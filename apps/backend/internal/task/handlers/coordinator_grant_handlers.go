@@ -285,7 +285,7 @@ func (h *CoordinatorGrantHandlers) validateCreateGrantRequest(c *gin.Context, wo
 		return nil, "", false
 	}
 	sid := req.ScopeID
-	if req.ScopeKind == "workspace" && sid == "" {
+	if req.ScopeKind == "workspace" {
 		sid = workspaceID
 	}
 	return caps, sid, true

@@ -86,7 +86,7 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 		c.Next()
 	})
 	RegisterCoordinatorGrantRoutes(router, repo, svc, log)
-	body, err := json.Marshal(createGrantRequest{CoordinatorTaskID: "coordinator", ScopeKind: "workspace", Capabilities: "inspect"})
+	body, err := json.Marshal(createGrantRequest{CoordinatorTaskID: "coordinator", ScopeKind: "workspace", ScopeID: "wrong-workspace", Capabilities: "inspect"})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
@@ -110,6 +110,9 @@ func TestCreateCoordinatorGrantBindsTheTaskActivePrincipal(t *testing.T) {
 	created, err := repo.ListCoordinatorGrants(ctx, "ws-1", "coordinator", false)
 	if err != nil || len(created) != 1 || created[0].GrantedByUserID != "admin" {
 		t.Fatalf("created grants = %#v, err = %v; want audit actor admin", created, err)
+	}
+	if created[0].ScopeID != "ws-1" {
+		t.Fatalf("workspace scope ID = %q, want route workspace", created[0].ScopeID)
 	}
 }
 

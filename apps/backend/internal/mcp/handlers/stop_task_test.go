@@ -193,7 +193,7 @@ func TestHandleStopTask_AuthorizesOnlyDirectParentInWorkspace(t *testing.T) {
 	}
 }
 
-func TestHandleStopTaskAutomationUsesTrustedCallerWithoutLookingUpSender(t *testing.T) {
+func TestHandleStopTaskAutomationCallerCannotSpoofSender(t *testing.T) {
 	tasks := map[string]*models.Task{
 		"automation-target": {ID: "automation-target", WorkspaceID: "ws-1"},
 		"foreign-sender":    {ID: "foreign-sender", WorkspaceID: "ws-2"},
@@ -229,11 +229,12 @@ func TestHandleStopTaskAutomationUsesTrustedCallerWithoutLookingUpSender(t *test
 			if err != nil {
 				t.Fatalf("handleStopTask: %v", err)
 			}
-			if resp.Type != ws.MessageTypeResponse {
-				t.Fatalf("response type = %q, want response", resp.Type)
+			assertWSError(t, resp, ws.ErrorCodeForbidden)
+			if len(lookups) != 0 {
+				t.Fatalf("task lookups = %v, want none", lookups)
 			}
-			if len(lookups) != 1 || lookups[0] != "automation-target" {
-				t.Fatalf("task lookups = %v, want only target lookup", lookups)
+			if len(stopper.calls) != 0 {
+				t.Fatalf("stopper calls = %v, want none", stopper.calls)
 			}
 		})
 	}
