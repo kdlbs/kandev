@@ -162,17 +162,20 @@ func (c *Controller) managedConversationDispatch(ctx *gin.Context) {
 		return
 	}
 	bridge := c.svc.agentConversationDeps()
-	_, err := bridge.Dispatch(ctx.Request.Context(), ctx.Param("id"), descriptor.WorkspaceID, descriptor.ConversationKey, request.Content, request.OccurrenceKey)
+	dispatch, err := bridge.Dispatch(ctx.Request.Context(), ctx.Param("id"), descriptor.WorkspaceID, descriptor.ConversationKey, request.Content, request.OccurrenceKey)
 	if err != nil {
 		writeConversationError(ctx, http.StatusConflict, "upstream_failure", "managed conversation is unavailable", true)
 		return
 	}
-	ctx.Status(http.StatusNoContent)
+	// A dispatcher can decline an otherwise valid request when the managed
+	// session is busy. Return that status so the browser keeps the prompt
+	// instead of presenting an undelivered message as sent.
+	ctx.JSON(http.StatusOK, gin.H{"status": dispatch.Status})
 }
 
 func (c *Controller) resolveManagedConversation(ctx *gin.Context) (pluginsdk.AgentConversationDescriptor, bool) {
 	ctx.Header("Cache-Control", conversationNoStore)
-	record, identity, ok := c.authorizeConversationRequest(ctx)
+	record, identity, ok := c.authorizeManagedConversationRequest(ctx)
 	if !ok || !c.validBinding(ctx, record, identity.UserID) {
 		return pluginsdk.AgentConversationDescriptor{}, false
 	}
@@ -202,7 +205,7 @@ func (c *Controller) conversationBinding(ctx *gin.Context) {
 		writeConversationError(ctx, http.StatusUnauthorized, "unauthenticated", "authentication required", false)
 		return
 	}
-	record, ok := c.conversationRecord(ctx.Param("id"))
+	record, ok := c.conversationBindingRecord(ctx.Param("id"))
 	if !ok {
 		writeConversationError(ctx, http.StatusNotFound, "not_found", "plugin not found", false)
 		return
@@ -224,6 +227,17 @@ func (c *Controller) conversationBinding(ctx *gin.Context) {
 func (c *Controller) conversationRecord(pluginID string) (*store.Record, bool) {
 	record, err := c.svc.Get(pluginID)
 	if err != nil || record.Status != StatusActive || !record.Capabilities.CanRead("messages") {
+		return nil, false
+	}
+	return record, true
+}
+
+// conversationBindingRecord admits only capabilities that have a browser
+// conversation surface. A binding token still carries the plugin and user
+// identity; each endpoint applies its own capability gate before using it.
+func (c *Controller) conversationBindingRecord(pluginID string) (*store.Record, bool) {
+	record, err := c.svc.Get(pluginID)
+	if err != nil || record.Status != StatusActive || (!record.Capabilities.CanRead("messages") && !record.Capabilities.AgentConversation) {
 		return nil, false
 	}
 	return record, true
@@ -510,6 +524,26 @@ func (c *Controller) authorizeConversationRequest(
 	}
 	record, ok := c.conversationRecord(ctx.Param("id"))
 	if !ok {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "plugin not found", false)
+		return nil, authn.Identity{}, false
+	}
+	return record, identity, true
+}
+
+// authorizeManagedConversationRequest deliberately does not accept
+// api_read:messages. Managed chat is authorized by the owning plugin's
+// agent_conversation capability; ordinary transcript endpoints retain their
+// narrower messages capability gate above.
+func (c *Controller) authorizeManagedConversationRequest(
+	ctx *gin.Context,
+) (*store.Record, authn.Identity, bool) {
+	identity, ok := authn.IdentityFromContext(ctx.Request.Context())
+	if !ok {
+		writeConversationError(ctx, http.StatusUnauthorized, "unauthenticated", "authentication required", false)
+		return nil, authn.Identity{}, false
+	}
+	record, err := c.svc.Get(ctx.Param("id"))
+	if err != nil || record.Status != StatusActive || !record.Capabilities.AgentConversation {
 		writeConversationError(ctx, http.StatusNotFound, "not_found", "plugin not found", false)
 		return nil, authn.Identity{}, false
 	}

@@ -38,7 +38,7 @@ describe("WorkspaceAgentChat", () => {
           { status: 200 },
         ),
       )
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "sent" }), { status: 200 }));
     render(
       <WorkspaceAgentChat
         pluginId="plugin-1"
@@ -126,5 +126,31 @@ describe("WorkspaceAgentChat", () => {
       "Message could not be sent. Try again.",
     );
     expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("retry me");
+  });
+
+  it("keeps the prompt when a busy managed session does not accept the dispatch", async () => {
+    transport.fetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ taskId: "task-1", sessionId: "session-1", workspaceId: "ws-1" }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: "skipped_busy" }), { status: 200 }),
+      );
+    render(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="1"
+      />,
+    );
+    await screen.findByTestId("workspace-agent-chat");
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "wait for turn" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByRole("alert");
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("wait for turn");
   });
 });

@@ -118,7 +118,8 @@ function ManagedTranscript({
           body: JSON.stringify({ content, occurrenceKey: generateUUID() }),
         },
       );
-      if (!response.ok) throw new Error("send failed");
+      const delivery = (await response.json().catch(() => null)) as { status?: string } | null;
+      if (!response.ok || delivery?.status !== "sent") throw new Error("send failed");
       setContent("");
     } catch {
       setSendFailed(true);

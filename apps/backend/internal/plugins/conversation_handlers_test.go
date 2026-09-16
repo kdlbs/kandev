@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // @covers AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
@@ -139,6 +140,11 @@ type fakeConversationReader struct {
 	turns    []*taskmodels.Turn
 	hasMore  bool
 	request  taskservice.ListMessagesRequest
+	authErr  error
+}
+
+func (f *fakeConversationReader) AuthorizeWorkspaceAccess(_ context.Context, _ string) error {
+	return f.authErr
 }
 
 func (f *fakeConversationReader) GetTaskSession(
@@ -604,3 +610,101 @@ func TestFilterTurnsByTaskNarrowsMixedTaskSession(t *testing.T) {
 		t.Fatalf("empty task filter must be a no-op, got %d", len(filtered))
 	}
 }
+
+type managedConversationBridgeStub struct {
+	descriptor  pluginsdk.AgentConversationDescriptor
+	resolveErr  error
+	dispatchErr error
+	dispatched  struct {
+		pluginID, workspaceID, conversationKey, content, occurrenceKey string
+	}
+}
+
+func (s *managedConversationBridgeStub) Ensure(context.Context, string, pluginsdk.AgentConversationSpec) (pluginsdk.AgentConversationDescriptor, string, error) {
+	return pluginsdk.AgentConversationDescriptor{}, "", nil
+}
+
+func (s *managedConversationBridgeStub) Dispatch(_ context.Context, pluginID, workspaceID, conversationKey, content, occurrenceKey string) (pluginsdk.AgentConversationDispatch, error) {
+	s.dispatched.pluginID = pluginID
+	s.dispatched.workspaceID = workspaceID
+	s.dispatched.conversationKey = conversationKey
+	s.dispatched.content = content
+	s.dispatched.occurrenceKey = occurrenceKey
+	if s.dispatchErr != nil {
+		return pluginsdk.AgentConversationDispatch{}, s.dispatchErr
+	}
+	return pluginsdk.AgentConversationDispatch{Status: "sent"}, nil
+}
+
+func (s *managedConversationBridgeStub) Delete(context.Context, string, string, string) (int32, error) {
+	return 0, nil
+}
+
+func (s *managedConversationBridgeStub) DeleteAllForPlugin(context.Context, string) (int32, error) {
+	return 0, nil
+}
+
+func (s *managedConversationBridgeStub) ResolveManagedConversation(context.Context, string, string, string) (pluginsdk.AgentConversationDescriptor, error) {
+	if s.resolveErr != nil {
+		return pluginsdk.AgentConversationDescriptor{}, s.resolveErr
+	}
+	return s.descriptor, nil
+}
+
+func managedConversationPluginRecord(id string, installedAt time.Time) *store.Record {
+	return &store.Record{
+		Manifest: manifest.Manifest{ID: id, Capabilities: manifest.Capabilities{AgentConversation: true}},
+		Status:   StatusActive, InstalledAt: installedAt,
+	}
+}
+
+func TestManagedConversationHandlersRequireManagedCapabilityAndBinding(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	reader := &fakeConversationReader{}
+	bridge := &managedConversationBridgeStub{descriptor: pluginsdk.AgentConversationDescriptor{
+		TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1", ConversationKey: "coordinator",
+	}}
+	svc.SetAgentConversations(bridge)
+	router := registerPluginRoutesWithIdentity(t, svc, authn.Identity{UserID: "user_1", Role: authn.RoleMember}, reader)
+	svc.registry.Add(managedConversationPluginRecord("plugin-managed", time.Now().UTC()))
+
+	path := "/api/plugins/plugin-managed/conversation/managed/session-1?workspace_id=workspace-1"
+	missingBinding := doAuthedRequest(router, http.MethodGet, path, "", nil)
+	require.Equal(t, http.StatusUnauthorized, missingBinding.Code)
+
+	binding := conversationBindingToken(t, router, "plugin-managed")
+	headers := map[string]string{"X-Kandev-Plugin-Binding": binding, "Content-Type": "application/json"}
+	resolved := doAuthedRequest(router, http.MethodGet, path, "", headers)
+	require.Equal(t, http.StatusOK, resolved.Code, resolved.Body.String())
+	require.JSONEq(t, `{"taskId":"task-1","sessionId":"session-1","workspaceId":"workspace-1"}`, resolved.Body.String())
+
+	dispatched := doAuthedRequest(router, http.MethodPost,
+		"/api/plugins/plugin-managed/conversation/managed/session-1/dispatch?workspace_id=workspace-1",
+		`{"content":"hello","occurrenceKey":"occ-1"}`, headers)
+	require.Equal(t, http.StatusOK, dispatched.Code, dispatched.Body.String())
+	require.JSONEq(t, `{"status":"sent"}`, dispatched.Body.String())
+	require.Equal(t, "plugin-managed", bridge.dispatched.pluginID)
+	require.Equal(t, "workspace-1", bridge.dispatched.workspaceID)
+	require.Equal(t, "coordinator", bridge.dispatched.conversationKey)
+	require.Equal(t, "hello", bridge.dispatched.content)
+	require.Equal(t, "occ-1", bridge.dispatched.occurrenceKey)
+
+	reader.authErr = assertErr{}
+	foreignWorkspace := doAuthedRequest(router, http.MethodGet, path, "", headers)
+	require.Equal(t, http.StatusNotFound, foreignWorkspace.Code)
+}
+
+func TestManagedConversationHandlersDoNotGrantTranscriptReads(t *testing.T) {
+	router, svc := newTestRouter(t)
+	svc.registry.Add(managedConversationPluginRecord("plugin-managed", time.Now().UTC()))
+	binding := conversationBindingToken(t, router, "plugin-managed")
+
+	response := doAuthedRequest(router, http.MethodGet,
+		"/api/plugins/plugin-managed/conversation/task-sessions/session-1/messages",
+		"", map[string]string{"X-Kandev-Plugin-Binding": binding})
+	require.Equal(t, http.StatusNotFound, response.Code)
+}
+
+type assertErr struct{}
+
+func (assertErr) Error() string { return "denied" }
