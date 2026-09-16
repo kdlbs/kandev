@@ -230,7 +230,10 @@ func scanExactProfileAssignment(row exactProfileAssignmentScanner) (*models.Exac
 
 func validateExactProfileAssignment(assignment *models.ExactProfileAssignment) error {
 	if assignment == nil || assignment.TaskID == "" || assignment.WorkspaceID == "" ||
-		assignment.AgentProfileID == "" || assignment.Generation < 1 || assignment.ProfileRevision.IsZero() {
+		assignment.AgentProfileID == "" || assignment.ProfileRevision.IsZero() {
+		return models.ErrExactProfileAssignmentInvalidInput
+	}
+	if assignment.Generation < 1 {
 		return models.ErrExactProfileAssignmentGeneration
 	}
 	return nil
@@ -260,12 +263,15 @@ func (r *Repository) exactProfileAssignmentNow() time.Time {
 // returns false and never overwrites the original outcome, model, or flags.
 func (r *Repository) RecordExactProfileLaunchReceipt(ctx context.Context, receipt *models.ExactProfileLaunchReceipt) (bool, error) {
 	if receipt == nil || receipt.TaskID == "" || receipt.SessionID == "" ||
-		receipt.Generation < 1 || receipt.ProfileRevision.IsZero() {
+		receipt.AgentProfileID == "" || receipt.ProfileRevision.IsZero() {
+		return false, models.ErrExactProfileAssignmentInvalidInput
+	}
+	if receipt.Generation < 1 {
 		return false, models.ErrExactProfileAssignmentGeneration
 	}
 	if receipt.Outcome != models.ExactProfileLaunchOutcomeApplied &&
 		receipt.Outcome != models.ExactProfileLaunchOutcomeFailedClosed {
-		return false, models.ErrExactProfileAssignmentGeneration
+		return false, models.ErrExactProfileAssignmentInvalidInput
 	}
 	if receipt.CreatedAt.IsZero() {
 		receipt.CreatedAt = r.exactProfileAssignmentNow()

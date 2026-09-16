@@ -237,3 +237,38 @@ func TestFindExactProfileReusableSessionFiltersGenerationRevisionAndTerminalStat
 		}
 	}
 }
+
+func TestExactProfileAssignmentRejectsInvalidInput(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	ctx := context.Background()
+
+	invalid := *assignment
+	invalid.AgentProfileID = ""
+	changed, err := repo.UpsertExactProfileAssignment(ctx, &invalid)
+	if !errors.Is(err, models.ErrExactProfileAssignmentInvalidInput) || changed {
+		t.Fatalf("missing profile = (%v, %v), want invalid input", changed, err)
+	}
+
+	invalid = *assignment
+	invalid.ProfileRevision = time.Time{}
+	changed, err = repo.UpsertExactProfileAssignment(ctx, &invalid)
+	if !errors.Is(err, models.ErrExactProfileAssignmentInvalidInput) || changed {
+		t.Fatalf("missing revision = (%v, %v), want invalid input", changed, err)
+	}
+
+	invalid = *assignment
+	invalid.Generation = 0
+	changed, err = repo.UpsertExactProfileAssignment(ctx, &invalid)
+	if !errors.Is(err, models.ErrExactProfileAssignmentGeneration) || changed {
+		t.Fatalf("zero generation = (%v, %v), want generation rejection", changed, err)
+	}
+
+	receipt := &models.ExactProfileLaunchReceipt{
+		TaskID: assignment.TaskID, SessionID: "session-invalid", AgentProfileID: assignment.AgentProfileID,
+		Generation: 1, ProfileRevision: assignment.ProfileRevision, Outcome: "unknown",
+	}
+	changed, err = repo.RecordExactProfileLaunchReceipt(ctx, receipt)
+	if !errors.Is(err, models.ErrExactProfileAssignmentInvalidInput) || changed {
+		t.Fatalf("invalid receipt outcome = (%v, %v), want invalid input", changed, err)
+	}
+}

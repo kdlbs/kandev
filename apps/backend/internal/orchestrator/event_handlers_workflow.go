@@ -4863,18 +4863,28 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 }
 
 func (s *Service) pendingMoveExactProfileGenerationCurrent(ctx context.Context, taskID string, generation int64) bool {
+	current, _ := s.pendingMoveExactProfileGenerationState(ctx, taskID, generation)
+	return current
+}
+
+// pendingMoveExactProfileGenerationState distinguishes a confirmed mismatch
+// from a store read failure. Replay fails closed on either condition; the
+// background reaper preserves rows it could not inspect so recovery can retry.
+func (s *Service) pendingMoveExactProfileGenerationState(
+	ctx context.Context, taskID string, generation int64,
+) (current, known bool) {
 	assignments, ok := s.repo.(exactProfileAssignmentStore)
 	if !ok {
-		return generation == 0
+		return generation == 0, true
 	}
 	assignment, err := assignments.GetExactProfileAssignment(ctx, taskID)
 	if err != nil {
-		return false
+		return false, false
 	}
 	if assignment == nil || !assignment.Active {
-		return generation == 0
+		return generation == 0, true
 	}
-	return generation > 0 && assignment.Generation == generation
+	return generation > 0 && assignment.Generation == generation, true
 }
 
 func (s *Service) consumeUnfencedPendingMove(

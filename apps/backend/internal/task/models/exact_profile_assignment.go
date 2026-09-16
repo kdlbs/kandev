@@ -5,7 +5,10 @@ import (
 	"time"
 )
 
-var ErrExactProfileAssignmentGeneration = errors.New("exact profile assignment generation rejected")
+var (
+	ErrExactProfileAssignmentGeneration   = errors.New("exact profile assignment generation rejected")
+	ErrExactProfileAssignmentInvalidInput = errors.New("invalid exact profile assignment input")
+)
 
 // Exact-profile launch receipt outcomes.
 const (
