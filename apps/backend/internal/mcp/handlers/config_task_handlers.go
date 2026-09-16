@@ -443,6 +443,9 @@ func classifyMoveTaskError(err error) string {
 	if errors.Is(err, workflowmove.ErrMoveConflict) {
 		return ws.ErrorCodeConflict
 	}
+	if errors.Is(err, service.ErrWorkflowStepChanged) {
+		return ws.ErrorCodeValidation
+	}
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||

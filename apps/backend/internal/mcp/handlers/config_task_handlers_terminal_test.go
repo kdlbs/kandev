@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/routing"
@@ -22,6 +23,77 @@ import (
 type stepCompletionRaceRepository struct {
 	*taskrepo.Repository
 	once sync.Once
+}
+
+type sameStepMoveRaceRepository struct {
+	*taskrepo.Repository
+	once         sync.Once
+	beforeUpdate func()
+}
+
+func (r *sameStepMoveRaceRepository) UpdateTaskIfWorkflowStepMatches(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID, expectedWorkflowID string,
+) error {
+	r.once.Do(func() {
+		if r.beforeUpdate != nil {
+			r.beforeUpdate()
+		}
+	})
+	return r.Repository.UpdateTaskIfWorkflowStepMatches(ctx, task, expectedStepID, expectedWorkflowID)
+}
+
+func TestHandleMoveTask_SameStepRaceRecordsStaleSourceAndReplays(t *testing.T) {
+	ctx := context.Background()
+	var raceRepo *sameStepMoveRaceRepository
+	svc, repo, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflowTasks(t, func(repo *taskrepo.Repository) taskrepository.TaskRepository {
+		raceRepo = &sameStepMoveRaceRepository{Repository: repo}
+		return raceRepo
+	})
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-same-step", Name: "Same step", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-same-step", WorkspaceID: "ws-same-step", Name: "Board", CreatedAt: now, UpdatedAt: now}))
+	for _, step := range []*workflowmodels.WorkflowStep{
+		{ID: "step-source", WorkflowID: "wf-same-step", Name: "Source", Position: 0, CreatedAt: now, UpdatedAt: now},
+		{ID: "step-concurrent", WorkflowID: "wf-same-step", Name: "Concurrent", Position: 1, CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, workflowRepo.CreateStep(ctx, step))
+	}
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task-same-step", WorkspaceID: "ws-same-step", WorkflowID: "wf-same-step", WorkflowStepID: "step-source", Title: "Race", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now}))
+
+	raceRepo.beforeUpdate = func() {
+		current, err := repo.GetTask(ctx, "task-same-step")
+		require.NoError(t, err)
+		current.WorkflowStepID = "step-concurrent"
+		require.NoError(t, repo.UpdateTask(ctx, current))
+	}
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+	request := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id": "task-same-step", "workflow_id": "wf-same-step", "workflow_step_id": "step-source", "position": 9,
+	})
+	request.ID = "same-step-race"
+
+	response, err := h.handleMoveTask(ctx, request)
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeValidation)
+	operation, found, err := svc.GetWorkflowRouteOperation(ctx, workflowRouteOperationID("mcp-move", request.ID))
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, routing.OutcomeStaleSource, operation.Outcome)
+	assert.Equal(t, "step-source", operation.ExpectedStepID)
+	assert.Equal(t, "step-concurrent", operation.ObservedStepID)
+
+	retry := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id": "task-same-step", "workflow_id": "wf-same-step", "workflow_step_id": "step-source", "position": 0,
+	})
+	retry.ID = request.ID
+	retryResponse, err := h.handleMoveTask(ctx, retry)
+	require.NoError(t, err)
+	assertWSError(t, retryResponse, ws.ErrorCodeValidation)
+	stored, err := repo.GetTask(ctx, "task-same-step")
+	require.NoError(t, err)
+	assert.Equal(t, "step-concurrent", stored.WorkflowStepID, "stale-route replay must not write the task")
 }
 
 func TestHandleMoveTask_PendingReplayReturnsPersistedRequest(t *testing.T) {

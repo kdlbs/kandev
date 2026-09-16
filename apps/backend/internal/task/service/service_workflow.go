@@ -32,7 +32,7 @@ const (
 	workflowMoveOptionsKey    = "options"
 )
 
-var ErrWorkflowStepChanged = errors.New("workflow step changed before route commit")
+var ErrWorkflowStepChanged = repoerrors.ErrWorkflowStepChanged
 var ErrWorkflowStepNotFound = errors.New("workflow step not found")
 
 // ApproveSessionResult contains the result of approving a session

@@ -112,6 +112,10 @@ func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo
 }
 
 func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
+	return newTestTaskServiceWithWorkflowTasks(t, nil)
+}
+
+func newTestTaskServiceWithWorkflowTasks(t *testing.T, tasksFor func(*sqliterepo.Repository) repository.TaskRepository) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
@@ -132,9 +136,13 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(func() { eventBus.Close() })
+	tasks := repository.TaskRepository(repo)
+	if tasksFor != nil {
+		tasks = tasksFor(repo)
+	}
 	svc := service.NewService(service.Repos{
 		Workspaces:       repo,
-		Tasks:            repo,
+		Tasks:            tasks,
 		TaskRepos:        repo,
 		WorkspaceFolders: repo,
 		Workflows:        repo,
