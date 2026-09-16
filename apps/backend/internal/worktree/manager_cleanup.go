@@ -192,7 +192,7 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 	if err != nil {
 		return err
 	}
-	wt = m.enrichCleanupWorktreeFromCache(wt)
+	wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
 	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, WorktreeCleanupOptions{})
 	if !removeBranch {
 		m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
@@ -207,21 +207,24 @@ func (m *Manager) RemoveByIDWithReceipt(ctx context.Context, worktreeID string) 
 	if err != nil {
 		return newBranchCleanupReceipt(), err
 	}
-	wt = m.enrichCleanupWorktreeFromCache(wt)
+	wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
 	receipt, err := m.removeWorktreeWithReceipt(ctx, wt, false, WorktreeCleanupOptions{})
 	m.logger.Info("managed branch cleanup receipt", receipt.reasonFields()...)
 	return receipt, err
 }
 
-func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) *Worktree {
+func (m *Manager) enrichCleanupWorktreeFromCache(ctx context.Context, wt *Worktree) *Worktree {
 	if wt == nil {
 		return nil
 	}
 	clone := *wt
 	wt = &clone
-	if wt.RepositoryPath != "" && wt.BaseBranch != "" && wt.CleanupHeadOID != "" {
-		return wt
-	}
+	m.enrichCleanupWorktreeFromCachedFields(wt, m.cachedCleanupWorktree(wt))
+	m.enrichCleanupWorktreeFromStore(ctx, wt)
+	return wt
+}
+
+func (m *Manager) cachedCleanupWorktree(wt *Worktree) *Worktree {
 	m.mu.RLock()
 	cached := m.worktrees[cacheKey(wt.SessionID, wt.RepositoryID, wt.BranchSlug)]
 	if cached == nil {
@@ -233,8 +236,12 @@ func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) *Worktree {
 		}
 	}
 	m.mu.RUnlock()
+	return cached
+}
+
+func (m *Manager) enrichCleanupWorktreeFromCachedFields(wt, cached *Worktree) {
 	if cached == nil || cached.ID != wt.ID {
-		return wt
+		return
 	}
 	if wt.RepositoryPath == "" {
 		wt.RepositoryPath = cached.RepositoryPath
@@ -245,7 +252,36 @@ func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) *Worktree {
 	if wt.CleanupHeadOID == "" && !wt.CleanupHeadOIDUnavailable {
 		wt.CleanupHeadOID = cached.CleanupHeadOID
 	}
-	return wt
+	if wt.BranchOwner == "" {
+		wt.BranchOwner = cached.BranchOwner
+	}
+	if wt.IntegrationRef == "" {
+		wt.IntegrationRef = cached.IntegrationRef
+	}
+	if wt.RecoveryHeadSHA == "" {
+		wt.RecoveryHeadSHA = cached.RecoveryHeadSHA
+	}
+	if wt.BranchCompactedAt == nil {
+		wt.BranchCompactedAt = cached.BranchCompactedAt
+	}
+}
+
+func (m *Manager) enrichCleanupWorktreeFromStore(ctx context.Context, wt *Worktree) {
+	if m.store == nil || wt.ID == "" {
+		return
+	}
+	current, err := m.store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil || current == nil || current.ID != wt.ID {
+		return
+	}
+	// A durable cleanup snapshot can outlive the manager cache. Reload the
+	// internal branch state from the current row when it is available so a
+	// newer recovery or compaction transition always wins over stale snapshot
+	// data.
+	wt.BranchOwner = current.BranchOwner
+	wt.IntegrationRef = current.IntegrationRef
+	wt.RecoveryHeadSHA = current.RecoveryHeadSHA
+	wt.BranchCompactedAt = current.BranchCompactedAt
 }
 
 // CaptureCleanupHeadOIDs records the checkout commit for each worktree before
@@ -258,7 +294,7 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 		if wt == nil || wt.ID == "" {
 			continue
 		}
-		wt = m.enrichCleanupWorktreeFromCache(wt)
+		wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
 		if strings.TrimSpace(wt.RepositoryPath) == "" || strings.TrimSpace(wt.Path) == "" {
 			// Older environment rows can outlive their repository/session rows.
 			// Keep them in the durable snapshot, but let the later cleanup audit
@@ -440,6 +476,20 @@ func (m *Manager) retainReferencedWorktree(
 func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) error {
 	if wt == nil || wt.SessionID == "" {
 		return fmt.Errorf("session ID is required to release worktree reference")
+	}
+	if m.store != nil && wt.ID != "" {
+		current, err := m.store.GetWorktreeByID(ctx, wt.ID)
+		if err != nil && !errors.Is(err, ErrWorktreeNotFound) {
+			return err
+		}
+		if current != nil {
+			// The cleanup snapshot may be stale. Keep the latest branch policy
+			// and recovery state while changing only this association's status.
+			wt.BranchOwner = current.BranchOwner
+			wt.IntegrationRef = current.IntegrationRef
+			wt.RecoveryHeadSHA = current.RecoveryHeadSHA
+			wt.BranchCompactedAt = current.BranchCompactedAt
+		}
 	}
 	now := time.Now().UTC()
 	wt.Status = StatusDeleted
@@ -693,7 +743,7 @@ func (m *Manager) cleanupWorktreesWithReceipt(
 			continue
 		}
 		seen[wt.ID] = struct{}{}
-		wt = m.enrichCleanupWorktreeFromCache(wt)
+		wt = m.enrichCleanupWorktreeFromCache(ctx, wt)
 		branchReceipt, err := m.removeWorktreeWithReceipt(ctx, wt, removeBranch, options)
 		receipt.merge(branchReceipt)
 		if err != nil {

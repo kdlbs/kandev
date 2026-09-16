@@ -2085,9 +2085,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	// materialization can select a different head.
 	recoveredFromHead := false
 	if !exists {
-		recovery := *existing
-		recovery.RepositoryPath = req.RepositoryPath
-		if restoreErr := m.restoreManagedBranchFromRecoveryHeadLocked(ctx, &recovery); restoreErr == nil {
+		existing.RepositoryPath = req.RepositoryPath
+		if restoreErr := m.restoreManagedBranchFromRecoveryHeadLocked(ctx, existing); restoreErr == nil {
 			exists = true
 			recoveredFromHead = true
 		} else if existing.BranchCompactedAt != nil {

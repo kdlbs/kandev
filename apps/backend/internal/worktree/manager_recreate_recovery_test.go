@@ -801,4 +801,14 @@ func TestCreate_RestoresSafelyCompactedBranchFromExactHead(t *testing.T) {
 	if got := strings.TrimSpace(runGit(t, restored.Path, "rev-parse", "HEAD")); got != wantSHA {
 		t.Fatalf("restored HEAD = %q, want exact compacted head %q", got, wantSHA)
 	}
+	persistedRestored, err := store.GetWorktreeByID(ctx, restored.ID)
+	if err != nil {
+		t.Fatalf("load restored worktree: %v", err)
+	}
+	if persistedRestored.RecoveryHeadSHA != "" {
+		t.Fatalf("restored worktree kept recovery head %q, want it cleared", persistedRestored.RecoveryHeadSHA)
+	}
+	if persistedRestored.BranchCompactedAt != nil {
+		t.Fatalf("restored worktree kept compaction marker %v", persistedRestored.BranchCompactedAt)
+	}
 }

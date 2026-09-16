@@ -92,13 +92,15 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	}
 	if req.WorkspaceReuseRequired {
 		return &EnvPrepareResult{
-			Success:        true,
-			Steps:          steps,
-			WorkspacePath:  wt.Path,
-			Duration:       time.Since(start),
-			WorktreeID:     wt.ID,
-			WorktreeBranch: wt.Branch,
-			MainRepoGitDir: filepath.Join(req.RepositoryPath, ".git"),
+			Success:                true,
+			Steps:                  steps,
+			WorkspacePath:          wt.Path,
+			Duration:               time.Since(start),
+			WorktreeID:             wt.ID,
+			WorktreeBranch:         wt.Branch,
+			WorktreeBranchOwner:    wt.BranchOwner,
+			WorktreeIntegrationRef: wt.IntegrationRef,
+			MainRepoGitDir:         filepath.Join(req.RepositoryPath, ".git"),
 		}, nil
 	}
 
@@ -153,6 +155,8 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		Duration:                  time.Since(start),
 		WorktreeID:                wt.ID,
 		WorktreeBranch:            wt.Branch,
+		WorktreeBranchOwner:       wt.BranchOwner,
+		WorktreeIntegrationRef:    wt.IntegrationRef,
 		MainRepoGitDir:            mainRepoGitDir,
 		RequestedBaseBranch:       req.BaseBranch,
 		BaseBranch:                wt.BaseBranch,

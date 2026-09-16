@@ -7,12 +7,48 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 type cleanupOrderRecordingScriptHandler struct {
 	cleanupRuns int
+}
+
+func TestReleaseWorktreeReference_PreservesCurrentBranchRecoveryMetadata(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-release-metadata", "session-release-metadata", models.TaskSessionStateCompleted)
+	current := createReferenceCleanupWorktree(t, mgr, "task-release-metadata", "session-release-metadata")
+	compactedAt := time.Now().UTC()
+	current.RecoveryHeadSHA = "current-recovery-head"
+	current.BranchCompactedAt = &compactedAt
+	if err := store.UpdateWorktree(ctx, current); err != nil {
+		t.Fatalf("persist current recovery metadata: %v", err)
+	}
+
+	stale := *current
+	stale.BranchOwner = ""
+	stale.IntegrationRef = ""
+	stale.RecoveryHeadSHA = "stale-recovery-head"
+	stale.BranchCompactedAt = nil
+	if err := mgr.ReleaseWorktreeReference(ctx, &stale); err != nil {
+		t.Fatalf("release stale worktree reference: %v", err)
+	}
+
+	persisted, err := store.GetWorktreeByID(ctx, current.ID)
+	if err != nil {
+		t.Fatalf("load released worktree: %v", err)
+	}
+	if persisted.BranchOwner != BranchOwnerManaged || persisted.IntegrationRef != "main" {
+		t.Fatalf("released branch metadata = owner %q integration %q, want managed/main",
+			persisted.BranchOwner, persisted.IntegrationRef)
+	}
+	if persisted.RecoveryHeadSHA != "current-recovery-head" || persisted.BranchCompactedAt == nil {
+		t.Fatalf("released recovery metadata = head %q compacted %v, want current state",
+			persisted.RecoveryHeadSHA, persisted.BranchCompactedAt)
+	}
 }
 
 func (h *cleanupOrderRecordingScriptHandler) ExecuteSetupScript(context.Context, ScriptExecutionRequest) error {
