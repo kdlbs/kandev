@@ -44,6 +44,8 @@
   "workspaceAgentChatSend": "Send",
   "workspaceAgentChatSendFailed": "Message could not be sent. Try again.",
   "workspaceAgentChatSessionEnded": "Conversation ended",
+  "workspaceAgentChatPermissionDenied": "You do not have access to this conversation.",
+  "workspaceAgentChatUnavailable": "Conversation is unavailable.",
   "webAppLoading": "Loading canvas…",
   "webAppUnavailable": "This canvas is unavailable.",
   "loadingPlugins": "Loading plugins...",

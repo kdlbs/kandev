@@ -44,6 +44,8 @@
   "workspaceAgentChatSend": "Šēńđ",
   "workspaceAgentChatSendFailed": "Mēššàĝē ćōũľď ńōţ bē šēńţ. Ţŕŷ àĝàĩń.",
   "workspaceAgentChatSessionEnded": "Ćōńvēŕšàţĩōń ēńďēď",
+  "workspaceAgentChatPermissionDenied": "Ŷōũ ďō ńōţ ħàvē àććēšš ţō ţħĩš ćōńvēŕšàţĩōń.",
+  "workspaceAgentChatUnavailable": "Ćōńvēŕšàţĩōń ĩš ũńàvàĩľàbľē.",
   "webAppLoading": "Ĺōàďĩńĝ ćàńvàś…",
   "webAppUnavailable": "Ţĥĩś ćàńvàś ĩś ũńàvàĩĺàƀĺē.",
   "loadingPlugins": "Ĺōàďĩńĝ ƥĺũĝĩńś...",

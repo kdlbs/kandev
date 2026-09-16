@@ -17,6 +17,7 @@ import type { WorkspaceAgentChatProps, WorkspaceAgentChatStatus } from "@kandev/
 
 type ManagedDescriptor = { taskId: string; sessionId: string; workspaceId: string };
 type InternalProps = WorkspaceAgentChatProps & { pluginId?: string };
+const permissionDeniedStatus: WorkspaceAgentChatStatus = "permission-denied";
 
 function useManagedDescriptor(
   pluginId: string | undefined,
@@ -51,20 +52,20 @@ function useManagedDescriptor(
       )
       .then(async (response) => {
         if (response.ok) return response.json() as Promise<ManagedDescriptor>;
-        if (response.status === 403) throw new Error("permission-denied");
+        if (response.status === 403) throw new Error(permissionDeniedStatus);
         if (response.status === 404) throw new Error("deleted");
         throw new Error("unavailable");
       })
       .then((next) => {
         if (next.workspaceId !== workspaceId || next.sessionId !== conversationId)
-          throw new Error("permission-denied");
+          throw new Error(permissionDeniedStatus);
         setDescriptor(next);
         setStatus("ready");
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted)
           setStatus(
-            error instanceof Error && ["permission-denied", "deleted"].includes(error.message)
+            error instanceof Error && [permissionDeniedStatus, "deleted"].includes(error.message)
               ? (error.message as WorkspaceAgentChatStatus)
               : "unavailable",
           );
@@ -183,16 +184,26 @@ export const WorkspaceAgentChat = memo(function WorkspaceAgentChat({
   useEffect(() => {
     onStatus?.(status);
   }, [onStatus, status]);
-  if (status !== "ready" || !descriptor || !pluginId)
+  if (status !== "ready" || !descriptor || !pluginId) {
+    let terminalMessage: string | null = null;
+    if (status === "deleted") terminalMessage = t("plugins:workspaceAgentChatSessionEnded");
+    if (status === permissionDeniedStatus)
+      terminalMessage = t("plugins:workspaceAgentChatPermissionDenied");
+    if (status === "unavailable") terminalMessage = t("plugins:workspaceAgentChatUnavailable");
     return (
       <div
         data-testid="workspace-agent-chat-status"
         data-status={status}
         className="flex h-full items-center justify-center"
       >
-        <Spinner aria-label={t("plugins:loadingWorkspaceAgentChat")} />
+        {terminalMessage ? (
+          <p role={status === "deleted" ? "status" : "alert"}>{terminalMessage}</p>
+        ) : (
+          <Spinner aria-label={t("plugins:loadingWorkspaceAgentChat")} />
+        )}
       </div>
     );
+  }
   return (
     <PluginConversationScopeProvider
       pluginId={pluginId}

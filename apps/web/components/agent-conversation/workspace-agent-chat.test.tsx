@@ -153,4 +153,20 @@ describe("WorkspaceAgentChat", () => {
     await screen.findByRole("alert");
     expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("wait for turn");
   });
+
+  it("renders a terminal status instead of a loading spinner for a deleted conversation", async () => {
+    transport.fetch.mockResolvedValueOnce(new Response(null, { status: 404 }));
+    render(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="1"
+      />,
+    );
+    const terminal = await screen.findByTestId("workspace-agent-chat-status");
+    await waitFor(() => expect(terminal.dataset.status).toBe("deleted"));
+    expect(terminal.querySelector('[role="status"]')?.textContent).toBe("Conversation ended");
+    expect(screen.queryByLabelText("Loading conversation…")).toBeNull();
+  });
 });
