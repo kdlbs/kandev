@@ -38,11 +38,12 @@ type RemoteDockerExecutor struct {
 // remoteDockerSession is one executor profile's live connection to a remote
 // daemon, plus the per-session resources that ride it.
 type remoteDockerSession struct {
-	sshClient    *ssh.Client
-	dockerClient *docker.Client
-	containerMgr *ContainerManager
-	endpoints    containerEndpointResolver
-	platform     SSHRemotePlatform
+	sshClient     *ssh.Client
+	dockerClient  *docker.Client
+	containerMgr  *ContainerManager
+	endpoints     containerEndpointResolver
+	hostFileStore *sshHostFileStore
+	platform      SSHRemotePlatform
 }
 
 func (s *remoteDockerSession) close() error {
@@ -180,9 +181,11 @@ func (r *RemoteDockerExecutor) dialRemote(ctx context.Context, req *ExecutorCrea
 		sshPortForwarder{client: sshClient, logger: r.logger},
 	)
 
+	session.hostFileStore = newSSHHostFileStore(sshClient, NewAgentctlResolver(r.logger), r.logger)
+
 	mgr := NewContainerManager(dockerClient, "", "", r.logger)
 	mgr.containerHostFiles = newRemoteContainerHostFiles(
-		newSSHHostFileStore(sshClient, NewAgentctlResolver(r.logger), r.logger),
+		session.hostFileStore,
 		info.Platform,
 		mgr.commandBuilder,
 	)
@@ -217,6 +220,11 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 	r.sessions[req.InstanceID] = session
 	r.mu.Unlock()
 
+	if err := r.seedRemoteSessionDir(ctx, session, req); err != nil {
+		r.releaseSession(req.InstanceID)
+		return nil, err
+	}
+
 	instance, err := launchDockerContainer(ctx, dockerLaunchTarget{
 		dockerClient: session.dockerClient,
 		containerMgr: session.containerMgr,
@@ -229,6 +237,40 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 		return nil, err
 	}
 	return instance, nil
+}
+
+// seedRemoteSessionDir copies the agent's credentials and selected config
+// bundles into the directory the container mounts. Without it the container
+// mounts an empty directory and the agent starts with no login.
+func (r *RemoteDockerExecutor) seedRemoteSessionDir(
+	ctx context.Context, session *remoteDockerSession, req *ExecutorCreateRequest,
+) error {
+	if req.AgentConfig == nil || session.hostFileStore == nil {
+		return nil
+	}
+	remoteDir, err := session.hostFileStore.EnsureSessionDir(req.InstanceID)
+	if err != nil {
+		return err
+	}
+	// A credential failure is reported but does not stop the launch, matching
+	// the local Docker path: some agents authenticate from the environment or
+	// their in-container setup script instead.
+	if seedErr := seedRemoteAgentSessionDir(
+		ctx,
+		session.sshClient,
+		req.AgentConfig,
+		remoteDir,
+		selectedPortableConfigBundleIDs(req.Metadata),
+		r.logger,
+		func(warnings []PortableConfigWarning) {
+			reportPortableConfigWarnings(req.OnProgress, warnings)
+		},
+	); seedErr != nil {
+		r.logger.Warn("remote docker: failed to seed agent session dir (continuing)",
+			zap.String("instance_id", req.InstanceID),
+			zap.Error(seedErr))
+	}
+	return nil
 }
 
 func (r *RemoteDockerExecutor) releaseSession(instanceID string) {
