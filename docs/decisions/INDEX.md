@@ -243,3 +243,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-04-generation-fenced-task-environment-ownership | [Fence Task Environment Ownership by Generation](2026-09-04-generation-fenced-task-environment-ownership.md) | accepted | backend | 2026-09-04 |
 | 2026-09-04-use-repository-token-for-runtime-pin-prs | [Use the built-in Actions token for runtime pin PRs](2026-09-04-use-repository-token-for-runtime-pin-prs.md) | accepted | workflow, security | 2026-09-04 |
 | 2026-09-05-agent-owned-credential-file-conflicts | [Agent-owned credential file conflicts](2026-09-05-agent-owned-credential-file-conflicts.md) | accepted | backend | 2026-09-05 |
+| 2026-09-16-instance-wide-claim-lock-and-budget-fail-mode-asymmetry | [Instance-Wide Launch-Claim Lock Scope and Budget Fail-Mode Asymmetry](2026-09-16-instance-wide-claim-lock-and-budget-fail-mode-asymmetry.md) | accepted | backend | 2026-09-16 |
+| 2026-09-16-consolidate-office-enqueue-paths | [Consolidate Office Run Enqueue Onto One Authoritative API](2026-09-16-consolidate-office-enqueue-paths.md) | accepted | backend | 2026-09-16 |
