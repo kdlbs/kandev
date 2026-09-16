@@ -120,6 +120,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_OFFICE_PROMOTION_AGE_MINUTES", class: "catalog"},
 		{envVar: "KANDEV_OFFICE_MAX_CAUSATION_DEPTH", class: "catalog"},
 		{envVar: "KANDEV_OFFICE_SELF_TRIGGER_ALLOWANCE", class: "catalog"},
+		{envVar: "KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE", class: "catalog"},
 		{envVar: "KANDEV_OFFICE_GATE_FAILURE_THRESHOLD", class: "catalog"},
 		{envVar: "KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", class: "catalog"},
 		{envVar: "KANDEV_TASK_PREPARATION_TIMEOUT", class: "catalog"},

@@ -46,7 +46,7 @@ func TestPostgresQueueRun_SelfTriggerAllowanceHoldsUnderConcurrency(t *testing.T
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	eb := bus.NewMemoryEventBus(log)
 	svc := runsservice.New(officeRepo.RunsRepository(), eb, log, nil)
-	svc.SetLaunchSafetyLimits(runsservice.DefaultMaxCausationDepth, 1)
+	svc.SetLaunchSafetyLimits(runsservice.DefaultMaxCausationDepth, 1, runsservice.DefaultSelfTriggerTotalAllowance)
 
 	const concurrency = 8
 	var (

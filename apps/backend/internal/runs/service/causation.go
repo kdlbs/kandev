@@ -32,9 +32,17 @@ const (
 	// the effective ceiling (AC-OFFICE-LAUNCH-SAFETY-003.4).
 	RefusalCausationDepth RefusalGate = "causation_depth"
 	// RefusalSelfTrigger means the agent has re-triggered itself with the
-	// same reason more than the effective allowance within
-	// SelfTriggerWindow (AC-OFFICE-LAUNCH-SAFETY-004.4).
+	// same reason more than the effective per-reason allowance within
+	// SelfTriggerWindow (AC-OFFICE-LAUNCH-SAFETY-004.3). A wake that also
+	// exceeds RefusalSelfTriggerTotal is refused once, under this gate,
+	// per the fixed evaluation order of AC-OFFICE-LAUNCH-SAFETY-004.8.
 	RefusalSelfTrigger RefusalGate = "self_trigger"
+	// RefusalSelfTriggerTotal means the agent has re-triggered itself,
+	// whatever reason it named, more than the effective reason-independent
+	// allowance within SelfTriggerWindow (AC-OFFICE-LAUNCH-SAFETY-004.8).
+	// Only reached when RefusalSelfTrigger's per-reason check already
+	// passed.
+	RefusalSelfTriggerTotal RefusalGate = "self_trigger_total"
 )
 
 // RefusalError is returned by insertRun (via resolveCausation) instead of
@@ -266,14 +274,17 @@ func causingCausationID(causing *models.Run) string {
 }
 
 // checkSelfTriggerAllowance refuses an enqueue whose agent has
-// re-triggered itself with the same reason more than the effective
-// allowance within SelfTriggerWindow (AC-OFFICE-LAUNCH-SAFETY-004).
-// Only applies to an agent acting as itself: a system or human actor
-// cannot self-trigger by definition. The count runs against the
-// caller's enqueue transaction (AC-OFFICE-LAUNCH-SAFETY-003.8) so it is
-// serialized against the insert and against every other concurrent
-// enqueue for the same agent profile — a count over rows the insert
-// alone does not lock.
+// re-triggered itself more than one of two effective allowances within
+// SelfTriggerWindow (AC-OFFICE-LAUNCH-SAFETY-004): the per-reason
+// allowance (AC-004.3) and the reason-independent total allowance
+// (AC-004.8). Only applies to an agent acting as itself: a system or
+// human actor cannot self-trigger by definition. The two are evaluated
+// in a fixed order, per-reason first, so a wake over both is refused
+// once and recorded as a per-reason refusal (AC-004.8). Both counts run
+// against the caller's enqueue transaction (AC-OFFICE-LAUNCH-SAFETY-003.8)
+// so they are serialized against the insert and against every other
+// concurrent enqueue for the same agent profile — a count over rows the
+// insert alone does not lock.
 func (s *Service) checkSelfTriggerAllowance(
 	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest, actorKind models.ActorKind, actorID string,
 	workspaceID, causationID string,
@@ -284,6 +295,17 @@ func (s *Service) checkSelfTriggerAllowance(
 		// applies and RecordGateOutcome is not called.
 		return nil
 	}
+	if err := s.checkSelfTriggerPerReasonAllowance(ctx, tx, rec, agentInstanceID, req, workspaceID, causationID); err != nil {
+		return err
+	}
+	return s.checkSelfTriggerTotalAllowance(ctx, tx, rec, agentInstanceID, req, workspaceID, causationID)
+}
+
+// checkSelfTriggerPerReasonAllowance implements AC-OFFICE-LAUNCH-SAFETY-004.3.
+func (s *Service) checkSelfTriggerPerReasonAllowance(
+	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest,
+	workspaceID, causationID string,
+) error {
 	reason := req.Reason
 	since := time.Now().UTC().Add(-SelfTriggerWindow)
 	count, err := s.repo.CountSelfTriggeredRunsTx(ctx, tx, agentInstanceID, reason, since)
@@ -310,6 +332,41 @@ func (s *Service) checkSelfTriggerAllowance(
 			Gate: RefusalSelfTrigger,
 			Reason: fmt.Sprintf("agent %s exceeded self-trigger allowance %d for reason %q within %s",
 				agentInstanceID, s.effectiveSelfTriggerAllowance(), reason, SelfTriggerWindow),
+		}
+	}
+	return nil
+}
+
+// checkSelfTriggerTotalAllowance implements AC-OFFICE-LAUNCH-SAFETY-004.8,
+// the reason-independent sibling of checkSelfTriggerPerReasonAllowance.
+// Only reached once the per-reason allowance has already passed, so this
+// gate's own refusal never doubles as a per-reason one.
+func (s *Service) checkSelfTriggerTotalAllowance(
+	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest,
+	workspaceID, causationID string,
+) error {
+	since := time.Now().UTC().Add(-SelfTriggerWindow)
+	count, err := s.repo.CountSelfTriggeredRunsAnyReasonTx(ctx, tx, agentInstanceID, since)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTriggerTotal)), 1)
+		s.logRefusal(RefusalSelfTriggerTotal, agentInstanceID, req, causationID)
+		if !isShutdownCanceled(ctx, err) {
+			shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTriggerTotal)), 1)
+			rec.record(workspaceID, RefusalSelfTriggerTotal, false)
+		}
+		return &RefusalError{
+			Gate:   RefusalSelfTriggerTotal,
+			Reason: fmt.Sprintf("self-trigger total count unreadable: %v", err),
+		}
+	}
+	rec.record(workspaceID, RefusalSelfTriggerTotal, true)
+	if count >= s.effectiveSelfTriggerTotalAllowance() {
+		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTriggerTotal)), 1)
+		s.logRefusal(RefusalSelfTriggerTotal, agentInstanceID, req, causationID)
+		return &RefusalError{
+			Gate: RefusalSelfTriggerTotal,
+			Reason: fmt.Sprintf("agent %s exceeded total self-trigger allowance %d within %s",
+				agentInstanceID, s.effectiveSelfTriggerTotalAllowance(), SelfTriggerWindow),
 		}
 	}
 	return nil

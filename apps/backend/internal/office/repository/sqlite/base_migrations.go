@@ -83,6 +83,8 @@ func (r *Repository) migrateLaunchSafetyColumns() {
 		`CREATE INDEX IF NOT EXISTS idx_run_claim_order ON runs(status, priority_class, requested_at, id)`)
 	r.migrate.Apply("idx_run_self_trigger_window",
 		`CREATE INDEX IF NOT EXISTS idx_run_self_trigger_window ON runs(agent_profile_id, reason, actor_id, requested_at)`)
+	r.migrate.Apply("idx_run_self_trigger_total_window",
+		`CREATE INDEX IF NOT EXISTS idx_run_self_trigger_total_window ON runs(agent_profile_id, actor_id, requested_at)`)
 
 	_, _ = r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_launch_ledger (

@@ -43,14 +43,15 @@ type CatalogExclusion struct {
 // Office launch-safety catalog keys, shared with yamlOnlyStartupKeys
 // (source.go) and clampOfficeLaunchSafetyConfig (source.go).
 const (
-	officeMaxConcurrentInstanceKey  = "office.maxConcurrentInstance"
-	officeMaxConcurrentWorkspaceKey = "office.maxConcurrentWorkspace"
-	officeWorkspaceBudgetPerHourKey = "office.workspaceBudgetPerHour"
-	officeRoutineBudgetPerHourKey   = "office.routineBudgetPerHour"
-	officePromotionAgeMinutesKey    = "office.promotionAgeMinutes"
-	officeMaxCausationDepthKey      = "office.maxCausationDepth"
-	officeSelfTriggerAllowanceKey   = "office.selfTriggerAllowance"
-	officeGateFailureThresholdKey   = "office.gateFailureThreshold"
+	officeMaxConcurrentInstanceKey     = "office.maxConcurrentInstance"
+	officeMaxConcurrentWorkspaceKey    = "office.maxConcurrentWorkspace"
+	officeWorkspaceBudgetPerHourKey    = "office.workspaceBudgetPerHour"
+	officeRoutineBudgetPerHourKey      = "office.routineBudgetPerHour"
+	officePromotionAgeMinutesKey       = "office.promotionAgeMinutes"
+	officeMaxCausationDepthKey         = "office.maxCausationDepth"
+	officeSelfTriggerAllowanceKey      = "office.selfTriggerAllowance"
+	officeSelfTriggerTotalAllowanceKey = "office.selfTriggerTotalAllowance"
+	officeGateFailureThresholdKey      = "office.gateFailureThreshold"
 )
 
 var startupCatalog = []CatalogEntry{
@@ -110,6 +111,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: officePromotionAgeMinutesKey, EnvVars: []string{"KANDEV_OFFICE_PROMOTION_AGE_MINUTES"}, Owner: "office", Default: "15"},
 	{Key: officeMaxCausationDepthKey, EnvVars: []string{"KANDEV_OFFICE_MAX_CAUSATION_DEPTH"}, Owner: "office", Default: "8"},
 	{Key: officeSelfTriggerAllowanceKey, EnvVars: []string{"KANDEV_OFFICE_SELF_TRIGGER_ALLOWANCE"}, Owner: "office", Default: "3"},
+	{Key: officeSelfTriggerTotalAllowanceKey, EnvVars: []string{"KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE"}, Owner: "office", Default: "8"},
 	{Key: officeGateFailureThresholdKey, EnvVars: []string{"KANDEV_OFFICE_GATE_FAILURE_THRESHOLD"}, Owner: "office", Default: "3"},
 	{Key: "githubCredentialBroker.publicBaseUrl", EnvVars: []string{"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL"}, Owner: "github credential broker", Default: ""},
 	{Key: "tasks.preparationTimeout", EnvVars: []string{"KANDEV_TASK_PREPARATION_TIMEOUT"}, Owner: "task lifecycle", Default: "10m"},

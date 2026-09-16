@@ -184,7 +184,7 @@ func TestQueueRun_RefusesUnreadableCausingRun(t *testing.T) {
 // exceeds the configured ceiling is refused, not inserted.
 func TestQueueRun_RefusesBeyondMaxCausationDepth(t *testing.T) {
 	svc, _, repo := newTestServiceWithRepo(t)
-	svc.SetLaunchSafetyLimits(1, runsservice.DefaultSelfTriggerAllowance)
+	svc.SetLaunchSafetyLimits(1, runsservice.DefaultSelfTriggerAllowance, runsservice.DefaultSelfTriggerTotalAllowance)
 	ctx := context.Background()
 
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
@@ -231,7 +231,7 @@ func TestQueueRun_RefusesBeyondMaxCausationDepth(t *testing.T) {
 // reach resolveCausation and would defeat this test's row count).
 func TestQueueRun_RefusesSelfTriggerBeyondAllowance(t *testing.T) {
 	svc, _ := newTestService(t)
-	svc.SetLaunchSafetyLimits(runsservice.DefaultMaxCausationDepth, 2)
+	svc.SetLaunchSafetyLimits(runsservice.DefaultMaxCausationDepth, 2, runsservice.DefaultSelfTriggerTotalAllowance)
 	ctx := context.Background()
 
 	for i := 0; i < 2; i++ {

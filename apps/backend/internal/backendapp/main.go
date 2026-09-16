@@ -1597,10 +1597,11 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRoute(
 // field here is read once from cfg at startup and handed to the owning
 // repository/service via its SetXxx method, never polled at runtime.
 type launchSafetyLimits struct {
-	claim                runssqlite.ClaimSafetyLimits
-	maxCausationDepth    int
-	selfTriggerAllowance int
-	gateFailureThreshold int
+	claim                     runssqlite.ClaimSafetyLimits
+	maxCausationDepth         int
+	selfTriggerAllowance      int
+	selfTriggerTotalAllowance int
+	gateFailureThreshold      int
 }
 
 func launchSafetyLimitsFromConfig(cfg *config.Config) launchSafetyLimits {
@@ -1612,9 +1613,10 @@ func launchSafetyLimitsFromConfig(cfg *config.Config) launchSafetyLimits {
 			RoutineBudgetPerHour:   cfg.Office.RoutineBudgetPerHour,
 			PromotionAge:           time.Duration(cfg.Office.PromotionAgeMinutes) * time.Minute,
 		},
-		maxCausationDepth:    cfg.Office.MaxCausationDepth,
-		selfTriggerAllowance: cfg.Office.SelfTriggerAllowance,
-		gateFailureThreshold: cfg.Office.GateFailureThreshold,
+		maxCausationDepth:         cfg.Office.MaxCausationDepth,
+		selfTriggerAllowance:      cfg.Office.SelfTriggerAllowance,
+		selfTriggerTotalAllowance: cfg.Office.SelfTriggerTotalAllowance,
+		gateFailureThreshold:      cfg.Office.GateFailureThreshold,
 	}
 }
 
@@ -1649,7 +1651,7 @@ func startSchedulingRuntime(
 	runsSvc := runsservice.New(
 		runsRepo, eventBus, log, nil,
 	)
-	runsSvc.SetLaunchSafetyLimits(safetyLimits.maxCausationDepth, safetyLimits.selfTriggerAllowance)
+	runsSvc.SetLaunchSafetyLimits(safetyLimits.maxCausationDepth, safetyLimits.selfTriggerAllowance, safetyLimits.selfTriggerTotalAllowance)
 	runProcessorSvc.SetRunsService(runsSvc)
 	// office/scheduler.SchedulerService.QueueRun/QueueRunCtx (approval-resolved
 	// and reactivity wakes) also delegate through the same seam, gaining

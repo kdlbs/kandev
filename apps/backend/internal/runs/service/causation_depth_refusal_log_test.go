@@ -59,7 +59,7 @@ func newObservedTestService(t *testing.T) (
 // the agent that requested it" — not just the identifier and agent.
 func TestQueueRun_DepthRefusalLogsTheRefusingDepth(t *testing.T) {
 	svc, repo, logs := newObservedTestService(t)
-	svc.SetLaunchSafetyLimits(1, runsservice.DefaultSelfTriggerAllowance)
+	svc.SetLaunchSafetyLimits(1, runsservice.DefaultSelfTriggerAllowance, runsservice.DefaultSelfTriggerTotalAllowance)
 
 	ctx := context.Background()
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{

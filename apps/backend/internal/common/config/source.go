@@ -84,6 +84,7 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	officePromotionAgeMinutesKey:         {},
 	officeMaxCausationDepthKey:           {},
 	officeSelfTriggerAllowanceKey:        {},
+	officeSelfTriggerTotalAllowanceKey:   {},
 	officeGateFailureThresholdKey:        {},
 	"observability.otlpEndpoint":         {},
 	"launcher.webPort":                   {},
@@ -308,6 +309,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultInt("office.promotionAgeMinutes", &cfg.Office.PromotionAgeMinutes, 15)
 	setDefaultInt("office.maxCausationDepth", &cfg.Office.MaxCausationDepth, 8)
 	setDefaultInt("office.selfTriggerAllowance", &cfg.Office.SelfTriggerAllowance, 3)
+	setDefaultInt("office.selfTriggerTotalAllowance", &cfg.Office.SelfTriggerTotalAllowance, 8)
 	setDefaultInt("office.gateFailureThreshold", &cfg.Office.GateFailureThreshold, 3)
 	if !yamlKeys["observability.otlpEndpoint"] {
 		cfg.Observability.OTLPEndpoint = ""
@@ -339,6 +341,7 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyPositiveIntEnv("office.promotionAgeMinutes", &cfg.Office.PromotionAgeMinutes, 15, envSnapshot, sources)
 	applyPositiveIntEnv("office.maxCausationDepth", &cfg.Office.MaxCausationDepth, 8, envSnapshot, sources)
 	applyPositiveIntEnv("office.selfTriggerAllowance", &cfg.Office.SelfTriggerAllowance, 3, envSnapshot, sources)
+	applyPositiveIntEnv("office.selfTriggerTotalAllowance", &cfg.Office.SelfTriggerTotalAllowance, 8, envSnapshot, sources)
 	applyPositiveIntEnv("office.gateFailureThreshold", &cfg.Office.GateFailureThreshold, 3, envSnapshot, sources)
 	applyStringEnvAllowEmpty("observability.otlpEndpoint", &cfg.Observability.OTLPEndpoint, envSnapshot, sources)
 	applyBoundedIntEnv("launcher.webPort", &cfg.Launcher.WebPort, 0, 1, 65535, envSnapshot, sources)
@@ -349,13 +352,17 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 // clampOfficeLaunchSafetyConfig clamps a below-minimum office.*
 // launch-safety value to its documented default and returns a warning
 // naming the key and the rejected value, per
-// AC-OFFICE-LAUNCH-SAFETY-001.5/003.1/004.3/005.1 and
+// AC-OFFICE-LAUNCH-SAFETY-001.5/003.1/004.3/004.8/005.1 and
 // AC-OFFICE-BACKPRESSURE-002.1/003.5: these values must degrade to their
 // default and let boot proceed, not fail startup. Defaults here must stay
 // in sync with applyStartupDefaults's and applyStartupEnvironment's
 // literals for the same keys. Only a YAML-sourced value can still be
 // invalid by the point this runs: applyStartupEnvironment's env path and
 // applyStartupDefaults's default path already resolve to a value >= 1.
+// This is also where the two self-trigger allowances are resolved
+// against each other: AC-OFFICE-LAUNCH-SAFETY-004.8 permits (and does
+// not clamp) a configured total below the per-reason value, but requires
+// a warn-level log naming that the total is now the binding limit.
 func clampOfficeLaunchSafetyConfig(cfg *Config) []string {
 	entries := []struct {
 		key   string
@@ -369,6 +376,7 @@ func clampOfficeLaunchSafetyConfig(cfg *Config) []string {
 		{officePromotionAgeMinutesKey, &cfg.Office.PromotionAgeMinutes, 15},
 		{officeMaxCausationDepthKey, &cfg.Office.MaxCausationDepth, 8},
 		{officeSelfTriggerAllowanceKey, &cfg.Office.SelfTriggerAllowance, 3},
+		{officeSelfTriggerTotalAllowanceKey, &cfg.Office.SelfTriggerTotalAllowance, 8},
 		{officeGateFailureThresholdKey, &cfg.Office.GateFailureThreshold, 3},
 	}
 	var warnings []string
@@ -380,6 +388,15 @@ func clampOfficeLaunchSafetyConfig(cfg *Config) []string {
 		log.Print(warning)
 		warnings = append(warnings, warning)
 		*e.value = e.def
+	}
+	if cfg.Office.SelfTriggerTotalAllowance < cfg.Office.SelfTriggerAllowance {
+		warning := fmt.Sprintf(
+			"%s is configured as %d, below %s's %d; the total allowance is binding and the per-reason allowance is unreachable",
+			officeSelfTriggerTotalAllowanceKey, cfg.Office.SelfTriggerTotalAllowance,
+			officeSelfTriggerAllowanceKey, cfg.Office.SelfTriggerAllowance,
+		)
+		log.Print(warning)
+		warnings = append(warnings, warning)
 	}
 	return warnings
 }

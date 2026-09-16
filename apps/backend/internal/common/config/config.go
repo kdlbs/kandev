@@ -438,7 +438,12 @@ type OfficeConfig struct {
 	PromotionAgeMinutes  int `mapstructure:"promotionAgeMinutes"`
 	MaxCausationDepth    int `mapstructure:"maxCausationDepth"`
 	SelfTriggerAllowance int `mapstructure:"selfTriggerAllowance"`
-	GateFailureThreshold int `mapstructure:"gateFailureThreshold"`
+	// SelfTriggerTotalAllowance is the reason-independent sibling of
+	// SelfTriggerAllowance (AC-OFFICE-LAUNCH-SAFETY-004.8): it may be
+	// configured below SelfTriggerAllowance, in which case it is the
+	// binding limit and the per-reason allowance becomes unreachable.
+	SelfTriggerTotalAllowance int `mapstructure:"selfTriggerTotalAllowance"`
+	GateFailureThreshold      int `mapstructure:"gateFailureThreshold"`
 }
 
 // FeaturesConfig is the typed wire/config shape for runtime feature flags.

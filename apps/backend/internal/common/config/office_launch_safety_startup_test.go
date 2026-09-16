@@ -26,6 +26,7 @@ func TestOfficeLaunchSafetyYAMLBelowMinimumClampsAndStartsNormally(t *testing.T)
 		{"promotionAgeMinutes", 15, func(c *Config) int { return c.Office.PromotionAgeMinutes }},
 		{"maxCausationDepth", 8, func(c *Config) int { return c.Office.MaxCausationDepth }},
 		{"selfTriggerAllowance", 3, func(c *Config) int { return c.Office.SelfTriggerAllowance }},
+		{"selfTriggerTotalAllowance", 8, func(c *Config) int { return c.Office.SelfTriggerTotalAllowance }},
 		{"gateFailureThreshold", 3, func(c *Config) int { return c.Office.GateFailureThreshold }},
 	}
 
@@ -81,5 +82,41 @@ func TestOfficeLaunchSafetyEnvOutOfRangeLogsWarning(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "office.maxConcurrentInstance") {
 		t.Fatalf("log output = %q, want a warning naming office.maxConcurrentInstance", buf.String())
+	}
+}
+
+// TestOfficeSelfTriggerTotalBelowPerReasonLogsWarningAndIsHonored pins
+// AC-OFFICE-LAUNCH-SAFETY-004.8: a total allowance configured below the
+// per-reason allowance is a valid configuration, not a below-minimum
+// clamp case, so both values must be honored exactly as configured; the
+// system must still warn, at the point the two are resolved, that the
+// total is now the binding limit.
+func TestOfficeSelfTriggerTotalBelowPerReasonLogsWarningAndIsHonored(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "config.yaml")
+	contents := "office:\n  selfTriggerAllowance: 5\n  selfTriggerTotalAllowance: 2\n"
+	if err := os.WriteFile(configFile, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("KANDEV_SERVER_PORT", "")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if cfg.Office.SelfTriggerAllowance != 5 {
+		t.Fatalf("office.selfTriggerAllowance = %d, want 5 (honored as configured, not clamped)", cfg.Office.SelfTriggerAllowance)
+	}
+	if cfg.Office.SelfTriggerTotalAllowance != 2 {
+		t.Fatalf("office.selfTriggerTotalAllowance = %d, want 2 (honored as configured, not clamped)", cfg.Office.SelfTriggerTotalAllowance)
+	}
+	found := false
+	for _, w := range cfg.Source.Warnings {
+		if strings.Contains(w, "office.selfTriggerTotalAllowance") && strings.Contains(w, "office.selfTriggerAllowance") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %#v, want one naming both office.selfTriggerTotalAllowance and office.selfTriggerAllowance", cfg.Source.Warnings)
 	}
 }

@@ -74,3 +74,31 @@ func countSelfTriggeredRuns(ctx context.Context, exec sqlExecutor, agentProfileI
 	}
 	return count, nil
 }
+
+// CountSelfTriggeredRunsAnyReasonTx counts runs queued for
+// agentProfileID whose persisted actor kind is `agent` and actor id
+// equals agentProfileID, requested strictly after since, whatever
+// reason they name (AC-OFFICE-LAUNCH-SAFETY-004.7/.8): the
+// reason-independent sibling of CountSelfTriggeredRunsTx, differing
+// from it in that one predicate only. Run against the caller's enqueue
+// transaction for the same serialization reason CountSelfTriggeredRunsTx
+// documents.
+func (r *Repository) CountSelfTriggeredRunsAnyReasonTx(
+	ctx context.Context, tx *sqlx.Tx, agentProfileID string, since time.Time,
+) (int, error) {
+	return countSelfTriggeredRunsAnyReason(ctx, tx, agentProfileID, since)
+}
+
+func countSelfTriggeredRunsAnyReason(ctx context.Context, exec sqlExecutor, agentProfileID string, since time.Time) (int, error) {
+	var count int
+	err := exec.QueryRowxContext(ctx, exec.Rebind(`
+		SELECT COUNT(*) FROM runs
+		WHERE agent_profile_id = ?
+		  AND actor_kind = ? AND actor_id = ?
+		  AND requested_at > ?
+	`), agentProfileID, string(models.ActorKindAgent), agentProfileID, since).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}

@@ -193,12 +193,14 @@ type Service struct {
 	resolver AgentResolver
 	signalCh chan struct{}
 
-	// maxCausationDepth and selfTriggerAllowance back
-	// REQ-OFFICE-LAUNCH-SAFETY-003/004. Zero means "use the documented
-	// default", so a Service built via New without SetLaunchSafetyLimits
-	// still enforces the spec defaults rather than being unbounded.
-	maxCausationDepth    int
-	selfTriggerAllowance int
+	// maxCausationDepth, selfTriggerAllowance, and
+	// selfTriggerTotalAllowance back REQ-OFFICE-LAUNCH-SAFETY-003/004.
+	// Zero means "use the documented default", so a Service built via
+	// New without SetLaunchSafetyLimits still enforces the spec defaults
+	// rather than being unbounded.
+	maxCausationDepth         int
+	selfTriggerAllowance      int
+	selfTriggerTotalAllowance int
 }
 
 // DefaultMaxCausationDepth is the documented default for
@@ -209,19 +211,28 @@ const DefaultMaxCausationDepth = 8
 // AC-OFFICE-LAUNCH-SAFETY-004.3.
 const DefaultSelfTriggerAllowance = 3
 
+// DefaultSelfTriggerTotalAllowance is the documented default for the
+// reason-independent allowance of AC-OFFICE-LAUNCH-SAFETY-004.8.
+const DefaultSelfTriggerTotalAllowance = 8
+
 // SelfTriggerWindow is the rolling window AC-OFFICE-LAUNCH-SAFETY-004.3
-// counts against. Unlike the allowance, the window itself is not
-// configurable.
+// and AC-OFFICE-LAUNCH-SAFETY-004.8 count against. Unlike the
+// allowances, the window itself is not configurable.
 const SelfTriggerWindow = 60 * time.Minute
 
-// SetLaunchSafetyLimits configures the causation-depth ceiling and the
+// SetLaunchSafetyLimits configures the causation-depth ceiling, the
+// per-reason self-trigger allowance, and the reason-independent
 // self-trigger allowance. A value less than 1 is replaced by the
-// documented default, per AC-OFFICE-LAUNCH-SAFETY-003.1 / 004.3: a
-// configured 0 must not mean "unlimited" or "no self-triggering ever
-// allowed by accident of an unset override".
-func (s *Service) SetLaunchSafetyLimits(maxCausationDepth, selfTriggerAllowance int) {
+// documented default, per AC-OFFICE-LAUNCH-SAFETY-003.1 / 004.3 / 004.8:
+// a configured 0 must not mean "unlimited" or "no self-triggering ever
+// allowed by accident of an unset override". A total below the
+// per-reason value is a valid, honored configuration
+// (AC-OFFICE-LAUNCH-SAFETY-004.8); clamping happens independently for
+// each of the three values.
+func (s *Service) SetLaunchSafetyLimits(maxCausationDepth, selfTriggerAllowance, selfTriggerTotalAllowance int) {
 	s.maxCausationDepth = clampToDefault(maxCausationDepth, DefaultMaxCausationDepth)
 	s.selfTriggerAllowance = clampToDefault(selfTriggerAllowance, DefaultSelfTriggerAllowance)
+	s.selfTriggerTotalAllowance = clampToDefault(selfTriggerTotalAllowance, DefaultSelfTriggerTotalAllowance)
 }
 
 func clampToDefault(value, def int) int {
@@ -237,6 +248,10 @@ func (s *Service) effectiveMaxCausationDepth() int {
 
 func (s *Service) effectiveSelfTriggerAllowance() int {
 	return clampToDefault(s.selfTriggerAllowance, DefaultSelfTriggerAllowance)
+}
+
+func (s *Service) effectiveSelfTriggerTotalAllowance() int {
+	return clampToDefault(s.selfTriggerTotalAllowance, DefaultSelfTriggerTotalAllowance)
 }
 
 // New constructs a Service. The signal channel is created here so
