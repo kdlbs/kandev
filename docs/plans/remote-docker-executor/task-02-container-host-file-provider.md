@@ -1,7 +1,7 @@
 ---
 id: "02-container-host-file-provider"
 title: "Container host-file provider"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -89,4 +89,25 @@ None. Consumes the SSH upload helpers, which already exist.
 
 ## Results
 
-_Not started._
+- Added the `ContainerHostFiles` seam covering the three container inputs whose
+  source is a filesystem path rather than image content: the `agentctl` helper,
+  the per-instance agent session directory, and the E2E mock-agent binary.
+- Locked today's local mount set with a characterization test written before
+  the refactor. It immediately caught a wrong assumption of mine: agents
+  without a full `SessionDirTemplate`+`SessionDirTarget` pair add no session
+  mount at all, so the test now uses an agent that has one.
+- Added `remoteContainerHostFiles`, resolving every source on the remote host
+  and asserting no backend-host path reaches a remote container. The test fails
+  the run if the backend-side agentctl resolver is called at all.
+- Agentctl selection now follows the probed `SSHRemotePlatform`, fixing the
+  current unconditional `linux/amd64` choice. That is invisible with a local
+  amd64 daemon and fatal against an arm64 remote.
+- `SessionDir` reports an error instead of returning an empty path when the
+  directory should exist but could not be produced. The first version swallowed
+  it, which would have started an agent without its seeded credentials and no
+  stated cause; `expandMounts` and `buildContainerConfig` thread the error.
+- `MockAgentBinary` is always empty for a remote daemon, since it resolves from
+  the backend's own build tree.
+- Verified with:
+  - `go test ./internal/agent/runtime/lifecycle/ -count=1` (50s, goleak clean)
+  - `golangci-lint run ./internal/agent/runtime/lifecycle/...` (0 issues)

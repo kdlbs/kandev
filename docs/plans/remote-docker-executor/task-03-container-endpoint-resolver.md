@@ -1,7 +1,7 @@
 ---
 id: "03-container-endpoint-resolver"
 title: "Container endpoint resolver"
-status: pending
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"

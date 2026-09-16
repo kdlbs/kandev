@@ -1,7 +1,7 @@
 ---
 id: "01-ssh-dialed-docker-client"
 title: "SSH-dialed Docker client"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -94,4 +94,27 @@ None.
 
 ## Results
 
-_Not started._
+- Added `docker.NewRemoteClient`, whose Engine API requests travel through a
+  supplied dialer instead of a local socket or a TCP address.
+- Pinned the option-order hazard with a test asserting the supplied dialer is
+  never consulted under the reversed order. Asserting a failed ping instead
+  would also pass under a slow resolver, for the wrong reason. Verified by
+  mutation: flipping the shipped order fails two tests.
+- Dropped `client.WithAPIVersionNegotiation()`; it is deprecated and a no-op in
+  `moby/client v0.5.0`, where negotiation is on by default.
+- Added `ValidateRemoteDaemonAddress`, rejecting every URL scheme so the
+  `tcp://` exclusion holds by construction rather than by denylist.
+- Added `ClassifyRemoteDialError`, separating socket-permission-denied, a
+  missing Docker CLI, and an unreachable daemon while preserving remote stderr.
+- Added `newSSHDockerDialer`, running `docker system dial-stdio` on a pooled
+  Kandev SSH connection and adapting it to `net.Conn` with `CloseWrite`.
+- Connection lifetime is deliberately not bound to the dial context:
+  `http.Transport` pools connections across requests, so tearing one down when
+  its dialing request ends would close a connection later requests still use.
+- Extended the fake SSH server with a streaming exec handler. The canned
+  handler reads stdin to EOF before replying, which no real failing command
+  does and which deadlocks a client awaiting a response.
+- Verified with:
+  - `go test ./internal/agent/docker/ -count=1 -race`
+  - `go test ./internal/agent/runtime/lifecycle/ -count=1` (50s, goleak clean)
+  - `golangci-lint run ./internal/agent/runtime/lifecycle/... ./internal/agent/docker/...` (0 issues)
