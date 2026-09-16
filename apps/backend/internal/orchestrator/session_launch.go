@@ -416,7 +416,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 	if err != nil {
 		return nil, err
 	}
-	return executionToLaunchResponse(req.TaskID, execution), nil
+	return s.withExactProfileLaunchReceipt(ctx, executionToLaunchResponse(req.TaskID, execution)), nil
 }
 
 // launchWorkflowStep starts a session with workflow step prompt configuration.
