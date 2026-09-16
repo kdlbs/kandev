@@ -4253,7 +4253,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to reconcile clarification retry", nil)
 	}
-	if durable.response != nil && !durable.deliveryPending && (!deliveryMissed || durable.response.Rejected) {
+	if durable.response != nil && (!deliveryMissed || durable.response.Rejected) {
 		if isNew {
 			h.clarificationSvc.CancelRequest(pendingID)
 		}

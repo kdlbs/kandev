@@ -136,6 +136,22 @@ func seedRetryMessage(t *testing.T, ctx context.Context, repo *sqliterepo.Reposi
 	}))
 }
 
+func seedRetryDeliveryPendingMessage(
+	t *testing.T,
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+	taskID, sessionID, pendingID, status string,
+	response map[string]interface{},
+) {
+	t.Helper()
+	seedRetryMessage(t, ctx, repo, taskID, sessionID, pendingID, status, response)
+	messages, err := repo.FindMessagesByPendingID(ctx, pendingID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	messages[0].Metadata["response_delivery_pending"] = true
+	require.NoError(t, repo.UpdateMessage(ctx, messages[0]))
+}
+
 func retryAskPayload(sessionID, taskID string) map[string]interface{} {
 	return map[string]interface{}{
 		"session_id": sessionID,
@@ -474,6 +490,58 @@ func TestHandleAskUserQuestion_RetryReturnsRecordedAnswerWithoutWaiting(t *testi
 
 	assert.Empty(t, store.ListPending(), "a recorded outcome must not open a new in-memory wait")
 	assert.Equal(t, int32(0), creator.calls.Load())
+}
+
+func TestHandleAskUserQuestion_RetryReturnsDeliveryPendingRecordedOutcome(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   string
+		response map[string]interface{}
+		rejected bool
+	}{
+		{
+			name:   "answered",
+			status: "answered",
+			response: map[string]interface{}{
+				"question_id": "q1", "selected_options": []interface{}{"opt-red"},
+			},
+		},
+		{name: "rejected", status: "rejected", rejected: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc, repo := newTestTaskService(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			taskID, sessionID, pendingID := seedRetrySession(t, ctx, svc, repo, "retry-delivery-pending-"+test.name)
+			seedRetryDeliveryPendingMessage(t, ctx, repo, taskID, sessionID, pendingID, test.status, test.response)
+
+			store := clarification.NewStore(time.Minute)
+			h := NewHandlers(svc, nil, store, nil, &countingMessageCreator{}, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+			done := make(chan askUserQuestionResult, 1)
+			go func() {
+				resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, retryAskPayload(sessionID, taskID)))
+				done <- askUserQuestionResult{response: resp, err: err}
+			}()
+
+			var result askUserQuestionResult
+			select {
+			case result = <-done:
+			case <-time.After(time.Second):
+				cancel()
+				<-done
+				t.Fatal("retry of a delivery-pending terminal bundle must return immediately")
+			}
+			require.NoError(t, result.err)
+			require.Equal(t, ws.MessageTypeResponse, result.response.Type)
+			var body clarification.Response
+			require.NoError(t, json.Unmarshal(result.response.Payload, &body))
+			assert.Equal(t, pendingID, body.PendingID)
+			assert.Equal(t, test.rejected, body.Rejected)
+			assert.Empty(t, store.ListPending(), "a terminal durable outcome must not leave a retry waiter")
+		})
+	}
 }
 
 func TestHandleAskUserQuestion_RetryReturnsRecordedRejection(t *testing.T) {
