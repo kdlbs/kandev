@@ -56,6 +56,9 @@ type Config struct {
 	// NotificationQueueCapacity is the resolved ACP inbound notification queue
 	// capacity. Zero keeps compatibility for directly constructed test configs.
 	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
+	PromptCancelJoinTimeout time.Duration
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

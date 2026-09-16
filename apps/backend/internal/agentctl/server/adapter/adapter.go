@@ -319,6 +319,9 @@ type Config struct {
 
 	// NotificationQueueCapacity is the server-resolved ACP inbound queue size.
 	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
+	PromptCancelJoinTimeout time.Duration
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -350,6 +353,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AssumeMcpHttp:             c.AssumeMcpHttp,
 		RequiresProcessKill:       c.RequiresProcessKill,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
 	}
 }
 

@@ -1456,6 +1456,7 @@ func (m *Manager) buildAdapterConfig() error {
 		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
 		RequiresProcessKill:       m.cfg.RequiresProcessKill,
 		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   m.cfg.PromptCancelJoinTimeout,
 	}
 
 	// Configure one-shot mode when a continue command is provided.

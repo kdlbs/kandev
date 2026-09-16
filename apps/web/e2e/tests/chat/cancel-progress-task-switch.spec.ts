@@ -30,8 +30,8 @@ test.describe("Cancel progress across task switches", () => {
     );
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
-    // /sleep 30 keeps the backend cancellation alive long enough for a task switch.
-    await session.sendMessage("/sleep 30");
+    // /e2e:cancel-hold keeps an acknowledged backend cancellation pending through task switching.
+    await session.sendMessage("/e2e:cancel-hold");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(activeCancel).toBeVisible({ timeout: 15_000 });

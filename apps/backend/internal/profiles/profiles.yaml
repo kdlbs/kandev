@@ -220,6 +220,17 @@ ui:
 # don't belong in dev (would mask real interactions) and never in
 # prod (would leak test-only behaviour).
 e2eTuning:
+  # Holds a mock ACP cancellation through navigation and hydration without
+  # changing production cancellation behavior.
+  KANDEV_E2E_CANCEL_HOLD_DURATION:
+    prod: ""
+    dev:  ""
+    e2e:  "8s"
+  KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT:
+    prod: ""
+    dev:  ""
+    e2e:  "12s"
+
   # Auto-approve every permission request in agentctl so e2e specs
   # don't have to script the approval UI. Read by the agentctl child
   # process; the backend forwards its env to children, so setting it
