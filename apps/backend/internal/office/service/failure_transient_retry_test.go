@@ -439,6 +439,53 @@ func TestHandleAgentFailure_ProviderIDRequiredForTransientClassification(t *test
 	}
 }
 
+// TestHandleAgentFailure_ProviderErrorIDSubstitutedWhenAgentIDHasNoRules pins
+// review round 4 finding R4-1: the substitution branch in
+// tryLegacyTransientRetry (providerError.ProviderID stands in for agentID
+// only when agentID itself has no provider rules) had no test exercising it
+// — every existing case either supplied an agentID with rules (claude-acp)
+// or left providerError.ProviderID empty. "too many requests" matches only
+// codex-acp's rate rule, not any provider-neutral rule, so a retry here is
+// evidence only of the substitution, not of some other classification path.
+func TestHandleAgentFailure_ProviderErrorIDSubstitutedWhenAgentIDHasNoRules(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-opencode-go")
+	taskID := "task-provider-id-substituted"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-opencode-go")
+	run := queueAndReadRun(t, svc, "agent-opencode-go", taskID)
+
+	providerErr := &streams.ProviderError{
+		Source:     "adapter",
+		ProviderID: "codex-acp",
+		Message:    "too many requests",
+		OccurredAt: time.Now().UTC(),
+	}
+
+	// "opencode-go" is a real model-provider id (routingerr/rules.go's
+	// HasProviderRules doc comment) with no rules of its own, so this only
+	// retries if providerErr.ProviderID is substituted in.
+	wrote, err := svc.HandleAgentFailure(ctx, run, "too many requests", "opencode-go", providerErr)
+	if err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	if wrote {
+		t.Fatal("wrote = true, want false: codex-acp's provider rule should have classified transient via providerError.ProviderID")
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusQueued {
+		t.Fatalf("run status = %q, want %q", refreshed.Status, service.RunStatusQueued)
+	}
+	if refreshed.RetryCount != 1 {
+		t.Fatalf("retry_count = %d, want 1", refreshed.RetryCount)
+	}
+}
+
 // TestHandleAgentFailure_ScheduleRetryErrorFallsThroughToTerminal pins
 // review round 3 finding R3-3: tryLegacyTransientRetry releases the
 // checkout and clears agent-working before calling ScheduleRetry, then
