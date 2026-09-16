@@ -67,6 +67,19 @@ scanner: a credential shaped like something not on that list (a
 vendor-specific token prefix, for example) survives the narrow tier unless it
 also matches a listed pattern.
 
+The primary launch prompt (`ConductorLaunch.Prompt`, rendered by
+`ContinuationPrompt` ahead of the continuation package on every attempt,
+including attempt 0, not only fallbacks) is carrier text of the same kind as
+`TaskDescription`/`PlanSummary`/`RepositorySummary` above: it is
+user-authored, already shown to the user unredacted, and commonly carries
+long identifiers a fallback provider still needs (a file path, a commit SHA,
+a PR URL, a task UUID). It therefore receives the same narrow
+credential-only tier, via `routingerr.SanitizeCredentialsUnbounded` rather
+than `SanitizeCredentials` — unbounded, because unlike the continuation
+fields it is not subject to `continuationFieldLimit` and must not be
+silently truncated. Diagnostic-tier redaction (`routingerr.Sanitize`) is
+reserved for provider output and `FailureReason`, never for this field.
+
 The key match is a substring match, not exact-name, so it also matches a key
 merely containing a keyword without naming a credential (`max_tokens`,
 `tokenizer`); an exact-name allowlist would drop the qualified env-var keys
