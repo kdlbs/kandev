@@ -1,7 +1,7 @@
 ---
 id: "01-postgres-coverage"
 title: "Prove PostgreSQL source and cleanup behavior"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -98,5 +98,8 @@ None. Run sequentially in the recommended order.
 
 ## Results
 
-Pending. Record exact commands, tested commit, environment, results, and skipped tests.
-Update this package and the original package together; preserve historical results.
+- Added `conversation_source_postgres_test.go` with the three required named tests. They cover source-page filters and keyset paging, repeatable-read consistency, direct source updates/deletes and session moves, turn completion, cascades, transaction rollback, revision bounds, transaction-bound receipts, concurrent writers, incomplete intervals, cleanup rollback/retry, source sentinels, index preservation, and unrelated PostgreSQL objects.
+- On disposable PostgreSQL 16.15, `KANDEV_TEST_POSTGRES_DSN=<redacted> go test -race ./internal/task/repository/sqlite -run '^TestConversationPostgres' -count=1 -v` passed all 3/3 named tests in 5.721s. The receipt test used two repository connections for concurrent writes.
+- `go test -race ./internal/task/repository/sqlite -run '^TestConversation' -count=1` passed. `go test -race ./internal/persistence/storeconformance -run 'PreviousStableUpgrade|UpgradeFixtureManifest' -count=1 -v` passed with the SQLite and PostgreSQL dynamic conformance routes. `go run ./cmd/sqlguard ./internal` passed.
+- No PostgreSQL test was skipped. The database was disposable and was removed after verification. No production source or cleanup fix was required.
+- Tested code revision: `213492517315abb38697b765e91e6fe0ea5388c7`.

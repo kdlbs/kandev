@@ -1,7 +1,7 @@
 ---
 id: "05-parity-and-docs"
 title: "Prove parity and publish the contract"
-status: in_progress
+status: done
 wave: 5
 depends_on:
   - "04-retire-journal"
@@ -125,8 +125,7 @@ Managed E2E rebuilds the application and fixture. Run desktop and mobile sequent
 - Desktop managed E2E passed 6/6 for core/plugin recovery, plugin parity, core panel behavior, and stream isolation.
 - Mobile managed E2E passed 2/2 for prompt-history touch navigation and stream isolation.
 - Frontend unit tests passed 64/64; TypeScript, ESLint, plugin SDK tests/typecheck, i18n checks, public-doc validation, specification validation, SQL guard, and `git diff --check` passed.
-- PostgreSQL variants were not run because `KANDEV_TEST_POSTGRES_DSN` is not configured in this workspace.
-- Status remains in progress until the dependent migration verification is complete and the broad backend target is green.
+- The follow-up completed the dependent PostgreSQL, Office, task-service, and final recovery gates. The final guarded browser matrix passed desktop 5/5 and mobile 5/5, with 41 focused frontend tests and gateway race coverage passing on revision `213492517315abb38697b765e91e6fe0ea5388c7`. The historical 6/6 desktop and 2/2 mobile counts above remain unchanged.
 
 
 ## Large legacy SQLite verification
@@ -145,6 +144,5 @@ gates remain open. All changes remain uncommitted.
 
 ## Remaining-gate handoff
 
-See the [follow-up package](../conversation-storage-follow-up/plan.md) for remaining
-PostgreSQL, backend failure, and final recovery evidence. Existing results remain historical.
-Do not mark this work order complete until its outstanding gates pass.
+The follow-up package records the final PostgreSQL, backend, and recovery
+evidence. Existing results remain historical.

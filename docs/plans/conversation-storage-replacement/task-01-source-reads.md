@@ -1,7 +1,7 @@
 ---
 id: "01-source-reads"
 title: "Add revision-backed source reads"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -110,10 +110,9 @@ None.
 - `GOCACHE=/tmp/kandev-go-cache go test ./internal/task/service -run 'TestPublishMessageEvent|Conversation' -count=1`: passed.
 - `GOCACHE=/tmp/kandev-go-cache go run ./cmd/sqlguard ./internal`: passed.
 - Focused source, receipt, route, and gateway tests passed.
-- Status remains in progress because the required PostgreSQL source and receipt variants could not run without `KANDEV_TEST_POSTGRES_DSN`.
+- The follow-up added the required PostgreSQL source, receipt, and cleanup variants. On disposable PostgreSQL 16.15, all three named PostgreSQL tests passed with the race detector; the SQLite/PostgreSQL upgrade conformance checks and SQL guard also passed. See the [follow-up Task 01 results](../conversation-storage-follow-up/task-01-postgres-coverage.md).
 
 ## Remaining-gate handoff
 
-See the [follow-up package](../conversation-storage-follow-up/plan.md) for remaining
-PostgreSQL, backend failure, and final recovery evidence. Existing results remain historical.
-Do not mark this work order complete until its outstanding gates pass.
+The follow-up package records the final PostgreSQL and related delivery evidence.
+Existing results remain historical.

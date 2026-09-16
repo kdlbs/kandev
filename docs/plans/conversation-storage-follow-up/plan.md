@@ -1,6 +1,6 @@
 ---
 created: 2026-09-16
-status: draft
+status: complete
 requirements:
   - REQ-PLUGINS-PROMPT-HISTORY-HOST-002
   - REQ-PLUGINS-PROMPT-HISTORY-HOST-005
@@ -45,7 +45,8 @@ A 2.95 GB synthetic legacy database retained its file size after logical cleanup
 Manual compaction reduced it to 477 MB. Source records remained intact.
 Both streaming runs passed without write or health-probe failures.
 The SQLite catalog and runtime worker audit found no active legacy payload copies or journal workers.
-PostgreSQL removal has only static evidence so far.
+The follow-up PostgreSQL tests now provide direct source, receipt, and cleanup
+evidence against PostgreSQL 16.15.
 
 Implementation commit hooks passed, including Go lint and zero-warning web lint.
 The former lint findings are resolved; they are not another pending work order.
@@ -90,27 +91,39 @@ Record the boundary used for each scenario; do not report a unit test as browser
 Recommended execution: 01, 02, 03, then 04. Only Task 04 depends on all preceding results.
 A wave does not authorize delegation. The user will arrange implementation separately.
 
-- [ ] [Task 01: PostgreSQL source and cleanup coverage](task-01-postgres-coverage.md)
-- [ ] [Task 02: Office migration failure](task-02-office-migration.md)
-- [ ] [Task 03: Task-service failure](task-03-task-service.md)
-- [ ] [Task 04: Desktop and mobile recovery](task-04-recovery-e2e.md)
+- [x] [Task 01: PostgreSQL source and cleanup coverage](task-01-postgres-coverage.md)
+- [x] [Task 02: Office migration failure](task-02-office-migration.md)
+- [x] [Task 03: Task-service failure](task-03-task-service.md)
+- [x] [Task 04: Desktop and mobile recovery](task-04-recovery-e2e.md)
 
 ## Verification results
 
-Implementation of this follow-up package is pending. Planning checks passed:
+Follow-up implementation gates completed on 2026-09-17 at code revision
+`213492517315abb38697b765e91e6fe0ea5388c7`:
 
-- `python3 scripts/list-docs.py validate`: 280 decisions and 960 specifications validated.
-- `python3 scripts/lint-spec-files.py --all`: passed.
-- Requirement IDs, local links, and named existing file paths: checked.
-- `git diff --check`: passed.
-- All six new package files were inspected before staging.
-Do not mark the original package complete until these gates have evidence.
-Skipped PostgreSQL tests, historical E2E counts, and unexplained package failures do not pass.
+- Task 01 passed all three named PostgreSQL tests on disposable PostgreSQL 16.15,
+  the conversation SQLite and PostgreSQL conformance checks, and SQL guard.
+- Task 02 classified the Office failure as a stale `fts5` fixture and passed the
+  corrected targeted and full Office repository race tests. The comparison base
+  reproduces the missing `description` column failure.
+- Task 03 passed the full task-service race package three times on the current
+  tree and once on the comparison base. No task-service production fix was
+  needed.
+- Task 04 passed the final desktop 5/5 and mobile 5/5 guarded Playwright
+  matrices, the 41 frontend reconciliation tests, TypeScript, gateway race
+  tests, specification validation, and whitespace checks.
+- The broad `make test` target was attempted. It still reports unrelated
+  `agentctl/server/process/probe`, `common/config`, and `launcher` failures in
+  this workspace, including home-config discovery against the existing
+  `/root/.kandev/config.yaml`. The Office failure seen during that run was fixed
+  by the fixture correction above. These unrelated failures are recorded and
+  are not hidden as passed follow-up gates.
+- No PostgreSQL test was skipped, no production database was changed, and the
+  disposable PostgreSQL service was removed after verification.
+- Final plan validators and diff checks were rerun after this synchronization.
 
 ## Risks
 
-- A missing disposable PostgreSQL DSN blocks PostgreSQL execution, not test implementation.
-- Dialect-specific triggers and concurrent revision locks remain unproven until Task 01 passes.
-- The task-service failure has no identified test yet; reproduction determines its scope.
-- A base failure still needs a passing remediation or an explicit user waiver before completion.
+- PostgreSQL evidence depends on a disposable service and must never use operator data.
+- The broad backend audit still has unrelated process-probe, home-config, and launcher failures in this workspace.
 - Physical SQLite space is reclaimed only by explicit maintenance after backup.

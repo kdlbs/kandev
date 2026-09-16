@@ -22,7 +22,8 @@ Ship the package as one release. Intermediate dual-path work orders are not rele
 
 The user requested and authorized implementation of this design package on 2026-09-16.
 The user later authorized committing the implementation and this follow-up plan.
-Production database mutation, push, and PR creation remain outside this request.
+Production database mutation remains outside the package. Branch delivery is
+handled by the current implementation handoff.
 
 ## Inputs and authority
 
@@ -121,11 +122,11 @@ No new ASCII UI preview is needed because no rendered UI change is proposed.
 
 ## Work orders
 
-- [ ] [Task 01: Add revision-backed source reads](task-01-source-reads.md)
+- [x] [Task 01: Add revision-backed source reads](task-01-source-reads.md)
 - [x] [Task 02: Switch plugin scopes to source reconciliation](task-02-plugin-reconciliation.md)
-- [ ] [Task 03: Migrate core conversation delivery](task-03-core-reconciliation.md)
-- [ ] [Task 04: Remove legacy journal storage safely](task-04-retire-journal.md)
-- [ ] [Task 05: Prove parity and publish the contract](task-05-parity-and-docs.md)
+- [x] [Task 03: Migrate core conversation delivery](task-03-core-reconciliation.md)
+- [x] [Task 04: Remove legacy journal storage safely](task-04-retire-journal.md)
+- [x] [Task 05: Prove parity and publish the contract](task-05-parity-and-docs.md)
 
 Execution order is 01 -> 02 -> 03 -> 04 -> 05. All work is sequential.
 Shared schema and transport changes prevent independent release or parallel execution.
@@ -150,7 +151,7 @@ Initial design and incremental-update refinement validation passed on 2026-09-16
 - Plugin SDK tests and typecheck passed.
 - Public docs, specification, i18n, SQL guard, formatting, and diff checks passed.
 - The broad `GOCACHE=/tmp/kandev-go-cache make -C apps/backend test` target was attempted. It reported the pre-existing Office migration fixture failure `TestMigrate_PriorityIdempotent` (`description` is absent) and a separate failure in `internal/task/service`; focused conversation-related package checks passed.
-- PostgreSQL variants were not run because this workspace has no `KANDEV_TEST_POSTGRES_DSN`.
+- PostgreSQL variants were not run at this historical checkpoint because this workspace had no `KANDEV_TEST_POSTGRES_DSN`; the follow-up package now records their successful disposable-database execution.
   Exact product commands are in each work order. Do not treat design lint as implementation verification.
 
 ## Risks
@@ -171,7 +172,13 @@ At completion, record commands/results and mark the paired replacement design cu
 Keep requirements active. Do not label requirement documents shipped.
 Preserve historical companion results and link new evidence instead of overwriting old counts.
 Update `PLUGIN-API.md`, public plugin authoring/manifest reference, and System database maintenance guidance during Task 05.
-The implementation portion is complete. The plan remains in progress until the required PostgreSQL matrix and broad backend verification are rerun with a clean result. The public pages and active system design were updated during Task 05. Historical companion plans retain their original context and now link to the replacement package.
+The implementation portion and the required follow-up gates are complete. The
+public pages and active system design were updated during Task 05. Historical
+companion plans retain their original context and now link to the replacement
+package. The broad `make test` audit still reports unrelated process-probe,
+home-config, and launcher failures in this workspace; those failures remain
+explicitly recorded in the follow-up package rather than being attributed to
+the conversation storage change.
 
 
 ## Review remediation
@@ -226,8 +233,10 @@ Implementation is committed as `c0a048bc128f7ef9a1051caf95ed442627faf9df`.
 Normal commit hooks passed, including Go lint and zero-warning web lint.
 Earlier uncommitted and lint-failure notes describe their historical verification phase.
 
-The [remaining-gates package](../conversation-storage-follow-up/plan.md) now owns
-PostgreSQL coverage, the Office migration failure, the task-service failure,
-and desktop/mobile recovery checks after final remediation.
-This package remains in progress until those gates pass.
+The [remaining-gates package](../conversation-storage-follow-up/plan.md) owns
+the completed PostgreSQL coverage, Office migration fixture correction,
+task-service comparison, and desktop/mobile recovery checks after final
+remediation. All package work orders now have recorded results. The broad
+backend audit has unrelated failures in this workspace and is not presented as
+conversation-storage evidence.
 No automatic startup VACUUM was added. Physical compaction remains explicit.

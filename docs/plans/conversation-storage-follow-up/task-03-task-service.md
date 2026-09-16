@@ -1,7 +1,7 @@
 ---
 id: "03-task-service"
 title: "Identify and resolve the task-service failure"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -82,5 +82,7 @@ None. Run sequentially in the recommended order.
 
 ## Results
 
-Pending. Record exact commands, tested commit, environment, results, and skipped tests.
-Update this package and the original package together; preserve historical results.
+- The current implementation head did not reproduce a task-service defect after isolating the package. `go test -race ./internal/task/service -count=1` passed in three consecutive runs (268.522s, 289.599s, and 272.722s in the recorded runs).
+- The comparison base `88c6c0fe0a6ae5d25332070d603b99f7d9241645` also passed the same command (312.033s). No task-service production change was required, and no failure was hidden with a skip or reduced assertion.
+- The package preserves durable-write success and post-commit publication behavior covered by its existing tests.
+- Tested code revision: `213492517315abb38697b765e91e6fe0ea5388c7`.

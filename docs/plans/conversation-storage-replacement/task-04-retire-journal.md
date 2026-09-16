@@ -1,7 +1,7 @@
 ---
 id: "04-retire-journal"
 title: "Remove legacy journal storage safely"
-status: in_progress
+status: done
 wave: 4
 depends_on:
   - "03-core-reconciliation"
@@ -109,8 +109,7 @@ rg -n 'conversation_message_versions|conversation_turn_versions|conversation_ses
 - Added the `BenchmarkConversationSourceStorage` benchmark and recorded 10k/100k-row runs in the implementation evidence.
 - `go run ./cmd/sqlguard ./internal`: passed.
 - Targeted cleanup, repository, plugin, gateway, and test-harness race checks: passed.
-- PostgreSQL integration variants remain unrun because `KANDEV_TEST_POSTGRES_DSN` is unavailable in this workspace.
-- Status remains in progress until the required PostgreSQL migration and cleanup matrix passes.
+- The follow-up ran the PostgreSQL source and cleanup variants on disposable PostgreSQL 16.15. Source bytes and indexes survived injected cleanup rollback and retry; legacy tables, functions, and triggers were removed without removing unrelated objects. See the [follow-up Task 01 results](../conversation-storage-follow-up/task-01-postgres-coverage.md).
 
 
 ## Large legacy SQLite verification
@@ -129,6 +128,5 @@ gates remain open. All changes remain uncommitted.
 
 ## Remaining-gate handoff
 
-See the [follow-up package](../conversation-storage-follow-up/plan.md) for remaining
-PostgreSQL, backend failure, and final recovery evidence. Existing results remain historical.
-Do not mark this work order complete until its outstanding gates pass.
+The follow-up package records the final PostgreSQL and recovery evidence.
+Existing results remain historical.

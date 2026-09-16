@@ -1,7 +1,7 @@
 ---
 id: "02-office-migration"
 title: "Resolve the Office migration test failure"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -46,8 +46,8 @@ Run this block at both the current head and comparison worktree root, retaining 
 After remediation, run it again at the final implementation head.
 
 ```bash
-(cd apps/backend && go test -race ./internal/office/repository/sqlite -run '^TestMigrate_PriorityIdempotent$' -count=1 -v)
-(cd apps/backend && go test -race ./internal/office/repository/sqlite -count=1)
+(cd apps/backend && go test -tags fts5 -race ./internal/office/repository/sqlite -run '^TestMigrate_PriorityIdempotent$' -count=1 -v)
+(cd apps/backend && go test -tags fts5 -race ./internal/office/repository/sqlite -count=1)
 ```
 
 ## Files likely touched
@@ -78,5 +78,7 @@ None. Run sequentially in the recommended order.
 
 ## Results
 
-Pending. Record exact commands, tested commit, environment, results, and skipped tests.
-Update this package and the original package together; preserve historical results.
+- The comparison base `88c6c0fe0a6ae5d25332070d603b99f7d9241645` reproduced the failure with the tagged command: `backfill tasks FTS: no such column: description`.
+- The idempotence fixture was stale for the production `fts5` migration. It defined only the priority-era columns, while the migration backfills `tasks.description` and `tasks.identifier`. Added those two historical columns to the fixture; no production migration behavior changed.
+- On revision `213492517315abb38697b765e91e6fe0ea5388c7`, both exact commands passed with `-tags fts5 -race`: the targeted test and the full Office SQLite repository package.
+- The idempotence test still runs both initializations and verifies that the existing `high` priority remains unchanged.

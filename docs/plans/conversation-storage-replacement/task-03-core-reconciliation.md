@@ -1,7 +1,7 @@
 ---
 id: "03-core-reconciliation"
 title: "Migrate core conversation delivery"
-status: in_progress
+status: done
 wave: 3
 depends_on:
   - "02-plugin-reconciliation"
@@ -113,11 +113,13 @@ Managed E2E rebuilds the application and fixture. Run desktop and mobile sequent
 - Added client tests for matching updates, gaps, malformed/reset changes, recovery, and v2 transport selection.
 - `go test -race ./internal/gateway/websocket`: passed.
 - Targeted frontend Vitest and the managed core recovery, prompt-history panel, and stream-isolation desktop checks: passed.
-- Status remains in progress because the broad backend target reported an independent `internal/task/service` package failure; focused conversation and gateway checks passed.
+- The follow-up reproduced the reported task-service package condition on the comparison base and current tree; both passed the full race package, with three current-tree repetitions. The gateway and frontend recovery gates also pass. See the [follow-up Task 03 results](../conversation-storage-follow-up/task-03-task-service.md).
 
 
 ## Review remediation
 
 Added the five-second subscribed-session revision worker and delivery authorization rechecks. Core revision observations wait one second for pending changes, and stop after unsubscribe. Gateway race tests and core client regression tests pass.
 
-See [the plan](plan.md#review-remediation-verification) for commands, results, and remaining package gates. No commit was created.
+See [the plan](plan.md#review-remediation-verification) for the historical
+remediation commands and results. The follow-up package records final delivery
+evidence.

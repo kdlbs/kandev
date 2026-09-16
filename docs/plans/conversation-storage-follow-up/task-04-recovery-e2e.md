@@ -1,7 +1,7 @@
 ---
 id: "04-recovery-e2e"
 title: "Close desktop and mobile recovery coverage"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-postgres-coverage"
@@ -117,5 +117,9 @@ fake-clock tests for timing mechanics, plus browser evidence for the resulting u
 
 ## Results
 
-Pending. Record exact commands, tested commit, environment, results, and skipped tests.
-Update this package and the original package together; preserve historical results.
+- The final guarded Docker desktop command passed 5/5 tests: core recovery (2), plugin recovery with pagination (1), session stream isolation (1), and Prompt History panel behavior (2). An earlier full-matrix run had one transient plugin-panel timeout; its isolated rerun and the final full matrix both passed.
+- The final guarded Docker mobile command passed 5/5 tests: fixture-plugin Host navigation (1), native session-sheet stream isolation (1), Prompt History panel touch navigation (1), long-history touch loading (1), and cancellation after leaving Chat (1).
+- The focused frontend Vitest command passed 41/41 tests. `pnpm run typecheck` passed. `go test -race ./internal/gateway/websocket -count=1` passed, including the synthetic-client authorization regression and task-event receipt projection regression. Specification catalog validation, full specification lint, and `git diff --check` passed.
+- The browser helper now drops the v2 source-change notification for the targeted prompt, so recovery tests exercise the source reconciliation path while preserving compatibility frames.
+- No layout, navigation, scrolling, or touch behavior changed. The mobile tests use the existing Panels picker, full-height panel, and single scroller.
+- Tested code revision: `213492517315abb38697b765e91e6fe0ea5388c7`.
