@@ -260,26 +260,27 @@ type RelatedTasks struct {
 // than reaching into the repos directly so document writes still go
 // through DocumentService and emit the same revision/event side effects.
 type HandoffService struct {
-	tasks              repository.TaskRepository
-	docs               *DocumentService
-	docsRepo           repository.DocumentRepository
-	blockers           BlockerRepository
-	wsGroups           WorkspaceGroupRepo
-	sessions           SessionWorktreeReader
-	cleaner            WorkspaceCleaner
-	runCanceller       RunCanceller
-	gitArchiveCapture  GitArchiveCapture
-	eventPublisher     TaskEventPublisher
-	vacancyReconciler  VacatedStepReconciler
-	resourceCleaner    TaskResourceCleaner
-	taskAccessCheck    func(ctx context.Context, taskID string) error
-	comments           CommentReader
-	logger             *logger.Logger
-	parentLock         parentMutex
-	archiveCascadeLock parentMutex
-	partialArchiveMu   sync.Mutex
-	partialArchiveIDs  map[string]string
-	workspaceGroupLock parentMutex
+	tasks                  repository.TaskRepository
+	docs                   *DocumentService
+	docsRepo               repository.DocumentRepository
+	blockers               BlockerRepository
+	wsGroups               WorkspaceGroupRepo
+	sessions               SessionWorktreeReader
+	cleaner                WorkspaceCleaner
+	runCanceller           RunCanceller
+	gitArchiveCapture      GitArchiveCapture
+	eventPublisher         TaskEventPublisher
+	vacancyReconciler      VacatedStepReconciler
+	resourceCleaner        TaskResourceCleaner
+	taskAccessCheck        func(ctx context.Context, taskID string) error
+	comments               CommentReader
+	sessionCeilingReleaser SessionCeilingReleaser
+	logger                 *logger.Logger
+	parentLock             parentMutex
+	archiveCascadeLock     parentMutex
+	partialArchiveMu       sync.Mutex
+	partialArchiveIDs      map[string]string
+	workspaceGroupLock     parentMutex
 }
 
 // TaskEventPublisher abstracts the side-effect of broadcasting task
@@ -354,6 +355,13 @@ func (s *HandoffService) SetTaskEventPublisher(p TaskEventPublisher) {
 // Archive and delete remain committed if reconciliation cannot fill a slot.
 func (s *HandoffService) SetVacatedStepReconciler(r VacatedStepReconciler) {
 	s.vacancyReconciler = r
+}
+
+// SetSessionCeilingReleaser wires session-ceiling release (orchestrator) for
+// finalizeActiveSessions' bulk cancellation, which never passes through the
+// orchestrator's own persistence funnels.
+func (s *HandoffService) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
+	s.sessionCeilingReleaser = releaser
 }
 
 // TaskResourceCleaner tears down a task's runtime resources (container,

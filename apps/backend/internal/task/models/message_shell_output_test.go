@@ -123,3 +123,22 @@ func jsonMetadata(t *testing.T, metadata map[string]any) map[string]any {
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 	return decoded
 }
+
+func TestShellExitCodeJSONNumber(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		want  int
+		valid bool
+	}{
+		{"0", 0, true}, {"1", 1, true}, {"-1", -1, true},
+		{"1.5", 0, false}, {"9223372036854775808", 0, false}, {"not-a-number", 0, false},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			value, ok := intFromAny(json.Number(tc.raw))
+			require.Equal(t, tc.valid, ok)
+			if ok {
+				require.Equal(t, tc.want, value)
+			}
+		})
+	}
+}

@@ -9,42 +9,44 @@ import (
 // creation. Value fields retain the existing create defaults; omitted optional
 // fields are left at their domain defaults.
 type ProfileCreateRequest struct {
-	AgentID        string                  `json:"agent_id"`
-	Name           string                  `json:"name"`
-	Model          string                  `json:"model,omitempty"`
-	FallbackModel  string                  `json:"fallback_model,omitempty"`
-	AutoFallback   bool                    `json:"auto_fallback,omitempty"`
-	Mode           string                  `json:"mode,omitempty"`
-	ConfigOptions  map[string]string       `json:"config_options,omitempty"`
-	AllowIndexing  bool                    `json:"allow_indexing,omitempty"`
-	AutoApprove    bool                    `json:"auto_approve,omitempty"`
-	CLIPassthrough bool                    `json:"cli_passthrough,omitempty"`
-	CLIFlags       []CLIFlagDTO            `json:"cli_flags,omitempty"`
-	EnvVars        []ProfileEnvVarDTO      `json:"env_vars,omitempty"`
-	CommandPrefix  string                  `json:"command_prefix,omitempty"`
-	Dynamic        *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
+	AgentID           string                  `json:"agent_id"`
+	Name              string                  `json:"name"`
+	Model             string                  `json:"model,omitempty"`
+	FallbackModel     string                  `json:"fallback_model,omitempty"`
+	AutoFallback      bool                    `json:"auto_fallback,omitempty"`
+	RequireExactModel bool                    `json:"require_exact_model,omitempty"`
+	Mode              string                  `json:"mode,omitempty"`
+	ConfigOptions     map[string]string       `json:"config_options,omitempty"`
+	AllowIndexing     bool                    `json:"allow_indexing,omitempty"`
+	AutoApprove       bool                    `json:"auto_approve,omitempty"`
+	CLIPassthrough    bool                    `json:"cli_passthrough,omitempty"`
+	CLIFlags          []CLIFlagDTO            `json:"cli_flags,omitempty"`
+	EnvVars           []ProfileEnvVarDTO      `json:"env_vars,omitempty"`
+	CommandPrefix     string                  `json:"command_prefix,omitempty"`
+	Dynamic           *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
 }
 
 // ProfileUpdateRequest is the shared partial wire contract. A nil pointer
 // means that the caller omitted the field. A non-nil pointer preserves an
 // explicit false, empty string, empty map, or empty list.
 type ProfileUpdateRequest struct {
-	ID             string                  `json:"id"`
-	Name           *string                 `json:"name,omitempty"`
-	Model          *string                 `json:"model,omitempty"`
-	FallbackModel  *string                 `json:"fallback_model,omitempty"`
-	AutoFallback   *bool                   `json:"auto_fallback,omitempty"`
-	Mode           *string                 `json:"mode,omitempty"`
-	ConfigOptions  *map[string]string      `json:"config_options,omitempty"`
-	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
-	AutoApprove    *bool                   `json:"auto_approve,omitempty"`
-	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
-	Enabled        *bool                   `json:"enabled,omitempty"`
-	CLIFlags       *[]CLIFlagDTO           `json:"cli_flags,omitempty"`
-	EnvVars        *[]ProfileEnvVarDTO     `json:"env_vars,omitempty"`
-	CommandPrefix  *string                 `json:"command_prefix,omitempty"`
-	Dynamic        *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
-	Force          bool                    `json:"force,omitempty"`
+	ID                string                  `json:"id"`
+	Name              *string                 `json:"name,omitempty"`
+	Model             *string                 `json:"model,omitempty"`
+	FallbackModel     *string                 `json:"fallback_model,omitempty"`
+	AutoFallback      *bool                   `json:"auto_fallback,omitempty"`
+	RequireExactModel *bool                   `json:"require_exact_model,omitempty"`
+	Mode              *string                 `json:"mode,omitempty"`
+	ConfigOptions     *map[string]string      `json:"config_options,omitempty"`
+	AllowIndexing     *bool                   `json:"allow_indexing,omitempty"`
+	AutoApprove       *bool                   `json:"auto_approve,omitempty"`
+	CLIPassthrough    *bool                   `json:"cli_passthrough,omitempty"`
+	Enabled           *bool                   `json:"enabled,omitempty"`
+	CLIFlags          *[]CLIFlagDTO           `json:"cli_flags,omitempty"`
+	EnvVars           *[]ProfileEnvVarDTO     `json:"env_vars,omitempty"`
+	CommandPrefix     *string                 `json:"command_prefix,omitempty"`
+	Dynamic           *DynamicAgentProfileDTO `json:"dynamic,omitempty"`
+	Force             bool                    `json:"force,omitempty"`
 }
 
 func (r ProfileCreateRequest) Validate() error {
@@ -83,6 +85,7 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "model", JSONType: "string", Support: "read_write", Description: "Preferred model; empty uses the agent default."},
 		{Path: "fallback_model", JSONType: "string", Support: "read_write", Description: "Optional fallback model."},
 		{Path: "auto_fallback", JSONType: "boolean", Support: "read_write", Description: "Enable automatic fallback behavior."},
+		{Path: "require_exact_model", JSONType: "boolean", Support: "read_write", Description: "Require the configured model to be advertised and applied."},
 		{Path: "mode", JSONType: "string", Support: "read_write", Description: "Agent operating mode."},
 		{Path: "config_options", JSONType: "object", Support: "read_write", Description: "Typed provider configuration options.", Replacement: true},
 		{Path: "allow_indexing", JSONType: "boolean", Support: "compatibility", Description: "Legacy indexing permission field."},

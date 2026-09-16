@@ -510,10 +510,12 @@ describe("sendQueuedNow", () => {
   });
 
   it("maps send-now conflict codes to a typed error", async () => {
-    const request = vi.fn().mockRejectedValue({
-      code: "send_now_conflict",
-      message: "Another cancellation is in progress",
-    });
+    const conflict = new WebSocketRequestError(
+      "Another cancellation is in progress",
+      "send_now_conflict",
+      { session_id: SESSION_ID },
+    );
+    const request = vi.fn().mockRejectedValue(conflict);
     getWebSocketClientMock.mockReturnValue({ request });
 
     await expect(

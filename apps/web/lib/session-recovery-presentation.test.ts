@@ -41,6 +41,7 @@ describe("session recovery presentation", () => {
         selectedSessionMetadata,
       ),
     ).toEqual({
+      scope: "session",
       session_id: "session-1",
       stamp: "bootstrap-session-1",
       occurred_at: "2026-09-11T09:00:00Z",

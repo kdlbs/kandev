@@ -1,3 +1,4 @@
+import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 /* eslint-disable max-lines -- session state intentionally keeps its coordinated actions together. */
 import type { StateCreator } from "zustand";
 import { original } from "immer";
@@ -74,6 +75,12 @@ function applyMessageMeta(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
   for (const key of Object.keys(source)) {
+    if (
+      key === "metadata" &&
+      payloadRetentionMarker(target.metadata) &&
+      !payloadRetentionMarker(source.metadata)
+    )
+      continue;
     if (source[key] !== undefined) {
       target[key] = source[key];
     }
@@ -286,7 +293,10 @@ function buildMessageActions(set: ImmerSet) {
       meta?: Parameters<SessionSlice["setMessages"]>[2],
     ) =>
       set((draft) => {
-        draft.messages.bySession[sessionId] = messages;
+        draft.messages.bySession[sessionId] = reconcileMessages(
+          draft.messages.bySession[sessionId],
+          messages,
+        );
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
       }),

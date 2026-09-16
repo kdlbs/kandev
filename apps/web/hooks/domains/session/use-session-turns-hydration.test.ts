@@ -211,12 +211,36 @@ describe("ensureSessionTurnsLoaded — hydration and marker", () => {
         sessionId: string,
         store: unknown,
         options: { readiness: Promise<void> },
-      ) => Promise<void>
+      ) => Promise<boolean>
     )(SESSION_ID, store, { readiness });
 
     expect(mockListSessionTurns).toHaveBeenCalledTimes(1);
     expect(store.addTurn).toHaveBeenCalledWith(
       expect.objectContaining({ id: "turn-after-reconnect" }),
+    );
+  });
+
+  it("forces an authoritative replacement even when the current generation is loaded", async () => {
+    const store = makeStore();
+    store.getState().turns.loadedBySession[SESSION_ID] = true;
+    mockListSessionTurns.mockResolvedValue({
+      turns: [makeTurn("turn-repaired")],
+      total: 1,
+    });
+
+    await expect(
+      ensureSessionTurnsLoaded(SESSION_ID, store as never, {
+        readiness: Promise.resolve(),
+        force: true,
+        replace: true,
+      }),
+    ).resolves.toBe(true);
+
+    expect(store.mergeTurnsSnapshot).toHaveBeenCalledWith(
+      SESSION_ID,
+      [expect.objectContaining({ id: "turn-repaired" })],
+      0,
+      { replace: true },
     );
   });
 });
@@ -311,7 +335,7 @@ describe("ensureSessionTurnsLoaded — guards and races", () => {
     mockListSessionTurns.mockRejectedValue(new Error(BACKEND_DOWN));
     const store = makeStore();
 
-    await ensureSessionTurnsLoaded(SESSION_ID, store as never);
+    await expect(ensureSessionTurnsLoaded(SESSION_ID, store as never)).resolves.toBe(false);
 
     // Bounded: no unbounded hammering of a failing endpoint.
     expect(mockListSessionTurns).toHaveBeenCalledTimes(3);

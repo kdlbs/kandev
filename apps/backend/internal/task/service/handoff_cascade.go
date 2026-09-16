@@ -305,7 +305,7 @@ func (s *HandoffService) archiveTaskTree(
 	transferCompensationCtx, cancelTransferCompensation := archivecascade.ContinuationContextUntil(ctx, archiveDeadline)
 	defer cancelTransferCompensation()
 	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(
-		archiveCtx, transferCompensationCtx, all)
+		archiveCtx, transferCompensationCtx, all, true)
 	if err != nil {
 		return out, err
 	}
@@ -649,7 +649,7 @@ func (s *HandoffService) prepareDeleteCascade(
 	discardWorktreeChanges bool,
 ) ([]workspaceEnvironmentOwnershipTransfer, map[string]string, error) {
 	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(
-		deleteCtx, compensationCtx, taskIDs,
+		deleteCtx, compensationCtx, taskIDs, false,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -945,6 +945,7 @@ func (s *HandoffService) transferSharedWorkspaceEnvironmentOwnership(
 	ctx context.Context,
 	compensationCtx context.Context,
 	taskIDs []string,
+	tolerateAbsentEnvironment bool,
 ) ([]workspaceEnvironmentOwnershipTransfer, error) {
 	if s.wsGroups == nil || len(taskIDs) == 0 {
 		return nil, nil
@@ -968,7 +969,7 @@ func (s *HandoffService) transferSharedWorkspaceEnvironmentOwnership(
 			continue
 		}
 		seenGroups[group.ID] = struct{}{}
-		transfer, err := s.transferWorkspaceGroupEnvironmentOwnership(ctx, group, departing)
+		transfer, err := s.transferWorkspaceGroupEnvironmentOwnership(ctx, group, departing, tolerateAbsentEnvironment)
 		if err != nil {
 			return nil, s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(compensationCtx, transfers, err)
 		}
@@ -983,6 +984,7 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 	ctx context.Context,
 	group *orchmodels.WorkspaceGroup,
 	departing map[string]struct{},
+	tolerateAbsentEnvironment bool,
 ) (*workspaceEnvironmentOwnershipTransfer, error) {
 	for taskID := range departing {
 		task, taskErr := s.tasks.GetTask(ctx, taskID)
@@ -1005,11 +1007,28 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 		return nil, fmt.Errorf("preserve workspace group %s: task environment repository unavailable", group.ID)
 	}
 	env, err := environments.GetTaskEnvironment(ctx, group.MaterializedEnvironmentID)
+	// A positively absent environment carries no ownership, so there is nothing
+	// to transfer and an archive caller may proceed. Absence must come from the
+	// typed sentinel or a nil row returned with a nil error: any other failure
+	// is an uncertain signal and stays fatal, so ownership is never abandoned on
+	// a transient error. Skipping the transfer is not evidence that the group's
+	// physical resources are gone and never authorizes teardown, so a caller
+	// about to delete does not get this tolerance.
+	if errors.Is(err, taskrepo.ErrTaskEnvironmentNotFound) {
+		if tolerateAbsentEnvironment {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load materialized environment %s for workspace group %s: %w",
+			group.MaterializedEnvironmentID, group.ID, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load materialized environment %s for workspace group %s: %w",
 			group.MaterializedEnvironmentID, group.ID, err)
 	}
 	if env == nil {
+		if tolerateAbsentEnvironment {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("materialized environment %s for workspace group %s not found",
 			group.MaterializedEnvironmentID, group.ID)
 	}
@@ -1306,6 +1325,18 @@ func (s *HandoffService) finalizeActiveSessions(
 	}
 	if publisher, ok := s.eventPublisher.(taskSessionCancellationPublisher); ok {
 		publisher.PublishTaskSessionsCancelled(finalizeCtx, taskID, cancelled, reason)
+	}
+	// Bulk writer: every returned row is released unconditionally rather than
+	// branched on state, since RETURNING reports post-update CANCELLED for all
+	// of them (AC-51e). Releasing an id that held no reservation is a defined
+	// no-op.
+	if s.sessionCeilingReleaser != nil {
+		for _, session := range cancelled {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			s.sessionCeilingReleaser.ReleaseCeilingReservation(session.ID)
+		}
 	}
 	return nil
 }

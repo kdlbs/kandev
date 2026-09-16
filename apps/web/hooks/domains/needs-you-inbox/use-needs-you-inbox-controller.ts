@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { FOREGROUND_EVENT_COALESCE_MS, useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { listClarificationInbox } from "@/lib/api/domains/clarification-inbox-api";
 import { selectNeedsYouInboxNextSnoozeExpiry } from "@/lib/state/slices/needs-you-inbox/selectors";
@@ -46,6 +46,85 @@ function useNeedsYouInboxBootSeed(
       nextSnoozeExpiry: boot.nextSnoozeExpiry,
     });
   }, [enabled, workspaceId, storeApi]);
+}
+
+// Trigger: WS action-based (session.pending_action_changed,
+// session.state_changed) and edge-detected WS (re)connect. Both live in one
+// effect keyed on connectionStatus so a client created after this hook mounts
+// is picked up the moment status first changes.
+function useNeedsYouInboxWsRefresh(
+  enabled: boolean,
+  workspaceId: string | null,
+  connectionStatus: string,
+  refresh: (targetWorkspaceId: string) => Promise<void>,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  const wasConnectedRef = useRef(false);
+  // session.state_changed is broadcast workspace-wide, so a burst of
+  // unrelated session transitions must not cause a burst of reads: coalesce
+  // with the same window use-foreground-refresh.ts uses for its own bursty
+  // browser events. Unlike that hook's duplicate browser events, though,
+  // session.state_changed and session.pending_action_changed are distinct
+  // signals from distinct sessions -- a read triggered by one cannot reflect
+  // a change the other carries -- so an event landing inside the window is
+  // queued for one trailing bump at the end of it, never dropped.
+  const lastWsBumpAtRef = useRef(-Infinity);
+  // Held in a ref alongside `lastWsBumpAtRef`, not effect-local: this effect
+  // re-runs on every `connectionStatus` change (e.g. a reconnect), and its own
+  // cleanup only tears down the WS listeners it just registered -- clearing a
+  // still-pending trailing bump there would drop it silently on a re-run,
+  // exactly the "dropped, not deferred" bug this coalescing exists to avoid.
+  // Only a true unmount (below) clears it.
+  const trailingBumpTimeoutRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled) return;
+    const isConnected = connectionStatus === "connected";
+    if (isConnected && !wasConnectedRef.current && workspaceId) {
+      void refresh(workspaceId);
+    }
+    wasConnectedRef.current = isConnected;
+
+    const client = getWebSocketClient();
+    if (!client) return;
+    const doBump = () => {
+      lastWsBumpAtRef.current = Date.now();
+      storeApi.getState().bumpNeedsYouInboxRefreshTick();
+    };
+    const bump = () => {
+      const elapsed = Date.now() - lastWsBumpAtRef.current;
+      if (elapsed >= FOREGROUND_EVENT_COALESCE_MS) {
+        // A pending trailing timer due but not yet fired loses the race to
+        // this immediate path; cancel it so the burst yields one read here,
+        // not one here and a second when the timer catches up.
+        if (trailingBumpTimeoutRef.current !== undefined) {
+          window.clearTimeout(trailingBumpTimeoutRef.current);
+          trailingBumpTimeoutRef.current = undefined;
+        }
+        doBump();
+        return;
+      }
+      if (trailingBumpTimeoutRef.current !== undefined) return;
+      trailingBumpTimeoutRef.current = window.setTimeout(() => {
+        trailingBumpTimeoutRef.current = undefined;
+        doBump();
+      }, FOREGROUND_EVENT_COALESCE_MS - elapsed);
+    };
+    const offPending = client.on("session.pending_action_changed", bump);
+    const offStateChanged = client.on("session.state_changed", bump);
+    return () => {
+      offPending();
+      offStateChanged();
+    };
+  }, [enabled, connectionStatus, workspaceId, refresh, storeApi]);
+
+  useEffect(() => {
+    return () => {
+      if (trailingBumpTimeoutRef.current !== undefined) {
+        window.clearTimeout(trailingBumpTimeoutRef.current);
+        trailingBumpTimeoutRef.current = undefined;
+      }
+    };
+  }, []);
 }
 
 /**
@@ -95,29 +174,7 @@ export function useNeedsYouInboxController() {
     void refresh(workspaceId);
   }, [enabled, workspaceId, refresh]);
 
-  // Trigger: WS action-based (session.pending_action_changed,
-  // session.state_changed) and edge-detected WS (re)connect. Both live in one
-  // effect keyed on connectionStatus so a client created after this hook
-  // mounts is picked up the moment status first changes.
-  const wasConnectedRef = useRef(false);
-  useEffect(() => {
-    if (!enabled) return;
-    const isConnected = connectionStatus === "connected";
-    if (isConnected && !wasConnectedRef.current && workspaceId) {
-      void refresh(workspaceId);
-    }
-    wasConnectedRef.current = isConnected;
-
-    const client = getWebSocketClient();
-    if (!client) return;
-    const bump = () => storeApi.getState().bumpNeedsYouInboxRefreshTick();
-    const offPending = client.on("session.pending_action_changed", bump);
-    const offStateChanged = client.on("session.state_changed", bump);
-    return () => {
-      offPending();
-      offStateChanged();
-    };
-  }, [enabled, connectionStatus, workspaceId, refresh, storeApi]);
+  useNeedsYouInboxWsRefresh(enabled, workspaceId, connectionStatus, refresh, storeApi);
 
   // Applies the WS-triggered refresh tick bumped above.
   const lastTickRef = useRef(refreshTick);

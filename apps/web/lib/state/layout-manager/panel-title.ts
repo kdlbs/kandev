@@ -1,6 +1,7 @@
 import { t } from "@/lib/i18n";
 
 import { panelRegistryEntry } from "./constants";
+import { resolvePluginPanelDefinition } from "./plugin-panels";
 
 /**
  * The display title for a registry panel, in the active locale.
@@ -24,6 +25,8 @@ import { panelRegistryEntry } from "./constants";
  * `panelFromDockviewPanel` canonicalizes on the way back out.
  */
 export function panelTitle(id: string, fallback?: string, component?: string): string {
+  const pluginPanel = resolvePluginPanelDefinition(id);
+  if (pluginPanel) return pluginPanel.title;
   const config = panelRegistryEntry(id, component);
   if (!config) return fallback ?? id;
   return config.titleKey ? t(config.titleKey) : config.title;

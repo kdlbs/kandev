@@ -176,7 +176,8 @@ test.describe("Plan mode follow-up messages", () => {
     // Fill in the comment textarea.
     const textarea = testPage.locator('textarea[placeholder="Add your comment or instruction..."]');
     await expect(textarea).toBeVisible({ timeout: 5_000 });
-    await textarea.fill("Split step 2 into smaller sub-steps");
+    const planCommentText = "Split step 2 into smaller sub-steps";
+    await textarea.fill(planCommentText);
 
     // Click the "Run" button (use exact match to avoid matching sidebar task button).
     const runBtn = testPage.getByRole("button", { name: "Run", exact: true });
@@ -187,9 +188,13 @@ test.describe("Plan mode follow-up messages", () => {
     await expect(session.chat.getByText("Plan Comments", { exact: false })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(
-      session.chat.getByText("Split step 2 into smaller sub-steps", { exact: false }),
-    ).toBeVisible({ timeout: 5_000 });
+    const commentBubble = session.chat
+      .getByTestId("user-message-bubble")
+      .filter({ hasText: planCommentText });
+    await expect(commentBubble).toHaveCount(1, { timeout: 5_000 });
+    await expect(commentBubble.getByText(planCommentText, { exact: true })).toBeVisible({
+      timeout: 5_000,
+    });
 
     // Plan mode badge should be visible on the comment message.
     const planBadges = session.chat.getByText("Plan mode", { exact: true });

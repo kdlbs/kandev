@@ -31,5 +31,9 @@
   "openTask": "開啟任務",
   "questionCount_one": "此問題集中有 {{count}} 個問題",
   "questionCount_other": "此問題集中有 {{count}} 個問題",
-  "emptyTitleUnnamedWorkspace": "此工作區中沒有任何事項在等待您處理。"
+  "emptyTitleUnnamedWorkspace": "此工作區中沒有任何事項在等待您處理。",
+  "tabLabel": "需要你處理",
+  "failedClauseSome_one": "此清單不計入失敗的任務。{{count}} 個任務也失敗了,請檢視失敗標籤頁。",
+  "failedClauseSome_other": "此清單不計入失敗的任務。{{count}} 個任務也失敗了,請檢視失敗標籤頁。",
+  "failedClauseNone": "此清單不計入失敗的任務。此工作區目前沒有失敗的任務,您可以隨時檢視失敗標籤頁。"
 }

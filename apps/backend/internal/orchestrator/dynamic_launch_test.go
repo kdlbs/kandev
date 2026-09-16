@@ -40,6 +40,7 @@ func TestRelaunchDynamicTaskAfterFailure_DoesNotLaunchSuccessorWhenStopFails(t *
 			AgentExecutionID: executionID,
 		},
 		"fallback-profile",
+		launchOriginAutomatic,
 	)
 
 	if relaunched {
@@ -108,6 +109,7 @@ func TestRelaunchDynamicTaskAfterFailure_DoesNotResurrectCancelledSession(t *tes
 			AgentExecutionID: executionID,
 		},
 		"fallback-profile",
+		launchOriginAutomatic,
 	)
 
 	if relaunched {

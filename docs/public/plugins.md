@@ -203,8 +203,9 @@ binary an operator hasn't explicitly approved via install or Sync.
 
 ## Enable, disable, uninstall
 
-- **Disable** stops the subprocess. Config and state are preserved; no
-  events or webhooks are delivered while disabled.
+- **Disable** stops the subprocess and removes the plugin's managed agent
+  conversations. Config and other state are preserved; no events or webhooks
+  are delivered while disabled.
 - **Enable** respawns the subprocess and re-completes the handshake. It is also
   the manual recovery action for an `error` plugin; the Settings row and detail
   page show the last failure diagnostic when one is available. A successful
@@ -308,7 +309,9 @@ disk on its first restart after upgrading to this version.
   sessions, workspaces, workflows, agent profiles, repositories) is gated
   individually via `api_read:<resource>`. Task create/update and message send
   are independently gated by `api_write:tasks` and `api_write:messages` and
-  use Kandev's first-party service paths. An undeclared capability returns
+  use Kandev's first-party service paths. `agent_conversation` separately gates
+  plugin-owned hidden agent sessions and their Ensure, Dispatch, and Delete
+  lifecycle. An undeclared capability returns
   gRPC `PermissionDenied` with a message naming the missing capability,
   checked before the handler runs. `GetConfig` and `EmitEvent` are the only
   ungated RPCs: a plugin can always read its own config (secrets included)

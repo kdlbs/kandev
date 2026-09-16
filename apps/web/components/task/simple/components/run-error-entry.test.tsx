@@ -72,4 +72,17 @@ describe("RunErrorEntry", () => {
     expect(screen.getByTestId("run-error-continue-new-branch-button")).toBeTruthy();
     expect(screen.getByTestId("run-error-restore-workspace-button")).toBeTruthy();
   });
+
+  it("renders recovered session history without stale recovery controls", () => {
+    render(
+      <RunErrorEntry
+        taskId="task-1"
+        workspaceId="workspace-1"
+        error={{ ...runError("provider_auth_required"), isActive: false }}
+      />,
+    );
+
+    expect(screen.queryByTestId("run-error-resume-button")).toBeNull();
+    expect(screen.queryByTestId("run-error-fresh-button")).toBeNull();
+  });
 });

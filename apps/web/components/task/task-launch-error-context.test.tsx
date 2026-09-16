@@ -6,11 +6,17 @@ import { TaskLaunchErrorProvider, useTaskLaunchErrorContext } from "./task-launc
 const { toastMock } = vi.hoisted(() => ({
   toastMock: vi.fn(),
 }));
+const { statusSummaryMock } = vi.hoisted(() => ({
+  statusSummaryMock: vi.fn(),
+}));
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: toastMock }),
 }));
 vi.mock("@/lib/i18n", () => ({ t: (key: string) => key }));
+vi.mock("@/hooks/domains/task/use-task-status-summary", () => ({
+  useTaskStatusSummary: statusSummaryMock,
+}));
 
 const initialSummary: TaskStatusSummary = {
   revision: 1,
@@ -46,6 +52,10 @@ afterEach(() => {
 
 beforeEach(() => {
   toastMock.mockReset();
+  statusSummaryMock.mockReset();
+  statusSummaryMock.mockImplementation(
+    (_taskId: string, detail: TaskStatusSummary | null | undefined) => detail,
+  );
 });
 
 describe("TaskLaunchErrorProvider", () => {
@@ -71,5 +81,21 @@ describe("TaskLaunchErrorProvider", () => {
     renderProvider(initialSummary);
 
     expect(screen.getByTestId("summary-stamp").textContent).toBe("initial");
+  });
+
+  it("replaces the hydrated summary with a live task projection", () => {
+    const liveSummary: TaskStatusSummary = {
+      ...initialSummary,
+      active_error: {
+        ...initialSummary.active_error!,
+        stamp: "live",
+      },
+    };
+    statusSummaryMock.mockReturnValue(liveSummary);
+
+    renderProvider(initialSummary);
+
+    expect(screen.getByTestId("summary-stamp").textContent).toBe("live");
+    expect(statusSummaryMock).toHaveBeenCalledWith("task-1", initialSummary);
   });
 });

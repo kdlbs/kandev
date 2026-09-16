@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { TaskSession } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/ids";
-import { resolveThreadColumnStatus, resolveThreadSessionStatus } from "./thread-session-status";
+import {
+  FAILED_TASK_STATUS,
+  resolveThreadColumnStatus,
+  resolveThreadSessionStatus,
+} from "./thread-session-status";
 
 function session(overrides: Partial<TaskSession> = {}): TaskSession {
   return {
@@ -81,5 +85,18 @@ describe("resolveThreadColumnStatus", () => {
         session: session({ state: "WAITING_FOR_INPUT", pending_action: null }),
       }),
     ).toMatchObject({ kind: "needs-you", hasAttention: true });
+  });
+});
+
+// AC-UI-INBOX-FAILED-001.20: the Failed tab has no session to resolve status
+// from, so it reaches the shared vocabulary's "failed" entry directly rather
+// than fabricating a stand-in session for resolveThreadSessionStatus.
+describe("FAILED_TASK_STATUS", () => {
+  it("is exactly the same entry resolveThreadSessionStatus returns for a failed session", () => {
+    expect(FAILED_TASK_STATUS).toEqual(resolveThreadSessionStatus(session({ state: "FAILED" })));
+  });
+
+  it("carries no attention flag", () => {
+    expect(FAILED_TASK_STATUS.hasAttention).toBe(false);
   });
 });

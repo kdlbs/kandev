@@ -13,6 +13,8 @@ import (
 
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -35,9 +37,14 @@ const (
 	ciAutomationMaxFixRounds        = github.TaskCIAutoFixMaxRounds
 	ciAutomationKindAutoFix         = "ci_auto_fix"
 	ciAutomationStateEventSource    = "ci_automation_state"
+	ciAutomationOutcomeToolMetadata = "ci_auto_fix_outcome_tool"
+	ciAutomationNeutralOutcomeTool  = "report_change_request_auto_fix_outcome_kandev"
+	ciAutomationLegacyOutcomeTool   = "report_pr_auto_fix_outcome_kandev"
 )
 
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
+
+var errCIAutoFixMCPToolCatalogUnavailable = errors.New("kandev MCP tool catalog is unavailable for the current auto-fix execution")
 
 type ciAutomationCheckpoint struct {
 	FailedChecks  []ciAutomationCheckSnapshot            `json:"failed_checks"`
@@ -363,7 +370,13 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 		return s.handleCIAutoFixWithoutSession(ctx, pr, allowNewRound)
 	}
 	prompt = s.expandPromptReferences(ctx, prompt, session.IsPassthrough)
-	prompt = ciAutomationAppendOutcomeProtocol(prompt, session.IsPassthrough)
+	outcomeTool, cataloged := ciAutomationOutcomeToolForSession(session)
+	if !cataloged {
+		return true, errCIAutoFixMCPToolCatalogUnavailable.Error()
+	}
+	prompt = ciAutomationAppendOutcomeProtocolForTool(prompt, session.IsPassthrough, outcomeTool)
+	metadata := ciAutomationMessageMetadataForPR(pr, signature)
+	metadata[ciAutomationOutcomeToolMetadata] = outcomeTool
 	queueRemovalEventID, queueRemovalCause := "", ""
 	if queueRecovery {
 		queueRemovalEventID = queueRemoval.EventID
@@ -390,7 +403,7 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	params := ciAutomationDispatchParams{
 		ChatPrompt:    ciAutomationChatPrompt(prompt),
 		CoalesceKey:   ciAutomationCoalesceKey(pr),
-		Metadata:      ciAutomationMessageMetadataForPR(pr, signature),
+		Metadata:      metadata,
 		AllowNewRound: allowNewRound,
 		OnDirectAdmission: func(turnID string) error {
 			return recordAttempt(github.TaskCIAutoFixAttemptRunning, "", turnID, true)
@@ -1202,7 +1215,20 @@ func ciAutomationRenderPromptTemplate(base, snapshot string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-const ciAutomationOutcomeProtocol = `Kandev PR auto-fix outcome protocol:
+const ciAutomationOutcomeProtocolTemplate = `Kandev change-request auto-fix outcome protocol:
+This instruction applies only to the current Kandev-dispatched auto-fix turn that received this protocol. It expires when this turn ends.
+Before this turn ends, call %s exactly once with one of these outcomes:
+- action_taken: you made or requested a concrete provider-visible change and want Kandev to wait for provider progress.
+- non_actionable: the current feedback does not identify a change this task can make.
+- blocked: a concrete change is needed, but an external condition prevents it. Include a short reason.
+Do not report an outcome for manual change-request fixup, sibling review messages, or historical auto-fix instructions. Tool availability or enabled automation settings alone do not establish this obligation.
+Do not claim action_taken from a plan or an attempted command alone. If the tool is unavailable, continue the repair work and explain that the outcome could not be recorded.`
+
+// ciAutomationLegacyOutcomeProtocol is the exact protocol persisted by
+// runtimes before the provider-neutral outcome tool was introduced. Queued
+// prompts may still contain this block and must be migrated without changing
+// their surrounding user-authored text.
+const ciAutomationLegacyOutcomeProtocol = `Kandev PR auto-fix outcome protocol:
 This instruction applies only to the current Kandev-dispatched auto-fix turn that received this protocol. It expires when this turn ends.
 Before this turn ends, call report_pr_auto_fix_outcome_kandev exactly once with one of these outcomes:
 - action_taken: you made or requested a concrete provider-visible change and want Kandev to wait for CI or PR progress.
@@ -1212,11 +1238,41 @@ Do not report an outcome for manual PR fixup, sibling review messages, or histor
 Do not claim action_taken from a plan or an attempted command alone. If the tool is unavailable, continue the repair work and explain that the outcome could not be recorded.`
 
 func ciAutomationAppendOutcomeProtocol(prompt string, passthrough bool) string {
+	return ciAutomationAppendOutcomeProtocolForTool(prompt, passthrough, ciAutomationNeutralOutcomeTool)
+}
+
+func ciAutomationAppendOutcomeProtocolForTool(prompt string, passthrough bool, toolName string) string {
 	prompt = strings.TrimSpace(prompt)
+	protocol := fmt.Sprintf(ciAutomationOutcomeProtocolTemplate, toolName)
 	if passthrough {
-		return strings.TrimSpace(prompt + "\n\n" + ciAutomationOutcomeProtocol)
+		return strings.TrimSpace(prompt + "\n\n" + protocol)
 	}
-	return strings.TrimSpace(prompt + "\n\n" + sysprompt.Wrap(ciAutomationOutcomeProtocol))
+	return strings.TrimSpace(prompt + "\n\n" + sysprompt.Wrap(protocol))
+}
+
+func ciAutomationOutcomeToolForSession(session *models.TaskSession) (string, bool) {
+	if session == nil {
+		return "", false
+	}
+	history, ok := agentruntime.LoadMCPAttachmentHistory(session.Metadata[models.SessionMetaKeyMCPAttachmentState])
+	if !ok {
+		return "", false
+	}
+	server, ok := history.CurrentServer("kandev")
+	if !ok || server.Source != "" && server.Source != streams.MCPServerSourceKandev {
+		return "", false
+	}
+	for _, tool := range server.Tools {
+		if tool.Name == ciAutomationNeutralOutcomeTool {
+			return ciAutomationNeutralOutcomeTool, true
+		}
+	}
+	for _, tool := range server.Tools {
+		if tool.Name == ciAutomationLegacyOutcomeTool {
+			return ciAutomationLegacyOutcomeTool, true
+		}
+	}
+	return "", false
 }
 
 func ciAutomationRenderSnapshot(pr *github.TaskPR, delta ciAutomationCheckpoint) string {

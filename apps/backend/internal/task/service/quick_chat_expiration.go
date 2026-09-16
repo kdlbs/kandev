@@ -46,6 +46,12 @@ func (s *Service) runQuickChatExpiration(ctx context.Context, now time.Time) {
 
 	s.logger.Info("quick-chat expiration: found candidates", zap.Int("count", len(tasks)))
 	for _, task := range tasks {
+		// Plugin-managed conversation tasks are excluded from the 7-day quick
+		// chat sweeper. They are removed only through the plugin lifecycle
+		// (disable or uninstall).
+		if IsManagedConversationTask(task) {
+			continue
+		}
 		deleted, err := s.deleteExpiredQuickChatTask(ctx, task.ID, cutoff)
 		if err != nil {
 			s.logger.Warn("quick-chat expiration: failed to delete task",
