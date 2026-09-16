@@ -224,4 +224,56 @@ describe("WorkspaceAgentChat", () => {
       ),
     );
   });
+
+  it("recovers from a terminal transcript failure when the managed conversation changes", async () => {
+    transport.transcriptError = { code: "unauthenticated" };
+    transport.fetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            taskId: "task-1",
+            sessionId: "session-1",
+            workspaceId: "ws-1",
+            managedConversationToken: "managed-token-1",
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            taskId: "task-2",
+            sessionId: "session-2",
+            workspaceId: "ws-1",
+            managedConversationToken: "managed-token-2",
+          }),
+          { status: 200 },
+        ),
+      );
+    const view = render(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="1"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-agent-chat-status").dataset.status).toBe(
+        "permission-denied",
+      ),
+    );
+
+    transport.transcriptError = null;
+    view.rerender(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-2"
+        resourceVersion="2"
+      />,
+    );
+
+    await screen.findByTestId("workspace-agent-chat");
+  });
 });

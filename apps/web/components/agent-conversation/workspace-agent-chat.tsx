@@ -214,6 +214,9 @@ export const WorkspaceAgentChat = memo(function WorkspaceAgentChat({
     resourceVersion,
   );
   const [transcriptStatus, setTranscriptStatus] = useState<WorkspaceAgentChatStatus | null>(null);
+  useEffect(() => {
+    setTranscriptStatus(null);
+  }, [conversationId, pluginId, resourceVersion, workspaceId]);
   const effectiveStatus = transcriptStatus ?? status;
   useEffect(() => {
     onStatus?.(effectiveStatus);
