@@ -676,7 +676,12 @@ func TestManagedConversationHandlersRequireManagedCapabilityAndBinding(t *testin
 	headers := map[string]string{"X-Kandev-Plugin-Binding": binding, "Content-Type": "application/json"}
 	resolved := doAuthedRequest(router, http.MethodGet, path, "", headers)
 	require.Equal(t, http.StatusOK, resolved.Code, resolved.Body.String())
-	require.JSONEq(t, `{"taskId":"task-1","sessionId":"session-1","workspaceId":"workspace-1"}`, resolved.Body.String())
+	var managed managedConversationResponse
+	require.NoError(t, json.Unmarshal(resolved.Body.Bytes(), &managed))
+	require.Equal(t, "task-1", managed.TaskID)
+	require.Equal(t, "session-1", managed.SessionID)
+	require.Equal(t, "workspace-1", managed.WorkspaceID)
+	require.NotEmpty(t, managed.ManagedConversationToken)
 
 	dispatched := doAuthedRequest(router, http.MethodPost,
 		"/api/plugins/plugin-managed/conversation/managed/session-1/dispatch?workspace_id=workspace-1",
@@ -703,6 +708,36 @@ func TestManagedConversationHandlersDoNotGrantTranscriptReads(t *testing.T) {
 		"/api/plugins/plugin-managed/conversation/task-sessions/session-1/messages",
 		"", map[string]string{"X-Kandev-Plugin-Binding": binding})
 	require.Equal(t, http.StatusNotFound, response.Code)
+}
+
+func TestManagedConversationGrantReadsOnlyItsResolvedTranscript(t *testing.T) {
+	created := time.Now().UTC()
+	reader := &fakeConversationReader{
+		session:  &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1"},
+		messages: []*taskmodels.Message{{ID: "message-1", TaskSessionID: "session-1", TaskID: "task-1", AuthorType: taskmodels.MessageAuthorUser, Content: "managed", CreatedAt: created}},
+	}
+	svc, _, _ := newTestService(t)
+	bridge := &managedConversationBridgeStub{descriptor: pluginsdk.AgentConversationDescriptor{TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1"}}
+	svc.SetAgentConversations(bridge)
+	svc.registry.Add(managedConversationPluginRecord("plugin-managed", created))
+	router := registerPluginRoutesWithIdentity(t, svc, authn.Identity{UserID: "user_1", Role: authn.RoleMember}, reader)
+	binding := conversationBindingToken(t, router, "plugin-managed")
+	resolved := doAuthedRequest(router, http.MethodGet, "/api/plugins/plugin-managed/conversation/managed/session-1?workspace_id=workspace-1", "", map[string]string{"X-Kandev-Plugin-Binding": binding})
+	require.Equal(t, http.StatusOK, resolved.Code, resolved.Body.String())
+	var descriptor managedConversationResponse
+	require.NoError(t, json.Unmarshal(resolved.Body.Bytes(), &descriptor))
+	record, err := svc.Get("plugin-managed")
+	require.NoError(t, err)
+	snapshot, _, _, err := svc.MintSessionStreamGrant("plugin-managed", "user_1", conversationGeneration(record.InstalledAt), "session-1", "consumer", "", 0, 0)
+	require.NoError(t, err)
+	headers := map[string]string{"X-Kandev-Plugin-Binding": binding, "X-Kandev-Snapshot-Token": snapshot, "X-Kandev-Managed-Conversation": descriptor.ManagedConversationToken}
+	page := doAuthedRequest(router, http.MethodGet, "/api/plugins/plugin-managed/conversation/task-sessions/session-1/messages?task_id=task-1", "", headers)
+	require.Equal(t, http.StatusOK, page.Code, page.Body.String())
+	require.Contains(t, page.Body.String(), "managed")
+
+	bridge.descriptor.TaskID = "replacement-task"
+	stale := doAuthedRequest(router, http.MethodGet, "/api/plugins/plugin-managed/conversation/task-sessions/session-1/messages?task_id=task-1", "", headers)
+	require.Equal(t, http.StatusNotFound, stale.Code, stale.Body.String())
 }
 
 type assertErr struct{}

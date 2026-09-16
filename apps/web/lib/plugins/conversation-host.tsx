@@ -341,6 +341,9 @@ async function fetchMessagePage({
       headers: {
         "X-Kandev-Plugin-Binding": binding.bindingToken,
         "X-Kandev-Snapshot-Token": binding.snapshotToken,
+        ...(scope.managedConversationToken
+          ? { "X-Kandev-Managed-Conversation": scope.managedConversationToken }
+          : {}),
       },
       signal: scope.signal,
     },
@@ -811,6 +814,9 @@ function useSessionTurns(
           headers: {
             "X-Kandev-Plugin-Binding": binding.bindingToken,
             "X-Kandev-Snapshot-Token": binding.snapshotToken,
+            ...(scope.managedConversationToken
+              ? { "X-Kandev-Managed-Conversation": scope.managedConversationToken }
+              : {}),
           },
           signal: scope.signal,
         },

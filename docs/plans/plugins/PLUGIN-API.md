@@ -705,6 +705,21 @@ state, first-party `/api/v1` URLs, raw content, arbitrary metadata, or raw
 WebSocket frames. The Host binds every request and event to the current
 plugin generation and task-panel session context.
 
+### `host.ui.WorkspaceAgentChat` — managed agent conversation
+
+`host.ui.WorkspaceAgentChat` is available only to a plugin declaring
+`capabilities.agent_conversation: true`. It renders the exact managed session
+named by its `workspaceId` and `conversationId`; it does not add that session
+to the global Kanban or grant general message history access. The Host resolves
+the descriptor under the authenticated user's workspace access, then mints a
+short-lived private grant bound to the plugin, user, generation, workspace,
+task, and session. That grant is carried only by the Host's transcript and
+stream bridge. Each page read, renewal, and stream subscription revalidates the
+current descriptor, so replaced, deleted, stale, or foreign identities fail
+closed. Plugins without `api_read: ["messages"]` therefore receive only this
+bound managed transcript, while ordinary `host.conversation` requests continue
+to require `api_read: ["messages"]`.
+
 ```ts
 type PluginConversationErrorCode =
   | "unauthenticated"

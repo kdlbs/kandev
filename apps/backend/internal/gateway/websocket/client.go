@@ -321,16 +321,17 @@ type UserSubscribeRequest struct {
 }
 
 type SessionSubscribeRequest struct {
-	SessionID        string  `json:"session_id"`
-	ConsumerKind     string  `json:"consumer_kind,omitempty"`
-	PluginID         string  `json:"plugin_id,omitempty"`
-	Generation       int64   `json:"generation,omitempty"`
-	BindingToken     string  `json:"binding_token,omitempty"`
-	LastSeenSequence *uint64 `json:"last_seen_sequence,omitempty"`
-	ResumeToken      string  `json:"resume_token,omitempty"`
-	ReplaceCursor    bool    `json:"replace_cursor,omitempty"`
-	ConsumerID       string  `json:"consumer_id,omitempty"`
-	WireID           string  `json:"wire_id,omitempty"`
+	SessionID                string  `json:"session_id"`
+	ConsumerKind             string  `json:"consumer_kind,omitempty"`
+	PluginID                 string  `json:"plugin_id,omitempty"`
+	Generation               int64   `json:"generation,omitempty"`
+	BindingToken             string  `json:"binding_token,omitempty"`
+	ManagedConversationToken string  `json:"managed_conversation_token,omitempty"`
+	LastSeenSequence         *uint64 `json:"last_seen_sequence,omitempty"`
+	ResumeToken              string  `json:"resume_token,omitempty"`
+	ReplaceCursor            bool    `json:"replace_cursor,omitempty"`
+	ConsumerID               string  `json:"consumer_id,omitempty"`
+	WireID                   string  `json:"wire_id,omitempty"`
 }
 
 // ownUserTopic resolves the user-topic this client may subscribe to: its own
@@ -699,12 +700,12 @@ func (c *Client) authorizeOrderedPluginConsumer(
 		c.sendSessionStreamFailure(msg, req.SessionID, "invalid_request", "invalid plugin consumer identity", false)
 		return false
 	}
-	err := service.AuthorizeConversationConsumer(
-		req.PluginID,
-		userID,
-		req.Generation,
-		req.BindingToken,
-	)
+	var err error
+	if req.ManagedConversationToken != "" {
+		err = service.AuthorizeManagedConversationConsumer(req.PluginID, userID, req.Generation, req.BindingToken, req.ManagedConversationToken, req.SessionID)
+	} else {
+		err = service.AuthorizeConversationConsumer(req.PluginID, userID, req.Generation, req.BindingToken)
+	}
 	if err == nil {
 		return true
 	}

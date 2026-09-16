@@ -81,12 +81,17 @@ function renderTurnsHarness(sessionId: string | null, taskId?: string | null) {
   );
 }
 
-function renderHarness(sessionId: string | null, taskId?: string | null) {
+function renderHarness(
+  sessionId: string | null,
+  taskId?: string | null,
+  managedConversationToken?: string,
+) {
   return render(
     <PluginConversationScopeProvider
       pluginId="plugin-history"
       taskId="task-1"
       sessionId={sessionId}
+      managedConversationToken={managedConversationToken}
     >
       <Harness sessionId={sessionId} taskId={taskId} />
     </PluginConversationScopeProvider>,
@@ -251,6 +256,31 @@ describe("plugin conversation Host facade", () => {
     expect(
       transport.request.mock.calls.filter(([action]) => action === SESSION_SUBSCRIBE_ACTION),
     ).toHaveLength(2);
+  });
+
+  it("carries a managed grant only through the bound transcript bridge", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) =>
+      String(input).endsWith(BINDING_PATH_SUFFIX)
+        ? Promise.resolve(
+            response({ bindingToken: "binding-1", generation: 7, expiresAt: FAR_FUTURE_EXPIRY }),
+          )
+        : Promise.resolve(response({ messages: [], hasMore: false, cursor: null })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderHarness("session-1", undefined, "managed-grant");
+    await waitFor(() => expect(currentState?.hydrated).toBe(true));
+    expect(transport.request).toHaveBeenCalledWith(
+      SESSION_SUBSCRIBE_ACTION,
+      expect.objectContaining({ managed_conversation_token: "managed-grant" }),
+    );
+    const messageRequest = fetchMock.mock.calls.find(([input]) =>
+      String(input).includes("/messages?"),
+    );
+    expect(messageRequest?.[1]).toEqual(
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-Kandev-Managed-Conversation": "managed-grant" }),
+      }),
+    );
   });
 
   it("commits the authorized snapshot before projecting and acknowledging ordered live events", async () => {

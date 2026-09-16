@@ -15,7 +15,12 @@ import {
 import { pluginConversationApi } from "@/lib/plugins/conversation-host";
 import type { WorkspaceAgentChatProps, WorkspaceAgentChatStatus } from "@kandev/plugin-sdk";
 
-type ManagedDescriptor = { taskId: string; sessionId: string; workspaceId: string };
+type ManagedDescriptor = {
+  taskId: string;
+  sessionId: string;
+  workspaceId: string;
+  managedConversationToken: string;
+};
 type InternalProps = WorkspaceAgentChatProps & { pluginId?: string };
 const permissionDeniedStatus: WorkspaceAgentChatStatus = "permission-denied";
 
@@ -57,7 +62,11 @@ function useManagedDescriptor(
         throw new Error("unavailable");
       })
       .then((next) => {
-        if (next.workspaceId !== workspaceId || next.sessionId !== conversationId)
+        if (
+          next.workspaceId !== workspaceId ||
+          next.sessionId !== conversationId ||
+          !next.managedConversationToken
+        )
           throw new Error(permissionDeniedStatus);
         setDescriptor(next);
         setStatus("ready");
@@ -210,6 +219,7 @@ export const WorkspaceAgentChat = memo(function WorkspaceAgentChat({
       taskId={descriptor.taskId}
       sessionId={descriptor.sessionId}
       generation={Number(resourceVersion) || 0}
+      managedConversationToken={descriptor.managedConversationToken}
     >
       <ManagedTranscript
         pluginId={pluginId}

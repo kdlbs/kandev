@@ -34,7 +34,12 @@ describe("WorkspaceAgentChat", () => {
     transport.fetch
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ taskId: "task-1", sessionId: "session-1", workspaceId: "ws-1" }),
+          JSON.stringify({
+            taskId: "task-1",
+            sessionId: "session-1",
+            workspaceId: "ws-1",
+            managedConversationToken: "managed-token",
+          }),
           { status: 200 },
         ),
       )
@@ -73,7 +78,12 @@ describe("WorkspaceAgentChat", () => {
       )
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ taskId: "task-2", sessionId: "session-2", workspaceId: "ws-1" }),
+          JSON.stringify({
+            taskId: "task-2",
+            sessionId: "session-2",
+            workspaceId: "ws-1",
+            managedConversationToken: "managed-token",
+          }),
           { status: 200 },
         ),
       );
@@ -106,7 +116,12 @@ describe("WorkspaceAgentChat", () => {
     transport.fetch
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ taskId: "task-1", sessionId: "session-1", workspaceId: "ws-1" }),
+          JSON.stringify({
+            taskId: "task-1",
+            sessionId: "session-1",
+            workspaceId: "ws-1",
+            managedConversationToken: "managed-token",
+          }),
           { status: 200 },
         ),
       )
@@ -132,7 +147,12 @@ describe("WorkspaceAgentChat", () => {
     transport.fetch
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ taskId: "task-1", sessionId: "session-1", workspaceId: "ws-1" }),
+          JSON.stringify({
+            taskId: "task-1",
+            sessionId: "session-1",
+            workspaceId: "ws-1",
+            managedConversationToken: "managed-token",
+          }),
           { status: 200 },
         ),
       )

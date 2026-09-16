@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -53,6 +54,34 @@ func (s *Service) AuthorizeConversationConsumer(
 		claims.PluginID != pluginID ||
 		claims.UserID != userID ||
 		claims.Generation != generation {
+		return ErrConversationBindingInvalid
+	}
+	return nil
+}
+
+// AuthorizeManagedConversationConsumer admits agent_conversation only for a
+// descriptor that was minted after workspace authorization and is still live.
+//
+//nolint:cyclop // Every grant claim is independently checked before stream admission.
+func (s *Service) AuthorizeManagedConversationConsumer(pluginID, userID string, generation int64, bindingToken, managedToken, sessionID string) error {
+	record, err := s.Get(pluginID)
+	if err != nil || record.Status != StatusActive || !record.Capabilities.AgentConversation || conversationGeneration(record.InstalledAt) != generation {
+		return ErrConversationBindingInvalid
+	}
+	binding, err := s.conversationTokens.parse(bindingToken)
+	if err != nil || binding.Kind != tokenKindBinding || binding.PluginID != pluginID || binding.UserID != userID || binding.Generation != generation {
+		return ErrConversationBindingInvalid
+	}
+	claims, err := s.conversationTokens.parse(managedToken)
+	if err != nil || claims.Kind != tokenKindManaged || claims.PluginID != pluginID || claims.UserID != userID || claims.Generation != generation || claims.SessionID != sessionID || claims.TaskID == nil || claims.WorkspaceID == "" {
+		return ErrConversationBindingInvalid
+	}
+	bridge, ok := s.agentConversationDeps().(managedConversationResolver)
+	if !ok || bridge == nil {
+		return ErrConversationBindingInvalid
+	}
+	descriptor, err := bridge.ResolveManagedConversation(context.Background(), pluginID, claims.WorkspaceID, sessionID)
+	if err != nil || descriptor.TaskID != *claims.TaskID || descriptor.WorkspaceID != claims.WorkspaceID || descriptor.SessionID != sessionID {
 		return ErrConversationBindingInvalid
 	}
 	return nil
