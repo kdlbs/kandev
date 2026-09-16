@@ -30,13 +30,24 @@ test.describe("Webhook alert ingest trigger on mobile", () => {
     await triggerCard.getByPlaceholder("issue.id").fill("issue.id");
 
     // One filter: path/op/values.
-    await triggerCard.getByRole("button", { name: "Add filter" }).tap();
+    const addFilterButton = triggerCard.getByRole("button", { name: "Add filter" });
+    await addFilterButton.tap();
     await triggerCard.getByPlaceholder("severity").fill("severity");
     await triggerCard.getByRole("combobox").tap();
     await testPage.getByRole("option", { name: "In list", exact: true }).tap();
     const valuesInput = triggerCard.getByPlaceholder("critical, fatal");
     await valuesInput.fill("critical, fatal");
     await valuesInput.blur();
+
+    // Add/remove filter controls meet the 44px coarse-pointer touch-target
+    // minimum (.agents/skills/mobile-parity/references/control-sizing.md).
+    const addFilterBox = await addFilterButton.boundingBox();
+    const removeFilterBox = await triggerCard.getByTitle("Remove filter").boundingBox();
+    expect(addFilterBox).not.toBeNull();
+    expect(removeFilterBox).not.toBeNull();
+    expect(addFilterBox!.height).toBeGreaterThanOrEqual(44);
+    expect(removeFilterBox!.height).toBeGreaterThanOrEqual(44);
+    expect(removeFilterBox!.width).toBeGreaterThanOrEqual(44);
 
     // Repository selector.
     await triggerCard.getByPlaceholder("service").fill("service");

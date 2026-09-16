@@ -30,6 +30,11 @@ const FILTER_OP_LABEL_KEYS: Record<WebhookFilterOp, string> = {
   contains: "automations:webhookFilterOpContains",
 };
 const FILTER_OPS_WITHOUT_VALUES = new Set<WebhookFilterOp>(["exists", "not_exists"]);
+// eq/ne/contains compare against exactly one string (validateWebhookConfig's
+// cardinality rule); only in/not_in take a list. A single-value op gets its
+// own scalar editor so a comma inside the compared value — "panic, runtime
+// error" for `contains` — is not split into two values and rejected at save.
+const SINGLE_VALUE_OPS = new Set<WebhookFilterOp>(["eq", "ne", "contains"]);
 
 type WebhookFiltersConfigProps = {
   filters: WebhookFilter[];
@@ -65,7 +70,7 @@ export function WebhookFiltersConfig({ filters, onChange }: WebhookFiltersConfig
         type="button"
         variant="outline"
         size="sm"
-        className="cursor-pointer"
+        className="cursor-pointer [@media(pointer:coarse)]:h-11"
         onClick={addFilter}
       >
         <IconPlus className="mr-1.5 h-3.5 w-3.5" />
@@ -85,7 +90,6 @@ function FilterRow({
   onRemove: () => void;
 }) {
   const { t } = useTranslation();
-  const needsValues = !FILTER_OPS_WITHOUT_VALUES.has(filter.op);
   return (
     <div className="flex items-start gap-2">
       {/* An example JSON payload path — data the user types verbatim, not copy. */}
@@ -118,19 +122,12 @@ function FilterRow({
           ))}
         </SelectContent>
       </Select>
-      {needsValues ? (
-        <FilterValuesInput
-          values={filter.values ?? []}
-          onChange={(values) => onChange({ ...filter, values })}
-        />
-      ) : (
-        <div className="flex-1" />
-      )}
+      <FilterValueCell filter={filter} onChange={onChange} />
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        className="cursor-pointer text-muted-foreground hover:text-destructive shrink-0"
+        className="cursor-pointer text-muted-foreground hover:text-destructive shrink-0 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
         onClick={onRemove}
         title={t("automations:removeFilter")}
       >
@@ -140,16 +137,45 @@ function FilterRow({
   );
 }
 
+// Picks the values editor for a filter's operator: none for exists/not_exists,
+// the scalar editor for eq/ne/contains, the comma-list editor for in/not_in.
+function FilterValueCell({
+  filter,
+  onChange,
+}: {
+  filter: WebhookFilter;
+  onChange: (next: WebhookFilter) => void;
+}) {
+  if (FILTER_OPS_WITHOUT_VALUES.has(filter.op)) {
+    return <div className="flex-1" />;
+  }
+  if (SINGLE_VALUE_OPS.has(filter.op)) {
+    return (
+      <FilterScalarValueInput
+        value={filter.values?.[0] ?? ""}
+        onChange={(value) => onChange({ ...filter, values: value === "" ? [] : [value] })}
+      />
+    );
+  }
+  return (
+    <FilterValuesInput
+      values={filter.values ?? []}
+      onChange={(values) => onChange({ ...filter, values })}
+    />
+  );
+}
+
 // Buffers the comma-separated text locally so a trailing ", " mid-edit isn't
 // immediately reformatted away; committed as a trimmed string array on blur.
-// Mirrors GitHubPRConfig's branches/authors fields.
+// Mirrors GitHubPRConfig's branches/authors fields. Only in/not_in reach this
+// parser — eq/ne/contains use FilterScalarValueInput below, which never
+// splits on commas.
 //
 // A lone trailing segment produced only by an in-progress trailing comma is
 // dropped (so "critical, fatal ," commits as ["critical", "fatal"]), but an
 // otherwise-empty segment is kept — so typing "," commits an explicit single
-// empty-string value (values: [""]), which some operators such as `ne`
-// legitimately need. A field that was never edited, or holds only
-// whitespace, commits as an empty array rather than [""].
+// empty-string value (values: [""]). A field that was never edited, or holds
+// only whitespace, commits as an empty array rather than [""].
 function commitFilterValues(text: string): string[] {
   if (text.trim() === "") {
     return [];
@@ -180,6 +206,32 @@ function FilterValuesInput({
       className="font-mono text-xs"
       // eslint-disable-next-line i18next/no-literal-string -- example comparison values, not copy
       placeholder="critical, fatal"
+    />
+  );
+}
+
+// eq/ne/contains compare against exactly one string, so this never splits on
+// commas — "panic, runtime error" commits verbatim as a single value. Buffers
+// locally like FilterValuesInput so the trailing-whitespace trim on blur
+// doesn't fight the user's cursor mid-edit.
+function FilterScalarValueInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+
+  return (
+    <Input
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => onChange(text.trim())}
+      className="font-mono text-xs"
+      // eslint-disable-next-line i18next/no-literal-string -- example comparison value, not copy
+      placeholder="critical"
     />
   );
 }

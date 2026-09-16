@@ -87,13 +87,39 @@ describe("WebhookFiltersConfig", () => {
   });
 
   it("commits a lone comma as an explicit single empty-string value", () => {
-    const onChange = renderFilters([{ path: "issue.id", op: "ne", values: [] }]);
+    const onChange = renderFilters([{ path: "issue.id", op: "in", values: [] }]);
 
     const input = screen.getByPlaceholderText(VALUES_PLACEHOLDER);
     fireEvent.change(input, { target: { value: "," } });
     fireEvent.blur(input);
 
-    expect(onChange).toHaveBeenCalledWith([{ path: "issue.id", op: "ne", values: [""] }]);
+    expect(onChange).toHaveBeenCalledWith([{ path: "issue.id", op: "in", values: [""] }]);
+  });
+
+  // A single-value operator (eq/ne/contains) gets a scalar editor that never
+  // splits on commas, so a value that legitimately contains one — matching
+  // the report that "panic, runtime error" was silently split into two
+  // values and rejected by validateWebhookConfig's cardinality check — is
+  // preserved verbatim.
+  it("preserves a comma inside a single-value operator's value", () => {
+    const onChange = renderFilters([{ path: "message", op: "contains", values: [] }]);
+
+    const input = screen.getByPlaceholderText("critical");
+    fireEvent.change(input, { target: { value: "panic, runtime error" } });
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledWith([
+      { path: "message", op: "contains", values: ["panic, runtime error"] },
+    ]);
+  });
+
+  it("commits a blank, never-edited single-value field as an empty array", () => {
+    const onChange = renderFilters([{ path: "severity", op: "eq", values: [] }]);
+
+    const input = screen.getByPlaceholderText("critical");
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledWith([{ path: "severity", op: "eq", values: [] }]);
   });
 
   it("commits a blank, never-edited values field as an empty array", () => {
