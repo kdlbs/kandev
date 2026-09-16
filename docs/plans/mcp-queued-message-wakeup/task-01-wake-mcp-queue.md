@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-UI-MESSAGE-QUEUE-AUTOMATION-CONTROLS-001.6
 system_design:
   - ../../specs/tasks/system-design/parent-child-message-interrupt.md
+  - ../../specs/ui/system-design/message-queue-automation-controls.md
 ---
 
 # Task 01: Wake Eligible MCP Queue Admissions

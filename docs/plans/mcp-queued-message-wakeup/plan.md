@@ -6,6 +6,7 @@ requirements:
   - REQ-UI-MESSAGE-QUEUE-AUTOMATION-CONTROLS-001
 system_design:
   - ../../specs/tasks/system-design/parent-child-message-interrupt.md
+  - ../../specs/ui/system-design/message-queue-automation-controls.md
 legacy_specs: []
 ---
 
@@ -68,7 +69,7 @@ reproduction of the reporter's timeout.
 
 ## Requirement conformance
 
-The implementation violates existing behavior; no new requirement is needed.
+The pre-fix implementation violated existing behavior; no new requirement was needed.
 Reuse `AC-TASKS-PARENT-CHILD-MESSAGE-INTERRUPT-001.1` and its queue/turn safety
 contract. Preserve `AC-UI-MESSAGE-QUEUE-AUTOMATION-CONTROLS-001.3`, `.4`, and `.6`
 for automatic FIFO dispatch and durable paused policy.
