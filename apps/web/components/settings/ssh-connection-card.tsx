@@ -60,6 +60,11 @@ export interface SSHConnectionCardProps {
   // Existing running sessions for this executor. Triggers the
   // "this won't affect existing sessions" warning on save.
   runningSessionCount?: number;
+  // Endpoint that runs the connection test. Defaults to the SSH executor's
+  // test. The remote Docker executor passes its own, which adds the daemon
+  // and API-version steps on top of the same SSH connection, so both share
+  // this card's test-then-trust flow rather than forking it.
+  testConnection?: (request: SSHTestRequest) => Promise<SSHTestResult>;
 }
 
 interface SSHConnectionState {
@@ -209,7 +214,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
         identity_file: form.identity_file || undefined,
         proxy_jump: form.proxy_jump || undefined,
       };
-      const res = await testSSHConnection(req);
+      const res = await (props.testConnection ?? testSSHConnection)(req);
       setState((prev) => ({
         ...prev,
         result: res,
@@ -223,7 +228,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
       const msg = e instanceof Error ? e.message : translate("executors:sshFailedToReachBackend");
       setState((prev) => ({ ...prev, error: msg, testing: false }));
     }
-  }, [form]);
+  }, [form, props.testConnection]);
 
   const canSave = !!result?.success && !!result.fingerprint && trust && !resultStale && !saving;
 

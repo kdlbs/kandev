@@ -49,6 +49,7 @@ import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
 import { EXECUTOR_TYPE_MAP, executorTypeLabel, type ExecutorTypeInfo } from "./executor-types";
+import { RemoteDockerCreatePage } from "./remote-docker-create-page";
 import { SSHCreatePage } from "./ssh-create-page";
 import { KubernetesCreatePage } from "./kubernetes-create-page";
 
@@ -69,6 +70,9 @@ export default function CreateProfilePage({ executorType }: { executorType: stri
     return <InvalidTypeFallback />;
   }
 
+  if (executorType === "remote_docker") {
+    return <RemoteDockerCreatePage />;
+  }
   if (executorType === "ssh") {
     return <SSHCreatePage />;
   }
