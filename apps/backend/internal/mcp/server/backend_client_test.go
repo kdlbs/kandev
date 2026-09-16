@@ -260,6 +260,33 @@ func TestChannelBackendClientErrorTypeWithEmptyPayloadKeepsBackendErrorBehavior(
 	require.Contains(t, respErr.Error(), "backend error")
 }
 
+func TestChannelBackendClientStructuredBackendErrorPreservesDetails(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, nil)
+	}()
+	request := <-client.GetRequestChannel()
+
+	response, err := ws.NewError(request.ID, request.Action, "provider_update_failed", "provider update failed", map[string]interface{}{
+		"status": "partial",
+		"providers": []interface{}{
+			map[string]interface{}{"provider": "github", "status": "applied"},
+		},
+	})
+	require.NoError(t, err)
+	client.HandleResponse(response)
+
+	var backendErr *BackendError
+	require.ErrorAs(t, <-errCh, &backendErr)
+	require.Equal(t, "provider_update_failed", backendErr.Code)
+	require.Equal(t, "provider update failed", backendErr.Message)
+	require.Equal(t, "partial", backendErr.Details["status"])
+	require.NotNil(t, backendErr.Details["providers"])
+}
+
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.5
 // @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.8
 func TestChannelBackendClientEmptyObjectPayloadDecodesToNonNilEmptyMap(t *testing.T) {

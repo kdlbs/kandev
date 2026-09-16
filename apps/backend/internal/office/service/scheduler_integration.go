@@ -12,11 +12,25 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/pause"
+	"github.com/kandev/kandev/internal/office/routing"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/office/wakeup"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// ErrLaunchDeferredByCapacity is the TaskStarter-side sentinel a
+// TaskStarter*ReturningSession implementation returns when the underlying
+// launch was deferred rather than started or failed — the orchestrator's
+// session ceiling admitted no reservation but persisted a replay record of
+// its own, so the launch will complete later without this caller's
+// involvement. A caller that only distinguishes "session created" from
+// "error" cannot tell a deferred launch apart from an ordinary success
+// that forgot to report its session id; recognizing this sentinel lets it
+// stop short of recording the launch as started (counters, health,
+// persisted session id) while also not treating it as a failure worth
+// retrying through provider fallback or restoring a one-shot claim over.
+var ErrLaunchDeferredByCapacity = errors.New("office: launch deferred by capacity, not started")
 
 // DefaultTickInterval is the default run processing interval.
 const DefaultTickInterval = 5 * time.Second
@@ -697,6 +711,10 @@ func (si *SchedulerIntegration) launchAgent(
 		err = si.svc.taskStarter.StartTask(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil)
 	}
+	if errors.Is(err, ErrLaunchDeferredByCapacity) {
+		si.handleLaunchDeferred(ctx, run)
+		return false
+	}
 	if err != nil {
 		si.logger.Error("agent launch failed",
 			zap.String("run_id", runID), zap.Error(err))
@@ -711,6 +729,34 @@ func (si *SchedulerIntegration) launchAgent(
 	IncLoopLaunch(agent.WorkspaceID)
 	si.persistLaunchedSession(ctx, runID, agent.WorkspaceID, sessionID)
 	return true
+}
+
+// handleLaunchDeferred is launchAgent's disposition when the task starter
+// reports ErrLaunchDeferredByCapacity: the orchestrator's own session
+// ceiling already persisted a replay record for this exact launch and owns
+// retrying it, so this run must not be counted as launched (no session was
+// created) and must not go through HandleRunFailure's backoff-retry path —
+// a second automatic attempt from there would race the ceiling's own
+// replay into a double launch. Parking under blocked_provider_action_required
+// (the same status the routed dispatch path uses for the identical
+// disposition, see scheduler.SchedulerService.handleLaunchDeferred) keeps
+// the scheduler's own wake-up loop from ever picking the run back up on
+// its own; an operator notices via "Retry now" once capacity is known to
+// be free.
+func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *models.Run) {
+	si.releaseCheckoutIfNeeded(ctx, run)
+	si.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
+		"phase":  "deferred",
+		"reason": "session_ceiling",
+	})
+	if err := si.svc.repo.ParkRunForProviderCapacity(ctx,
+		run.ID, routing.StatusBlockedActionRequired, time.Time{}); err != nil {
+		si.logger.Error("failed to park run deferred by session ceiling",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return
+	}
+	si.logger.Info("run parked: launch deferred by session ceiling",
+		zap.String("run_id", run.ID))
 }
 
 // persistLaunchedSession stores the session id a successful direct

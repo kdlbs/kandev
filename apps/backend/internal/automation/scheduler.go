@@ -145,6 +145,16 @@ func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
 }
 
 func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now time.Time) {
+	a, err := cs.svc.Store().GetAutomation(ctx, t.AutomationID)
+	if err != nil || a == nil {
+		return
+	}
+	for _, condition := range a.Triggers {
+		if condition.Type == TriggerTypePluginEvent {
+			return
+		}
+	}
+
 	data, _ := json.Marshal(map[string]string{
 		triggerDataSourceKey: string(TriggerTypeScheduled),
 		"timestamp":          now.Format(time.RFC3339),

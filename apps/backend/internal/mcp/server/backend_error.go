@@ -2,11 +2,9 @@ package mcp
 
 import "fmt"
 
-// BackendError preserves the structured websocket error payload (code,
-// message, details) returned by a failed BackendClient.RequestPayload call.
-// Handlers that surface backend failures to MCP tool callers can use
-// errors.As to recover Details — e.g. a related-task-read denial's
-// details["reason"] — instead of only matching a flattened error string.
+// BackendError preserves a structured WebSocket error for MCP tool handlers.
+// Details can carry a committed partial result or a stable denial reason and
+// remain available to callers that can recover from an independent failure.
 type BackendError struct {
 	Code    string
 	Message string
@@ -14,5 +12,11 @@ type BackendError struct {
 }
 
 func (e *BackendError) Error() string {
+	if e == nil {
+		return "backend error"
+	}
+	if e.Code == "" {
+		return fmt.Sprintf("backend error: %s", e.Message)
+	}
 	return fmt.Sprintf("backend error [%s]: %s", e.Code, e.Message)
 }

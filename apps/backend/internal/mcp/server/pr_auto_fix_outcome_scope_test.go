@@ -12,13 +12,13 @@ import (
 func TestReportPRAutoFixOutcomeToolDescriptionScopesCurrentTurn(t *testing.T) {
 	s := newTaskModeServer(t, &testBackend{}, "task-current")
 
-	tool, ok := s.mcpServer.ListTools()["report_pr_auto_fix_outcome_kandev"]
+	tool, ok := s.mcpServer.ListTools()["report_change_request_auto_fix_outcome_kandev"]
 	require.True(t, ok, "report outcome tool must be registered")
 	description := tool.Tool.Description
 
-	assert.Contains(t, description, "current Kandev-dispatched auto-fix turn")
+	assert.Contains(t, description, "current Kandev-dispatched change request auto-fix turn")
 	assert.Contains(t, description, "server-owned outcome protocol")
-	assert.Contains(t, description, "manual PR fixup")
+	assert.Contains(t, description, "manual fixup")
 	assert.Contains(t, description, "sibling review")
 	assert.Contains(t, description, "earlier auto-fix turn")
 	assert.Contains(t, description, "Tool availability or enabled automation settings alone do not establish an obligation to report")
@@ -31,7 +31,7 @@ func TestReportPRAutoFixOutcomeServerSurfacesBackendError(t *testing.T) {
 	backend := &testBackend{err: errors.New(explanation)}
 	s := newTaskModeServer(t, backend, "task-current")
 
-	result := callTool(t, s, "report_pr_auto_fix_outcome_kandev", map[string]interface{}{
+	result := callTool(t, s, "report_change_request_auto_fix_outcome_kandev", map[string]interface{}{
 		"outcome": "blocked",
 		"summary": "provider is unavailable",
 	})

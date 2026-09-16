@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
-const FOREGROUND_EVENT_COALESCE_MS = 250;
+export const FOREGROUND_EVENT_COALESCE_MS = 250;
 
 type Refresh = () => void | Promise<void>;
 

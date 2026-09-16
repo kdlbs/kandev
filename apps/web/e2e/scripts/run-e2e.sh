@@ -167,15 +167,12 @@ build_backend_host() {
   make -C "$BACKEND_DIR" "${targets[@]}" >/dev/null || die "backend build failed"
 }
 
-# Packages the plugin-fixture SDK plugin (cmd/plugin-fixture) into
-# .build/kandev-plugin-e2e-1.0.0.tar.gz for tests/plugins/plugins.spec.ts.
-# Always built on the host — like mock-agent, e2e/global-setup.ts only checks
-# this file exists (not that it's current), so it must be rebuilt any time
-# cmd/plugin-fixture changes (this runner always rebuilds it via build_fe's
-# sibling call below, unless --no-build is set).
+# Builds the external-style fixture UI from its sole source, then packages the
+# backend and UI with their immutable identity for every host/container run.
 build_plugin_package() {
-  log "packaging e2e fixture plugin"
-  make -C "$BACKEND_DIR" e2e-plugin-package >/dev/null || die "e2e plugin package build failed"
+  log "building and packaging e2e fixture plugin"
+  make -C "$BACKEND_DIR" e2e-plugin-ui e2e-plugin-package >/dev/null \
+    || die "e2e plugin package build failed"
 }
 
 backend_runs_in() {  # $1=image — does the host-built binary run there? (glibc check, ~2s)
