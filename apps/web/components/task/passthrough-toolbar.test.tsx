@@ -462,6 +462,7 @@ describe("PassthroughToolbar – touch-scroll activation", () => {
 // Composer open / close
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line max-lines-per-function -- composer dismissal cases share one toolbar harness.
 describe("PassthroughToolbar – composer toggle", () => {
   it("clicking Chat toggle opens and closes the composer", async () => {
     renderToolbar();
@@ -502,6 +503,24 @@ describe("PassthroughToolbar – composer toggle", () => {
       expect.arrayContaining([expect.objectContaining({ kind: "file", label: "foo.ts" })]),
     );
     expect(props.contextFiles).toEqual([{ path: SRC_FILE, name: "foo.ts" }]);
+  });
+
+  it("keeps the passthrough cancel callback as composer dismissal only", async () => {
+    mockSessionState = "RUNNING";
+    renderToolbar();
+    await openComposer();
+
+    const props = latestChatInputProps();
+    expect(props.showCancelAgent).toBe(false);
+
+    (props.onCancel as () => void)();
+    await waitFor(() => expect(screen.queryByTestId(TID_COMPOSER)).toBeNull());
+    expect(mockSessionState).toBe("RUNNING");
+    expect(mockWsRequestFn).not.toHaveBeenCalledWith(
+      "agent.cancel",
+      expect.objectContaining({ session_id: SESSION_ID }),
+      expect.any(Number),
+    );
   });
 
   it("uses the passthrough-specific focus shortcut instead of the global slash shortcut", async () => {

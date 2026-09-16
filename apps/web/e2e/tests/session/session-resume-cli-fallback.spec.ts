@@ -58,10 +58,11 @@ test.describe("Session resume — CLI fallback after fast-fail", () => {
       },
     );
 
-    // The fallback contract starts on the task session. Navigate by the API
-    // returned id so a delayed Kanban snapshot cannot hide a ready session
-    // behind a list-hydration race.
+    // Navigate by the API-created task ID. The kanban list is refreshed through
+    // a separate websocket path and can lag behind task creation under a busy
+    // CI shard, while the task route can load the same persisted task directly.
     await testPage.goto(`/t/${task.id}`);
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForPassthroughLoad();
     await session.waitForPassthroughLoaded();

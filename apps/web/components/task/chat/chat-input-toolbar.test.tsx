@@ -151,6 +151,7 @@ function renderToolbar(onCancel: () => void | Promise<void>) {
         taskId="t1"
         taskDescription=""
         isAgentBusy
+        canCancelAgent
         isDisabled={false}
         isSending={false}
         onCancel={onCancel}
@@ -242,6 +243,7 @@ describe("ChatInputToolbar backend cancellation state", () => {
           taskId="t1"
           taskDescription=""
           isAgentBusy
+          canCancelAgent
           isDisabled={false}
           isSending={false}
           onCancel={() => {}}
@@ -268,6 +270,7 @@ describe("ChatInputToolbar backend cancellation state", () => {
           taskId="t1"
           taskDescription=""
           isAgentBusy
+          canCancelAgent
           isDisabled={false}
           isSending={false}
           onCancel={onCancel}
@@ -289,7 +292,33 @@ describe("ChatInputToolbar backend cancellation state", () => {
 // Without this guard, an impatient user clicking it repeatedly while the agent
 // tears down a long-running tool (Claude Monitor, etc.) sends N cancel requests
 // to the backend, each producing a duplicate "Turn cancelled by user" message.
+// eslint-disable-next-line max-lines-per-function -- cancellation cases share one toolbar harness.
 describe("ChatInputToolbar cancel button", () => {
+  it("gives the cancel icon its localized accessible name", () => {
+    renderToolbar(() => {});
+
+    expect(screen.getByRole("button", { name: "Cancel agent" })).toBeTruthy();
+  });
+
+  it("keeps the cancel button name stable while cancellation is pending", async () => {
+    const { promise, resolve } = deferred<void>();
+    const onCancel = vi.fn(() => promise);
+
+    renderToolbar(onCancel);
+    const button = screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID) as HTMLButtonElement;
+
+    fireEvent.click(button);
+    await act(async () => {});
+
+    expect(button.getAttribute("aria-label")).toBe("Cancel agent");
+    expect(screen.getByRole("status", { name: "Cancelling..." })).toBeTruthy();
+
+    await act(async () => {
+      resolve();
+      await promise;
+    });
+  });
+
   it.each(["desktop", "mobile"] as const)(
     "keeps cancellation progress after a %s toolbar remount",
     async (breakpoint) => {
@@ -308,6 +337,7 @@ describe("ChatInputToolbar cancel button", () => {
               taskId="t1"
               taskDescription=""
               isAgentBusy
+              canCancelAgent
               isDisabled={false}
               isSending={false}
               onCancel={onCancel}
