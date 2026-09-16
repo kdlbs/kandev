@@ -416,14 +416,27 @@ func StartupConfigFromEnv() (commonconfig.AgentctlStartupConfig, bool, error) {
 	return startup, true, nil
 }
 
+func directE2EPromptCancelJoinTimeout() time.Duration {
+	if !isProfileTruthy(os.Getenv("KANDEV_E2E_MOCK")) {
+		return 0
+	}
+	return getEnvDuration("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", 0)
+}
+
+func isProfileTruthy(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 	idleTimeout := getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour)
 	idleReaperInterval := getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute)
 	notificationQueueCapacity := getEnvInt("KANDEV_ACP_NOTIF_QUEUE", 131072)
-	promptCancelJoinTimeout := time.Duration(0)
-	if os.Getenv("KANDEV_E2E_MOCK") == "true" {
-		promptCancelJoinTimeout = getEnvDuration("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", 0)
-	}
+	promptCancelJoinTimeout := directE2EPromptCancelJoinTimeout()
 	otlpEndpoint := getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	unownedPeriod := getEnvDuration("KANDEV_ACP_UNOWNED_PERIOD", defaultUnownedPeriod)
 	detachedEventLimit := getEnvInt("KANDEV_ACP_DETACHED_EVENT_LIMIT", defaultDetachedEventLimit)
@@ -434,6 +447,7 @@ func load(startup *commonconfig.AgentctlStartupConfig) *Config {
 		idleReaperInterval = startup.IdleReaperInterval
 		notificationQueueCapacity = startup.NotificationQueueCapacity
 		otlpEndpoint = startup.OTLPEndpoint
+		promptCancelJoinTimeout = startup.PromptCancelJoinTimeout
 		// Zero means the caller did not resolve these (an older backend, or
 		// one built before agent survival existed) — keep the env/built-in
 		// value already computed above rather than adopting zero.

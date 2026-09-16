@@ -25,6 +25,7 @@ func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
 		IdleReaperInterval:        3 * time.Minute,
 		NotificationQueueCapacity: 4096,
 		OTLPEndpoint:              "http://configured:4318",
+		PromptCancelJoinTimeout:   12 * time.Second,
 	}
 	cfg, err := LoadWithStartup(startup)
 	if err != nil {
@@ -38,6 +39,9 @@ func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
 	}
 	if cfg.OTLPEndpoint != startup.OTLPEndpoint {
 		t.Fatalf("managed OTLP endpoint = %q, want %q", cfg.OTLPEndpoint, startup.OTLPEndpoint)
+	}
+	if cfg.PromptCancelJoinTimeout != startup.PromptCancelJoinTimeout {
+		t.Fatalf("managed prompt cancel join timeout = %s, want %s", cfg.PromptCancelJoinTimeout, startup.PromptCancelJoinTimeout)
 	}
 }
 
@@ -77,6 +81,14 @@ func TestLoadWithStartupPropagatesAgentSurvivalEnabled(t *testing.T) {
 // TestLoadWithoutStartupLeavesAgentSurvivalDisabled pins that a legacy/direct
 // (unmanaged) launch -- Load(), no startup contract -- never engages the
 // capability, matching AC-EXECUTORS-SURVIVAL-005.2's "defaults disabled".
+func TestLoadWithoutStartupAcceptsTruthyE2ESelector(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "1")
+	t.Setenv("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT", "12s")
+	if got := Load().PromptCancelJoinTimeout; got != 12*time.Second {
+		t.Fatalf("prompt cancel join timeout = %s, want 12s", got)
+	}
+}
+
 func TestLoadWithoutStartupLeavesAgentSurvivalDisabled(t *testing.T) {
 	cfg := Load()
 	if cfg.AgentSurvivalEnabled {

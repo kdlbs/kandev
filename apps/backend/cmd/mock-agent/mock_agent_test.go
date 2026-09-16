@@ -29,7 +29,7 @@ func (u *promptCancelUpdater) RequestPermission(context.Context, acp.RequestPerm
 func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
 	const sessionID = acp.SessionId("cancel-hold-session")
 	t.Setenv("KANDEV_E2E_CANCEL_HOLD_DURATION", "30ms")
-	updater := &promptCancelUpdater{started: make(chan struct{})}
+	updater := newCapturingUpdater()
 	agent := &mockAgent{
 		model:             "mock-fast",
 		conn:              updater,
@@ -53,7 +53,7 @@ func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
 	}()
 
 	select {
-	case <-updater.started:
+	case <-updater.anySeen:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the hold prompt to start")
 	}
@@ -64,6 +64,9 @@ func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
 	case <-result:
 		t.Fatal("cancel-hold prompt completed before its configured hold elapsed")
 	case <-time.After(10 * time.Millisecond):
+	}
+	if texts := updater.textMessages(); len(texts) != 0 {
+		t.Fatalf("cancel-hold emitted assistant text: %v", texts)
 	}
 	select {
 	case response := <-result:

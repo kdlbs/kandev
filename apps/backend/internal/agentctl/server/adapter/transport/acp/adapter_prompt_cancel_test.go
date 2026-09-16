@@ -102,6 +102,23 @@ func TestWaitForPromptRPCAfterUserCancel_CompletesAfterAbort(t *testing.T) {
 	})
 }
 
+func TestWaitForPromptRPCAfterUserCancelUsesAdapterConfiguration(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+	a.cancelJoinTimeout = 40 * time.Millisecond
+	turn := &promptTurnState{endTurn: func(error) {}, rpcDone: make(chan struct{}), abortCh: make(chan struct{})}
+	close(turn.abortCh)
+
+	started := time.Now()
+	err := a.waitForPromptRPCAfterUserCancel(turn, "")
+	if !errors.Is(err, errPromptAbandonedAfterCancel) {
+		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 35*time.Millisecond {
+		t.Fatalf("adapter timeout elapsed = %s, want configured bound", elapsed)
+	}
+}
+
 func TestPromptCancelTimeoutUsesAdapterConfiguration(t *testing.T) {
 	a := newTestAdapter()
 	t.Cleanup(func() { _ = a.Close() })
