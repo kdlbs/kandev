@@ -105,7 +105,7 @@ the third is, and is listed here only because it is easy to assume otherwise:
 
 Two asymmetries appeared only once the second package was real. The stores are
 not the same table under two names: config sync adds an ownership manifest table
-and its own indexes, while workflow sync carries two idempotent `ALTER TABLE`
+and its own index, while workflow sync carries two idempotent `ALTER TABLE`
 migration helpers for databases that predate its poll toggle and its GitLab
 columns. Office has no legacy rows and will never need them, so a
 table-parameterized shared store would carry workflow sync's migration history
@@ -255,6 +255,6 @@ without failing CI.
 `docs/specs/office/requirements/config-sync.md` and its siblings define the
 Office contract whose acceptance criteria drove most of the divergences above.
 `docs/specs/office/system-design/config-sync.md` records the original deferral
-and the condition for this revisit; see Consequences for the three statements of
-its that this ADR supersedes. That design's Related decisions section links back
+and the condition for this revisit; see Consequences for the three statements
+that this ADR supersedes. That design's Related decisions section links back
 to this ADR.
