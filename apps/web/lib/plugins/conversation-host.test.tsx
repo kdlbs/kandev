@@ -276,7 +276,7 @@ describe("plugin conversation Host facade", () => {
     const messageRequest = fetchMock.mock.calls.find(([input]) =>
       String(input).includes("/messages?"),
     );
-    expect(messageRequest?.[1]).toEqual(
+    expect((messageRequest as [RequestInfo | URL, RequestInit] | undefined)?.[1]).toEqual(
       expect.objectContaining({
         headers: expect.objectContaining({ "X-Kandev-Managed-Conversation": "managed-grant" }),
       }),

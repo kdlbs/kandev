@@ -24,6 +24,12 @@ type ManagedDescriptor = {
 type InternalProps = WorkspaceAgentChatProps & { pluginId?: string };
 const permissionDeniedStatus: WorkspaceAgentChatStatus = "permission-denied";
 
+function transcriptErrorStatus(code: string): WorkspaceAgentChatStatus {
+  if (code === "not_found") return "deleted";
+  if (code === "unauthenticated") return permissionDeniedStatus;
+  return "unavailable";
+}
+
 function useManagedDescriptor(
   pluginId: string | undefined,
   workspaceId: string,
@@ -84,20 +90,23 @@ function useManagedDescriptor(
   return { descriptor, status };
 }
 
+// eslint-disable-next-line max-lines-per-function -- The composer and transcript share one bound scope.
 function ManagedTranscript({
   pluginId,
   descriptor,
   readOnly,
   placeholderOverride,
+  onStatus,
 }: {
   pluginId: string;
   descriptor: ManagedDescriptor;
   readOnly: boolean;
   placeholderOverride?: string;
+  onStatus(status: WorkspaceAgentChatStatus): void;
 }) {
   const { t } = useTranslation();
   const scope = useContext(ConversationScopeContext);
-  const { messages, loading, removed } = pluginConversationApi.useSessionMessages({
+  const { messages, loading, removed, error } = pluginConversationApi.useSessionMessages({
     sessionId: descriptor.sessionId,
     taskId: descriptor.taskId,
     sort: "asc",
@@ -106,6 +115,10 @@ function ManagedTranscript({
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
+  useEffect(() => {
+    if (!error) return;
+    onStatus(transcriptErrorStatus(error.code));
+  }, [error, onStatus]);
   const send = useCallback(async () => {
     if (!content.trim() || sending) return;
     setSending(true);
@@ -145,6 +158,16 @@ function ManagedTranscript({
         className="flex h-full items-center justify-center"
       >
         <p role="status">{t("plugins:workspaceAgentChatSessionEnded")}</p>
+      </div>
+    );
+  if (error)
+    return (
+      <div
+        data-testid="workspace-agent-chat-status"
+        data-status="unavailable"
+        className="flex h-full items-center justify-center"
+      >
+        <p role="alert">{t("plugins:workspaceAgentChatUnavailable")}</p>
       </div>
     );
   return (
@@ -190,23 +213,27 @@ export const WorkspaceAgentChat = memo(function WorkspaceAgentChat({
     conversationId,
     resourceVersion,
   );
+  const [transcriptStatus, setTranscriptStatus] = useState<WorkspaceAgentChatStatus | null>(null);
+  const effectiveStatus = transcriptStatus ?? status;
   useEffect(() => {
-    onStatus?.(status);
-  }, [onStatus, status]);
-  if (status !== "ready" || !descriptor || !pluginId) {
+    onStatus?.(effectiveStatus);
+  }, [effectiveStatus, onStatus]);
+  if (effectiveStatus !== "ready" || !descriptor || !pluginId) {
     let terminalMessage: string | null = null;
-    if (status === "deleted") terminalMessage = t("plugins:workspaceAgentChatSessionEnded");
-    if (status === permissionDeniedStatus)
+    if (effectiveStatus === "deleted")
+      terminalMessage = t("plugins:workspaceAgentChatSessionEnded");
+    if (effectiveStatus === permissionDeniedStatus)
       terminalMessage = t("plugins:workspaceAgentChatPermissionDenied");
-    if (status === "unavailable") terminalMessage = t("plugins:workspaceAgentChatUnavailable");
+    if (effectiveStatus === "unavailable")
+      terminalMessage = t("plugins:workspaceAgentChatUnavailable");
     return (
       <div
         data-testid="workspace-agent-chat-status"
-        data-status={status}
+        data-status={effectiveStatus}
         className="flex h-full items-center justify-center"
       >
         {terminalMessage ? (
-          <p role={status === "deleted" ? "status" : "alert"}>{terminalMessage}</p>
+          <p role={effectiveStatus === "deleted" ? "status" : "alert"}>{terminalMessage}</p>
         ) : (
           <Spinner aria-label={t("plugins:loadingWorkspaceAgentChat")} />
         )}
@@ -226,6 +253,7 @@ export const WorkspaceAgentChat = memo(function WorkspaceAgentChat({
         descriptor={descriptor}
         readOnly={readOnly}
         placeholderOverride={placeholderOverride}
+        onStatus={setTranscriptStatus}
       />
     </PluginConversationScopeProvider>
   );

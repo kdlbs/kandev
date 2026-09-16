@@ -7,6 +7,7 @@ import { WorkspaceAgentChat } from "./workspace-agent-chat";
 const transport = vi.hoisted(() => ({
   fetch: vi.fn(),
   messages: [{ id: "m-1", content: "existing transcript" }],
+  transcriptError: null as { code: string } | null,
 }));
 
 vi.mock("@/lib/plugins/conversation-scope", () => ({
@@ -19,7 +20,12 @@ vi.mock("@/lib/plugins/conversation-scope", () => ({
 }));
 vi.mock("@/lib/plugins/conversation-host", () => ({
   pluginConversationApi: {
-    useSessionMessages: () => ({ messages: transport.messages, loading: false, removed: false }),
+    useSessionMessages: () => ({
+      messages: transport.messages,
+      loading: false,
+      removed: false,
+      error: transport.transcriptError,
+    }),
   },
 }));
 
@@ -27,6 +33,7 @@ describe("WorkspaceAgentChat", () => {
   afterEach(cleanup);
   beforeEach(() => {
     transport.fetch.mockReset();
+    transport.transcriptError = null;
     vi.stubGlobal("fetch", transport.fetch);
   });
 
@@ -188,5 +195,33 @@ describe("WorkspaceAgentChat", () => {
     await waitFor(() => expect(terminal.dataset.status).toBe("deleted"));
     expect(terminal.querySelector('[role="status"]')?.textContent).toBe("Conversation ended");
     expect(screen.queryByLabelText("Loading conversation…")).toBeNull();
+  });
+
+  it("surfaces a scoped transcript authorization failure", async () => {
+    transport.transcriptError = { code: "unauthenticated" };
+    transport.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          taskId: "task-1",
+          sessionId: "session-1",
+          workspaceId: "ws-1",
+          managedConversationToken: "managed-token",
+        }),
+        { status: 200 },
+      ),
+    );
+    render(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="1"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-agent-chat-status").dataset.status).toBe(
+        "permission-denied",
+      ),
+    );
   });
 });
