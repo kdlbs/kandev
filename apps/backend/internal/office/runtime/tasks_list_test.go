@@ -101,6 +101,8 @@ func newBoardReadHarness(t *testing.T, caps Capabilities, claimWorkspaceID strin
 		NewActions(ActionDependencies{Agents: agentSvc}),
 		nil,
 		runEvents,
+		nil,
+		nil,
 		lister,
 	))
 	return &boardReadHarness{router: router, token: token, runEvents: runEvents}
