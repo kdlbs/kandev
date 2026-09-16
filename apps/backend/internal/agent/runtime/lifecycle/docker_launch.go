@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/scriptengine"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // dockerLaunchTarget is the daemon a container launch runs against, together
@@ -111,7 +112,7 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		PrepareScript:                  prepareScript,
 		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		AllowUserNamespaces:            getMetadataString(req.Metadata, MetadataKeyAllowUserNamespaces) == boolStringTrue,
-		LocalClonePath:                 localCloneMountPath(req.Metadata),
+		LocalClonePath:                 localCloneMountPathFor(req.Metadata, executorType),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:            req.RemoteContributions,
 		ContributionDestinations:       req.ContributionDestinations,
@@ -120,6 +121,19 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		ProviderGatewayAuth:            req.ProviderGatewayAuth,
 		Metadata:                       req.Metadata,
 	}, nil
+}
+
+// localCloneMountPathFor resolves the local-repository mount source, which
+// only exists for a daemon sharing the backend's filesystem.
+//
+// A remote daemon resolves the path against its own filesystem, so forwarding
+// it mounts the wrong directory or fails the launch. Remote executors require
+// a cloneable origin instead; see the remote source rules.
+func localCloneMountPathFor(metadata map[string]interface{}, executorType string) string {
+	if executorType == string(models.ExecutorTypeRemoteDocker) {
+		return ""
+	}
+	return localCloneMountPath(metadata)
 }
 
 // resolveDockerPrepareScript builds the in-container prepare script, falling

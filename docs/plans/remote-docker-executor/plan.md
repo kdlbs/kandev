@@ -1,6 +1,6 @@
 ---
 created: 2026-09-16
-status: implemented
+status: in_progress
 requirements:
   - REQ-EXECUTORS-REMOTE-DOCKER-001
 system_design:
@@ -72,6 +72,23 @@ rtk make test lint
 rtk pnpm run typecheck && rtk pnpm --filter @kandev/web lint
 KANDEV_E2E_CONTAINERS=1 rtk pnpm run e2e --project=containers --grep "remote docker"
 ```
+
+## Branch-review rework
+
+An independent review of the branch raised seven findings. All were verified
+against the code and confirmed; all are now addressed.
+
+1. No reconnect path and stop released the only SSH session (task 04).
+2. No transport watchdog on live sessions (task 04).
+3. `LocalClonePath` forwarded to a remote daemon (task 04).
+4. Generic executor and profile mutations stayed member-accessible, so only
+   the bespoke routes were gated (task 05).
+5. Saved profiles had no retest path and no effective-root notice (task 05).
+6. Package statuses claimed completion while task 04 was still `pending` and
+   task 06 recorded a missing scenario. Corrected rather than argued: the
+   statuses were wrong, not the finding.
+7. The build stream ignored scanner errors, so a truncated log read as a
+   successful build (task 06).
 
 ## Risks
 

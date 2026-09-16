@@ -223,3 +223,35 @@ func TestRemoteHostFilesFailsBeforeLaunchOnUnsupportedPlatform(t *testing.T) {
 		t.Fatal("AgentctlBinary on an unsupported platform = nil error, want error")
 	}
 }
+
+// TestRemoteLaunchConfigDropsLocalClonePath is finding 3 from branch review.
+//
+// LocalClonePath is a path on the backend host. Forwarding it to a remote
+// daemon makes the daemon resolve it against its own filesystem, which either
+// mounts the wrong directory or fails the launch. A remote container must
+// carry no backend-host mount source at all.
+func TestRemoteLaunchConfigDropsLocalClonePath(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		TaskID:     "task-1",
+		Metadata: map[string]interface{}{
+			"repository_clone_url": "/home/dev/src/project",
+		},
+	}
+
+	local, err := buildDockerContainerConfig(req, "local_docker")
+	if err != nil {
+		t.Fatalf("local config: %v", err)
+	}
+	if local.LocalClonePath == "" {
+		t.Fatal("local_docker lost its clone mount; this test would not detect the remote bug")
+	}
+
+	remote, err := buildDockerContainerConfig(req, "remote_docker")
+	if err != nil {
+		t.Fatalf("remote config: %v", err)
+	}
+	if remote.LocalClonePath != "" {
+		t.Fatalf("remote_docker forwarded the backend-host clone path %q", remote.LocalClonePath)
+	}
+}

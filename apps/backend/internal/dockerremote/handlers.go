@@ -6,6 +6,7 @@ package dockerremote
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -103,6 +104,20 @@ func (h *Handler) httpBuild(c *gin.Context) {
 			return
 		}
 		c.Writer.Flush()
+	}
+	// A read failure truncates the build log. The status line is already
+	// sent, so the only way to keep a truncated build from reading as a
+	// successful one is to append an explicit error record the client parses.
+	if scanErr := scanner.Err(); scanErr != nil {
+		h.logger.Error("remote docker build stream failed",
+			zap.String("executor_id", id), zap.Error(scanErr))
+		payload, marshalErr := json.Marshal(map[string]string{
+			"error": "build output truncated: " + scanErr.Error(),
+		})
+		if marshalErr == nil {
+			_, _ = c.Writer.Write(append(payload, '\n'))
+			c.Writer.Flush()
+		}
 	}
 }
 

@@ -1,5 +1,5 @@
 ---
-status: current
+status: draft
 system: executors
 requirements:
   - REQ-EXECUTORS-REMOTE-DOCKER-001

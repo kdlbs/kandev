@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
@@ -27,9 +28,17 @@ import (
 type RemoteDockerExecutor struct {
 	logger *logger.Logger
 
-	// connect resolves a request to a live remote session. Indirected so the
-	// composition can be tested without a daemon or an SSH host.
+	// connect resolves a request to a live remote session. These operations
+	// are fields so the lifecycle can be tested without a daemon or an SSH
+	// host.
 	connect func(context.Context, *ExecutorCreateRequest) (*remoteDockerSession, error)
+	// reconnect adopts a container the request already names, so a resume
+	// reattaches to the preserved workspace instead of launching a new one.
+	reconnect func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, bool)
+	// launch provisions a fresh container.
+	launch func(context.Context, *remoteDockerSession, *ExecutorCreateRequest) (*ExecutorInstance, error)
+	// watchTransport starts the keepalive watchdog for a live session.
+	watchTransport func(string, *remoteDockerSession)
 
 	mu       sync.Mutex
 	sessions map[string]*remoteDockerSession
@@ -44,10 +53,16 @@ type remoteDockerSession struct {
 	endpoints     containerEndpointResolver
 	hostFileStore *sshHostFileStore
 	platform      SSHRemotePlatform
+	watchdog      *sshKeepaliveWatchdog
 }
 
 func (s *remoteDockerSession) close() error {
 	var firstErr error
+	if s.watchdog != nil {
+		s.watchdog.stopAndAwaitLoop()
+		s.watchdog.awaitProbeExit()
+		s.watchdog = nil
+	}
 	if s.endpoints != nil {
 		if err := s.endpoints.Close(); err != nil {
 			firstErr = err
@@ -74,6 +89,9 @@ func NewRemoteDockerExecutor(log *logger.Logger) *RemoteDockerExecutor {
 		sessions: map[string]*remoteDockerSession{},
 	}
 	r.connect = r.dialRemote
+	r.reconnect = r.reconnectToContainer
+	r.launch = r.launchFresh
+	r.watchTransport = r.startTransportWatchdog
 	return r
 }
 
@@ -220,23 +238,101 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 	r.sessions[req.InstanceID] = session
 	r.mu.Unlock()
 
+	r.watchTransport(req.InstanceID, session)
+
+	// A resume names the container it left behind. Reattaching keeps the
+	// workspace the user expects; launching a second container would abandon
+	// it on the remote host.
+	if instance, ok := r.reconnect(ctx, session, req); ok {
+		return instance, nil
+	}
+
 	if err := r.seedRemoteSessionDir(ctx, session, req); err != nil {
 		r.releaseSession(req.InstanceID)
 		return nil, err
 	}
 
-	instance, err := launchDockerContainer(ctx, dockerLaunchTarget{
+	instance, err := r.launch(ctx, session, req)
+	if err != nil {
+		r.releaseSession(req.InstanceID)
+		return nil, err
+	}
+	return instance, nil
+}
+
+// remoteDockerTaskLabel is the owning task stamped on every managed container.
+const remoteDockerTaskLabel = "kandev.task_id"
+
+// launchFresh provisions a new container for the request.
+func (r *RemoteDockerExecutor) launchFresh(
+	ctx context.Context, session *remoteDockerSession, req *ExecutorCreateRequest,
+) (*ExecutorInstance, error) {
+	return launchDockerContainer(ctx, dockerLaunchTarget{
 		dockerClient: session.dockerClient,
 		containerMgr: session.containerMgr,
 		runtimeName:  r.Name(),
 		executorType: string(models.ExecutorTypeRemoteDocker),
 		logger:       r.logger,
 	}, req)
-	if err != nil {
-		r.releaseSession(req.InstanceID)
-		return nil, err
+}
+
+// reconnectToContainer adopts the container the request names, when it is
+// still running on the remote daemon.
+//
+// The container is verified before adoption: a recycled ID on a shared daemon
+// would otherwise hand the session somebody else's container.
+func (r *RemoteDockerExecutor) reconnectToContainer(
+	ctx context.Context, session *remoteDockerSession, req *ExecutorCreateRequest,
+) (*ExecutorInstance, bool) {
+	containerID := getMetadataString(req.Metadata, MetadataKeyContainerID)
+	if containerID == "" {
+		return nil, false
 	}
-	return instance, nil
+
+	info, err := session.dockerClient.GetContainerInfo(ctx, containerID)
+	if err != nil || info == nil || info.State != containerStateRunning {
+		r.logger.Info("remote docker: preserved container is not adoptable, launching fresh",
+			zap.String("container_id", containerID), zap.Error(err))
+		return nil, false
+	}
+	if owner := info.Labels[remoteDockerTaskLabel]; owner != "" && owner != req.TaskID {
+		r.logger.Warn("remote docker: refusing a container owned by another task",
+			zap.String("container_id", containerID), zap.String("owner_task_id", owner))
+		return nil, false
+	}
+
+	containerIP, _ := session.dockerClient.GetContainerIP(ctx, containerID)
+	return &ExecutorInstance{
+		InstanceID:    req.InstanceID,
+		TaskID:        req.TaskID,
+		SessionID:     req.SessionID,
+		RuntimeName:   r.Name(),
+		ContainerID:   containerID,
+		ContainerIP:   containerIP,
+		WorkspacePath: dockerWorkspacePath,
+		Metadata:      map[string]interface{}{MetadataKeyIsRemote: true},
+	}, true
+}
+
+// startTransportWatchdog surfaces a dropped SSH connection as a failure
+// instead of a session that looks healthy but answers nothing.
+func (r *RemoteDockerExecutor) startTransportWatchdog(instanceID string, session *remoteDockerSession) {
+	if session == nil || session.sshClient == nil {
+		return
+	}
+	interval, deadline := sshKeepaliveInterval, sshKeepaliveDeadline
+	if !sshKeepaliveTuningValid(interval, deadline) {
+		return
+	}
+	session.watchdog = startSSHKeepaliveWatchdog(session.sshClient, interval, deadline, time.Now(), nil,
+		func(reason string, silence time.Duration) {
+			r.logger.Warn("remote docker: transport lost",
+				zap.String("instance_id", instanceID),
+				zap.String("reason", reason),
+				zap.Duration("silence", silence))
+			r.releaseSession(instanceID)
+		},
+	)
 }
 
 // seedRemoteSessionDir copies the agent's credentials and selected config
@@ -290,7 +386,13 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 	if instance == nil {
 		return nil
 	}
-	defer r.releaseSession(instance.InstanceID)
+	// An ordinary stop preserves the container, so it must also preserve the
+	// connection that reaches it. Releasing here strands the container: the
+	// later archive or delete would have no way to remove it.
+	teardown := force || instance.AgentStopFailed || shouldTeardownDockerContainer(instance.StopReason)
+	if teardown {
+		defer r.releaseSession(instance.InstanceID)
+	}
 
 	if instance.ContainerID == "" {
 		// Nothing was provisioned. Stop runs inside archive and delete, so
@@ -298,10 +400,7 @@ func (r *RemoteDockerExecutor) StopInstance(ctx context.Context, instance *Execu
 		return nil
 	}
 
-	// An ordinary stop preserves the remote container so a resume can
-	// re-attach to the same workspace; only a forced stop or a destructive
-	// lifecycle reason removes it.
-	if !force && !instance.AgentStopFailed && !shouldTeardownDockerContainer(instance.StopReason) {
+	if !teardown {
 		r.logger.Info("preserving remote docker container after agent stop",
 			zap.String("container_id", instance.ContainerID),
 			zap.String("instance_id", instance.InstanceID),

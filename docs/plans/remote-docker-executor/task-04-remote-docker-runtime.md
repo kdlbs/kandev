@@ -1,7 +1,7 @@
 ---
 id: "04-remote-docker-runtime"
 title: "Remote Docker runtime"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-ssh-dialed-docker-client"
@@ -100,4 +100,27 @@ Tasks 01, 02, and 03.
 
 ## Results
 
-_Not started._
+- Replaced the stub with a runtime that dials SSH, probes the platform, pings
+  the daemon through the transport, and launches a container with
+  remote-resolved mounts and forwarded endpoints.
+- Both Docker runtimes share one launch path, parameterized by executor type.
+- Seeds agent credentials into the per-instance directory the container
+  mounts, not the remote home, which the container never sees.
+
+### Branch-review rework
+
+- **Reconnect (finding 1).** The runtime adopts a container the request names
+  instead of always launching a new one, verifying it is running and owned by
+  the same task first. A recycled ID on a shared daemon would otherwise hand
+  the session somebody else's container.
+- **Session preservation (finding 1).** An ordinary stop now keeps its SSH
+  session. Releasing it stranded the preserved container: the later archive or
+  delete had no connection left to remove it.
+- **Transport watchdog (finding 2).** Live sessions attach the SSH keepalive
+  watchdog, so a dropped connection surfaces as a failure rather than a
+  session that looks healthy.
+- **Local clone path (finding 3).** `LocalClonePath` is dropped for
+  `remote_docker`. It is a backend-host path, which a remote daemon resolves
+  against its own filesystem.
+- Verified with `go test ./internal/agent/runtime/lifecycle/ -count=1` and the
+  live-daemon integration test.

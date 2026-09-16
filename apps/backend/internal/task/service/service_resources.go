@@ -1755,10 +1755,41 @@ func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []stri
 
 var ErrKubernetesAdminRequired = errors.New("administrator identity required for Kubernetes settings")
 
+// ErrRemoteDockerAdminRequired gates remote Docker executor mutation. A saved
+// profile grants effective root on the remote host, so it is not an ordinary
+// member operation.
+var ErrRemoteDockerAdminRequired = errors.New("administrator identity required for remote Docker settings")
+
 func requireKubernetesAdmin(ctx context.Context) error {
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || !identity.IsAdmin() {
 		return ErrKubernetesAdminRequired
+	}
+	return nil
+}
+
+func requireRemoteDockerAdmin(ctx context.Context) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || !identity.IsAdmin() {
+		return ErrRemoteDockerAdminRequired
+	}
+	return nil
+}
+
+// requireExecutorTypeAdmin applies the admin gate for executor types whose
+// configuration is an administrative grant over a machine.
+func requireExecutorTypeAdmin(ctx context.Context, types ...models.ExecutorType) error {
+	for _, t := range types {
+		switch t {
+		case models.ExecutorTypeKubernetes:
+			if err := requireKubernetesAdmin(ctx); err != nil {
+				return err
+			}
+		case models.ExecutorTypeRemoteDocker:
+			if err := requireRemoteDockerAdmin(ctx); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1784,10 +1815,8 @@ func validateKubernetesProfileConfig(config map[string]string) error {
 }
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
-	if req.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
+	if err := requireExecutorTypeAdmin(ctx, req.Type); err != nil {
+		return nil, err
 	}
 	if err := validateExecutorForType(req.Type, req.Config); err != nil {
 		return nil, err
@@ -1822,10 +1851,8 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if req.Type != nil {
 		targetType = *req.Type
 	}
-	if executor.Type == models.ExecutorTypeKubernetes || targetType == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type, targetType); err != nil {
+		return nil, err
 	}
 	if err := validateExecutorUpdateRequest(executor, req); err != nil {
 		return nil, err
@@ -1908,10 +1935,8 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return err
-		}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return err
 	}
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
@@ -1988,10 +2013,10 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
 	}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return nil, err
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
 		if err := validateKubernetesProfileConfig(req.Config); err != nil {
 			return nil, err
 		}
@@ -2031,10 +2056,10 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if err != nil {
 		return nil, err
 	}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return nil, err
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
 		config := profile.Config
 		if req.Config != nil {
 			config = req.Config
@@ -2154,8 +2179,8 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
 		return err
 	}
-	if executor != nil && executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
+	if executor != nil {
+		if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 			return err
 		}
 	}

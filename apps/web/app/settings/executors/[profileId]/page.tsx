@@ -28,6 +28,7 @@ import {
   envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
+import { RemoteDockerConnectionSection } from "@/components/settings/remote-docker-connection-section";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import { SSHTaskDirReclamationCard } from "@/components/settings/ssh-task-dir-reclamation-card";
 import {
@@ -388,6 +389,7 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
   const canManageKubernetes = useKubernetesAdminAccess();
   return (
     <>
+      {executor.type === "remote_docker" && <RemoteDockerConnectionSection executor={executor} />}
       {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
