@@ -1081,7 +1081,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepMatches(ctx context.Context, task *
 	if expectedStepID != "" && stepID != expectedStepID {
 		return fmt.Errorf("%w: expected %q, task is now in %q", ErrWorkflowStepChanged, expectedStepID, stepID)
 	}
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, true, false)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, true, true)
 	if err != nil {
 		return err
 	}

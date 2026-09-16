@@ -1004,6 +1004,9 @@ func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 		WorkflowStepID:  "step-a",
 		QueuedAt:        original.QueuedAt,
 		SenderSessionID: "sender-s1",
+		EntryOptions: &workflowmove.EntryOptions{
+			ResetContext: true, Instructions: "continue", SkipStepPrompt: true,
+		},
 	}); err != nil {
 		t.Fatalf("replace session: %v", err)
 	}
@@ -1032,6 +1035,10 @@ func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
 	}
 	if move.SenderSessionID != "sender-s1" {
 		t.Fatalf("pending move sender_session_id = %q, want sender-s1", move.SenderSessionID)
+	}
+	if move.EntryOptions == nil || !move.EntryOptions.ResetContext ||
+		move.EntryOptions.Instructions != "continue" || !move.EntryOptions.SkipStepPrompt {
+		t.Fatalf("pending move entry options = %#v, want the restored one-shot overrides", move.EntryOptions)
 	}
 }
 

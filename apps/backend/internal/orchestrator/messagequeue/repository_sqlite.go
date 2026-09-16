@@ -6065,14 +6065,14 @@ func (r *sqliteRepository) restorePendingMoveTx(
 		INSERT INTO pending_moves (
 			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
 			workflow_step_id, step_position, queued_at, actor, sender_session_id,
-			expected_workflow_step_id, initiating_turn_id
+			expected_workflow_step_id, initiating_turn_id, entry_options_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		pendingMoveRowID(pendingMove), pendingMove.MoveID, pendingMove.SessionIncarnationID, sessionID,
 		pendingMove.TaskID, pendingMove.WorkflowID, pendingMove.WorkflowStepID,
 		pendingMove.Position, queuedAt, pendingMove.Actor, pendingMove.SenderSessionID,
-		pendingMove.ExpectedWorkflowStepID, pendingMove.InitiatingTurnID,
+		pendingMove.ExpectedWorkflowStepID, pendingMove.InitiatingTurnID, marshalEntryOptions(pendingMove.EntryOptions),
 	); err != nil {
 		return fmt.Errorf("restore pending move: %w", err)
 	}
