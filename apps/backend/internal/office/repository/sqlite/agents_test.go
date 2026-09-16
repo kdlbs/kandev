@@ -747,8 +747,8 @@ func TestUnpauseAgentIfCurrent_RefusesWhenPauseReasonChanged(t *testing.T) {
 			got.Status, got.PauseReason)
 	}
 
-	// The observed reason still matches: the CAS succeeds and moves the
-	// agent to idle without touching pause_reason in its own SET clause.
+	// The observed reason still matches: the CAS succeeds, moving the
+	// agent to idle and clearing pause_reason.
 	changed, err = repo.UnpauseAgentIfCurrent(ctx, agent.ID, "Auto-paused: reason2", "idle")
 	if err != nil {
 		t.Fatalf("compare-and-set unpause (matching reason): %v", err)
