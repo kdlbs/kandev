@@ -549,8 +549,7 @@ no step in this order can regress a shipped feature.
 ## Out of scope
 
 **Table alignment with `workflow_sync_configs`.** Not held aligned and not
-compared here; `branch` and the three timestamp columns diverge. The ADR below
-owns the comparison.
+compared here; the three timestamp columns diverge.
 
 ## Related decisions
 
