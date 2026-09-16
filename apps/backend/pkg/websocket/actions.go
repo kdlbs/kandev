@@ -268,6 +268,7 @@ const (
 	ActionSessionModelsUpdated          = "session.models_updated"
 	ActionSessionModelFallback          = "session.model_fallback"
 	ActionSessionModelSelectionWarning  = "session.model_selection_warning"
+	ActionSessionLaunchWarning          = "session.launch.warning"
 	ActionSessionMCPStatusUpdated       = "session.mcp_status_updated"
 	ActionSessionInfoUpdated            = "session.info_updated"
 	ActionSessionSetMode                = "session.set_mode"

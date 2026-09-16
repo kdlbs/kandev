@@ -445,6 +445,22 @@ export type EmbeddedVscodeSupportState = {
   bySessionId: Record<string, boolean>;
 };
 
+/**
+ * Applied verbatim from a session.launch.warning event — no field is ever
+ * re-derived from the reachability settings store. See launch-warning.tsx.
+ */
+export type LaunchWarningEntry = {
+  executorId: string;
+  host: string;
+  state: string;
+  reason: string;
+  lastSuccessAt?: string;
+};
+
+export type LaunchWarningState = {
+  bySessionId: Record<string, LaunchWarningEntry>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -465,6 +481,7 @@ export type SessionRuntimeSliceState = {
   sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
+  launchWarning: LaunchWarningState;
   sessionPollMode: SessionPollModeState;
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
@@ -558,6 +575,7 @@ export type SessionRuntimeSliceActions = {
   completeWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
   failWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt, details: string) => boolean;
   clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
+  setLaunchWarning: (sessionId: string, entry: LaunchWarningEntry) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

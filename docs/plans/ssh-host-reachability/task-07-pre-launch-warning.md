@@ -1,7 +1,7 @@
 ---
 id: "07-pre-launch-warning"
 title: "Pre-launch reachability warning"
-status: pending
+status: done
 wave: 5
 depends_on: ["05-launch-non-gating", "06-settings-surface"]
 plan: "plan.md"
@@ -148,4 +148,74 @@ card already established.
 
 ## Results
 
-Pending.
+Implemented both renderers against the `session.launch.warning` event payload
+only, with no read of the task 06 reachability store slice and no client-side
+fetch.
+
+- **Session-stream handler:** `apps/web/lib/ws/handlers/ssh-launch-warning.ts`,
+  following `executor-prepare.ts`'s pattern, stores a normalized
+  `LaunchWarningEntry` (`executorId`, `host`, `state`, `reason`,
+  `lastSuccessAt`) keyed by session id in a new `launchWarning` slot on the
+  session-runtime slice; registered in `apps/web/lib/ws/router.ts`.
+- **Inline-at-initiation renderer:** `apps/web/components/task/launch-warning.tsx`
+  reads that same slot via `useAppStore` and renders host, last-success age
+  (or "never recorded"), and a translated reason sentence. It never renders a
+  confirmation control. Mounted in `task-chat-panel.tsx` alongside the
+  existing `<TaskChatLaunchError>`, not through a virtualized-list injection
+  mechanism — that is where the launch surface for a session already renders
+  transient launch state, and it satisfies "inline at the point of
+  initiation" without a new mount point.
+- Since the session-stream handler is the only consumer and a session card
+  opened later reads the same store slot, a single handler plus a single
+  component covers both the "present at launch" and "opened later" cases from
+  the Acceptance section; no separate non-interactive path was needed.
+
+**Scope deviations, disclosed:**
+
+1. **One backend file set, out of this task's stated scope.** Wiring the
+   bus event to the WS gateway (`GetSessionID()` on the payload, the
+   `session.launch.warning` action constant, and the subscription
+   registration in `RegisterSessionStreamNotifications`) turned out to be
+   missing entirely — task 05 published the event to the internal bus but
+   nothing forwarded it to WS clients, so no frontend handler could ever have
+   fired regardless of implementation. Fixed as a small, tested gap-fix
+   (`manager_launch_reachability_warning.go`, `session_notifications.go`,
+   `session_notifications_test.go`, `actions.go`) rather than leaving the
+   frontend half unreachable. Same shape as the disclosed deviations in tasks
+   04/05.
+2. **Locale namespace corrected from the work order's literal text.** The
+   work order names `tasks.json`; the actual convention (confirmed against
+   existing launch/session copy) is `task.json` (`task:` namespace).
+   `tasks.json` (`tasks:` namespace) is scoped to the `/tasks` list view only.
+   The 10 new keys were added to `task.json` in all five locales instead.
+3. **No reuse of task 06's `reachabilityReasonKey()`.** Per the work order's
+   own Risk-section guidance against folding this into task 06's namespace,
+   the six reason tokens are mapped independently to fresh
+   `task:launchWarningReason*` keys rather than importing task 06's
+   `executors.json`-scoped helper.
+4. **Incidental store-composition fix.** Found and fixed a pre-existing gap in
+   `apps/web/lib/state/store-overrides.ts`'s `buildStateOverrides`: it did not
+   list the new `launchWarning` field, so `StateProvider`/boot-payload
+   `initialState` would have silently been reset to `{bySessionId: {}}` by
+   the session-runtime slice's own default spread. This is a store-plumbing
+   fix required for the new field to hydrate correctly at all, not a design
+   change.
+
+Verification (from `apps/web`):
+
+```
+pnpm vitest run lib/ws/handlers/ssh-launch-warning.test.ts components/task/launch-warning.test.tsx lib/state/slices/session-runtime/purge-session.test.ts
+# 3 files, 16 tests passed
+pnpm run typecheck   # clean
+pnpm run lint        # clean, 0 warnings
+pnpm run i18n:check  # clean, pseudo in sync, 5 locales complete
+pnpm run i18n:ratchet # clean
+```
+
+And from `apps/backend`:
+
+```
+go test ./internal/gateway/websocket/... -run TestSessionStreamBroadcaster
+# ok
+gofmt -l <the 4 touched files>   # no output
+```

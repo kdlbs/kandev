@@ -39,6 +39,12 @@ describe("purgeSessionRuntimeState", () => {
       status: "running",
     });
     s.appendProcessOutput("proc-1", "process noise");
+    s.setLaunchWarning("session-1", {
+      executorId: "executor-1",
+      host: "10.0.0.5",
+      state: "unreachable",
+      reason: "timeout",
+    });
 
     store.setState((draft) => {
       purgeSessionRuntimeState(draft, SESSION_ID);
@@ -52,6 +58,7 @@ describe("purgeSessionRuntimeState", () => {
     expect(after.processes.devProcessBySessionId[SESSION_ID]).toBeUndefined();
     expect(after.processes.processesById["proc-1"]).toBeUndefined();
     expect(after.processes.outputsByProcessId["proc-1"]).toBeUndefined();
+    expect(after.launchWarning.bySessionId["session-1"]).toBeUndefined();
     // env-scoped buffers gone because no other session references env-1.
     expect(after.shell.outputs["env-1"]).toBeUndefined();
     expect(after.shell.statuses["env-1"]).toBeUndefined();

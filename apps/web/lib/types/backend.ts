@@ -53,6 +53,7 @@ import type {
   ExecutorProfilePayload,
   PrepareProgressPayload,
   PrepareCompletedPayload,
+  LaunchWarningPayload,
   EnvironmentPayload,
 } from "./executor-payloads";
 
@@ -359,6 +360,7 @@ export {
   type ExecutorProfilePayload,
   type PrepareProgressPayload,
   type PrepareCompletedPayload,
+  type LaunchWarningPayload,
   type EnvironmentPayload,
 } from "./executor-payloads";
 
@@ -557,6 +559,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
       "executor.reachability.changed",
       SSHReachabilityRecord
     >;
+    "session.launch.warning": BackendMessage<"session.launch.warning", LaunchWarningPayload>;
     "environment.created": BackendMessage<"environment.created", EnvironmentPayload>;
     "environment.updated": BackendMessage<"environment.updated", EnvironmentPayload>;
     "environment.deleted": BackendMessage<"environment.deleted", EnvironmentPayload>;

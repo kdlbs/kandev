@@ -51,6 +51,13 @@ type LaunchWarningEventPayload struct {
 	Timestamp     string     `json:"timestamp"`
 }
 
+// GetSessionID satisfies the session-routing accessor
+// internal/gateway/websocket.extractSessionID uses to broadcast this event
+// to the correct session's subscribers.
+func (p LaunchWarningEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
 // PublishLaunchWarning publishes a session.launch.warning event to the
 // launched session's own event stream.
 func (p *EventPublisher) PublishLaunchWarning(sessionID string, payload *LaunchWarningEventPayload) {

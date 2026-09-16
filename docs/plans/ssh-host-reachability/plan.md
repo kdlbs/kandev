@@ -457,7 +457,7 @@ flows live in `apps/web/e2e/tests/ssh/reachability.spec.ts` under that project.
 - [x] [Task 04: Reachability API, change event, and immediate probe](task-04-reachability-api-and-events.md)
 - [x] [Task 05: Launch-path non-gating and failure attribution](task-05-launch-non-gating.md)
 - [x] [Task 06: Reachability data layer and settings surface](task-06-settings-surface.md)
-- [ ] [Task 07: Pre-launch reachability warning](task-07-pre-launch-warning.md)
+- [x] [Task 07: Pre-launch reachability warning](task-07-pre-launch-warning.md)
 - [ ] [Task 08: Container E2E coverage and operator documentation](task-08-e2e-and-docs.md)
 
 ### Waves

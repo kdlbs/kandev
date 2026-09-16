@@ -153,6 +153,7 @@ export type AppState = KanbanSlice & {
   sessionMode: (typeof defaultSessionRuntimeState)["sessionMode"];
   userShells: (typeof defaultSessionRuntimeState)["userShells"];
   prepareProgress: (typeof defaultSessionRuntimeState)["prepareProgress"];
+  launchWarning: (typeof defaultSessionRuntimeState)["launchWarning"];
   sessionTodos: (typeof defaultSessionRuntimeState)["sessionTodos"];
   agentCapabilities: (typeof defaultSessionRuntimeState)["agentCapabilities"];
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
@@ -595,6 +596,10 @@ export type AppState = KanbanSlice & {
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
+  setLaunchWarning: (
+    sessionId: string,
+    entry: import("./slices/session-runtime/types").LaunchWarningEntry,
+  ) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];

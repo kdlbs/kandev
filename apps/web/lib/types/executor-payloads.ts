@@ -65,6 +65,17 @@ export type PrepareCompletedPayload = {
   timestamp: string;
 };
 
+export type LaunchWarningPayload = {
+  task_id: string;
+  session_id: string;
+  executor_id: string;
+  host: string;
+  state: string;
+  reason: string;
+  last_success_at?: string;
+  timestamp: string;
+};
+
 export type EnvironmentPayload = {
   id: string;
   name: string;
