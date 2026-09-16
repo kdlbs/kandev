@@ -492,10 +492,6 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 
 func (c *Controller) conversationContinuationRenew(ctx *gin.Context) {
 	ctx.Header("Cache-Control", conversationNoStore)
-	record, identity, _, _, ok := c.authorizeTranscriptRequest(ctx)
-	if !ok || !c.validBinding(ctx, record, identity.UserID) {
-		return
-	}
 	var request conversationContinuationRenewRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil ||
 		request.Cursor == "" ||
@@ -507,6 +503,13 @@ func (c *Controller) conversationContinuationRenew(ctx *gin.Context) {
 	snapshotClaims, snapshotErr := c.conversationTokens.parse(request.SnapshotToken)
 	if !validContinuationClaims(cursorClaims, snapshotClaims, cursorErr, snapshotErr) {
 		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "invalid continuation", false)
+		return
+	}
+	// Renewal has no session path parameter. Derive it from the signed
+	// continuation before applying the same managed identity boundary.
+	ctx.Params = append(ctx.Params, gin.Param{Key: "sessionId", Value: cursorClaims.SessionID})
+	record, identity, _, _, ok := c.authorizeTranscriptRequest(ctx)
+	if !ok || !c.validBinding(ctx, record, identity.UserID) {
 		return
 	}
 	if cursorClaims.PluginID != record.ID ||

@@ -120,6 +120,9 @@ function ManagedTranscript({
   const [sending, setSending] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
   useEffect(() => {
+    if (removed) onStatus("deleted");
+  }, [onStatus, removed]);
+  useEffect(() => {
     if (!error) return;
     onStatus(transcriptErrorStatus(error.code));
   }, [error, onStatus]);
