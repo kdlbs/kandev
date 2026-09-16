@@ -58,6 +58,12 @@ test('the registry exemption does not cover other registry files or mixed change
   assert.equal(otherRegistryFile.requiresCoverage, true);
   assert.deepEqual(otherRegistryFile.triggeringPaths, ['plugin-registry/schema.json']);
 
+  const registryBuilder = validator.classifyChangedFiles([
+    { filename: 'plugin-registry/build-index.mjs', status: 'modified' },
+  ]);
+  assert.equal(registryBuilder.requiresCoverage, true);
+  assert.deepEqual(registryBuilder.triggeringPaths, ['plugin-registry/build-index.mjs']);
+
   const mixedChange = validator.classifyChangedFiles([
     { filename: 'plugin-registry/plugins.yaml', status: 'modified' },
     { filename: 'apps/backend/runtime.go', status: 'modified' },
