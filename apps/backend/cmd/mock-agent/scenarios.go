@@ -54,6 +54,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"steer-fold-setup":        scenarioSteerFoldSetup,
 	"steer-defer-setup":       scenarioSteerDeferSetup,
 	"saved-prompt-delivery":   scenarioSavedPromptDelivery,
+	"response-retry":          scenarioResponseRetry,
 	"goal-active":             scenarioGoalActive,
 	"goal-complete":           scenarioGoalComplete,
 	"goal-clear":              scenarioGoalClear,
@@ -136,6 +137,16 @@ func scenarioSimpleMessage(e *emitter) {
 
 	fixedDelay(100)
 	e.text("This is a simple mock response for e2e testing.")
+}
+
+func scenarioResponseRetry(e *emitter) {
+	e.thoughtWithID("Abandoned response attempt reasoning.")
+	waitForDelay(e.ctx, 1000)
+	e.textWithID("Abandoned response attempt answer.")
+	waitForDelay(e.ctx, 1000)
+	e.responseAttemptReset()
+	waitForDelay(e.ctx, 100)
+	e.textWithID("Replacement response after provider retry.")
 }
 
 // scenarioReadAndEdit: read -> edit -> text with fixed delays, using real files.

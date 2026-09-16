@@ -27,6 +27,7 @@ type acpDialect struct {
 	subagentFrame        func(map[string]any, string, any) (subagentFrame, bool)
 	mcpToolCall          func(map[string]any, any) (mcpToolCallFrame, bool)
 	mcpToolResult        func(any) (any, bool)
+	responseAttemptReset func(map[string]any) bool
 }
 
 type mcpToolCallFrame struct {
@@ -58,6 +59,8 @@ func newACPDialect(agentID string) acpDialect {
 		return newGrokACPDialect()
 	case codexAgentID:
 		return newCodexACPDialect()
+	case mockAgentID:
+		return newMockACPDialect()
 	}
 	return acpDialect{}
 }
@@ -147,4 +150,8 @@ func (d acpDialect) promptUsage(
 		return usage
 	}
 	return d.normalizePromptUsage(usage, meta)
+}
+
+func (d acpDialect) resetsResponseAttempt(meta map[string]any) bool {
+	return d.responseAttemptReset != nil && d.responseAttemptReset(meta)
 }

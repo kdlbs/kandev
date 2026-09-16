@@ -225,6 +225,9 @@ type AgentExecution struct {
 	// reusing the same source ID cannot merge visible and reasoning content.
 	protocolMessageIDs  map[string]string
 	protocolThinkingIDs map[string]string
+	// responseAttemptMessageIDs preserves allocation order for assistant and
+	// thinking records created since the latest committed response boundary.
+	responseAttemptMessageIDs []string
 	// assistantHistoryBuffer accumulates assistant chunks in wire order for
 	// history-context injection. Tool and completion boundaries persist it as
 	// one segment before recording the boundary event.

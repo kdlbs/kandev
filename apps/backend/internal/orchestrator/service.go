@@ -152,6 +152,13 @@ type TransientRetryMessageService interface {
 	DeleteMessage(ctx context.Context, id string) error
 }
 
+// StreamingMessageRetractionService removes transcript records abandoned by a
+// provider response retry. The task service owns durable deletion and client
+// notification publication.
+type StreamingMessageRetractionService interface {
+	DeleteMessage(ctx context.Context, id string) error
+}
+
 // transientRetryNoticeState serializes retry-notice storage with the in-memory
 // retry lifecycle for one session. refs and fenceTimer are owned by
 // Service.transientRetryNoticeStatesMu. The bounded retirement fence keeps a
@@ -696,6 +703,7 @@ type Service struct {
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
 	transientRetryMessages TransientRetryMessageService
+	streamingRetractions   StreamingMessageRetractionService
 	// transientRetryNoticeStates serializes notice writes and cleanup by
 	// session. Entries are reference counted while callers use the mutex,
 	// retained while a prompt/retry is active, and retained for a bounded fence
@@ -1895,6 +1903,12 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 // retire persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
 	s.transientRetryMessages = service
+}
+
+// SetStreamingMessageRetractionService wires durable cleanup for provider
+// response attempts that were abandoned before the prompt completed.
+func (s *Service) SetStreamingMessageRetractionService(service StreamingMessageRetractionService) {
+	s.streamingRetractions = service
 }
 
 // SetSubagentContextRecorder wires the optional subagent-context writer.

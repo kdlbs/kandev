@@ -167,6 +167,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "thinking_streaming":
 		s.handleThinkingStreamingEvent(ctx, payload)
 
+	case streams.EventTypeResponseAttemptReset:
+		if !s.responseAttemptResetOwnsCurrentPrompt(payload) {
+			return
+		}
+		s.handleResponseAttemptReset(ctx, payload)
+
 	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
@@ -251,6 +257,51 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// short-circuits on it), so this is also a safe no-op for an ordinary
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func (s *Service) responseAttemptResetOwnsCurrentPrompt(
+	payload *lifecycle.AgentStreamEventPayload,
+) bool {
+	if payload == nil || payload.Data == nil || payload.Data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	if !ok {
+		return false
+	}
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return generationOwner.OwnsPromptGeneration(
+		payload.SessionID,
+		executionID,
+		payload.Data.PromptGeneration,
+	)
+}
+
+func (s *Service) handleResponseAttemptReset(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if s.streamingRetractions == nil {
+		return
+	}
+	for _, messageID := range payload.Data.RetractedMessageIDs {
+		if messageID == "" {
+			continue
+		}
+		if err := s.streamingRetractions.DeleteMessage(ctx, messageID); err != nil {
+			s.logger.Warn("failed to retract abandoned response message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", payload.SessionID),
+				zap.String("execution_id", payload.ExecutionID),
+				zap.String("message_id", messageID),
+				zap.Error(err))
+		}
 	}
 }
 

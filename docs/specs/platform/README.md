@@ -116,6 +116,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Session MCP Attachment Observability](system-design/mcp-session-observability.md)
 - [Required Persisted Store Parity](system-design/postgres-domain-store-parity.md)
 - [Provider Error Recovery](system-design/provider-error-recovery.md)
+- [Provider Response-Attempt Recovery](system-design/provider-response-attempt-recovery.md)
 - [Workspace Git Status](system-design/workspace-git-status.md)
 - [Go dev launcher and startup version](system-design/go-dev-launcher.md)
 - [Startup database selection continuity](system-design/startup-database-selection-continuity.md)

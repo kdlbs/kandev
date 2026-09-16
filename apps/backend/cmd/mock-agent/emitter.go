@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/google/uuid"
 )
 
 // sessionUpdater abstracts the ACP connection methods used by the emitter.
@@ -50,11 +51,44 @@ func (e *emitter) text(msg string) {
 	})
 }
 
+func (e *emitter) textWithID(msg string) {
+	messageID := acp.MessageId(uuid.NewString())
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+			Content:   acp.TextBlock(msg),
+			MessageId: &messageID,
+		}},
+	})
+}
+
 // thought sends an agent thinking/reasoning update.
 func (e *emitter) thought(msg string) {
 	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
 		SessionId: e.sid,
 		Update:    acp.UpdateAgentThoughtText(msg),
+	})
+}
+
+func (e *emitter) thoughtWithID(msg string) {
+	messageID := acp.MessageId(uuid.NewString())
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{AgentThoughtChunk: &acp.SessionUpdateAgentThoughtChunk{
+			Content:   acp.TextBlock(msg),
+			MessageId: &messageID,
+		}},
+	})
+}
+
+func (e *emitter) responseAttemptReset() {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{SessionInfoUpdate: &acp.SessionSessionInfoUpdate{
+			Meta: map[string]any{
+				"kandevMock": map[string]any{"responseAttemptReset": true},
+			},
+		}},
 	})
 }
 
