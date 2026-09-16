@@ -35,6 +35,8 @@ Configure the Cloud Function to POST this shape to the Kandev webhook URL:
 
 `service` is a constant your Cloud Function sets, not a value copied from the Crashlytics event. It exists so the payload carries a value that can equal a Kandev repository's exact name. `appId` cannot serve that purpose: it is an opaque Firebase identifier that no operator would use as a repository name.
 
+The Cloud Function must also send the automation's webhook secret in an `X-Webhook-Secret` header on that same request; the JSON body above carries no credential. Kandev reveals the secret once, in the automation editor, when you create or rotate the webhook trigger. Store it in the Cloud Function's secret manager (for example Google Secret Manager) and read it at request time; never put it in the forwarded JSON body or commit it to source code. A request missing or misstating this header is rejected before admission, and no task is created.
+
 ## Configure the webhook automation
 
 Create a workspace automation with a webhook trigger, then set:
