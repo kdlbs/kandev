@@ -7,6 +7,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
   updateUserSettings: vi.fn(() => Promise.resolve({ settings: {} })),
 }));
 beforeEach(() => vi.clearAllMocks());
+const sidebarSaveFailedMessage = "A save failed";
 
 it("captures workspace identity for every saved-view mutation", () => {
   const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
@@ -132,14 +133,65 @@ it("rolls a delayed failure back only in its originating workspace", async () =>
   store.getState().createSidebarView();
   store.getState().setActiveWorkspace("b");
   const b = store.getState().createSidebarView();
-  reject(new ApiError("A save failed", 500, {}));
+  reject(new ApiError(sidebarSaveFailedMessage, 500, {}));
   await waitFor(() =>
-    expect(store.getState().sidebarViewsByWorkspace.a.syncError).toBe("A save failed"),
+    expect(store.getState().sidebarViewsByWorkspace.a.syncError).toBe(sidebarSaveFailedMessage),
   );
   expect(store.getState().sidebarViewsByWorkspace.b.activeViewId).toBe(b);
   expect(store.getState().sidebarViewsByWorkspace.b.views).toHaveLength(2);
   store.getState().setActiveWorkspace("a");
   expect(store.getState().sidebarViewsByWorkspace.a.views).toHaveLength(1);
+});
+
+it("rolls a queued failure back after returning to its originating workspace", async () => {
+  const { waitFor } = await import("@testing-library/react");
+  const { ApiError } = await import("@/lib/api/client");
+  let rejectA!: (error: Error) => void;
+  vi.mocked(updateUserSettings)
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectA = reject;
+        }),
+    )
+    .mockResolvedValue({ settings: {} } as never);
+
+  const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
+  store.getState().createSidebarView();
+  store.getState().setActiveWorkspace("b");
+  store.getState().createSidebarView();
+  store.getState().setActiveWorkspace("a");
+  rejectA(new ApiError(sidebarSaveFailedMessage, 500, {}));
+
+  await waitFor(() =>
+    expect(store.getState().sidebarViewsByWorkspace.a.syncError).toBe(sidebarSaveFailedMessage),
+  );
+  expect(store.getState().sidebarViewsByWorkspace.a.views).toHaveLength(1);
+  expect(store.getState().sidebarViewsByWorkspace.b.views).toHaveLength(2);
+});
+
+it("applies a queued success after returning to its originating workspace", async () => {
+  const { waitFor } = await import("@testing-library/react");
+  let resolveA!: (value: Awaited<ReturnType<typeof updateUserSettings>>) => void;
+  vi.mocked(updateUserSettings)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveA = resolve;
+        }),
+    )
+    .mockResolvedValue({ settings: {} } as never);
+
+  const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
+  const aView = store.getState().createSidebarView();
+  store.getState().setActiveWorkspace("b");
+  const bView = store.getState().createSidebarView();
+  store.getState().setActiveWorkspace("a");
+  resolveA({ settings: {} } as never);
+
+  await waitFor(() => expect(store.getState().sidebarViewsByWorkspace.a.syncPending).toBe(false));
+  expect(store.getState().sidebarViewsByWorkspace.a.activeViewId).toBe(aView);
+  expect(store.getState().sidebarViewsByWorkspace.b.activeViewId).toBe(bView);
 });
 
 it("restores independent drafts and collapsed groups when returning to a workspace", () => {

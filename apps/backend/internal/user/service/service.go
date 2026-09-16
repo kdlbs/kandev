@@ -259,7 +259,14 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if err != nil {
 		return nil, err
 	}
-	return s.getSidebarWorkspaceSettings(ctx, settings)
+	projected, err := s.getSidebarWorkspaceSettings(ctx, settings)
+	if err == nil {
+		return projected, nil
+	}
+	// The CAS write has already committed. Keep the response successful while
+	// omitting the scoped projection until the next authorized settings read.
+	s.logger.Warn("sidebar workspace response projection failed", zap.Error(err))
+	return withoutSidebarWorkspaceState(settings), nil
 }
 
 // applySidebarTaskColorAutomation replaces the complete personal automatic
@@ -1081,13 +1088,15 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 	if s.eventBus == nil || settings == nil {
 		return
 	}
+	includeSidebarWorkspaceState := true
 	if s.sidebarWorkspaceAccess != nil {
 		ids, err := s.sidebarWorkspaceAccess(ctx)
 		if err != nil {
 			s.logger.Warn("sidebar workspace projection failed", zap.Error(err))
-			return
+			includeSidebarWorkspaceState = false
+		} else {
+			settings = projectSidebarWorkspaces(settings, ids)
 		}
-		settings = projectSidebarWorkspaces(settings, ids)
 	}
 	data := map[string]interface{}{
 		"user_id":                                  settings.UserID,
@@ -1125,7 +1134,6 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            settings.SavedLayouts,
 		"sidebar_views":                            settings.SidebarViews,
-		"sidebar_views_by_workspace":               settings.SidebarViewsByWorkspace,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
 		"thread_views":                             settings.ThreadViews,
@@ -1162,6 +1170,9 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
+	}
+	if includeSidebarWorkspaceState {
+		data["sidebar_views_by_workspace"] = settings.SidebarViewsByWorkspace
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))

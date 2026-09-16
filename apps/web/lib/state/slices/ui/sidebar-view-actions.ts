@@ -142,23 +142,27 @@ function draftsEqual(a: SidebarViewDraft | null, b: SidebarViewDraft | null): bo
 
 function enqueueSidebarSettingsSync(set: ImmerSet, payload: SidebarViewPatch): Promise<void> {
   const workspaceId = workspaceBySetter.get(set);
+  if (!workspaceId) {
+    // i18n-exempt: programmer invariant diagnostic; this setter is registered before use.
+    return Promise.reject(new Error("sidebar set not bound to a workspace"));
+  }
   const scopedPayload: UserSettingsUpdatePayload = {
-    sidebar_view_state: { workspace_id: workspaceId!, ...payload },
+    sidebar_view_state: { workspace_id: workspaceId, ...payload },
   };
   const previous = sidebarSettingsQueues.get(set);
   const write = previous
     ? previous.then(() => requestUserSettingsUpdateWithRetry(scopedPayload))
     : requestUserSettingsUpdateWithRetry(scopedPayload);
   const request = write.then((response) => {
-    const server = response.settings.sidebar_views_by_workspace?.[workspaceId!];
+    const server = response.settings.sidebar_views_by_workspace?.[workspaceId];
     if (!server) return;
     set((state) => {
       const mapped = mapSidebarWorkspaces(
-        { [workspaceId!]: server },
-        { [workspaceId!]: state.sidebarViews },
+        { [workspaceId]: server },
+        { [workspaceId]: state.sidebarViews },
         response.settings.revision,
       );
-      Object.assign(state.sidebarViews, mapped[workspaceId!]);
+      Object.assign(state.sidebarViews, mapped[workspaceId]);
     });
   });
   sidebarSettingsQueues.set(

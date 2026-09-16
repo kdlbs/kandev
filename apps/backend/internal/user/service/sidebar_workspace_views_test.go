@@ -81,6 +81,50 @@ func TestSidebarWorkspacePatchIsolation(t *testing.T) {
 	}
 }
 
+func TestUpdateUserSettingsReturnsCommittedSettingsWhenSidebarProjectionFails(t *testing.T) {
+	repo := newCASFakeRepo(&models.UserSettings{
+		UserID:                  store.DefaultUserID,
+		SidebarWorkspaceVersion: 1,
+		SidebarViewsByWorkspace: map[string]models.SidebarWorkspaceState{
+			"a": {
+				Views:        store.DefaultSidebarViews(),
+				ActiveViewID: store.DefaultSidebarViewID,
+			},
+		},
+	})
+	eventBus := &casEventBus{}
+	svc := newCASService(repo, eventBus)
+	accessCalls := 0
+	svc.SetSidebarWorkspaceAccess(func(context.Context) ([]string, error) {
+		accessCalls++
+		if accessCalls == 1 {
+			return []string{"a"}, nil
+		}
+		return nil, errors.New("workspace read failed")
+	})
+
+	got, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{DefaultEditorID: ptr("editor")})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if got == nil || got.DefaultEditorID != "editor" {
+		t.Fatalf("updated settings = %+v, want committed editor", got)
+	}
+	if got.SidebarViewsByWorkspace != nil {
+		t.Fatalf("response exposed an unprojected sidebar state: %#v", got.SidebarViewsByWorkspace)
+	}
+	if eventBus.count() != 1 {
+		t.Fatalf("events = %d, want one event despite projection failure", eventBus.count())
+	}
+	eventData, ok := eventBus.events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map[string]interface{}", eventBus.events[0].Data)
+	}
+	if _, exists := eventData["sidebar_views_by_workspace"]; exists {
+		t.Fatalf("event exposed an unprojected sidebar state: %#v", eventData["sidebar_views_by_workspace"])
+	}
+}
+
 func TestSidebarWorkspaceMigrationFailureDoesNotMarkComplete(t *testing.T) {
 	svc, repo, _ := sidebarService(t)
 	svc.SetSidebarWorkspaceAccess(func(context.Context) ([]string, error) { return nil, errors.New("workspace read failed") })

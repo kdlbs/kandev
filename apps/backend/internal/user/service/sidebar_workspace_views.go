@@ -76,6 +76,12 @@ func projectSidebarWorkspaces(settings *models.UserSettings, ids []string) *mode
 	return &copy
 }
 
+func withoutSidebarWorkspaceState(settings *models.UserSettings) *models.UserSettings {
+	copy := *settings
+	copy.SidebarViewsByWorkspace = nil
+	return &copy
+}
+
 func (s *Service) getSidebarWorkspaceSettings(ctx context.Context, settings *models.UserSettings) (*models.UserSettings, error) {
 	if s.sidebarWorkspaceAccess == nil {
 		return settings, nil
