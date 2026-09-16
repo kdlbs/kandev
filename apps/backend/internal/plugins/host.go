@@ -100,6 +100,13 @@ type pluginHost struct {
 	// effect without a plugin restart. nil on a bare test host.
 	// See host_utility.go.
 	utilityDeps func() (utilityDefaultProfileSource, agentProfileSource, utilityRunner)
+
+	// agentConversations provides the managed workspace agent conversation
+	// operations — EnsureAgentConversation / DispatchAgentConversation /
+	// DeleteAgentConversation. Wired by backendapp via SetAgentConversations
+	// and read through agentConversationsDeps (live, not snapshotted at
+	// hostForPlugin time, for the same late-wiring reason as writeDeps).
+	agentConversations func() AgentConversationService
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)
@@ -313,6 +320,15 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	subject := "plugin." + h.pluginID + "." + name
 	event := bus.NewEvent(subject, "plugin:"+h.pluginID, payload)
 	return h.bus.Publish(ctx, subject, event)
+}
+
+// AgentConversations returns the agent conversation manager. It always
+// returns a usable manager — an undeclared capability or missing wiring is
+// denied per call with a typed error (see pluginHostAgentConversationManager.
+// resolve), because the gRPC server adapter calls methods on it directly and
+// a nil interface would panic the host server.
+func (h *pluginHost) AgentConversations() pluginsdk.AgentConversationManager {
+	return &pluginHostAgentConversationManager{host: h}
 }
 
 // unmarshalStateValue decodes a plugin_state row's JSON value into a

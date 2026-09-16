@@ -64,6 +64,21 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 		State:     sessionState,
 		StartedAt: now,
 		UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyMCPAttachmentState: streams.MCPAttachmentHistory{
+				Version: streams.MCPAttachmentSchemaVersion,
+				Current: streams.MCPAttachmentAttempt{
+					AttemptID: "test-attachment-" + sessionID,
+					Servers: []streams.MCPServerAttachment{{
+						Name:   "kandev",
+						Source: streams.MCPServerSourceKandev,
+						Tools: []streams.MCPToolSummary{{
+							Name: "report_change_request_auto_fix_outcome_kandev",
+						}},
+					}},
+				},
+			},
+		},
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create session: %v", err)
@@ -3419,7 +3434,7 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 	promptAccepted := make(chan promptCall, 2)
 	turnComplete := make(chan struct{})
 	var retryAcceptedOnce sync.Once
-	agentMgr := &mockAgentManager{
+	baseAgentMgr := &mockAgentManager{
 		isAgentRunning:         true,
 		repoForExecutionLookup: repo,
 		promptAgentFunc: func(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
@@ -3432,6 +3447,15 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 			}
 			return &executor.PromptResult{}, nil
 		},
+	}
+	// Keep the provider call blocked after it has entered the turn, but fire
+	// the dispatch callback at that acceptance boundary. The base mock invokes
+	// its callback only after promptAgentFunc returns, which would hold the
+	// admission guard until turnComplete and make this test exercise the mock's
+	// ordering rather than the provider contract.
+	agentMgr := &callbackAfterPromptEntryAgentManager{
+		mockAgentManager: baseAgentMgr,
+		promptEntries:    []<-chan struct{}{retryAccepted},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})

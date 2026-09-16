@@ -1,15 +1,23 @@
 package plugins
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
+// Registry is an in-memory, mutex-guarded index of installed plugins, keyed
+// by plugin id. It is loaded from the filesystem store at startup (Load)
+// and kept in sync as Service mutates installations, so read paths (List,
+// Get) never hit disk.
+//
+// Get and List return copies of the stored *store.Record so callers cannot
 // mutate registry state by holding onto a returned pointer; all writes go
 // through Add / Remove / SetStatus / SetRuntimeState / SetAutoUpdate /
 // SetRestartCount.
@@ -33,14 +41,24 @@ func (r *Registry) Load(s store.Store) error {
 	}
 
 	byID := make(map[string]*store.Record, len(records))
+	var migrationErrs []error
 	for _, rec := range records {
+		if rec.InstallationID == "" {
+			migrated := cloneRecord(rec)
+			migrated.InstallationID = uuid.NewString()
+			if err := s.Save(migrated); err != nil {
+				migrationErrs = append(migrationErrs, fmt.Errorf("migrate plugin installation id for %s: %w", rec.ID, err))
+			} else {
+				rec = migrated
+			}
+		}
 		byID[rec.ID] = cloneRecord(rec)
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.byID = byID
-	return nil
+	r.mu.Unlock()
+	return errors.Join(migrationErrs...)
 }
 
 // Get returns a copy of the record for id, and whether it was found.

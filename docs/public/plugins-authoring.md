@@ -268,6 +268,12 @@ curated React, UI, and app-store surface.
 - capabilities.auth is the highest-risk capability. A webhook response may
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
+- Plugin installations also carry a host-minted opaque installation identity
+  and a generic capability-approval ledger. That ledger records approval
+  history, exact approval revisions, and revocation tombstones for the host
+  boundary, but there is no public mutation UI in this release. Future exact
+  Host adapters consume the approval receipt/query surface; they do not derive
+  authority from plugin IDs, package digests, or workspace state.
 
 An isolated web app has a separate browser boundary. Kandev loads it in a
 sandboxed iframe with an opaque origin. It cannot use the host DOM, cookies,
@@ -679,6 +685,7 @@ subscription vocabulary and wildcard rules are in the
 | Interactions          | Interactions().ListPending, Interactions().Get                                 | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
 | Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions                                                     | Routed through the services the native UI drives; first terminal response wins                                                                                                              |
 | Agent invocation      | InvokeUtilityAgent(ctx, prompt, options...)                                    | agent_invoke: true                                                          | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
+| Agent conversations   | AgentConversations(host): Ensure, Dispatch, Delete                             | agent_conversation: true                                                    | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
@@ -855,6 +862,33 @@ Pending agent interactions are an additive, optional Host extension too;
 discover it the same way with `pluginsdk.Interactions(host)`. See "Pending
 agent interactions" below for the contract.
 
+Managed agent conversations are another optional Host extension. They let a
+backend plugin keep one hidden agent session for each workspace and stable
+conversation key:
+
+```go
+conversations, ok := pluginsdk.AgentConversations(host)
+if !ok {
+	return errors.New("this Kandev host does not support agent conversations")
+}
+
+descriptor, status, err := conversations.Ensure(ctx, pluginsdk.AgentConversationSpec{
+	WorkspaceID:     workspaceID,
+	ConversationKey: "coordinator",
+	BasePrompt:      "Review this workspace and report actionable changes.",
+	AgentProfileID:  configuredProfileID,
+})
+```
+
+Declare `agent_conversation: true` before using the manager. `Ensure` returns
+`created`, `exists`, or `configuration_required`; the last result creates no
+task or session. `Dispatch` returns `started`, `sent`, `duplicate_occurrence`,
+or `skipped_busy`. Supply a stable occurrence key when a scheduled event may be
+retried; a busy dispatch does not consume it. `Delete` is idempotent and only
+removes conversations owned by the calling plugin. Disabling or uninstalling
+the plugin removes all of that plugin's managed conversations across
+workspaces.
+
 **Host state** is a small key/value store kandev keeps for your plugin in
 its own database. Each entry is addressed by a `(scope, scopeID, key)`
 triple and holds a JSON object (`map[string]any`): `SetState` upserts one,
@@ -999,7 +1033,8 @@ checked against your manifest's `capabilities` before the handler runs:
 `GetState`/`SetState`/`DeleteState`/`ListState` require
 `capabilities.state: true`; `GetSecret`/`SetSecret`/`DeleteSecret`/
 `RevealSecret` require `capabilities.secrets: true`; `InvokeUtilityAgent`
-requires `capabilities.agent_invoke: true`; each data-reader accessor requires
+requires `capabilities.agent_invoke: true`; managed conversation operations
+require `capabilities.agent_conversation: true`; each data-reader accessor requires
 its resource in `capabilities.api_read` (e.g. `tasks`, `sessions`, `messages`,
 `interactions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`).
 Calling one without the declared capability returns gRPC `PermissionDenied`

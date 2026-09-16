@@ -303,6 +303,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 		return nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
 	}
+	var agentConversationsSvc *taskservice.AgentConversationService
 	if pluginsSvc != nil {
 		// The ldflags-injected build version, so Install can enforce a
 		// package's manifest.min_kandev_version. This is the only production
@@ -310,6 +311,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		// Wire the managed agent conversation service for the agent_conversation
+		// Host capability. Wired here (not at boot time in main.go) because the
+		// task service, shared repository, agent settings repository, and
+		// plugin state store are all available at this point. Its runtime
+		// dispatcher is wired later, once the orchestrator exists — see
+		// SetAgentConversationsDispatcher in main.go.
+		agentConversationsSvc = NewAgentConversationService(repos.Task, repos.AgentSettings, pluginsSvc.StateStore(), eventBus)
+		agentConversationsSvc.SetTaskDeleter(taskSvc)
+		pluginsSvc.SetAgentConversations(agentConversationsSvc)
 		// Separate from SetDataSources: githubSvc is optional (nil when github
 		// is unconfigured), and a nil source leaves tasks with no PullRequests
 		// rather than failing every task read.
@@ -437,6 +447,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Share:                    shareHTTP,
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
+		AgentConversations:       agentConversationsSvc,
 		PluginsCleanup:           pluginsCleanup,
 		Canvas:                   canvasSvc,
 		CanvasDistribution:       canvasDistributionSvc,

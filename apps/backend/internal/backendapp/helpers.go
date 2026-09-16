@@ -46,6 +46,7 @@ import (
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/failedinbox"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -1427,6 +1428,9 @@ func registerSecondaryRoutes(
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
+	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
+	p.log.Debug("Registered Failed Inbox handlers (HTTP)")
+
 	// Wire the plugin Host interaction write path (ADR 0052) onto the same
 	// orchestrator permission resolution and the same clarification resolver
 	// instance the REST route and the MCP handlers use, so a plugin's response
@@ -2031,9 +2035,15 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetTaskMRLister(mcpTaskMRListerAdapter{gl: p.services.GitLab})
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
+	mcpHandlers.SetTaskChangeRequestReadService(newTaskChangeRequestReader(
+		p.taskSvc, p.services.GitHub, p.services.GitLab,
+	))
+	mcpHandlers.SetTaskChangeRequestAutomationService(newTaskChangeRequestAutomationCoordinator(
+		p.taskSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
+	))
 	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
 		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
-		singleUserIdentity: taskChangeLinkIdentityResolver(p.authSvc),
+		logger: p.log, singleUserIdentity: taskChangeLinkIdentityResolver(p.authSvc),
 	})
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

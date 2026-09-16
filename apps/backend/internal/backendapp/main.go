@@ -1108,6 +1108,14 @@ func startGatewayAndServe(
 		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
 	}
 
+	// Wire the managed conversation dispatcher, for the same boot-ordering
+	// reason as SetWriteDeps just above: AgentConversations was constructed
+	// during service initialization, but its dispatch path needs the
+	// orchestrator, which exists only here.
+	if services.AgentConversations != nil {
+		SetAgentConversationsDispatcher(services.AgentConversations, services.Task, orchestratorSvc, log)
+	}
+
 	// ============================================
 	// OFFICE FEATURES + GLOBAL RUN SCHEDULING
 	// ============================================

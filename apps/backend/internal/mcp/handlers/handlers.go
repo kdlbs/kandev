@@ -312,12 +312,14 @@ type Handlers struct {
 	canvasAuthoringSvc CanvasAuthoringService
 
 	// Optional task-bound GitHub PR automation controls.
-	taskPRAutomation       TaskPRAutomationService
-	taskChangeLinks        TaskChangeLinkService
-	taskPRAutoFixOutcome   TaskPRAutoFixOutcomeService
-	remoteContributionSvc  RemoteContributionService
-	diagnosticBundles      DiagnosticBundleProvider
-	diagnosticMaterializer DiagnosticBundleMaterializer
+	taskPRAutomation            TaskPRAutomationService
+	taskChangeLinks             TaskChangeLinkService
+	taskChangeRequestReader     TaskChangeRequestReadService
+	taskChangeRequestAutomation TaskChangeRequestAutomationService
+	taskPRAutoFixOutcome        TaskPRAutoFixOutcomeService
+	remoteContributionSvc       RemoteContributionService
+	diagnosticBundles           DiagnosticBundleProvider
+	diagnosticMaterializer      DiagnosticBundleMaterializer
 	// Optional task-bound GitLab MR automation controls.
 	taskMRAutomation TaskMRAutomationService
 
@@ -496,9 +498,12 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
 	d.RegisterFunc(ws.ActionMCPListRepositories, h.handleListRepositories)
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
+	d.RegisterFunc(ws.ActionMCPGetTaskChangeRequests, h.handleGetTaskChangeRequests)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskChangeRequestAutomation, h.handleUpdateTaskChangeRequestAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPReportPRAutoFixOutcome, h.handleReportTaskPRAutoFixOutcome)
+	d.RegisterFunc(ws.ActionMCPReportTaskChangeRequestAutoFixOutcome, h.handleReportTaskChangeRequestAutoFixOutcome)
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
@@ -518,6 +523,8 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPLinkTaskPR, h.handleLinkTaskPR)
 	d.RegisterFunc(ws.ActionMCPUnlinkTaskPR, h.handleUnlinkTaskPR)
 	d.RegisterFunc(ws.ActionMCPReplaceTaskPR, h.handleReplaceTaskPR)
+	d.RegisterFunc(ws.ActionMCPManageTaskChangeRequest, h.handleManageTaskChangeRequest)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskChangeRequestAutomation, h.handleUpdateTaskChangeRequestAutomation)
 	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)
 	d.RegisterFunc(ws.ActionMCPRemoveTaskDependency, h.handleRemoveTaskDependency)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)

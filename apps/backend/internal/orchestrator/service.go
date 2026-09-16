@@ -1176,9 +1176,10 @@ type Service struct {
 	// dispatchingQueued tracks the pre-acceptance reservation for the exact
 	// queued message handed to an async worker. acceptedQueuedDispatch keeps
 	// the same ownership visible after the worker claims RUNNING until its turn
-	// settles, so Send Now cannot cancel or duplicate a successor that FIFO has
-	// already accepted. The two maps are managed by queued_dispatch.go and are
-	// arbitrated through cancelInFlight.
+	// settles, so late predecessor events cannot cancel or duplicate the FIFO
+	// successor. The live phase still allows Send Now to replace that successor
+	// after provider acceptance. The two maps are managed by
+	// queued_dispatch.go and are arbitrated through cancelInFlight.
 	dispatchingQueued      sync.Map
 	acceptedQueuedDispatch sync.Map
 	// queuedDispatchDrainPending records a boot-ready event that arrived while

@@ -522,6 +522,9 @@ const (
 	Host_SendMessage_FullMethodName                   = "/kandev.plugin.v1.Host/SendMessage"
 	Host_PreviewPluginOwnedTaskTree_FullMethodName    = "/kandev.plugin.v1.Host/PreviewPluginOwnedTaskTree"
 	Host_DeletePluginOwnedTaskTree_FullMethodName     = "/kandev.plugin.v1.Host/DeletePluginOwnedTaskTree"
+	Host_EnsureAgentConversation_FullMethodName       = "/kandev.plugin.v1.Host/EnsureAgentConversation"
+	Host_DispatchAgentConversation_FullMethodName     = "/kandev.plugin.v1.Host/DispatchAgentConversation"
+	Host_DeleteAgentConversation_FullMethodName       = "/kandev.plugin.v1.Host/DeleteAgentConversation"
 	Host_RespondToPermission_FullMethodName           = "/kandev.plugin.v1.Host/RespondToPermission"
 	Host_AnswerClarification_FullMethodName           = "/kandev.plugin.v1.Host/AnswerClarification"
 	Host_CancelClarification_FullMethodName           = "/kandev.plugin.v1.Host/CancelClarification"
@@ -636,6 +639,14 @@ type HostClient interface {
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	PreviewPluginOwnedTaskTree(ctx context.Context, in *PreviewPluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*PreviewPluginOwnedTaskTreeResponse, error)
 	DeletePluginOwnedTaskTree(ctx context.Context, in *DeletePluginOwnedTaskTreeRequest, opts ...grpc.CallOption) (*DeletePluginOwnedTaskTreeResponse, error)
+	// Agent conversations — capability agent_conversation. Ensure creates or
+	// repairs one hidden workflowless ephemeral task with a primary session per
+	// (plugin_id, workspace_id, conversation_key). Dispatch sends a prompt to an
+	// ensured conversation with stable occurrence idempotency and busy-session
+	// coalescing. Delete removes only conversations owned by this plugin.
+	EnsureAgentConversation(ctx context.Context, in *EnsureAgentConversationRequest, opts ...grpc.CallOption) (*EnsureAgentConversationResponse, error)
+	DispatchAgentConversation(ctx context.Context, in *DispatchAgentConversationRequest, opts ...grpc.CallOption) (*DispatchAgentConversationResponse, error)
+	DeleteAgentConversation(ctx context.Context, in *DeleteAgentConversationRequest, opts ...grpc.CallOption) (*DeleteAgentConversationResponse, error)
 	// Interaction responses — capability api_write:interactions. Each routes
 	// through the same first-party service the native UI uses, so the agent
 	// unblocks, the durable record turns terminal, and every surface converges
@@ -967,6 +978,36 @@ func (c *hostClient) DeletePluginOwnedTaskTree(ctx context.Context, in *DeletePl
 	return out, nil
 }
 
+func (c *hostClient) EnsureAgentConversation(ctx context.Context, in *EnsureAgentConversationRequest, opts ...grpc.CallOption) (*EnsureAgentConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnsureAgentConversationResponse)
+	err := c.cc.Invoke(ctx, Host_EnsureAgentConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DispatchAgentConversation(ctx context.Context, in *DispatchAgentConversationRequest, opts ...grpc.CallOption) (*DispatchAgentConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DispatchAgentConversationResponse)
+	err := c.cc.Invoke(ctx, Host_DispatchAgentConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DeleteAgentConversation(ctx context.Context, in *DeleteAgentConversationRequest, opts ...grpc.CallOption) (*DeleteAgentConversationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteAgentConversationResponse)
+	err := c.cc.Invoke(ctx, Host_DeleteAgentConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) RespondToPermission(ctx context.Context, in *RespondToPermissionRequest, opts ...grpc.CallOption) (*RespondToPermissionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RespondToPermissionResponse)
@@ -1106,6 +1147,14 @@ type HostServer interface {
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	PreviewPluginOwnedTaskTree(context.Context, *PreviewPluginOwnedTaskTreeRequest) (*PreviewPluginOwnedTaskTreeResponse, error)
 	DeletePluginOwnedTaskTree(context.Context, *DeletePluginOwnedTaskTreeRequest) (*DeletePluginOwnedTaskTreeResponse, error)
+	// Agent conversations — capability agent_conversation. Ensure creates or
+	// repairs one hidden workflowless ephemeral task with a primary session per
+	// (plugin_id, workspace_id, conversation_key). Dispatch sends a prompt to an
+	// ensured conversation with stable occurrence idempotency and busy-session
+	// coalescing. Delete removes only conversations owned by this plugin.
+	EnsureAgentConversation(context.Context, *EnsureAgentConversationRequest) (*EnsureAgentConversationResponse, error)
+	DispatchAgentConversation(context.Context, *DispatchAgentConversationRequest) (*DispatchAgentConversationResponse, error)
+	DeleteAgentConversation(context.Context, *DeleteAgentConversationRequest) (*DeleteAgentConversationResponse, error)
 	// Interaction responses — capability api_write:interactions. Each routes
 	// through the same first-party service the native UI uses, so the agent
 	// unblocks, the durable record turns terminal, and every surface converges
@@ -1219,6 +1268,15 @@ func (UnimplementedHostServer) PreviewPluginOwnedTaskTree(context.Context, *Prev
 }
 func (UnimplementedHostServer) DeletePluginOwnedTaskTree(context.Context, *DeletePluginOwnedTaskTreeRequest) (*DeletePluginOwnedTaskTreeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeletePluginOwnedTaskTree not implemented")
+}
+func (UnimplementedHostServer) EnsureAgentConversation(context.Context, *EnsureAgentConversationRequest) (*EnsureAgentConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EnsureAgentConversation not implemented")
+}
+func (UnimplementedHostServer) DispatchAgentConversation(context.Context, *DispatchAgentConversationRequest) (*DispatchAgentConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DispatchAgentConversation not implemented")
+}
+func (UnimplementedHostServer) DeleteAgentConversation(context.Context, *DeleteAgentConversationRequest) (*DeleteAgentConversationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteAgentConversation not implemented")
 }
 func (UnimplementedHostServer) RespondToPermission(context.Context, *RespondToPermissionRequest) (*RespondToPermissionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RespondToPermission not implemented")
@@ -1808,6 +1866,60 @@ func _Host_DeletePluginOwnedTaskTree_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_EnsureAgentConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnsureAgentConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).EnsureAgentConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_EnsureAgentConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).EnsureAgentConversation(ctx, req.(*EnsureAgentConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DispatchAgentConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DispatchAgentConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DispatchAgentConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DispatchAgentConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DispatchAgentConversation(ctx, req.(*DispatchAgentConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DeleteAgentConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteAgentConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DeleteAgentConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DeleteAgentConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DeleteAgentConversation(ctx, req.(*DeleteAgentConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_RespondToPermission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RespondToPermissionRequest)
 	if err := dec(in); err != nil {
@@ -1992,6 +2104,18 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeletePluginOwnedTaskTree",
 			Handler:    _Host_DeletePluginOwnedTaskTree_Handler,
+		},
+		{
+			MethodName: "EnsureAgentConversation",
+			Handler:    _Host_EnsureAgentConversation_Handler,
+		},
+		{
+			MethodName: "DispatchAgentConversation",
+			Handler:    _Host_DispatchAgentConversation_Handler,
+		},
+		{
+			MethodName: "DeleteAgentConversation",
+			Handler:    _Host_DeleteAgentConversation_Handler,
 		},
 		{
 			MethodName: "RespondToPermission",

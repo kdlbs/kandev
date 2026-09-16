@@ -349,9 +349,6 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *message
 	} else {
 		reservation = s.markQueuedDispatchInFlightWithSourceLocked(sessionID, claim.Dispatch.ID, nil)
 	}
-	if reservation != nil {
-		reservation.liveEligible.Store(true)
-	}
 	if !s.launchSendNowClaim(claim, reservation) {
 		if restoreErr := s.restoreSendNowClaimWithRetry(context.Background(), claim); restoreErr != nil {
 			s.logger.Error("failed to restore send-now claim after service shutdown",

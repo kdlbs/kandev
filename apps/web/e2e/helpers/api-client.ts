@@ -718,6 +718,7 @@ export class ApiClient {
       model: string;
       fallback_model?: string;
       auto_fallback?: boolean;
+      require_exact_model?: boolean;
       auto_approve?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
@@ -732,6 +733,7 @@ export class ApiClient {
       model: opts.model,
       fallback_model: opts.fallback_model,
       auto_fallback: opts.auto_fallback,
+      require_exact_model: opts.require_exact_model,
       auto_approve: opts.auto_approve,
       mode: opts.mode,
       config_options: opts.config_options,
@@ -762,6 +764,9 @@ export class ApiClient {
     patch: {
       name?: string;
       model?: string;
+      fallback_model?: string;
+      auto_fallback?: boolean;
+      require_exact_model?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
@@ -1442,6 +1447,7 @@ export class ApiClient {
       repositoryId?: string;
       startedAt?: string;
       completedAt?: string;
+      errorMessage?: string;
       commandCount?: number;
       metadata?: Record<string, unknown>;
     },
@@ -1455,6 +1461,7 @@ export class ApiClient {
     if (opts.repositoryId !== undefined) body.repository_id = opts.repositoryId;
     if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
     if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
+    if (opts.errorMessage !== undefined) body.error_message = opts.errorMessage;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
     return this.request("POST", "/api/v1/_test/task-sessions", body);
@@ -2929,6 +2936,18 @@ export class ApiClient {
     enabled: boolean,
   ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
     return this.wsRequest("message.queue.auto_run.set", {
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
+      enabled,
+    });
+  }
+
+  async setQueueAutoMerge(
+    identity: QueueSessionIdentityInput,
+    enabled: boolean,
+  ): Promise<{ session_id: string; auto_merge_enabled: boolean }> {
+    return this.wsRequest("message.queue.auto_merge.set", {
       task_id: identity.taskId,
       session_id: identity.sessionId,
       session_incarnation_id: identity.sessionIncarnationId,
