@@ -177,6 +177,7 @@ export function CreateGrantDialog({ workspaceId, onCreated }: Props) {
       setOpen(false);
       setCoordinatorTaskId("");
       setScopeKind("workspace");
+      setScopeId("");
       setCapInsp(false);
       setCapOrch(false);
       setCapExecute(false);

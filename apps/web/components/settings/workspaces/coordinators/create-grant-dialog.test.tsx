@@ -8,6 +8,7 @@ const NOTE_INPUT = "grant-note-input";
 const CREATE_GRANT_BUTTON = "create-grant-button";
 const SUBMIT_BUTTON = "grant-create-submit";
 const EXECUTE_CAPABILITY = "grant-cap-execute";
+const SCOPE_ID_INPUT = "grant-scope-id-input";
 
 const mocks = vi.hoisted(() => ({
   createWorkspaceCoordinatorGrant: vi.fn(),
@@ -120,5 +121,22 @@ describe("CreateGrantDialog", () => {
     expect(inputValue(TASK_ID_INPUT)).toBe("");
     expect(inputValue(NOTE_INPUT)).toBe("");
     expect(checkboxState(EXECUTE_CAPABILITY)).toBe("false");
+  });
+
+  it("clears a workflow scope ID after a successful create", async () => {
+    renderDialog();
+    fillTaskId();
+    selectCapability();
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByText("Workflow"));
+    fireEvent.change(screen.getByTestId(SCOPE_ID_INPUT), { target: { value: "workflow-1" } });
+    fireEvent.click(screen.getByTestId(SUBMIT_BUTTON));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "New Coordinator Grant" })).toBeNull(),
+    );
+    fireEvent.click(screen.getByTestId(CREATE_GRANT_BUTTON));
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByText("Workflow"));
+    expect(inputValue(SCOPE_ID_INPUT)).toBe("");
   });
 });
