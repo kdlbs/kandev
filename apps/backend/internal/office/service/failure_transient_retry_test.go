@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -14,6 +16,21 @@ import (
 // (routingerr's provider-neutral network_unavailable rule) — the fixture
 // used throughout this file for "a retryable blip".
 const transientMessage = "connection reset by peer"
+
+// assertScheduledRetryNear pins the exact AC-OFFICE-RUNTIME-001.9 backoff
+// value ("5s then 10s"), not just that a retry was scheduled at all
+// (Review round 3, R3-3: collapsing officeLegacyTransientBackoff to
+// {1ms, 1ms} passed every prior assertion in this file).
+func assertScheduledRetryNear(t *testing.T, got *time.Time, want time.Duration) {
+	t.Helper()
+	if got == nil {
+		t.Fatal("expected scheduled_retry_at to be set")
+	}
+	const tolerance = 2 * time.Second
+	if delta := time.Until(*got); delta < want-tolerance || delta > want+tolerance {
+		t.Fatalf("scheduled_retry_at = now+%v, want approximately now+%v", delta, want)
+	}
+}
 
 // TestHandleAgentFailure_TransientDoesNotCountTowardAutoPause is AC-4.2's
 // stated observable: a classified-transient post-start failure on the
@@ -27,7 +44,7 @@ func TestHandleAgentFailure_TransientDoesNotCountTowardAutoPause(t *testing.T) {
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-transient")
 	run := queueAndReadRun(t, svc, "agent-transient", taskID)
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, nil)
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -53,9 +70,7 @@ func TestHandleAgentFailure_TransientDoesNotCountTowardAutoPause(t *testing.T) {
 	if refreshed.Status != service.RunStatusQueued {
 		t.Fatalf("run status = %q, want %q", refreshed.Status, service.RunStatusQueued)
 	}
-	if refreshed.ScheduledRetryAt == nil {
-		t.Fatal("expected scheduled_retry_at to be set")
-	}
+	assertScheduledRetryNear(t, refreshed.ScheduledRetryAt, 5*time.Second)
 	if refreshed.RetryCount != 1 {
 		t.Fatalf("retry_count = %d, want 1", refreshed.RetryCount)
 	}
@@ -75,8 +90,12 @@ func TestHandleAgentFailure_TransientRetryBounded(t *testing.T) {
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-transient-bounded")
 	run := queueAndReadRun(t, svc, "agent-transient-bounded", taskID)
 
+	// AC-OFFICE-RUNTIME-001.9's stated backoff: 5s on the first retry, 10s
+	// on the second.
+	wantDelay := []time.Duration{5 * time.Second, 10 * time.Second}
+
 	for i := 0; i < 2; i++ {
-		wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, nil)
+		wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
 		if err != nil {
 			t.Fatalf("handle failure %d: %v", i, err)
 		}
@@ -90,6 +109,7 @@ func TestHandleAgentFailure_TransientRetryBounded(t *testing.T) {
 		if refreshed.RetryCount != i+1 {
 			t.Fatalf("attempt %d: retry_count = %d, want %d", i, refreshed.RetryCount, i+1)
 		}
+		assertScheduledRetryNear(t, refreshed.ScheduledRetryAt, wantDelay[i])
 		// Simulate the dispatcher re-claiming the requeued run for its
 		// next launch attempt, the precondition every production caller
 		// of HandleAgentFailure actually has.
@@ -99,7 +119,7 @@ func TestHandleAgentFailure_TransientRetryBounded(t *testing.T) {
 		run = refreshed
 	}
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, nil)
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
 	if err != nil {
 		t.Fatalf("handle failure (bound): %v", err)
 	}
@@ -128,7 +148,7 @@ func TestHandleAgentFailure_NonTransientUnchanged(t *testing.T) {
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-non-transient")
 	run := queueAndReadRun(t, svc, "agent-non-transient", taskID)
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, "boom", nil)
+	wrote, err := svc.HandleAgentFailure(ctx, run, "boom", "", nil)
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -171,7 +191,7 @@ func TestHandleAgentFailure_UnlaunchableMessageNotRetried(t *testing.T) {
 	run := queueAndReadRun(t, svc, "agent-unlaunchable", taskID)
 
 	const msg = "scheduler cannot launch run: no task starter is configured"
-	wrote, err := svc.HandleAgentFailure(ctx, run, msg, nil)
+	wrote, err := svc.HandleAgentFailure(ctx, run, msg, "", nil)
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -205,7 +225,7 @@ func TestHandleAgentFailure_StaleRunNotRetried(t *testing.T) {
 	svc.ExecSQL(t, `UPDATE runs SET requested_at = ? WHERE id = ?`, staleRequestedAt, run.ID)
 	run.RequestedAt = staleRequestedAt
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, nil)
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -255,7 +275,7 @@ func TestHandleAgentFailure_ClaimStaleRunNotRetried(t *testing.T) {
 	svc.ExecSQL(t, `UPDATE runs SET requested_at = ? WHERE id = ?`, requestedAt, run.ID)
 	run.RequestedAt = requestedAt
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, nil)
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -303,7 +323,7 @@ func TestHandleAgentFailure_ProviderErrorMessagePreferred(t *testing.T) {
 		OccurredAt: time.Now().UTC(),
 	}
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, "Overloaded", providerErr)
+	wrote, err := svc.HandleAgentFailure(ctx, run, "Overloaded", "", providerErr)
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -343,7 +363,7 @@ func TestHandleAgentFailure_TransientRetryClearsDeadSession(t *testing.T) {
 	svc.ExecSQL(t, `UPDATE runs SET session_id = ? WHERE id = ?`, deadSessionID, run.ID)
 	run.SessionID = deadSessionID
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, nil)
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -357,5 +377,157 @@ func TestHandleAgentFailure_TransientRetryClearsDeadSession(t *testing.T) {
 	}
 	if refreshed.SessionID != "" {
 		t.Fatalf("session_id = %q, want empty: a relaunch must not resolve the dead session from the failed attempt", refreshed.SessionID)
+	}
+}
+
+// TestHandleAgentFailure_ProviderIDRequiredForTransientClassification pins
+// review round 3 finding R3-1: routingerr's provider rules are matched
+// before the provider-neutral rules, so classifying a raw provider rate
+// limit string without the agent id misses "claude.stderr.rate.v1" and
+// falls back to an unretryable agent_runtime_error — the canonical
+// transient failure AC-4.2 exists to cover, silently un-covered. Threading
+// the agent id ("claude-acp", which has provider rules) must retry; the
+// identical message with no agent id must not.
+func TestHandleAgentFailure_ProviderIDRequiredForTransientClassification(t *testing.T) {
+	const rateLimitMessage = "rate limit exceeded"
+
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-rate-limit-id")
+	taskID := "task-rate-limit-id"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-rate-limit-id")
+	run := queueAndReadRun(t, svc, "agent-rate-limit-id", taskID)
+
+	wrote, err := svc.HandleAgentFailure(ctx, run, rateLimitMessage, "claude-acp", nil)
+	if err != nil {
+		t.Fatalf("handle failure (with agent id): %v", err)
+	}
+	if wrote {
+		t.Fatal("wrote = true, want false: claude-acp's provider rule should have classified transient")
+	}
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusQueued {
+		t.Fatalf("run status = %q, want %q", refreshed.Status, service.RunStatusQueued)
+	}
+
+	svc.ExecSQL(t, `UPDATE runs SET status = 'claimed', claimed_at = ? WHERE id = ?`,
+		time.Now().UTC(), refreshed.ID)
+	refreshed.Status = service.RunStatusClaimed
+
+	createTestAgent(t, svc, "ws-1", "agent-rate-limit-no-id")
+	taskID2 := "task-rate-limit-no-id"
+	insertSyntheticTask(t, svc, taskID2, "ws-1", "agent-rate-limit-no-id")
+	run2 := queueAndReadRun(t, svc, "agent-rate-limit-no-id", taskID2)
+
+	wrote2, err := svc.HandleAgentFailure(ctx, run2, rateLimitMessage, "", nil)
+	if err != nil {
+		t.Fatalf("handle failure (no agent id): %v", err)
+	}
+	if !wrote2 {
+		t.Fatal("wrote = false, want true: without a provider id the same message classifies unclassified, not transient")
+	}
+	refreshed2, err := svc.GetRun(ctx, run2.ID)
+	if err != nil {
+		t.Fatalf("get run 2: %v", err)
+	}
+	if refreshed2.Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q", refreshed2.Status, service.RunStatusFailed)
+	}
+}
+
+// TestHandleAgentFailure_ScheduleRetryErrorFallsThroughToTerminal pins
+// review round 3 finding R3-3: tryLegacyTransientRetry releases the
+// checkout and clears agent-working before calling ScheduleRetry, then
+// returns false on a write error expecting the caller to run terminal
+// accounting. Nothing previously proved that fallthrough happens rather
+// than the failure vanishing between MarkRunFailed and the retry write. A
+// trigger targets exactly the column ScheduleRetry sets and MarkRunFailed
+// does not, so MarkRunFailed's own write still succeeds.
+func TestHandleAgentFailure_ScheduleRetryErrorFallsThroughToTerminal(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-schedule-retry-error")
+	taskID := "task-schedule-retry-error"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-schedule-retry-error")
+	run := queueAndReadRun(t, svc, "agent-schedule-retry-error", taskID)
+
+	svc.ExecSQL(t, `
+		CREATE TRIGGER block_schedule_retry_test
+		BEFORE UPDATE OF retry_count ON runs
+		BEGIN
+			SELECT RAISE(FAIL, 'retry_count update blocked for test');
+		END`)
+
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
+	if err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	if !wrote {
+		t.Fatal("wrote = false, want true: a ScheduleRetry error must fall through to terminal accounting")
+	}
+
+	agent, err := svc.GetAgentInstance(ctx, "agent-schedule-retry-error")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.ConsecutiveFailures != 1 {
+		t.Fatalf("consecutive_failures = %d, want 1 (the failure must count, not vanish)", agent.ConsecutiveFailures)
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q", refreshed.Status, service.RunStatusFailed)
+	}
+}
+
+// TestAgentFailedEvent_ThreadsAgentIDThroughToTransientRetry drives the
+// real production call site end-to-end: publishing an AgentFailed bus
+// event (not calling HandleAgentFailure directly, as every other test in
+// this file does) with AgentLifecycleData.AgentID set to a provider with
+// rules. R3-1 added a second identity threaded from the decoded event
+// through to the classifier; this is the only test that would catch it
+// being mis-threaded or dropped between the subscriber and the retry.
+func TestAgentFailedEvent_ThreadsAgentIDThroughToTransientRetry(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-e2e-ratelimit")
+	taskID := "task-agent-failed-e2e"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-e2e-ratelimit")
+	run := queueAndReadRun(t, svc, "agent-e2e-ratelimit", taskID)
+
+	event := bus.NewEvent(events.AgentFailed, "orchestrator", service.AgentLifecycleData{
+		TaskID:         taskID,
+		AgentID:        "claude-acp",
+		AgentProfileID: "agent-e2e-ratelimit",
+		ErrorMessage:   "rate limit exceeded",
+		ProviderError: &streams.ProviderError{
+			Source:     "adapter",
+			Message:    "rate limit exceeded",
+			OccurredAt: time.Now().UTC(),
+		},
+	})
+	if err := eb.Publish(ctx, events.AgentFailed, event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusQueued {
+		t.Fatalf("run status = %q, want %q: a rate limit from an agent id with provider rules must retry",
+			refreshed.Status, service.RunStatusQueued)
+	}
+	if refreshed.RetryCount != 1 {
+		t.Fatalf("retry_count = %d, want 1", refreshed.RetryCount)
 	}
 }

@@ -893,7 +893,10 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 		"error_message": msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
-	wrote, err := si.svc.HandleAgentFailure(ctx, run, msg, nil)
+	// No lifecycle event backs a wiring fault, so there is no agent id to
+	// thread — the message classifies unclassified from text alone either
+	// way (TestHandleAgentFailure_UnlaunchableMessageNotRetried).
+	wrote, err := si.svc.HandleAgentFailure(ctx, run, msg, "", nil)
 	if err != nil {
 		si.logger.Error("failed to handle agent failure for unlaunchable run",
 			zap.String("run_id", run.ID), zap.Error(err))

@@ -67,6 +67,7 @@ func (s *Service) HandleAgentFailure(
 	ctx context.Context,
 	run *models.Run,
 	errorMessage string,
+	agentID string,
 	providerError *streams.ProviderError,
 ) (bool, error) {
 	wrote, err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage)
@@ -80,7 +81,7 @@ func (s *Service) HandleAgentFailure(
 		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return false, nil
 	}
-	if s.tryLegacyTransientRetry(ctx, run, errorMessage, providerError) {
+	if s.tryLegacyTransientRetry(ctx, run, errorMessage, agentID, providerError) {
 		return false, nil
 	}
 	// MarkRunFailed bypasses transitionRunTerminal (this is the office v1
@@ -135,12 +136,23 @@ func (s *Service) HandleAgentFailure(
 // caller must not also run the terminal-shape/counter/auto-pause
 // accounting below — that is exactly what returning true signals.
 //
-// providerError.Message and .ResetAt are preferred over the bare
-// errorMessage when present: a raw agent stderr string ("Overloaded", a
-// bare 429) usually classifies unclassified, while the structured
-// provider error carries the signal the classifier needs.
+// providerError.Message is preferred over the bare errorMessage when
+// present: a raw agent stderr string ("Overloaded", a bare 429) usually
+// classifies unclassified, while the structured provider error carries
+// the signal the classifier needs.
+//
+// Provider rules are keyed by agent ID (agentID, e.g. "claude-acp"), not
+// providerError.ProviderID — some adapters put a model-provider id there
+// instead, which has no rules of its own. The provider id is substituted
+// only when the agent id itself has no rules and the provider id does,
+// mirroring classifyKanbanFailure's resolution
+// (internal/orchestrator/event_handlers_transient.go). Without this, a
+// provider rate limit — the canonical transient failure this retry exists
+// to cover — falls through the provider-specific rules unmatched and
+// classifies as an unretryable agent_runtime_error instead (Review round
+// 3, R3-1).
 func (s *Service) tryLegacyTransientRetry(
-	ctx context.Context, run *models.Run, errorMessage string,
+	ctx context.Context, run *models.Run, errorMessage string, agentID string,
 	providerError *streams.ProviderError,
 ) bool {
 	if run.RetryCount >= officeLegacyTransientMaxRetries {
@@ -160,17 +172,20 @@ func (s *Service) tryLegacyTransientRetry(
 		return false
 	}
 	message := errorMessage
-	var resetHint *time.Time
+	providerID := agentID
 	if providerError != nil {
 		if providerError.Message != "" {
 			message = providerError.Message
 		}
-		resetHint = providerError.ResetAt
+		if id := providerError.ProviderID; id != "" &&
+			!routingerr.HasProviderRules(providerID) && routingerr.HasProviderRules(id) {
+			providerID = id
+		}
 	}
 	classified := routingerr.Classify(routingerr.Input{
-		Phase:     routingerr.PhaseStreaming,
-		Stderr:    message,
-		ResetHint: resetHint,
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: providerID,
+		Stderr:     message,
 	})
 	if !classified.ShouldShortRetry() {
 		return false
