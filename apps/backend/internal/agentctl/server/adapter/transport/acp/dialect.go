@@ -28,6 +28,7 @@ type acpDialect struct {
 	mcpToolCall          func(map[string]any, any) (mcpToolCallFrame, bool)
 	mcpToolResult        func(any) (any, bool)
 	responseAttemptReset func(map[string]any) bool
+	permissionToolName   func(*string, map[string]any, string, string) *string
 }
 
 type mcpToolCallFrame struct {
@@ -59,6 +60,8 @@ func newACPDialect(agentID string) acpDialect {
 		return newGrokACPDialect()
 	case codexAgentID:
 		return newCodexACPDialect()
+	case claudeAgentID:
+		return newClaudeACPDialect()
 	case mockAgentID:
 		return newMockACPDialect()
 	}
@@ -154,4 +157,16 @@ func (d acpDialect) promptUsage(
 
 func (d acpDialect) resetsResponseAttempt(meta map[string]any) bool {
 	return d.responseAttemptReset != nil && d.responseAttemptReset(meta)
+}
+
+func (d acpDialect) normalizePermissionToolName(
+	name *string,
+	meta map[string]any,
+	title string,
+	actionType string,
+) *string {
+	if d.permissionToolName == nil {
+		return name
+	}
+	return d.permissionToolName(name, meta, title, actionType)
 }
