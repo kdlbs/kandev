@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -84,6 +84,8 @@ export function WorkflowMoveOptionsFields({
   instructionsRows = 4,
 }: WorkflowMoveOptionsFieldsProps) {
   const { t } = useTranslation();
+  const resetContextId = useId();
+  const skipStepPromptId = useId();
   const rowClass = isTouchSurface
     ? "flex items-center gap-2.5 min-h-11"
     : "flex items-start gap-2.5";
@@ -94,25 +96,31 @@ export function WorkflowMoveOptionsFields({
   );
   return (
     <div className={cn("grid min-w-0 gap-3 text-xs/relaxed", isTouchSurface && "text-sm/relaxed")}>
-      <label className={rowClass}>
+      <div className={rowClass}>
         <Checkbox
           className={checkboxClass}
           checked={draft.resetContext}
           onCheckedChange={(checked) => onDraftChange({ resetContext: checked === true })}
+          id={resetContextId}
           data-testid="workflow-move-reset-context"
         />
-        <span className="leading-snug">{t("task:workflowMoveResetContext")}</span>
-      </label>
+        <label className="cursor-pointer leading-snug" htmlFor={resetContextId}>
+          {t("task:workflowMoveResetContext")}
+        </label>
+      </div>
       <div className={rowClass}>
-        <label className="flex min-w-0 flex-1 items-start gap-2.5">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
           <Checkbox
             className={checkboxClass}
             checked={draft.skipStepPrompt}
             onCheckedChange={(checked) => onDraftChange({ skipStepPrompt: checked === true })}
+            id={skipStepPromptId}
             data-testid="workflow-move-skip-step-prompt"
           />
-          <span className="leading-snug">{t("task:workflowMoveSkipStepPrompt")}</span>
-        </label>
+          <label className="cursor-pointer leading-snug" htmlFor={skipStepPromptId}>
+            {t("task:workflowMoveSkipStepPrompt")}
+          </label>
+        </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
