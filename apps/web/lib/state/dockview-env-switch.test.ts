@@ -298,6 +298,13 @@ describe("performEnvSwitch fast-path group survival", () => {
     expect(order).toEqual(["add", "close"]);
   });
 
+});
+
+describe("performEnvSwitch fast-path sibling restoration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("restores sibling session tabs when the fast path replaces the outgoing session", () => {
     vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
 
@@ -363,6 +370,13 @@ describe("performEnvSwitch fast-path group survival", () => {
       }),
     );
     expect(closeStale).toHaveBeenCalledOnce();
+  });
+
+});
+
+describe("performEnvSwitch fast-path hidden sibling restoration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   it("does not restore a hidden sibling on the fast path", () => {

@@ -14,6 +14,7 @@ import {
   getManualRightWidth,
 } from "@/lib/local-storage";
 import { getLayoutProfileIdentity, type LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
+import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
@@ -806,6 +807,19 @@ type RestoreCustomLayoutParams = {
   set: StoreSet;
 };
 
+function visibleCustomLayoutSessions(opts: ApplyCustomLayoutOptions | undefined): {
+  activeSessionId: string | null;
+  sessionIds: string[];
+} {
+  const hiddenSessionIds = new Set(opts?.envId ? getEnvHiddenSessions(opts.envId) : []);
+  const activeSessionId = opts?.activeSessionId ?? null;
+  return {
+    activeSessionId:
+      activeSessionId && !hiddenSessionIds.has(activeSessionId) ? activeSessionId : null,
+    sessionIds: (opts?.sessionIds ?? []).filter((sessionId) => !hiddenSessionIds.has(sessionId)),
+  };
+}
+
 /**
  * Restore a saved custom layout onto the dockview API. New-format layouts
  * (with columns) are normalized (reusable session panels, chat materialization)
@@ -825,10 +839,11 @@ function restoreCustomLayout({
   if (state?.columns) {
     // Normalize first so both old saved layouts with session-specific panels
     // and newer reusable layouts with chat placeholders apply through one path.
+    const visibleSessions = visibleCustomLayoutSessions(opts);
     const activeState = materializeReusableChatPanel(
       normalizeReusableSessionPanels(state),
-      opts?.activeSessionId ?? null,
-      opts?.sessionIds ?? [],
+      visibleSessions.activeSessionId,
+      visibleSessions.sessionIds,
     );
     const savedWidths = resolveCustomLayoutPinnedWidths(activeState.columns, safeWidth);
     set({

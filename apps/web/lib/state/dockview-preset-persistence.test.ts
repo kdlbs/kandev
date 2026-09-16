@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Store integration coverage shares one mocked Dockview fixture. */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi } from "dockview-react";
 
@@ -16,6 +17,10 @@ vi.mock("@/lib/local-storage", () => ({
 
 vi.mock("@/lib/layout/panel-portal-manager", () => ({
   panelPortalManager: { releaseByEnv: vi.fn(), reconcile: vi.fn() },
+}));
+
+vi.mock("@/lib/env-hidden-sessions", () => ({
+  getEnvHiddenSessions: vi.fn(() => []),
 }));
 
 vi.mock("./dockview-scroll-preserve", () => ({
@@ -80,6 +85,7 @@ vi.mock("./layout-manager", async (importOriginal) => {
 });
 
 import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
+import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
 import {
   applyLayout,
@@ -618,6 +624,30 @@ describe("applyCustomLayout — session panel normalization", () => {
       SIBLING_SESSION_PANEL_ID,
     ]);
     expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
+  });
+
+  it("does not materialize a hidden sibling from a reusable custom layout", async () => {
+    const api = makeStoreApi();
+    vi.mocked(getEnvHiddenSessions).mockReturnValueOnce([SIBLING_SESSION_ID]);
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+
+    (
+      useDockviewStore.getState().applyCustomLayout as (
+        layout: ApplyCustomLayoutArg,
+        opts: { activeSessionId: string; sessionIds: string[]; envId: string },
+      ) => void
+    )(staleSessionLayout() as unknown as ApplyCustomLayoutArg, {
+      activeSessionId: NEW_SESSION_ID,
+      sessionIds: [SIBLING_SESSION_ID, NEW_SESSION_ID],
+      envId: CUSTOM_ENV_ID,
+    });
+
+    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    expect(appliedState?.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
+      NEW_SESSION_PANEL_ID,
+    ]);
+    expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
+    await flushRaf();
   });
 
   it("derives right panel visibility from the materialized custom layout", async () => {
