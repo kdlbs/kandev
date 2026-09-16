@@ -51,7 +51,7 @@ func TestTaskBoundaryCarrierMetadata_PrefersLiveClaimedRunOverStaleTaskCarrier(t
 		t.Fatalf("claim live run: %v (run=%v)", err, liveRun)
 	}
 
-	got := svc.TaskBoundaryCarrierMetadata(ctx, "parent-task")
+	got := svc.TaskBoundaryCarrierMetadata(ctx, "parent-task", agent.ID)
 
 	if got["office_carrier_creating_run_id"] != liveRun.ID {
 		t.Errorf("creating_run_id = %v, want the live run %q (not the stale forwarded value)",
@@ -63,6 +63,55 @@ func TestTaskBoundaryCarrierMetadata_PrefersLiveClaimedRunOverStaleTaskCarrier(t
 	}
 	if got["office_carrier_causation_id"] != liveRun.CausationID {
 		t.Errorf("causation_id = %v, want the live run's %q", got["office_carrier_causation_id"], liveRun.CausationID)
+	}
+}
+
+// TestTaskBoundaryCarrierMetadata_ScopesToCausingAgentWhenTwoAgentsHoldClaimsOnSameTask
+// proves the fix for the carrier lookup's task-only ambiguity: when two
+// different agents each hold a claimed run against the same task, the
+// resolved carrier must come from the causing agent's own claimed run,
+// not whichever of the two happened to claim most recently.
+func TestTaskBoundaryCarrierMetadata_ScopesToCausingAgentWhenTwoAgentsHoldClaimsOnSameTask(t *testing.T) {
+	svc, repo := newRunCausationFromTaskTestService(t)
+	ctx := context.Background()
+
+	agentA := runCausationTestAgent("worker-a", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agentA); err != nil {
+		t.Fatalf("create agent A: %v", err)
+	}
+	agentB := runCausationTestAgent("worker-b", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agentB); err != nil {
+		t.Fatalf("create agent B: %v", err)
+	}
+
+	seedOfficeTaskWithMetadata(t, repo, "shared-task", map[string]interface{}{
+		"unrelated_key": "value",
+	})
+
+	// agentA claims first, then agentB claims second — an unscoped
+	// most-recently-claimed lookup would pick agentB's run regardless of
+	// which agent is actually causing this resolution.
+	if err := svc.QueueRunWithActor(ctx, agentA.ID, "task_assigned", `{"task_id":"shared-task"}`, "",
+		models.ActorKindAgent, "agent-a-actor", ""); err != nil {
+		t.Fatalf("queue agentA's run: %v", err)
+	}
+	runA, err := svc.ClaimNextRun(ctx)
+	if err != nil || runA == nil {
+		t.Fatalf("claim agentA's run: %v (run=%v)", err, runA)
+	}
+	if err := svc.QueueRunWithActor(ctx, agentB.ID, "task_assigned", `{"task_id":"shared-task"}`, "",
+		models.ActorKindAgent, "agent-b-actor", ""); err != nil {
+		t.Fatalf("queue agentB's run: %v", err)
+	}
+	runB, err := svc.ClaimNextRun(ctx)
+	if err != nil || runB == nil {
+		t.Fatalf("claim agentB's run: %v (run=%v)", err, runB)
+	}
+
+	got := svc.TaskBoundaryCarrierMetadata(ctx, "shared-task", agentA.ID)
+	if got["office_carrier_creating_run_id"] != runA.ID {
+		t.Errorf("creating_run_id = %v, want agentA's run %q (not agentB's more-recently-claimed %q)",
+			got["office_carrier_creating_run_id"], runA.ID, runB.ID)
 	}
 }
 
@@ -118,7 +167,7 @@ func TestCreateChildTaskCarrier_DepthAdvancesAcrossChainedChildTasks(t *testing.
 	// create_child_task fires from parentRun's own turn: the resolved
 	// carrier must come from parentRun (depth 1), not from parent-task's
 	// original depth-0 carrier.
-	childCarrier := svc.TaskBoundaryCarrierMetadata(ctx, "parent-task")
+	childCarrier := svc.TaskBoundaryCarrierMetadata(ctx, "parent-task", agent.ID)
 	if childCarrier["office_carrier_causation_depth"] != parentRun.CausationDepth {
 		t.Fatalf("child task carrier depth = %v, want %d (parentRun's own depth)",
 			childCarrier["office_carrier_causation_depth"], parentRun.CausationDepth)

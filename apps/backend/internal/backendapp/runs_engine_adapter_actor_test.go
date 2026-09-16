@@ -302,9 +302,10 @@ func TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarr
 
 	// queue_run fires from that live turn, targeting a different agent.
 	if _, err := adapter.QueueRun(ctx, workflowengine.QueueRunRequest{
-		AgentProfileID: targetAgent.ID,
-		TaskID:         taskID,
-		Reason:         "on_enter",
+		AgentProfileID:        targetAgent.ID,
+		TaskID:                taskID,
+		Reason:                "on_enter",
+		CausingAgentProfileID: turnAgent.ID,
 	}); err != nil {
 		t.Fatalf("QueueRun: %v", err)
 	}
@@ -332,6 +333,84 @@ func TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarr
 	}
 	if queued.CausationID != liveRun.CausationID {
 		t.Errorf("causation_id = %q, want the live run's %q", queued.CausationID, liveRun.CausationID)
+	}
+}
+
+// TestRunsServiceEngineAdapter_QueueRunScopesToCausingAgentWhenTwoAgentsHoldClaimsOnSameTask
+// proves the carrier lookup's task-only ambiguity is fixed end to end
+// through the production adapter: when two different agents each hold a
+// claimed run against the same task, the queued run's lineage must come
+// from the causing agent's own claimed run, not whichever of the two
+// happened to claim most recently.
+func TestRunsServiceEngineAdapter_QueueRunScopesToCausingAgentWhenTwoAgentsHoldClaimsOnSameTask(t *testing.T) {
+	adapter, taskSvc, officeRepo, officeSvc := newRunsEngineAdapterActorTestHarness(t)
+	ctx := context.Background()
+
+	turnAgentA := &officemodels.AgentInstance{
+		WorkspaceID: "ws-1", Name: "turn-agent-a",
+		Role: officemodels.AgentRoleWorker, Status: officemodels.AgentStatusIdle,
+	}
+	turnAgentB := &officemodels.AgentInstance{
+		WorkspaceID: "ws-1", Name: "turn-agent-b",
+		Role: officemodels.AgentRoleWorker, Status: officemodels.AgentStatusIdle,
+	}
+	targetAgent := &officemodels.AgentInstance{
+		WorkspaceID: "ws-1", Name: "target-agent",
+		Role: officemodels.AgentRoleWorker, Status: officemodels.AgentStatusIdle,
+	}
+	for _, a := range []*officemodels.AgentInstance{turnAgentA, turnAgentB, targetAgent} {
+		if err := officeRepo.CreateAgentInstance(ctx, a); err != nil {
+			t.Fatalf("create agent %s: %v", a.Name, err)
+		}
+	}
+
+	taskID := seedTaskWithCarrier(t, taskSvc, nil)
+
+	// turnAgentA claims first, then turnAgentB claims second — an
+	// unscoped most-recently-claimed lookup would pick turnAgentB's run
+	// regardless of which agent is actually causing this queue_run.
+	if err := officeSvc.QueueRunWithActor(ctx, turnAgentA.ID, "task_assigned",
+		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "agent-a-actor", ""); err != nil {
+		t.Fatalf("queue turnAgentA's run: %v", err)
+	}
+	runA, err := officeSvc.ClaimNextRun(ctx)
+	if err != nil || runA == nil {
+		t.Fatalf("claim turnAgentA's run: %v (run=%v)", err, runA)
+	}
+	if err := officeSvc.QueueRunWithActor(ctx, turnAgentB.ID, "task_assigned",
+		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "agent-b-actor", ""); err != nil {
+		t.Fatalf("queue turnAgentB's run: %v", err)
+	}
+	runB, err := officeSvc.ClaimNextRun(ctx)
+	if err != nil || runB == nil {
+		t.Fatalf("claim turnAgentB's run: %v (run=%v)", err, runB)
+	}
+
+	if _, err := adapter.QueueRun(ctx, workflowengine.QueueRunRequest{
+		AgentProfileID:        targetAgent.ID,
+		TaskID:                taskID,
+		Reason:                "on_enter",
+		CausingAgentProfileID: turnAgentA.ID,
+	}); err != nil {
+		t.Fatalf("QueueRun: %v", err)
+	}
+
+	runs, err := officeRepo.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var queued *officemodels.Run
+	for _, r := range runs {
+		if r.AgentProfileID == targetAgent.ID {
+			queued = r
+		}
+	}
+	if queued == nil {
+		t.Fatalf("expected a run queued against target agent; got %d runs total", len(runs))
+	}
+	if queued.ParentRunID != runA.ID {
+		t.Errorf("parent_run_id = %q, want turnAgentA's run %q (not turnAgentB's more-recently-claimed %q)",
+			queued.ParentRunID, runA.ID, runB.ID)
 	}
 }
 

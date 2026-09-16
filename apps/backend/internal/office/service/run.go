@@ -221,15 +221,21 @@ func (s *Service) TaskBoundaryCarrier(ctx context.Context, taskID string) TaskBo
 // taskID is the action's own task, not a fixed "root" — create_child_task
 // can chain, so the carrier must advance one hop deeper each time or the
 // depth ceiling never engages. The run currently claimed against taskID
-// (the run executing this action's turn) is that hop: its own lineage is
-// carried forward directly via carrierMetadataFromRun, the same way
-// CreateOfficeSubtaskAsAgent resolves a live causing run. Only when no run
-// is claimed against taskID — a genuinely sessionless trigger — does this
-// fall back to forwarding taskID's own already-resolved carrier verbatim,
+// by causingAgentProfileID (the agent executing this action's turn) is
+// that hop: its own lineage is carried forward directly via
+// carrierMetadataFromRun, the same way CreateOfficeSubtaskAsAgent resolves
+// a live causing run. Scoping the claimed-run lookup to
+// causingAgentProfileID (rather than taking whichever run was claimed
+// most recently against the task) matters because more than one agent can
+// hold a claimed run on the same task at once. When
+// causingAgentProfileID is empty, or holds no claimed run on taskID, this
+// falls back to forwarding taskID's own already-resolved carrier verbatim,
 // which cannot advance depth on its own.
-func (s *Service) TaskBoundaryCarrierMetadata(ctx context.Context, taskID string) map[string]interface{} {
-	if run, err := s.repo.GetClaimedRunByTaskID(ctx, taskID); err == nil && run != nil {
-		return carrierMetadataFromRun(run)
+func (s *Service) TaskBoundaryCarrierMetadata(ctx context.Context, taskID, causingAgentProfileID string) map[string]interface{} {
+	if causingAgentProfileID != "" {
+		if run, err := s.repo.GetClaimedRunByTaskAndAgent(ctx, taskID, causingAgentProfileID); err == nil && run != nil {
+			return carrierMetadataFromRun(run)
+		}
 	}
 	return carrierMetadataFromCarrier(s.TaskBoundaryCarrier(ctx, taskID))
 }
@@ -237,14 +243,19 @@ func (s *Service) TaskBoundaryCarrierMetadata(ctx context.Context, taskID string
 // TaskBoundaryCarrierForRunQueue resolves the causation carrier a run
 // queued because of taskID should carry, applying the same live-run
 // preference as TaskBoundaryCarrierMetadata: the run currently claimed
-// against taskID (the turn actually queuing this run, e.g. the workflow
-// engine's queue_run action) wins over taskID's own already-resolved
-// carrier, so depth keeps advancing hop by hop across a chain instead of
-// freezing at the task's original creating-run carrier. Only when no run
-// is claimed against taskID does this fall back to taskID's own carrier.
-func (s *Service) TaskBoundaryCarrierForRunQueue(ctx context.Context, taskID string) TaskBoundaryCarrier {
-	if run, err := s.repo.GetClaimedRunByTaskID(ctx, taskID); err == nil && run != nil {
-		return carrierFromRun(run)
+// against taskID by causingAgentProfileID (the turn actually queuing this
+// run, e.g. the workflow engine's queue_run action) wins over taskID's
+// own already-resolved carrier, so depth keeps advancing hop by hop
+// across a chain instead of freezing at the task's original creating-run
+// carrier. Scoping to causingAgentProfileID keeps this unambiguous when
+// more than one agent holds a claimed run on the same task. When
+// causingAgentProfileID is empty, or holds no claimed run on taskID, this
+// falls back to taskID's own carrier.
+func (s *Service) TaskBoundaryCarrierForRunQueue(ctx context.Context, taskID, causingAgentProfileID string) TaskBoundaryCarrier {
+	if causingAgentProfileID != "" {
+		if run, err := s.repo.GetClaimedRunByTaskAndAgent(ctx, taskID, causingAgentProfileID); err == nil && run != nil {
+			return carrierFromRun(run)
+		}
 	}
 	return s.TaskBoundaryCarrier(ctx, taskID)
 }

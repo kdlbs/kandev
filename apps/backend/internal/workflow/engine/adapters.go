@@ -49,6 +49,13 @@ type QueueRunRequest struct {
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+	// CausingAgentProfileID is the agent profile whose turn is executing
+	// this action — the trigger session's own agent, not AgentProfileID
+	// (the run being queued). A carrier resolver uses it to scope a
+	// task's currently claimed run to the agent that actually holds it,
+	// since more than one agent can hold a claimed run on the same task.
+	// Empty for triggers with no session (e.g. a routine or wakeup fire).
+	CausingAgentProfileID string
 }
 
 // ParticipantInfo is a lightweight projection of a workflow_step_participants
@@ -239,6 +246,13 @@ type ChildTaskSpec struct {
 	WorkflowID     string
 	StepID         string
 	AgentProfileID string
+	// CausingAgentProfileID is the agent profile whose turn is executing
+	// this action — the trigger session's own agent, not AgentProfileID
+	// (the child task's assignee). A carrier resolver uses it to scope
+	// the parent task's currently claimed run to the agent that actually
+	// holds it, since more than one agent can hold a claimed run on the
+	// same task. Empty for triggers with no session.
+	CausingAgentProfileID string
 }
 
 // TaskCreator is the engine's contract with whoever knows how to create a

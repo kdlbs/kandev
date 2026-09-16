@@ -152,7 +152,7 @@ func TestTaskBoundaryCarrierMetadata_RoundTripsThroughRealCarrier(t *testing.T) 
 		"office_carrier_actor_id":        "agent-1",
 	})
 
-	got := svc.TaskBoundaryCarrierMetadata(context.Background(), "parent-task")
+	got := svc.TaskBoundaryCarrierMetadata(context.Background(), "parent-task", "")
 	want := map[string]interface{}{
 		"office_carrier_causation_id":    "causation-1",
 		"office_carrier_causation_depth": 2,
@@ -179,7 +179,7 @@ func TestTaskBoundaryCarrierMetadata_NoCarrierResolvesToRootValues(t *testing.T)
 		"unrelated_key": "value",
 	})
 
-	got := svc.TaskBoundaryCarrierMetadata(context.Background(), "plain-task")
+	got := svc.TaskBoundaryCarrierMetadata(context.Background(), "plain-task", "")
 	if got["office_carrier_creating_run_id"] != "" {
 		t.Errorf("creating_run_id = %v, want empty (root)", got["office_carrier_creating_run_id"])
 	}

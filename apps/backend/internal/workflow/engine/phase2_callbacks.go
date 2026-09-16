@@ -97,12 +97,13 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 	}
 	for _, agentID := range agentIDs {
 		req := QueueRunRequest{
-			AgentProfileID: agentID,
-			TaskID:         taskID,
-			WorkflowStepID: workflowStepID,
-			Reason:         queueRunReason(in),
-			IdempotencyKey: idempotencyKey(in, agentID, taskID),
-			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
+			AgentProfileID:        agentID,
+			TaskID:                taskID,
+			WorkflowStepID:        workflowStepID,
+			Reason:                queueRunReason(in),
+			IdempotencyKey:        idempotencyKey(in, agentID, taskID),
+			Payload:               queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
+			CausingAgentProfileID: in.State.AgentProfileID,
 		}
 		if _, err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)

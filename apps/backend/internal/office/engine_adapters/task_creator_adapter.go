@@ -48,14 +48,16 @@ type ChildTaskCreateSpec struct {
 // created from it (the create_child_task workflow step action) can carry
 // the same causation lineage forward instead of silently rooting at
 // depth 0. The implementation prefers the run currently claimed against
-// the task id (the run executing this action) so depth advances one hop
-// per create_child_task call; it falls back to the task's own
-// already-resolved carrier only when no run is claimed against it.
-// Implemented in production by *office/service.Service. Optional: nil
-// means create_child_task never carries a carrier (pre-existing
+// the task id by causingAgentProfileID (the agent executing this action's
+// turn) so depth advances one hop per create_child_task call while
+// staying unambiguous when more than one agent holds a claimed run on the
+// same task; it falls back to the task's own already-resolved carrier
+// when causingAgentProfileID is empty or holds no claimed run on the
+// task. Implemented in production by *office/service.Service. Optional:
+// nil means create_child_task never carries a carrier (pre-existing
 // behaviour).
 type CarrierResolver interface {
-	TaskBoundaryCarrierMetadata(ctx context.Context, taskID string) map[string]interface{}
+	TaskBoundaryCarrierMetadata(ctx context.Context, taskID, causingAgentProfileID string) map[string]interface{}
 }
 
 // TaskCreatorAdapter implements engine.TaskCreator. Given a parent task id
@@ -106,7 +108,7 @@ func (a *TaskCreatorAdapter) CreateChildTask(
 	}
 	var carrierMetadata map[string]interface{}
 	if a.Carrier != nil {
-		carrierMetadata = a.Carrier.TaskBoundaryCarrierMetadata(ctx, parentTaskID)
+		carrierMetadata = a.Carrier.TaskBoundaryCarrierMetadata(ctx, parentTaskID, spec.CausingAgentProfileID)
 	}
 	taskID, err := a.TaskService.CreateChildTask(ctx, parent, ChildTaskCreateSpec{
 		Title:                 spec.Title,

@@ -1857,11 +1857,12 @@ type runsServiceEngineAdapter struct {
 	// request: req.TaskID is always populated (the engine resolves it
 	// before calling QueueRun), so this path resolves the task-boundary
 	// carrier off it, preferring the run currently claimed against that
-	// task over the task's own already-resolved carrier — the same
-	// live-run preference office/service.TaskBoundaryCarrierMetadata
-	// applies for create_child_task, needed here so a chain of queue_run
-	// actions also advances the causation depth hop by hop. Nil only in
-	// tests that construct this adapter directly.
+	// task by req.CausingAgentProfileID over the task's own
+	// already-resolved carrier — the same live-run preference
+	// office/service.TaskBoundaryCarrierMetadata applies for
+	// create_child_task, needed here so a chain of queue_run actions also
+	// advances the causation depth hop by hop. Nil only in tests that
+	// construct this adapter directly.
 	officeSvc *officeservice.Service
 }
 
@@ -1872,7 +1873,7 @@ func (a *runsServiceEngineAdapter) QueueRun(
 ) (workflowengine.QueueOutcome, error) {
 	var carrier officeservice.TaskBoundaryCarrier
 	if a.officeSvc != nil && req.TaskID != "" {
-		carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, req.TaskID)
+		carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, req.TaskID, req.CausingAgentProfileID)
 	}
 	if carrier.ActorKind == "" {
 		carrier.ActorKind = officemodels.ActorKindSystem
