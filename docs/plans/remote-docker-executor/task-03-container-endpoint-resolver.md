@@ -1,7 +1,7 @@
 ---
 id: "03-container-endpoint-resolver"
 title: "Container endpoint resolver"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -84,4 +84,23 @@ None. Reuses `StartPortForward` and `SSHPortForwarder` as they are.
 
 ## Results
 
-_Not started._
+- Added the `containerEndpointResolver` seam with a local implementation that
+  preserves today's behavior, including the container-IP fallback when the
+  published port cannot be read.
+- Added `remoteEndpointResolver`, which forwards each distinct published port
+  back to backend loopback once and reuses it for repeat lookups.
+- The remote resolver deliberately has no container-IP fallback. A remote
+  container's IP is on the remote daemon's network, so that fallback would
+  return an address that hangs on first use instead of naming the cause.
+- Propagated resolution errors out of `resolveContainerEndpoint` and both call
+  sites. The first wiring absorbed the error back into the container-IP
+  fallback, which silently defeated the fail-loudly property the remote
+  resolver exists to provide.
+- Forwards are session-scoped and closed together; a leaked forward outlives
+  its container and holds a listener for the backend's lifetime.
+- Concurrent resolution of the same port keeps the winning forward and closes
+  the loser rather than leaking it.
+- Verified with:
+  - `go test ./internal/agent/runtime/lifecycle/ -count=1 -race` (endpoint tests)
+  - `go test ./internal/agent/runtime/lifecycle/ -count=1` (50s, goleak clean)
+  - `golangci-lint run ./internal/agent/runtime/lifecycle/...` (0 issues)
