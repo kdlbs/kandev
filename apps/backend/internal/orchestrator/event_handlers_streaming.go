@@ -167,6 +167,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "thinking_streaming":
 		s.handleThinkingStreamingEvent(ctx, payload)
 
+	case streams.EventTypeResponseAttemptReset:
+		if !s.responseAttemptResetOwnsCurrentPrompt(payload) {
+			return
+		}
+		s.handleResponseAttemptReset(ctx, payload)
+
 	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
@@ -251,6 +257,51 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// short-circuits on it), so this is also a safe no-op for an ordinary
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func (s *Service) responseAttemptResetOwnsCurrentPrompt(
+	payload *lifecycle.AgentStreamEventPayload,
+) bool {
+	if payload == nil || payload.Data == nil || payload.Data.PromptGeneration == 0 {
+		return false
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	if !ok {
+		return false
+	}
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return generationOwner.OwnsPromptGeneration(
+		payload.SessionID,
+		executionID,
+		payload.Data.PromptGeneration,
+	)
+}
+
+func (s *Service) handleResponseAttemptReset(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if s.streamingRetractions == nil {
+		return
+	}
+	for _, messageID := range payload.Data.RetractedMessageIDs {
+		if messageID == "" {
+			continue
+		}
+		if err := s.streamingRetractions.DeleteMessage(ctx, messageID); err != nil {
+			s.logger.Warn("failed to retract abandoned response message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", payload.SessionID),
+				zap.String("execution_id", payload.ExecutionID),
+				zap.String("message_id", messageID),
+				zap.Error(err))
+		}
 	}
 }
 
@@ -1214,6 +1265,7 @@ func (s *Service) persistTaskSessionState(
 	nextState models.TaskSessionState,
 	errorMessage string,
 ) (*models.TaskSession, *time.Time, bool) {
+	priorState := session.State
 	if updater, ok := s.repo.(conditionalTaskSessionStateUpdater); ok {
 		changed, updatedAt, err := updater.UpdateTaskSessionStateIfCurrent(
 			ctx, sessionID, session.State, nextState, errorMessage,
@@ -1228,6 +1280,7 @@ func (s *Service) persistTaskSessionState(
 		persisted := taskSessionAfterStateWrite(session, nextState, errorMessage, updatedAt)
 		persisted = s.refreshTaskSessionOr(ctx, sessionID, persisted)
 		t := updatedAt.UTC()
+		s.releaseCeilingIfLeftPopulation(sessionID, priorState, nextState)
 		return persisted, &t, true
 	}
 
@@ -1236,6 +1289,7 @@ func (s *Service) persistTaskSessionState(
 		return session, nil, false
 	}
 	refreshed := s.refreshTaskSessionOr(ctx, sessionID, session)
+	s.releaseCeilingIfLeftPopulation(sessionID, priorState, nextState)
 	if refreshed.UpdatedAt.IsZero() {
 		return refreshed, nil, true
 	}
@@ -1425,6 +1479,8 @@ func (s *Service) persistBootstrapFailureMessage(
 	if s.messageCreator == nil {
 		return fmt.Errorf("bootstrap failure message creator is unavailable")
 	}
+	// Bootstrap failures occur before any turn started, so there is no failed
+	// turn to attach to — resolve the turn lazily via the empty turn ID.
 	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:           taskID,
 		SessionID:        sessionID,
@@ -1436,7 +1492,7 @@ func (s *Service) persistBootstrapFailureMessage(
 		AttemptID:        errorValue.AttemptID,
 		ErrorStamp:       errorValue.Stamp(),
 		Causes:           errorValue.Causes,
-	})
+	}, "")
 }
 
 func (s *Service) publishAcceptedTaskSessionState(
@@ -1469,7 +1525,27 @@ func (s *Service) publishAcceptedTaskSessionState(
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
 }
 
+// persistStrictTaskSessionState is transitionTaskSessionState's persistence
+// funnel — a second, independent funnel from persistTaskSessionState (AC-51).
+// It releases the ceiling reservation itself, after dispatching to whichever
+// branch actually performed the write, so the release applies uniformly
+// however the write was made.
 func (s *Service) persistStrictTaskSessionState(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	nextState models.TaskSessionState,
+	errorMessage string,
+) (bool, *models.TaskSession, *time.Time, error) {
+	priorState := session.State
+	changed, refreshed, updatedAt, err := s.persistStrictTaskSessionStateDispatch(ctx, sessionID, session, nextState, errorMessage)
+	if err == nil && changed {
+		s.releaseCeilingIfLeftPopulation(sessionID, priorState, nextState)
+	}
+	return changed, refreshed, updatedAt, err
+}
+
+func (s *Service) persistStrictTaskSessionStateDispatch(
 	ctx context.Context,
 	sessionID string,
 	session *models.TaskSession,
@@ -2571,6 +2647,19 @@ func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, ses
 		}
 	}
 	if isTerminalSessionState(session.State) {
+		return
+	}
+	if session.State == models.TaskSessionStateWaitingForInput &&
+		!s.isExecutionCompleted(sessionID, executionID) &&
+		s.sessionHasLiveClarification(ctx, sessionID) {
+		// Tool-stream events from the execution that opened a clarification can
+		// arrive while the MCP request is still blocked. Keep the durable input
+		// barrier visible until the user answers; the clarification handler owns
+		// the transition back to RUNNING.
+		s.logger.Debug("ignoring stream event while clarification is pending",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID))
 		return
 	}
 	if session.State == models.TaskSessionStateWaitingForInput && s.isExecutionCompleted(sessionID, executionID) {

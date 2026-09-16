@@ -28,6 +28,18 @@ class PRWalkthroughRenderTest(unittest.TestCase):
         self.data = json.loads(
             (self.skill / "references" / "example.json").read_text(encoding="utf-8")
         )
+        manifest_paths = {
+            item["file"]
+            for category in self.data["impact"].values()
+            for item in category.get("items", [])
+        }
+        manifest_paths.update(change["file"] for change in self.data["changes"])
+        manifest = {
+            "files": [{"path": path, "status": "M"} for path in sorted(manifest_paths)]
+        }
+        manifest_dir = self.worktree / ".pr-walkthrough" / "head-context"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
         self.env = {
             **os.environ,
             "PR_NUMBER": "42",
@@ -130,6 +142,22 @@ class PRWalkthroughRenderTest(unittest.TestCase):
         self.assertFalse((output / "pr-42.json").exists())
         self.assertFalse((output / "pr-42.html").exists())
         self.assertIn("why.problem is required", result.stderr)
+
+    def test_managed_renderer_requires_new_impact_contract(self) -> None:
+        data = json.loads(json.dumps(self.data))
+        del data["impact"]
+        result = self.run_render(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("impact is required for new walkthroughs", result.stderr)
+
+    def test_managed_renderer_requires_manifest_evidence_path(self) -> None:
+        data = json.loads(json.dumps(self.data))
+        data["impact"]["ux"] = {"status": "changed", "items": [{
+            "surface": "Settings", "before": "Old", "after": "New", "file": "not-changed.ts"
+        }]}
+        result = self.run_render(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("changed file in the prepared manifest", result.stderr)
 
 
 if __name__ == "__main__":

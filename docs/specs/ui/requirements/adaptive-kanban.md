@@ -109,7 +109,7 @@ desktop.
   parent titles never widen the card; visible text truncates while the full available title remains
   accessible.
 - Phone Kanban retains its single focused workflow-and-step view, workflow/step drawer, swipe navigation,
-  fixed drop targets, direct card navigation, and safe-area FAB.
+  native card scrolling, menu-based task moves, direct card navigation, and safe-area FAB.
 - Tablet Kanban retains its two-column snap-scrolling composition and existing task actions.
 
 ## Failure modes

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -320,37 +321,151 @@ func (s *Server) getTaskPRAutomationHandler() server.ToolHandlerFunc {
 	}
 }
 
-func (s *Server) taskPRLinkHandler(name string) server.ToolHandlerFunc {
+func (s *Server) manageTaskChangeRequestHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		actions := map[string]string{
-			"link_task_pr_kandev":    ws.ActionMCPLinkTaskPR,
-			"unlink_task_pr_kandev":  ws.ActionMCPUnlinkTaskPR,
-			"replace_task_pr_kandev": ws.ActionMCPReplaceTaskPR,
-		}
-		action, ok := actions[name]
-		if !ok {
-			return mcp.NewToolResultError("unsupported task PR link operation"), nil
+		operation, err := req.RequireString("operation")
+		if err != nil || (operation != "link" && operation != "unlink" && operation != "replace") {
+			return mcp.NewToolResultError("operation must be link, unlink, or replace"), nil
 		}
 		taskID, err := req.RequireString(mcpKeyTaskID)
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
+		if errMsg := validateChangeRequestOldIdentity(operation, req.GetArguments()); errMsg != "" {
+			return mcp.NewToolResultError(errMsg), nil
+		}
 		payload := map[string]interface{}{
+			"operation":      operation,
 			mcpKeyTaskID:     taskID,
 			"caller_task_id": s.taskID,
 		}
-		for _, key := range []string{"provider", "repository_id", "number", "old_provider", "old_repository_id", "old_number"} {
+		for _, key := range []string{
+			"provider", "repository_id", "number", "old_provider", "old_repository_id", "old_number",
+		} {
 			if value, ok := req.GetArguments()[key]; ok {
 				payload[key] = value
 			}
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPManageTaskChangeRequest, payload, &result); err != nil {
+			return backendToolError(err), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) getTaskChangeRequestsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(
+			ctx, ws.ActionMCPGetTaskChangeRequests, map[string]interface{}{"task_id": s.taskID}, &result,
+		); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func (s *Server) updateTaskChangeRequestAutomationHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+		if errMsg := validateChangeRequestAutomationTarget(args); errMsg != "" {
+			return mcp.NewToolResultError(errMsg), nil
+		}
+		payload := make(map[string]interface{}, 2)
+		for _, key := range []string{"target", "patch"} {
+			if value, ok := args[key]; ok {
+				payload[key] = value
+			}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskChangeRequestAutomation, payload, &result); err != nil {
+			return taskChangeRequestAutomationToolError(err), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func backendToolError(err error) *mcp.CallToolResult {
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) || backendErr.Details == nil {
+		return mcp.NewToolResultError(err.Error())
+	}
+	data, marshalErr := json.MarshalIndent(backendErr.Details, "", "  ")
+	if marshalErr != nil {
+		return mcp.NewToolResultError(err.Error())
+	}
+	result := mcp.NewToolResultStructured(backendErr.Details, string(data))
+	result.IsError = true
+	return result
+}
+
+func taskChangeRequestAutomationToolError(err error) *mcp.CallToolResult {
+	return backendToolError(err)
+}
+
+// validateChangeRequestOldIdentity enforces the operation/old-identity
+// exclusivity the portable schema can no longer express: link and unlink reject
+// any old identity field, replace requires all three. It names the violated
+// constraint without echoing argument values.
+func validateChangeRequestOldIdentity(operation string, args map[string]interface{}) string {
+	oldFields := []string{"old_provider", "old_repository_id", "old_number"}
+	if operation == "replace" {
+		for _, key := range oldFields {
+			if _, ok := args[key]; !ok {
+				return "replace requires old_provider, old_repository_id, and old_number"
+			}
+		}
+		return ""
+	}
+	for _, key := range oldFields {
+		if _, ok := args[key]; ok {
+			return "old_provider, old_repository_id, and old_number are only valid for replace"
+		}
+	}
+	return ""
+}
+
+// validateChangeRequestAutomationTarget enforces the target scope exclusivity
+// and the association prompt exclusion the portable schema can no longer
+// express. An association target requires the change-request identity and
+// rejects providers; a task target requires providers and rejects that
+// identity; an association target cannot carry auto_fix_prompt_override.
+func validateChangeRequestAutomationTarget(args map[string]interface{}) string {
+	target, ok := args["target"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	identityFields := []string{"provider", "repository_id", "number"}
+	switch target["scope"] {
+	case "association":
+		for _, key := range identityFields {
+			if _, present := target[key]; !present {
+				return "an association target requires provider, repository_id, and number"
+			}
+		}
+		if _, present := target["providers"]; present {
+			return "providers is only valid for a task target"
+		}
+		if patch, ok := args["patch"].(map[string]interface{}); ok {
+			if _, present := patch["auto_fix_prompt_override"]; present {
+				return "auto_fix_prompt_override is only valid for a task target"
+			}
+		}
+	case "task":
+		if _, present := target["providers"]; !present {
+			return "a task target requires a providers array"
+		}
+		for _, key := range identityFields {
+			if _, present := target[key]; present {
+				return "provider, repository_id, and number are only valid for an association target"
+			}
+		}
+	}
+	return ""
 }
 
 func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
@@ -386,6 +501,14 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 }
 
 func (s *Server) reportTaskPRAutoFixOutcomeHandler() server.ToolHandlerFunc {
+	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportPRAutoFixOutcome)
+}
+
+func (s *Server) reportTaskChangeRequestAutoFixOutcomeHandler() server.ToolHandlerFunc {
+	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportTaskChangeRequestAutoFixOutcome)
+}
+
+func (s *Server) reportTaskAutoFixOutcomeHandler(action string) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		outcome := strings.TrimSpace(req.GetString("outcome", ""))
 		summary := strings.TrimSpace(req.GetString("summary", ""))
@@ -402,7 +525,7 @@ func (s *Server) reportTaskPRAutoFixOutcomeHandler() server.ToolHandlerFunc {
 			"summary":    summary,
 		}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPReportPRAutoFixOutcome, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

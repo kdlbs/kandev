@@ -50,6 +50,7 @@ results, including the shared recovery owner and phone touch-target checks.
 
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.8:** After manual or automatic recovery, the session error shall remain readable before later messages. It shall retain its original cause and occurrence time after reload.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.9:** Only the current unresolved failure shall offer recovery actions. Pending recovery shall not imply success. A later failure shall not reactivate controls on an older entry.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.10:** A recoverable failure that occurs after agent startup, such as a model provider rejecting a dispatched prompt, shall carry the same bounded, sanitized failure detail in its initially collapsed details disclosure as bootstrap and managed-runtime failures do. The detail shall be sanitized of URLs, credentials, and identifiers, and shall be omitted when sanitization leaves nothing usable, in which case the generic recovery card remains. This lets a user expand a short provider error, such as an invalid tool definition, without the raw detail appearing in the summary line.
 
 ## Session error history amendment
 

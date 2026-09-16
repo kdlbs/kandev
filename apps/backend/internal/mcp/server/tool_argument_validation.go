@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/mark3labs/mcp-go/mcp"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
@@ -52,6 +53,9 @@ func compileToolArgumentSchema(toolName string, tool mcp.Tool) (*jsonschema.Sche
 	var schemaDoc map[string]any
 	if err := json.Unmarshal(rawSchema, &schemaDoc); err != nil {
 		return nil, fmt.Errorf("decode schema: %w", err)
+	}
+	if err := toolschema.CheckPortableRoot(schemaDoc); err != nil {
+		return nil, err
 	}
 	schemaDoc["additionalProperties"] = false
 

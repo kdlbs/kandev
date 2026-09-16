@@ -21,6 +21,19 @@ func AutoIncrementIDColumn(driver string) string {
 	return "id INTEGER PRIMARY KEY AUTOINCREMENT"
 }
 
+// ByteOrderedText wraps a column or expression reference so ORDER BY compares
+// it byte-for-byte on every supported dialect, regardless of a database-level
+// locale collation. SQLite's TEXT columns already default to the BINARY
+// collation, so this is a no-op there; PostgreSQL's default template
+// collation can be locale-aware, so this appends an explicit COLLATE "C" to
+// force the same byte order there too.
+func ByteOrderedText(driver, expr string) string {
+	if IsPostgres(driver) {
+		return expr + ` COLLATE "C"`
+	}
+	return expr
+}
+
 // BoolToInt converts a boolean to an integer for SQL storage.
 func BoolToInt(value bool) int {
 	if value {

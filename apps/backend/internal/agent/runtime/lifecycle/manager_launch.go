@@ -1027,6 +1027,21 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if profileInfo != nil {
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
+
+	providerGatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(
+		ctx, profileInfo, agentConfig, models.ExecutorType(reqWithWorktree.ExecutorType).Runtime())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if providerKey != "" && providerKeyEnvVar != "" {
+		if env == nil {
+			env = map[string]string{}
+		}
+		// The profile-declared provider key wins over any inherited value so a
+		// stale shell-exported OPENAI_API_KEY cannot shadow it.
+		env[providerKeyEnvVar] = providerKey
+	}
+
 	execReq := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
 		TaskID:                         reqWithWorktree.TaskID,
@@ -1058,6 +1073,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
 		ComparisonTargets:              comparisonTargets,
+		ProviderGatewayAuth:            providerGatewayAuth,
 	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 
@@ -1194,6 +1210,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		SetupScript:                req.SetupScript,
 		RepoSetupScript:            repoSetupScript,
 		BaseBranch:                 req.BaseBranch,
+		IntegrationRef:             req.IntegrationRef,
 		DefaultBranch:              req.DefaultBranch,
 		CheckoutBranch:             req.CheckoutBranch,
 		PRNumber:                   req.PRNumber,
@@ -1230,6 +1247,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				RepositoryPath:             r.RepositoryPath,
 				RepoName:                   r.RepoName,
 				BaseBranch:                 r.BaseBranch,
+				IntegrationRef:             r.IntegrationRef,
 				DefaultBranch:              r.DefaultBranch,
 				CheckoutBranch:             r.CheckoutBranch,
 				PRNumber:                   r.PRNumber,

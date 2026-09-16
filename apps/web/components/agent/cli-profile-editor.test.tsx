@@ -193,6 +193,51 @@ describe("CliProfileEditor fallback settings", () => {
     const modelComboboxes = screen.getAllByTestId("profile-model-combobox-trigger");
     expect((modelComboboxes.at(-1) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("keeps dormant fallback values while exact model mode is enabled", () => {
+    const profile = {
+      id: toAgentProfileId("p-strict"),
+      name: "strict",
+      agentId: "claude",
+      agentDisplayName: "Claude",
+      model: MODEL_ID,
+      fallbackModel: "claude-opus-4",
+      autoFallback: true,
+      requireExactModel: true,
+      mode: "",
+      allowIndexing: false,
+      autoApprove: false,
+      cliFlags: [],
+      cliPassthrough: false,
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    };
+
+    render(
+      <StateProvider
+        initialState={{
+          settingsAgents: { items: [] },
+          availableAgents: {
+            items: [baseAvailableAgent],
+            tools: [],
+            loaded: true,
+            loading: false,
+          },
+        }}
+      >
+        <CliProfileEditor mode="edit" profile={profile} onSaved={vi.fn()} />
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("profile-fallback-settings-summary").textContent).toContain(
+      "Exact model required",
+    );
+    fireEvent.click(screen.getByTestId("profile-fallback-settings-trigger"));
+    expect(
+      screen.getByRole("switch", { name: "Fallback automatically to next model" }),
+    ).toHaveProperty("disabled", true);
+    expect(screen.getByRole("switch", { name: "Agent fallback" })).toHaveProperty("disabled", true);
+  });
 });
 
 describe("CliProfileEditor recommended flags", () => {

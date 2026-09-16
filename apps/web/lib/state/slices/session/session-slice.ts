@@ -98,6 +98,10 @@ function mergeMessageAtIndex(messages: Message[], message: Message): void {
   messages[index] = merged;
 }
 
+function isTransientRetryNotice(message: Message): boolean {
+  return message.type === "status" && message.metadata?.retrying === true;
+}
+
 /** Return a new messages array with the message matching `messageId` removed. */
 function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
@@ -324,8 +328,15 @@ function buildMessageActions(set: ImmerSet) {
     updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
       set((draft) => {
         for (const message of messages) {
-          const sessionMessages = draft.messages.bySession[message.session_id];
-          if (sessionMessages) mergeMessageAtIndex(sessionMessages, message);
+          let sessionMessages = draft.messages.bySession[message.session_id];
+          if (!sessionMessages && isTransientRetryNotice(message)) {
+            sessionMessages = draft.messages.bySession[message.session_id] = [];
+          }
+          if (sessionMessages) {
+            const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
+            if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
+            else if (isTransientRetryNotice(message)) sessionMessages.push(message);
+          }
           updatePromptMessage(draft, message);
         }
       }),

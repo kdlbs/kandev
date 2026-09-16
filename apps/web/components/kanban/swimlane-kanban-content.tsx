@@ -9,7 +9,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { MobileColumnTabs } from "./mobile-column-tabs";
 import { SwipeableColumns } from "./swipeable-columns";
-import { MobileDropTargets } from "./mobile-drop-targets";
 import { KanbanDragSurface } from "./kanban-drag-surface";
 import { getDesktopEmptyState } from "./desktop-auto-hidden-empty-state";
 import { useOrphanDisplay } from "./swimlane-orphan-display";
@@ -124,7 +123,6 @@ function MobileKanbanLayout({
   onDeleteTask,
   onArchiveTask,
   moveTaskToStep,
-  activeTask,
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
@@ -133,14 +131,10 @@ function MobileKanbanLayout({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
-  activeTaskId,
-  keyboardDraft,
-  onCardKeyDown,
   mobileWorkflowNavigation,
 }: SharedKanbanLayoutProps & {
   activeIndex: number;
   onIndexChange: (index: number) => void;
-  activeTask: Task | null;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
 }) {
   const taskCounts = useMemo(() => {
@@ -151,7 +145,6 @@ function MobileKanbanLayout({
     return counts;
   }, [steps, tasks]);
 
-  const currentStepId = steps[activeIndex]?.id ?? null;
   const allStepsAutoHidden = areAllEmptyStepsAutoHidden(steps, moveTargetSteps);
 
   return (
@@ -193,16 +186,8 @@ function MobileKanbanLayout({
           onSelectRange={onSelectRange}
           isMultiSelectMode={isMultiSelectMode}
           externalLinkAvailability={externalLinkAvailability}
-          activeTaskId={activeTaskId}
-          keyboardDraft={keyboardDraft}
-          onCardKeyDown={onCardKeyDown}
         />
       )}
-      <MobileDropTargets
-        steps={moveTargetSteps}
-        currentStepId={currentStepId}
-        isDragging={!!activeTask}
-      />
     </div>
   );
 }
@@ -373,7 +358,6 @@ function renderKanbanLayout({
   sharedProps,
   activeIndex,
   setActiveIndex,
-  activeTask,
   mobileWorkflowNavigation,
 }: {
   isMobile: boolean;
@@ -381,7 +365,6 @@ function renderKanbanLayout({
   sharedProps: SharedKanbanLayoutProps;
   activeIndex: number;
   setActiveIndex: (index: number) => void;
-  activeTask: Task | null;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
 }): React.ReactNode {
   if (isMobile) {
@@ -390,7 +373,6 @@ function renderKanbanLayout({
         {...sharedProps}
         activeIndex={activeIndex}
         onIndexChange={setActiveIndex}
-        activeTask={activeTask}
         mobileWorkflowNavigation={mobileWorkflowNavigation}
       />
     );
@@ -487,7 +469,6 @@ export function SwimlaneKanbanContent({
     sharedProps,
     activeIndex,
     setActiveIndex,
-    activeTask: drag.activeTask,
     mobileWorkflowNavigation,
   });
 

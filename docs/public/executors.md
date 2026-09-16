@@ -101,32 +101,24 @@ Review the selected bundles before saving the profile.
 ### Model selection in remote executors
 
 The host model probe helps edit a profile, but it is not the launch authority.
-At launch, the selected executor's advertised ACP catalog decides the model.
-For profiles without automatic fallback, Kandev applies this deterministic
-order:
+At launch, the selected executor's advertised ACP catalog decides whether
+Kandev sends the saved model. Profiles are compatible by default. When the
+saved model is absent, Kandev can use an advertised explicit fallback, one
+unique bracketed variation, or the executor's current or default model. An
+automatic-fallback profile continues with the provider default and ignores its
+saved explicit fallback. Kandev writes one warning to task chat when it uses a
+different model.
 
-1. An exact advertised model ID.
-2. An advertised explicit fallback.
-3. One unique advertised bracketed variation of the saved model.
-4. The agent's current or default model.
+Enable **Require exact model** on a profile when a substitution is not allowed.
+The executor must advertise and accept the saved model before the first prompt.
+An unavailable model, empty or unsupported catalog, or failed apply stops the
+session before inference. The session error reports the requested model, the
+effective model when known, and a stable reason. Kandev does not send an
+unadvertised model or rewrite the saved profile model.
 
-For profiles with automatic fallback enabled, an absent saved model keeps the
-legacy behavior: Kandev ignores the explicit fallback and does not infer a
-variation. It uses the agent's current or default model instead.
-
-For example, a saved `opus` model uses `opus[1m]` when that is the only
-advertised variation. With both `opus[270k]` and `opus[1m, fast]`, Kandev
-does not infer a choice and uses the agent's current or default model instead.
-It treats model IDs as case-sensitive and variation text as opaque.
-
-Kandev writes one warning to task chat when the effective model differs from
-the saved model. The warning can list the requested model, effective model,
-agent, executor, and executor profile. It also tells you to check executor
-credentials, copied agent configuration, and the agent version. Kandev does
-not rewrite the saved profile model, including after applying a unique
-variation.
-Portable configuration can improve parity, but it does not guarantee equal
-host and executor model catalogs.
+A missing host-probe model remains an advisory warning and does not disable
+profile selection. Portable configuration can improve parity, but it does not
+guarantee equal host and executor model catalogs.
 
 ### Script behavior is runtime-specific
 
@@ -167,6 +159,13 @@ its ambient environment. Git's credential helper selects the lease whose HTTPS h
 exactly match the repository. A broker-aware `gh` shim redeems the primary repository lease for
 each invocation, sets `GH_TOKEN` only on the child `gh` process, and isolates CLI configuration
 from the host.
+
+For Local and Worktree tasks, managed credentials cover Kandev's checkout operations and the
+launched task processes. Per-repository setup scripts still receive executor-profile and repository
+environment bindings, user-configured Git settings, and Kandev's managed build cache, but Kandev
+removes broker leases and generated Git and `gh` helper routing before those scripts start. If a
+repository setup script needs authenticated GitHub access, configure an explicit scoped profile or
+repository credential, or select **Inherit executor Git credentials** and configure the host.
 
 When the workspace uses a GitHub App, the redeemed installation token is minted for that one
 repository. On a multi-repository task, Git can redeem each repository's lease, but App-backed

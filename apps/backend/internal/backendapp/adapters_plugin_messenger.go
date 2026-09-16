@@ -2,8 +2,10 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,6 +29,8 @@ type messengerTaskSvc interface {
 	GetTaskSession(ctx context.Context, sessionID string) (*taskmodels.TaskSession, error)
 	GetPrimarySession(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 	CreateMessage(ctx context.Context, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error)
+	CreateMessageIdempotent(ctx context.Context, id string, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error)
+	GetMessageWithPromptIndex(ctx context.Context, id string) (*taskmodels.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
 	WaitForSessionReady(ctx context.Context, sessionID string) error
 }
@@ -117,16 +121,75 @@ func (a pluginsTaskMessengerAdapter) startOrPromptSession(ctx context.Context, t
 	recorded := a.recordUserMessage(ctx, taskID, session.ID, text, metadata)
 	if shouldStartMessagedSession(session) {
 		if _, err := a.orch.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, text, true, false, true, nil, nil); err != nil {
-			a.deleteRecordedMessage(ctx, recorded)
+			_ = a.deleteRecordedMessage(ctx, recorded)
 			return plugins.PluginMessageResult{}, fmt.Errorf("failed to start session: %w", err)
 		}
 		return plugins.PluginMessageResult{SessionID: session.ID, Status: "started"}, nil
 	}
 	if err := a.promptWithResume(ctx, taskID, session.ID, text); err != nil {
-		a.deleteRecordedMessage(ctx, recorded)
+		_ = a.deleteRecordedMessage(ctx, recorded)
 		return plugins.PluginMessageResult{}, err
 	}
 	return plugins.PluginMessageResult{SessionID: session.ID, Status: "sent"}, nil
+}
+
+// StartOrPromptIdempotent is the agent-conversation dispatcher's delivery
+// primitive (see internal/task/service's agentConversationDispatcher
+// interface): it starts a never-launched session or prompts/resumes an idle
+// one, exactly like startOrPromptSession, but records the user message with
+// a caller-supplied idempotencyID via CreateMessageIdempotent instead of
+// always minting a new one. A durable occurrence claim means a successful
+// dispatch never reaches this method twice. An existing message row therefore
+// identifies a failed marker compensation; it is removed before retrying the
+// runtime delivery. The caller (AgentConversationService) has already
+// confirmed the session is not RUNNING/STARTING before calling this — session
+// is passed in rather than re-resolved.
+func (a pluginsTaskMessengerAdapter) StartOrPromptIdempotent(ctx context.Context, taskID string, session *taskmodels.TaskSession, text, source, idempotencyID string) (string, error) {
+	// A committed row for this id means another caller already recorded this
+	// occurrence. Normally the durable occurrence claim prevents this path
+	// after a successful dispatch. If a prior dispatch failed while compensating
+	// its marker, remove that stale marker before retrying the delivery.
+	existing, err := a.tasks.GetMessageWithPromptIndex(ctx, idempotencyID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("check existing dispatch message: %w", err)
+	}
+	if err == nil && existing != nil {
+		if err := a.deleteRecordedMessage(ctx, existing); err != nil {
+			return "", fmt.Errorf("reconcile failed dispatch message: %w", err)
+		}
+	}
+
+	metadata := map[string]interface{}{"source": source}
+	recorded, err := a.tasks.CreateMessageIdempotent(ctx, idempotencyID, &taskservice.CreateMessageRequest{
+		TaskSessionID: session.ID,
+		TaskID:        taskID,
+		Content:       text,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to record idempotent message: %w", err)
+	}
+	if shouldStartMessagedSession(session) {
+		if _, err := a.orch.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, text, true, false, true, nil, nil); err != nil {
+			if cleanupErr := a.deleteRecordedMessage(ctx, recorded); cleanupErr != nil {
+				return "", fmt.Errorf("failed to start session: %w; failed to remove dispatch marker: %v", err, cleanupErr)
+			}
+			return "", fmt.Errorf("failed to start session: %w", err)
+		}
+		return "started", nil
+	}
+	if err := a.promptWithResume(ctx, taskID, session.ID, text); err != nil {
+		var accepted interface{ DetachedResumeAccepted() bool }
+		if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
+			return "sent", nil
+		}
+		if cleanupErr := a.deleteRecordedMessage(ctx, recorded); cleanupErr != nil {
+			return "", fmt.Errorf("%w; failed to remove dispatch marker: %v", err, cleanupErr)
+		}
+		return "", err
+	}
+	return "sent", nil
 }
 
 // promptWithResume dispatches the prompt, resuming the agent process first when
@@ -173,13 +236,17 @@ func (a pluginsTaskMessengerAdapter) recordUserMessage(ctx context.Context, task
 	return message
 }
 
-func (a pluginsTaskMessengerAdapter) deleteRecordedMessage(ctx context.Context, message *taskmodels.Message) {
+func (a pluginsTaskMessengerAdapter) deleteRecordedMessage(ctx context.Context, message *taskmodels.Message) error {
 	if message == nil {
-		return
+		return nil
 	}
-	if err := a.tasks.DeleteMessage(ctx, message.ID); err != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := a.tasks.DeleteMessage(cleanupCtx, message.ID); err != nil {
 		a.log.Warn("plugins: failed to delete recorded message after failed SendMessage")
+		return err
 	}
+	return nil
 }
 
 // shouldStartMessagedSession reports whether a message targets a session that

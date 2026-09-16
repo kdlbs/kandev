@@ -166,6 +166,7 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		RepositoryID:           repo.ID,
 		RepositoryPath:         repo.LocalPath,
 		BaseBranch:             tr.BaseBranch,
+		IntegrationRef:         taskRepositoryIntegrationRef(tr),
 		FallbackBaseBranch:     repo.DefaultBranch,
 		CheckoutBranch:         tr.CheckoutBranch,
 		WorktreeBranchPrefix:   repo.WorktreeBranchPrefix,
@@ -177,6 +178,16 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		BranchSlug:             slug,
 	}
 	return req, env, session, slug, true, nil
+}
+
+func taskRepositoryIntegrationRef(taskRepo *models.TaskRepository) string {
+	if taskRepo == nil {
+		return ""
+	}
+	if taskRepo.BranchPolicyPullRequestTarget != "" {
+		return taskRepo.BranchPolicyPullRequestTarget
+	}
+	return taskRepo.BaseBranch
 }
 
 func taskRepositoryBranchTemplate(repo *models.Repository, taskRepo *models.TaskRepository) string {

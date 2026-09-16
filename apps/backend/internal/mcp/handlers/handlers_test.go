@@ -2196,6 +2196,9 @@ func (m *mockSessionLauncher) QueueUserPrompt(context.Context, string, string, s
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
 
+func (m *mockSessionLauncher) CheckQueueAdmissionReadiness(context.Context, messagequeue.QueueSessionIdentity) {
+}
+
 // QueueAndInterruptForPeerMessage always reports a successful immediate
 // dispatch with a fake queued entry; tests exercising other outcomes
 // (failure, not-dispatched) use fakeOrchestrator in message_task_test.go

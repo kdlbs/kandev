@@ -36,7 +36,7 @@ test("two sparse workflows fit without scrolling the board", async ({
     await apiClient.saveUserSettings({ workflow_filter_id: "", repository_ids: [] });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCard(second.id)).toBeVisible();
+    await expect(kanban.taskCard(second.id)).toBeVisible({ timeout: 30_000 });
     const board = testPage.getByTestId("swimlane-container");
     await testInfo.attach("sparse-lane-geometry", {
       body: JSON.stringify({

@@ -17,6 +17,8 @@ const effortTriggerTestId = "config-option-trigger-effort";
 const modelSettingsButtonName = "Model settings";
 const providerModelId = "gpt-5.6-sol";
 const providerModelName = "GPT-5.6-Sol";
+const copilotModelId = "claude-opus-5";
+const copilotModelName = "Claude Opus 5";
 const optionDescription = "Controls how much reasoning the model performs.";
 const effortOptionName = "Reasoning Effort";
 const makeModelOptions = (count: number) =>
@@ -304,6 +306,38 @@ describe("ModelConfigSelector filtering", () => {
     expect(configOptionToModelOptions(modelConfig).map((model) => model.id)).toEqual([
       providerModelId,
       "gpt-5.6-terra",
+    ]);
+  });
+
+  it("drops a description that duplicates the model name and falls back to the id", () => {
+    const modelConfig: SelectConfigOption = {
+      type: "select",
+      id: "model",
+      name: "Model",
+      currentValue: copilotModelId,
+      category: "model",
+      options: [{ value: copilotModelId, name: copilotModelName, description: copilotModelName }],
+    };
+
+    expect(configOptionToModelOptions(modelConfig)).toEqual([
+      { id: copilotModelId, name: copilotModelName, description: copilotModelId },
+    ]);
+  });
+
+  it("keeps a distinct provider description", () => {
+    const modelConfig: SelectConfigOption = {
+      type: "select",
+      id: "model",
+      name: "Model",
+      currentValue: providerModelId,
+      category: "model",
+      options: [
+        { value: providerModelId, name: providerModelName, description: "Frontier coding model." },
+      ],
+    };
+
+    expect(configOptionToModelOptions(modelConfig)).toEqual([
+      { id: providerModelId, name: providerModelName, description: "Frontier coding model." },
     ]);
   });
 

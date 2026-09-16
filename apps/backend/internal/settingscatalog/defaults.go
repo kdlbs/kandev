@@ -742,6 +742,7 @@ func profileDomain() DomainDescriptor {
 			profileWritable("agent_profile.model", "model", "Model", "string", "Preferred model. Empty inherits the provider default.", false),
 			profileWritable("agent_profile.fallback_model", "fallback_model", "Fallback model", "string", "Optional fallback model.", false),
 			profileWritable("agent_profile.auto_fallback", "auto_fallback", "Automatic fallback", "boolean", "Enable automatic fallback behavior.", false),
+			profileWritable("agent_profile.require_exact_model", "require_exact_model", "Require exact model", "boolean", "Require the configured model to be advertised and applied.", false),
 			profileWritable("agent_profile.mode", "mode", "Mode", "string", "Agent operating mode.", false),
 			profileWritable("agent_profile.config_options", "config_options", "Configuration options", "object", "Typed provider options. Supplied maps replace the saved map.", true),
 			profileWritable("agent_profile.allow_indexing", "allow_indexing", "Allow indexing", "boolean", "Legacy compatibility permission.", false),
