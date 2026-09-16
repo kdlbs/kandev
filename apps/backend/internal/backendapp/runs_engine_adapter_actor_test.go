@@ -14,7 +14,10 @@ package backendapp
 
 import (
 	"context"
+	"expvar"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -26,6 +29,7 @@ import (
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeservice "github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -33,6 +37,25 @@ import (
 	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+// readLaunchActorMissingCounter sums every office_launch_actor_missing_total
+// entry whose label starts with prefix. Prefix match keeps the assertion
+// robust against other reasons/tests sharing the process-wide expvar map.
+func readLaunchActorMissingCounter(t *testing.T, prefix string) int64 {
+	t.Helper()
+	var total int64
+	shared.LaunchActorMissingTotal.Do(func(kv expvar.KeyValue) {
+		if !strings.HasPrefix(kv.Key, prefix) {
+			return
+		}
+		n, err := strconv.ParseInt(kv.Value.String(), 10, 64)
+		if err != nil {
+			t.Fatalf("counter %q value not int: %s", kv.Key, kv.Value.String())
+		}
+		total += n
+	})
+	return total
+}
 
 func newRunsEngineAdapterActorTestHarness(t *testing.T) (
 	*runsServiceEngineAdapter, *taskservice.Service, *officesqlite.Repository, *officeservice.Service,
@@ -309,5 +332,59 @@ func TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarr
 	}
 	if queued.CausationID != liveRun.CausationID {
 		t.Errorf("causation_id = %q, want the live run's %q", queued.CausationID, liveRun.CausationID)
+	}
+}
+
+// TestRunsServiceEngineAdapter_QueueRunNoCarrierDeclaresSystemActorExplicitly
+// pins AC-OFFICE-RUN-CAUSATION-001.23 for the one case
+// TestRunsServiceEngineAdapter_QueueRunNoCarrierRootsAsSystemActor doesn't
+// reach: a task with neither a task-boundary carrier nor a live claimed run.
+// TaskBoundaryCarrierForRunQueue resolves a zero-value carrier for that
+// task, so ActorKind reaches runs/service.QueueRun empty and
+// normalizeActor's missing-actor fallback silently absorbs it — landing on
+// the same system-actor root the caller wanted, but only via the counter
+// that exists to flag an enqueue path that never declared a source. This
+// path does have a source (the task carrier resolver, which is exactly the
+// "wake caused by a task" row in the design's actor-source table); it
+// should say so rather than tripping the fallback.
+func TestRunsServiceEngineAdapter_QueueRunNoCarrierDeclaresSystemActorExplicitly(t *testing.T) {
+	adapter, taskSvc, officeRepo, _ := newRunsEngineAdapterActorTestHarness(t)
+	ctx := context.Background()
+
+	agent := &officemodels.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "assignee-agent",
+		Role:        officemodels.AgentRoleWorker,
+		Status:      officemodels.AgentStatusIdle,
+	}
+	if err := officeRepo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent instance: %v", err)
+	}
+	taskID := seedTaskWithCarrier(t, taskSvc, nil)
+
+	prefix := "reason=on_enter"
+	before := readLaunchActorMissingCounter(t, prefix)
+
+	if _, err := adapter.QueueRun(ctx, workflowengine.QueueRunRequest{
+		AgentProfileID: agent.ID,
+		TaskID:         taskID,
+		Reason:         "on_enter",
+	}); err != nil {
+		t.Fatalf("QueueRun: %v", err)
+	}
+
+	after := readLaunchActorMissingCounter(t, prefix)
+	if after != before {
+		t.Errorf("office_launch_actor_missing_total delta = %d, want 0: queue_run has a declared "+
+			"source (the task carrier resolver) even when it resolves empty, so this enqueue must not "+
+			"trip the caller-never-declared-a-source counter", after-before)
+	}
+
+	runs, err := officeRepo.ListRuns(ctx, "ws-1")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("list runs: %v (got %d)", err, len(runs))
+	}
+	if runs[0].ActorKind != officemodels.ActorKindSystem {
+		t.Errorf("actor_kind = %q, want system", runs[0].ActorKind)
 	}
 }

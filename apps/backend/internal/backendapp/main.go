@@ -1874,6 +1874,9 @@ func (a *runsServiceEngineAdapter) QueueRun(
 	if a.officeSvc != nil && req.TaskID != "" {
 		carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, req.TaskID)
 	}
+	if carrier.ActorKind == "" {
+		carrier.ActorKind = officemodels.ActorKindSystem
+	}
 	humanRooted := carrier.HumanRooted
 	outcome, err := a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID:        req.AgentProfileID,

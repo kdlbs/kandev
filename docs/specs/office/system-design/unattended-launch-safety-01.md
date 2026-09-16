@@ -263,6 +263,17 @@ each call site:
 | Routine fire | none; the fire is a root cause | `system` |
 | Wake caused by a task | the actor on the task carrier | as carried |
 | Retry / recovery / re-dispatch | re-queues an existing row; actor unchanged | as persisted |
+| Workflow engine `queue_run` action, task carrier unresolved | none; a task with no carrier and no live claimed run is itself a root cause | `system` |
+
+The sixth row is the workflow engine's `queue_run` bridge
+(`runsServiceEngineAdapter.QueueRun`, `internal/backendapp/main.go`): it always resolves
+a `TaskID` and reads that task's boundary carrier, but a task that never carried a
+causation carrier and has no run currently claimed against it resolves an empty
+carrier. That empty result is still a declared source — the carrier resolver ran and
+found nothing to attribute, which is itself the "root cause" case — so the adapter sets
+`ActorKind` to `system` explicitly rather than leaving it unset, matching the routine-fire
+row instead of falling through to `normalizeActor`'s caller-never-declared-a-source
+counter.
 
 The fourth row is the one this design previously lacked, and its absence is why the
 actor is now a carried value rather than a re-derived one. `queueTaskAssignedRun`
