@@ -495,7 +495,7 @@ func dialDirect(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.C
 	if err != nil {
 		return nil, fmt.Errorf("ssh: tcp dial %s: %w", addr, err)
 	}
-	sshConn, chans, reqs, err := ssh.NewClientConn(tcpConn, addr, cfg)
+	sshConn, chans, reqs, err := handshakeWithDeadline(ctx, tcpConn, addr, cfg)
 	if err != nil {
 		_ = tcpConn.Close()
 		return nil, fmt.Errorf("ssh: handshake with %s: %w", addr, err)
@@ -528,6 +528,19 @@ func (c *sshProxyJumpConn) Close() error {
 		c.closeErr = errors.Join(bastionErr, tunnelErr)
 	})
 	return c.closeErr
+}
+
+// handshakeWithDeadline runs the SSH handshake over conn, bounding it by
+// ctx's deadline when one is set. ssh.NewClientConn itself takes no context —
+// without this, a peer that completes the TCP handshake but never speaks SSH
+// (or stalls partway through key exchange) blocks the caller indefinitely.
+// Callers that pass a context with no deadline see unchanged behavior.
+func handshakeWithDeadline(ctx context.Context, conn net.Conn, addr string, cfg *ssh.ClientConfig) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+		defer func() { _ = conn.SetDeadline(time.Time{}) }()
+	}
+	return ssh.NewClientConn(conn, addr, cfg)
 }
 
 // dialViaJump implements ProxyJump as a single bastion hop. The bastion is
@@ -568,7 +581,7 @@ func dialViaJump(ctx context.Context, target *SSHTarget, finalAddr string, final
 		return nil, fmt.Errorf("ssh: bastion tunnel to %s: %w", finalAddr, err)
 	}
 	jumpConn := &sshProxyJumpConn{Conn: tunnel, bastion: bastionClient}
-	sshConn, chans, reqs, err := ssh.NewClientConn(jumpConn, finalAddr, finalCfg)
+	sshConn, chans, reqs, err := handshakeWithDeadline(ctx, jumpConn, finalAddr, finalCfg)
 	if err != nil {
 		_ = jumpConn.Close()
 		return nil, fmt.Errorf("ssh: handshake with %s via %s: %w", finalAddr, target.ProxyJump, err)

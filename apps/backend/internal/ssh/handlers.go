@@ -421,38 +421,11 @@ func (h *Handler) resolveSSHTarget(ctx context.Context, executorID string) (*lif
 	if executor == nil || executor.Type != models.ExecutorTypeSSH {
 		return nil, http.StatusBadRequest, fmt.Errorf("executor %q is not an SSH executor", executorID)
 	}
-	target, err := sshTargetFromExecutorConfig(executor.Config)
+	target, err := lifecycle.SSHTargetFromExecutorConfig(executor.Config)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
 	return target, http.StatusOK, nil
-}
-
-// sshTargetFromExecutorConfig projects an executor.Config into the
-// SSHConnConfig the dialer expects. Keeps the handler decoupled from
-// lifecycle's internal metadata-vs-config representation.
-func sshTargetFromExecutorConfig(cfg map[string]string) (*lifecycle.SSHTarget, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("ssh executor has no config")
-	}
-	port := 0
-	if p := strings.TrimSpace(cfg["ssh_port"]); p != "" {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 || n > 65535 {
-			return nil, fmt.Errorf("invalid ssh_port %q", p)
-		}
-		port = n
-	}
-	return lifecycle.ResolveSSHTarget(lifecycle.SSHConnConfig{
-		HostAlias:         cfg["ssh_host_alias"],
-		Host:              cfg["ssh_host"],
-		Port:              port,
-		User:              cfg["ssh_user"],
-		IdentitySource:    lifecycle.SSHIdentitySource(cfg["ssh_identity_source"]),
-		IdentityFile:      cfg["ssh_identity_file"],
-		ProxyJump:         cfg["ssh_proxy_jump"],
-		PinnedFingerprint: cfg["ssh_host_fingerprint"],
-	})
 }
 
 // --- WS handlers ---

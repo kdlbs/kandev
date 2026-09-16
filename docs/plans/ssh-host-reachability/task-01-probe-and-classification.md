@@ -1,7 +1,7 @@
 ---
 id: "01-probe-and-classification"
 title: "Single-host SSH probe and failure classification"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -173,4 +173,33 @@ generated contract.
 
 ## Results
 
-Pending.
+Implemented. `executor_ssh_reachability_probe.go` adds `SSHReachabilityReason`
+(6 constants), `SSHProbeOutcome` (`Success`, `Cancelled`, `Host`, `Reason`,
+`Message`), `ProbeSSHHost`, `ClassifyDialError`, and
+`SSHTargetFromExecutorConfig`; `internal/ssh/handlers.go`'s
+`resolveSSHTarget` now delegates to it and the old unexported projection was
+deleted. The handshake-timeout-bound fix landed as a shared
+`handshakeWithDeadline` helper used by both `dialDirect` and `dialViaJump`'s
+final hop, so the bastion hop (already routed through `dialDirect`) and the
+tunneled final hop are both bounded, not just the plain direct-dial path.
+
+Tests added in `executor_ssh_reachability_probe_test.go`: the classification
+table (including both required ordering cases), probe success (no session
+channel opened), host-key mismatch (pin unchanged), empty-pin config
+short-circuit (no TCP dial attempted), a stalled-handshake fake listener
+proving the probe returns at the deadline instead of hanging, the
+AC-…-001.29 bastion host-key mismatch case (`host_key`, `Host` stays the
+target, message names the bastion), a cancelled-context case, and
+`SSHTargetFromExecutorConfig` resolution/error cases.
+
+Verification:
+```
+go test -tags fts5 -race ./internal/agent/runtime/lifecycle/ -run 'Reachability|ClassifyDialError|ProbeSSHHost'   # PASS
+go test -tags fts5 -race ./internal/ssh/...                                                                       # PASS
+golangci-lint run ./internal/agent/runtime/lifecycle/... ./internal/ssh/... --new-from-rev=845546151              # 0 issues
+```
+The full `./internal/agent/runtime/lifecycle/...` suite has 9 pre-existing
+failures unrelated to this change (Kubernetes retained-workspace tests,
+worktree rollback tests, and a unix-socket-path-length test) — reproduced
+identically on the pre-Task-01 commit via `git stash`, so not a regression
+from this work.
