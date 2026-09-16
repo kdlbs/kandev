@@ -248,11 +248,41 @@ func (s *Store) initSchema() error {
 	if err := s.backfillRepositoryModes(); err != nil {
 		return err
 	}
+	if err := s.releaseStaleFailedWebhookDedupKeys(); err != nil {
+		return err
+	}
 	if err := s.dedupeAutomationRunDuplicateKeys(); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(schemaSQLForDriver(migrateRunDedupUniqueIndexSQL, s.db.DriverName())); err != nil {
 		return fmt.Errorf("create automation_runs dedup unique index: %w", err)
+	}
+	return nil
+}
+
+// releaseStaleFailedWebhookDedupKeys blanks the dedup_key of any webhook run
+// that failed before ever creating a task. MarkRunTerminal only performs this
+// release for a run transitioning to failed through that code path; a run
+// that reached "failed" on a database predating that release logic (or
+// predating the webhook trigger's dedup feature entirely) keeps its key
+// forever, since MarkRunTerminal's WHERE clause only matches rows still in
+// ("triggered", "task_created"). Left unfixed, migrateRunDedupUniqueIndexSQL
+// would let HasRunWithDedupKey treat that stale key as permanently taken,
+// silently skipping every future retry of an alert that never produced a
+// task. Runs a single time before the unique index exists to enforce it;
+// idempotent since a row with dedup_key already ” matches nothing further.
+func (s *Store) releaseStaleFailedWebhookDedupKeys() error {
+	_, err := s.db.Exec(s.db.Rebind(`
+		UPDATE automation_runs
+		SET dedup_key = ''
+		WHERE status = ?
+		  AND trigger_type = ?
+		  AND COALESCE(task_id, '') = ''
+		  AND dedup_key != ''`),
+		string(RunStatusFailed), string(TriggerTypeWebhook),
+	)
+	if err != nil {
+		return fmt.Errorf("release stale failed webhook dedup keys: %w", err)
 	}
 	return nil
 }

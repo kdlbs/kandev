@@ -523,14 +523,14 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 			return nil, err
 		}
 	}
-	if err := s.store.CreateAutomation(ctx, a); err != nil {
-		return nil, fmt.Errorf("create automation: %w", err)
-	}
-
-	// Create initial triggers. The cron check is the same one AddTrigger and
-	// UpdateTrigger apply: without it an expression the scheduler cannot parse
-	// is accepted at creation and rejected on the first edit, and in between the
-	// automation simply never fires with nothing on screen to say why.
+	// Validate every trigger config before persisting anything. The cron
+	// check is the same one AddTrigger and UpdateTrigger apply: without it an
+	// expression the scheduler cannot parse is accepted at creation and
+	// rejected on the first edit, and in between the automation simply never
+	// fires with nothing on screen to say why. Validating before
+	// s.store.CreateAutomation (rather than inside the trigger-creation loop
+	// below) means a bad trigger config never leaves behind an orphaned
+	// automation row or a partially-created trigger set.
 	for _, ts := range req.Triggers {
 		if err := validateScheduledConfig(ts.Type, ts.Config); err != nil {
 			return nil, err
@@ -538,6 +538,12 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		if err := validateWebhookConfig(ts.Type, ts.Config); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.store.CreateAutomation(ctx, a); err != nil {
+		return nil, fmt.Errorf("create automation: %w", err)
+	}
+
+	for _, ts := range req.Triggers {
 		t := &AutomationTrigger{
 			AutomationID: a.ID,
 			Type:         ts.Type,
