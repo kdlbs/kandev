@@ -47,6 +47,53 @@ launch path keeps its two surviving obligations: it never gates on a record, and
 its failure message names the host and the reason classified from that launch's
 own attempt.
 
+**Reconciled against spec round 5 (2026-09-15, commit `b0481c492`).** Four
+rounds of spec review closed all 15 open findings from round 4. The changes
+that affect this plan and its work orders:
+
+- A configuration reset is now a dedicated second SQL statement, not a branch
+  of the observation upsert, and it carries the newly saved `host`. Ownership
+  of *detecting* a save lives in `internal/task/service` (`CreateExecutor` /
+  `UpdateExecutor`), which notifies an `ExecutorSaveObserver` the reachability
+  package implements — not `internal/ssh`, as the pre-round-5 plan assumed.
+- `ProbeSSHHost` must bound the SSH handshake on its context, not only the TCP
+  dial, or a stalled handshake outlives both `probeTimeout` and `Stop`.
+- A new criterion, `AC-EXECUTORS-SSH-REACHABILITY-001.29`, requires a bastion
+  (`ProxyJump`) host-key mismatch to classify as `host_key`, matching a
+  target-host mismatch. `host` stays the target in every case; a bastion-hop
+  failure is disambiguated in `message`, never in `host`.
+- The client reconciliation key for a pushed or refetched record is
+  `updated_at`, not `checked_at` — a reset clears `checked_at`, so ordering on
+  it would make every reset look older than the record it supersedes and get
+  discarded. The DTO gained an `updated_at` field.
+- The GET routes now have a full edge contract: `404` for a nonexistent or
+  soft-deleted id, `400` only for a wrong executor type (not for an
+  unresolvable configuration, which is a `200` carrying reason `config`),
+  `GET /reachability` ordered by `executor_id` ascending and including
+  inactive executors.
+- The settings page runs no refresh timer at all while probing is disabled,
+  rather than reading a zero effective interval literally.
+- The pre-launch warning collapsed from two mechanisms (an interactive prompt
+  versus a session-recorded non-interactive note) into one: the backend always
+  emits a `session.launch.warning` event to the launched session's stream, and
+  a client that initiated that launch also renders the same event inline.
+  There is no "interactive user" branch on the backend. **The system design
+  attributes the producer to `internal/task/service`; that package is not in
+  the launch call path.** Per `apps/backend/AGENTS.md`'s Execution Flow
+  (Orchestrator → Lifecycle Manager → ExecutorBackend) and the verified call
+  site, the producer belongs in
+  `internal/agent/runtime/lifecycle/manager_launch.go`'s
+  `launchBuildExecutorRequest`, immediately before `rt.CreateInstance` at its
+  existing call site, using the `Manager`'s existing `eventPublisher` (the
+  same mechanism behind `PublishPrepareProgress`). Tasks 05 and 07 below use
+  this verified location; the spec's package reference needs a follow-up
+  correction.
+- The operator configuration key's environment and YAML paths diverge: an
+  unparsable environment value falls back to the default, but an unparsable
+  `config.yaml` value refuses boot like every other typed catalog key. A
+  negative whole number decodes cleanly from either source and needs its own
+  clamp branch (`below 0` → the default).
+
 ## Scope
 
 ### In scope
@@ -110,7 +157,27 @@ because a deadline expiry surfaces through `dialDirect` as a dial error and
 would otherwise read as a refused connection. `host_key` precedes `auth`
 because both arrive as handshake failures from `ssh.NewClientConn` and only
 `host_key` is a security event; the existing `errHostKeyMismatch` is the
-discriminator.
+discriminator. A bastion (`ProxyJump`) host-key rejection also classifies as
+`host_key` per `AC-EXECUTORS-SSH-REACHABILITY-001.29`, even though it arrives
+as `ssh: bastion dial: …` rather than `errHostKeyMismatch`, because only the
+target hop is fingerprint-pinned — the reason names what failed, not which hop.
+`host` always stays the target executor's host, success or failure; a
+bastion-hop failure is disambiguated in `message` alone, which names the
+bastion and states the failure arose on the jump hop.
+
+`ProbeSSHHost` bounds the handshake phase on its context, not only the TCP
+dial: `ssh.NewClientConn` takes no context and `ssh.ClientConfig.Timeout`
+covers only `DialSSH`'s own TCP connect, so a host that completes TCP and then
+stalls the handshake would otherwise hold its goroutine past `probeTimeout`
+and past `Stop`. The probe sets a deadline on the connection covering the
+handshake and clears it once the transport is up.
+
+Resolution also validates the pin before any dial: `ResolveSSHTarget` does not
+reject an empty `PinnedFingerprint`, and `buildClientConfig`'s host-key
+callback accepts any key when the pin is empty, so a probe that skipped this
+check would dial unpinned and record a substituted host as `reachable`. The
+probe returns reason `config` for an empty pin, exactly as for an
+unresolvable configuration, before any network access.
 
 `sshTargetFromExecutorConfig` moves out of `internal/ssh/handlers.go` and is
 exported from `lifecycle` as `SSHTargetFromExecutorConfig`, so the poller and
@@ -156,6 +223,18 @@ scheduled pass and an immediate probe racing on one executor converge on the
 later observation and the streak cannot be lost to an interleaving.
 `DeleteExecutor` deletes the record alongside the soft delete.
 
+A **second** repository method, `ResetExecutorReachability(ctx, executorID,
+host string) error`, is a distinct statement, not a branch of the upsert
+above: the upsert's `state` CASE has no `unknown` branch and its `WHERE`
+admits only a strictly later `checked_at`, which a reset does not carry. It
+writes `unknown`, a zero counter, cleared reason/message, the newly saved
+`host`, and both timestamps `NULL`, guarded only by `type = 'ssh' AND
+deleted_at IS NULL AND status = 'active'` — no `checked_at` or `updated_at`
+pin, because a reset is ordered by the save that caused it, not by an
+observation clock, and must win over whatever is stored. An executor that is
+`ssh` but not `active` is *not* reset (eligibility wins per
+`AC-…-001.17`), and the statement lands zero rows for it.
+
 ### Poller (`internal/executors/reachability`, new package)
 
 A ticker loop started from `internal/backendapp/main.go` alongside the
@@ -192,6 +271,16 @@ compile-time constants — `probeTimeout` 10s, `passConcurrency` 4,
 `failureThreshold` 2 — because no operator scenario needs them independently
 and each key is a permanent contract.
 
+**The environment and YAML paths do not behave alike, and the clamp needs a
+negative branch.** `applyBoundedIntEnv` reads the environment only and returns
+early when it is unset, so a `config.yaml` value never reaches the
+fallback-and-bounds logic; a non-integer YAML value instead hits
+`decodeConfig`'s ordinary typed-key path and refuses boot, exactly like any
+other catalog key. A negative whole number decodes cleanly from either source,
+so the package's own clamp (not the catalog's) needs a `below 0` branch
+yielding the default `60`, alongside `0` disables, `1`–`14` → `15`, and above
+`3600` → `3600`, logged once at startup.
+
 Observability follows the `office_stall_*` precedent: `expvar` counters
 `executor_ssh_reachability_probe_total` (by outcome),
 `executor_ssh_reachability_state_transitions_total` (by destination state),
@@ -213,18 +302,46 @@ that changes every interval does not invalidate the executor list payload:
 
 The `POST` route coalesces through a `golang.org/x/sync/singleflight` group
 keyed by executor id, so two overlapping requests open one connection and share
-one result. It works while the poller is disabled. Its 404/400 mapping matches
-the existing `resolveSSHTarget` behavior.
+one result. It works while the poller is disabled. The coalesced probe does
+**not** run on any caller's request context — a disconnecting caller must
+neither cancel it nor fail the other caller waiting on it — but it is also
+**not** `context.Background()`: it is registered on the reachability package's
+own `WaitGroup` and context, the off-cycle-probe primitive task 03 exposes, so
+`Stop` still cancels and awaits it. Status codes are the same shape on all
+three routes: `404` for a nonexistent or soft-deleted executor id, `400` only
+when the id names a non-`ssh` executor. `resolveSSHTarget`'s existing mapping
+must **not** be reused wholesale for the probe route — that helper also maps a
+config-resolution failure to `400`, which is exactly the case
+`AC-…-002.5` requires to return a `200` outcome carrying reason `config`
+instead. `GET` on an executor with no record returns the `unknown` shape with
+every timestamp, including `updated_at`, `null`, never `404`.
+`GET /reachability` orders its entries by `executor_id` ascending — the same
+order the pass uses — and includes executors whose `status` is not `active`,
+carrying their retained record.
 
 `events.ExecutorReachabilityChanged = "executor.reachability.changed"` is
 published only when `state` or `reason` differs from the stored record, and is
 bridged in `task_notifications.go` alongside `events.ExecutorUpdated`.
 Publishing every probe result would put one message per executor per interval
-on every connected client forever.
+on every connected client forever. The record DTO carries `updated_at`
+alongside `checked_at`; it is the field a client reconciles two racing
+payloads on (see Frontend below), because a reset clears `checked_at` but
+still advances `updated_at`.
 
-Creating an SSH executor, or saving a change to its connection configuration,
-resets its record to `unknown` with a zero counter and triggers an out-of-band
-probe, because the prior streak describes a different target.
+**Save detection lives in `internal/task/service`, not `internal/ssh`.**
+`Service.CreateExecutor` and `Service.UpdateExecutor`
+(`service_resources.go`) are the only two call sites that can create a
+before/after connection-configuration comparison — `internal/ssh` never sees
+an executor write. Each notifies an `ExecutorSaveObserver` interface the
+service declares and the `internal/executors/reachability` package
+implements, wired at construction. `applyExecutorUpdates` mutates the loaded
+executor in place, so `UpdateExecutor` must copy the before-values out ahead
+of that call; read afterwards they compare the row against itself and the
+reset never fires. On any difference in the fields Terminology names (a
+create is a difference by definition), the observer calls
+`ResetExecutorReachability` with the newly saved host and dispatches an
+out-of-band probe through the same off-cycle primitive the immediate-probe
+route uses, if the executor is still eligible.
 
 ### Launch interaction (`internal/agent/runtime/lifecycle`)
 
@@ -237,27 +354,62 @@ The launch-failure message names the target host and the reason classified from
 **that launch's own** dial through `ClassifyDialError`, so a user is not
 left holding an agent-generated message about a firewall when the cause was a
 stale address. Kandev never intercepts or edits agent output; it adds its own
-attribution alongside. Where no interactive user is present the pre-launch
-warning is recorded against the launched session instead of prompting.
+attribution alongside.
+
+**The pre-launch warning is one mechanism, not two.** There is no branch on
+whether an interactive user is present. `Manager.launchBuildExecutorRequest`
+(`manager_launch.go`), which already resolves the per-executor-type backend
+and calls `rt.CreateInstance` at its single call site for every executor type,
+reads the target executor's reachability record through a narrow read-only
+accessor immediately before that call — never inside `CreateInstance` itself,
+so the negative test (`CreateInstance` reads no record) stays meaningful. When
+the executor is `ssh`, the record's state is `unreachable`, and either
+periodic probing is enabled or the record's `checked_at` is within three times
+the *default* interval, it publishes `session.launch.warning` to the launched
+session's own event stream via the `Manager`'s existing `eventPublisher` (the
+mechanism behind `PublishPrepareProgress`), carrying `executor_id`, `host`,
+`state`, `reason`, and `last_success_at`. A read failure produces no warning
+rather than blocking the launch. Every launch path — WS-initiated, a
+dependency chain, a workflow transition, an autostart — converges on this one
+call site, so none can diverge from another. A client that initiated the
+launch itself renders the same event inline at the point of initiation, in
+addition to it appearing in the session's stream; there is no second backend
+code path to keep in step.
 
 ### Frontend (`apps/web`)
 
 `lib/types/http-ssh.ts` gains the record shape including `probing_enabled`,
 which is `false` when the interval key is `0` so a surface can distinguish
 "not probed yet" from "probing is off" without inferring it from an absent
-timestamp, and `probe_interval_seconds`, the effective interval the staleness
-rule and the refresh cadence are both computed from. `lib/api/domains/ssh-api.ts` gains the three calls. The settings
-slice holds records keyed by executor id and applies the change action.
+timestamp, `probe_interval_seconds`, the effective interval the staleness rule
+and the refresh cadence are both computed from, and `updated_at`.
+`lib/api/domains/ssh-api.ts` gains the three calls. The settings slice holds
+records keyed by executor id and applies the change action, reconciling a
+racing refetch against a pushed event by keeping whichever payload carries the
+**later `updated_at`**, not `checked_at` — a reset clears `checked_at`, so
+ordering on it would discard the reset in favor of the stale record it just
+invalidated.
 
 The settings card renders state, probed host, reason and message when
 `unreachable`, the consecutive-failure count, and the age of the last probe;
 it marks the result stale past three intervals, states plainly when probing is
 off, and offers the probe-now action. Because a steady state is silent on the
 wire, the card refetches its own record on mount and on the interval while it
-is open.
+is open — and runs **no timer at all** while `probing_enabled` is `false`,
+fetching once on open and again after an immediate probe instead of reading a
+zero effective interval as a cadence.
 
-The pre-launch warning names the host and the age of the last successful probe
-and does not block or require confirmation.
+**The pre-launch warning renders a pushed event, not a derived client
+computation.** The backend always emits `session.launch.warning` to the
+launched session's own stream (see Launch interaction above); the session view
+renders it there through the existing session-scoped WS-event handler pattern
+(the `executor-prepare.ts` shape), and a client that initiated that launch
+also renders the same event inline at the initiation point, naming the host
+and the age of the last successful probe. Neither surface derives
+"unreachable" from the reachability store slice itself — both render the one
+event the backend decided to raise, so there is no second code path that could
+diverge from the backend's when-to-warn rule. The launch proceeds without a
+confirmation step in either rendering.
 
 All copy goes through `t()` in `executors.json` and `tasks.json` across `en`,
 `pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw`, with the failure reason rendered as
@@ -272,17 +424,17 @@ split.
 
 | Acceptance criterion | Evidence |
 | --- | --- |
-| `AC-…-001.4`, `.5`, `.6`, `.7`, `.8` | `internal/agent/runtime/lifecycle/executor_ssh_reachability_probe_test.go` — `TestProbeSucceedsAndClosesWithoutRemoteCommand`, `TestProbeReportsConfigWithoutDialing`, `TestProbeRejectsChangedHostKeyWithoutRepinning`, `TestProbeDeadlineReportsTimeout`, `TestFailureCarriesExactlyOneReasonAndMessage` |
-| `AC-…-001.27` | `executor_ssh_reachability_probe_test.go` — `TestClassifyDialErrorOrdering`, table-driven, one case per reason plus the deadline-before-network and host-key-before-auth orderings |
+| `AC-…-001.4`, `.5`, `.6`, `.7`, `.8` | `internal/agent/runtime/lifecycle/executor_ssh_reachability_probe_test.go` — `TestProbeSucceedsAndClosesWithoutRemoteCommand`, `TestProbeReportsConfigWithoutDialing`, `TestProbeRejectsUnpinnedFingerprintWithoutDialing`, `TestProbeRejectsChangedHostKeyWithoutRepinning`, `TestProbeDeadlineReportsTimeout`, `TestProbeAbandonsStalledHandshakeAtDeadline`, `TestFailureCarriesExactlyOneReasonAndMessage` |
+| `AC-…-001.27`, `.29` | `executor_ssh_reachability_probe_test.go` — `TestClassifyDialErrorOrdering`, table-driven, one case per reason plus the deadline-before-network and host-key-before-auth orderings; `TestBastionHostKeyMismatchClassifiesAsHostKey`, `TestBastionFailureNamesTargetHostAndBastionInMessage` |
 | `AC-…-001.16`, `.21`, `.22` | `internal/task/repository/sqlite/executor_reachability_test.go` — `TestSoftDeleteRemovesReachabilityRecord`, `TestUpsertKeepsLaterObservationRegardlessOfCommitOrder`, `TestEqualTimestampWriteIsDiscarded`, `TestRecordAndBothTimestampsSurviveRepositoryReopen`; Postgres parity in `executor_reachability_postgres_test.go` |
 | `AC-…-001.1`, `.2`, `.3`, `.13`, `.14`, `.15`, `.17`, `.20`, `.26` | `internal/executors/reachability/poller_test.go` — `TestPassProbesEligibleExecutorsInIDOrder`, `TestPassSkipsNonSSHAndInactiveExecutors`, `TestInactiveExecutorRetainsItsRecord`, `TestOverlappingTickIsDroppedNotQueued`, `TestPassConcurrencyIsBounded`, `TestEmptyPassIsSilent`, `TestResultForNowIneligibleExecutorIsDiscarded`, `TestStopDrainsInFlightPass`, `TestStopDiscardsCancelledProbeResults`; `goleak_test.go` |
 | `AC-…-001.9`, `.10`, `.11`, `.12` | `internal/executors/reachability/hysteresis_test.go` — `TestNonStickyFailureFlipsOnThresholdProbe`, `TestStickyFailureFlipsOnFirstProbe`, `TestBelowThresholdFailureStoresReasonWithoutChangingState`, `TestSingleSuccessRecoversFromUnreachable`, `TestAbsentRecordReportsUnknown`, each table-driven over probe sequences asserting the exact probe on which the state flips |
 | `AC-…-001.23`, `.24`, `.25` | `internal/common/config/config_test.go` — `TestSSHReachabilityIntervalClampsOutOfRangeAndLogsOnce`, `TestAbsentNegativeOrMalformedIntervalUsesDefault`, `TestZeroIntervalDisablesPollerButNegativeDoesNot`; `internal/executors/reachability/poller_test.go` — `TestDisabledPollerRunsNoPassIncludingAtStart` |
-| `AC-…-001.18`, `.19`, `.28`, `AC-…-002.7` | `internal/ssh/reachability_handlers_test.go` — `TestSavingConnectionConfigResetsRecordAndProbes`, `TestUnchangedSaveResetsNothing`, `TestInFlightProbeResultDiscardedAfterConfigSave`, `TestImmediateProbeRunsWhilePollerDisabled`, `TestImmediateProbeRefusedForInactiveExecutor` |
-| `AC-…-002.2`, `.3`, `.6` | `internal/executors/reachability/publish_test.go` — `TestChangePublishesEvent`, `TestUnchangedProbePublishesNothing`; `internal/ssh/reachability_handlers_test.go` — `TestOverlappingImmediateProbesShareOneProbe`, `TestSharedProbeCompletesWhenStarterDisconnects`; `internal/gateway/websocket/task_notifications_test.go` bridge assertion |
-| `AC-…-002.1`, `.4`, `.5`, `.10`, `.11`, `.12` | `apps/web/components/settings/ssh-reachability-card.test.tsx` — field coverage per state, stale past three intervals, probing-off copy, load failure renders "not known", not-persisted probe result; `apps/web/lib/state/slices/settings/settings-slice.test.ts` — `applies executor.reachability.changed`, `keeps the later checked_at`; `pnpm run i18n:check` |
+| `AC-…-001.18`, `.19`, `.28`, `AC-…-002.7` | `internal/task/service/service_resources_executors_reachability_test.go` — `TestSavingConnectionConfigNotifiesObserverWithBeforeAndAfterFields`, `TestUnchangedSaveNotifiesNothing`, `TestCreateExecutorAlwaysNotifies`; `internal/executors/reachability/save_observer_test.go` — `TestObserverResetsRecordAndSchedulesOffCycleProbe`, `TestObserverSkipsIneligibleExecutor`; `internal/ssh/reachability_handlers_test.go` — `TestInFlightProbeResultDiscardedAfterConfigSave`, `TestImmediateProbeRunsWhilePollerDisabled`, `TestImmediateProbeRefusedForInactiveExecutor` |
+| `AC-…-002.2`, `.3` | `internal/executors/reachability/publish_test.go` — `TestChangePublishesEvent`, `TestUnchangedProbePublishesNothing`, `TestResetPublishesEvent`; `internal/gateway/websocket/task_notifications_test.go` bridge assertion |
+| `AC-…-002.1`, `.4`, `.5`, `.6`, `.10`, `.11`, `.12` | `internal/ssh/reachability_handlers_test.go` — `TestOverlappingImmediateProbesShareOneProbe`, `TestSharedProbeCompletesWhenStarterDisconnects`, `TestSharedProbeNotOnCallerRequestContext`, `TestGETReturnsUnknownShapeWithNullUpdatedAtForUnprobedExecutor`, `TestGETReachabilityOrderedByExecutorIDAscending`, `TestGET404ForSoftDeletedExecutor`; `apps/web/components/settings/ssh-reachability-card.test.tsx` — field coverage per state, stale past three intervals, probing-off copy with no refresh timer, load failure renders "not known", not-persisted probe result; `apps/web/lib/state/slices/settings/settings-slice.test.ts` — `applies executor.reachability.changed`, `keeps the later updated_at`; `pnpm run i18n:check` |
 | `AC-…-003.1` | `internal/agent/runtime/lifecycle/executor_ssh_reachability_launch_test.go` — `TestCreateInstanceReadsNoReachabilityRecord`, asserting against a store fake that fails the test on any read, plus `TestLaunchProceedsAgainstUnreachableExecutor` |
-| `AC-…-003.2`, `.3` | `executor_ssh_reachability_launch_test.go` — `TestDialFailureMessageNamesHostAndClassifiedReason`, `TestNonInteractiveWarningRecordedAgainstSession`; `apps/web/components/…/launch-warning.test.tsx` — warning names host and last-success age, and does not block |
+| `AC-…-003.2`, `.3` | `internal/agent/runtime/lifecycle/manager_launch_reachability_warning_test.go` — `TestDialFailureMessageNamesHostAndClassifiedReason`, `TestWarningPublishedForUnreachableExecutorAcrossEveryLaunchPath` (WS-initiated, dependency chain, workflow transition, autostart), `TestNoWarningWhenProbingDisabledAndRecordStale`, `TestWarningStillPublishedWhenProbingDisabledButRecordFresh`; `apps/web/lib/ws/handlers/ssh-launch-warning.test.ts` — session-stream event applied to session-runtime state; `apps/web/components/task/launch-warning.test.tsx` — inline render for the initiating client names host and last-success age, and does not block |
 
 ## E2E tests
 
@@ -343,8 +495,18 @@ Pending.
   the same flow as `AC-…-003.1`'s prohibition. A future change that moves that
   read into `CreateInstance` to "avoid a pointless launch" would silently
   violate REQ-003 without breaking any existing test. Mitigated by keeping the
-  read in the launch orchestration that emits the warning and by task 05's
-  negative test, which asserts against a store fake that fails on any read.
+  read in `Manager.launchBuildExecutorRequest`, the one call site every
+  executor-type dispatch already passes through, and by task 05's negative
+  test, which asserts against a store fake that fails on any read.
+- **The system design's stated package for the warning producer
+  (`internal/task/service`) does not match the verified call path.** Every
+  launch — WS-initiated, a dependency chain, a workflow transition, an
+  autostart — converges in `internal/agent/runtime/lifecycle` at
+  `Manager.launchBuildExecutorRequest`'s single `rt.CreateInstance` call site
+  (confirmed against `apps/backend/AGENTS.md`'s Execution Flow and
+  `manager_launch.go`); `internal/task/service` is not in that path. This plan
+  and tasks 05/07 use the verified location. The spec still needs a follow-up
+  correction so a future reader isn't sent to the wrong package.
 - **Deferring the launch-path write leaves the poller as the only writer.** A
   host that dies between passes lags the settings page by up to the failure
   threshold times the effective interval, and a failed launch — the strongest

@@ -33,21 +33,35 @@ with a probe-now action. Localized in all five supported locales.
 ## In scope
 
 - `SSHReachabilityRecord` in `lib/types/http-ssh.ts` mirroring the backend
-  shape, including `probing_enabled`.
+  shape, including `probing_enabled`, `probe_interval_seconds` (the
+  **effective**, clamped interval), and `updated_at` alongside `checked_at`
+  and `last_success_at`.
 - `getSSHReachability`, `getSSHExecutorReachability`, and
   `probeSSHExecutorReachability` in `lib/api/domains/ssh-api.ts`, following the
   existing options-spread-then-required-fields ordering in that file.
 - Settings slice state keyed by executor id, plus the
-  `executor.reachability.changed` WS handler that applies a pushed record.
+  `executor.reachability.changed` WS handler that applies a pushed record. A
+  refetch racing a pushed event is reconciled by keeping whichever payload
+  carries the **later `updated_at`**, never `checked_at` — a
+  connection-configuration reset clears `checked_at` (it is `null`) while
+  still advancing `updated_at`, so reconciling on `checked_at` would make a
+  reset compare as older than the record it just invalidated and get
+  discarded, leaving a stale `reachable`/`unreachable` state showing for a
+  host the user just re-pointed. A `null` `updated_at` (the synthesized
+  never-probed shape) always loses to a real record.
 - A `SSHReachabilityCard` rendering state, the host that was actually probed,
   reason and message when `unreachable`, the consecutive-failure count, and
   the age of the last completed probe; marking the result stale past three
   intervals; stating plainly that periodic probing is off when
   `probing_enabled` is `false`, rather than presenting a retained state as
   current; and offering the probe-now action.
-- Refetch on mount and on the configured interval while the card is open,
-  because a steady host publishes nothing and `checked_at` would otherwise age
-  in place.
+- Refetch on mount and on the configured interval (`probe_interval_seconds`,
+  not a constant) while the card is open, because a steady host publishes
+  nothing and `checked_at` would otherwise age in place. **No timer runs at
+  all when `probing_enabled` is `false`** — the card fetches once on open and
+  again after an immediate probe; reading a `0` effective interval literally
+  as a cadence would be a zero-delay refetch loop against a record known not
+  to be changing.
 - A failed load reports that reachability is not known. It must never render
   as `unreachable`.
 - Mobile-viewport layout, and state exposed to assistive technology as text
@@ -73,9 +87,12 @@ with a probe-now action. Localized in all five supported locales.
   current.
 - A pushed `executor.reachability.changed` updates the card without a reload
   and without the card polling for it.
-- With `probing_enabled` false the card says periodic probing is off, and a
-  load failure says reachability is not known — neither renders as
-  `unreachable`.
+- A pushed record with a `null` `checked_at` but a newer `updated_at` (a
+  reset) replaces a stored `reachable`/`unreachable` record rather than being
+  discarded as stale.
+- With `probing_enabled` false the card says periodic probing is off, runs no
+  refresh timer, and a load failure says reachability is not known — neither
+  renders as `unreachable`.
 
 ## Verification
 
@@ -118,6 +135,11 @@ are that task's contract.
   interval. The record carries it as `probe_interval_seconds`; use that value
   rather than a constant, or both rules silently drift from the operator's
   configuration.
+- Reconciling on `checked_at` instead of `updated_at` is the one regression
+  that passes every test written against a normal probe sequence and only
+  fails on a reset, because a reset is the single write that advances
+  `updated_at` without advancing `checked_at`. Write the reconciliation test
+  around a reset payload specifically, not just a newer/older probe pair.
 - `i18next/no-literal-string` is a lint error repo-wide and
   `check-nonjsx-copy.mjs` scans non-JSX positions by exclusion. A reason-to-copy
   lookup table written as a plain `.ts` map is exactly the shape that rule

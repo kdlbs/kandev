@@ -38,7 +38,10 @@ soft-deleted. No probe writes to it yet.
   `ExecutorRepository` and its SQLite implementation.
 - Columns per the system design, including `last_success_at` alongside
   `checked_at`: the pre-launch warning needs the age of the last *successful*
-  probe, and `checked_at` is overwritten by every failure.
+  probe, and `checked_at` is overwritten by every failure. `updated_at
+  TIMESTAMP NOT NULL` is a distinct column from `checked_at`: it advances on
+  every write including a reset (whose `checked_at` is `NULL`), and is the
+  field task 04's client reconciliation depends on.
 - Last-write-wins on `checked_at`: the upsert's conflict clause writes only
   when the incoming `checked_at` is strictly later than the stored one, or the
   stored one is `NULL`. A write whose `checked_at` equals the stored value is
@@ -46,6 +49,18 @@ soft-deleted. No probe writes to it yet.
   two probes in the same second still order. The consecutive-failure counter is
   read and written inside that same statement's transaction so a streak cannot
   be lost to an interleaving.
+- **A second, distinct method, `ResetExecutorReachability(ctx, executorID,
+  host string) error`**, is its own SQL statement, not a branch of the upsert:
+  the upsert's `state` CASE has no `unknown` branch and its `WHERE` admits only
+  a strictly later `checked_at`, which a reset does not carry. It writes
+  `unknown`, a zero counter, cleared reason/message, the newly saved `host`,
+  and both `checked_at`/`last_success_at` set `NULL`, guarded only by `type =
+  'ssh' AND deleted_at IS NULL AND status = 'active'` — no `checked_at` or
+  `updated_at` pin, because a reset is ordered by the save that caused it, not
+  by an observation clock, and must win over whatever is stored. An executor
+  that is `ssh` but not `active` is *not* reset (eligibility wins per
+  `AC-…-001.17`), and the statement lands zero rows for it rather than
+  erroring. This task owns only the statement; task 04 owns who calls it.
 - `DeleteExecutor` removes the reachability row alongside the soft delete.
 
 ## Out of scope
@@ -70,6 +85,14 @@ soft-deleted. No probe writes to it yet.
   `last_success_at`.
 - An upsert whose `checked_at` equals the stored value leaves the row
   unchanged.
+- `ResetExecutorReachability` on a record with a populated `checked_at`,
+  `last_success_at`, and non-zero counter leaves `state = unknown`, the
+  counter zeroed, reason/message cleared, `host` set to the new value, and
+  both timestamps `NULL`; `updated_at` still advances even though `checked_at`
+  does not.
+- `ResetExecutorReachability` against an executor whose `status` is not
+  `active` (but is still `type = 'ssh'` and not soft-deleted) affects zero
+  rows and leaves the existing record untouched.
 
 ## Verification
 
@@ -80,7 +103,7 @@ run:
 
 ```bash
 # From apps/backend:
-go test -tags fts5 -race ./internal/task/repository/sqlite/ -run 'ExecutorReachability'
+go test -tags fts5 -race ./internal/task/repository/sqlite/ -run 'ExecutorReachability|ResetExecutorReachability'
 go test -tags fts5 -race ./internal/task/repository/... -run 'Migration|Schema'
 make lint
 ```

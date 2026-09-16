@@ -77,9 +77,33 @@ the probe from task 01 and the store from task 02.
   `0` falls below it and the kill switch becomes a 60-second cadence. Requires a matching entry in
   `auditedStartupEnvironmentInventory()` in `catalog_test.go`, a new
   `ExecutorsConfig` section on `config.Config`, and its `SetDefault`.
+- **The environment and YAML paths do not behave alike, and the clamp needs a
+  negative branch.** `applyBoundedIntEnv` reads the environment only and
+  returns early when it is unset, so a `config.yaml` value never reaches the
+  fallback-and-bounds logic; a non-integer YAML value instead hits
+  `decodeConfig`'s ordinary typed-key path and refuses boot, exactly like any
+  other catalog key. A negative whole number decodes cleanly from either
+  source, so the package's own clamp (not the catalog's) needs a `below 0`
+  branch yielding the default `60`, alongside `0` disables, `1`-`14` → `15`,
+  and above `3600` → `3600`, logged once at startup.
+- **An internal off-cycle-probe dispatch primitive**, registered on the
+  package's own `WaitGroup`/context (not a caller's), that runs one probe for
+  a single executor outside the ticker and persists its result through the
+  same write path a scheduled pass uses. `Stop` cancels and awaits it like any
+  other in-flight probe. This is the only piece task 04's immediate-probe
+  route and its save-triggered reset consume from this package; neither task
+  04 concern reimplements dispatch or persistence.
 - `executor_ssh_reachability_probe_discarded_total`, incremented when `Stop`
   cancels a probe and its result is dropped: a cancelled probe has no outcome,
   so `probe_total` cannot represent it.
+- `executor_ssh_reachability_write_refused_total`, incremented when the write
+  path's own guard (ineligible executor, stale `checked_at`) drops a write
+  rather than the probe itself failing: a rising value means configuration
+  churn, not a fault.
+- `executor_ssh_reachability_reset_total`, incremented by
+  `ResetExecutorReachability` succeeding with at least one row affected — task
+  04's save observer is the only caller, but the counter lives with the other
+  reachability metrics.
 - `expvar` counters `executor_ssh_reachability_probe_total` (by outcome),
   `…_state_transitions_total` (by destination state), `…_pass_skipped_total`,
   `…_probe_duration_ms`, each also a structured `zap` log. Transitions log at
@@ -92,7 +116,9 @@ the probe from task 01 and the store from task 02.
 - Publishing the change event and the HTTP routes. Task 04 owns both; this
   task's write path exposes the change signal as a return value that task 04
   consumes.
-- The immediate-probe action and the reset-on-config-change behavior.
+- Calling the off-cycle-probe primitive: the immediate-probe HTTP route and
+  the `ExecutorSaveObserver`/reset trigger both live in task 04, which only
+  consumes the primitive this task exposes.
 - Any launch-path interaction.
 - A runtime feature toggle. The interval key's `0` is the kill switch, and a
   toggle would leave a retired identity to carry forever.
@@ -115,6 +141,14 @@ the probe from task 01 and the store from task 02.
   starts the poller at the 60s default rather than disabling it; an interval
   outside 15 to 3600 starts clamped with one log line rather than refusing to
   boot; and `Stop` leaves no goroutine behind.
+- The off-cycle-probe primitive runs a probe for one executor outside the
+  ticker, persists through the same write path, and is included in whatever
+  `Stop` cancels and awaits — a call issued just before `Stop` either completes
+  or is cancelled cleanly, never leaking.
+- A YAML `config.yaml` value for the interval key that is not a whole number
+  refuses boot like any other catalog key; a negative whole number from either
+  YAML or the environment falls back to the 60s default rather than the
+  nearest bound.
 
 ## Verification
 
@@ -139,6 +173,7 @@ test sleeps on wall-clock time.
 - `apps/backend/internal/executors/reachability/poller.go`
 - `apps/backend/internal/executors/reachability/store.go`
 - `apps/backend/internal/executors/reachability/metrics.go`
+- `apps/backend/internal/executors/reachability/off_cycle_probe.go`
 - `apps/backend/internal/executors/reachability/poller_test.go`
 - `apps/backend/internal/executors/reachability/hysteresis_test.go`
 - `apps/backend/internal/executors/reachability/goleak_test.go`

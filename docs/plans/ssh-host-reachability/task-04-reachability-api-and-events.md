@@ -39,22 +39,62 @@ Reset an executor's record when its connection configuration is saved.
   `GET /reachability` for every SSH executor's record,
   `GET /executors/:id/reachability` for one, and
   `POST /executors/:id/reachability/probe` to probe now, persist, and return
-  the record. A `POST` for an unknown executor returns 404; for a non-SSH
-  executor, 400 — matching the existing `resolveSSHTarget` mapping.
-- `probing_enabled` on the response, `false` when the interval key is `0`, so
-  a surface distinguishes "not probed yet" from "probing is off" without
-  inferring it from an absent timestamp.
+  the record.
+- **Do not reuse `resolveSSHTarget`'s mapping wholesale.** That helper answers
+  `400` both for a wrong executor type *and* for a failure to project the
+  executor's config into a target, and an unresolvable configuration (or one
+  with no pinned fingerprint) is exactly the case `AC-…-002.5` requires to
+  return a `200` outcome carrying reason `config` instead. On all three
+  routes: `404` for a nonexistent id or one that is soft-deleted; `400` only
+  when the id names an executor whose `type` is not `ssh`; an unresolvable
+  `ssh` config is a `200` with reason `config`, never a `400`. The `POST`
+  route additionally answers `409` when the executor is `ssh` but its `status`
+  is not `active` — probing a deactivated executor on request would
+  contradict the rule that its retained record stays unchanged.
+- `GET /reachability` returns one entry per SSH executor that is not
+  soft-deleted, **ordered by `executor_id` ascending** — the same total order
+  the poller's pass uses — and includes an executor whose `status` is not
+  `active`, carrying its retained record (`AC-…-001.17`).
+- `GET` on an eligible executor with no record returns the `unknown` shape
+  with every timestamp — `checked_at`, `last_success_at`, and `updated_at` —
+  `null`, never `404`. A client treats a null `updated_at` as older than any
+  real record, so this synthesized shape can never displace one that actually
+  exists.
+- The DTO adds `updated_at` alongside `checked_at` and `last_success_at`, and
+  `probing_enabled`, `false` when the interval key is `0`, so a surface
+  distinguishes "not probed yet" from "probing is off" without inferring it
+  from an absent timestamp. `probe_interval_seconds` carries the **effective**
+  (clamped) interval, which task 06's staleness and refetch logic depends on.
 - Coalescing through a `golang.org/x/sync/singleflight` group keyed by executor
   id, so two overlapping `POST`s open one connection and share one result. Its
-  write follows the same last-write-wins rule as a scheduled probe.
+  write follows the same last-write-wins rule as a scheduled probe. **The
+  coalesced probe does not run on any caller's request context** — a
+  disconnecting caller must neither cancel it nor fail the other caller
+  waiting on it — but it is also not `context.Background()`: it runs through
+  task 03's off-cycle-probe primitive, registered on the reachability
+  package's own `WaitGroup`/context, so `Stop` still cancels and awaits it. A
+  probe that ran but was not stored (the write failed, or a guard refused it)
+  still answers `200` with the outcome and `persisted: false`.
 - The immediate probe runs and persists while the poller is disabled.
 - `events.ExecutorReachabilityChanged = "executor.reachability.changed"`, a
   matching `ws.ActionExecutorReachabilityChanged`, and the bridge subscription
   in `task_notifications.go` beside `events.ExecutorUpdated`. Published only
   when `state` or `reason` differs from the stored record.
-- Creating an SSH executor, or saving a change to its connection
-  configuration, resets its record to `unknown` with a zero counter and
-  triggers an out-of-band probe without waiting for the next scheduled pass.
+- **Save detection lives in `internal/task/service`, not `internal/ssh`.**
+  `Service.CreateExecutor` and `Service.UpdateExecutor`
+  (`service_resources.go`) are the only two call sites that can form a
+  before/after connection-configuration comparison — `internal/ssh` never
+  sees an executor write. Each notifies an `ExecutorSaveObserver` interface
+  the service package declares (this task adds the interface and the two call
+  sites); `internal/executors/reachability` implements it and is wired at
+  construction (also this task). `applyExecutorUpdates` mutates the loaded
+  executor in place, so `UpdateExecutor` must copy the before-values out
+  ahead of that call, or a same-row comparison never detects a difference and
+  the reset never fires. On any difference in the connection-configuration
+  fields (a create counts as a difference by definition), the observer calls
+  `ResetExecutorReachability` with the newly saved host and dispatches an
+  out-of-band probe through task 03's off-cycle primitive, if the executor is
+  still eligible.
 
 ## Out of scope
 
@@ -65,7 +105,10 @@ Reset an executor's record when its connection configuration is saved.
   possibly-unsaved form configuration and keeps writing no record.
 - Reachability fields on the executor DTO. A record that changes every interval
   must not invalidate the executor list payload.
-- Any launch-path behavior.
+- Any launch-path behavior (task 05).
+- The `ResetExecutorReachability` SQL statement itself and the off-cycle-probe
+  dispatch primitive. Both are implemented in tasks 02 and 03 respectively;
+  this task only calls them from the new observer and the `POST` route.
 
 ## Acceptance
 
@@ -73,9 +116,21 @@ Reset an executor's record when its connection configuration is saved.
   return one identical record to both callers.
 - A probe whose result matches the stored state and reason publishes nothing;
   a probe that changes either publishes exactly one event carrying the record.
+- `GET /reachability` returns entries ordered by `executor_id` ascending,
+  includes a deactivated `ssh` executor's retained record, and omits a
+  soft-deleted executor entirely.
+- A `GET` for a wrong-type executor id returns `400`; a `GET` for an `ssh`
+  executor whose config cannot resolve a target returns `200` with reason
+  `config`, not `400`. A `POST` against a deactivated `ssh` executor returns
+  `409` without probing.
 - Saving a changed host on an existing SSH executor leaves its record
-  `unknown` with a zero counter and a probe already dispatched, rather than
-  carrying the previous target's failure streak.
+  `unknown` with a zero counter and both timestamps `null`, and dispatches a
+  probe without waiting for the next scheduled pass, rather than carrying the
+  previous target's failure streak. Saving a change that does not touch the
+  connection-configuration fields (for example only a name/label change)
+  leaves the record untouched.
+- Cancelling the client that issued a `POST` mid-probe neither cancels the
+  probe nor prevents its result from being persisted.
 
 ## Verification
 
@@ -86,7 +141,8 @@ it fails against a handler that probes per request. Then run:
 ```bash
 # From apps/backend:
 go test -tags fts5 -race ./internal/ssh/...
-go test -tags fts5 -race ./internal/executors/reachability/... -run 'Publish|Change'
+go test -tags fts5 -race ./internal/executors/reachability/... -run 'Publish|Change|SaveObserver'
+go test -tags fts5 -race ./internal/task/service/ -run 'Executor.*Reachability|SaveObserver'
 go test -tags fts5 -race ./internal/gateway/websocket/ -run 'Reachability|Executor'
 go test -tags fts5 -race ./internal/events/...
 make lint
@@ -102,12 +158,18 @@ make lint
 - `apps/backend/internal/gateway/websocket/task_notifications.go`
 - `apps/backend/internal/executors/reachability/publish.go`
 - `apps/backend/internal/executors/reachability/publish_test.go`
+- `apps/backend/internal/executors/reachability/save_observer.go`
+- `apps/backend/internal/executors/reachability/save_observer_test.go`
+- `apps/backend/internal/task/service/service_resources.go`
+- `apps/backend/internal/task/service/service_resources_executors_reachability_test.go`
 
 ## Dependencies
 
 Task 03. The poller's write path is the single place that decides whether a
 result is a change, and the immediate probe must share it rather than
-reimplementing hysteresis at the handler.
+reimplementing hysteresis at the handler. Task 02's `ResetExecutorReachability`
+statement and task 03's off-cycle-probe primitive, both consumed by the new
+`ExecutorSaveObserver`.
 
 ## Risks
 
@@ -120,6 +182,19 @@ reimplementing hysteresis at the handler.
   user-visible staleness bug in a different work order.
 - Registering a new WS action without the bridge subscription produces no
   compile error and no test failure unless the bridge is asserted directly.
+- The save-reset mechanism spans two packages: the interface and its call
+  sites live in `internal/task/service`, the implementation in
+  `internal/executors/reachability`. A change to `applyExecutorUpdates`'s
+  field set in a later, unrelated PR can silently stop detecting a
+  connection-configuration change if the observer's field list is not kept in
+  sync; there is no compiler error for a comparison that reads a field that no
+  longer changes. Name the exact compared fields in the observer's own test,
+  not just in a comment.
+- `Service.UpdateExecutor` mutates the loaded executor in place via
+  `applyExecutorUpdates`; capturing before-values after that call instead of
+  before it compares the row against itself and the reset silently never
+  fires. Assert this with a test that changes the host and asserts the
+  observer actually saw old-host/new-host, not just that it was called.
 
 ## Parallelism
 
@@ -127,11 +202,15 @@ reimplementing hysteresis at the handler.
 
 ## Inputs
 
-- System design, section *API and event contracts*.
-- `internal/ssh/handlers.go` for the route group, the 404/400 mapping, and
-  the WS dispatcher registration shape.
+- System design, sections *API and event contracts* and *Save detection*.
+- `internal/ssh/handlers.go` for the route group and the WS dispatcher
+  registration shape (not its 404/400 mapping — see the *Do not reuse*
+  bullet above).
 - `internal/gateway/websocket/task_notifications.go` around the
   `events.Executor*` subscriptions.
+- `internal/task/service/service_resources.go` around `CreateExecutor`
+  (line ~1581), `UpdateExecutor` (line ~1611), and `applyExecutorUpdates`
+  (line ~1683) for the exact before/after capture points.
 
 ## Results
 
