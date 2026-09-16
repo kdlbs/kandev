@@ -114,6 +114,38 @@ func TestGetClaimedRunByTaskAndAgent_ScopesToTheAgentEvenWhenAnotherAgentsClaimI
 	}
 }
 
+// TestGetClaimedRunForAgent_ReturnsTheAgentsOwnMostRecentClaimAcrossTasks
+// pins the fully agent-scoped lookup used to resolve a reactivity wake's
+// live causing run: unlike GetClaimedRunByTaskID/GetClaimedRunByTaskAndAgent,
+// this ignores task boundaries entirely and reports whichever run the
+// agent itself currently holds claimed, whatever task (or none) it
+// names.
+func TestGetClaimedRunForAgent_ReturnsTheAgentsOwnMostRecentClaimAcrossTasks(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	older := seedTaskRun(t, repo, "older-claim", "a1", "t1", "queued")
+	setStatus(t, repo, older.ID, "claimed", timePtr(base), nil)
+	newer := seedTaskRun(t, repo, "newer-claim-other-task", "a1", "t2", "queued")
+	setStatus(t, repo, newer.ID, "claimed", timePtr(base.Add(time.Hour)), nil)
+	// Newest of all, but a different agent.
+	otherAgent := seedTaskRun(t, repo, "other-agent-claim", "a2", "t1", "queued")
+	setStatus(t, repo, otherAgent.ID, "claimed", timePtr(base.Add(2*time.Hour)), nil)
+
+	got, err := repo.GetClaimedRunForAgent(ctx, "a1")
+	if err != nil {
+		t.Fatalf("get claimed run for agent: %v", err)
+	}
+	if got.ID != newer.ID {
+		t.Errorf("claimed run = %q, want %q (a1's most recent claim, any task)", got.ID, newer.ID)
+	}
+
+	if _, err := repo.GetClaimedRunForAgent(ctx, "a-unknown"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown agent err = %v, want sql.ErrNoRows", err)
+	}
+}
+
 // TestGetClaimedTasklessRunForAgent_OnlyMatchesRunsWithoutATask pins the
 // heartbeat attribution rule: a missing or empty payload task_id counts
 // as taskless, a populated one never does.

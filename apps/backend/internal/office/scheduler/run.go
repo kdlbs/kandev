@@ -288,6 +288,7 @@ func (ss *SchedulerService) queueRunAsActor(
 			Payload:        service.PayloadWithAgent(payload, agentInstanceID),
 			ActorKind:      actorKind,
 			ActorID:        actorID,
+			CausingRunID:   ss.resolveCausingRunID(ctx, actorKind, actorID),
 		})
 		return err
 	}
@@ -348,6 +349,25 @@ func (ss *SchedulerService) queueRunAsActor(
 		zap.String("agent", agentInstanceID),
 		zap.String("reason", reason))
 	return nil
+}
+
+// resolveCausingRunID looks up the acting agent's own live claimed run,
+// so a reactivity-triggered wake (no explicit CausingRunID or task-
+// boundary carrier the way a workflow-engine action has) still inherits
+// the causation chain of whatever the actor was doing when it caused
+// this wake, instead of every such wake resolving as a fresh root
+// cause. Returns "" for a non-agent actor or an agent with no live
+// claimed run, in which case causation resolution roots the new run
+// exactly as it did before this lookup existed.
+func (ss *SchedulerService) resolveCausingRunID(ctx context.Context, actorKind models.ActorKind, actorID string) string {
+	if actorKind != models.ActorKindAgent || actorID == "" {
+		return ""
+	}
+	run, err := ss.repo.RunsRepository().GetClaimedRunForAgent(ctx, actorID)
+	if err != nil {
+		return ""
+	}
+	return run.ID
 }
 
 // QueueRunCtx is the typed variant of QueueRun that takes a

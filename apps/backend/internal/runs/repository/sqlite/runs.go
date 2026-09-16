@@ -407,6 +407,29 @@ func (r *Repository) GetClaimedTasklessRunForAgent(
 	return &req, nil
 }
 
+// GetClaimedRunForAgent returns the most recently claimed run for
+// agentProfileID, across every task (or none). Used to resolve the live
+// causing run for a wake whose actor is an agent profile but which
+// carries no explicit CausingRunID or task-boundary carrier — a
+// reactivity-pipeline wake, not a workflow-engine action inside a known
+// task boundary. Returns sql.ErrNoRows when the agent has no claimed
+// run; the caller then resolves the wake as its own root cause, exactly
+// as if this lookup had never run.
+func (r *Repository) GetClaimedRunForAgent(ctx context.Context, agentProfileID string) (*models.Run, error) {
+	var run models.Run
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT * FROM runs
+		WHERE agent_profile_id = ?
+		  AND status = 'claimed'
+		ORDER BY claimed_at DESC
+		LIMIT 1
+	`), agentProfileID).StructScan(&run)
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
 // GetClaimedRunByTaskID returns the claimed run associated with a task payload.
 func (r *Repository) GetClaimedRunByTaskID(ctx context.Context, taskID string) (*models.Run, error) {
 	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
