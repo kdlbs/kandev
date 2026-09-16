@@ -303,6 +303,109 @@ func TestHandleAgentFailure_ClaimStaleRunNotRetried(t *testing.T) {
 	}
 }
 
+// TestHandleAgentFailure_ScheduledArrivalPastStaleThresholdNotRetried pins
+// review round 5 finding R5-1: the 2h staleRunThreshold gate must account
+// for the backoff it is about to schedule, not just the run's current age.
+// A run requested (2h - 3s) ago is still inside the threshold right now,
+// but scheduling the first-attempt 5s retry would land its claimable time
+// 2s past the threshold, where evaluateRunStaleness would cancel it with no
+// consecutive_failures increment and no inbox row — the exact silent-loss
+// outcome R2-1's gate exists to prevent, just displaced by the width of the
+// backoff this same function schedules. The gate must refuse before that
+// happens, falling through to today's terminal accounting instead.
+func TestHandleAgentFailure_ScheduledArrivalPastStaleThresholdNotRetried(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-arrival-stale-first")
+	taskID := "task-arrival-stale-first"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-arrival-stale-first")
+	run := queueAndReadRun(t, svc, "agent-arrival-stale-first", taskID)
+
+	// retry_count == 0: the pending backoff is 5s. 2h-3s+5s = 2h+2s, past
+	// the threshold.
+	requestedAt := time.Now().UTC().Add(-(2*time.Hour - 3*time.Second))
+	svc.ExecSQL(t, `UPDATE runs SET requested_at = ? WHERE id = ?`, requestedAt, run.ID)
+	run.RequestedAt = requestedAt
+
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
+	if err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	if !wrote {
+		t.Fatal("wrote = false, want true (the scheduled arrival is past the stale threshold; the failure must count, not vanish)")
+	}
+
+	agent, err := svc.GetAgentInstance(ctx, "agent-arrival-stale-first")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.ConsecutiveFailures != 1 {
+		t.Fatalf("consecutive_failures = %d, want 1 (the failure must count, not vanish)", agent.ConsecutiveFailures)
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q", refreshed.Status, service.RunStatusFailed)
+	}
+	if refreshed.ScheduledRetryAt != nil {
+		t.Fatal("expected scheduled_retry_at to remain unset")
+	}
+}
+
+// TestHandleAgentFailure_ScheduledArrivalPastStaleThresholdNotRetriedSecondAttempt
+// pins the same R5-1 gap at the second backoff step (10s, retry_count ==
+// 1), which a fix using a constant or first-step width would still miss: a
+// run requested (2h - 8s) ago is inside the threshold under EITHER the old
+// gate (time.Since alone, ~2h-8s < 2h) or a fixed-5s-width gate (2h-8s+5s <
+// 2h), and only fails when the gate reads the actual per-attempt backoff
+// (officeLegacyTransientBackoff[run.RetryCount] == 10s: 2h-8s+10s = 2h+2s).
+func TestHandleAgentFailure_ScheduledArrivalPastStaleThresholdNotRetriedSecondAttempt(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-arrival-stale-second")
+	taskID := "task-arrival-stale-second"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-arrival-stale-second")
+	run := queueAndReadRun(t, svc, "agent-arrival-stale-second", taskID)
+
+	requestedAt := time.Now().UTC().Add(-(2*time.Hour - 8*time.Second))
+	svc.ExecSQL(t, `UPDATE runs SET requested_at = ?, retry_count = 1 WHERE id = ?`,
+		requestedAt, run.ID)
+	run.RequestedAt = requestedAt
+	run.RetryCount = 1
+
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
+	if err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	if !wrote {
+		t.Fatal("wrote = false, want true (the scheduled arrival is past the stale threshold; the failure must count, not vanish)")
+	}
+
+	agent, err := svc.GetAgentInstance(ctx, "agent-arrival-stale-second")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.ConsecutiveFailures != 1 {
+		t.Fatalf("consecutive_failures = %d, want 1 (the failure must count, not vanish)", agent.ConsecutiveFailures)
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q", refreshed.Status, service.RunStatusFailed)
+	}
+	if refreshed.ScheduledRetryAt != nil {
+		t.Fatal("expected scheduled_retry_at to remain unset")
+	}
+}
+
 // TestHandleAgentFailure_ProviderErrorMessagePreferred pins the reason the
 // providerError parameter is in scope at all: a bare agent stderr string
 // like "Overloaded" classifies unclassified from text alone, but the
