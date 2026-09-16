@@ -6,7 +6,8 @@ export type TriggerType =
   | "github_pr_merged"
   | "github_push"
   | "github_ci"
-  | "webhook";
+  | "webhook"
+  | "plugin_event";
 
 export type RunStatus =
   | "triggered"
@@ -166,7 +167,25 @@ export type PlaceholderInfo = {
   example: string;
 };
 
+export type PluginConditionInfo = {
+  config_options?: Record<string, string[]>;
+  plugin_id: string;
+  provider_label: string;
+  available: boolean;
+  reason?: string;
+  condition: {
+    key: string;
+    label: string;
+    label_key?: string;
+    description: string;
+    description_key?: string;
+    config_version: number;
+    config_schema: Record<string, unknown>;
+  };
+};
+
 export type TriggerTypeInfo = {
+  plugin?: PluginConditionInfo;
   type: TriggerType;
   label: string;
   description: string;

@@ -140,6 +140,7 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 		copy.OccurredAt = now.UTC()
 	}
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
+	copy.Scope = normalizeErrorScope(copy.Scope, copy.SessionID != "")
 	copy.SessionID = truncateString(copy.SessionID, maxSessionIDBytes)
 	copy.TaskRepositoryID = truncateString(copy.TaskRepositoryID, maxTaskRepositoryIDBytes)
 	copy.ExecutionID = truncateString(copy.ExecutionID, maxSessionIDBytes)
@@ -156,4 +157,14 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 	}
 	copy.Stamp = truncateString(copy.Stamp, maxActiveErrorStampBytes)
 	return &copy
+}
+
+func normalizeErrorScope(scope string, sessionOwned bool) string {
+	if scope == models.ErrorScopeSession || scope == models.ErrorScopeTask {
+		return scope
+	}
+	if sessionOwned {
+		return models.ErrorScopeSession
+	}
+	return models.ErrorScopeTask
 }

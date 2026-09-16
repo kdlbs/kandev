@@ -15,6 +15,7 @@ import (
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
@@ -68,6 +69,14 @@ type TaskRepository interface {
 	// task.Position as given, for the generic task-update API's explicit
 	// position field (predates REQ-TASKS-KANBAN-TASK-REORDERING-001).
 	UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error
+	// UpdateTaskPreservingDeferredLaunch is UpdateTask for callers holding a
+	// task snapshot old enough to race the session ceiling's deferred_launch
+	// compare-and-set writers: deferred_launch in the write payload is
+	// replaced by the row's own current value at write time, so a stale
+	// snapshot can never resurrect or clobber a concurrent CAS write. Every
+	// other key keeps ordinary replace semantics, including deletion by
+	// omission.
+	UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
@@ -108,6 +117,21 @@ type TaskRepository interface {
 	// counterpart to an atomic remove: an editor must never re-create a key a
 	// concurrent claim just consumed.
 	SetTaskMetadataKeyIfPresent(ctx context.Context, taskID, key string, value interface{}) (bool, error)
+	// GetTaskDeferredLaunch reads a task's deferred_launch record and the
+	// opaque prior-state token a subsequent SetTaskDeferredLaunchIfUnchanged
+	// compares against. Unlike SetTaskMetadataKeyIfPresent, the comparison is
+	// over the whole stored value, not just the key's presence, so an editor
+	// that reads, patches one field and writes back cannot silently clobber a
+	// concurrent writer's change to a different field.
+	GetTaskDeferredLaunch(ctx context.Context, taskID string) (map[string]interface{}, interface{}, error)
+	// SetTaskDeferredLaunchIfUnchanged writes the deferred_launch record only
+	// when the stored value still matches prior (from GetTaskDeferredLaunch).
+	// A lost comparison is reported through lostCompare with a nil error: it
+	// is an ordinary, expected race whose handling is to re-read and re-apply,
+	// not a failure.
+	SetTaskDeferredLaunchIfUnchanged(
+		ctx context.Context, taskID string, prior interface{}, value map[string]interface{},
+	) (stored bool, lostCompare bool, err error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// UpdateTaskStateIfSessionState atomically transitions task state only while
 	// the named session remains in expectedSessionState and the task is not

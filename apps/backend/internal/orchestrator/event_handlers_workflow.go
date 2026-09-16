@@ -598,7 +598,7 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	targetStep *wfmodels.WorkflowStep,
 ) error {
 	if targetStep == nil {
-		return s.repo.UpdateTask(ctx, task)
+		return s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
@@ -791,15 +791,7 @@ func (s *Service) workflowMovePendingOptions(task *models.Task) *workflowmove.En
 // has been dispatched. A missing marker is a no-op. The options are already
 // captured by the caller (overlaid step or threaded value) before this runs.
 func (s *Service) clearWorkflowMovePending(ctx context.Context, taskID string) {
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.Metadata == nil {
-		return
-	}
-	if _, ok := task.Metadata[models.MetaKeyWorkflowMovePending]; !ok {
-		return
-	}
-	delete(task.Metadata, models.MetaKeyWorkflowMovePending)
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if _, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyWorkflowMovePending); err != nil {
 		s.logger.Warn("failed to clear workflow move pending marker",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
@@ -1676,7 +1668,7 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 		return nil
 	}
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		return fmt.Errorf("persist promoted task state: %w", err)
 	}
 	s.publishTaskUpdated(ctx, task)
@@ -2058,6 +2050,20 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			EntryOptions:    moveOptions,
 			WorkflowEntryID: stepTransitionID,
 		})
+		if errors.Is(err, ErrCeilingLaunchDeferred) {
+			// The sweep already persisted a replay record and owns retrying
+			// this launch; restoring the claim tokens here (as the generic
+			// failure path below does) would let a second auto-start attempt
+			// race that replay into a double launch, and marking the task's
+			// auto-start-failed marker would mislabel a queued launch as a
+			// failed one.
+			s.logger.Debug(eventName+": auto-start deferred by session ceiling; will replay once capacity frees up",
+				zap.String("task_id", task.ID))
+			if restoreAutoStartOnCreate {
+				s.completeAutoStartOnCreate(asyncCtx, task.ID, eventName)
+			}
+			return
+		}
 		if err != nil {
 			s.logger.Error(eventName+": failed to auto-start task",
 				zap.String("task_id", task.ID),
@@ -2289,7 +2295,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 	}
 	go func() {
 		launchCtx := context.WithoutCancel(ctx)
-		metadataClaimed, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
+		wip, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
 		if !claimOK {
 			if createClaimed {
 				s.restoreAutoStartOnCreate(launchCtx, task.ID, eventName)
@@ -2307,7 +2313,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 				launchErr = errors.New("deferred launch returned an unsuccessful response")
 			}
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
-			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
+			s.restoreDeferredLaunch(launchCtx, task.ID, wip, eventName)
 			if restoreQueuePromotion {
 				s.restoreTaskLifecycleToken(launchCtx, task.ID, models.MetaKeyQueuePromotionPending, queuePromotionLifecycleToken(task), eventName)
 			}
@@ -2322,46 +2328,48 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		if intent.RecordRecentUse {
 			s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)
 		}
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
-		if metadataClaimed {
-			task.UpdatedAt = time.Now().UTC()
-			s.publishTaskUpdated(launchCtx, task)
-			return
+		// Publish the repository-backed task, not the pre-claim snapshot this
+		// closure captured: a concurrent ceiling deferral can write a fresh
+		// deferred_launch record while LaunchSession runs, and deleting the
+		// key from the stale in-memory copy would both discard that
+		// concurrent write and publish it as gone.
+		current, err := s.repo.GetTask(launchCtx, task.ID)
+		if err != nil {
+			s.logger.Warn(eventName+": failed to reload task after deferred launch; publishing pre-launch snapshot",
+				zap.String("task_id", task.ID), zap.Error(err))
+			current = task
+			delete(current.Metadata, models.MetaKeyDeferredLaunch)
+			current.UpdatedAt = time.Now().UTC()
 		}
-		task.UpdatedAt = time.Now().UTC()
-		if updateErr := s.repo.UpdateTask(launchCtx, task); updateErr == nil {
-			s.publishTaskUpdated(launchCtx, task)
-		}
+		s.publishTaskUpdated(launchCtx, current)
 	}()
 	return true
 }
 
-func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (bool, bool) {
-	remover, ok := s.repo.(taskMetadataKeyRemover)
-	if !ok {
-		return false, true
+// claimDeferredLaunch reserves the launch-intent keys of a task's shared
+// deferred_launch record for the gate that is about to fire (WIP promotion or
+// dependency resolution). It takes only the launch-intent keys and leaves any
+// concurrently-written ceiling_* keys in place (AC-59a) — the same sub-key
+// take/restore protocol claimDeferredLaunchForStart uses for the direct-start
+// path, so the two consumers of the shared record can never clobber each
+// other's half of it.
+func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (map[string]interface{}, bool) {
+	wip, claimed, err := s.repo.TakeTaskDeferredLaunchWIPKeys(ctx, taskID)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to claim deferred launch", zap.String("task_id", taskID), zap.Error(err))
+		return nil, false
 	}
-	claimed, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch)
-	if err != nil || !claimed {
-		if err != nil {
-			s.logger.Warn(eventName+": failed to claim deferred launch", zap.String("task_id", taskID), zap.Error(err))
-		}
-		return false, false
-	}
-	return true, true
+	return wip, claimed
 }
 
-func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, raw interface{}, eventName string, claimed bool) {
-	if !claimed {
+// restoreDeferredLaunch puts a failed launch's claimed keys back, merging
+// into whatever the record holds now rather than replacing it — so a ceiling
+// record written while the launch was in flight survives the restore.
+func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, wip map[string]interface{}, eventName string) {
+	if len(wip) == 0 {
 		return
 	}
-	setter, ok := s.repo.(interface {
-		SetTaskMetadataKey(context.Context, string, string, interface{}) error
-	})
-	if !ok {
-		return
-	}
-	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch, raw); err != nil {
+	if err := s.repo.RestoreTaskDeferredLaunchWIPKeys(ctx, taskID, wip); err != nil {
 		s.logger.Warn(eventName+": failed to restore deferred launch intent", zap.String("task_id", taskID), zap.Error(err))
 	}
 }
@@ -3573,7 +3581,7 @@ func (s *Service) prepareWorkflowReplacementSession(
 	launchProfileID, err := s.resolveDynamicLaunchExecution(ctx, newSession, newAgentProfileID, true)
 	if err != nil {
 		resolutionErr := fmt.Errorf("failed to resolve workflow replacement profile: %w", err)
-		if deleteErr := s.deleteSessionAndCleanAttachments(ctx, newSession); deleteErr != nil {
+		if deleteErr := s.deleteSessionAndPublishRemoval(ctx, taskID, sessionID); deleteErr != nil {
 			s.logger.Warn("failed to delete workflow replacement after profile resolution failure",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -3583,6 +3591,8 @@ func (s *Service) prepareWorkflowReplacementSession(
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
 					zap.Error(terminalErr))
+			} else {
+				s.releaseCeilingReservation(sessionID)
 			}
 		}
 		return nil, resolutionErr
@@ -3653,6 +3663,8 @@ func (s *Service) rollbackNewWorkflowProfileSwitch(
 				ctx, destination.ID, models.TaskSessionStateFailed, cleanupErr.Error(),
 			); terminalErr != nil {
 				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("terminalize failed workflow destination: %w", terminalErr))
+			} else {
+				s.releaseCeilingReservation(destination.ID)
 			}
 			return errors.Join(cause, cleanupErr)
 		}
@@ -3663,6 +3675,8 @@ func (s *Service) rollbackNewWorkflowProfileSwitch(
 			ctx, destination.ID, models.TaskSessionStateFailed, deleteErr.Error(),
 		); terminalErr != nil {
 			deleteErr = errors.Join(deleteErr, fmt.Errorf("terminalize failed workflow destination: %w", terminalErr))
+		} else {
+			s.releaseCeilingReservation(destination.ID)
 		}
 		return errors.Join(cause, deleteErr)
 	}
@@ -3711,6 +3725,7 @@ func (s *Service) retainFailedWorkflowDestination(
 	); err != nil {
 		return fmt.Errorf("terminalize retained workflow destination: %w", err)
 	}
+	s.releaseCeilingReservation(destination.ID)
 	s.logger.Warn("retained failed workflow destination for durable recovery",
 		zap.String("task_id", taskID),
 		zap.String("session_id", destination.ID),
@@ -3880,8 +3895,8 @@ func (s *Service) exactModelWorkflowStartPolicy(
 // resuming a parked session whose persisted provider model disagrees with the
 // profile's configured model policy. Explicit session overrides remain valid
 // within a lane; this boundary applies only while entering a different workflow
-// step. Auto-fallback profiles intentionally allow provider-default reuse, but
-// explicit fallback profiles may reuse only the configured model or fallback.
+// step. Only profiles with exactness explicitly enabled require a fresh session
+// when the persisted effective model is unknown or different.
 func (s *Service) workflowEntryRequiresFreshExactModelSession(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -3925,14 +3940,14 @@ func (s *Service) sessionHasUnauthorizedExactModelDrift(
 	if profile == nil {
 		return false, fmt.Errorf("resolve exact workflow profile %q: profile is unavailable", profileID)
 	}
-	if profile.Model == "" || profile.AutoFallback {
+	if !profile.RequireExactModel || profile.Model == "" {
 		return false, nil
 	}
 	effective, ok := models.LoadEffectiveSessionRuntimeConfig(session)
-	if !ok || effective.Model == "" || effective.Model == profile.Model {
-		return false, nil
+	if !ok || effective.Model == "" {
+		return true, nil
 	}
-	return profile.FallbackModel == "" || effective.Model != profile.FallbackModel, nil
+	return effective.Model != profile.Model, nil
 }
 
 func (s *Service) keepCurrentWorkflowStepSession(
@@ -4662,21 +4677,6 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	if move.MoveID == "" {
 		move.MoveID = legacyPendingMoveID(sessionID, move)
 	}
-	if !s.pendingMoveExactProfileGenerationCurrent(ctx, taskID, move.ExactProfileGeneration) {
-		s.logger.Warn("discarding stale exact-profile pending move",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.String("move_id", move.MoveID),
-			zap.Int64("exact_profile_generation", move.ExactProfileGeneration))
-		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
-		if s.messageQueue != nil {
-			if _, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, ""); err != nil {
-				s.logger.Warn("failed to discard stale exact-profile pending move",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-			}
-		}
-		return
-	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Error("failed to load task for pending move",
@@ -4684,7 +4684,6 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			zap.Error(err))
 		return
 	}
-
 	fromStepID := task.WorkflowStepID
 	if fromStepID == move.WorkflowStepID {
 		var applyErr error
@@ -4849,21 +4848,6 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		context.WithoutCancel(ctx), identity, freshSession,
 		fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions,
 	)
-}
-
-func (s *Service) pendingMoveExactProfileGenerationCurrent(ctx context.Context, taskID string, generation int64) bool {
-	assignments, ok := s.repo.(exactProfileAssignmentStore)
-	if !ok {
-		return generation == 0
-	}
-	assignment, err := assignments.GetExactProfileAssignment(ctx, taskID)
-	if err != nil {
-		return false
-	}
-	if assignment == nil || !assignment.Active {
-		return generation == 0
-	}
-	return generation > 0 && assignment.Generation == generation
 }
 
 func (s *Service) consumeUnfencedPendingMove(
@@ -5087,7 +5071,7 @@ func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromS
 	oldState := task.State
 	task.State = v1.TaskStateTODO
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.taskRuntimeStateMu.Unlock()
 		s.logger.Warn("pending move state sync: failed to reopen completed task",
 			zap.String("task_id", taskID),
@@ -5817,7 +5801,7 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, promptTaskOptions{
+		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, launchOriginAutomatic, promptTaskOptions{
 			requireNonterminalSession: true,
 			// dispatchPrompt is already fully composed for this step entry
 			// (handoff included, see the ErrExecutionNotFound branch below):
@@ -5834,6 +5818,18 @@ func (s *Service) autoStartStepPrompt(
 		}
 		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 			requeueTaken()
+			return err
+		}
+		// AC-47c2: the two seam-3 dispositions carry opposite restoration
+		// obligations. A deferred refusal already holds the prompt and its
+		// AC-47c(c) strings in the written record, so requeuing here would
+		// redeliver the same content twice; an undeferred one (AC-47c1) is
+		// the caller's own to restore, exactly like the terminalized branch
+		// above.
+		if refusal, ok := isSeam3Refusal(err); ok {
+			if !refusal.deferred {
+				requeueTaken()
+			}
 			return err
 		}
 
@@ -6186,7 +6182,7 @@ func (s *Service) queueAutoStartPrompt(
 	if handoffText != "" {
 		meta[messagequeue.MetadataStepHandoff] = handoffText
 	}
-	_, err := s.messageQueue.QueueMessageWithMetadata(
+	queued, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
 		sessionID,
 		taskID,
@@ -6201,7 +6197,7 @@ func (s *Service) queueAutoStartPrompt(
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID)
+	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
 	return nil
 }
 
@@ -6216,14 +6212,14 @@ func (s *Service) queueAutoStartPrompt(
 // crashed just before the on_enter transition). If the agent is alive when
 // the queue is written but dies later, the queue is drained by the next
 // handleAgentBootReady (manual or automatic resume).
-func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID string) {
+func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID, queuedMessageID string) {
 	if s.executor == nil {
 		return
 	}
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		return
 	}
-	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID)
+	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID, seam3CallShapeQueueDrain, launchOriginAutomatic, queuedMessageID)
 }
 
 // flipStaleRunningToWaiting flips the session to WAITING_FOR_INPUT when its

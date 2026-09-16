@@ -102,21 +102,23 @@ Review the selected bundles before saving the profile.
 
 The host model probe helps edit a profile, but it is not the launch authority.
 At launch, the selected executor's advertised ACP catalog decides whether
-Kandev sends the saved model. If the executor does not advertise that model,
-Kandev sends no request for it. An exact profile (a model with neither an
-explicit fallback nor automatic fallback) fails before inference instead of
-substituting the executor default. Kandev uses an advertised explicit fallback
-when configured. With automatic fallback enabled, the agent can use its
-current or default model.
+Kandev sends the saved model. Profiles are compatible by default. When the
+saved model is absent, Kandev can use an advertised explicit fallback, one
+unique bracketed variation, or the executor's current or default model. An
+automatic-fallback profile continues with the provider default and ignores its
+saved explicit fallback. Kandev writes one warning to task chat when it uses a
+different model.
 
-Kandev writes one warning to task chat for an explicitly authorized fallback.
-For an exact-profile mismatch, the session error reports the requested model,
-the effective model when known, and a stable reason. The warning can list the
-requested model, effective model, agent, executor, and executor profile.
-It also tells you to check executor credentials, copied agent configuration,
-and the agent version. Kandev does not rewrite the saved profile model.
-Portable configuration can improve parity, but it does not guarantee equal
-host and executor model catalogs.
+Enable **Require exact model** on a profile when a substitution is not allowed.
+The executor must advertise and accept the saved model before the first prompt.
+An unavailable model, empty or unsupported catalog, or failed apply stops the
+session before inference. The session error reports the requested model, the
+effective model when known, and a stable reason. Kandev does not send an
+unadvertised model or rewrite the saved profile model.
+
+A missing host-probe model remains an advisory warning and does not disable
+profile selection. Portable configuration can improve parity, but it does not
+guarantee equal host and executor model catalogs.
 
 ### Script behavior is runtime-specific
 

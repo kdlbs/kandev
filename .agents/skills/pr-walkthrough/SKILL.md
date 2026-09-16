@@ -1,11 +1,16 @@
 ---
 name: pr-walkthrough
-description: Generate a single-file HTML walkthrough for a pull request. Use when the user wants a visual, scrollable page that explains a PR's problem, approach, architecture, key code changes, data flow, and trade-offs for reviewers. Trigger on "walkthrough for this PR", "explain this PR visually", "generate a PR walkthrough", or a PR URL with a request to explain it. Not for code review: do not load this skill to critique a PR, post review findings, or approve or request changes. Use a code-review skill for that.
+description: >-
+  Generate a single-file HTML walkthrough that explains a PR's purpose, user impact,
+  interface changes, compatibility risks, and implementation. Use for requests to
+  generate a PR walkthrough or explain a PR visually. Not for code review,
+  review findings, or approval verdicts.
 ---
 
 # PR Walkthrough
 
-Generate one HTML file that orients a reviewer to a pull request. The page is a vertical, center-contained "story": the reviewer scrolls from the problem, through the architecture and the key code changes, to the data model and the trade-offs.
+Generate one HTML file that explains why a PR exists and what changes for its users.
+Lead with the problem, outcome, and compatibility impact. Follow with architecture, code, and trade-offs.
 
 This skill is **not** a code-review skill. Do not produce review findings, approve/request-changes verdicts, or a full critique. Explain the change so a reviewer understands it fast.
 
@@ -31,6 +36,7 @@ The renderer is `references/build.py` (Python standard library only). It reads y
 The renderer does not judge whether the content is true, clear, or useful. That is your job, and it is the whole job. A page that passes the build but has a vague `tldr`, a wrong `sig`, or a diagram that does not match the code is a failed walkthrough. Spend your effort on the quality of each JSON section, not on the mechanics the renderer already handles. Each section below states the bar it must meet.
 
 See `references/example.json` for a complete, working data file. Copy its shape.
+Read [impact.md](references/impact.md) before collecting evidence or writing the impact sections.
 
 ### Managed CI filesystem mode
 
@@ -102,25 +108,37 @@ Do not build the page from the diff alone. Read the full current version of each
 
 Read each file once and keep it in mind. Do not re-open the same file to copy one more excerpt; scroll back to what you already read. Copy code excerpts straight from the diff and the first read, not from a second `view` of the same file.
 
-Scale the page to the PR size. A small PR gets a short page with 2-3 code changes and one diagram. A large PR gets more sections, but never filler. If two blocks teach the same fact, merge them.
+Scale the page to the PR size. A small PR can use one code change and no diagram.
+Use short bullets and tables. If two blocks teach the same fact, merge them.
+Inspect all five impact categories from `references/impact.md`, including callers and registrations.
+Distinguish confirmed absence from missing evidence. Do not infer user impact from filenames alone.
 
 ### 3. Plan the sections
 
-The JSON drives these sections. Keep only the ones that add value. The renderer draws a section when its key is present, and skips `architecture` and `data` when you omit them. The keys map to sections like this:
+The page order is: header, why, impact, optional data diagram, architecture, code, risk, and review notes.
+New walkthroughs must include `impact` with all five categories. The renderer accepts older files without it for compatibility.
+Unchanged categories occupy one summary line each. Only changed categories get detail tables.
+The keys map to sections like this:
 
 1. **Header / TL;DR** (`pr`) - the PR title, URL, base and head, file and line counts, and a one line `tldr`. The renderer builds the `<h1>`, the badges, and the topbar. The topbar **Review split button** opens the GitHub review pane and copies `gh pr review <number> --repo <repo> --approve`. It never approves on its own; the page holds no credentials. Set `pr.repo` to the `owner/repo` slug (for example `example-org/parcel-service`) so the copied command is correct.
    - Quality bar: `tldr` states, in one sentence, what the PR changes and why. A reader who reads only this line knows the point of the PR. Do not restate the title. Do not use vague words such as "improve" or "update" without the concrete change.
-2. **Why and what** (`why`) - `why.problem` is one or two sentences. `why.what` is a bullet list of what the change does.
-   - Quality bar: `why.problem` names the concrete problem the PR fixes, not the solution. `why.what` lists the real changes a reviewer will see in the diff, one per bullet, with no filler and no repeat of `tldr`.
-3. **Architecture, end to end** (`architecture`) - one high-level Mermaid `flowchart` in `architecture.mermaid`, with a short `architecture.caption`. Omit the key for a PR that needs no diagram. Choose the flow direction from the first token: use `flowchart LR` (left to right) for a linear pipeline so it fills the full-width container and stays short, and `flowchart TD` (top to bottom) when the flow branches enough that `LR` would grow too wide. The renderer passes the direction through unchanged; it is your choice, not a fixed default.
-   - Quality bar: the diagram shows the real components and the real flow the PR touches, with names that match the code. It is not a generic box diagram. Omit the section rather than draw a diagram that does not match the change.
-4. **Key code changes** (`changes`, `edges`) - the code canvas plus a linear fallback list. See "Changes" below. Use 2-6 changes.
-   - Quality bar: each change points at a real file and shows real code from the head commit. Each `why` says what the code does, not that it "was added". Each `sig` is the true signature. Each `edge` is a real call or data flow. A reviewer can trust the canvas as a map of the change. Show changed code as a diff so the reviewer sees what moved: use `patch` for a real hunk, or `diff: true` for an excerpt that is entirely new in this PR (it renders green). Use a plain `code` block only for context that the PR does not change.
-5. **Data and storage** (`data`) - a Mermaid diagram in `data.mermaid`, or a `data.fields` table of `field`, `type`, and `note`. Keep only what the PR touches. Omit the key when the PR touches no data.
+2. **Why this PR exists** (`why`) - name the affected user in `audience`, the concrete failure or limitation in `problem`, and the benefit in `outcome`.
+   - State the trigger and previous consequence. For new capabilities, explain the workflow that users cannot complete before this PR.
+   - Use one short sentence per field and 1-3 `what` bullets for the mechanism. Do not repeat the impact tables or enumerate test files.
+   - Derive the explanation from code, tests, and linked requirements. Label inferred motivation when the PR does not establish it.
+3. **Impact at a glance** (`impact`) - breaking changes, visible UX, plugin interfaces, MCP tools by context, and database changes.
+   - Read [impact.md](references/impact.md) for the schema, evidence checklist, count rules, and examples.
+   - Put compatibility alerts first. Describe actual before/after behavior, including new errors that replace automatic fallback.
+   - Include UI changes only when users see or do something different. A component refactor alone is not a UX change.
+4. **Data and storage** (`data`) - an optional Mermaid diagram in `data.mermaid`, or a non-database `data.fields` table of `field`, `type`, and `note`. Database migrations belong in `impact.database`. Do not duplicate that table here.
    - Quality bar: every field or entity is one the PR adds or changes. Types match the code. Omit the section for a PR that touches no data model.
-6. **Risk** (`risk`) - a score from 1 to 10 (10 = highest risk) in `risk.score`, and short bullets in `risk.reasons`. See "Risk score" below.
+5. **Architecture, end to end** (`architecture`) - one high-level Mermaid `flowchart` in `architecture.mermaid`, with a short `architecture.caption`. Omit the key for a PR that needs no diagram. Choose the flow direction from the first token: use `flowchart LR` (left to right) for a linear pipeline so it fills the full-width container and stays short, and `flowchart TD` (top to bottom) when the flow branches enough that `LR` would grow too wide. The renderer passes the direction through unchanged; it is your choice, not a fixed default.
+   - Quality bar: the diagram shows the real components and the real flow the PR touches, with names that match the code. It is not a generic box diagram. Omit the section rather than draw a diagram that does not match the change.
+6. **Key code changes** (`changes`, `edges`) - the code canvas plus a linear fallback list. See "Changes" below. Use 2-6 changes.
+   - Quality bar: each change points at a real file and shows real code from the head commit. Each `why` says what the code does, not that it "was added". Each `sig` is the true signature. Each `edge` is a real call or data flow. A reviewer can trust the canvas as a map of the change. Show changed code as a diff so the reviewer sees what moved: use `patch` for a real hunk, or `diff: true` for an excerpt that is entirely new in this PR (it renders green). Use a plain `code` block only for context that the PR does not change.
+7. **Risk** (`risk`) - a score from 1 to 10 (10 = highest risk) in `risk.score`, and short bullets in `risk.reasons`. See "Risk score" below.
    - Quality bar: the score follows from the reasons, and each reason is a real signal from this PR (blast radius, test coverage, rollback cost, data or contract change). Do not give a default middle score with generic reasons.
-7. **Trade-offs and review notes** (`review`) - `review.tradeoffs` is a bullet list. `review.focus` is an ordered "where to look first" list.
+8. **Trade-offs and review notes** (`review`) - `review.tradeoffs` is a bullet list. `review.focus` is an ordered "where to look first" list.
    - Quality bar: `review.tradeoffs` names real choices the PR makes and what it gives up. `review.focus` orders the files or areas a reviewer should read first, most important first. Do not fill it with "check the tests" boilerplate.
 
 For a section the PR needs but the schema does not cover (for example a state-machine diagram or a config table), tell the user which section you cannot express and ask how to proceed. Do not edit `shell.html` to add it.

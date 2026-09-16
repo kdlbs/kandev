@@ -1,8 +1,11 @@
 # ADR-2026-09-06-exact-profile-model-identity: Enforce Exact Profile Model Identity
 
-**Status:** accepted
+**Status:** superseded by 2026-09-15-explicit-profile-model-strictness
 **Date:** 2026-09-06
 **Area:** backend, frontend, protocol, persistence, workflow
+
+See [the per-profile opt-in amendment](2026-09-15-explicit-profile-model-strictness.md).
+The original decision below is historical; its implicit default is superseded.
 
 ## Context
 

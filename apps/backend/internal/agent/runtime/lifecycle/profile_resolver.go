@@ -90,6 +90,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		Mode:                       profile.Mode,
 		FallbackModel:              profile.FallbackModel,
 		AutoFallback:               profile.AutoFallback,
+		RequireExactModel:          profile.RequireExactModel,
 		ConfigOptions:              profile.ConfigOptions,
 		AutoApprove:                profile.AutoApprove,
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,

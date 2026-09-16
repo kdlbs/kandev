@@ -2031,7 +2031,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if req.Position != nil {
 		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
 	} else {
-		updateErr = s.tasks.UpdateTask(updateCtx, task)
+		updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)
 	}
 	if updateErr != nil {
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))
@@ -2683,6 +2683,19 @@ func (s *Service) finalizeCancelledSessions(
 			parkedCtx, cancelParked := context.WithTimeout(detachedCtx, taskPublicationTimeout)
 			s.parkedProjectionCanceller.ClearParkedProjectionOnSessionTerminated(parkedCtx, taskID, session.ID, session.State)
 			cancelParked()
+		}
+	}
+	// CancelActiveTaskSessionsByTaskID is a bulk writer: RETURNING reports every
+	// row's post-update CANCELLED state, not which were in an AC-1 state before
+	// the update, so every returned id is released unconditionally rather than
+	// branched on state (AC-51e). Releasing an id that held no reservation is a
+	// defined no-op.
+	if s.sessionCeilingReleaser != nil {
+		for _, session := range cancelledSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			s.sessionCeilingReleaser.ReleaseCeilingReservation(session.ID)
 		}
 	}
 	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)

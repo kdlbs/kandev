@@ -6,6 +6,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	"github.com/kandev/kandev/internal/plugins"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -38,6 +39,10 @@ func NewGateway(log *logger.Logger) *Gateway {
 		Handler:    handler,
 		logger:     log,
 	}
+}
+
+func (g *Gateway) SetPluginConversationService(service *plugins.Service) {
+	g.Hub.SetPluginConversationService(service)
 }
 
 // SetLifecycleManager enables the dedicated terminal WebSocket handler for passthrough mode.

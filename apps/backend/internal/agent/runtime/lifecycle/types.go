@@ -1311,7 +1311,10 @@ type AgentProfileInfo struct {
 	FallbackModel string
 	// AutoFallback opts the profile into the legacy automatic-fallback
 	// behavior (session-start best-effort).
-	AutoFallback        bool
+	AutoFallback bool
+	// RequireExactModel makes the configured model an explicit identity
+	// requirement. False preserves compatible pre-PR behavior.
+	RequireExactModel   bool
 	AllowIndexing       bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
 	CLIPassthrough      bool
 	NativeSessionResume bool // Agent supports ACP session/load for resume

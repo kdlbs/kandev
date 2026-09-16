@@ -24,19 +24,19 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 		{
 			name:    "exact model absent fails without calling executor",
 			state:   modelState("executor-default"),
-			policy:  StartModelPolicy{Model: "host-only-model"},
+			policy:  StartModelPolicy{Model: "host-only-model", RequireExactModel: true},
 			wantErr: `requested model "host-only-model" is unavailable (reason: requested_not_advertised)`,
 		},
 		{
 			name:    "exact model with empty catalog fails without calling executor",
 			state:   &CachedModelState{},
-			policy:  StartModelPolicy{Model: "host-only-model", FallbackModel: "fallback"},
+			policy:  StartModelPolicy{Model: "host-only-model", FallbackModel: "fallback", RequireExactModel: true},
 			wantErr: `requested model "host-only-model" is unavailable (reason: catalog_empty)`,
 		},
 		{
 			name:    "exact model with nil catalog state fails without calling executor",
 			state:   nil,
-			policy:  StartModelPolicy{Model: "host-only-model"},
+			policy:  StartModelPolicy{Model: "host-only-model", RequireExactModel: true},
 			wantErr: `requested model "host-only-model" is unavailable (reason: catalog_empty)`,
 		},
 		{
@@ -50,23 +50,25 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			wantWarning:   true,
 		},
 		{
-			name:          "advertised fallback method not supported fails",
+			name:          "compatible advertised fallback method not supported uses provider default",
 			state:         modelState("fallback"),
 			policy:        StartModelPolicy{Model: "host-only-model", FallbackModel: "fallback"},
 			applierErrors: []error{methodNotFoundErr()},
 			wantCalls:     []string{"fallback"},
-			wantErr:       `requested model "host-only-model" is unavailable (reason: selection_unsupported)`,
+			wantOutcome:   ModelSelectionOutcomeProviderDefault,
+			wantReason:    ModelSelectionReasonSelectionUnsupported,
+			wantWarning:   true,
 		},
 		{
 			name:    "unadvertised fallback fails",
 			state:   modelState("executor-default"),
-			policy:  StartModelPolicy{Model: "host-only-model", FallbackModel: "host-fallback"},
-			wantErr: `requested model "host-only-model" is unavailable (reason: fallback_not_advertised)`,
+			policy:  StartModelPolicy{Model: "host-only-model", FallbackModel: "host-fallback", RequireExactModel: true},
+			wantErr: `requested model "host-only-model" is unavailable (reason: requested_not_advertised)`,
 		},
 		{
 			name:          "advertised requested model is applied",
 			state:         modelState("requested"),
-			policy:        StartModelPolicy{Model: "requested"},
+			policy:        StartModelPolicy{Model: "requested", RequireExactModel: true},
 			wantCalls:     []string{"requested"},
 			wantOutcome:   ModelSelectionOutcomeApplied,
 			wantEffective: "requested",
@@ -74,7 +76,7 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 		{
 			name:          "exact model selection unsupported fails",
 			state:         modelState("requested"),
-			policy:        StartModelPolicy{Model: "requested"},
+			policy:        StartModelPolicy{Model: "requested", RequireExactModel: true},
 			applierErrors: []error{methodNotFoundErr()},
 			wantCalls:     []string{"requested"},
 			wantErr:       `requested model "requested" is unavailable (reason: selection_unsupported)`,
@@ -108,7 +110,7 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 		{
 			name:          "advertised apply error is explicit",
 			state:         modelState("requested"),
-			policy:        StartModelPolicy{Model: "requested", FallbackModel: "fallback"},
+			policy:        StartModelPolicy{Model: "requested", FallbackModel: "fallback", RequireExactModel: true},
 			applierErrors: []error{errors.New("rejected")},
 			wantCalls:     []string{"requested"},
 			wantErr:       `failed to set start model "requested"`,
@@ -122,6 +124,22 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 			wantOutcome:   ModelSelectionOutcomeProviderDefault,
 			wantReason:    ModelSelectionReasonSelectionFailedAutoFallback,
 			wantWarning:   true,
+		},
+		{
+			name:          "compatible profile selects one advertised variation",
+			state:         modelState("executor-default", "requested[1m]"),
+			policy:        StartModelPolicy{Model: "requested"},
+			wantCalls:     []string{"requested[1m]"},
+			wantOutcome:   ModelSelectionOutcomeUniqueVariation,
+			wantReason:    ModelSelectionReasonUniqueVariationApplied,
+			wantEffective: "requested[1m]",
+			wantWarning:   true,
+		},
+		{
+			name:    "strict profile rejects advertised variation",
+			state:   modelState("executor-default", "requested[1m]"),
+			policy:  StartModelPolicy{Model: "requested", RequireExactModel: true},
+			wantErr: `requested model "requested" is unavailable (reason: requested_not_advertised)`,
 		},
 	}
 
@@ -139,7 +157,6 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 					t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
 				}
 			}
-
 			if !reflect.DeepEqual(applier.calls, tt.wantCalls) {
 				t.Errorf("SetModel calls = %v, want %v", applier.calls, tt.wantCalls)
 			}

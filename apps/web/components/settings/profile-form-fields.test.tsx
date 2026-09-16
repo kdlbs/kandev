@@ -176,6 +176,21 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(screen.queryByTestId("profile-auto-fallback-field")).not.toBeNull();
   });
 
+  it("disables fallback controls while exact model is required", () => {
+    renderForm(formData({ require_exact_model: true, fallback_model: "mock-fast" }));
+    expandFallbackSettings();
+    expect(
+      screen.getByRole("switch", { name: "Require exact model" }).getAttribute("data-state"),
+    ).toBe("checked");
+    expect(
+      screen.getByRole("switch", { name: "Fallback automatically to next model" }),
+    ).toHaveProperty("disabled", true);
+    expect(screen.getByRole("switch", { name: "Agent fallback" })).toHaveProperty("disabled", true);
+    expect(screen.getByTestId("profile-fallback-settings-summary").textContent).toContain(
+      "Exact model required",
+    );
+  });
+
   it("marks a gone fallback model red in its picker", () => {
     renderForm(formData({ fallback_model: "gpt-gone" }));
     expandFallbackSettings();

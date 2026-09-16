@@ -22,6 +22,8 @@ type TaskLaunchErrorEntryProps = {
   workspaceId: string;
   error: TaskStatusSummaryActiveError;
   repositories?: TaskRepository[];
+  /** Retained session history has no live recovery controls. */
+  isActive?: boolean;
 };
 
 const pendingRecoveryRequests = new Map<string, Promise<unknown>>();
@@ -58,7 +60,7 @@ function useTaskLaunchRecovery({
     const request = Promise.resolve().then(() =>
       client.request("task.launch.recover", {
         task_id: taskId,
-        ...(error.session_id ? { session_id: error.session_id } : {}),
+        ...(error.scope !== "task" && error.session_id ? { session_id: error.session_id } : {}),
         ...(error.task_repository_id ? { task_repository_id: error.task_repository_id } : {}),
         action,
         ...(baseBranch ? { base_branch: baseBranch } : {}),
@@ -196,6 +198,7 @@ export function TaskLaunchErrorEntry({
   workspaceId,
   error,
   repositories,
+  isActive = true,
 }: TaskLaunchErrorEntryProps) {
   const { t } = useTranslation();
   const { pendingAction, recoveryError, sendRecovery } = useTaskLaunchRecovery({ taskId, error });
@@ -243,16 +246,18 @@ export function TaskLaunchErrorEntry({
             </CollapsibleContent>
           </Collapsible>
         )}
-        <TaskLaunchRecoveryActions
-          actions={error.recovery_actions ?? []}
-          workspaceId={workspaceId}
-          repositories={repositories}
-          taskRepositoryId={error.task_repository_id}
-          currentBase={currentBase}
-          pendingAction={pendingAction}
-          onRecover={sendRecovery}
-        />
-        {recoveryError && (
+        {isActive && (
+          <TaskLaunchRecoveryActions
+            actions={error.recovery_actions ?? []}
+            workspaceId={workspaceId}
+            repositories={repositories}
+            taskRepositoryId={error.task_repository_id}
+            currentBase={currentBase}
+            pendingAction={pendingAction}
+            onRecover={sendRecovery}
+          />
+        )}
+        {isActive && recoveryError && (
           <p
             className="mt-2 text-xs text-destructive"
             data-testid="task-launch-recovery-error"

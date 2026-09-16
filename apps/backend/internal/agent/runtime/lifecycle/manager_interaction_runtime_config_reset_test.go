@@ -101,6 +101,7 @@ func TestManager_ResetAgentContext_ReappliesSessionRuntimeConfig(t *testing.T) {
 
 func TestReapplySessionModel_RejectsUnadvertisedExactModel(t *testing.T) {
 	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{RequireExactModel: true}}
 	mock := newRestartMockAgentctlServer(t, false, false)
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -121,6 +122,7 @@ func TestReapplySessionModel_RejectsUnadvertisedExactModel(t *testing.T) {
 
 func TestWorkspaceRebindModel_RejectsUnadvertisedExactModel(t *testing.T) {
 	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{RequireExactModel: true}}
 	mock := newRestartMockAgentctlServer(t, false, false)
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)

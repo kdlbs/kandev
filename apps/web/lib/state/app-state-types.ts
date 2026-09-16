@@ -45,6 +45,7 @@ import {
   defaultPluginsState,
   defaultReviewState,
   defaultNeedsYouInboxState,
+  defaultFailedInboxState,
 } from "./slices";
 import type {
   WorkspaceState,
@@ -219,6 +220,10 @@ export type AppState = KanbanSlice & {
   // Needs-you Inbox slice (actions merged via NeedsYouInboxSliceActions
   // intersection on AppState)
   needsYouInbox: (typeof defaultNeedsYouInboxState)["needsYouInbox"];
+
+  // Failed Inbox slice (actions merged via FailedInboxSliceActions
+  // intersection on AppState)
+  failedInbox: (typeof defaultFailedInboxState)["failedInbox"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -422,7 +427,12 @@ export type AppState = KanbanSlice & {
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
-  mergeTurnsSnapshot: (sessionId: string, turns: Turn[], hydrationEpoch: number) => void;
+  mergeTurnsSnapshot: (
+    sessionId: string,
+    turns: Turn[],
+    hydrationEpoch: number,
+    options?: { replace?: boolean },
+  ) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,

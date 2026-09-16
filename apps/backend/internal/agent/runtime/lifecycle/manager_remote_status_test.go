@@ -362,7 +362,7 @@ func TestPrepareRestartedKubernetesAgentctl_RejectsUnadvertisedExactModel(t *tes
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
 	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
-	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{Model: "gpt-5.4"}}
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{Model: "gpt-5.4", RequireExactModel: true}}
 	mgr.sessionManager = NewSessionManager(newTestLogger(), newTestStopCh(t))
 	agentConfig, ok := newTestRegistry().Get("claude-acp")
 	require.True(t, ok)

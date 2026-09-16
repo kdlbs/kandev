@@ -161,6 +161,8 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name                         | Label shown in workflow, session, and automation selectors.                                                                                                      |
 | Model                        | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                             |
+| Require exact model          | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values. |
+| Fallback settings            | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning. |
 | Mode                         | Requested with ACP `session/set_mode`. The choices come from the installed agent.                                                                                |
 | Configuration options        | Dynamic ACP values requested with `session/set_config_option`.                                                                                                   |
 | CLI flags                    | Enabled entries are tokenized and appended to the ACP launch command.                                                                                            |
@@ -250,19 +252,25 @@ Authentication, installation, and probe-failure indicators remain visible on
 profile selectors.
 
 At task launch, the selected executor's ACP catalog is authoritative. Kandev
-sends the requested model only when the executor advertises it. An exact
-profile, with no explicit fallback and automatic fallback off, fails before
-inference when its model cannot be selected. An advertised explicit fallback
-may be selected instead. With automatic fallback enabled, Kandev sends no
-unadvertised model request and continues with the agent's current or default
-model. Authorized fallback stores one warning in task chat with the requested
-model and effective model when known. The warning identifies the agent and
-executor and asks you to check credentials, copied configuration, and the
-agent version.
+sends the requested model only when the executor advertises it. Profiles are
+compatible by default, so an unavailable saved model can use an advertised
+explicit fallback, one unique bracketed variation, or the executor's current
+or default model. Kandev records one warning with the requested and effective
+models when it continues with a different model. Automatic fallback allows
+provider-default continuation and ignores the saved explicit fallback.
 
-The saved profile model is not changed. Optional portable configuration can
-copy selected allowlisted files into a remote executor, but it cannot guarantee
-that the host and executor expose the same model catalog.
+Enable **Require exact model** when the profile must keep the saved model. The
+executor must advertise and accept that model before the first prompt. An empty
+or unsupported catalog, an unavailable model, or a failed apply stops the
+session before inference. Kandev never sends an unadvertised model and never
+rewrites the saved profile model.
+
+The host model list is only an editing hint. A missing host-probe model keeps a
+profile selectable and shows an advisory warning; the executor catalog decides
+the launch result. Upgrades and omitted API fields keep existing profiles
+compatible, with strictness off until a user enables it. Optional portable
+configuration can copy selected allowlisted files to a remote executor, but it
+cannot guarantee equal host and executor model catalogs.
 
 ### Monitor capability and subscription status
 

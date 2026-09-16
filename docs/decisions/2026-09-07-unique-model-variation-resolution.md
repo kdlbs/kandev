@@ -1,13 +1,12 @@
 # ADR-2026-09-07: Resolve Only One Advertised Model Variation
 
-**Status:** rejected (superseded by `2026-09-06-exact-profile-model-identity`)
+**Status:** superseded by 2026-09-15-explicit-profile-model-strictness
 **Date:** 2026-09-07
 **Area:** backend, frontend, protocol
-**Superseded by:** `2026-09-06-exact-profile-model-identity`
 
-> This proposed policy is rejected. An inferred variation is not the exact
-> model identity selected by the profile, so it cannot authorize inference.
-> The accepted exact-profile policy governs model selection instead.
+The historical rejection below is superseded by the
+[compatible-only variation rule](2026-09-15-explicit-profile-model-strictness.md).
+Explicit strict profiles continue to reject inferred variations.
 
 ## Context
 

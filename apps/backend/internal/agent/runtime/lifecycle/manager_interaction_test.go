@@ -1009,6 +1009,10 @@ func TestManager_ResetAgentContext_ClearsIdleDispatchGate(t *testing.T) {
 // persisted model selection.
 func TestManager_ResetAgentContext_FailsWhenSessionModelCannotBeRestored(t *testing.T) {
 	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{
+		AgentName:         "auggie",
+		RequireExactModel: true,
+	}}
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
 		infos: map[string]*WorkspaceInfo{
 			"session-1": {SessionID: "session-1", RuntimeModel: "mock-smart"},
