@@ -3,12 +3,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { SessionPage } from "../../pages/session-page";
 
 // Download is wired in file-context-menu.tsx → useFileOperations.downloadFile →
 // downloadFileContent → triggerFileDownload (Blob + <a download>). We drive
@@ -55,7 +51,9 @@ async function setupTask({
       { timeout: 60_000, message: `Waiting for ${taskTitle} worktree materialization` },
     )
     .toBe(true);
-  const session = await openTaskSession(testPage, taskTitle);
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
   await session.clickTab("Files");
   return session;
 }
