@@ -1,6 +1,7 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
+import { routeMainWebSocketWithPreviewFeedbackCreateFailure } from "../../helpers/ws-drop";
 import {
   chooseCapture,
   dragScreenshotRegion,
@@ -19,6 +20,7 @@ test.describe("Web preview feedback", () => {
     seedData,
   }) => {
     const server = await startPreviewServer();
+    const createFailure = await routeMainWebSocketWithPreviewFeedbackCreateFailure(testPage);
     try {
       const { session, frame } = await openBrowserPreview(
         testPage,
@@ -68,15 +70,86 @@ test.describe("Web preview feedback", () => {
       await expect(screenshotDraft).toContainText(/\d+ × \d+ · PNG/);
       await saveDraft(testPage, "Tighten the spacing in this region");
 
-      await expect(testPage.getByTestId("preview-feedback-trigger")).toContainText("3");
+      const failedScreenshotComment = "Keep this screenshot comment after create fails";
+      createFailure.failNextCreate();
+      await chooseCapture(testPage, "Select screenshot region");
+      await dragScreenshotRegion(testPage, frame.locator("#save"));
+      const failedDraft = testPage.getByTestId("preview-feedback-draft");
+      await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
+      await failedDraft
+        .getByRole("textbox", { name: "Comment on selection" })
+        .fill(failedScreenshotComment);
+      await failedDraft.getByRole("button", { name: "Save feedback" }).click();
+      await expect.poll(() => createFailure.failedCount()).toBe(1);
+      await expect(failedDraft).toBeVisible();
+      await expect(failedDraft.getByRole("textbox", { name: "Comment on selection" })).toHaveValue(
+        failedScreenshotComment,
+      );
+      await expect(failedDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
+      await expect(
+        testPage.getByTestId("preview-feedback-popover").getByRole("alert"),
+      ).toContainText("feedback could not be saved");
+
+      await failedDraft.getByRole("button", { name: "Save feedback" }).click();
+      await expect(failedDraft).toBeHidden({ timeout: 15_000 });
+      await expect(testPage.getByTestId("preview-feedback-trigger")).toContainText("4");
+
       await session.clickSessionChatTab();
-      await expect(session.activeChat()).toContainText("3 preview feedback items");
+      const userMessageCount = await session
+        .activeChat()
+        .getByTestId("user-message-bubble")
+        .count();
+      await expect(session.activeChat()).toContainText("4 preview feedback items");
+
+      await testPage.evaluate(() => {
+        type Panel = { id: string; api: { close: () => void } };
+        type DockviewApi = { panels: Panel[] };
+        const api = (window as unknown as { __dockviewApi__?: DockviewApi }).__dockviewApi__;
+        for (const panel of [...(api?.panels ?? [])]) {
+          if (panel.id.startsWith("browser:")) panel.api.close();
+        }
+      });
+      await expect(session.browserPanel).toHaveCount(0);
+
+      const feedbackChip = session
+        .activeChat()
+        .getByRole("button", { name: "4 preview feedback items", exact: true });
+      await feedbackChip.click();
+      const collection = testPage.getByTestId("preview-feedback-collection-popover");
+      await expect(collection).toBeVisible();
+      const collectionItems = collection.getByTestId("preview-feedback-item");
+      await expect(collectionItems).toHaveCount(4);
+
+      const firstItem = collectionItems.nth(0);
+      await firstItem.getByRole("button", { name: "Edit feedback" }).click();
+      await firstItem
+        .getByRole("textbox", { name: "Edit comment" })
+        .fill("Make the action clearer");
+      await firstItem.getByRole("button", { name: "Save changes" }).click();
+      await expect(firstItem).toContainText("Make the action clearer");
+
+      await collectionItems.nth(1).getByRole("button", { name: "Delete feedback" }).click();
+      await expect(collectionItems).toHaveCount(3);
+      await expect(collection).toContainText(failedScreenshotComment);
+      await expect(collection).not.toContainText("Explain how this generated total was calculated");
+      expect(await session.activeChat().getByTestId("user-message-bubble").count()).toBe(
+        userMessageCount,
+      );
+      await testPage.keyboard.press("Escape");
 
       await testPage.reload();
       await session.waitForLoad();
       await expect(session.activeChat()).toContainText("3 preview feedback items", {
         timeout: 15_000,
       });
+      const restoredFeedbackChip = session
+        .activeChat()
+        .getByRole("button", { name: "3 preview feedback items", exact: true });
+      await restoredFeedbackChip.click();
+      await expect(collection).toBeVisible();
+      await expect(collection).toContainText("Make the action clearer");
+      await expect(collection).not.toContainText("Explain how this generated total was calculated");
+      await testPage.keyboard.press("Escape");
 
       await session.sendMessageViaButton("Apply the pending preview feedback");
       const directMessage = session
@@ -84,9 +157,12 @@ test.describe("Web preview feedback", () => {
         .getByTestId("user-message-bubble")
         .filter({ hasText: "Apply the pending preview feedback" });
       await expect(directMessage).toContainText("Web Preview Feedback", { timeout: 20_000 });
-      await expect(directMessage).toContainText("Explain how this generated total was calculated");
-      await expect(directMessage).toContainText("Rendered text anchor");
-      await expect(directMessage).toContainText("node_path");
+      await expect(directMessage).toContainText("Make the action clearer");
+      await expect(directMessage).not.toContainText(
+        "Explain how this generated total was calculated",
+      );
+      await expect(directMessage).toContainText("Rendered element snapshot");
+      await expect(directMessage).toContainText('"selector": "button#save"');
       await expect(directMessage).toContainText("viewport_width");
       const screenshotAttachment = directMessage.getByRole("button", {
         name: "Open Attachment 1",
@@ -100,6 +176,7 @@ test.describe("Web preview feedback", () => {
 
       await session.sendMessage("/slow 5s");
       await waitForComposerQueueMode(testPage);
+      await session.addBrowserPanel();
       await session.clickTab("Browser");
       await session.browserAddressInput.fill(server.url);
       await session.browserAddressInput.press("Enter");

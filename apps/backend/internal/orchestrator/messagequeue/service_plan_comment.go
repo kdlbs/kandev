@@ -13,20 +13,22 @@ import (
 // PlanCommentQueueRequest describes a caller-identified queued prompt that
 // consumes exact task-owned plan comments when admitted.
 type PlanCommentQueueRequest struct {
-	ClientQueueID         string
-	SessionID             string
-	TaskID                string
-	SessionIncarnationID  string
-	Content               string
-	Model                 string
-	UserID                string
-	PlanMode              bool
-	Attachments           []MessageAttachment
-	Metadata              map[string]interface{}
-	PlanCommentRefs       []models.TaskPlanCommentRef
-	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef
-	RequirePrimarySession bool
-	AttachmentClaim       *QueueAttachmentClaim
+	ClientQueueID                     string
+	SessionID                         string
+	TaskID                            string
+	SessionIncarnationID              string
+	Content                           string
+	Model                             string
+	UserID                            string
+	PlanMode                          bool
+	Attachments                       []MessageAttachment
+	Metadata                          map[string]interface{}
+	PlanCommentRefs                   []models.TaskPlanCommentRef
+	PreviewFeedbackRefs               []models.TaskPreviewFeedbackRef
+	RequirePrimarySession             bool
+	AttachmentClaim                   *QueueAttachmentClaim
+	PreviewFeedbackAttachmentResolver func(context.Context, string, []models.TaskPreviewFeedbackRef) ([]MessageAttachment, error)
+	AttachmentClaimResolver           func(context.Context, string, []MessageAttachment) (QueueAttachmentClaim, error)
 }
 
 // PlanCommentQueueResult distinguishes a first admission from an exact replay.
@@ -44,6 +46,7 @@ type taskFeedbackQueueWriter interface {
 		*QueuedMessage,
 		[]models.TaskPlanCommentRef,
 		[]models.TaskPreviewFeedbackRef,
+		string,
 		bool,
 		*QueueAttachmentClaim,
 		int,
@@ -119,38 +122,112 @@ func (s *Service) QueueMessageWithPlanComments(
 	ctx = plancommenttx.WithLocalAdmission(ctx, req.TaskID)
 	var result *PlanCommentQueueResult
 	err = s.WithSessionAdmission(ctx, req.SessionID, func(admittedCtx context.Context) error {
-		var snapshot *models.TaskPlanCommentSnapshot
-		var previewSnapshot *models.TaskPreviewFeedbackSnapshot
-		var replay bool
-		var insertErr error
-		if len(req.PreviewFeedbackRefs) > 0 {
-			writer, ok := s.repo.(taskFeedbackQueueWriter)
-			if !ok {
-				return errors.New("task feedback queue admission is unavailable")
-			}
-			snapshot, previewSnapshot, replay, insertErr = writer.InsertWithTaskFeedback(
-				admittedCtx, identity, message, req.PlanCommentRefs, req.PreviewFeedbackRefs,
-				req.RequirePrimarySession, req.AttachmentClaim, s.MaxPerSession(),
-			)
-		} else {
-			writer, ok := s.repo.(planCommentQueueWriter)
-			if !ok {
-				return errors.New("plan comment queue admission is unavailable")
-			}
-			snapshot, replay, insertErr = writer.InsertWithPlanComments(
-				admittedCtx, identity, message, req.PlanCommentRefs, req.RequirePrimarySession,
-				req.AttachmentClaim, s.MaxPerSession(),
-			)
-		}
-		if insertErr != nil {
-			return insertErr
-		}
-		result = &PlanCommentQueueResult{
-			Message: message, Snapshot: snapshot, PreviewSnapshot: previewSnapshot, Replay: replay,
-		}
-		return nil
+		var err error
+		result, err = s.admitTaskFeedbackQueue(admittedCtx, identity, req, message)
+		return err
 	})
 	return result, err
+}
+
+func (s *Service) admitTaskFeedbackQueue(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	req PlanCommentQueueRequest,
+	message *QueuedMessage,
+) (*PlanCommentQueueResult, error) {
+	if len(req.PreviewFeedbackRefs) == 0 {
+		writer, ok := s.repo.(planCommentQueueWriter)
+		if !ok {
+			return nil, errors.New("plan comment queue admission is unavailable")
+		}
+		snapshot, replay, err := writer.InsertWithPlanComments(
+			ctx, identity, message, req.PlanCommentRefs, req.RequirePrimarySession,
+			req.AttachmentClaim, s.MaxPerSession(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		return &PlanCommentQueueResult{Message: message, Snapshot: snapshot, Replay: replay}, nil
+	}
+	writer, ok := s.repo.(taskFeedbackQueueWriter)
+	if !ok {
+		return nil, errors.New("task feedback queue admission is unavailable")
+	}
+	reader, ok := s.repo.(queueAdmissionRepository)
+	if !ok {
+		return nil, ErrQueueAdmissionUnavailable
+	}
+	replayFingerprint, existing, replay, err := lookupTaskFeedbackQueueReplay(
+		ctx, reader, identity, req.ClientQueueID, message,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if replay {
+		return &PlanCommentQueueResult{Message: existing, Replay: true}, nil
+	}
+	claim, err := s.resolveTaskFeedbackQueueInputs(ctx, req, message)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, previewSnapshot, replay, err := writer.InsertWithTaskFeedback(
+		ctx, identity, message, req.PlanCommentRefs, req.PreviewFeedbackRefs,
+		replayFingerprint, req.RequirePrimarySession, claim, s.MaxPerSession(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &PlanCommentQueueResult{
+		Message: message, Snapshot: snapshot, PreviewSnapshot: previewSnapshot, Replay: replay,
+	}, nil
+}
+
+func lookupTaskFeedbackQueueReplay(
+	ctx context.Context,
+	reader queueAdmissionRepository,
+	identity QueueSessionIdentity,
+	clientQueueID string,
+	message *QueuedMessage,
+) (string, *QueuedMessage, bool, error) {
+	fingerprint, err := queueAdmissionFingerprint(identity, message)
+	if err != nil {
+		return "", nil, false, err
+	}
+	existing, replay, err := reader.LookupQueueAdmission(ctx, identity, clientQueueID, message)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if replay {
+		return "", existing, true, nil
+	}
+	return fingerprint, nil, false, nil
+}
+
+func (s *Service) resolveTaskFeedbackQueueInputs(
+	ctx context.Context,
+	req PlanCommentQueueRequest,
+	message *QueuedMessage,
+) (*QueueAttachmentClaim, error) {
+	if req.PreviewFeedbackAttachmentResolver == nil {
+		return nil, errors.New("preview feedback attachments are unavailable")
+	}
+	attachments, err := req.PreviewFeedbackAttachmentResolver(ctx, req.TaskID, req.PreviewFeedbackRefs)
+	if err != nil {
+		return nil, err
+	}
+	message.Attachments = append(message.Attachments, attachments...)
+	claim := req.AttachmentClaim
+	if claim == nil && len(req.Attachments) > 0 {
+		if req.AttachmentClaimResolver == nil {
+			return nil, errors.New("transactional attachment admission is unavailable")
+		}
+		prepared, err := req.AttachmentClaimResolver(ctx, req.TaskID, req.Attachments)
+		if err != nil {
+			return nil, err
+		}
+		claim = &prepared
+	}
+	return claim, nil
 }
 
 func preparePlanCommentQueueMetadata(req PlanCommentQueueRequest) (map[string]interface{}, error) {

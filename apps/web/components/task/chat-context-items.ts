@@ -38,6 +38,7 @@ export type BuildContextItemsParams = {
   messageComments: AgentMessageComment[];
   handleClearMessageComments: () => void;
   taskId: string | null;
+  onOpenPreviewFeedback?: () => void;
 };
 
 type FileItemHelpers = {
@@ -261,6 +262,7 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
       id: "preview-feedback",
       label: t("task:previewFeedbackCount", { count: previewFeedback.length }),
       items: previewFeedback,
+      onOpen: params.onOpenPreviewFeedback,
     });
   }
 

@@ -92,7 +92,8 @@ describe("buildContextItems task plan comments", () => {
 });
 
 describe("buildContextItems task preview feedback", () => {
-  it("keeps the shared collection local to the context chip", () => {
+  it("opens the task-scoped collection from the context chip", () => {
+    const open = vi.fn();
     const items = buildContextItems({
       planContextEnabled: false,
       contextFiles: [],
@@ -125,14 +126,15 @@ describe("buildContextItems task preview feedback", () => {
       messageComments: [],
       handleClearMessageComments: vi.fn(),
       taskId: "task-1",
+      onOpenPreviewFeedback: open,
     } as never);
 
     const item = items.find((candidate) => candidate.kind === "preview-feedback");
     expect(item).toMatchObject({
       kind: "preview-feedback",
       label: "1 preview feedback item",
+      onOpen: open,
     });
-    expect(item).not.toHaveProperty("onOpen");
     expect(item?.onRemove).toBeUndefined();
   });
 });

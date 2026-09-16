@@ -250,6 +250,7 @@ describe("usePreviewCapture screenshots", () => {
     );
 
     await waitFor(() => expect(result.current.draft?.kind).toBe("screenshot"));
+    expect(result.current.isRasterizing).toBe(false);
     if (result.current.draft?.kind !== "screenshot") throw new Error("expected screenshot draft");
     expect(result.current.draft?.screenshot?.previewUrl).toBe("blob:preview-screenshot");
     expect(html2canvas).toHaveBeenCalledWith(

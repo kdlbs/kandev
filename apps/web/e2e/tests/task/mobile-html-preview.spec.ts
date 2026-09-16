@@ -6,6 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { routeMainWebSocketWithPreviewFeedbackCreateFailure } from "../../helpers/ws-drop";
 import { SessionPage } from "../../pages/session-page";
 
 const SVG_ASSET =
@@ -56,7 +57,7 @@ async function setupMobileHtmlPreviewTest({
   apiClient: ApiClient;
   seedData: SeedData;
   backend: BackendContext;
-}): Promise<{ session: SessionPage; filePath: string }> {
+}): Promise<{ session: SessionPage; filePath: string; taskId: string; sessionId: string }> {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const filePath = `mobile-preview-${suffix}.html`;
   const assetDirectory = `mobile-preview-assets-${suffix}`;
@@ -88,7 +89,8 @@ async function setupMobileHtmlPreviewTest({
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
-  return { session, filePath };
+  if (!task.session_id) throw new Error("Mobile HTML preview task has no session");
+  return { session, filePath, taskId: task.id, sessionId: task.session_id };
 }
 
 test.describe("Mobile HTML preview", () => {
@@ -152,7 +154,8 @@ test.describe("Mobile HTML preview", () => {
     seedData,
     backend,
   }) => {
-    const { filePath } = await setupMobileHtmlPreviewTest({
+    const createFailure = await routeMainWebSocketWithPreviewFeedbackCreateFailure(testPage);
+    const { filePath, session, taskId, sessionId } = await setupMobileHtmlPreviewTest({
       testPage,
       apiClient,
       seedData,
@@ -251,7 +254,19 @@ test.describe("Mobile HTML preview", () => {
     await screenshotDraft
       .getByRole("textbox", { name: "Comment on selection" })
       .fill("Reduce the vertical space in this card");
+    createFailure.failNextCreate();
     await screenshotDraft.getByRole("button", { name: "Save feedback" }).tap();
+    await expect.poll(() => createFailure.failedCount()).toBe(1);
+    await expect(screenshotDraft).toBeVisible();
+    await expect(
+      screenshotDraft.getByRole("textbox", { name: "Comment on selection" }),
+    ).toHaveValue("Reduce the vertical space in this card");
+    await expect(screenshotDraft.getByRole("img", { name: "Screenshot preview" })).toBeVisible();
+    await expect(testPage.getByTestId("preview-feedback-drawer").getByRole("alert")).toContainText(
+      "feedback could not be saved",
+    );
+    await screenshotDraft.getByRole("button", { name: "Save feedback" }).tap();
+    await expect(screenshotDraft).toBeHidden({ timeout: 15_000 });
     await expect(preview.getByTestId("preview-feedback-trigger")).toContainText("2");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile preview feedback drawer");
 
@@ -260,6 +275,84 @@ test.describe("Mobile HTML preview", () => {
     await preview.getByRole("button", { name: "Show code" }).tap();
     await expect(viewer.locator(".cm-content")).toContainText("Generated order summary");
     await expect(preview).toBeHidden();
+
+    await testPage.getByRole("navigation").getByRole("button", { name: "Chat", exact: true }).tap();
+    await apiClient.seedTaskSession(taskId, {
+      state: "COMPLETED",
+      sessionId,
+      completedAt: new Date().toISOString(),
+    });
+    await testPage.reload();
+    await session.waitForLoad();
+    await testPage.getByRole("navigation").getByRole("button", { name: "Chat", exact: true }).tap();
+    await expect(testPage.getByTestId("completed-session-banner")).toBeVisible({ timeout: 15_000 });
+
+    const fallbackTrigger = testPage.getByTestId("preview-feedback-collection-trigger");
+    await expect(fallbackTrigger).toBeVisible();
+    const fallbackTriggerBox = await fallbackTrigger.boundingBox();
+    expect(fallbackTriggerBox?.width).toBeGreaterThanOrEqual(44);
+    expect(fallbackTriggerBox?.height).toBeGreaterThanOrEqual(44);
+    const userMessageCount = await session.activeChat().getByTestId("user-message-bubble").count();
+    await fallbackTrigger.tap();
+
+    const collectionBody = testPage.getByTestId("preview-feedback-collection-body");
+    const collectionDrawer = testPage.getByRole("dialog").filter({ has: collectionBody });
+    await expect(collectionDrawer).toBeVisible();
+    const collectionViewport = testPage.viewportSize();
+    expect(collectionViewport).not.toBeNull();
+    await expect
+      .poll(async () => {
+        const box = await collectionDrawer.boundingBox();
+        return box ? box.y + box.height : Number.POSITIVE_INFINITY;
+      })
+      .toBeLessThanOrEqual(collectionViewport!.height);
+    const collectionBox = await collectionDrawer.boundingBox();
+    expect(collectionBox).not.toBeNull();
+    expect(collectionBox!.y + collectionBox!.height).toBeLessThanOrEqual(
+      collectionViewport!.height,
+    );
+    expect(
+      parseFloat(
+        await collectionBody.evaluate((element) => getComputedStyle(element).paddingBottom),
+      ),
+    ).toBeGreaterThanOrEqual(16);
+    const collectionItems = collectionBody.getByTestId("preview-feedback-item");
+    await expect(collectionItems).toHaveCount(2);
+
+    const firstItem = collectionItems.nth(0);
+    await firstItem.getByRole("button", { name: "Edit feedback" }).tap();
+    await firstItem
+      .getByRole("textbox", { name: "Edit comment" })
+      .fill("Keep this touch action clear");
+    await firstItem.getByRole("button", { name: "Save changes" }).tap();
+    await expect(firstItem).toContainText("Keep this touch action clear");
+
+    await collectionItems.nth(1).getByRole("button", { name: "Delete feedback" }).tap();
+    await expect(collectionItems).toHaveCount(1);
+    expect(await session.activeChat().getByTestId("user-message-bubble").count()).toBe(
+      userMessageCount,
+    );
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile task feedback collection");
+
+    await testPage.keyboard.press("Escape");
+    await expect(collectionDrawer).toBeHidden();
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? ""),
+      )
+      .toBe("preview-feedback-collection-trigger");
+
+    await testPage.reload();
+    await expect(
+      testPage.getByRole("navigation").getByRole("button", { name: "Chat", exact: true }),
+    ).toBeVisible();
+    await testPage.getByRole("navigation").getByRole("button", { name: "Chat", exact: true }).tap();
+    const restoredTrigger = testPage.getByTestId("preview-feedback-collection-trigger");
+    await expect(restoredTrigger).toContainText("1");
+    await restoredTrigger.tap();
+    await expect(testPage.getByTestId("preview-feedback-collection-body")).toContainText(
+      "Keep this touch action clear",
+    );
   });
 
   test("recovers from a failed publish without losing the source viewer", async ({

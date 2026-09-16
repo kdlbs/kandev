@@ -16,6 +16,11 @@ type MessageAddResponseDropController = {
   droppedCount: () => number;
 };
 
+type PreviewFeedbackCreateFailureController = {
+  failNextCreate: () => void;
+  failedCount: () => number;
+};
+
 type ExpiredPluginSnapshotController = {
   expireNextPluginSnapshot: () => void;
   modifiedCount: () => number;
@@ -272,6 +277,64 @@ export async function routeMainWebSocketWithMessageAddResponseDrop(
       dropped.value = 0;
     },
     droppedCount: () => dropped.value,
+  };
+}
+
+/**
+ * Rejects one preview-feedback create request before it reaches the backend.
+ * The next request is forwarded normally, so a screenshot draft can exercise
+ * create failure and retry without leaving a server-side row behind.
+ */
+export async function routeMainWebSocketWithPreviewFeedbackCreateFailure(
+  page: Page,
+): Promise<PreviewFeedbackCreateFailureController> {
+  const state = { armed: false, failed: 0 };
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      if (typeof message !== "string") {
+        server.send(message);
+        return;
+      }
+
+      const forwarded: string[] = [];
+      for (const part of message.split("\n")) {
+        const frame = parseQueueAdmissionFrame(part);
+        if (
+          state.armed &&
+          frame?.type === "request" &&
+          frame.action === "task.preview_feedback.create" &&
+          typeof frame.id === "string"
+        ) {
+          state.armed = false;
+          state.failed += 1;
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              id: frame.id,
+              action: frame.action,
+              payload: {
+                code: "INTERNAL_ERROR",
+                message: "Injected preview feedback create failure",
+              },
+            }),
+          );
+          continue;
+        }
+        forwarded.push(part);
+      }
+      const next = forwarded.join("\n");
+      if (next.trim()) server.send(next);
+    });
+    server.onMessage((message) => ws.send(message));
+  });
+
+  return {
+    failNextCreate: () => {
+      state.armed = true;
+    },
+    failedCount: () => state.failed,
   };
 }
 

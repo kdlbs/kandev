@@ -54,7 +54,7 @@ type InspectorEventOptions = {
   enabled: boolean;
   projectMarkers: () => void;
   setMode: React.Dispatch<React.SetStateAction<PreviewCaptureMode | null>>;
-  setDraft: React.Dispatch<React.SetStateAction<PreviewFeedbackDraft | null>>;
+  setDraft: (draft: PreviewFeedbackDraft) => void;
   setCandidateLabel: React.Dispatch<React.SetStateAction<string | null>>;
   setPageRoute: React.Dispatch<React.SetStateAction<string>>;
   setPageTitle: React.Dispatch<React.SetStateAction<string>>;
@@ -146,10 +146,27 @@ function releaseScreenshotDraft(draft: PreviewFeedbackDraft | null) {
 
 function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | null>) {
   const [draft, setDraft] = useState<PreviewFeedbackDraft | null>(null);
+  const [draftComment, setDraftComment] = useState("");
   const [captureError, setCaptureError] = useState<PreviewCaptureError | null>(null);
   const [isRasterizing, setIsRasterizing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const generationRef = useRef(0);
+  const draftRef = useRef<PreviewFeedbackDraft | null>(null);
+
+  const setNewDraft = useCallback((next: PreviewFeedbackDraft) => {
+    releaseScreenshotDraft(draftRef.current);
+    draftRef.current = next;
+    setDraft(next);
+    setDraftComment("");
+    generationRef.current += 1;
+  }, []);
+
+  const updateDraft = useCallback((next: React.SetStateAction<PreviewFeedbackDraft | null>) => {
+    const current = draftRef.current;
+    const updated = typeof next === "function" ? next(current) : next;
+    draftRef.current = updated;
+    setDraft(updated);
+  }, []);
 
   const captureScreenshot = useCallback(
     (region: PreviewScreenshotRegion) => {
@@ -167,17 +184,15 @@ function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | nul
         .then((image) => {
           if (generationRef.current !== generation) return;
           const previewUrl = URL.createObjectURL(image.blob);
-          setDraft((previous) => {
-            releaseScreenshotDraft(previous);
-            return {
-              ...region,
-              kind: "screenshot",
-              screenshot: {
-                ...image,
-                previewUrl,
-                fileName: `preview-${Date.now()}.png`,
-              },
-            };
+          setIsRasterizing(false);
+          setNewDraft({
+            ...region,
+            kind: "screenshot",
+            screenshot: {
+              ...image,
+              previewUrl,
+              fileName: `preview-${Date.now()}.png`,
+            },
           });
         })
         .catch(() => {
@@ -187,35 +202,40 @@ function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | nul
           if (generationRef.current === generation) setIsRasterizing(false);
         });
     },
-    [iframeRef],
+    [iframeRef, setNewDraft],
   );
 
   const clearForCapture = useCallback(() => {
     generationRef.current += 1;
-    setDraft((current) => {
-      releaseScreenshotDraft(current);
-      return null;
-    });
+    releaseScreenshotDraft(draftRef.current);
+    draftRef.current = null;
+    setDraft(null);
+    setDraftComment("");
     setCaptureError(null);
     setIsRasterizing(false);
   }, []);
 
-  const discardDraft = useCallback(() => {
-    clearForCapture();
-  }, [clearForCapture]);
+  const discardDraft = clearForCapture;
 
-  const completeDraft = useCallback((savedDraft: PreviewFeedbackDraft) => {
-    generationRef.current += 1;
-    if (savedDraft.kind === "screenshot") {
-      URL.revokeObjectURL(savedDraft.screenshot.previewUrl);
+  const completeDraft = useCallback((savedGeneration: number) => {
+    if (generationRef.current !== savedGeneration || !draftRef.current) return false;
+    if (draftRef.current.kind === "screenshot") {
+      URL.revokeObjectURL(draftRef.current.screenshot.previewUrl);
     }
+    draftRef.current = null;
     setDraft(null);
+    setDraftComment("");
     setCaptureError(null);
+    generationRef.current += 1;
+    return true;
   }, []);
 
   return {
     draft,
-    setDraft,
+    draftComment,
+    setDraftComment,
+    setDraft: setNewDraft,
+    updateDraft,
     captureError,
     setCaptureError,
     isRasterizing,
@@ -273,7 +293,7 @@ function useSavePreviewDraft({
               void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
               return false;
             }
-            draftState.setDraft((current) =>
+            draftState.updateDraft((current) =>
               current?.kind === "screenshot"
                 ? {
                     ...current,
@@ -305,8 +325,7 @@ function useSavePreviewDraft({
         screenshotAttachmentId,
       });
       if (!result) return false;
-      draftState.completeDraft(draft);
-      projectMarkers();
+      if (draftState.completeDraft(saveGeneration)) projectMarkers();
       return true;
     },
     [createFeedback, draftState, projectMarkers, source, workspaceId],
@@ -397,6 +416,8 @@ export function usePreviewCapture({
     ...feedback,
     mode,
     draft: draftState.draft,
+    draftComment: draftState.draftComment,
+    setDraftComment: draftState.setDraftComment,
     candidateLabel,
     captureError: draftState.captureError,
     isRasterizing: draftState.isRasterizing,

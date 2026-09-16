@@ -23,11 +23,12 @@ func (r *sqliteRepository) InsertWithTaskFeedback(
 	msg *QueuedMessage,
 	planRefs []models.TaskPlanCommentRef,
 	previewRefs []models.TaskPreviewFeedbackRef,
+	replayFingerprint string,
 	requirePrimary bool,
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
 ) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, bool, error) {
-	if err := validateTaskFeedbackQueueRequest(identity, msg, previewRefs); err != nil {
+	if err := validateTaskFeedbackQueueRequest(identity, msg, previewRefs, replayFingerprint); err != nil {
 		return nil, nil, false, err
 	}
 	release, err := plancommenttx.AcquireLocalAdmission(ctx, msg.TaskID)
@@ -42,7 +43,7 @@ func (r *sqliteRepository) InsertWithTaskFeedback(
 	}
 	defer func() { _ = tx.Rollback() }()
 	existing, replayed, err := r.commitTaskFeedbackQueueReplay(
-		ctx, tx, &candidate, planRefs, previewRefs,
+		ctx, tx, identity, &candidate, planRefs, previewRefs, replayFingerprint,
 	)
 	if err != nil {
 		return nil, nil, false, err
@@ -80,6 +81,11 @@ func (r *sqliteRepository) InsertWithTaskFeedback(
 	if err != nil {
 		return nil, nil, false, err
 	}
+	if err := r.insertQueueAdmissionReceiptTx(
+		ctx, tx, identity, candidate.ID, replayFingerprint, &candidate,
+	); err != nil {
+		return nil, nil, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, false, fmt.Errorf("commit task-feedback queue admission: %w", err)
 	}
@@ -91,8 +97,9 @@ func validateTaskFeedbackQueueRequest(
 	identity QueueSessionIdentity,
 	msg *QueuedMessage,
 	previewRefs []models.TaskPreviewFeedbackRef,
+	replayFingerprint string,
 ) error {
-	if msg == nil || msg.ID == "" || len(previewRefs) == 0 {
+	if msg == nil || msg.ID == "" || len(previewRefs) == 0 || replayFingerprint == "" {
 		return errors.New("client queue id and preview feedback are required")
 	}
 	if msg.TaskID != identity.TaskID || msg.SessionID != identity.SessionID {
@@ -104,10 +111,26 @@ func validateTaskFeedbackQueueRequest(
 func (r *sqliteRepository) commitTaskFeedbackQueueReplay(
 	ctx context.Context,
 	tx *sqlx.Tx,
+	identity QueueSessionIdentity,
 	candidate *QueuedMessage,
 	planRefs []models.TaskPlanCommentRef,
 	previewRefs []models.TaskPreviewFeedbackRef,
+	replayFingerprint string,
 ) (*QueuedMessage, bool, error) {
+	receipt, err := r.readQueueAdmissionReceiptTx(ctx, tx, identity, candidate.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if receipt != nil {
+		if receipt.Fingerprint != replayFingerprint ||
+			!sameTaskFeedbackQueueRequest(receipt.Message, candidate, planRefs, previewRefs) {
+			return nil, false, ErrQueueIDConflict
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, false, fmt.Errorf("commit task-feedback queue receipt replay: %w", err)
+		}
+		return receipt.Message, true, nil
+	}
 	existing, err := r.findQueuedMessageByIDTx(ctx, tx, candidate.ID)
 	if err != nil || existing == nil {
 		return existing, false, err

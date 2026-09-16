@@ -82,11 +82,13 @@ const item: TaskPreviewFeedback = {
 };
 
 function controller(overrides: Partial<PreviewFeedbackController> = {}): PreviewFeedbackController {
-  return {
+  const value: PreviewFeedbackController = {
     items: [item],
     snapshot: { task_id: "task-1", revision: 3, items: [item] },
     mode: null,
     draft: null,
+    draftComment: "",
+    setDraftComment: vi.fn(),
     candidateLabel: null,
     captureError: null,
     isRasterizing: false,
@@ -102,6 +104,12 @@ function controller(overrides: Partial<PreviewFeedbackController> = {}): Preview
     clear: vi.fn(),
     ...overrides,
   };
+  if (!overrides.setDraftComment) {
+    value.setDraftComment = vi.fn((comment: string) => {
+      value.draftComment = comment;
+    });
+  }
+  return value;
 }
 
 describe("PreviewFeedbackControls", () => {
@@ -161,13 +169,27 @@ describe("PreviewFeedbackControls", () => {
         },
       },
     });
-    render(<PreviewFeedbackControls capture={capture} enabled />);
+    const { rerender } = render(<PreviewFeedbackControls capture={capture} enabled />);
 
     expect(screen.getByText("$42.00")).toBeTruthy();
     const comment = screen.getByLabelText("Comment on selection");
     fireEvent.change(comment, { target: { value: "Keep the generated total visible" } });
+    rerender(<PreviewFeedbackControls capture={capture} enabled />);
     fireEvent.click(screen.getByRole("button", { name: "Save feedback" }));
     expect(capture.saveDraft).toHaveBeenCalledWith("Keep the generated total visible");
+  });
+
+  it("reuses the saved collection editor for item management", () => {
+    const capture = controller();
+    render(<PreviewFeedbackControls capture={capture} enabled />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Annotate.*1/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit feedback" }));
+    const editor = screen.getByRole("textbox", { name: "Edit comment" });
+    fireEvent.change(editor, { target: { value: "Keep the button aligned" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(capture.update).toHaveBeenCalledWith("feedback-1", "Keep the button aligned", 2);
   });
 
   it("uses a touch-sized drawer entry and exposes the same capture choices", () => {

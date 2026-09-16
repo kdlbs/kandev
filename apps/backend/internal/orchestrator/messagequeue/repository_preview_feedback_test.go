@@ -3,6 +3,7 @@ package messagequeue_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -18,6 +19,7 @@ type taskFeedbackQueueWriter interface {
 		*messagequeue.QueuedMessage,
 		[]models.TaskPlanCommentRef,
 		[]models.TaskPreviewFeedbackRef,
+		string,
 		bool,
 		*messagequeue.QueueAttachmentClaim,
 		int,
@@ -44,6 +46,7 @@ func TestSQLiteRepositoryInsertWithTaskFeedbackQueuesAndConsumesMixedContext(t *
 		ctx, identity, queued,
 		[]models.TaskPlanCommentRef{{ID: "comment-preview", Version: 1}},
 		[]models.TaskPreviewFeedbackRef{{ID: preview.ID, Version: 1}},
+		"fingerprint-preview",
 		true, nil, 10,
 	)
 	if err != nil || replay {
@@ -64,6 +67,58 @@ func TestSQLiteRepositoryInsertWithTaskFeedbackQueuesAndConsumesMixedContext(t *
 	entries, err := queueRepo.ListBySession(ctx, queued.SessionID)
 	if err != nil || len(entries) != 1 || entries[0].Content != queued.Content {
 		t.Fatalf("stored queue=%#v err=%v", entries, err)
+	}
+}
+
+func TestSQLiteRepositoryTaskFeedbackReplaySurvivesQueueDrain(t *testing.T) {
+	taskRepo, queueRepo := newPlanCommentQueueRepos(t)
+	ctx := context.Background()
+	seedQueuePlanComment(t, ctx, taskRepo, "preview-drained")
+	preview := seedQueuePreviewFeedback(t, ctx, taskRepo, "preview-drained")
+	refs := []models.TaskPreviewFeedbackRef{{ID: preview.ID, Version: 1}}
+	queued := planCommentQueuedMessage("preview-drained", "queue-preview-drained", "fingerprint-preview-drained", nil)
+	queued.Metadata["preview_feedback_refs"] = refs
+	identity := resolvePlanCommentQueueIdentity(t, ctx, queueRepo, queued)
+	writer, ok := queueRepo.(taskFeedbackQueueWriter)
+	if !ok {
+		t.Fatal("queue repository does not implement task feedback admission")
+	}
+
+	_, _, replay, err := writer.InsertWithTaskFeedback(
+		ctx, identity, queued, nil, refs, "fingerprint-preview-drained", false, nil, 10,
+	)
+	if err != nil || replay {
+		t.Fatalf("first insert replay=%v err=%v", replay, err)
+	}
+	reserved, autoRun, err := queueRepo.ReserveHeadIfAutoRunForSession(ctx, identity)
+	if err != nil || !autoRun || reserved == nil {
+		t.Fatalf("reserve accepted feedback = %#v auto_run=%v err=%v", reserved, autoRun, err)
+	}
+	if err := queueRepo.AcknowledgeByIDForSession(ctx, identity, reserved); err != nil {
+		t.Fatalf("acknowledge accepted feedback: %v", err)
+	}
+
+	retry := planCommentQueuedMessage("preview-drained", queued.ID, "fingerprint-preview-drained", nil)
+	retry.Metadata["preview_feedback_refs"] = refs
+	planSnapshot, previewSnapshot, replay, err := writer.InsertWithTaskFeedback(
+		ctx, identity, retry, nil, refs, "fingerprint-preview-drained", false, nil, 10,
+	)
+	if err != nil || !replay || planSnapshot != nil || previewSnapshot != nil {
+		t.Fatalf("drained replay plan=%#v preview=%#v replay=%v err=%v", planSnapshot, previewSnapshot, replay, err)
+	}
+	if retry.Content != queued.Content {
+		t.Fatalf("replayed content = %q, want %q", retry.Content, queued.Content)
+	}
+	conflict := planCommentQueuedMessage("preview-drained", queued.ID, "different-fingerprint", nil)
+	conflict.Metadata["preview_feedback_refs"] = refs
+	if _, _, _, err := writer.InsertWithTaskFeedback(
+		ctx, identity, conflict, nil, refs, "different-fingerprint", false, nil, 10,
+	); !errors.Is(err, messagequeue.ErrQueueIDConflict) {
+		t.Fatalf("conflicting drained replay error = %v, want ErrQueueIDConflict", err)
+	}
+	entries, err := queueRepo.ListBySession(ctx, queued.SessionID)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("queue after replay = %#v, err=%v", entries, err)
 	}
 }
 

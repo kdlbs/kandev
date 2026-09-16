@@ -20,6 +20,8 @@ const capture = {
   snapshot: { task_id: "task-1", revision: 0, items: [] },
   mode: null,
   draft: null,
+  draftComment: "",
+  setDraftComment: vi.fn(),
   candidateLabel: null,
   captureError: null,
   isRasterizing: false,

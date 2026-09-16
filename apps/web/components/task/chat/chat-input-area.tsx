@@ -34,10 +34,15 @@ import { resolveComposerWorkspaceId } from "./composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
-import { hasPendingClarification } from "./types";
+import {
+  hasPendingClarification,
+  shouldHideChatInputForLaunchError,
+  shouldRenderStoppedSessionBanner,
+} from "./types";
 import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import { toTaskPreviewFeedbackRefs } from "@/lib/preview-feedback-refs";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
+import { PreviewFeedbackCollectionSurface } from "@/components/task/inspector/preview-feedback-collection";
 import {
   ComposerCollapseButton,
   ComposerDisclosureRegion,
@@ -470,6 +475,65 @@ function useChatInputDerived(
   return { planActions, executor, placeholder };
 }
 
+export function shouldShowPreviewFeedbackFallback(args: {
+  taskId: string | null;
+  resolvedSessionId: string | null;
+  itemCount: number;
+  isFailed: boolean;
+  isCompleted: boolean;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}) {
+  if (!args.taskId || args.itemCount === 0) return false;
+  return (
+    !args.resolvedSessionId ||
+    shouldHideChatInputForLaunchError({
+      isFailed: args.isFailed,
+      launchErrorOwned: args.launchErrorOwned,
+    }) ||
+    shouldRenderStoppedSessionBanner({
+      isFailed: args.isFailed,
+      isCompleted: args.isCompleted,
+      executorUnavailable: args.executorUnavailable,
+      launchErrorOwned: args.launchErrorOwned,
+    })
+  );
+}
+
+function PreviewFeedbackFallbackSurface({
+  panelState,
+  taskId,
+  executorUnavailable,
+  launchErrorOwned,
+}: {
+  panelState: ChatPanelState;
+  taskId: string | null;
+  executorUnavailable: boolean;
+  launchErrorOwned?: boolean;
+}) {
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+  const collection = panelState.previewFeedbackState;
+  const showTrigger = shouldShowPreviewFeedbackFallback({
+    taskId,
+    resolvedSessionId: panelState.resolvedSessionId,
+    itemCount: panelState.previewFeedback?.length ?? 0,
+    isFailed: panelState.isFailed,
+    isCompleted: panelState.isCompleted,
+    executorUnavailable,
+    launchErrorOwned,
+  });
+  if (!collection || !taskId || (panelState.previewFeedback?.length ?? 0) === 0) return null;
+  return (
+    <PreviewFeedbackCollectionSurface
+      taskId={taskId}
+      collection={collection}
+      open={panelState.previewFeedbackOpen ?? fallbackOpen}
+      onOpenChange={panelState.setPreviewFeedbackOpen ?? setFallbackOpen}
+      showTrigger={showTrigger}
+    />
+  );
+}
+
 /**
  * The chat composer: input box, submit/cancel handling, plan-mode toggle,
  * clarification banner, and the {@link ChatStatusBar} above it.
@@ -560,6 +624,12 @@ export function ChatInputArea(props: ChatInputAreaProps) {
         </QueueAffordance>
         <ComposerCollapseButton />
       </ComposerDisclosureRegion>
+      <PreviewFeedbackFallbackSurface
+        panelState={panelState}
+        taskId={taskId}
+        executorUnavailable={executor.unavailable}
+        launchErrorOwned={props.launchErrorOwned}
+      />
     </div>
   );
 }

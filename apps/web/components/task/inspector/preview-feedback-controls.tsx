@@ -3,11 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
   IconClick,
-  IconEdit,
   IconMessagePlus,
   IconScreenshot,
   IconTextScan2,
-  IconTrash,
   IconX,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -17,13 +15,17 @@ import { useTranslation } from "react-i18next";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { PreviewCaptureMode } from "@/lib/preview-inspect-bridge";
 import type { PreviewFeedbackDraft } from "@/hooks/use-preview-capture";
-import type { TaskPreviewFeedback, TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
+import {
+  PreviewFeedbackCollection,
+  previewFeedbackElementLabel,
+  type PreviewFeedbackCollectionController,
+} from "./preview-feedback-collection";
 
-export type PreviewFeedbackController = {
-  items: TaskPreviewFeedback[];
-  snapshot?: TaskPreviewFeedbackSnapshot;
+export type PreviewFeedbackController = PreviewFeedbackCollectionController & {
   mode: PreviewCaptureMode | null;
   draft: PreviewFeedbackDraft | null;
+  draftComment: string;
+  setDraftComment: (comment: string) => void;
   candidateLabel: string | null;
   captureError: "raster" | "upload" | "workspace" | null;
   isRasterizing: boolean;
@@ -34,9 +36,6 @@ export type PreviewFeedbackController = {
   cancelCapture: () => void;
   discardDraft: () => void;
   saveDraft: (comment: string) => Promise<boolean>;
-  update: (id: string, comment: string, expectedVersion: number) => unknown;
-  remove: (id: string, expectedVersion: number) => unknown;
-  clear: (expectedRevision: number) => unknown;
 };
 
 type PreviewFeedbackControlsProps = {
@@ -44,27 +43,12 @@ type PreviewFeedbackControlsProps = {
   enabled: boolean;
 };
 
-function elementLabel(item: Pick<TaskPreviewFeedback, "kind" | "element_snapshot">) {
-  const element = item.element_snapshot;
-  if (!element) return "";
-  let label = element.tag;
-  if (element.id) label += `#${element.id}`;
-  else if (element.classes[0]) label += `.${element.classes[0]}`;
-  return `<${label}>`;
-}
-
-function feedbackEvidence(item: TaskPreviewFeedback) {
-  if (item.kind === "text") return item.selected_text ?? "";
-  if (item.kind === "element") return elementLabel(item);
-  return item.screenshot_attachment?.name ?? "";
-}
-
 function draftEvidence(draft: PreviewFeedbackDraft) {
   if (draft.kind === "text") return draft.selected_text ?? "";
   if (draft.kind === "screenshot") return "";
   const element = draft.element_snapshot;
   if (!element) return "";
-  return elementLabel({ kind: "element", element_snapshot: element });
+  return previewFeedbackElementLabel({ kind: "element", element_snapshot: element });
 }
 
 function CaptureChoices({
@@ -127,9 +111,6 @@ function CaptureChoices({
 
 function DraftEditor({ capture, touch }: { capture: PreviewFeedbackController; touch: boolean }) {
   const { t } = useTranslation();
-  const [comment, setComment] = useState("");
-
-  useEffect(() => setComment(""), [capture.draft]);
   if (!capture.draft) return null;
 
   return (
@@ -160,8 +141,8 @@ function DraftEditor({ capture, touch }: { capture: PreviewFeedbackController; t
         )}
       </div>
       <Textarea
-        value={comment}
-        onChange={(event) => setComment(event.target.value)}
+        value={capture.draftComment}
+        onChange={(event) => capture.setDraftComment(event.target.value)}
         aria-label={t("task:previewCommentSelection")}
         placeholder={t("task:previewCommentPlaceholder")}
         className="min-h-20 resize-y"
@@ -179,173 +160,14 @@ function DraftEditor({ capture, touch }: { capture: PreviewFeedbackController; t
         <Button
           type="button"
           className={touch ? "h-11" : "h-8"}
-          onClick={() => void capture.saveDraft(comment)}
-          disabled={!comment.trim() || capture.isMutating || capture.isUploading}
+          onClick={() => void capture.saveDraft(capture.draftComment)}
+          disabled={!capture.draftComment.trim() || capture.isMutating || capture.isUploading}
         >
           {capture.isUploading
             ? t("task:previewUploadingScreenshot")
             : t("task:previewSaveFeedback")}
         </Button>
       </div>
-    </section>
-  );
-}
-
-function PendingFeedbackItem({
-  item,
-  capture,
-  touch,
-}: {
-  item: TaskPreviewFeedback;
-  capture: PreviewFeedbackController;
-  touch: boolean;
-}) {
-  const { t } = useTranslation();
-  const [editing, setEditing] = useState(false);
-  const [editComment, setEditComment] = useState("");
-  const actionClass = touch ? "h-11 min-w-11" : "h-7 min-w-7";
-
-  function startEditing() {
-    setEditing(true);
-    setEditComment(item.comment);
-  }
-
-  function saveEditing() {
-    if (!editComment.trim()) return;
-    void capture.update(item.id, editComment.trim(), item.version);
-    setEditing(false);
-  }
-
-  return (
-    <li className="rounded-md border p-3" data-testid="preview-feedback-item">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs text-muted-foreground">
-            {item.source_label} · {item.page_route}
-          </p>
-          <p className="line-clamp-2 break-words font-mono text-xs">{feedbackEvidence(item)}</p>
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className={actionClass}
-          onClick={startEditing}
-          aria-label={t("task:previewEditFeedback")}
-        >
-          <IconEdit className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className={actionClass}
-          onClick={() => void capture.remove(item.id, item.version)}
-          aria-label={t("task:previewDeleteFeedback")}
-        >
-          <IconX className="h-4 w-4" />
-        </Button>
-      </div>
-      {editing ? (
-        <div className="mt-2 space-y-2">
-          <Textarea
-            value={editComment}
-            onChange={(event) => setEditComment(event.target.value)}
-            aria-label={t("task:previewEditComment")}
-            className="min-h-20"
-          />
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              className={actionClass}
-              onClick={() => setEditing(false)}
-            >
-              {t("task:previewCancel")}
-            </Button>
-            <Button
-              type="button"
-              className={actionClass}
-              onClick={saveEditing}
-              disabled={!editComment.trim() || capture.isMutating}
-            >
-              {t("task:previewSaveChanges")}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <p className="mt-2 break-words text-xs">{item.comment}</p>
-      )}
-    </li>
-  );
-}
-
-function PendingFeedback({
-  capture,
-  touch,
-}: {
-  capture: PreviewFeedbackController;
-  touch: boolean;
-}) {
-  const { t } = useTranslation();
-  const [confirmClear, setConfirmClear] = useState(false);
-  const actionClass = touch ? "h-11 min-w-11" : "h-7 min-w-7";
-
-  return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium">{t("task:previewPendingFeedback")}</h3>
-        {capture.items.length > 0 && !confirmClear && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className={actionClass}
-            onClick={() => setConfirmClear(true)}
-            aria-label={t("task:previewClearAll")}
-          >
-            <IconTrash className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
-      {confirmClear && (
-        <div className="rounded-md border border-destructive/30 p-3">
-          <p className="text-xs text-muted-foreground">
-            {t("task:previewConfirmClearDescription")}
-          </p>
-          <div className="mt-2 flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              className={actionClass}
-              onClick={() => setConfirmClear(false)}
-            >
-              {t("task:previewCancel")}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              className={actionClass}
-              onClick={() => {
-                void capture.clear(capture.snapshot?.revision ?? 0);
-                setConfirmClear(false);
-              }}
-            >
-              {t("task:previewClearAll")}
-            </Button>
-          </div>
-        </div>
-      )}
-      {capture.items.length === 0 && !capture.draft && (
-        <p className="py-4 text-center text-xs text-muted-foreground">
-          {t("task:previewPendingEmpty")}
-        </p>
-      )}
-      <ul className="space-y-2">
-        {capture.items.map((item) => (
-          <PendingFeedbackItem key={item.id} item={item} capture={capture} touch={touch} />
-        ))}
-      </ul>
     </section>
   );
 }
@@ -379,7 +201,12 @@ function FeedbackSurface({
             : t("task:previewMutationFailed")}
         </p>
       )}
-      <PendingFeedback capture={capture} touch={touch} />
+      <PreviewFeedbackCollection
+        collection={capture}
+        touch={touch}
+        showEmpty={!capture.draft}
+        showErrors={false}
+      />
     </div>
   );
 }

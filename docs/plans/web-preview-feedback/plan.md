@@ -301,6 +301,18 @@ move the task to Test.
 
 ## Verification results
 
+### Review follow-up (2026-09-16)
+
+The [review-fix package](../web-preview-feedback-review-fixes/plan.md) owns
+three open corrections: queue replay, screenshot draft comments, and independent
+collection access. It reuses this package's requirements and system design.
+Tasks 02, 03, 04, and 05 intersect those corrections. Their results here remain
+historical contributor evidence, not evidence that the new regressions pass.
+The follow-up package owns its pending statuses and new command results.
+Its scope does not include a commit, push, or whole-PR merge clearance.
+
+### Original implementation results
+
 - Desktop Chromium, mobile Chrome, and Docker-backed Playwright scenarios each
   pass against rebuilt production artifacts. They cover multi-route durable
   review, exact generated-text position evidence, candidate highlighting,

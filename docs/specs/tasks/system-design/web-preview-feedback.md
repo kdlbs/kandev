@@ -438,6 +438,62 @@ external-I/O boundary. Accepted queue cancellation or editing never resurrects
 the consumed feedback because the queued prompt and attachments are then the
 durable user message.
 
+## Recovery implementation
+
+### Replay before pending resolution
+
+The queue boundary separates original request identity from server-expanded
+prompt content and screenshot descriptors. `wsQueueMessage` authorizes task and
+session access before replay lookup. An exact accepted request does not depend
+on rows that acceptance already consumed.
+
+The lookup precedes pending-feedback resolution and repeats inside final
+admission. The transaction records the accepted response and original identity
+in the existing `queue_admission_receipts` store. That record outlives the
+visible queue entry. Queue insertion, attachment transfer, feedback consumption,
+and receipt persistence remain one transaction.
+
+`service_plan_comment.go` and `repository_preview_feedback.go` retain the
+existing task-before-session lock order and at-most-once delivery boundary.
+They reuse receipt primitives from `repository_admission.go`, not a nested
+ordinary-admission transaction. Altered requests under the same caller ID fail
+closed. A replay never resolves replacement feedback or claims another image.
+
+Legacy preview entries without an original-request identity retain fail-closed
+matching. They must not produce a new delivery from ambiguous metadata.
+Ordinary and plan-only receipt formats remain compatible.
+
+### Logical capture draft
+
+`use-preview-capture.ts` owns a logical draft identity and its comment.
+Screenshot upload enriches that draft with an attachment ID without changing
+its identity. `DraftEditor` uses controlled comment state rather than an effect
+that resets input on object replacement.
+
+Successful create or explicit discard settles the matching draft. Failed
+creation retains the PNG, comment, and upload ID. Terminal callbacks compare
+draft identity or generation before cleanup. A late callback cannot settle a
+replacement draft. Closing a form preserves its mounted controller state.
+
+### Collection access without capture
+
+The saved collection surface accepts task identity and the existing
+`usePreviewFeedback` operations. It does not require an iframe, capture mode,
+source session, or upload controller. Preview chrome and composer entry points
+reuse that surface without duplicating its mutation logic.
+
+`ChatInputArea` owns the composer-side surface outside `ChatInputContainer`
+branches that hide or replace input after a launch error or session stop.
+An independent task-scoped trigger remains available when the normal context
+chip is absent. A null selected session does not block collection access.
+Existing archived-task restrictions still apply.
+
+Desktop uses a controlled Popover. Coarse pointers use the existing task
+Drawer pattern with a fixed header, one scroll body, and safe-area clearance.
+Opening the surface never starts an agent or sends feedback. Edit success
+closes the editor. Edit failure retains its input and shows the current
+snapshot. Clear retains its revision check and confirmation.
+
 ## Lifecycle
 
 - Task deletion cascades pending rows and collection state and schedules all
@@ -534,3 +590,4 @@ shows a need for rates such as capture failure or stale-send conflict.
 ## Implementation plans
 
 - [Interactive web preview feedback](../../../plans/web-preview-feedback/plan.md)
+- [PR review fixes](../../../plans/web-preview-feedback-review-fixes/plan.md)

@@ -295,6 +295,12 @@ type previewFeedbackAttachmentPreparer interface {
 	PreviewFeedbackAttachments(context.Context, string, []models.TaskPreviewFeedbackRef) ([]v1.MessageAttachment, error)
 }
 
+type planCommentQueueAttachmentPreparation struct {
+	claim           *messagequeue.QueueAttachmentClaim
+	previewResolver func(context.Context, string, []models.TaskPreviewFeedbackRef) ([]messagequeue.MessageAttachment, error)
+	claimResolver   func(context.Context, string, []messagequeue.MessageAttachment) (messagequeue.QueueAttachmentClaim, error)
+}
+
 type QueueAttachmentReleaser interface {
 	ReleaseMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
 }
@@ -601,20 +607,6 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if validationError := validatePlanCommentQueueRequest(req); validationError != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validationError, nil)
 	}
-	if len(req.PreviewFeedbackRefs) > 0 {
-		preparer, ok := h.attachmentClaimer.(previewFeedbackAttachmentPreparer)
-		if !ok {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Preview feedback attachments are unavailable", nil)
-		}
-		attachments, err := preparer.PreviewFeedbackAttachments(ctx, req.TaskID, req.PreviewFeedbackRefs)
-		if err != nil {
-			if response := planCommentQueueError(msg, err); response != nil {
-				return response, nil
-			}
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid preview feedback attachments", nil)
-		}
-		req.Attachments = append(req.Attachments, queueAttachmentsFromV1(attachments)...)
-	}
 	if invalid := firstInvalidDeliveryMode(req.Attachments); invalid >= 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
 			map[string]interface{}{"attachment_index": invalid})
@@ -708,6 +700,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		if errors.Is(err, errQueuedAttachmentUnavailable) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
 		}
+		if errors.Is(err, errPreviewFeedbackAttachmentInvalid) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment metadata is invalid", nil)
+		}
 		if conflict := planCommentQueueError(msg, err); conflict != nil {
 			return conflict, nil
 		}
@@ -732,11 +727,12 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 }
 
 var (
-	errQueueInvalidReferences        = errors.New("invalid queued entity references")
-	errQueuedAttachmentUnavailable   = errors.New("queued attachment unavailable")
-	errQueuedAttachmentRollback      = errors.New("queued attachment rollback failed")
-	errAttachmentCleanupLeaseActive  = errors.New("queue attachment cleanup blocked by edit lease")
-	errAttachmentCleanupEntryChanged = errors.New("queue attachment cleanup entry changed")
+	errQueueInvalidReferences           = errors.New("invalid queued entity references")
+	errQueuedAttachmentUnavailable      = errors.New("queued attachment unavailable")
+	errQueuedAttachmentRollback         = errors.New("queued attachment rollback failed")
+	errPreviewFeedbackAttachmentInvalid = errors.New("preview feedback attachment metadata is invalid")
+	errAttachmentCleanupLeaseActive     = errors.New("queue attachment cleanup blocked by edit lease")
+	errAttachmentCleanupEntryChanged    = errors.New("queue attachment cleanup entry changed")
 )
 
 func (h *QueueHandlers) admitIdentifiedOrdinaryQueuedMessage(
@@ -940,17 +936,9 @@ func (h *QueueHandlers) admitPlanCommentQueuedMessage(
 		return nil, errors.New("plan comment queue admission is unavailable")
 	}
 	attachments := queueAttachmentsToV1(req.Attachments)
-	var attachmentClaim *messagequeue.QueueAttachmentClaim
-	if h.attachmentClaimer != nil && len(attachments) > 0 {
-		preparer, ok := h.attachmentClaimer.(QueueAttachmentClaimPreparer)
-		if !ok {
-			return nil, errors.New("transactional attachment admission is unavailable")
-		}
-		claim, err := preparer.PrepareQueueAttachmentClaim(ctx, req.TaskID, attachments)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, err)
-		}
-		attachmentClaim = &claim
+	prepared, err := h.preparePlanCommentQueueAttachments(ctx, req, attachments)
+	if err != nil {
+		return nil, err
 	}
 	return service.QueueMessageWithPlanComments(ctx, messagequeue.PlanCommentQueueRequest{
 		ClientQueueID: req.ClientQueueID, SessionID: req.SessionID, TaskID: req.TaskID,
@@ -958,8 +946,90 @@ func (h *QueueHandlers) admitPlanCommentQueuedMessage(
 		Content:              req.Content, Model: req.Model, UserID: queuedBy, PlanMode: req.PlanMode,
 		Attachments: req.Attachments, Metadata: metadata, PlanCommentRefs: req.PlanCommentRefs,
 		PreviewFeedbackRefs:   req.PreviewFeedbackRefs,
-		RequirePrimarySession: req.RequirePrimarySession, AttachmentClaim: attachmentClaim,
+		RequirePrimarySession: req.RequirePrimarySession, AttachmentClaim: prepared.claim,
+		PreviewFeedbackAttachmentResolver: prepared.previewResolver,
+		AttachmentClaimResolver:           prepared.claimResolver,
 	})
+}
+
+func (h *QueueHandlers) preparePlanCommentQueueAttachments(
+	ctx context.Context,
+	req *wsQueueMessageRequest,
+	attachments []v1.MessageAttachment,
+) (planCommentQueueAttachmentPreparation, error) {
+	if len(req.PreviewFeedbackRefs) == 0 {
+		return h.prepareOrdinaryQueueAttachments(ctx, req.TaskID, attachments)
+	}
+	return h.preparePreviewFeedbackQueueAttachments(req)
+}
+
+func (h *QueueHandlers) prepareOrdinaryQueueAttachments(
+	ctx context.Context,
+	taskID string,
+	attachments []v1.MessageAttachment,
+) (planCommentQueueAttachmentPreparation, error) {
+	if h.attachmentClaimer == nil || len(attachments) == 0 {
+		return planCommentQueueAttachmentPreparation{}, nil
+	}
+	preparer, ok := h.attachmentClaimer.(QueueAttachmentClaimPreparer)
+	if !ok {
+		return planCommentQueueAttachmentPreparation{}, errors.New("transactional attachment admission is unavailable")
+	}
+	claim, err := preparer.PrepareQueueAttachmentClaim(ctx, taskID, attachments)
+	if err != nil {
+		return planCommentQueueAttachmentPreparation{}, fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, err)
+	}
+	return planCommentQueueAttachmentPreparation{claim: &claim}, nil
+}
+
+func (h *QueueHandlers) preparePreviewFeedbackQueueAttachments(
+	req *wsQueueMessageRequest,
+) (planCommentQueueAttachmentPreparation, error) {
+	preparer, ok := h.attachmentClaimer.(previewFeedbackAttachmentPreparer)
+	if !ok {
+		return planCommentQueueAttachmentPreparation{}, nil
+	}
+	prepared := planCommentQueueAttachmentPreparation{
+		previewResolver: func(
+			resolveCtx context.Context,
+			taskID string,
+			refs []models.TaskPreviewFeedbackRef,
+		) ([]messagequeue.MessageAttachment, error) {
+			resolved, err := preparer.PreviewFeedbackAttachments(resolveCtx, taskID, refs)
+			if err != nil {
+				return nil, err
+			}
+			converted := queueAttachmentsFromV1(resolved)
+			if err := validatePreviewFeedbackQueueAttachments(req.Attachments, converted); err != nil {
+				return nil, err
+			}
+			return converted, nil
+		},
+	}
+	if claimPreparer, canPrepare := h.attachmentClaimer.(QueueAttachmentClaimPreparer); canPrepare && len(req.Attachments) > 0 {
+		prepared.claimResolver = func(
+			resolveCtx context.Context,
+			taskID string,
+			candidate []messagequeue.MessageAttachment,
+		) (messagequeue.QueueAttachmentClaim, error) {
+			return claimPreparer.PrepareQueueAttachmentClaim(resolveCtx, taskID, queueAttachmentsToV1(candidate))
+		}
+	}
+	return prepared, nil
+}
+
+func validatePreviewFeedbackQueueAttachments(
+	caller []messagequeue.MessageAttachment,
+	resolved []messagequeue.MessageAttachment,
+) error {
+	all := append(append([]messagequeue.MessageAttachment{}, caller...), resolved...)
+	if invalid := firstInvalidDeliveryMode(all); invalid >= 0 {
+		return fmt.Errorf("%w: attachment delivery mode at index %d", errPreviewFeedbackAttachmentInvalid, invalid)
+	}
+	if invalid := firstInvalidAttachment(all); invalid >= 0 {
+		return fmt.Errorf("%w at index %d", errPreviewFeedbackAttachmentInvalid, invalid)
+	}
+	return nil
 }
 
 func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
