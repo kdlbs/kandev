@@ -246,8 +246,11 @@ func (r *Repository) logDeferral(gate string, run *models.Run) {
 // concurrent cancel can commit between the candidate scan's SELECT and
 // this UPDATE, so a blind write would silently resurrect a cancelled
 // run as claimed. Zero rows affected means the row was in fact no
-// longer eligible; the caller gets sql.ErrNoRows and the scan moves on
-// rather than reporting a claim that didn't happen.
+// longer eligible: commitClaim returns sql.ErrNoRows, which propagates
+// through claimFirstEligible and scanCandidatePages to
+// ClaimNextEligibleRun, whose deferred rollback discards this tick's
+// gate outcomes along with the abandoned claim. The next tick re-scans
+// from scratch rather than resuming mid-page.
 func (r *Repository) commitClaim(ctx context.Context, tx *sqlx.Tx, candidate *models.Run) (*models.Run, error) {
 	claimedAt := time.Now().UTC()
 	res, err := tx.ExecContext(ctx, tx.Rebind(
