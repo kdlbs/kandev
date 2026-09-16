@@ -119,6 +119,42 @@ func (s *Service) validateSidebarWorkspacePatch(ctx context.Context, req *Update
 	return nil
 }
 
+// scopeLegacySidebarPatch preserves compatibility with clients that still send
+// the legacy sidebar fields alongside the selected workspace. Once workspace
+// state has migrated, those fields are applied to that explicit workspace
+// instead of mutating the old global projection.
+func (s *Service) scopeLegacySidebarPatch(req *UpdateUserSettingsRequest) (*UpdateUserSettingsRequest, error) {
+	if s.sidebarWorkspaceAccess == nil || req.SidebarViewState != nil || !hasLegacySidebarPatch(req) || req.WorkspaceID == nil {
+		return req, nil
+	}
+	workspaceID := strings.TrimSpace(*req.WorkspaceID)
+	if workspaceID == "" {
+		return nil, fmt.Errorf("%w: workspace is required for legacy sidebar preferences", ErrValidation)
+	}
+	patch := &models.SidebarWorkspacePatch{
+		WorkspaceID:  workspaceID,
+		Views:        req.SidebarViews,
+		ActiveViewID: req.SidebarActiveViewID,
+	}
+	if req.SidebarDraft != nil {
+		if *req.SidebarDraft == nil {
+			patch.Draft = json.RawMessage("null")
+		} else {
+			draft, err := json.Marshal(*req.SidebarDraft)
+			if err != nil {
+				return nil, fmt.Errorf("%w: invalid sidebar draft", ErrValidation)
+			}
+			patch.Draft = draft
+		}
+	}
+	scoped := *req
+	scoped.SidebarViewState = patch
+	scoped.SidebarViews = nil
+	scoped.SidebarActiveViewID = nil
+	scoped.SidebarDraft = nil
+	return &scoped, nil
+}
+
 func hasLegacySidebarPatch(req *UpdateUserSettingsRequest) bool {
 	return req.SidebarViews != nil || req.SidebarActiveViewID != nil || req.SidebarDraft != nil
 }

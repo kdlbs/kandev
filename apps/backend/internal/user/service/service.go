@@ -200,6 +200,11 @@ func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, 
 // validates each group, persists the result under expected-revision CAS, and
 // publishes the settings update event.
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
+	scopedReq, err := s.scopeLegacySidebarPatch(req)
+	if err != nil {
+		return nil, err
+	}
+	req = scopedReq
 	if err := s.validateSidebarWorkspacePatch(ctx, req); err != nil {
 		return nil, err
 	}

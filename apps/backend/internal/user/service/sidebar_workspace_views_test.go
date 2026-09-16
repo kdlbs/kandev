@@ -81,6 +81,31 @@ func TestSidebarWorkspacePatchIsolation(t *testing.T) {
 	}
 }
 
+func TestSidebarWorkspaceLegacyPatchUsesExplicitWorkspaceID(t *testing.T) {
+	svc, repo, _ := sidebarService(t)
+	if _, err := svc.GetUserSettings(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	workspaceID := "a"
+	views := []models.SidebarView{{ID: "scoped", Name: "Scoped"}}
+	got, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		WorkspaceID:  &workspaceID,
+		SidebarViews: &views,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SidebarViewsByWorkspace[workspaceID].Views[0].Name != "Scoped" {
+		t.Fatalf("workspace-scoped legacy patch was ignored: %+v", got.SidebarViewsByWorkspace)
+	}
+	if got.SidebarViewsByWorkspace["b"].Views[0].Name != "Original" {
+		t.Fatalf("legacy patch changed another workspace: %+v", got.SidebarViewsByWorkspace)
+	}
+	if repo.snapshot().SidebarViews[0].Name != "Original" {
+		t.Fatalf("legacy global state changed: %+v", repo.snapshot().SidebarViews)
+	}
+}
+
 func TestUpdateUserSettingsReturnsCommittedSettingsWhenSidebarProjectionFails(t *testing.T) {
 	repo := newCASFakeRepo(&models.UserSettings{
 		UserID:                  store.DefaultUserID,
