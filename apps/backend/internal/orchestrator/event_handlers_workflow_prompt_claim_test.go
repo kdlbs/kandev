@@ -189,7 +189,7 @@ func TestWorkflowAutoStartPromptClaimRejectsSessionTerminalizedAfterPromotion(t 
 	svc.repo = barrierRepo
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, _, _, claimErr := svc.claimSessionRunningForPrompt(
+		_, _, _, _, _, _, claimErr := svc.claimSessionRunningForPrompt(
 			ctx, session.TaskID, session.ID, "", false, nil, nil, "", true, nil,
 		)
 		errCh <- claimErr

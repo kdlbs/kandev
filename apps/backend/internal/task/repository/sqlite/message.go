@@ -132,7 +132,7 @@ func (r *Repository) insertMessageWithSessionLock(
 	messageType, metadataJSON string,
 ) error {
 	if !dialect.IsPostgres(r.db.DriverName()) {
-		return r.insertMessageRow(ctx, r.db, message, requestsInput, messageType, metadataJSON)
+		return r.insertMessageWithPayloadGuard(ctx, message, requestsInput, messageType, metadataJSON)
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -455,9 +455,20 @@ func buildListMessagesQuery(driverName, sessionID string, opts models.ListMessag
 		FROM task_session_messages
 		WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
-	if opts.AuthorType != "" {
+	if len(opts.AuthorTypes) > 0 {
+		placeholders := make([]string, len(opts.AuthorTypes))
+		for index, author := range opts.AuthorTypes {
+			placeholders[index] = "?"
+			args = append(args, author)
+		}
+		query += " AND author_type IN (" + strings.Join(placeholders, ",") + ")"
+	} else if opts.AuthorType != "" {
 		query += " AND author_type = ?"
 		args = append(args, opts.AuthorType)
+	}
+	if opts.TaskID != "" {
+		query += " AND task_id = ?"
+		args = append(args, opts.TaskID)
 	}
 	if cursor != nil {
 		if opts.Before != "" {
@@ -961,6 +972,9 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 	}
 
 	message.UpdatedAt = time.Now().UTC()
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return r.updateMessageWithPayloadGuard(ctx, message, metadataJSON, requestsInput)
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, updated_at = ?
 		WHERE id = ?

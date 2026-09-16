@@ -113,7 +113,7 @@ func (s *Service) dispatchCIAutomationPromptToIdleSession(
 			return ciAutomationDispatchResult{}, err
 		}
 	}
-	promptResult, promptErr := s.promptTask(ctx, session.TaskID, session.ID, params.ChatPrompt, "", false, nil, true, promptTaskOptions{
+	promptResult, promptErr := s.promptTask(ctx, session.TaskID, session.ID, params.ChatPrompt, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{
 		expectedSessionIdentity: &identity,
 		onAccepted: func(acceptedTurnID string) {
 			if params.OnAccepted != nil {

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, type ReactNode } from "react";
 import type { TaskRepository } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { SessionRecoveryOwner } from "@/lib/session-recovery-presentation";
@@ -12,6 +12,8 @@ export type TaskLaunchErrorContextValue = {
   statusSummary?: TaskStatusSummary | null;
   repositories?: TaskRepository[];
   automaticRecovery?: SessionRecoveryOwner | null;
+  /** Claims one assertive announcement for a task error stamp. */
+  claimTaskErrorAnnouncement?: (stamp: string) => boolean;
 };
 
 const TaskLaunchErrorContext = createContext<TaskLaunchErrorContextValue | null>(null);
@@ -24,8 +26,21 @@ export function TaskLaunchErrorProvider({
   children: ReactNode;
 }) {
   const statusSummary = useTaskStatusSummary(value.taskId, value.statusSummary);
+  const announcedTaskErrorRef = useRef<string | null>(null);
+  const claimTaskErrorAnnouncement = useCallback(
+    (stamp: string) => {
+      const key = `${value.taskId}:${stamp}`;
+      if (!stamp || announcedTaskErrorRef.current === key) return false;
+      announcedTaskErrorRef.current = key;
+      return true;
+    },
+    [value.taskId],
+  );
 
-  const contextValue = useMemo(() => ({ ...value, statusSummary }), [statusSummary, value]);
+  const contextValue = useMemo(
+    () => ({ ...value, statusSummary, claimTaskErrorAnnouncement }),
+    [claimTaskErrorAnnouncement, statusSummary, value],
+  );
   return (
     <TaskLaunchErrorContext.Provider value={contextValue}>
       {children}

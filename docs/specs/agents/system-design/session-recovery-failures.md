@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-09-11
-updated: 2026-09-12
+updated: 2026-09-14
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
@@ -97,24 +97,40 @@ Use 28-pixel fine-pointer buttons and at least 44-pixel phone/coarse-pointer
 targets. The semantic disclosure supports Enter/Space and expanded state.
 
 
-### Proposed recovery scroll ownership
+### Chronological recovery entries (September 14 amendment)
 
-The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) implements criterion 006.7.
-Place the recovery card inside the existing transcript viewport, before the message content.
-Disable outer `PanelBody` scrolling for the mounted chat.
-Preserve the fixed composer and existing dynamic viewport and safe-area layout.
-Expanded recovery details remain in the transcript scroll area.
-Do not add a card scroller, duplicate banner, or permanent fixed recovery panel.
+This amendment supersedes recovery reveal and prepend placement from the completed
+[startup recovery scrolling package](../../../plans/startup-recovery-scroll-timeout/plan.md).
+The [error scope package](../../../plans/error-scope-and-history/plan.md) owns implementation.
 
-Reveal the active card once per session and failure stamp when the chat becomes visible.
-Use the existing transcript scroll controller to coordinate this reveal with initial bottom positioning.
-A repeated event with the same stamp must not pull the user away from older messages.
-Scope reveal state to session identity and defer hidden-panel scrolling until visibility returns.
-Preserve normal bottom-follow behavior when no active recovery card exists.
+Render a session failure through the ordinary message pipeline at its persisted occurrence position.
+Reuse `ActionMessage`, `RunErrorEntry`, and `SessionBootstrapRecoveryCard` presentation and recovery handlers where applicable.
+One correlated failure selects one renderer, not a footer plus a prepended card.
+`TaskChatLaunchError` remains an adapter for compatible callers until those callers migrate.
 
-Task detail and preview share the chat panel. Audit Quick Chat for the same nested-scroll condition.
-The dedicated phone Chat surface retains stacked touch actions and one-dimensional navigation.
-The recovery card remains the sole explanation and action owner.
+Remove activity-based deletion from `deduplicateRecoveryMessages` in `processed-message-filtering.ts`.
+Deduplicate by session and durable stamp, with message ID as the legacy fallback.
+Do not collapse every recovery entry into the latest one. Preserve unrelated errors and provider-specific remediation.
+`ActionMessage` must retain a historical body while the session is STARTING, RUNNING, or COMPLETED.
+Neither a button click nor any later user message proves successful recovery.
+Use the existing durable recovery resolution timestamp and correlated boot evidence for outcome state.
+Only the matching current unresolved stamp can mount active recovery controls.
+A newer failed attempt creates a new chronological entry. The previous entry remains historical with no stale actions.
+An update within the same failure identity updates that entry without moving it.
+
+Remove recovery-specific `prependContent`, `recoveryRevealKey`, and top-placement branches from mounted chat paths.
+Remove only error-specific scroll behavior, preserving search, ordinary history anchors, bottom follow, and environment-switch placement.
+Update detail, preview, simple Chat, and Quick Chat. Keep the composer outside the single transcript scroll owner.
+A following reader sees new errors through normal append behavior. A reader in history stays at the same anchor.
+An active error outside the loaded page must not be fabricated at the tail.
+The existing session metadata can supply one provisional entry at its occurrence time until the persisted marker arrives.
+Merge that entry by stamp and replace it with the persisted message identity without duplication.
+After recovery, never reconstruct absent historical errors from current state alone.
+
+Phone entries stack actions with 44-pixel targets. Their details expand inline and wrap in the transcript.
+Shared task errors use the task-owned shell surface described in the
+[task design](../../tasks/system-design/task-launch-failure-recovery.md).
+The [scope decision](../../../decisions/2026-09-14-error-scope-and-history.md) records the tradeoffs.
 
 ## Persistence and compatibility
 
@@ -209,8 +225,8 @@ Explicit cancellation is a cancellation outcome, not a resume failure card.
 
 Reuse the existing `TaskLaunchErrorEntry` and recovery view model. The summary
 identifies recovery failure. Details identify the load timeout. Existing Retry
-and confirmed Start fresh actions keep their semantics. No new layout, setting,
-public retry endpoint, or background retry loop is necessary.
+and confirmed Start fresh actions keep their semantics. No new setting, public retry endpoint, or background retry loop is necessary.
+The chronological presentation amendment governs the layout.
 
 The nearest phone exemplar is the existing inline launch recovery card in
 `mobile/session-mobile-layout.tsx`. Phone actions stack below the summary and

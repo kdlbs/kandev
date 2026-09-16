@@ -6,6 +6,7 @@ const EDITABLE_FIELDS = [
   "model",
   "fallbackModel",
   "autoFallback",
+  "requireExactModel",
   "mode",
   "configOptions",
   "allowIndexing",

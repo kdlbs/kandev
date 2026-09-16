@@ -36,3 +36,28 @@ describe("Threads appearance draft", () => {
     });
   });
 });
+
+// @covers AC-UI-SIDEBAR-HOVER-002.1, AC-UI-SIDEBAR-HOVER-002.2, AC-UI-SIDEBAR-HOVER-002.3
+it("saves hover false and zero independently and rebases clean fields", () => {
+  const saved = createAppearanceSavedState("dark", "flat", true, defaultState.userSettings);
+  expect(saved).toMatchObject({ sidebarHoverEnabled: true, sidebarHoverDelayMs: "500" });
+  const draft = { ...saved, sidebarHoverEnabled: false, sidebarHoverDelayMs: "0" };
+  expect(buildAppearanceUserSettingsPatch(draft, saved)).toEqual({
+    sidebar_hover_enabled: false,
+    sidebar_hover_delay_ms: 0,
+  });
+  expect(appearanceRevision(draft)).not.toBe(appearanceRevision(saved));
+  const remote = { ...saved, sidebarHoverDelayMs: "1200", appStatusBarEnabled: true };
+  expect(rebaseAppearanceDraft(draft, saved, remote)).toEqual({
+    ...draft,
+    appStatusBarEnabled: true,
+  });
+  expect(rebaseAppearanceDraft(saved, saved, remote)).toEqual(remote);
+});
+
+it.each(["", "-1", "5001", "0.5", "abc"])("rejects invalid delay draft %s", (value) => {
+  const saved = createAppearanceSavedState("dark", "flat", true, defaultState.userSettings);
+  expect(() =>
+    buildAppearanceUserSettingsPatch({ ...saved, sidebarHoverDelayMs: value }, saved),
+  ).toThrow();
+});

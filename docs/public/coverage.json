@@ -471,14 +471,10 @@
         "/settings/integrations/sentry"
       ],
       "mcpTools": [
-        "get_task_mr_automation_kandev",
-        "get_task_pr_automation_kandev",
-        "link_task_pr_kandev",
-        "replace_task_pr_kandev",
-        "unlink_task_pr_kandev",
-        "report_pr_auto_fix_outcome_kandev",
-        "update_task_mr_automation_kandev",
-        "update_task_pr_automation_kandev"
+        "get_task_change_requests_kandev",
+        "manage_task_change_request_kandev",
+        "report_change_request_auto_fix_outcome_kandev",
+        "update_task_change_request_automation_kandev"
       ]
     },
     {

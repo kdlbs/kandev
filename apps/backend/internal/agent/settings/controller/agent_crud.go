@@ -27,7 +27,7 @@ func (c *Controller) GetAgent(ctx context.Context, id string) (*dto.AgentDTO, er
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
+	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 	if err := c.decorateAgentDTO(ctx, &result); err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (c *Controller) ListAgents(ctx context.Context) (*dto.ListAgentsResponse, e
 		if err != nil {
 			return nil, err
 		}
-		entry := toAgentDTO(agent, filterGlobalProfiles(profiles))
+		entry := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 		if err := c.decorateAgentDTO(ctx, &entry); err != nil {
 			return nil, err
 		}
@@ -119,11 +119,12 @@ type CreateAgentRequest struct {
 }
 
 type CreateAgentProfileRequest struct {
-	Name          string
-	Model         string
-	FallbackModel string
-	AutoFallback  bool
-	Mode          string
+	Name              string
+	Model             string
+	FallbackModel     string
+	AutoFallback      bool
+	RequireExactModel bool
+	Mode              string
 	// CLIFlags is the explicit list to persist. When nil the list is seeded
 	// from the agent's curated PermissionSettings() catalogue (all disabled
 	// by default) so a fresh profile opens with the agent's suggestions.
@@ -182,7 +183,7 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, profiles)
+	result := c.toAgentDTO(agent, profiles)
 	c.applyCapabilityStatus(&result, agent.Name)
 	return &result, nil
 }
@@ -233,6 +234,9 @@ func (c *Controller) findMatchedAvailability(name string, results []discovery.Av
 // agent-create profile. Kept separate so CreateAgent can validate every profile
 // before inserting the agent row (avoiding an orphaned agent on a bad profile).
 func validateCreateProfileRequest(p CreateAgentProfileRequest) error {
+	if err := validateRequireExactModelPolicy(p.Model, p.RequireExactModel, false, false); err != nil {
+		return err
+	}
 	if p.CLIFlags != nil {
 		if err := validateCLIFlagDTOs(p.CLIFlags); err != nil {
 			return err
@@ -255,16 +259,17 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			cliFlags = seedCLIFlags(agentConfig)
 		}
 		profile := &models.AgentProfile{
-			AgentID:          agentID,
-			Name:             profileReq.Name,
-			AgentDisplayName: displayName,
-			Model:            profileReq.Model,
-			FallbackModel:    strings.TrimSpace(profileReq.FallbackModel),
-			AutoFallback:     profileReq.AutoFallback,
-			Mode:             profileReq.Mode,
-			CLIFlags:         cliFlags,
-			EnvVars:          envVarsFromDTO(profileReq.EnvVars),
-			CommandPrefix:    strings.TrimSpace(profileReq.CommandPrefix),
+			AgentID:           agentID,
+			Name:              profileReq.Name,
+			AgentDisplayName:  displayName,
+			Model:             profileReq.Model,
+			FallbackModel:     strings.TrimSpace(profileReq.FallbackModel),
+			AutoFallback:      profileReq.AutoFallback,
+			RequireExactModel: profileReq.RequireExactModel,
+			Mode:              profileReq.Mode,
+			CLIFlags:          cliFlags,
+			EnvVars:           envVarsFromDTO(profileReq.EnvVars),
+			CommandPrefix:     strings.TrimSpace(profileReq.CommandPrefix),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err
@@ -309,7 +314,7 @@ func (c *Controller) UpdateAgent(ctx context.Context, req UpdateAgentRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	result := toAgentDTO(agent, filterGlobalProfiles(profiles))
+	result := c.toAgentDTO(agent, filterGlobalProfiles(profiles))
 	return &result, nil
 }
 

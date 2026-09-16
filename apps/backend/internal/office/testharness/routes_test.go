@@ -352,6 +352,51 @@ func TestSeedTaskSessionUsesRequestedSessionID(t *testing.T) {
 	}
 }
 
+func TestSeedTaskSessionUpdateAppliesErrorMessage(t *testing.T) {
+	repo, sqlxDB := newTestRepo(t)
+	taskID := uuid.New().String()
+	sessionID := uuid.New().String()
+	seedTask(t, sqlxDB, taskID)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"state":      "RUNNING",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	completedAt := time.Now().UTC().Format(time.RFC3339)
+	updateBody := mustJSON(t, map[string]interface{}{
+		"task_id":       taskID,
+		"session_id":    sessionID,
+		"state":         "FAILED",
+		"completed_at":  completedAt,
+		"error_message": "boom",
+	})
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("get updated session: %v", err)
+	}
+	if session.ErrorMessage != "boom" {
+		t.Fatalf("error_message = %q, want %q", session.ErrorMessage, "boom")
+	}
+}
+
 func TestSeedTaskSessionUsesRequestedRepositoryID(t *testing.T) {
 	repo, sqlxDB := newTestRepo(t)
 	taskID := uuid.New().String()

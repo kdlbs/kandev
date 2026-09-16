@@ -31,5 +31,9 @@
   "openTask": "Open task",
   "questionCount_one": "{{count}} question in this bundle",
   "questionCount_other": "{{count}} questions in this bundle",
-  "emptyTitleUnnamedWorkspace": "Nothing is waiting on you in this workspace."
+  "emptyTitleUnnamedWorkspace": "Nothing is waiting on you in this workspace.",
+  "tabLabel": "Needs you",
+  "failedClauseSome_one": "This list does not count failed tasks. {{count}} task has also failed. See the Failed tab.",
+  "failedClauseSome_other": "This list does not count failed tasks. {{count}} tasks have also failed. See the Failed tab.",
+  "failedClauseNone": "This list does not count failed tasks. None have failed in this workspace right now; check the Failed tab any time."
 }

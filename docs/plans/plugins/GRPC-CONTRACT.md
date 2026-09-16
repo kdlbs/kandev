@@ -62,6 +62,11 @@ service Host {
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
+  // Empty profile_id delegates to the platform default. A non-empty value
+  // selects that exact eligible profile. This separate method prevents an
+  // older host from silently ignoring an explicit selection.
+  rpc InvokeUtilityAgentWithOptions(InvokeUtilityAgentWithOptionsRequest) returns (InvokeUtilityAgentResponse);
+
   // The plugin's own operator-editable config (Settings > Plugins > <plugin>,
   // driven by the manifest's config_schema). Ungated; secret values arrive
   // in cleartext — this RPC is how an operator-configured credential (e.g. a
@@ -184,11 +189,28 @@ message RevealSecretResponse { string value = 1; }
 
 message EmitEventRequest { string event_name = 1; google.protobuf.Struct payload = 2; }
 message EmitEventResponse {}
+message InvokeUtilityAgentRequest { string prompt = 1; }
+message InvokeUtilityAgentWithOptionsRequest {
+  string prompt = 1;
+  string profile_id = 2;
+}
+message InvokeUtilityAgentResponse { string text = 1; }
 ```
 
 Notes: scope ∈ instance|workspace|task|agent (empty scope_id for instance —
 matches the state store). The plugin never passes its own id; the Host service
 instance is bound to the plugin's record at spawn time.
+
+`InvokeUtilityAgent` remains the prompt-only compatibility method. On a revised
+host it uses the platform default profile from Settings > Utility Agents.
+`InvokeUtilityAgentWithOptions` accepts the same prompt plus an optional
+`profile_id`; a non-empty ID selects that exact eligible profile and an invalid
+explicit ID returns `FailedPrecondition` without fallback. The revised SDK
+uses the options RPC for every call, including calls without an override. An
+older host returns `Unimplemented` for that method, and the SDK does not retry
+through the prompt-only RPC. Plugins own saved preferences and pass them in
+the request. The host does not read plugin configuration, utility-agent
+records, or transition metadata for invocation selection.
 
 `DeletePluginOwnedTaskTree` is partial-progress aware. A successful response
 carries every deleted task ID. If deletion stops after removing descendants,

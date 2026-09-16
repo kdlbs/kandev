@@ -211,6 +211,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         originalHash: hash,
         isDirty: false,
         isBinary: response.is_binary,
+        resolvedPath: response.resolved_path,
         renderedPreview:
           getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
             ? savedTab.renderedPreview

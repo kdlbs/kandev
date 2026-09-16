@@ -8,6 +8,12 @@ import "maps"
 // transient workflow-move marker carries encoded one-shot instructions and an
 // internal move ID; it is server-owned lifecycle state and must never reach a
 // public event or DTO.
+//
+// The session-ceiling replay payload is redacted for a stronger reason than
+// tidiness: it carries the launch-scoped environment map, the composed prompt, its
+// attachments and entity references. The record's discriminators, timestamps and
+// reason code stay projected, so a client can still see that a deferral is pending,
+// of which kind, since when and why.
 func PublicTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
 	if metadata == nil {
 		return nil
@@ -22,6 +28,7 @@ func PublicTaskMetadata(metadata map[string]interface{}) map[string]interface{} 
 	publicDeferred := maps.Clone(deferred)
 	delete(publicDeferred, DeferredLaunchUserIDKey)
 	delete(publicDeferred, DeferredLaunchRecordRecentUseKey)
+	delete(publicDeferred, CeilingLaunchPayloadKey)
 	public[MetaKeyDeferredLaunch] = publicDeferred
 	return public
 }

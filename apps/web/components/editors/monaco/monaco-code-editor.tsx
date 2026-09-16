@@ -32,6 +32,7 @@ type MonacoCodeEditorProps = {
   isSaving: boolean;
   sessionId?: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   repo?: string;
   enableComments?: boolean;
   previewKind?: FilePreviewKind;
@@ -256,6 +257,7 @@ function MonacoEditorView({
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
       <MonacoEditorToolbar
+        isSymlink={props.isSymlink}
         path={path}
         repositoryName={repo}
         worktreePath={worktreePath}

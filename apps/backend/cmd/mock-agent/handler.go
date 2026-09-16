@@ -435,6 +435,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitSubagentSequence(e, model)
 	case strings.EqualFold(cmd, "/subtask") || strings.HasPrefix(strings.ToLower(cmd), "/subtask "):
 		emitCreateSubtask(e, cmd, model)
+	case strings.EqualFold(cmd, "/e2e:utility-profile"):
+		e.text("utility profile model: " + model)
 	case strings.HasPrefix(cmd, "/e2e:"):
 		rest := strings.TrimPrefix(cmd, "/e2e:")
 		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")

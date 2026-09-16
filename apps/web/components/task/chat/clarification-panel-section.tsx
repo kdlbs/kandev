@@ -17,17 +17,21 @@ type ClarificationPanelSectionProps = {
   onResolved: () => void;
   shortcutScopeRef: RefObject<HTMLElement | null>;
   /**
+   * True when the session no longer has a live clarification waiter.
+   * Detached requests remain answerable even if their row refresh lags.
+   */
+  agentDisconnected?: boolean;
+  /**
    * Caps the expanded overlay's height as a percentage of the viewport.
-   * Drives both the rendered CSS max-height and the resize hook's drag
-   * clamp — the two MUST agree, or the drag handle silently stops
-   * responding before its own visible ceiling.
+   * Drives both the rendered CSS max-height and the resize hook's drag clamp
+   * - the two MUST agree, or the drag handle silently stops responding before
+   * its own visible ceiling.
    */
   maxHeightVh: number;
   // Additive: forwarded straight through to ClarificationInputOverlay.
   // Existing hosts (task chat, Quick Chat) leave this unset.
   onOutcome?: (outcome: ClarificationOutcome) => void;
 };
-
 function pendingIdFromMessages(messages: readonly Message[] | null | undefined): string | null {
   const first = messages?.[0];
   if (!first) return null;
@@ -61,6 +65,7 @@ export function ClarificationPanelSection({
   messages,
   onResolved,
   shortcutScopeRef,
+  agentDisconnected = false,
   maxHeightVh,
   onOutcome,
 }: ClarificationPanelSectionProps) {
@@ -89,6 +94,67 @@ export function ClarificationPanelSection({
 
   const questionCount = messages?.length ?? 0;
   const actionLabel = collapsed ? t("chat:expandClarification") : t("chat:collapseClarification");
+
+  return (
+    <ClarificationPanelContent
+      actionLabel={actionLabel}
+      agentDisconnected={agentDisconnected}
+      collapsed={collapsed}
+      containerRef={containerRef}
+      contentId={contentId}
+      disclosure={disclosure}
+      height={height}
+      maxHeightVh={maxHeightVh}
+      messages={messages}
+      onCollapse={() => setCollapsed(true)}
+      onOutcome={onOutcome}
+      onResolved={onResolved}
+      onToggleCollapse={() => setCollapsed((current) => !current)}
+      questionCount={questionCount}
+      resizeHandleProps={resizeHandleProps}
+      shortcutScopeRef={shortcutScopeRef}
+    />
+  );
+}
+
+type ClarificationPanelContentProps = {
+  actionLabel: string;
+  agentDisconnected: boolean;
+  collapsed: boolean;
+  containerRef: RefObject<HTMLDivElement | null>;
+  contentId: string;
+  disclosure: ReturnType<typeof useComposerDisclosureContext>;
+  height: number | null;
+  maxHeightVh: number;
+  messages: readonly Message[] | null | undefined;
+  onCollapse: () => void;
+  onOutcome?: (outcome: ClarificationOutcome) => void;
+  onResolved: () => void;
+  onToggleCollapse: () => void;
+  questionCount: number;
+  resizeHandleProps: Parameters<typeof ResizeHandle>[0];
+  shortcutScopeRef: RefObject<HTMLElement | null>;
+};
+
+function ClarificationPanelContent({
+  actionLabel,
+  agentDisconnected,
+  collapsed,
+  containerRef,
+  contentId,
+  disclosure,
+  height,
+  maxHeightVh,
+  messages,
+  onCollapse,
+  onOutcome,
+  onResolved,
+  onToggleCollapse,
+  questionCount,
+  resizeHandleProps,
+  shortcutScopeRef,
+}: ClarificationPanelContentProps) {
+  const { t } = useTranslation();
   const compact = collapsed || questionCount === 0;
 
   return (
@@ -135,7 +201,7 @@ export function ClarificationPanelSection({
               aria-controls={contentId}
               title={actionLabel}
               data-testid="clarification-collapse-toggle"
-              onClick={() => setCollapsed((current) => !current)}
+              onClick={onToggleCollapse}
             >
               {collapsed ? (
                 <IconChevronUp className="h-4 w-4" />
@@ -156,8 +222,9 @@ export function ClarificationPanelSection({
             onOutcome={onOutcome}
             shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
-            onDismiss={() => setCollapsed(true)}
-            onCollapse={() => setCollapsed(true)}
+            agentDisconnected={agentDisconnected}
+            onDismiss={onCollapse}
+            onCollapse={onCollapse}
             collapseContentId={contentId}
           />
         </div>

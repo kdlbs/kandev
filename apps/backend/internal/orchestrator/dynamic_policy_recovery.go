@@ -189,7 +189,7 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	lock.Unlock()
 	release()
 	locked = false
-	if err := s.LaunchDynamicRouteAction(ctx, sessionID); err != nil {
+	if err := s.LaunchDynamicRouteActionForRecovery(ctx, sessionID); err != nil {
 		s.markDynamicPolicyRecoveryActionRequired(ctx, sessionID, generation, err)
 	}
 }
