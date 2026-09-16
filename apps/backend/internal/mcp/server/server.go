@@ -1404,23 +1404,7 @@ func taskChangeRequestAutomationToolSchema() json.RawMessage {
           "items": {"type": "string", "enum": ["github", "gitlab"]}
         }
       },
-      "required": ["scope"],
-      "oneOf": [
-        {
-          "properties": {"scope": {"const": "association"}},
-          "required": ["provider", "repository_id", "number"],
-          "not": {"required": ["providers"]}
-        },
-        {
-          "properties": {"scope": {"const": "task"}},
-          "required": ["providers"],
-          "not": {"anyOf": [
-            {"required": ["provider"]},
-            {"required": ["repository_id"]},
-            {"required": ["number"]}
-          ]}
-        }
-      ]
+      "required": ["scope"]
     },
     "patch": {
       "type": "object",
@@ -1436,25 +1420,7 @@ func taskChangeRequestAutomationToolSchema() json.RawMessage {
       }
     }
   },
-  "required": ["target", "patch"],
-  "allOf": [{
-    "if": {
-      "properties": {
-        "target": {
-          "properties": {"scope": {"const": "association"}},
-          "required": ["scope"]
-        }
-      },
-      "required": ["target"]
-    },
-    "then": {
-      "properties": {
-        "patch": {
-          "not": {"required": ["auto_fix_prompt_override"]}
-        }
-      }
-    }
-  }]
+  "required": ["target", "patch"]
 }`)
 }
 
@@ -1472,29 +1438,7 @@ func taskChangeRequestToolSchema() json.RawMessage {
     "old_repository_id": {"type": "string", "minLength": 1},
     "old_number": {"type": "integer", "minimum": 1}
   },
-  "required": ["operation", "task_id", "provider", "repository_id", "number"],
-  "oneOf": [
-    {
-      "properties": {"operation": {"const": "link"}},
-      "not": {"anyOf": [
-        {"required": ["old_provider"]},
-        {"required": ["old_repository_id"]},
-        {"required": ["old_number"]}
-      ]}
-    },
-    {
-      "properties": {"operation": {"const": "unlink"}},
-      "not": {"anyOf": [
-        {"required": ["old_provider"]},
-        {"required": ["old_repository_id"]},
-        {"required": ["old_number"]}
-      ]}
-    },
-    {
-      "properties": {"operation": {"const": "replace"}},
-      "required": ["old_provider", "old_repository_id", "old_number"]
-    }
-  ]
+  "required": ["operation", "task_id", "provider", "repository_id", "number"]
 }`)
 }
 

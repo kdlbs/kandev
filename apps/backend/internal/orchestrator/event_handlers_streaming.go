@@ -1428,6 +1428,8 @@ func (s *Service) persistBootstrapFailureMessage(
 	if s.messageCreator == nil {
 		return fmt.Errorf("bootstrap failure message creator is unavailable")
 	}
+	// Bootstrap failures occur before any turn started, so there is no failed
+	// turn to attach to — resolve the turn lazily via the empty turn ID.
 	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:           taskID,
 		SessionID:        sessionID,
@@ -1439,7 +1441,7 @@ func (s *Service) persistBootstrapFailureMessage(
 		AttemptID:        errorValue.AttemptID,
 		ErrorStamp:       errorValue.Stamp(),
 		Causes:           errorValue.Causes,
-	})
+	}, "")
 }
 
 func (s *Service) publishAcceptedTaskSessionState(

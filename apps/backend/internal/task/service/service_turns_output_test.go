@@ -99,6 +99,55 @@ func TestCompleteTurn_PublishesHadOutput(t *testing.T) {
 	}
 }
 
+// A turn that ends in a recoverable agent failure carries the error entry as
+// its outcome, so its completion must report had_output=true even though the
+// recovery/status message does not count as agent output. Otherwise the
+// frontend shows a spurious empty-turn notice for the failed turn.
+func TestCompleteTurn_ErrorTerminatedTurnReportsHadOutput(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	turn := &models.Turn{
+		ID:            "turn-error-terminated",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		StartedAt:     time.Now().UTC(),
+		Metadata:      map[string]interface{}{models.TurnMetaKeyErrorTerminated: true},
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	// Only a status message belongs to the turn — this would compute
+	// had_output=false without the error-terminated marker.
+	status := &models.Message{
+		ID:            "msg-status",
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turn.ID,
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeStatus,
+		Content:       "Agent encountered an error: boom",
+	}
+	if err := repo.CreateMessage(ctx, status); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	eventBus.ClearEvents()
+	if err := svc.CompleteTurn(ctx, turn.ID); err != nil {
+		t.Fatalf("CompleteTurn: %v", err)
+	}
+
+	got, found := lastTurnCompletedHadOutput(t, eventBus)
+	if !found {
+		t.Fatal("expected a turn.completed event to be published")
+	}
+	if !got {
+		t.Error("had_output = false, want true (error-terminated turn must suppress the notice)")
+	}
+}
+
 // AbandonOpenTurns sweeps orphan turns on resume; it must report had_output=true
 // so the frontend never shows an empty-turn notice for a swept orphan.
 func TestAbandonOpenTurns_PublishesHadOutputTrue(t *testing.T) {

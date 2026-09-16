@@ -485,6 +485,14 @@ const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
 // turn authority, so every current-turn resolution site excludes it.
 const TurnMetaKeyLifecycleOnly = "lifecycle_only"
 
+// TurnMetaKeyErrorTerminated marks a turn that ended in a recoverable agent
+// failure. The failure's recovery/error entry is the turn's outcome, so a turn
+// carrying this marker reports had_output=true at completion even though a
+// status/recovery message does not otherwise count as agent output — this
+// keeps the frontend from showing a spurious empty-turn notice for the failed
+// turn.
+const TurnMetaKeyErrorTerminated = "error_terminated"
+
 // TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
 // acknowledges its prompt. Empty marked turns are not current-turn authority
 // unless dispatch ambiguity was recorded; publication clears the marker, while
