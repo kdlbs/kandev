@@ -337,6 +337,8 @@ func isPublicPath(method, path string) bool {
 		return method == http.MethodPost
 	}
 	switch {
+	case strings.HasPrefix(path, "/api/v1/automations/webhook-bindings/"):
+		return method == http.MethodPost && strings.Count(strings.TrimPrefix(path, "/api/v1/automations/webhook-bindings/"), "/") == 0
 	case strings.HasPrefix(path, "/api/v1/automations/webhook/"):
 		// X-Webhook-Secret, constant-time compared by the handler.
 		return true

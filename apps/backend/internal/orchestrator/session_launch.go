@@ -357,6 +357,15 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
 		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
 	)
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		// A ceiling-deferred launch (only reachable when req.AutoStart is
+		// true — a manual launch is always admitted, never deferred) is not
+		// this caller's failure to report: the sweep already persisted a
+		// replay record and owns retrying it. Fall through to the same
+		// no-op response the nil-execution case below returns, so the
+		// task-owned card note (not an RPC error) is the recovery surface.
+		execution, err = nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -420,6 +429,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
 		AllowBranchReplacement:      req.AllowBranchReplacement,
 		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
+		Origin:                      string(originFromAutoStart(req.AutoStart)),
 	})
 	if err != nil {
 		return nil, err

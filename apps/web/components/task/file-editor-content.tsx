@@ -12,6 +12,7 @@ import { MarkdownPreviewContent } from "./markdown-preview-content";
 
 export type FileEditorContentProps = {
   path: string;
+  isSymlink?: boolean;
   content: string;
   originalContent: string;
   isDirty: boolean;
@@ -68,6 +69,7 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
     return (
       <MarkdownPreviewContent
         path={props.path}
+        isSymlink={props.isSymlink}
         content={props.content}
         worktreePath={props.worktreePath}
         sessionId={props.sessionId}
@@ -85,6 +87,7 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
     return (
       <HtmlPreviewContent
         path={props.path}
+        isSymlink={props.isSymlink}
         previewUrl={htmlPreview.url}
         isLoading={htmlPreview.isPublishing}
         error={htmlPreview.error}

@@ -174,13 +174,15 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
         </Panel>
 
         {/* Right Panel: Files + Terminal stacked */}
-        <Panel id="right" minSize="250px" className="min-h-0 min-w-0">
-          <TaskRightPanel
-            topPanel={topFilesPanel}
-            sessionId={sessionForPreview}
-            repositoryId={repository?.id ?? null}
-          />
-        </Panel>
+        {layoutState.right && (
+          <Panel id="right" minSize="250px" className="min-h-0 min-w-0">
+            <TaskRightPanel
+              topPanel={topFilesPanel}
+              sessionId={sessionForPreview}
+              repositoryId={repository?.id ?? null}
+            />
+          </Panel>
+        )}
       </Group>
 
       {/* Task Switcher Sheet - same as mobile */}

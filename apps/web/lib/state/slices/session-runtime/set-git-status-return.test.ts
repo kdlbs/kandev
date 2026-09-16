@@ -31,6 +31,18 @@ function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
   };
 }
 
+it("accepts metadata-only changes and clears omitted snapshot metadata", () => {
+  const store = makeStore();
+  const first = status();
+  const linked = { ...first, files: { "a.ts": { ...first.files["a.ts"], is_symlink: true } } };
+  store.getState().setGitStatus(SESSION, first);
+  expect(store.getState().setGitStatus(SESSION, linked)).toBe(true);
+  expect(store.getState().setGitStatus(SESSION, first)).toBe(true);
+  expect(store.getState().gitStatus.byEnvironmentId[SESSION].files["a.ts"]).not.toHaveProperty(
+    "is_symlink",
+  );
+});
+
 describe("setGitStatus change reporting (single deep compare)", () => {
   let store: ReturnType<typeof makeStore>;
 

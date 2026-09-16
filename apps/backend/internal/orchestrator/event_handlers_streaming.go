@@ -1231,6 +1231,7 @@ func (s *Service) persistTaskSessionState(
 	nextState models.TaskSessionState,
 	errorMessage string,
 ) (*models.TaskSession, *time.Time, bool) {
+	priorState := session.State
 	if updater, ok := s.repo.(conditionalTaskSessionStateUpdater); ok {
 		changed, updatedAt, err := updater.UpdateTaskSessionStateIfCurrent(
 			ctx, sessionID, session.State, nextState, errorMessage,
@@ -1245,6 +1246,7 @@ func (s *Service) persistTaskSessionState(
 		persisted := taskSessionAfterStateWrite(session, nextState, errorMessage, updatedAt)
 		persisted = s.refreshTaskSessionOr(ctx, sessionID, persisted)
 		t := updatedAt.UTC()
+		s.releaseCeilingIfLeftPopulation(sessionID, priorState, nextState)
 		return persisted, &t, true
 	}
 
@@ -1253,6 +1255,7 @@ func (s *Service) persistTaskSessionState(
 		return session, nil, false
 	}
 	refreshed := s.refreshTaskSessionOr(ctx, sessionID, session)
+	s.releaseCeilingIfLeftPopulation(sessionID, priorState, nextState)
 	if refreshed.UpdatedAt.IsZero() {
 		return refreshed, nil, true
 	}
@@ -1390,7 +1393,9 @@ func (s *Service) transitionBootstrapFailure(
 
 	committer, ok := s.repo.(bootstrapFailureCommitter)
 	if !ok {
-		return s.transitionTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message, nil)
+		return false, expectedState, fmt.Errorf(
+			"bootstrap failure requires an execution-fenced repository commit",
+		)
 	}
 	changed, updatedAt, err := committer.CommitBootstrapFailureIfCurrentExecution(
 		ctx,
@@ -1406,11 +1411,12 @@ func (s *Service) transitionBootstrapFailure(
 	}
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: %w", err)
+		return true, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: %w", err)
 	}
 	if refreshed == nil {
-		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
+		return true, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
 	}
+	messageErr := s.persistBootstrapFailureMessage(ctx, taskID, sessionID, agentExecutionID, errorValue)
 	authoritativeUpdatedAt := updatedAt.UTC()
 	s.publishAcceptedTaskSessionState(
 		ctx,
@@ -1422,7 +1428,35 @@ func (s *Service) transitionBootstrapFailure(
 		&authoritativeUpdatedAt,
 		refreshed,
 	)
+	if messageErr != nil {
+		return true, models.TaskSessionStateFailed, fmt.Errorf("persist bootstrap failure history: %w", messageErr)
+	}
 	return true, models.TaskSessionStateFailed, nil
+}
+
+// persistBootstrapFailureMessage records the accepted bootstrap failure as a
+// chronological session entry. Its stable message identity makes a retry
+// after the state commit idempotent.
+func (s *Service) persistBootstrapFailureMessage(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	errorValue models.LastAgentError,
+) error {
+	if s.messageCreator == nil {
+		return fmt.Errorf("bootstrap failure message creator is unavailable")
+	}
+	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: agentExecutionID,
+		ErrorMessage:     errorValue.Message,
+		FailureCode:      errorValue.Code,
+		FailureDetails:   errorValue.Details,
+		Phase:            errorValue.Phase,
+		AttemptID:        errorValue.AttemptID,
+		ErrorStamp:       errorValue.Stamp(),
+		Causes:           errorValue.Causes,
+	})
 }
 
 func (s *Service) publishAcceptedTaskSessionState(
@@ -1455,7 +1489,27 @@ func (s *Service) publishAcceptedTaskSessionState(
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
 }
 
+// persistStrictTaskSessionState is transitionTaskSessionState's persistence
+// funnel — a second, independent funnel from persistTaskSessionState (AC-51).
+// It releases the ceiling reservation itself, after dispatching to whichever
+// branch actually performed the write, so the release applies uniformly
+// however the write was made.
 func (s *Service) persistStrictTaskSessionState(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	nextState models.TaskSessionState,
+	errorMessage string,
+) (bool, *models.TaskSession, *time.Time, error) {
+	priorState := session.State
+	changed, refreshed, updatedAt, err := s.persistStrictTaskSessionStateDispatch(ctx, sessionID, session, nextState, errorMessage)
+	if err == nil && changed {
+		s.releaseCeilingIfLeftPopulation(sessionID, priorState, nextState)
+	}
+	return changed, refreshed, updatedAt, err
+}
+
+func (s *Service) persistStrictTaskSessionStateDispatch(
 	ctx context.Context,
 	sessionID string,
 	session *models.TaskSession,
@@ -2557,6 +2611,19 @@ func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, ses
 		}
 	}
 	if isTerminalSessionState(session.State) {
+		return
+	}
+	if session.State == models.TaskSessionStateWaitingForInput &&
+		!s.isExecutionCompleted(sessionID, executionID) &&
+		s.sessionHasLiveClarification(ctx, sessionID) {
+		// Tool-stream events from the execution that opened a clarification can
+		// arrive while the MCP request is still blocked. Keep the durable input
+		// barrier visible until the user answers; the clarification handler owns
+		// the transition back to RUNNING.
+		s.logger.Debug("ignoring stream event while clarification is pending",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID))
 		return
 	}
 	if session.State == models.TaskSessionStateWaitingForInput && s.isExecutionCompleted(sessionID, executionID) {

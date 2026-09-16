@@ -64,7 +64,12 @@ type ListMessagesOptions struct {
 	After      string
 	Sort       string
 	AuthorType string
-	Around     string
+	// AuthorTypes narrows by any of the listed authors (IN); when non-empty
+	// it takes precedence over AuthorType. TaskID, when non-empty, narrows
+	// to rows for that task.
+	AuthorTypes []string
+	TaskID      string
+	Around      string
 }
 
 // SearchMessagesOptions defines options for searching a session's messages.
@@ -783,6 +788,7 @@ const SessionMetaKeyBackgroundWorkAttested = "background_work_attested"
 type LastAgentError struct {
 	Message          string            `json:"message"`
 	OccurredAt       time.Time         `json:"occurred_at"`
+	Scope            string            `json:"scope,omitempty"`
 	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
 	ExecutionID      string            `json:"execution_id,omitempty"`
 	Phase            string            `json:"phase,omitempty"`
@@ -1330,7 +1336,7 @@ func HasStartWhenUnblockedIntent(task *Task) bool {
 // every dependency chain, because admission happens at create time for any task
 // entering a step with room.
 func DropWIPDeferredLaunch(task *Task) {
-	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) {
+	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) || HasCeilingDeferredIntent(task) {
 		return
 	}
 	delete(task.Metadata, MetaKeyDeferredLaunch)

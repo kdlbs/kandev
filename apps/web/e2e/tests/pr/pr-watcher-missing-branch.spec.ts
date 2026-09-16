@@ -92,9 +92,11 @@ test.describe("PR watcher missing branch", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // --- Assert the bounded launch-error card appears once in chat ---
-    const chat = session.activeChat();
-    const recovery = chat.getByTestId("task-launch-error-entry");
+    // --- Assert the task-owned error strip and its focused recovery panel ---
+    const sharedError = testPage.getByTestId("task-shared-error");
+    await expect(sharedError).toBeVisible({ timeout: 30_000 });
+    await sharedError.getByTestId("task-shared-error-details").click();
+    const recovery = testPage.getByTestId("task-launch-error-entry");
     await expect(recovery).toHaveCount(1, { timeout: 30_000 });
     await expect(recovery).toContainText("The workspace could not be prepared for this launch.");
     await expect(recovery).not.toContainText(prBranch);

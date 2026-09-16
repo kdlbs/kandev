@@ -74,6 +74,7 @@ vi.mock("../prompt-history-panel-content", () => ({
 
 import {
   MobilePanelArea,
+  mobilePanelTopNavHeight,
   resolveMobilePluginPanel,
   resolveMobileReviewSource,
   terminalPaddingBottom,
@@ -327,6 +328,11 @@ describe("resolveMobilePluginPanel", () => {
 });
 
 describe("MobilePanelArea PR identity", () => {
+  it("removes nested top-bar padding when the outer task error reserves it", () => {
+    expect(mobilePanelTopNavHeight(false)).toBe("3.5rem");
+    expect(mobilePanelTopNavHeight(true)).toBe("0px");
+  });
+
   it("remounts detail feedback when the user chooses another mixed-provider review", () => {
     function MobileReviewHarness() {
       const reviews: ReviewItemSummary[] = [

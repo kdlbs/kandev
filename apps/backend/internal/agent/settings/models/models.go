@@ -63,6 +63,10 @@ type AgentProfile struct {
 	// enabled, FallbackModel is ignored and the UI hides its field.
 	AutoFallback bool `json:"auto_fallback" db:"auto_fallback"`
 
+	// RequireExactModel makes the configured model an explicit per-profile
+	// identity requirement. False preserves compatible pre-PR behavior.
+	RequireExactModel bool `json:"require_exact_model" db:"require_exact_model"`
+
 	// Mode is the optional ACP session mode applied via session/set_mode at
 	// session start. Empty when the agent does not advertise modes.
 	// The DB column is nullable; the settings repo handles the empty-string ↔ NULL

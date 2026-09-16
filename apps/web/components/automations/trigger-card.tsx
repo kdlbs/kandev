@@ -1,5 +1,7 @@
 "use client";
 
+import { PluginEventConfig } from "./trigger-configs/plugin-event-config";
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
@@ -14,7 +16,7 @@ import {
   IconChevronUp,
   IconInfoCircle,
 } from "@tabler/icons-react";
-import type { AutomationTrigger, TriggerType } from "@/lib/types/automation";
+import type { AutomationTrigger, TriggerType, TriggerTypeInfo } from "@/lib/types/automation";
 import { ScheduledConfig } from "./trigger-configs/scheduled-config";
 import { GitHubPRConfig } from "./trigger-configs/github-pr-config";
 import { GitHubPRMergedConfig } from "./trigger-configs/github-pr-merged-config";
@@ -24,6 +26,7 @@ import { WebhookConfig } from "./trigger-configs/webhook-config";
 import { describeSchedule } from "./schedule-expression";
 
 type TriggerCardProps = {
+  pluginInfo?: NonNullable<TriggerTypeInfo["plugin"]>;
   trigger: AutomationTrigger;
   savedTrigger?: AutomationTrigger;
   automationId: string | null;
@@ -40,6 +43,7 @@ const TRIGGER_ICON: Record<TriggerType, typeof IconClock> = {
   github_push: IconBrandGithub,
   github_ci: IconBrandGithub,
   webhook: IconWebhook,
+  plugin_event: IconWebhook,
 };
 
 const GITHUB_COLOR = "text-purple-400";
@@ -51,6 +55,7 @@ const TRIGGER_COLOR: Record<TriggerType, string> = {
   github_push: GITHUB_COLOR,
   github_ci: GITHUB_COLOR,
   webhook: "text-orange-400",
+  plugin_event: "text-orange-400",
 };
 
 // Keyed by the cron expression the backend parses — syntax, never translated.
@@ -79,6 +84,7 @@ const TRIGGER_INFO_KEYS: Record<TriggerType, string> = {
   github_push: "automations:triggerInfoNotImplemented",
   github_ci: "automations:triggerInfoNotImplemented",
   webhook: "automations:triggerInfoWebhook",
+  plugin_event: "automations:pluginWebhookHelp",
 };
 
 // A plain function returning copy is invisible to `i18next/no-literal-string`,
@@ -88,6 +94,7 @@ function getTriggerSummary(
   trigger: AutomationTrigger,
   t: (key: string, values?: Record<string, unknown>) => string,
 ): string {
+  if (trigger.type === "plugin_event") return String(trigger.config.condition_key ?? trigger.type);
   const simple = SIMPLE_SUMMARY_KEYS[trigger.type];
   if (simple) return t(simple);
 
@@ -115,6 +122,7 @@ function getTriggerSummary(
 }
 
 export function TriggerCard({
+  pluginInfo,
   trigger,
   savedTrigger,
   automationId,
@@ -184,7 +192,9 @@ export function TriggerCard({
       {expanded && (
         <div className="px-4 pb-4 pt-1 border-t">
           <TriggerConfigForm
+            pluginInfo={pluginInfo}
             trigger={trigger}
+            dirty={isDirty}
             automationId={automationId}
             workspaceId={workspaceId}
             onUpdate={onUpdate}
@@ -196,12 +206,16 @@ export function TriggerCard({
 }
 
 function TriggerConfigForm({
+  pluginInfo,
   trigger,
+  dirty,
   automationId,
   workspaceId,
   onUpdate,
 }: {
+  pluginInfo?: NonNullable<TriggerTypeInfo["plugin"]>;
   trigger: AutomationTrigger;
+  dirty: boolean;
   automationId: string | null;
   workspaceId: string;
   onUpdate: (config: Record<string, unknown>) => void;
@@ -224,6 +238,10 @@ function TriggerConfigForm({
       return <GitHubPushConfig config={trigger.config} onUpdate={onUpdate} />;
     case "github_ci":
       return <GitHubCIConfig config={trigger.config} onUpdate={onUpdate} />;
+    case "plugin_event":
+      return (
+        <PluginEventConfig trigger={trigger} info={pluginInfo} onUpdate={onUpdate} dirty={dirty} />
+      );
     case "webhook":
       return <WebhookConfig automationId={automationId} workspaceId={workspaceId} />;
     default:

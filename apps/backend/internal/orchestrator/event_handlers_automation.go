@@ -258,6 +258,30 @@ func (s *Service) handleAutomationTriggered(ctx context.Context, event *bus.Even
 		return nil
 	}
 
+	if evt.TriggerType == automation.TriggerTypePluginEvent {
+		delivery, ok := s.automationService.(interface {
+			ClaimPluginWebhookRun(context.Context, string) (bool, error)
+			CompletePluginWebhookRun(context.Context, string) error
+		})
+		if !ok {
+			return fmt.Errorf("plugin webhook dispatch unavailable")
+		}
+		go func() {
+			claimed, err := delivery.ClaimPluginWebhookRun(context.Background(), evt.RunID)
+			if err != nil {
+				s.logger.Error("webhook dispatch claim failed", zap.Error(err))
+				return
+			}
+			if !claimed {
+				return
+			}
+			s.createAutomationTask(context.Background(), evt)
+			if err := delivery.CompletePluginWebhookRun(context.Background(), evt.RunID); err != nil {
+				s.logger.Error("webhook dispatch completion failed", zap.Error(err))
+			}
+		}()
+		return nil
+	}
 	go s.createAutomationTask(context.Background(), evt)
 	return nil
 }
@@ -797,7 +821,7 @@ func (s *Service) promptAutomationContinuation(
 	session *models.TaskSession,
 	prompt string,
 ) (automation.RunDispatch, error) {
-	result, err := s.PromptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true)
+	result, err := s.promptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{})
 	if err != nil {
 		return automation.RunDispatch{}, err
 	}

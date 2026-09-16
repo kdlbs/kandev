@@ -138,6 +138,10 @@ func (r *idempotentCreateTaskRepo) UpdateTaskWithExplicitPosition(ctx context.Co
 	return r.UpdateTask(ctx, task)
 }
 
+func (r *idempotentCreateTaskRepo) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
 func (r *idempotentCreateTaskRepo) GetTaskByExternalID(_ context.Context, workspaceID, externalID string) (*models.Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

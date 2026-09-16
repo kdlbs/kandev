@@ -976,6 +976,9 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		AgentName:                  info.AgentName,
 		Model:                      info.Model,
 		Mode:                       info.Mode,
+		FallbackModel:              info.FallbackModel,
+		AutoFallback:               info.AutoFallback,
+		RequireExactModel:          info.RequireExactModel,
 		ConfigOptions:              info.ConfigOptions,
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
@@ -1421,6 +1424,27 @@ func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskI
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
 func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+		RequestsInput: requestsInput,
+	})
+	return err
+}
+
+// CreateSessionMessageIdempotent persists a lifecycle/status message with a
+// deterministic ID so a replayed failure event cannot add another transcript
+// entry for the same failure stamp.
+func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput bool,
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,

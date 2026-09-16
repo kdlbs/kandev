@@ -606,6 +606,7 @@ func (s *Service) rebuildInput(
 		var activeError *statussummary.ActiveErrorSummary
 		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
 			activeError = &statussummary.ActiveErrorSummary{
+				Scope:            models.ErrorScopeSession,
 				SessionID:        session.ID,
 				TaskRepositoryID: lastError.TaskRepositoryID,
 				ExecutionID:      lastError.ExecutionID,
@@ -655,10 +656,13 @@ func taskLaunchErrorSummary(task *models.Task) *statussummary.ActiveErrorSummary
 		return nil
 	}
 	return &statussummary.ActiveErrorSummary{
+		Scope:            models.ErrorScopeTask,
+		SessionID:        errorValue.SessionID,
 		TaskRepositoryID: errorValue.TaskRepositoryID,
 		Stamp:            errorValue.Stamp(),
 		OccurredAt:       errorValue.OccurredAt,
 		Preview:          errorValue.Message,
+		Details:          errorValue.Details,
 		Category:         errorValue.Code,
 		RecoveryActions:  errorValue.RecoveryActions,
 	}

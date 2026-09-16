@@ -236,21 +236,45 @@ The same data is available directly over REST for scripting: `GET /api/v1/worksp
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
 
-### Link an existing pull or merge request
+### Manage linked pull and merge requests
 
-Task MCP provides `link_task_pr_kandev`, `unlink_task_pr_kandev`, and
-`replace_task_pr_kandev` for GitHub pull requests and GitLab merge requests.
-Each request needs `task_id`, `provider` (`github` or `gitlab`), the canonical
-`repository_id`, and a positive request number. A number by itself is rejected,
-so a fork and its canonical repository can safely have the same number.
+Task MCP provides one shared contract for GitHub pull requests and GitLab merge
+requests. Use `get_task_change_requests_kandev` to read the current task's
+linked requests, automation settings, and provider capabilities.
 
-For example, link GitLab merge request 42 to its target task with
-`{ "task_id": "…", "provider": "gitlab", "repository_id": "…", "number": 42 }`.
-`replace_task_pr_kandev` also requires `old_provider`, `old_repository_id`, and
-`old_number`. Replacement supports associations from the same provider only;
-to switch between GitHub and GitLab, unlink the current association and then
-link the new one. Every successful mutation returns the resulting active link set.
-The target task must be reachable from the calling task's workspace.
+Use `manage_task_change_request_kandev` with `operation` set to `link`, `unlink`,
+or `replace`. Every mutation needs `task_id`, `provider` (`github` or `gitlab`),
+the canonical `repository_id`, and a positive request number. A number by itself
+is rejected, so a fork and its canonical repository can safely have the same
+number. For example:
+
+```json
+{
+  "operation": "link",
+  "task_id": "…",
+  "provider": "gitlab",
+  "repository_id": "…",
+  "number": 42
+}
+```
+
+`replace` also requires `old_provider`, `old_repository_id`, and `old_number`.
+Replacement supports one provider at a time. Every successful mutation returns
+the resulting active link set, and the target task must be reachable from the
+the calling task's workspace. For replacement, `old_provider` must equal
+`provider`; cross-provider replacement is rejected.
+
+Use `update_task_change_request_automation_kandev` for an exact association or
+for all current links of explicitly selected providers on the current task.
+Association targets require `provider`, `repository_id`, and `number`. Task
+targets require a nonempty `providers` list. Prompt overrides are task/provider
+settings and can be changed only with a task target. The tool does not create
+defaults for future links.
+
+`report_change_request_auto_fix_outcome_kandev` is available only when GitHub is
+among the task's supported providers. It reports the outcome of a server-bound
+GitHub auto-fix turn; it does not report manual work or GitLab auto-fix turns.
+
 `list_tasks_kandev` and `list_related_tasks_kandev` expose active GitHub PR and
 GitLab MR associations in the provider-neutral `change_requests` field; the
 legacy `prs` field remains GitHub-only for compatibility.
@@ -574,20 +598,21 @@ Task-mode review automation tools follow the providers attached to the task's
 repositories. Kandev computes their union when the session launches or
 resumes:
 
-| Attached providers  | Discoverable tools                                                  |
-| ------------------- | ------------------------------------------------------------------- |
-| GitHub only         | `get_task_pr_automation_kandev`, `update_task_pr_automation_kandev` |
-| GitLab only         | `get_task_mr_automation_kandev`, `update_task_mr_automation_kandev` |
-| GitHub and GitLab   | Both provider-specific pairs                                        |
-| None or unsupported | Neither pair                                                        |
+| Attached providers  | Discoverable tools                                                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| GitHub only         | `get_task_change_requests_kandev`, `manage_task_change_request_kandev`, `update_task_change_request_automation_kandev`, and `report_change_request_auto_fix_outcome_kandev` |
+| GitLab only         | `get_task_change_requests_kandev`, `manage_task_change_request_kandev`, and `update_task_change_request_automation_kandev` |
+| GitHub and GitLab   | The four tools above                                                                                                 |
+| None or unsupported | None of these change-request tools                                                                                   |
 
 Adding a repository source successfully to an idle task can update the live
 session's task MCP tool list after materialization. If live refresh is
 temporarily unavailable, the source attachment remains committed and the next
 launch or resume reconciles the tool list. Tool discovery only describes the
 available surface; backend authorization and task/provider validation remain
-authoritative for every call. The existing automation request and response
-payloads are unchanged.
+authoritative for every call. After an upgrade, rediscover the catalog or resume
+the task so cached clients use the shared names. An already-running older
+agentctl keeps its old catalog until it resumes on the new runtime.
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
 
@@ -974,3 +999,19 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 - **External client cannot stream:** verify the base backend URL and configure the reverse proxy for both the selected MCP transport and long-lived requests.
 
 Related: [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), [Agents and profiles](agents-and-profiles.md), and [Integrations](integrations.md).
+
+
+## Plugin webhooks
+
+Plugins with automation adapters add their own provider group under **Add
+Condition**. Choose a condition, configure its repository and filters, and save
+the automation. Expand the condition and select **Configure webhook**, then copy
+its URL and use **Reveal secret** to obtain the signing secret for the provider's
+webhook settings. Keep both the automation and condition enabled.
+
+Save filter changes before configuring the binding again. After **Rotate secret**,
+update the provider's webhook secret. **Revoke webhook** removes the binding URL;
+configuring it again creates a new URL. **Refresh deliveries** shows receipt
+outcomes and links to the task when one exists. A 202 response means Kandev stored
+the delivery; it does not mean the agent has finished or started successfully.
+The original generic **Webhook** condition continues to use `X-Webhook-Secret`.
