@@ -20,7 +20,7 @@ import {
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
-import { hiddenSessionIdsFor } from "./dockview-hidden-session-panels";
+import { hiddenSessionIdsFor, pruneHiddenSessionIds } from "./dockview-hidden-session-panels";
 import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("dockview:session-tabs");
@@ -516,6 +516,7 @@ export function runAutoSessionTabEffect(
     currentSessionIds,
     effectiveSessionId ?? "",
   );
+  pruneHiddenSessionIds(api, appStore.getState);
 
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");

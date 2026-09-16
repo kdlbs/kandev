@@ -1,3 +1,9 @@
+---
+status: current
+system: ui
+requirements:
+  - REQ-UI-AGENT-TAB-CLOSE-BEHAVIOR-001
+---
 # Agent tab close behavior design
 
 `UserSettings.AgentTabCloseBehavior` is normalized and persisted by the backend JSON settings payload. DTO, boot state, HTTP, and WebSocket settings paths project the effective value. The frontend uses the common settings mapper.

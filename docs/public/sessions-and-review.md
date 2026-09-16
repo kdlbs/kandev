@@ -438,7 +438,7 @@ Before moving a task to done:
 
 Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), and [Developer tools](developer-tools.md).
 
-# Agent tab close behavior
+## Agent tab close behavior
 
 On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task behavior**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
 

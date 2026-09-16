@@ -2,9 +2,11 @@ import type { DockviewApi } from "dockview-react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   getEnvHiddenSessions,
+  getEnvHiddenSessionRecords,
   setEnvHiddenSessionOwner,
   setEnvHiddenSessions,
 } from "@/lib/env-hidden-sessions";
+import type { TaskId } from "@/lib/types/http";
 
 const hiddenByApi = new WeakMap<DockviewApi, Map<string | null, Set<string>>>();
 
@@ -25,6 +27,61 @@ export function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
 function persist(api: DockviewApi, hidden: Set<string>) {
   const envId = useDockviewStore.getState().currentLayoutEnvId;
   if (envId) setEnvHiddenSessions(envId, [...hidden]);
+}
+
+function shouldPruneHiddenSession(args: {
+  sessionId: string;
+  owners: Map<string, string>;
+  sessions: Record<string, { task_id?: TaskId }>;
+  sessionsByTask?: Record<string, Array<{ id: string }>>;
+  loadedByTask?: Record<string, boolean>;
+}): boolean {
+  const ownerTaskId = args.owners.get(args.sessionId) || args.sessions[args.sessionId]?.task_id;
+  if (!ownerTaskId || args.loadedByTask?.[ownerTaskId] !== true) return false;
+  return !args.sessionsByTask?.[ownerTaskId]?.some((session) => session.id === args.sessionId);
+}
+
+/**
+ * Retire a hidden record only when its owning task has loaded and no longer
+ * contains that session. A shared environment can contain unrelated tasks.
+ */
+export function pruneHiddenSessionIds(
+  api: DockviewApi,
+  store: () => {
+    taskSessionsByTask?: {
+      itemsByTaskId?: Record<string, Array<{ id: string }>>;
+      loadedByTaskId?: Record<string, boolean>;
+    };
+    taskSessions?: { items?: Record<string, { task_id?: TaskId }> };
+  },
+): void {
+  const envId = useDockviewStore.getState().currentLayoutEnvId;
+  if (!envId) return;
+  const hidden = hiddenSessionIdsFor(api);
+  const state = store();
+  const records = new Map(
+    getEnvHiddenSessionRecords(envId).map((record) => [record.sessionId, record.taskId]),
+  );
+  const sessionsByTask = state.taskSessionsByTask?.itemsByTaskId;
+  const loadedByTask = state.taskSessionsByTask?.loadedByTaskId;
+  const sessions = state.taskSessions?.items ?? {};
+  let changed = false;
+  for (const sessionId of hidden) {
+    if (
+      !shouldPruneHiddenSession({
+        sessionId,
+        owners: records,
+        sessions,
+        sessionsByTask,
+        loadedByTask,
+      })
+    ) {
+      continue;
+    }
+    hidden.delete(sessionId);
+    changed = true;
+  }
+  if (changed) persist(api, hidden);
 }
 
 export function hideSessionPanel(api: DockviewApi, sessionId: string, taskId?: string): void {

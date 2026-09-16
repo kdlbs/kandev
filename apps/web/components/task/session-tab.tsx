@@ -227,6 +227,7 @@ function SessionTabTriggerContent({
   isActive,
   showDeleteOnClose,
   isDeleting,
+  closeBehavior,
   onCloseTab,
 }: {
   props: IDockviewPanelHeaderProps;
@@ -239,6 +240,7 @@ function SessionTabTriggerContent({
   isActive: boolean;
   showDeleteOnClose: boolean;
   isDeleting: boolean;
+  closeBehavior: "delete_session" | "hide_panel";
   onCloseTab: () => void;
 }) {
   return (
@@ -265,7 +267,12 @@ function SessionTabTriggerContent({
         ))}
       <DockviewDefaultTab {...props} hideClose />
       {showDeleteOnClose && (
-        <SessionTabCloseAction sessionId={sessionId} isDeleting={isDeleting} onClose={onCloseTab} />
+        <SessionTabCloseAction
+          sessionId={sessionId}
+          isDeleting={isDeleting}
+          closeBehavior={closeBehavior}
+          onClose={onCloseTab}
+        />
       )}
     </div>
   );
@@ -493,6 +500,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             isActive={isActive}
             showDeleteOnClose={showDeleteOnClose}
             isDeleting={isDeletingFromTab}
+            closeBehavior={agentTabCloseBehavior}
             onCloseTab={
               agentTabCloseBehavior === "hide_panel" ? actions.handleHide : handleCloseTab
             }
