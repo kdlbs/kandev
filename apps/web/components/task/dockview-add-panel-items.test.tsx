@@ -456,7 +456,7 @@ describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
       .forPlugin("kandev-plugin-notes")
       .registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
 
-    renderMenu();
+    renderMenu({ taskId: "task-1" });
     const row = screen.getByTestId("add-panel-plugin-item-kandev-plugin-notes-notes");
     expect(row.textContent).toContain("Notes");
 

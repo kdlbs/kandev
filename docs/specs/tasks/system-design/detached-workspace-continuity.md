@@ -38,6 +38,8 @@ generation and transaction rule is recorded in
 | `AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.4` | Admission matrix; stale-generation tests |
 | `AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.5` | Restart and recovery; replay tests |
 | `AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.6` | Command predicates; mixed-owner conflict tests |
+| `AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.7` | Cleanup fencing; absent canonical environment archive test |
+| `AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.8` | Cleanup fencing; uncertain environment lookup test |
 | `AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-002.1` | Canonical creation attachment; route matrix tests |
 | `AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-002.2` | CreationPlan attachment step; Abort/recovery tests |
 | `AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-002.3` | Lock order and admission; dialect race tests |
@@ -311,6 +313,22 @@ snapshot with the live environment. A missing row is idempotent success only
 when the resource is already positively known absent. An owner or generation
 mismatch makes the destructive portion a safe no-op and records that the
 snapshot was superseded.
+
+Stewardship transfer on archive resolves the group's canonical environment
+before it decides whether a transfer is needed. A positively absent
+environment — the repository's typed not-found sentinel, or a nil row returned
+with a nil error — means there is no ownership to move: the transfer is
+skipped, no generation is incremented, and the archive proceeds. Any other
+resolution failure is an uncertain signal and fails the archive, so ownership
+is never abandoned on a transient error. Skipping a transfer is not evidence
+that the group's physical resources are gone; it leaves the group reference
+intact for later reconciliation rather than authorizing teardown, per
+[ADR-0009](../../../decisions/0009-fail-closed-gc-semantics.md).
+
+This tolerance is scoped to archive. The delete cascade shares the same
+transfer helper but keeps the original fail-closed behavior for an absent
+environment: delete is destructive, and a skipped transfer there has not been
+evaluated against ADR-0009's requirement for destructive paths.
 
 Every environment-owner transfer uses a guarded repository method. It checks
 the expected owner and generation, verifies that the source owner has no active

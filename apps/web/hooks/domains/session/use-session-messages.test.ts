@@ -10,6 +10,8 @@ const mockWebSocketClient = {
   request: vi.fn(),
   subscribeSession: vi.fn(),
   subscribeSessionWithReady: vi.fn(),
+  registerCoreSessionRecovery: vi.fn(() => vi.fn()),
+  retryCoreSessionRecovery: vi.fn(() => undefined),
 };
 
 const mockState = {

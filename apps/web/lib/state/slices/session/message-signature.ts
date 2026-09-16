@@ -1,3 +1,4 @@
+import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 import type { Message } from "@/lib/types/http";
 
 const SEP = "\u0000";
@@ -62,7 +63,7 @@ export function signatureOf(message: Message): string {
   const cached = signatureCache.get(message);
   if (cached !== undefined) return cached;
   const signature = message.updated_at
-    ? `u:${message.updated_at}:p${message.prompt_index ?? ""}`
+    ? `u:${message.updated_at}:p${message.prompt_index ?? ""}:r${JSON.stringify(payloadRetentionMarker(message.metadata))}`
     : contentHashSignature(message);
   signatureCache.set(message, signature);
   return signature;
@@ -88,6 +89,13 @@ export function reconcileMessages(prev: Message[] | undefined, next: Message[]):
   // Carry forward a known prompt_index when the incoming payload omits it.
   const carried = next.map((message) => {
     const previous = prevById.get(message.id);
+    if (
+      previous &&
+      payloadRetentionMarker(previous.metadata) &&
+      !payloadRetentionMarker(message.metadata)
+    ) {
+      message = { ...message, metadata: previous.metadata };
+    }
     if (
       previous &&
       message.prompt_index === undefined &&

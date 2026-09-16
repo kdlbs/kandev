@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-19
-updated: 2026-09-11
+updated: 2026-09-14
 owners:
   - cfl12
 ---
@@ -70,6 +70,28 @@ These criteria are implemented in the
 [contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md),
 with execution fencing, transaction-serialized ownership, and recovery-surface
 regressions recorded in its verification results.
+
+### REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002: Error ownership and retained session history
+
+**Intent:** Keep session failures in their conversation and shared failures visible across the affected task.
+
+This September 14 amendment is implemented in the [error scope package](../../../plans/error-scope-and-history/plan.md).
+It changes presentation and retention, not recovery permissions or provider resume behavior.
+
+#### Acceptance criteria
+
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002.1:** Each failure shall identify session or task scope. A shared resource failure shall name its affected resource when known. An initiating session shall not make a shared failure session-scoped.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002.2:** A session failure shall create one durable chronological entry in its owning session. Repeated delivery of the same failure shall not create another entry.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002.3:** Successful recovery, later messages, reload, and reconnect shall preserve the original session error. Recovery shall retire only matching active error state.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002.4:** An active shared error shall appear once below the task header and above tab content. It shall remain visible on session, Plan, PR, Files, and plugin views. Task previews and tasks without sessions shall expose the same error.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002.5:** A newer session error or session recovery shall not replace or clear an unresolved shared error. An unrelated session shall not display another session's error as its own.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002.6:** One failure shall have one recovery control surface per task view. A shared error shall not repeat as an actionable banner inside each session. Separate failures can remain visible together.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002.7:** Phone users shall see the shared error outside tab content and reach its details and actions from a bottom drawer. Targets shall measure at least 44 pixels. Desktop shall use a compact shared strip and details dialog.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002.8:** Older records shall remain readable without invented failures or guessed resource scope. Stale recovery requests shall remain unable to mutate a successor error.
+
+Implementation belongs to the [error scope package](../../../plans/error-scope-and-history/plan.md).
+Session action presentation remains owned by the
+[agent recovery requirement](../../agents/requirements/session-recovery-failures.md).
 
 ## Out of scope
 

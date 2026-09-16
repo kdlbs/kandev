@@ -42,6 +42,7 @@ const (
 	RouteAttemptOutcomeSkippedUserAction     = "skipped_user_action"
 	RouteAttemptOutcomeSkippedMissingMapping = "skipped_missing_mapping"
 	RouteAttemptOutcomeMaxAttempts           = "skipped_max_attempts"
+	RouteAttemptOutcomeDeferredCapacity      = "deferred_capacity"
 )
 
 // MaxAttemptsPerRun caps the number of route_attempt rows a single run
@@ -273,6 +274,9 @@ func (ss *SchedulerService) tryCandidates(
 			return false, nil, err
 		}
 		sessionID, launchErr := ss.launchCandidate(ctx, taskID, agent.ID, candidate, candidateLaunch)
+		if errors.Is(launchErr, service.ErrLaunchDeferredByCapacity) {
+			return ss.handleLaunchDeferred(ctx, run, agent.WorkspaceID, seq)
+		}
 		if launchErr == nil {
 			if prev != nil {
 				// We walked past at least one prior candidate — that's
@@ -470,6 +474,41 @@ func (ss *SchedulerService) handleLaunchSuccess(
 	}
 	ss.markHealthScopes(ctx, agent.WorkspaceID, candidate)
 	return true, nil, nil
+}
+
+// handleLaunchDeferred is tryCandidates' disposition when the task starter
+// reports ErrLaunchDeferredByCapacity: the orchestrator's own session
+// ceiling already persisted a replay record for this exact launch and owns
+// retrying it, so this attempt must not be counted as launched (no session
+// was created) and this run must not be retried by the scheduler's own
+// routing/park wake-up loop — a second automatic attempt here would race
+// the ceiling's own replay into a double launch. Parking under
+// blocked_provider_action_required (the same status parkRunMaxAttempts
+// uses) keeps LiftParkedRuns from ever picking the run back up on its own;
+// an operator notices via "Retry now" once capacity is known to be free.
+func (ss *SchedulerService) handleLaunchDeferred(
+	ctx context.Context, run *models.Run, workspaceID string, seq int,
+) (bool, *routing.BlockReason, error) {
+	now := time.Now().UTC()
+	attempt := models.RouteAttempt{
+		RunID:      run.ID,
+		Seq:        seq,
+		Outcome:    RouteAttemptOutcomeDeferredCapacity,
+		FinishedAt: &now,
+	}
+	if err := ss.repo.UpdateRouteAttemptOutcome(ctx, &attempt); err != nil {
+		return false, nil, err
+	}
+	hydrated := ss.hydrateAttempt(ctx, run.ID, seq, attempt)
+	ss.publishRouteAttemptAppended(ctx, run.ID, hydrated)
+	if err := ss.repo.ParkRunForProviderCapacity(ctx,
+		run.ID, routing.StatusBlockedActionRequired, time.Time{}); err != nil {
+		return false, nil, err
+	}
+	ss.logger.Info("run parked: launch deferred by session ceiling",
+		zap.String("run_id", run.ID))
+	ss.recordRouteParked(workspaceID, run.ID, routing.StatusBlockedActionRequired)
+	return false, &routing.BlockReason{Status: routing.StatusBlockedActionRequired}, nil
 }
 
 // persistLaunchedSession stores the session id a successful launch

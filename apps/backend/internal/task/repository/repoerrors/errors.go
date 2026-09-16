@@ -12,6 +12,10 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrNoPrimarySession reports that a task exists but has no primary session.
+// Callers can repair that state without hiding other repository failures.
+var ErrNoPrimarySession = errors.New("no primary session")
+
 // ErrInitialTaskBriefStale reports that a prepared task's description changed
 // before its first direct message could be admitted.
 var ErrInitialTaskBriefStale = errors.New("initial task brief is stale")

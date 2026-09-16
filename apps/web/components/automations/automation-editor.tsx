@@ -1,5 +1,9 @@
 "use client";
 
+import { useTriggerTypeMetadata } from "@/hooks/use-automation-trigger-types";
+
+import { findTriggerInfo } from "./plugin-condition";
+
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -10,7 +14,7 @@ import { Separator } from "@kandev/ui/separator";
 import { useAppStore } from "@/components/state-provider";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
-import { getAutomation, listTriggerTypes } from "@/lib/api/domains/automation-api";
+import { getAutomation } from "@/lib/api/domains/automation-api";
 import type {
   Automation,
   CreateAutomationRequest,
@@ -96,18 +100,6 @@ function formFromAutomation(a: Automation): FormState {
     maxConcurrentRuns: a.max_concurrent_runs,
     continuationPolicy: a.continuation_policy ?? "new_task",
   };
-}
-
-function useTriggerTypeMetadata() {
-  const [triggerTypes, setTriggerTypes] = useState<TriggerTypeInfo[]>([]);
-
-  useEffect(() => {
-    listTriggerTypes()
-      .then(setTriggerTypes)
-      .catch(() => setTriggerTypes([]));
-  }, []);
-
-  return triggerTypes;
 }
 
 /** Returns the condition type from the current triggers (the non-scheduled, non-webhook trigger). */
@@ -242,8 +234,12 @@ function useLoadAutomation(opts: LoadAutomationOpts) {
 function useConditionMetadata(triggers: AutomationTrigger[], triggerTypes: TriggerTypeInfo[]) {
   const conditionType = getConditionType(triggers);
   const activeTriggerInfo = useMemo(
-    () => triggerTypes.find((t) => t.type === (conditionType ?? "scheduled")),
-    [triggerTypes, conditionType],
+    () =>
+      findTriggerInfo(
+        triggers.find((trigger) => trigger.type === conditionType),
+        triggerTypes,
+      ),
+    [triggerTypes, conditionType, triggers],
   );
   return {
     conditionType,
@@ -437,7 +433,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const isNew = currentId === null;
   const triggerActions = useAutomationTriggerDrafts(currentId);
   const [savedForm, setSavedForm] = useState(defaultForm);
-  const triggerTypes = useTriggerTypeMetadata();
+  const triggerTypes = useTriggerTypeMetadata(workspaceId);
 
   const { placeholders, defaultTaskTitle, activeTriggerInfo, conditionType } = useConditionMetadata(
     triggerActions.allTriggers,

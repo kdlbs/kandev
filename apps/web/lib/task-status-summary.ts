@@ -79,3 +79,14 @@ export function statusSummaryActiveErrorPreview(
   }
   return error.preview;
 }
+
+/** Returns the task-owned error while preserving compatibility with older
+ * summaries that placed it in `active_error` without a session identity. */
+export function statusSummaryTaskError(
+  summary: TaskStatusSummary | null | undefined,
+): TaskStatusSummary["task_error"] {
+  if (summary?.task_error) return summary.task_error;
+  const legacy = summary?.active_error;
+  if (legacy && !legacy.session_id && legacy.scope !== "session") return legacy;
+  return null;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
@@ -22,7 +22,7 @@ import CoordinatorsPage from "@/app/settings/workspace/[id]/coordinators/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import Link from "@/components/routing/app-link";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import {
   AppearanceSettings,
   KeyboardShortcutsSettings,
@@ -82,46 +82,25 @@ import {
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import {
-  fetchUserSettings,
-  listAgentDiscovery,
-  listAgents,
-  listAvailableAgents,
-  listExecutors,
-} from "@/lib/api/domains/settings-api";
-import { listWorkspaces } from "@/lib/api/domains/workspace-api";
-import {
   matchSingle,
   matchDouble,
   normalizeSettingsPath,
   safeDecodePathSegment,
 } from "@/lib/routing/path";
-import {
-  mapWorkspaceItem,
-  promoteLegacyWorkspaceSelection,
-  readActiveWorkspaceCookie,
-  resolveSettingsActiveWorkspaceId,
-} from "@/lib/routing/route-bootstrap";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import type { HydrationState } from "@/lib/state/store";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
-import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
 import { renderIntegrationSettingsRoute } from "./integration-settings-route";
 import {
   WorkspaceRepositoriesRoute,
   WorkspaceWorkflowsRoute,
 } from "./settings-routes.workspace-data";
+import { SettingsRouteBootstrap } from "./settings-routes-bootstrap";
+export {
+  buildSettingsInitialStateForRoute,
+  loadSettingsInitialState,
+  SettingsRouteBootstrap,
+} from "./settings-routes-bootstrap";
 
 type RouteRenderer = () => ReactNode;
-type SettingsInitialStateData = {
-  workspaces: ListWorkspacesResponse["workspaces"];
-  executors: Awaited<ReturnType<typeof listExecutors>>["executors"];
-  agents: Awaited<ReturnType<typeof listAgents>>["agents"];
-  discoveryAgents: Awaited<ReturnType<typeof listAgentDiscovery>>["agents"];
-  availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
-  availableTools: NonNullable<Awaited<ReturnType<typeof listAvailableAgents>>["tools"]>;
-  userSettingsResponse: UserSettingsResponse | null;
-};
 
 const licenseEntries = licenses as LicenseEntry[];
 
@@ -559,101 +538,6 @@ function UpdatesRoute() {
       <UpdatesCard />
     </SystemRouteShell>
   );
-}
-
-function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
-  const store = useAppStoreApi();
-  const bootstrappedRef = useRef(false);
-
-  useEffect(() => {
-    if (bootstrappedRef.current) return;
-    bootstrappedRef.current = true;
-    let cancelled = false;
-
-    async function bootstrap() {
-      const initialState = await loadSettingsInitialState();
-      if (!cancelled && Object.keys(initialState).length > 0) {
-        store.getState().hydrate(initialState);
-      }
-    }
-
-    void bootstrap();
-    return () => {
-      cancelled = true;
-      bootstrappedRef.current = false;
-    };
-  }, [pathname, store]);
-
-  return null;
-}
-
-async function loadSettingsInitialState(): Promise<HydrationState> {
-  const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
-    await Promise.all([
-      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-      listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
-      listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
-      listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
-      listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
-      fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    ]);
-
-  return buildSettingsInitialStateForRoute({
-    workspaces: workspaces.workspaces,
-    executors: executors.executors,
-    agents: agents.agents,
-    discoveryAgents: discovery.agents,
-    availableAgents: available.agents,
-    availableTools: available.tools ?? [],
-    userSettingsResponse,
-  });
-}
-
-export function buildSettingsInitialStateForRoute({
-  workspaces,
-  executors,
-  agents,
-  discoveryAgents,
-  availableAgents,
-  availableTools,
-  userSettingsResponse,
-}: SettingsInitialStateData): HydrationState {
-  const workspaceItems = workspaces.map(mapWorkspaceItem);
-  promoteLegacyWorkspaceSelection(workspaceItems);
-  const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
-    workspaceItems,
-    readActiveWorkspaceCookie(),
-    userSettingsResponse?.settings?.workspace_id ?? null,
-  );
-  const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
-
-  return {
-    workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
-    executors: { items: executors },
-    agentProfiles: {
-      items: agents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-      version: 0,
-    },
-    settingsAgents: { items: agents },
-    agentDiscovery: { items: discoveryAgents, loading: false, loaded: true },
-    availableAgents: {
-      items: availableAgents,
-      tools: availableTools,
-      loading: false,
-      loaded: true,
-    },
-    settingsData: { executorsLoaded: true, agentsLoaded: true },
-    ...(mappedUserSettings.loaded
-      ? {
-          userSettings: {
-            ...mappedUserSettings,
-            workspaceId: activeWorkspaceId,
-          },
-        }
-      : {}),
-  };
 }
 
 function SettingsRouteFallback({ pathname }: { pathname: string }) {

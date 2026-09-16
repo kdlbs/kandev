@@ -133,8 +133,10 @@ authoritative after the migration.
 - `POST /api/v1/utility/execute` keeps its request shape: callers select a utility-agent ID, and the
   backend resolves the effective profile. Successful responses and call-history responses keep the
   resolved model and expose logical and concrete profile attribution in call history.
-- Plugin `Host.InvokeUtilityAgent` and its plugin manifest selector keep selecting a utility-agent
-  ID; there is no plugin-facing profile-ID field.
+- Plugin `Host.InvokeUtilityAgent` accepts an optional profile ID per call. An empty ID uses the
+  platform default. The plugin owns any saved preference and passes it explicitly; plugin
+  configuration is not read by the host for execution selection. Ordinary
+  `/utility/execute` callers continue to select a utility-agent ID.
 
 ## Permissions
 

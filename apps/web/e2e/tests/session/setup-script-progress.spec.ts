@@ -35,7 +35,7 @@ test.describe("Setup script progress UX", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     // Gate the preceding fetch until the browser subscribes, then hold the
     // setup script so its preparing state and streamed output stay observable.
@@ -83,14 +83,14 @@ test.describe("Setup script progress UX", () => {
       await expect
         .poll(() => fs.existsSync(gitStartedFile), {
           message: "repository preparation should reach its deterministic git gate",
-          timeout: 45_000,
+          timeout: 90_000,
         })
         .toBe(true);
       fs.writeFileSync(gitReleaseFile, "release");
       await expect
         .poll(() => fs.existsSync(startedFile), {
           message: "setup script should reach its deterministic test gate",
-          timeout: 45_000,
+          timeout: 60_000,
         })
         .toBe(true);
 

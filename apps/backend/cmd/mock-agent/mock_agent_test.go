@@ -187,6 +187,20 @@ func newCapturingUpdater() *capturingUpdater {
 	return &capturingUpdater{anySeen: make(chan struct{}), textSeen: make(chan struct{})}
 }
 
+func TestHandlePromptUtilityProfileUsesSelectedModel(t *testing.T) {
+	updater := newCapturingUpdater()
+	handlePrompt(&emitter{
+		ctx:  context.Background(),
+		conn: updater,
+		sid:  acp.SessionId("utility-profile-session"),
+	}, "/e2e:utility-profile", modelSmart)
+
+	texts := updater.textMessages()
+	if len(texts) != 1 || texts[0] != "utility profile model: "+modelSmart {
+		t.Fatalf("utility profile response = %v, want [%q]", texts, "utility profile model: "+modelSmart)
+	}
+}
+
 func (u *capturingUpdater) SessionUpdate(_ context.Context, n acp.SessionNotification) error {
 	u.mu.Lock()
 	u.notes = append(u.notes, n)

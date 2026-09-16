@@ -73,7 +73,7 @@ var registrations = []runtimeFlagRegistration{
 			Key:         "features.needsYouInbox",
 			EnvVar:      "KANDEV_FEATURES_NEEDS_YOU_INBOX",
 			Kind:        KindFeature,
-			Label:       "Needs-you Inbox",
+			Label:       "Inbox",
 			Description: "Enables a workspace-scoped sidebar destination listing exactly the answerable clarification bundles for the active workspace, independent of Office mode.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskLow,

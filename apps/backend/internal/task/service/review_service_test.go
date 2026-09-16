@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -440,6 +441,42 @@ func TestReviewService_UpdateFindingStatusStampsAndClearsResolvedAt(t *testing.T
 	}
 	if reopened.Status != models.ReviewFindingOpen || reopened.ResolvedAt != nil {
 		t.Fatalf("reopen must clear resolved_at, got %+v", reopened)
+	}
+}
+
+func TestReviewService_UpdateFindingStatusResubmittingCurrentStatusIsIdempotent(t *testing.T) {
+	svc, eventBus, repo := createTestReviewService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-12b")
+	_, findings, err := svc.PublishFindings(ctx, PublishFindingsRequest{
+		TaskID:   "task-12b",
+		Findings: []ReviewFindingInput{validFindingInput()},
+	})
+	if err != nil {
+		t.Fatalf("PublishFindings: %v", err)
+	}
+
+	resolved, err := svc.UpdateFindingStatus(ctx, findings[0].ID, models.ReviewFindingResolved)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	firstResolvedAt := resolved.ResolvedAt
+	if firstResolvedAt == nil {
+		t.Fatal("expected resolved_at to be stamped")
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	eventBus.ClearEvents()
+
+	resubmitted, err := svc.UpdateFindingStatus(ctx, findings[0].ID, models.ReviewFindingResolved)
+	if err != nil {
+		t.Fatalf("resubmit: %v", err)
+	}
+	if resubmitted.ResolvedAt == nil || !resubmitted.ResolvedAt.Equal(*firstResolvedAt) {
+		t.Fatalf("resubmitting the current status must leave resolved_at unchanged, got %v want %v", resubmitted.ResolvedAt, firstResolvedAt)
+	}
+	if countEvents(eventBus.GetPublishedEvents(), events.TaskReviewFindingUpdated) != 1 {
+		t.Fatalf("resubmitting the current status should still publish an update event, got %v", eventTypes(eventBus.GetPublishedEvents()))
 	}
 }
 

@@ -26,11 +26,6 @@ type queuedDispatchReservation struct {
 	identity  messagequeue.QueueSessionIdentity
 	source    *messagequeue.QueuedMessage
 	phase     atomic.Uint32
-	// liveEligible is set only for Send Now reservations. It allows the
-	// prompt-claim path to move that reservation to live while it still owns
-	// the session guard; ordinary FIFO handoffs remain in accepted until their
-	// turn settles.
-	liveEligible atomic.Bool
 	// successorTurn is the replacement turn this dispatch opened. A late
 	// complete of the cancelled predecessor must not close that turn or
 	// drop this reservation; only the successor's own ready-path settlement
@@ -280,7 +275,7 @@ func (s *Service) isQueuedDispatchAccepted(sessionID string) bool {
 	return accepted != nil && accepted.currentPhase() == queuedDispatchAccepted
 }
 
-// markAcceptedDispatchLive moves a Send Now successor out of the handoff
+// markAcceptedDispatchLive moves a queued successor out of the handoff
 // conflict window once it owns execution. Stream-complete still protects the
 // bound successor turn; a later Send Now may cancel that live turn.
 func (s *Service) markAcceptedDispatchLive(sessionID string, reservation *queuedDispatchReservation) {
@@ -294,7 +289,7 @@ func (s *Service) markAcceptedDispatchLive(sessionID string, reservation *queued
 	s.markAcceptedDispatchLiveLocked(sessionID, reservation)
 }
 
-// markAcceptedDispatchLiveLocked moves a Send Now successor out of the
+// markAcceptedDispatchLiveLocked moves a queued successor out of the
 // handoff conflict window while the caller owns sessionID's cancellation
 // guard. This keeps the phase transition serialized with prompt ownership.
 func (s *Service) markAcceptedDispatchLiveLocked(sessionID string, reservation *queuedDispatchReservation) {

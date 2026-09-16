@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
@@ -52,7 +53,6 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
-	utilitymodels "github.com/kandev/kandev/internal/utility/models"
 	"github.com/kandev/kandev/internal/utility/profilebinding"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -296,10 +296,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if recordErr := recordRequiredStore(storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
-	pluginsSvc, _, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	pluginsSvc, pluginsCleanup, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordPluginStores(storeTracker, pluginStoreErrors); recordErr != nil {
+		if pluginsCleanup != nil {
+			_ = pluginsCleanup()
+		}
 		return nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
 	}
+	var agentConversationsSvc *taskservice.AgentConversationService
 	if pluginsSvc != nil {
 		// The ldflags-injected build version, so Install can enforce a
 		// package's manifest.min_kandev_version. This is the only production
@@ -307,6 +311,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		// Wire the managed agent conversation service for the agent_conversation
+		// Host capability. Wired here (not at boot time in main.go) because the
+		// task service, shared repository, agent settings repository, and
+		// plugin state store are all available at this point. Its runtime
+		// dispatcher is wired later, once the orchestrator exists — see
+		// SetAgentConversationsDispatcher in main.go.
+		agentConversationsSvc = NewAgentConversationService(repos.Task, repos.AgentSettings, pluginsSvc.StateStore(), eventBus)
+		agentConversationsSvc.SetTaskDeleter(taskSvc)
+		pluginsSvc.SetAgentConversations(agentConversationsSvc)
 		// Separate from SetDataSources: githubSvc is optional (nil when github
 		// is unconfigured), and a nil source leaves tasks with no PullRequests
 		// rather than failing every task read.
@@ -434,6 +447,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Share:                    shareHTTP,
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
+		AgentConversations:       agentConversationsSvc,
+		PluginsCleanup:           pluginsCleanup,
 		Canvas:                   canvasSvc,
 		CanvasDistribution:       canvasDistributionSvc,
 		GitCredentials:           gitCredentialBroker,
@@ -1388,6 +1403,10 @@ func initPluginsService(
 	return svc
 }
 
+type pluginHostUtilityManager interface {
+	ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (*hostutility.PromptResult, error)
+}
+
 func initPluginsServiceRequired(
 	cfg *config.Config,
 	dbPool *db.Pool,
@@ -1416,42 +1435,66 @@ func recordPluginStores(tracker *requiredstores.Tracker, initErrors plugins.Stor
 }
 
 type pluginsHostUtilityAdapter struct {
-	mgr *hostutility.Manager
+	mgr pluginHostUtilityManager
 }
 
 func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (string, error) {
 	res, err := a.mgr.ExecuteProfilePrompt(ctx, profileID, prompt)
+	if errors.Is(err, profilebinding.ErrProfileNotFound) {
+		return "", plugins.ErrAgentProfileNotFound
+	}
+	if errors.Is(err, profilebinding.ErrProfileIneligible) {
+		return "", plugins.ErrAgentProfileIneligible
+	}
 	if err != nil {
 		return "", err
 	}
 	return res.Response, nil
 }
 
-type pluginsUtilityAgentAdapter struct {
-	svc     *utilityservice.Service
-	userSvc *userservice.Service
+type pluginsDefaultUtilityProfileSource interface {
+	GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error)
 }
 
-func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {
-	agent, err := a.svc.GetAgentByID(ctx, id)
+type pluginsDefaultUtilityProfileAdapter struct {
+	source pluginsDefaultUtilityProfileSource
+}
+
+func (a pluginsDefaultUtilityProfileAdapter) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error) {
+	return a.source.GetDefaultUtilityAgentProfileID(ctx)
+}
+
+type pluginAgentProfileResolver interface {
+	Resolve(ctx context.Context, id string) (*agentsettingsmodels.AgentProfile, error)
+}
+
+// pluginsAgentProfileAdapter keeps agent-settings storage errors at the
+// backend boundary. The plugins package only receives the narrow execution
+// eligibility record and its typed missing-profile sentinel.
+type pluginsAgentProfileAdapter struct {
+	resolver pluginAgentProfileResolver
+}
+
+func (a pluginsAgentProfileAdapter) GetProfileByID(ctx context.Context, id string) (*plugins.AgentProfile, error) {
+	profile, err := a.resolver.Resolve(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, profilebinding.ErrProfileNotFound) {
+		return nil, plugins.ErrAgentProfileNotFound
+	}
+	if errors.Is(err, profilebinding.ErrProfileIneligible) {
+		return nil, plugins.ErrAgentProfileIneligible
+	}
 	if err != nil {
-		if errors.Is(err, utilityservice.ErrAgentNotFound) {
-			return nil, plugins.ErrUtilityAgentNotFound
-		}
 		return nil, err
 	}
-	profileID := agent.AgentProfileID
-	bindingState := agent.ProfileBindingState
-	if utilitymodels.UsesDefaultProfile(agent) && a.userSvc != nil {
-		profileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if profileID != "" {
-			bindingState = utilitymodels.ProfileBindingExplicit
-		}
+	if profile == nil {
+		return nil, plugins.ErrAgentProfileNotFound
 	}
-	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: bindingState, Enabled: agent.Enabled}, nil
+	return &plugins.AgentProfile{
+		Enabled:          profile.Enabled,
+		CLIPassthrough:   profile.CLIPassthrough,
+		WorkspaceID:      profile.WorkspaceID,
+		InferenceCapable: true,
+	}, nil
 }
 
 // pluginsTaskWriterAdapter adapts the task service to the plugins package's

@@ -263,3 +263,23 @@ describe("useShellCommandOutput terminal lifecycle", () => {
     },
   );
 });
+
+it("drops cached output and stops retrying when the server reports removal", async () => {
+  const { ApiError } = await import("@/lib/api/client");
+  fetchOutputMock
+    .mockResolvedValueOnce(snapshot("running", "deleted payload"))
+    .mockRejectedValue(new ApiError("gone", 410, { code: "tool_payload_removed" }));
+  const { result } = renderHook(() =>
+    useShellCommandOutput({
+      sessionId: "session-1",
+      messageId: "message-1",
+      isOpen: true,
+      messageStatus: "running",
+    }),
+  );
+  await flushPromises();
+  await act(async () => vi.advanceTimersByTime(1000));
+  expect(result.current.snapshot).toBeNull();
+  await act(async () => vi.advanceTimersByTime(10000));
+  expect(fetchOutputMock).toHaveBeenCalledTimes(2);
+});
