@@ -74,4 +74,39 @@ describe("TaskItemWithContextMenu Nest under candidates", () => {
 
     expect(await screen.findByRole("menuitem", { name: "Visible target" })).not.toBeNull();
   });
+
+  it("captures the latest candidates when the menu opens", async () => {
+    const current = task({ workflowId: WORKFLOW_ID, workflowStepId: STEP_ID });
+    const staleTarget = task({
+      id: "stale-target",
+      title: "Stale target",
+      workflowId: WORKFLOW_ID,
+      workflowStepId: STEP_ID,
+    });
+    const latestTarget = task({
+      id: "latest-target",
+      title: "Latest target",
+      workflowId: WORKFLOW_ID,
+      workflowStepId: STEP_ID,
+    });
+    let candidates = [current, staleTarget];
+
+    render(
+      <StateProvider>
+        <ToastProvider>
+          <TaskItemWithContextMenu task={current} getNestCandidateTasks={() => candidates}>
+            <div data-testid="fresh-task-row">Task 1</div>
+          </TaskItemWithContextMenu>
+        </ToastProvider>
+      </StateProvider>,
+    );
+    candidates = [current, latestTarget];
+
+    fireEvent.contextMenu(screen.getByTestId("fresh-task-row"));
+    const nestUnder = await screen.findByRole("menuitem", { name: "Nest under" });
+    fireEvent.pointerMove(nestUnder, { pointerType: "mouse" });
+
+    expect(await screen.findByRole("menuitem", { name: "Latest target" })).not.toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Stale target" })).toBeNull();
+  });
 });

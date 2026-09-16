@@ -14,6 +14,8 @@ const tasks: T[] = [
   { id: "d", title: "D" }, // root, leaf
   { id: "e", title: "E" }, // root, leaf
 ];
+const OFFICE_ROOT = "office-root";
+const OFFICE_CHILD = "office-child";
 
 describe("computeNestCandidates", () => {
   it("excludes the task itself", () => {
@@ -58,20 +60,26 @@ describe("computeNestCandidates", () => {
     expect(computeNestCandidates([{ id: "solo", title: "Solo" }], "solo")).toEqual([]);
   });
 
+  it("returns empty when the subject is missing", () => {
+    expect(computeNestCandidates(tasks, "missing")).toEqual([]);
+  });
+});
+
+describe("computeNestCandidates for Office hierarchies", () => {
   // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
   it("allows deep Office targets and excludes descendants", () => {
     const officeTasks: T[] = [
-      { id: "office-root", title: "Office root", isFromOffice: true },
+      { id: OFFICE_ROOT, title: "Office root", isFromOffice: true },
       {
-        id: "office-child",
+        id: OFFICE_CHILD,
         title: "Office child",
-        parentTaskId: "office-root",
+        parentTaskId: OFFICE_ROOT,
         isFromOffice: true,
       },
       {
         id: "office-grandchild",
         title: "Office grandchild",
-        parentTaskId: "office-child",
+        parentTaskId: OFFICE_CHILD,
         isFromOffice: true,
       },
       { id: "office-target-root", title: "Target root", isFromOffice: true },
@@ -89,7 +97,56 @@ describe("computeNestCandidates", () => {
     ]);
   });
 
-  it("returns empty when the subject is missing", () => {
-    expect(computeNestCandidates(tasks, "missing")).toEqual([]);
+  it("uses the complete hierarchy to exclude descendants hidden by the current view", () => {
+    const hierarchy: T[] = [
+      { id: "subject", title: "Subject", isFromOffice: true },
+      {
+        id: "hidden-child",
+        title: "Hidden child",
+        parentTaskId: "subject",
+        isFromOffice: true,
+      },
+      {
+        id: "visible-grandchild",
+        title: "Visible grandchild",
+        parentTaskId: "hidden-child",
+        isFromOffice: true,
+      },
+      { id: "valid-target", title: "Valid target", isFromOffice: true },
+    ];
+    const visibleTasks = hierarchy.filter((task) => task.id !== "hidden-child");
+
+    expect(
+      computeNestCandidates(visibleTasks, "subject", hierarchy).map((task) => task.id),
+    ).toEqual(["valid-target"]);
+  });
+
+  it("allows an Office subject to nest under a non-Office subtask", () => {
+    const mixedTasks: T[] = [
+      { id: "office-subject", title: "Office subject", isFromOffice: true },
+      { id: "kanban-root", title: "Kanban root" },
+      { id: "kanban-child", title: "Kanban child", parentTaskId: "kanban-root" },
+    ];
+
+    expect(computeNestCandidates(mixedTasks, "office-subject").map((task) => task.id)).toContain(
+      "kanban-child",
+    );
+  });
+
+  it("allows a non-Office subject to nest under an Office subtask", () => {
+    const mixedTasks: T[] = [
+      { id: "kanban-subject", title: "Kanban subject" },
+      { id: OFFICE_ROOT, title: "Office root", isFromOffice: true },
+      {
+        id: OFFICE_CHILD,
+        title: "Office child",
+        parentTaskId: OFFICE_ROOT,
+        isFromOffice: true,
+      },
+    ];
+
+    expect(computeNestCandidates(mixedTasks, "kanban-subject").map((task) => task.id)).toContain(
+      OFFICE_CHILD,
+    );
   });
 });

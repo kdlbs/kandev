@@ -21,26 +21,31 @@ export type NestCandidate = {
  *
  * Order is preserved from the input list.
  */
-export function computeNestCandidates<T extends NestCandidate>(tasks: T[], taskId: string): T[] {
-  const task = tasks.find((t) => t.id === taskId);
+export function computeNestCandidates<T extends NestCandidate>(
+  tasks: T[],
+  taskId: string,
+  hierarchyTasks: readonly NestCandidate[] = tasks,
+): T[] {
+  const tasksById = new Map(hierarchyTasks.map((candidate) => [candidate.id, candidate]));
+  const task = tasksById.get(taskId) ?? tasks.find((candidate) => candidate.id === taskId);
   if (!task) return [];
 
-  const tasksById = new Map(tasks.map((candidate) => [candidate.id, candidate]));
-  const taskHasChildren = tasks.some((candidate) => candidate.parentTaskId === taskId);
+  const taskHasChildren = hierarchyTasks.some((candidate) => candidate.parentTaskId === taskId);
   const currentParent = task.parentTaskId ?? undefined;
 
   return tasks.filter((candidate) => {
-    if (candidate.id === taskId || candidate.id === currentParent) return false;
-    if (hasAncestor(candidate, taskId, tasksById)) return false;
-    if (task.isFromOffice || candidate.isFromOffice) return true;
-    return !taskHasChildren && !candidate.parentTaskId;
+    const hierarchyCandidate = tasksById.get(candidate.id) ?? candidate;
+    if (hierarchyCandidate.id === taskId || hierarchyCandidate.id === currentParent) return false;
+    if (hasAncestor(hierarchyCandidate, taskId, tasksById)) return false;
+    if (task.isFromOffice || hierarchyCandidate.isFromOffice) return true;
+    return !taskHasChildren && !hierarchyCandidate.parentTaskId;
   });
 }
 
-function hasAncestor<T extends NestCandidate>(
-  candidate: T,
+function hasAncestor(
+  candidate: NestCandidate,
   ancestorId: string,
-  tasksById: ReadonlyMap<string, T>,
+  tasksById: ReadonlyMap<string, NestCandidate>,
 ): boolean {
   const visited = new Set<string>();
   let parentId = candidate.parentTaskId;

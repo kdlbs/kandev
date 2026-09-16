@@ -82,6 +82,8 @@ export type TaskSwitcherItem = {
 
 export type TaskSwitcherProps = {
   grouped: GroupedSidebarList;
+  /** Complete unfiltered task set used only to validate hierarchy constraints. */
+  nestHierarchyTasks?: TaskSwitcherItem[];
   workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   activeTaskId: string | null;

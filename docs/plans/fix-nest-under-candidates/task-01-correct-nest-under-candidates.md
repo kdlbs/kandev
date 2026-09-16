@@ -28,14 +28,18 @@ including arbitrary-depth Office targets, while Kanban keeps its one-level hiera
 
 - Preserve the backend Office discriminator through HTTP mapping, lightweight WebSocket merges,
   active/snapshot reconciliation, and the sidebar projection.
-- Make `computeNestCandidates` distinguish Office from Kanban and reject known descendants.
-- Supply the rendered group to the context menu and remove its independent raw-snapshot lookup.
+- Make canonical task updates serialize Office identity explicitly and publish after project
+  assignment or removal.
+- Make `computeNestCandidates` distinguish Office from Kanban and reject descendants through the
+  complete pre-filter hierarchy.
+- Supply the rendered group and complete hierarchy through stable getters, preserving row
+  memoization, and remove the context menu's independent raw-snapshot lookup.
 - Keep drag target discovery on the same group and helper.
 - Add focused unit, component, and Office E2E regression coverage.
 
 ## Out of scope
 
-- Backend validation, task PATCH semantics, persistence, and WebSocket contracts.
+- Backend validation, task PATCH semantics, and persistence.
 - Kanban card drag, sibling reorder, Office list parent picker, menu copy, and menu geometry.
 - Lifting the one-level Kanban hierarchy limit.
 
@@ -44,8 +48,10 @@ including arbitrary-depth Office targets, while Kanban keeps its one-level hiera
 - A visible eligible task remains selectable from `Nest under` when the corresponding raw
   multi-workflow snapshot is partial, and drag exposes exactly the same candidate identifiers.
 - Office subjects with children and Office targets at any depth are eligible except for self,
-  current parent, and descendants; the existing Kanban root-only and childless-subject behavior
-  remains unchanged.
+  current parent, and descendants, including a descendant behind a filtered intermediate ancestor;
+  the existing Kanban root-only and childless-subject behavior remains unchanged.
+- Unaffected rows retain their memoization while a subsequently opened menu sees current candidates,
+  and project assignment/removal updates cached Office identity without a reload.
 - The focused frontend suites, Office browser scenario, typecheck, lint, i18n ratchet, and spec
   validation pass.
 
@@ -75,6 +81,7 @@ sheet. No spacing, control, or navigation change is part of this work order.
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run lint)
 (cd apps/web && pnpm run i18n:ratchet)
+(cd apps/backend && go test ./internal/office/dashboard ./internal/task/service)
 (cd apps/web && pnpm e2e:run tests/task/sidebar-nest-task.spec.ts tests/task/office-sidebar-nest-task.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-subtask-reparent-drag-drop.spec.ts tests/task/mobile-office-sidebar-nest-task.spec.ts)
 python3 scripts/list-docs.py validate
@@ -101,6 +108,10 @@ Run the complete block from the repository root.
 - `apps/web/components/task/mobile/session-task-switcher-sheet-item.ts`
 - `apps/web/components/task/mobile/session-task-switcher-sheet-item.test.ts`
 - `apps/web/components/task/task-switcher-tree.tsx`
+- `apps/web/components/task/task-switcher.tsx`
+- `apps/web/components/task/task-switcher-render-stability.test.tsx`
+- `apps/web/components/task/task-session-sidebar-switcher-props.ts`
+- `apps/web/components/task/mobile/session-task-switcher-sheet-props.ts`
 - `apps/web/components/task/task-switcher-row.tsx`
 - `apps/web/components/task/task-switcher-context-menu.tsx`
 - `apps/web/components/task/task-switcher-context-menu-items.tsx`
@@ -111,6 +122,10 @@ Run the complete block from the repository root.
 - `apps/web/components/task/task-switcher-subtask-dnd.test.ts`
 - `apps/web/e2e/tests/task/office-sidebar-nest-task.spec.ts`
 - `apps/web/e2e/tests/task/mobile-office-sidebar-nest-task.spec.ts`
+- `apps/backend/internal/office/dashboard/service_tasks.go`
+- `apps/backend/internal/office/dashboard/task_updated_events_test.go`
+- `apps/backend/internal/task/service/service_events.go`
+- `apps/backend/internal/task/service/service_events_test.go`
 
 Use fewer files when the rendered-group value can be threaded through an existing context or prop.
 Do not introduce a general task registry for this local composition.
@@ -134,12 +149,14 @@ None.
 
 ## Risks
 
-- A cycle filter based only on direct children would expose deeper descendants in Office trees;
-  follow ancestor chains with a visited set.
+- A cycle filter based only on visible tasks would expose deeper descendants when a view hides an
+  intermediate ancestor; follow ancestor chains in the complete hierarchy with a visited set.
 - Defaulting a missing Office discriminator to true would relax Kanban rules; absent values remain
   non-Office.
 - A menu-local store selector would let menu and drag diverge again; both consume the rendered
   group supplied by their common tree composition.
+- Passing changing candidate arrays directly to every row would defeat memoization; stable getters
+  must resolve the latest committed arrays at interaction time.
 
 ## Results
 
@@ -148,6 +165,7 @@ identity projection and partial-update preservation, and descendant-cycle preven
 browser scenario proves an Office parent with a child can be nested under another Office task,
 persists the relationship, renders depth two, and survives reload.
 
-Verification passed: frozen install; 115 focused Vitest tests across nine files; TypeScript
-typecheck; full frontend lint; i18n ratchet; two Chromium desktop E2E cases; three `mobile-chrome`
-touch E2E cases; both specification validators; and the scoped diff check.
+Verification passed: frozen install; 107 focused Vitest tests across nine files; the full frontend
+suite with 18,454 passing tests and four skipped; TypeScript typecheck; full frontend lint; i18n
+ratchet; complete Office dashboard and task service Go package tests; desktop Chromium and
+`mobile-chrome` nesting flows; both specification validators; and the scoped diff check.

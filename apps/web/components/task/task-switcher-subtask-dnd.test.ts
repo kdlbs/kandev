@@ -17,6 +17,9 @@ const WORKFLOW = "wf-1";
 const OTHER_WORKFLOW = "wf-2";
 const PWC = "parent-with-child"; // root that already has a child
 const PWC_CHILD = "child-of-pwc";
+const OFFICE_SUBJECT = "office-subject";
+const OFFICE_TARGET_ROOT = "office-target-root";
+const HIDDEN_CHILD = "hidden-child";
 
 function task(
   id: string,
@@ -167,20 +170,34 @@ describe("computeNestTargets", () => {
   // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
   it("matches the shared Office candidates for a subject with children", () => {
     const officeTasks = [
-      task("office-subject", { isFromOffice: true }),
+      task(OFFICE_SUBJECT, { isFromOffice: true }),
       task("office-descendant", {
-        parentTaskId: "office-subject",
+        parentTaskId: OFFICE_SUBJECT,
         isFromOffice: true,
       }),
-      task("office-target-root", { isFromOffice: true }),
+      task(OFFICE_TARGET_ROOT, { isFromOffice: true }),
       task("office-target-child", {
-        parentTaskId: "office-target-root",
+        parentTaskId: OFFICE_TARGET_ROOT,
         isFromOffice: true,
       }),
     ];
 
     expect(computeNestTargets(officeTasks[0], officeTasks)).toEqual(
-      new Set(["office-target-root", "office-target-child"]),
+      new Set([OFFICE_TARGET_ROOT, "office-target-child"]),
+    );
+  });
+
+  it("excludes a descendant whose intermediate ancestor is hidden", () => {
+    const hierarchy = [
+      task(OFFICE_SUBJECT, { isFromOffice: true }),
+      task(HIDDEN_CHILD, { parentTaskId: OFFICE_SUBJECT, isFromOffice: true }),
+      task("visible-grandchild", { parentTaskId: HIDDEN_CHILD, isFromOffice: true }),
+      task("valid-target", { isFromOffice: true }),
+    ];
+    const visibleTasks = hierarchy.filter((candidate) => candidate.id !== HIDDEN_CHILD);
+
+    expect(computeNestTargets(hierarchy[0], visibleTasks, hierarchy)).toEqual(
+      new Set(["valid-target"]),
     );
   });
 });

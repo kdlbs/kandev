@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { countGroupTasks, type SidebarGroup } from "@/lib/sidebar/apply-view";
 import {
   SortableTaskLevel,
@@ -14,7 +14,14 @@ import type { TaskSwitcherItem } from "./task-switcher-types";
 
 export type TaskRowBaseProps = Omit<
   TaskRowProps,
-  "task" | "nestCandidateTasks" | "subtaskToggle" | "isPinned" | "isSubTask" | "depth"
+  | "task"
+  | "nestCandidateTasks"
+  | "getNestCandidateTasks"
+  | "getNestHierarchyTasks"
+  | "subtaskToggle"
+  | "isPinned"
+  | "isSubTask"
+  | "depth"
 >;
 
 type TaskTreeContext = {
@@ -23,7 +30,8 @@ type TaskTreeContext = {
   onToggleSubtasks?: (parentTaskId: string) => void;
   pinnedSet: Set<string>;
   rowProps: TaskRowBaseProps;
-  groupTasks: TaskSwitcherItem[];
+  getNestCandidateTasks: () => TaskSwitcherItem[];
+  getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
@@ -75,7 +83,8 @@ function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps)
     previous.depth !== next.depth ||
     previous.isDraggable !== next.isDraggable ||
     previous.ctx.rowProps !== next.ctx.rowProps ||
-    previous.ctx.groupTasks !== next.ctx.groupTasks ||
+    previous.ctx.getNestCandidateTasks !== next.ctx.getNestCandidateTasks ||
+    previous.ctx.getNestHierarchyTasks !== next.ctx.getNestHierarchyTasks ||
     previous.ctx.onToggleSubtasks !== next.ctx.onToggleSubtasks ||
     previous.ctx.onReorderGroup !== next.ctx.onReorderGroup ||
     previous.ctx.onReorderSubtasks !== next.ctx.onReorderSubtasks ||
@@ -127,7 +136,8 @@ const TaskTreeNode = memo(function TaskTreeNode({
         subtaskToggle={toggleInfo}
         isPinned={isRoot && ctx.pinnedSet.has(task.id)}
         {...ctx.rowProps}
-        nestCandidateTasks={ctx.groupTasks}
+        getNestCandidateTasks={ctx.getNestCandidateTasks}
+        getNestHierarchyTasks={ctx.getNestHierarchyTasks}
         onTogglePin={isRoot ? ctx.rowProps.onTogglePin : undefined}
       />
       {isNestTarget && <NestDropZone taskId={task.id} title={task.title} />}
@@ -187,6 +197,7 @@ function getReorderHandler(parentTaskId: string | null, ctx: TaskTreeContext) {
 export type GroupSectionProps = {
   group: SidebarGroup;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
+  getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined;
   rowProps: TaskRowBaseProps;
   pinnedSet: Set<string>;
   isCollapsed: boolean;
@@ -233,6 +244,7 @@ function groupSectionEqual(previous: GroupSectionProps, next: GroupSectionProps)
   if (
     previous.group !== next.group ||
     previous.rowProps !== next.rowProps ||
+    previous.getNestHierarchyTasks !== next.getNestHierarchyTasks ||
     previous.pinnedSet !== next.pinnedSet ||
     previous.isCollapsed !== next.isCollapsed ||
     previous.onToggleGroup !== next.onToggleGroup ||
@@ -289,6 +301,7 @@ function flattenGroupTasks(
 export const GroupSection = memo(function GroupSection({
   group,
   subTasksByParentId,
+  getNestHierarchyTasks,
   rowProps,
   pinnedSet,
   isCollapsed,
@@ -305,6 +318,11 @@ export const GroupSection = memo(function GroupSection({
     () => flattenGroupTasks(group.tasks, subTasksByParentId),
     [group.tasks, subTasksByParentId],
   );
+  const groupTasksRef = useRef(groupTasks);
+  useLayoutEffect(() => {
+    groupTasksRef.current = groupTasks;
+  }, [groupTasks]);
+  const getNestCandidateTasks = useCallback(() => groupTasksRef.current, []);
 
   const renderTree = (nestTargetIds: Set<string>) => {
     if (isCollapsed) return null;
@@ -314,7 +332,8 @@ export const GroupSection = memo(function GroupSection({
       onToggleSubtasks,
       pinnedSet,
       rowProps,
-      groupTasks,
+      getNestCandidateTasks,
+      getNestHierarchyTasks,
       onReorderGroup,
       onReorderSubtasks,
       onNestTask,
@@ -337,6 +356,7 @@ export const GroupSection = memo(function GroupSection({
       )}
       <TaskTreeDndGroup
         groupTasks={groupTasks}
+        getNestHierarchyTasks={getNestHierarchyTasks}
         onReorderGroup={onReorderGroup}
         onReorderSubtasks={onReorderSubtasks}
         onNestTask={onNestTask}

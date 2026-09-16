@@ -48,6 +48,7 @@ type SingleGroupProps = Pick<
   SingleSelectionMenuProps,
   | "task"
   | "nestCandidateTasks"
+  | "nestHierarchyTasks"
   | "isDeleting"
   | "isArchiving"
   | "isPinned"
@@ -284,6 +285,7 @@ function SingleEditGroup({
 function SingleRelationshipsGroup({
   task,
   nestCandidateTasks,
+  nestHierarchyTasks,
   isDeleting,
   onCreateSubtask,
   onDetachTask,
@@ -295,6 +297,7 @@ function SingleRelationshipsGroup({
   SingleGroupProps,
   | "task"
   | "nestCandidateTasks"
+  | "nestHierarchyTasks"
   | "isDeleting"
   | "onCreateSubtask"
   | "onDetachTask"
@@ -310,6 +313,7 @@ function SingleRelationshipsGroup({
         <TaskNestContextMenuItems
           task={task}
           nestCandidateTasks={nestCandidateTasks}
+          nestHierarchyTasks={nestHierarchyTasks}
           disabled={isDeleting}
         />
       )}

@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 type TaskNestContextMenuItemsProps = {
   task: TaskSwitcherItem;
   nestCandidateTasks?: TaskSwitcherItem[];
+  nestHierarchyTasks?: TaskSwitcherItem[];
   disabled?: boolean;
 };
 
@@ -28,6 +29,7 @@ type TaskNestContextMenuItemsProps = {
 export function TaskNestContextMenuItems({
   task,
   nestCandidateTasks = [],
+  nestHierarchyTasks,
   disabled,
 }: TaskNestContextMenuItemsProps) {
   const { t } = useTranslation();
@@ -39,6 +41,7 @@ export function TaskNestContextMenuItems({
   const candidates = computeNestCandidates(
     nestCandidateTasks.filter((candidate) => candidate.workflowId === workflowId),
     task.id,
+    nestHierarchyTasks ?? nestCandidateTasks,
   );
   const hasParent = Boolean(task.parentTaskId);
 

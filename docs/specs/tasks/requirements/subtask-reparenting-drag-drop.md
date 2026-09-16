@@ -5,6 +5,7 @@ created: 2026-08-04
 owners:
   - kandev
 ---
+
 # Subtask re-parenting by drag and drop Requirements
 
 ## Overview
@@ -32,8 +33,10 @@ eligible target that is already visible in the task group.
   one-level Kanban hierarchy.
 - **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4:** When the subject or target is an Office task,
   the UI shall allow arbitrary-depth re-parenting while excluding the subject, its current parent,
-  and its descendants. The backend remains authoritative for self, cycle, archive, workspace, and
-  concurrency validation.
+  and its descendants, including descendants whose intermediate ancestors are hidden by the active
+  sidebar view. The backend remains authoritative for self, cycle, archive, workspace, and
+  concurrency validation. Live project assignment and removal shall update the cached Office
+  identity in both directions.
 - **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.5:** Desktop sidebar and mobile task-switcher
   presentations shall use the same menu and drag eligibility without changing their existing
   pointer, touch, focus, dismissal, or scrolling behavior.
@@ -49,10 +52,12 @@ Users can detach a subtask or nest a task under another via context-menu actions
 - The sidebar task tree (desktop sidebar and the mobile task switcher sheet) lets a user re-parent a task by dragging its row onto another row's **nest drop zone**.
 - The result is strictly equivalent to choosing `Un-nest (remove parent)` then `Nest under <target>` from the task's context menu: the task's parent becomes the target, and a task whose workspace mode is `inherit_parent` ends with mode `shared_group` — its materialized workspace and workspace-group membership are unchanged.
 - Drop targets are exactly the candidates the context menu offers (the `computeNestCandidates`
-  rules) from the same-workflow tasks in the rendered group. Every mode excludes the subject and
-  its current parent. Kanban candidates must be roots and a Kanban subject with children has no
-  targets. Office candidates may be at any depth, and an Office subject may keep its descendants,
-  but its descendants are excluded as targets so the UI cannot offer a known cycle.
+  rules) from the same-workflow tasks in the rendered group. The complete unfiltered task
+  hierarchy is used only to validate ancestry and depth, so filtering an intermediate ancestor
+  cannot expose a descendant as a target. Every mode excludes the subject and its current parent.
+  Kanban candidates must be roots and a Kanban subject with children has no targets. Office
+  candidates may be at any depth, and an Office subject may keep its descendants, but its
+  descendants are excluded as targets so the UI cannot offer a known cycle.
 - While a drag with valid targets is active, candidate rows show a nest drop zone (a left-edge strip) with a `Nest under <title>` affordance. Dropping on a zone re-parents; dropping between rows keeps the existing sibling-reorder behavior; any other drop is a no-op.
 - Re-parenting is a single API call on the existing canonical path (`PATCH /api/v1/tasks/:id` with `parent_id`), which already rejects self-parenting, missing/archived/cross-workspace targets, descendant cycles, and one-level-depth violations for kanban tasks.
 - The sidebar `Nest under` menu, the Office parent picker, the WS task-update path, and the Office dashboard PATCH all share the same composite semantics: any effective parent change normalizes an `inherit_parent` workspace mode to `shared_group`.
@@ -77,7 +82,10 @@ No new endpoint. Reuses and extends existing contracts:
 
 - `PATCH /api/v1/tasks/:id` with `parent_id` (non-empty nests; `""` un-nests) — already validated by `Service.resolveParentID` (self, existence, archived, same workspace, descendant cycle) and `validateReparentDepth` (one-level kanban limit, Office trees exempt). **Behavior addition:** when the effective parent changes, `inherit_parent` workspace mode is normalized to `shared_group` (mirroring the detach operation). Success returns the updated task DTO; invalid targets map to `400`; missing task to `404`.
 - `PATCH /api/v1/office/tasks/:id` with non-empty `parent_id` — same normalization added for parity; empty parent continues to route through the canonical detach operation.
-- WS `task.updated` payload unchanged: `parent_id` is always present (nil when cleared), and `metadata` carries the normalized workspace mode.
+- WS `task.updated` includes an explicit `is_from_office` boolean so either Office-identity
+  transition clears or establishes the cached value. `parent_id` is always present (nil when
+  cleared), and `metadata` carries the normalized workspace mode. Office project reassignment
+  publishes this canonical event after the write.
 
 ## Failure modes
 
@@ -105,6 +113,12 @@ No new endpoint. Reuses and extends existing contracts:
   of a disabled `No other tasks` row.
 - **GIVEN** an Office task and one of its descendants, **WHEN** the menu or drag targets are shown,
   **THEN** that descendant is not offered as a parent.
+- **GIVEN** a sidebar filter hides the intermediate task between an Office subject and a visible
+  descendant, **WHEN** the menu or drag targets are shown, **THEN** the visible descendant is still
+  excluded as a parent.
+- **GIVEN** a Kanban task is assigned to or removed from an Office project, **WHEN** the canonical
+  `task.updated` event arrives, **THEN** open sidebar caches immediately adopt the explicit new
+  Office identity without a reload.
 - **GIVEN** a subtask dragged toward its current parent, **WHEN** the pointer rests on that parent row, **THEN** no nest drop zone is offered.
 - **GIVEN** a drag dropped between two sibling rows, **WHEN** the drop lands outside every nest zone, **THEN** the siblings reorder as before.
 - **GIVEN** a drop that lands outside every nest zone, **WHEN** the drop completes, **THEN** the task keeps its original parent and no request is sent (a plain no-op); a request-error toast appears only when a valid-zone drop's request is rejected by the backend.
