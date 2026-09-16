@@ -149,7 +149,7 @@ from the loaded transcript.
 - `pnpm run typecheck`: passed.
 - Managed Chromium E2E: 4 passed.
 - Managed mobile-chrome E2E: 1 passed.
-- `python3 scripts/list-docs.py validate`: passed, 272 decisions and 932
+- `python3 scripts/list-docs.py validate`: passed, 275 decisions and 947
   specifications.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
@@ -172,3 +172,22 @@ preceding files so that path is exercised deterministically.
 - Full LSP file intelligence E2E with retries disabled: 13 passed.
 - Targeted ESLint for the three changed E2E files: passed.
 - Web TypeScript typecheck: passed.
+
+The subsequent CI blob audit (run `35032213664`) found 13 hidden retry
+attempts across 12 tests. The follow-up fixup removed those timing, geometry,
+selector, and setup races: mobile branch refresh waits for settled controls and
+uses a forceful touch activation, layout checks poll or use their intended
+one-pixel tolerance, delayed provider and virtualized content use causal
+bounds, and the settings interlock retries only the backend's startup `503`.
+The parked-work suite now creates its temporary `claude-acp` profile after
+per-test profile cleanup, so a stale deleted profile cannot suppress session
+creation.
+
+- Interlock helper Vitest regression: passed.
+- Mobile CI regression batch with retries disabled and `--repeat-each=3`: 9
+  passed.
+- Chromium/tablet regression batch with retries disabled and
+  `--repeat-each=3`: 15 passed.
+- Git plus parked-work sequence with retries disabled: 2 passed.
+- Parked-work regression with retries disabled and `--repeat-each=3`: 3
+  passed; full parked-work file: 2 passed.

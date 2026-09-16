@@ -149,15 +149,19 @@ test.describe("mobile PR CI chip drawer", () => {
 
     const statusBar = session.activeChat().getByTestId("chat-status-bar");
     await expect(statusBar).toHaveCSS("flex-wrap", "wrap");
-    expect(
-      await statusBar.evaluate((element) => {
-        const bar = element.getBoundingClientRect();
-        return Array.from(element.children).every((child) => {
-          const rect = child.getBoundingClientRect();
-          return rect.left >= bar.left - 1 && rect.right <= bar.right + 1;
-        });
-      }),
-    ).toBe(true);
+    await expect
+      .poll(
+        () =>
+          statusBar.evaluate((element) => {
+            const bar = element.getBoundingClientRect();
+            return Array.from(element.children).every((child) => {
+              const rect = child.getBoundingClientRect();
+              return rect.left >= bar.left - 1 && rect.right <= bar.right + 1;
+            });
+          }),
+        { timeout: 15_000 },
+      )
+      .toBe(true);
     expect(
       await testPage.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

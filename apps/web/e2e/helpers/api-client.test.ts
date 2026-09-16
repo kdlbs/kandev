@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient } from "./api-client";
+import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 
 describe("ApiClient.createAgentProfile", () => {
   afterEach(() => {
@@ -83,5 +84,28 @@ describe("ApiClient user settings", () => {
       workflow_filter_id: settings.workflow_filter_id,
     });
     expect(saved).toEqual(baseline);
+  });
+});
+
+describe("loadInterimSettingsInterlockToken", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retries the backend startup response before reading the token", async () => {
+    let attempts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        attempts += 1;
+        if (attempts < 3) return new Response(null, { status: 503 });
+        return Response.json({ interimSettingsInterlockToken: "ready-token" });
+      }),
+    );
+
+    await expect(loadInterimSettingsInterlockToken("http://backend.test")).resolves.toBe(
+      "ready-token",
+    );
+    expect(attempts).toBe(3);
   });
 });

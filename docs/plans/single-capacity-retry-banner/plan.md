@@ -168,7 +168,7 @@ message identity, Cancel cleanup, and mobile document containment.
 - Web `pnpm run typecheck`: passed.
 - Desktop managed E2E: 4 tests passed.
 - Mobile managed E2E: 1 test passed.
-- Specification catalog validation: 272 decisions and 932 specifications
+- Specification catalog validation: 275 decisions and 947 specifications
   validated.
 - Specification lint: passed.
 - `git diff --check`: passed.
@@ -194,6 +194,24 @@ archive cleanup test forces that condition with 48 preceding files.
 - LSP archive cleanup focused E2E with retries disabled: 1 passed with the
   virtualized-tree regression fixture.
 - Targeted ESLint and web TypeScript typecheck: passed.
+
+The complete E2E blob audit for CI run `35032213664` exposed 13 retry
+attempts across 12 tests even though the aggregate workflow was green. The
+fixup stabilizes each reported path: mobile branch refresh activation, backend
+startup interlock reads, virtualized and delayed rendering, provider readiness,
+layout geometry, strict plan-comment selection, mobile containment, and parked
+session profile setup. The parked suite now creates its temporary provider
+profile after per-test cleanup, which preserves the profile used by task
+creation across file ordering and repetition.
+
+- Interlock helper Vitest regression: passed.
+- Mobile CI regression batch with retries disabled and `--repeat-each=3`: 9
+  passed.
+- Chromium/tablet regression batch with retries disabled and
+  `--repeat-each=3`: 15 passed.
+- Git plus parked-work sequence with retries disabled: 2 passed.
+- Parked-work regression with retries disabled and `--repeat-each=3`: 3
+  passed; full parked-work file: 2 passed.
 
 ## Risks
 

@@ -26,7 +26,7 @@ test.describe("Mobile plugin modal content", () => {
     const title = dialog.locator('[data-slot="dialog-title"]');
     const close = dialog.locator('[data-slot="dialog-close"]');
     const finalAction = dialog.getByTestId("hello-long-modal-final-action");
-    await expect(dialog).toBeVisible();
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
     await expect(body).toHaveCount(1);
     await expect(finalAction).toBeVisible();
     await dialog.evaluate(async (element) => {
