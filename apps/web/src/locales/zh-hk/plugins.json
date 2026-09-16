@@ -42,6 +42,8 @@
   "loadingWorkspaceAgentChat": "正在載入對話…",
   "workspaceAgentChatInput": "訊息",
   "workspaceAgentChatSend": "傳送",
+  "workspaceAgentChatSendFailed": "無法傳送訊息，請再試一次。",
+  "workspaceAgentChatSessionEnded": "對話已結束",
   "webAppLoading": "正在載入畫布…",
   "webAppUnavailable": "此畫布不可用。",
   "loadingPlugins": "正在載入外掛程式…",

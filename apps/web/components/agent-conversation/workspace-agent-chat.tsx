@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useContext, useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
 import { Textarea } from "@kandev/ui/textarea";
@@ -9,6 +9,8 @@ import { generateUUID } from "@/lib/utils";
 import {
   pluginConversationUrl,
   PluginConversationScopeProvider,
+  ConversationScopeContext,
+  fetchBinding,
 } from "@/lib/plugins/conversation-scope";
 import { pluginConversationApi } from "@/lib/plugins/conversation-host";
 import type { WorkspaceAgentChatProps, WorkspaceAgentChatStatus } from "@kandev/plugin-sdk";
@@ -32,13 +34,21 @@ function useManagedDescriptor(
     }
     setDescriptor(null);
     setStatus("loading");
-    fetch(
-      pluginConversationUrl(
-        pluginId,
-        `/conversation/managed/${encodeURIComponent(conversationId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
-      ),
-      { credentials: "include", cache: "no-store", signal: controller.signal },
-    )
+    fetchBinding(pluginId, controller.signal)
+      .then((binding) =>
+        fetch(
+          pluginConversationUrl(
+            pluginId,
+            `/conversation/managed/${encodeURIComponent(conversationId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+          ),
+          {
+            credentials: "include",
+            cache: "no-store",
+            signal: controller.signal,
+            headers: { "X-Kandev-Plugin-Binding": binding.bindingToken },
+          },
+        ),
+      )
       .then(async (response) => {
         if (response.ok) return response.json() as Promise<ManagedDescriptor>;
         if (response.status === 403) throw new Error("permission-denied");
@@ -76,6 +86,7 @@ function ManagedTranscript({
   placeholderOverride?: string;
 }) {
   const { t } = useTranslation();
+  const scope = useContext(ConversationScopeContext);
   const { messages, loading, removed } = pluginConversationApi.useSessionMessages({
     sessionId: descriptor.sessionId,
     taskId: descriptor.taskId,
@@ -84,10 +95,14 @@ function ManagedTranscript({
   });
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendFailed, setSendFailed] = useState(false);
   const send = useCallback(async () => {
     if (!content.trim() || sending) return;
     setSending(true);
+    setSendFailed(false);
     try {
+      const binding = await scope?.ready();
+      if (!binding) throw new Error("binding unavailable");
       const response = await fetch(
         pluginConversationUrl(
           pluginId,
@@ -96,16 +111,21 @@ function ManagedTranscript({
         {
           method: "POST",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Kandev-Plugin-Binding": binding.bindingToken,
+          },
           body: JSON.stringify({ content, occurrenceKey: generateUUID() }),
         },
       );
       if (!response.ok) throw new Error("send failed");
       setContent("");
+    } catch {
+      setSendFailed(true);
     } finally {
       setSending(false);
     }
-  }, [content, descriptor, pluginId, sending]);
+  }, [content, descriptor, pluginId, scope, sending]);
   if (removed)
     return (
       <div
@@ -113,7 +133,7 @@ function ManagedTranscript({
         data-status="deleted"
         className="flex h-full items-center justify-center"
       >
-        <Spinner aria-label={t("plugins:loadingWorkspaceAgentChat")} />
+        <p role="status">{t("plugins:workspaceAgentChatSessionEnded")}</p>
       </div>
     );
   return (
@@ -136,6 +156,7 @@ function ManagedTranscript({
           <Button type="button" onClick={send} disabled={sending || !content.trim()}>
             {t("plugins:workspaceAgentChatSend")}
           </Button>
+          {sendFailed && <p role="alert">{t("plugins:workspaceAgentChatSendFailed")}</p>}
         </div>
       )}
     </div>

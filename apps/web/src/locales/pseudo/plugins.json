@@ -42,6 +42,8 @@
   "loadingWorkspaceAgentChat": "Ĺōàďĩńĝ ćōńvēŕśàţĩōń…",
   "workspaceAgentChatInput": "Mēššàĝē",
   "workspaceAgentChatSend": "Šēńđ",
+  "workspaceAgentChatSendFailed": "Mēššàĝē ćōũľď ńōţ bē šēńţ. Ţŕŷ àĝàĩń.",
+  "workspaceAgentChatSessionEnded": "Ćōńvēŕšàţĩōń ēńďēď",
   "webAppLoading": "Ĺōàďĩńĝ ćàńvàś…",
   "webAppUnavailable": "Ţĥĩś ćàńvàś ĩś ũńàvàĩĺàƀĺē.",
   "loadingPlugins": "Ĺōàďĩńĝ ƥĺũĝĩńś...",

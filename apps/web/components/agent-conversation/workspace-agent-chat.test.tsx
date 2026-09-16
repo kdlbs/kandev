@@ -1,5 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+/* eslint-disable max-lines-per-function, sonarjs/no-duplicate-string -- This fixture exercises one managed conversation lifecycle. */
+import * as React from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceAgentChat } from "./workspace-agent-chat";
 
 const transport = vi.hoisted(() => ({
@@ -9,6 +11,10 @@ const transport = vi.hoisted(() => ({
 
 vi.mock("@/lib/plugins/conversation-scope", () => ({
   pluginConversationUrl: (pluginId: string, path: string) => `/api/plugins/${pluginId}${path}`,
+  fetchBinding: () => Promise.resolve({ bindingToken: "binding-token" }),
+  ConversationScopeContext: React.createContext({
+    ready: () => Promise.resolve({ bindingToken: "binding-token" }),
+  }),
   PluginConversationScopeProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock("@/lib/plugins/conversation-host", () => ({
@@ -18,6 +24,7 @@ vi.mock("@/lib/plugins/conversation-host", () => ({
 }));
 
 describe("WorkspaceAgentChat", () => {
+  afterEach(cleanup);
   beforeEach(() => {
     transport.fetch.mockReset();
     vi.stubGlobal("fetch", transport.fetch);
@@ -45,6 +52,12 @@ describe("WorkspaceAgentChat", () => {
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(transport.fetch).toHaveBeenCalledTimes(2));
+    expect(transport.fetch.mock.calls[0][1].headers).toEqual({
+      "X-Kandev-Plugin-Binding": "binding-token",
+    });
+    expect(transport.fetch.mock.calls[1][1].headers).toMatchObject({
+      "X-Kandev-Plugin-Binding": "binding-token",
+    });
     expect(transport.fetch.mock.calls[1][0]).toContain(
       "/managed/session-1/dispatch?workspace_id=ws-1",
     );
@@ -87,5 +100,31 @@ describe("WorkspaceAgentChat", () => {
     );
     await screen.findByTestId("workspace-agent-chat");
     expect(transport.fetch.mock.calls[1][0]).toContain("/managed/session-2?workspace_id=ws-1");
+  });
+
+  it("keeps the prompt and announces a failed dispatch", async () => {
+    transport.fetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ taskId: "task-1", sessionId: "session-1", workspaceId: "ws-1" }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    render(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="1"
+      />,
+    );
+    await screen.findByTestId("workspace-agent-chat");
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "retry me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Message could not be sent. Try again.",
+    );
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("retry me");
   });
 });

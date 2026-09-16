@@ -92,7 +92,7 @@ export async function parseConversationResponse<T>(response: Response): Promise<
   );
 }
 
-async function fetchBinding(pluginId: string, signal: AbortSignal): Promise<Binding> {
+export async function fetchBinding(pluginId: string, signal: AbortSignal): Promise<Binding> {
   const response = await fetch(pluginConversationUrl(pluginId, "/conversation/binding"), {
     credentials: "include",
     cache: "no-store",

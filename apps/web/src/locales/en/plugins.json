@@ -42,6 +42,8 @@
   "loadingWorkspaceAgentChat": "Loading conversation…",
   "workspaceAgentChatInput": "Message",
   "workspaceAgentChatSend": "Send",
+  "workspaceAgentChatSendFailed": "Message could not be sent. Try again.",
+  "workspaceAgentChatSessionEnded": "Conversation ended",
   "webAppLoading": "Loading canvas…",
   "webAppUnavailable": "This canvas is unavailable.",
   "loadingPlugins": "Loading plugins...",
