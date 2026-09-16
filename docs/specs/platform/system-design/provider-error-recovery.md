@@ -448,7 +448,7 @@ stored in policy or route state.
 
 Continuation package sanitization tiers are defined in [Part
 4](provider-error-recovery-04.md#continuation-package-sanitization-tiers),
-relocated there verbatim when this file reached its size limit.
+relocated there at the size limit, and extended since.
 
 ## API surface
 

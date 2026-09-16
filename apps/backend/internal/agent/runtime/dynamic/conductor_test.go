@@ -150,8 +150,8 @@ func TestConductorPreservesLongUserAuthoredPromptOnEveryDownstreamLaunch(t *test
 	const url = "https://example.com/org/repo/pull/123?tab=files#discussion_r42"
 	const uuid = "3f9a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b"
 	filler := strings.Repeat("Then update the handler so it returns a typed error. ", 100)
-	prompt := "Fix bug in " + path + " at commit " + sha + "; see " + url +
-		" and task " + uuid + ".\n" + filler + " API_KEY=" + secret
+	prompt := filler + "Fix bug in " + path + " at commit " + sha + "; see " + url +
+		" and task " + uuid + ".\n API_KEY=" + secret
 
 	if len(prompt) <= routingerr.MaxRawExcerptBytes {
 		t.Fatalf("test prompt must exceed MaxRawExcerptBytes=%d, got %d", routingerr.MaxRawExcerptBytes, len(prompt))
@@ -173,7 +173,7 @@ func TestConductorPreservesLongUserAuthoredPromptOnEveryDownstreamLaunch(t *test
 		t.Fatalf("launch count = %d, want 2", len(downstream.launches))
 	}
 	for i, launch := range downstream.launches {
-		if !strings.HasPrefix(launch.Prompt, "Fix bug in "+path) {
+		if !strings.HasPrefix(launch.Prompt, "Then update the handler") {
 			t.Fatalf("launch %d prompt did not survive whole: %q", i, launch.Prompt)
 		}
 		for _, want := range []string{path, sha, url, uuid} {

@@ -13,10 +13,10 @@ owners:
 ## Purpose and boundaries
 
 Part 1 defines the dynamic-routing continuation package's data model
-(`## Data model`). This part carries one subsection relocated from Part 1
-verbatim, unchanged, when Part 1 reached its file-size limit: the two
-sanitization tiers `routingerr` applies to the continuation package's carrier
-text before persistence.
+(`## Data model`). This part carries one subsection relocated from Part 1 when
+Part 1 reached its file-size limit, and extended since: the two sanitization
+tiers `routingerr` applies to the continuation package's carrier text before
+persistence.
 
 It does not change classification rules, policy values, retry ownership, or
 candidate ordering.
@@ -69,16 +69,24 @@ also matches a listed pattern.
 
 The primary launch prompt (`ConductorLaunch.Prompt`, rendered by
 `ContinuationPrompt` ahead of the continuation package on every attempt,
-including attempt 0, not only fallbacks) is carrier text of the same kind as
-`TaskDescription`/`PlanSummary`/`RepositorySummary` above: it is
-user-authored, already shown to the user unredacted, and commonly carries
-long identifiers a fallback provider still needs (a file path, a commit SHA,
-a PR URL, a task UUID). It therefore receives the same narrow
+including attempt 0, not only fallbacks) is the composed first-turn prompt
+built by `orchestrator.Service` (`task_operations.go`): the user's own text
+plus server-injected context — the `<kandev-system>` block carrying the
+task/session IDs and the MCP tool list, and, for config-mode sessions,
+injected config context. `Message.ToAPI` strips the `<kandev-system>` block
+before it reaches the UI bubble, so this is not simply text already shown to
+the user unredacted. It carries the same kind of long identifiers as
+`TaskDescription`/`PlanSummary`/`RepositorySummary` above (a file path, a
+commit SHA, a PR URL, a task UUID) plus the task/session UUIDs the
+`<kandev-system>` block itself injects, so it receives the same narrow
 credential-only tier, via `routingerr.SanitizeCredentialsUnbounded` rather
 than `SanitizeCredentials` — unbounded, because unlike the continuation
 fields it is not subject to `continuationFieldLimit` and must not be
-silently truncated. Diagnostic-tier redaction (`routingerr.Sanitize`) is
-reserved for provider output and `FailureReason`, never for this field.
+silently truncated. This is required for correctness, not only fidelity: the
+diagnostic tier's 32-plus-character catch-all would mangle the injected
+task/session UUIDs and break the fallback provider's MCP tool calls, which
+address the task by that UUID. Diagnostic-tier redaction (`routingerr.Sanitize`)
+is reserved for provider output and `FailureReason`, never for this field.
 
 The key match is a substring match, not exact-name, so it also matches a key
 merely containing a keyword without naming a credential (`max_tokens`,
