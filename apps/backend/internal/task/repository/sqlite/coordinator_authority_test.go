@@ -266,7 +266,18 @@ func TestIssueCoordinatorAuthorityGrantRejectsConflictingDesignationWithoutCapab
 func TestIssueCoordinatorAuthorityGrantRejectsMismatchedWorkspaceScope(t *testing.T) {
 	repo := newUsageEventsTestRepo(t)
 	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Coordinator authority"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	createUsageEventsTestTask(t, repo, "coordinator")
 	now := time.Now().UTC()
+	principal := &models.WorkspaceAgentPrincipal{
+		ID: "principal", WorkspaceID: "ws-1", PluginInstallationID: "plugin", LogicalKey: "coordinator",
+		BackingTaskID: "coordinator", CreatedAt: now,
+	}
+	if err := repo.CreateWorkspaceAgentPrincipal(ctx, principal); err != nil {
+		t.Fatalf("CreateWorkspaceAgentPrincipal: %v", err)
+	}
 	err := repo.IssueCoordinatorAuthorityGrant(ctx,
 		&models.WorkspaceCoordinatorGrant{WorkspaceID: "ws-1", CoordinatorTaskID: "coordinator", CreatedAt: now},
 		&models.CoordinatorGrant{ID: "grant", CoordinatorTaskID: "coordinator", PrincipalID: "principal", WorkspaceID: "ws-1", ScopeKind: "workspace", ScopeID: "wrong-workspace", Capabilities: "inspect", GrantedAt: now},
