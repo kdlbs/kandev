@@ -203,14 +203,14 @@ There are **two** precedences, because refusal and deferral see disjoint gate se
 - **Refusal**, at enqueue: `causation_depth`, `self_trigger`, `self_trigger_total`,
   `causing_run_unreadable`, `workspace_missing`.
 
-`causation_depth` and `self_trigger` are deliberately **absent** from the deferral
-precedence. An earlier draft listed them first, as the most specific gates; but they
-are evaluated at enqueue and can only prevent a row existing, so a row sitting in
-`queued` has by construction already passed both. Those two slots could never fire,
-and a precedence with unreachable entries invites a builder to implement them as
-no-ops and wonder what they mean. Narrower gates are still reported before broader
-ones within each list, because a run blocked by both its agent ceiling and the
-instance ceiling is more actionable when attributed to the agent.
+`causation_depth`, `self_trigger`, and `self_trigger_total` are deliberately **absent**
+from the deferral precedence. An earlier draft listed the first two first, as the most
+specific gates; but all three are evaluated at enqueue and can only prevent a row
+existing, so a row sitting in `queued` has by construction already passed all three.
+Those three slots could never fire, and a precedence with unreachable entries invites a
+builder to implement them as no-ops and wonder what they mean. Narrower gates are still
+reported before broader ones within each list, because a run blocked by both its agent
+ceiling and the instance ceiling is more actionable when attributed to the agent.
 
 This read is diagnostic only and never gates a launch, per
 AC-OFFICE-BACKPRESSURE-003.4, so a failure in it cannot deny work. It is also a
