@@ -149,6 +149,16 @@ func (s *Service) tryLegacyTransientRetry(
 	if stale, _ := isRetryStale(run); stale {
 		return false
 	}
+	// A requeued run is re-evaluated by evaluateRunStaleness the next time
+	// it is claimed, which cancels any run with retry_count > 0 once
+	// run.RequestedAt is older than staleRunThreshold — and scheduling this
+	// retry always leaves retry_count > 0. Refusing here when that
+	// cancellation is already certain lets the failure fall through to
+	// today's terminal accounting instead of vanishing silently between
+	// requeue and claim (no consecutive_failures increment, no inbox row).
+	if !run.RequestedAt.IsZero() && time.Since(run.RequestedAt) > staleRunThreshold {
+		return false
+	}
 	message := errorMessage
 	var resetHint *time.Time
 	if providerError != nil {

@@ -615,12 +615,14 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 // runs pre-launch (the run never had one) or post-start (the session it
 // had belongs to the failed attempt), and a relaunch must mint its
 // runtime credentials against the session the new attempt actually gets,
-// not a stale one from a previous attempt.
+// not a stale one from a previous attempt. error_message is cleared for
+// the same reason: a requeued run is not yet failed, so it must not carry
+// the previous attempt's error into a later successful finish.
 func (r *Repository) ScheduleRetry(ctx context.Context, runID string, retryAt time.Time, retryCount int) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
 		SET status = 'queued', retry_count = ?, scheduled_retry_at = ?,
-		    claimed_at = NULL, finished_at = NULL, session_id = ''
+		    claimed_at = NULL, finished_at = NULL, session_id = '', error_message = ''
 		WHERE id = ?
 	`), retryCount, retryAt, runID)
 	return err

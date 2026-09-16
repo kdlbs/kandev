@@ -230,6 +230,59 @@ func TestHandleAgentFailure_StaleRunNotRetried(t *testing.T) {
 	}
 }
 
+// TestHandleAgentFailure_ClaimStaleRunNotRetried pins review round 2
+// finding R2-1: scheduling a retry always leaves retry_count > 0, and
+// evaluateRunStaleness cancels any claimed run with retry_count > 0 once
+// requested_at is older than the 2h staleRunThreshold — well before the
+// 24h retryMaxAge this tier otherwise shares with the pre-launch retry
+// tier. Without this gate, a transient failure on a run in that window
+// would schedule a retry that the claim path immediately cancels,
+// destroying the failure with no consecutive_failures increment and no
+// inbox row. A run in the 2h-24h band must instead fall through to
+// today's terminal accounting, exactly like a run past 24h already does.
+func TestHandleAgentFailure_ClaimStaleRunNotRetried(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-claim-stale")
+	taskID := "task-claim-stale"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-claim-stale")
+	run := queueAndReadRun(t, svc, "agent-claim-stale", taskID)
+
+	// Inside the 24h retryMaxAge but past the 2h staleRunThreshold: a
+	// long-running Office agent session is routine, not an edge case.
+	requestedAt := time.Now().UTC().Add(-3 * time.Hour)
+	svc.ExecSQL(t, `UPDATE runs SET requested_at = ? WHERE id = ?`, requestedAt, run.ID)
+	run.RequestedAt = requestedAt
+
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, nil)
+	if err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	if !wrote {
+		t.Fatal("wrote = false, want true (a claim-stale run must not retry, it is already marked failed)")
+	}
+
+	agent, err := svc.GetAgentInstance(ctx, "agent-claim-stale")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.ConsecutiveFailures != 1 {
+		t.Fatalf("consecutive_failures = %d, want 1 (the failure must count, not vanish)", agent.ConsecutiveFailures)
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q", refreshed.Status, service.RunStatusFailed)
+	}
+	if refreshed.ScheduledRetryAt != nil {
+		t.Fatal("expected scheduled_retry_at to remain unset")
+	}
+}
+
 // TestHandleAgentFailure_ProviderErrorMessagePreferred pins the reason the
 // providerError parameter is in scope at all: a bare agent stderr string
 // like "Overloaded" classifies unclassified from text alone, but the
