@@ -64,7 +64,7 @@ func (s *Service) migrateSidebarWorkspaces(ctx context.Context, ids []string) (*
 		settings.SidebarViewsByWorkspace = entries
 		settings.SidebarWorkspaceVersion = 1
 		return true, nil
-	}, nil)
+	}, nil, &ids)
 }
 
 func projectSidebarWorkspaces(settings *models.UserSettings, ids []string) *models.UserSettings {
@@ -82,11 +82,25 @@ func withoutSidebarWorkspaceState(settings *models.UserSettings) *models.UserSet
 	return &copy
 }
 
-func (s *Service) getSidebarWorkspaceSettings(ctx context.Context, settings *models.UserSettings) (*models.UserSettings, error) {
+func (s *Service) resolveSidebarWorkspaceIDs(ctx context.Context, provided ...[]string) ([]string, error) {
+	if s.sidebarWorkspaceAccess == nil {
+		return nil, nil
+	}
+	if len(provided) > 0 {
+		return provided[0], nil
+	}
+	return s.sidebarWorkspaceAccess(ctx)
+}
+
+func (s *Service) getSidebarWorkspaceSettings(
+	ctx context.Context,
+	settings *models.UserSettings,
+	provided ...[]string,
+) (*models.UserSettings, error) {
 	if s.sidebarWorkspaceAccess == nil {
 		return settings, nil
 	}
-	ids, err := s.sidebarWorkspaceAccess(ctx)
+	ids, err := s.resolveSidebarWorkspaceIDs(ctx, provided...)
 	if err != nil {
 		return nil, err
 	}
@@ -99,14 +113,18 @@ func (s *Service) getSidebarWorkspaceSettings(ctx context.Context, settings *mod
 	return projectSidebarWorkspaces(settings, ids), nil
 }
 
-func (s *Service) validateSidebarWorkspacePatch(ctx context.Context, req *UpdateUserSettingsRequest) error {
+func (s *Service) validateSidebarWorkspacePatch(
+	ctx context.Context,
+	req *UpdateUserSettingsRequest,
+	provided ...[]string,
+) error {
 	if req.SidebarViewState == nil {
 		return nil
 	}
 	if s.sidebarWorkspaceAccess == nil {
 		return fmt.Errorf("%w: workspace access unavailable", ErrValidation)
 	}
-	ids, err := s.sidebarWorkspaceAccess(ctx)
+	ids, err := s.resolveSidebarWorkspaceIDs(ctx, provided...)
 	if err != nil {
 		return err
 	}

@@ -316,6 +316,7 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => SidebarActionState) 
       );
     },
     discardSidebarDraft: () => {
+      if (!get().sidebarViews.draft) return;
       const before = snapshotSidebar(get().sidebarViews);
       set((draft) => {
         draft.sidebarViews.draft = null;

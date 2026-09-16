@@ -32,6 +32,12 @@ it("does not mutate sidebar views without an active workspace", () => {
   expect(updateUserSettings).not.toHaveBeenCalled();
 });
 
+it("does not save when discarding an absent sidebar draft", () => {
+  const store = createAppStore({ workspaces: { items: [], activeId: "a" } });
+  store.getState().discardSidebarDraft();
+  expect(updateUserSettings).not.toHaveBeenCalled();
+});
+
 it("hydrates distinct workspace collections and preserves them while switching", () => {
   const view = (name: string) => ({
     id: "shared",

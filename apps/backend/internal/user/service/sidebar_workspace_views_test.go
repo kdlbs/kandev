@@ -106,7 +106,7 @@ func TestSidebarWorkspaceLegacyPatchUsesExplicitWorkspaceID(t *testing.T) {
 	}
 }
 
-func TestUpdateUserSettingsReturnsCommittedSettingsWhenSidebarProjectionFails(t *testing.T) {
+func TestUpdateUserSettingsReusesSidebarProjectionAccess(t *testing.T) {
 	repo := newCASFakeRepo(&models.UserSettings{
 		UserID:                  store.DefaultUserID,
 		SidebarWorkspaceVersion: 1,
@@ -122,10 +122,7 @@ func TestUpdateUserSettingsReturnsCommittedSettingsWhenSidebarProjectionFails(t 
 	accessCalls := 0
 	svc.SetSidebarWorkspaceAccess(func(context.Context) ([]string, error) {
 		accessCalls++
-		if accessCalls == 1 {
-			return []string{"a"}, nil
-		}
-		return nil, errors.New("workspace read failed")
+		return []string{"a"}, nil
 	})
 
 	got, err := svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{DefaultEditorID: ptr("editor")})
@@ -135,11 +132,33 @@ func TestUpdateUserSettingsReturnsCommittedSettingsWhenSidebarProjectionFails(t 
 	if got == nil || got.DefaultEditorID != "editor" {
 		t.Fatalf("updated settings = %+v, want committed editor", got)
 	}
-	if got.SidebarViewsByWorkspace != nil {
-		t.Fatalf("response exposed an unprojected sidebar state: %#v", got.SidebarViewsByWorkspace)
+	if got.SidebarViewsByWorkspace == nil || len(got.SidebarViewsByWorkspace) != 1 {
+		t.Fatalf("response omitted projected sidebar state: %#v", got.SidebarViewsByWorkspace)
+	}
+	if accessCalls != 1 {
+		t.Fatalf("workspace access calls = %d, want one", accessCalls)
 	}
 	if eventBus.count() != 1 {
-		t.Fatalf("events = %d, want one event despite projection failure", eventBus.count())
+		t.Fatalf("events = %d, want one event", eventBus.count())
+	}
+	eventData, ok := eventBus.events[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data = %T, want map[string]interface{}", eventBus.events[0].Data)
+	}
+	if _, exists := eventData["sidebar_views_by_workspace"]; !exists {
+		t.Fatal("event omitted projected sidebar state")
+	}
+}
+
+func TestPublishUserSettingsEventOmitsSidebarProjectionWhenAccessFails(t *testing.T) {
+	eventBus := &casEventBus{}
+	svc := newCASService(newCASFakeRepo(&models.UserSettings{UserID: store.DefaultUserID}), eventBus)
+	svc.SetSidebarWorkspaceAccess(func(context.Context) ([]string, error) {
+		return nil, errors.New("workspace read failed")
+	})
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{UserID: store.DefaultUserID})
+	if eventBus.count() != 1 {
+		t.Fatalf("events = %d, want one event", eventBus.count())
 	}
 	eventData, ok := eventBus.events[0].Data.(map[string]interface{})
 	if !ok {
