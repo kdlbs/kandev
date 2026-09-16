@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClient } from "./api-client";
+import { ApiClient, removeRoutingProfileReferences } from "./api-client";
 import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 
 describe("ApiClient.createAgentProfile", () => {
@@ -107,5 +107,53 @@ describe("loadInterimSettingsInterlockToken", () => {
       "ready-token",
     );
     expect(attempts).toBe(3);
+  });
+});
+
+describe("removeRoutingProfileReferences", () => {
+  it("removes role-tier overrides whose last execution profile was deleted", () => {
+    const updated = removeRoutingProfileReferences(
+      {
+        enabled: true,
+        provider_order: ["claude-acp", "codex-acp"],
+        default_tier: "balanced",
+        provider_profiles: {
+          "claude-acp": {
+            execution_profile_ids: { balanced: "profile-1", economy: "economy-1" },
+            tier_map: { balanced: "balanced-model", economy: "economy-model" },
+          },
+          "codex-acp": {
+            execution_profile_ids: { balanced: "profile-2" },
+          },
+        },
+        role_tiers: { ceo: "balanced", worker: "economy" },
+      },
+      "profile-1",
+    );
+
+    expect(updated?.role_tiers).toEqual({ ceo: "balanced", worker: "economy" });
+    expect(updated?.provider_profiles["claude-acp"]).toEqual({
+      execution_profile_ids: { economy: "economy-1" },
+      tier_map: { economy: "economy-model" },
+    });
+  });
+
+  it("drops a role-tier override when no provider still maps that tier", () => {
+    const updated = removeRoutingProfileReferences(
+      {
+        enabled: true,
+        provider_order: ["claude-acp"],
+        default_tier: "balanced",
+        provider_profiles: {
+          "claude-acp": {
+            execution_profile_ids: { balanced: "profile-1" },
+          },
+        },
+        role_tiers: { ceo: "balanced" },
+      },
+      "profile-1",
+    );
+
+    expect(updated?.role_tiers).toEqual({});
   });
 });

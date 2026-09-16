@@ -150,18 +150,23 @@ test.describe("mobile PR CI chip drawer", () => {
 
     const statusBar = session.activeChat().getByTestId("chat-status-bar");
     await expect(statusBar).toHaveCSS("flex-wrap", "wrap");
-    await waitForFiniteAnimations(statusBar);
     await expect
       .poll(
-        () =>
-          statusBar.evaluate((element) => {
+        async () => {
+          await waitForFiniteAnimations(statusBar);
+          return statusBar.evaluate((element) => {
             const bar = element.getBoundingClientRect();
             return Array.from(element.children).every((child) => {
               const rect = child.getBoundingClientRect();
               return rect.left >= bar.left - 1 && rect.right <= bar.right + 1;
             });
-          }),
-        { timeout: 15_000 },
+          });
+        },
+        {
+          timeout: 30_000,
+          intervals: [100, 250, 500],
+          message: "Waiting for the mobile chat status bar children to fit within the bar",
+        },
       )
       .toBe(true);
     expect(
