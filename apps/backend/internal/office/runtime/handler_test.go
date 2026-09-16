@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 type handlerHarness struct {
@@ -29,6 +30,7 @@ type handlerHarness struct {
 	status     *recordingTaskStatusUpdater
 	projects   *recordingProjectManager
 	tasks      *handlerTaskCreator
+	runs       *recordingRunSpawner
 	runEvents  *recordingRunEvents
 	agentSvc   *agents.AgentService
 	repository *sqlite.Repository
@@ -236,6 +238,58 @@ func TestRuntimeHandler_CreateAgentBindsSnakeCasePayload(t *testing.T) {
 		t.Fatalf("snake-case fields did not bind: %+v", body.Agent)
 	}
 	assertActionRunEvent(t, h.runEvents, "create_agent", "agent", body.Agent.ID)
+}
+
+// TestRuntimeHandler_SpawnAgentRunAcceptsRegistryReason exercises the
+// AC-OFFICE-LAUNCH-SAFETY-004.3 registry check's positive path through the
+// real HTTP route (POST /runtime/agents/:id/runs), not just the Actions
+// layer: a registry-member reason reaches the run spawner and the caller
+// gets 202 Accepted.
+func TestRuntimeHandler_SpawnAgentRunAcceptsRegistryReason(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+
+	resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+		"reason": string(shared.RunReasonHeartbeat),
+	})
+
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusAccepted, resp.Body.String())
+	}
+	if len(h.runs.calls) != 1 || h.runs.calls[0].Reason != string(shared.RunReasonHeartbeat) {
+		t.Fatalf("run spawner calls = %+v, want one call for reason %q", h.runs.calls, shared.RunReasonHeartbeat)
+	}
+}
+
+// TestRuntimeHandler_SpawnAgentRunRejectsReasonOutsideRegistryAndLogsRunEvent
+// pins AC-OFFICE-LAUNCH-SAFETY-004.3 end to end through the HTTP route: a
+// reason outside shared.WakeReasonRegistry (the empty string included)
+// must be rejected with 400, must never reach the run spawner, and must be
+// recorded as a denied run event — the same observable contract already
+// proven for errTaskTitleRequired/ErrProjectRequired on other actions.
+func TestRuntimeHandler_SpawnAgentRunRejectsReasonOutsideRegistryAndLogsRunEvent(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+	}{
+		{name: "unregistered reason", reason: "whatever-reason-the-agent-invents"},
+		{name: "empty reason", reason: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+
+			resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+				"reason": tc.reason,
+			})
+
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusBadRequest, resp.Body.String())
+			}
+			if len(h.runs.calls) != 0 {
+				t.Fatalf("run spawner called for reason outside the registry: %+v", h.runs.calls)
+			}
+			assertDeniedRunEvent(t, h.runEvents, "spawn_agent_run", "agent", "agent-1")
+		})
+	}
 }
 
 func TestRuntimeHandler_ListProjectsUsesTokenWorkspace(t *testing.T) {
@@ -804,6 +858,7 @@ func newRuntimeHandlerHarnessWithProjectManager(
 	comments := &handlerCommentWriter{}
 	status := &recordingTaskStatusUpdater{}
 	tasks := &handlerTaskCreator{}
+	runs := &recordingRunSpawner{}
 	projects := &recordingProjectManager{}
 	var projectManager ProjectManager = projects
 	if projectManagerFactory != nil {
@@ -819,6 +874,7 @@ func newRuntimeHandlerHarnessWithProjectManager(
 			TaskStatus:    status,
 			Agents:        agentSvc,
 			Projects:      projectManager,
+			Runs:          runs,
 			AgentModifier: agentSvc,
 		}),
 		nil,
@@ -831,6 +887,7 @@ func newRuntimeHandlerHarnessWithProjectManager(
 		status:     status,
 		projects:   projects,
 		tasks:      tasks,
+		runs:       runs,
 		runEvents:  runEvents,
 		agentSvc:   agentSvc,
 		repository: repo,
