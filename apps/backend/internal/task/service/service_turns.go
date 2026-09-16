@@ -86,7 +86,15 @@ func (s *Service) createTurn(
 		UpdatedAt:          time.Now().UTC(),
 	}
 
-	stamped, err := s.turns.CreateTurnWithStepStamp(ctx, turn)
+	var (
+		stamped bool
+		receipt *models.ConversationMutationReceipt
+	)
+	if writer, ok := s.turns.(taskrepo.ConversationTurnStampWriter); ok {
+		stamped, receipt, err = writer.CreateTurnWithStepStampConversationReceipt(ctx, turn)
+	} else {
+		stamped, err = s.turns.CreateTurnWithStepStamp(ctx, turn)
+	}
 	if err != nil {
 		s.logger.Error("failed to create turn", zap.Error(err))
 		return nil, err
@@ -97,7 +105,7 @@ func (s *Service) createTurn(
 
 	if publishStarted {
 		// had_output is only meaningful on turn.completed; omit it from turn.started.
-		_ = s.publishTurnEvent(events.TurnStarted, turn, nil)
+		_ = s.publishTurnEvent(events.TurnStarted, turn, nil, receipt)
 	}
 
 	s.logger.Debug("started turn",
@@ -447,18 +455,28 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil // No active turn to complete
 	}
 
-	if err := s.turns.CompleteTurn(ctx, turnID); err != nil {
-		s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
-		return err
-	}
-
-	// Safety net: mark any tool calls still in a non-terminal state as "complete"
+	// Complete tool calls before taking the turn receipt. Both the tool row
+	// updates and the turn completion then belong to the same published
+	// revision coverage boundary.
 	if affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, turnID); err != nil {
 		s.logger.Warn("failed to complete pending tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
 	} else if affected > 0 {
 		s.logger.Info("completed stale pending tool calls on turn end",
 			zap.String("turn_id", turnID),
 			zap.Int64("affected", affected))
+	}
+
+	var receipt *models.ConversationMutationReceipt
+	if writer, ok := s.turns.(taskrepo.ConversationMutationWriter); ok {
+		var err error
+		receipt, err = writer.CompleteTurnWithConversationReceipt(ctx, turnID)
+		if err != nil {
+			s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
+			return err
+		}
+	} else if err := s.turns.CompleteTurn(ctx, turnID); err != nil {
+		s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
+		return err
 	}
 
 	// Fetch the completed turn to get the completed_at timestamp
@@ -470,7 +488,7 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	}
 
 	hadOutput := s.turnHadOutput(ctx, turn)
-	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
+	_ = s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput, receipt)
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -625,7 +643,7 @@ func (s *Service) PublishTurnStarted(ctx context.Context, turn *models.Turn) err
 // turn.completed events (the frontend uses it to surface an "empty turn"
 // notice). Pass nil for turn.started so the field is omitted entirely rather
 // than carrying a misleading "false" on a turn that has not completed.
-func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) error {
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool, receipts ...*models.ConversationMutationReceipt) error {
 	if s.eventBus == nil {
 		return errors.New("turn event bus is unavailable")
 	}
@@ -653,6 +671,9 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 	payload[turnEventMetadataKey] = metadata
 	if hadOutput != nil {
 		payload["had_output"] = *hadOutput
+	}
+	if len(receipts) > 0 && receipts[0] != nil {
+		payload["conversation_receipt"] = receipts[0]
 	}
 	if err := s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload)); err != nil {
 		s.logger.Error("failed to publish turn event",

@@ -60,7 +60,8 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
-		r.initConversationJournalSchema,
+		r.initConversationSourceSchema,
+		r.cleanupLegacyConversationJournal,
 	}
 	// Every boundary is checked before and after its step. The task repository
 	// passes the same context to startup SQL through migrationContext, so a

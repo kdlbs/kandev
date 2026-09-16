@@ -24,6 +24,14 @@ system_design:
 
 # Task 02: Add Plugin Conversation Read Routes
 
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
+
 ## Scope
 
 Add the authenticated backend and Host-only transport prerequisites for browser

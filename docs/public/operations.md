@@ -453,6 +453,45 @@ Open **Settings > System > Data & Logs > Database** to see database size, WAL si
 
 These actions run as background system jobs. Closing the browser does not cancel a job. Check the page or logs for its terminal state before starting another maintenance operation.
 
+Conversation history uses the task database as its source. A storage cutover
+can remove the retired conversation journal tables and triggers in one startup
+migration, after the normal pre-migration backup. The migration is transactional
+and safe to retry after a failed attempt. Stop older Kandev backends before the
+upgrade; a mixed old and new writer set is not supported. The cutover does not
+run `VACUUM`, so use the existing **Vacuum** action later if you need to reduce
+the SQLite file size.
+
+#### Compact SQLite after the conversation upgrade
+
+Compaction is an explicit maintenance operation, separate from backup, migration,
+and readiness. Startup does not compact the live database. The pre-migration
+snapshot uses `VACUUM INTO` to create a separate backup; it does not shrink the
+live file.
+
+1. Wait for the upgraded backend to become ready. Check history before proceeding.
+2. Copy the verified pre-upgrade backup outside the automatic retention directory
+   for rollback. Create and verify a current snapshot to preserve newer work.
+3. Schedule a quiet maintenance period and pause agent runs. Ensure sufficient
+   free disk space for temporary files, the WAL, and retained backups.
+4. Open **Settings > System > Data & Logs > Database** and select **Vacuum**.
+   Wait for the job to finish before starting other maintenance or resuming runs.
+5. Check the reported reclaimed bytes, `/ready`, and conversation history.
+   Existing backup files are not compacted by this operation.
+
+For offline maintenance, stop every backend that uses the database, including
+supervised services. Then run the following against the configured SQLite path:
+
+```bash
+sqlite3 "/absolute/path/to/kandev.db" 'VACUUM;'
+sqlite3 "/absolute/path/to/kandev.db" 'PRAGMA integrity_check;'
+```
+
+The integrity check must return `ok` before you restart Kandev. Do not delete
+`-wal` or `-shm` files manually. `PRAGMA optimize` and a WAL checkpoint do not
+replace compaction. SQLite documents a worst-case requirement of twice the
+original database size in additional free space for
+[VACUUM](https://www.sqlite.org/lang_vacuum.html).
+
 ### PostgreSQL
 
 PostgreSQL is an external, operator-managed database. The Database page shows driver, database-level size, and schema version, but hides SQLite path, WAL, backup time, and maintenance controls. Kandev does not take a pre-migration PostgreSQL dump and the System Backups page is not a PostgreSQL backup/restore facility. Use your platform backup policy or `pg_dump`/`pg_restore`.

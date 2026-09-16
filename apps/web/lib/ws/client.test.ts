@@ -58,6 +58,7 @@ class FakeWebSocket {
 function connectClient(options?: ConstructorParameters<typeof WebSocketClient>[2]) {
   const client = new WebSocketClient("ws://test", undefined, {
     enabled: false,
+    conversationProtocol: "v1",
     ...options,
   });
   client.connect();
@@ -900,4 +901,192 @@ describe("ordered core session validation", () => {
     unregister();
     subscription.unsubscribe();
   });
+
+  it("projects source conversation batches and ignores legacy duplicates", async () => {
+    const { client, socket } = connectClient({ conversationProtocol: "v2" });
+    const projected = vi.fn();
+    const changed = vi.fn();
+    client.on("session.message.added", projected);
+    client.on("session.conversation.changed", changed);
+    const subscription = client.subscribeSessionWithReady("sess-1");
+    const v2Request = socket.sent.find(
+      (message) => message.action === "session.conversation.subscribe",
+    );
+    if (!v2Request) throw new Error("No source conversation subscribe request was sent");
+    const scopeID = (v2Request.payload as { scope_id: string }).scope_id;
+    socket.receive({
+      id: v2Request.id,
+      type: "response",
+      payload: {
+        success: true,
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        revision: "0",
+      },
+    });
+    const legacyRequest = socket.sent.find((message) => message.action === "session.subscribe");
+    if (!legacyRequest) throw new Error("No session subscribe request was sent");
+    socket.receive({ id: legacyRequest.id, type: "response", payload: { success: true } });
+    await subscription.ready;
+
+    socket.receive({
+      type: "notification",
+      action: "session.conversation.changed",
+      payload: {
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        base_revision: "0",
+        revision: "1",
+        operations: [
+          {
+            kind: "upsert",
+            entity: "message",
+            id: "message-1",
+            message: {
+              task_id: "task-1",
+              author_type: "user",
+              content: "source",
+              type: "message",
+              created_at: "2026-09-16T12:00:00Z",
+              updated_at: "2026-09-16T12:00:00Z",
+            },
+          },
+        ],
+      },
+    });
+    socket.receive({
+      type: "notification",
+      action: "session.message.added",
+      payload: { session_id: "sess-1", message_id: "message-1" },
+    });
+    expect(projected).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledTimes(1);
+    subscription.unsubscribe();
+  });
+
+  it("repairs malformed source operations before advancing the applied revision", async () => {
+    const { client, socket } = connectClient({ conversationProtocol: "v2" });
+    const projected = vi.fn();
+    const recover = vi.fn(async () => true);
+    client.on("session.message.added", projected);
+    const subscription = client.subscribeSessionWithReady("sess-1");
+    const v2Request = socket.sent.find(
+      (message) => message.action === "session.conversation.subscribe",
+    );
+    if (!v2Request) throw new Error("No source conversation subscribe request was sent");
+    const scopeID = (v2Request.payload as { scope_id: string }).scope_id;
+    socket.receive({
+      id: v2Request.id,
+      type: "response",
+      payload: {
+        success: true,
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        revision: "0",
+      },
+    });
+    const legacyRequest = socket.sent.find((message) => message.action === "session.subscribe");
+    if (!legacyRequest) throw new Error("No session subscribe request was sent");
+    socket.receive({ id: legacyRequest.id, type: "response", payload: { success: true } });
+    await subscription.ready;
+    client.registerCoreSessionRecovery("sess-1", recover);
+
+    socket.receive({
+      type: "notification",
+      action: "session.conversation.changed",
+      payload: {
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        base_revision: "0",
+        revision: "1",
+        operations: [{ kind: "upsert", entity: "message", id: "message-1" }],
+      },
+    });
+
+    await vi.waitFor(() => expect(recover).toHaveBeenCalledTimes(1));
+    expect(projected).not.toHaveBeenCalled();
+    subscription.unsubscribe();
+  });
+  it.each(["missed", "delivered", "closed"])(
+    "checks idle source revisions with %s updates",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const { client, socket } = connectClient({ conversationProtocol: "v2" });
+      const projected = vi.fn();
+      const recover = vi.fn(async () => true);
+      client.on("session.message.added", projected);
+      const subscription = client.subscribeSessionWithReady("sess-1");
+      const v2Request = socket.sent.find(
+        (message) => message.action === "session.conversation.subscribe",
+      );
+      if (!v2Request) throw new Error("No source conversation subscribe request was sent");
+      const scopeID = (v2Request.payload as { scope_id: string }).scope_id;
+      socket.receive({
+        id: v2Request.id,
+        type: "response",
+        payload: {
+          success: true,
+          protocol_version: 2,
+          scope_id: scopeID,
+          session_id: "sess-1",
+          epoch: "epoch-1",
+          revision: "0",
+        },
+      });
+      const legacyRequest = socket.sent.find((message) => message.action === "session.subscribe");
+      if (!legacyRequest) throw new Error("No session subscribe request was sent");
+      socket.receive({ id: legacyRequest.id, type: "response", payload: { success: true } });
+      await subscription.ready;
+      client.registerCoreSessionRecovery("sess-1", recover);
+
+      const check = (revision: string) =>
+        socket.receive({
+          type: "notification",
+          action: "session.conversation.changed",
+          payload: {
+            protocol_version: 2,
+            scope_id: scopeID,
+            session_id: "sess-1",
+            epoch: "epoch-1",
+            base_revision: revision,
+            revision,
+            check: true,
+            operations: [],
+          },
+        });
+      check("0");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(recover).not.toHaveBeenCalled();
+      check("1");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(recover).not.toHaveBeenCalled();
+      if (outcome === "closed") subscription.unsubscribe();
+      if (outcome === "delivered")
+        socket.receive({
+          type: "notification",
+          action: "session.conversation.changed",
+          payload: {
+            protocol_version: 2,
+            scope_id: scopeID,
+            session_id: "sess-1",
+            epoch: "epoch-1",
+            base_revision: "0",
+            revision: "1",
+            operations: [],
+          },
+        });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recover).toHaveBeenCalledTimes(outcome === "missed" ? 1 : 0);
+
+      subscription.unsubscribe();
+    },
+  );
 });

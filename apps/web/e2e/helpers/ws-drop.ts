@@ -16,9 +16,9 @@ type MessageAddResponseDropController = {
   droppedCount: () => number;
 };
 
-type ExpiredPluginSnapshotController = {
-  expireNextPluginSnapshot: () => void;
-  modifiedCount: () => number;
+type ConversationChangeDropController = {
+  dropChange: (content: string) => void;
+  droppedCount: () => number;
   pluginSubscribeCount: () => number;
 };
 
@@ -36,9 +36,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function parseJSONFrames(message: string | Buffer): Array<Record<string, unknown>> {
-  if (typeof message !== "string") return [];
+  const text = typeof message === "string" ? message : message.toString("utf8");
   const frames: Array<Record<string, unknown>> = [];
-  for (const part of message.split("\n")) {
+  for (const part of text.split("\n")) {
     if (!part.trim()) continue;
     try {
       const parsed = asRecord(JSON.parse(part));
@@ -408,17 +408,57 @@ export async function routeMainWebSocketWithQueueAdmissionDrops(
   };
 }
 
+function hasConversationChangeContent(message: unknown, content: string): boolean {
+  const envelope = asRecord(message);
+  if (envelope?.action !== "session.conversation.changed") {
+    return false;
+  }
+  return JSON.stringify(envelope).includes(content);
+}
+
+function filterConversationChange(
+  message: string | Buffer,
+  content: string | null,
+  state: { value: number },
+): string | Buffer {
+  if (content === null) return message;
+  const text = typeof message === "string" ? message : message.toString("utf8");
+  const kept: string[] = [];
+  let didDrop = false;
+  for (const part of text.split("\n")) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      kept.push(part);
+      continue;
+    }
+    let frame: unknown;
+    try {
+      frame = JSON.parse(trimmed);
+    } catch {
+      kept.push(part);
+      continue;
+    }
+    if (hasConversationChangeContent(frame, content)) {
+      state.value += 1;
+      didDrop = true;
+      continue;
+    }
+    kept.push(part);
+  }
+  if (!didDrop) return message;
+  const filtered = kept.join("\n");
+  return typeof message === "string" ? filtered : Buffer.from(filtered, "utf8");
+}
+
 /**
- * Rewrites one plugin subscription expiry in the browser transport. The
- * signed token remains server-valid, so the panel must exercise its normal
- * fresh rebind path instead of relying on a relaxed backend validation rule.
+ * Drops one durable plugin conversation change while preserving the socket.
+ * The following change creates a revision gap and exercises source recovery.
  */
-export async function routeMainWebSocketWithExpiredPluginSnapshot(
+export async function routeMainWebSocketWithConversationChangeDrop(
   page: Page,
-): Promise<ExpiredPluginSnapshotController> {
-  const requestIDs = new Set<string>();
-  let armed = false;
-  let modified = 0;
+): Promise<ConversationChangeDropController> {
+  let contentToDrop: string | null = null;
+  const dropped = { value: 0 };
   let pluginSubscribeRequests = 0;
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
@@ -428,64 +468,27 @@ export async function routeMainWebSocketWithExpiredPluginSnapshot(
         const payload = asRecord(frame.payload);
         if (
           frame.type === "request" &&
-          frame.action === "session.subscribe" &&
-          typeof frame.id === "string" &&
+          frame.action === "session.conversation.subscribe" &&
           payload?.consumer_kind === "plugin"
         ) {
           pluginSubscribeRequests += 1;
-          if (armed) requestIDs.add(frame.id);
         }
       }
       server.send(message);
     });
     server.onMessage((message) => {
-      if (typeof message !== "string") {
-        ws.send(message);
-        return;
-      }
-      const rewritten: string[] = [];
-      let didRewrite = false;
-      for (const part of message.split("\n")) {
-        const trimmed = part.trim();
-        if (!trimmed) {
-          rewritten.push(part);
-          continue;
-        }
-        let frame: Record<string, unknown> | null = null;
-        try {
-          frame = asRecord(JSON.parse(trimmed));
-        } catch {
-          // Preserve non-JSON frames.
-        }
-        if (
-          armed &&
-          frame?.type === "response" &&
-          frame.action === "session.subscribe" &&
-          typeof frame.id === "string" &&
-          requestIDs.delete(frame.id)
-        ) {
-          const payload = asRecord(frame.payload);
-          if (payload?.success === true) {
-            frame.payload = { ...payload, expires_at: "2000-01-01T00:00:00Z" };
-            rewritten.push(JSON.stringify(frame));
-            armed = false;
-            modified += 1;
-            didRewrite = true;
-            continue;
-          }
-        }
-        rewritten.push(part);
-      }
-      ws.send(didRewrite ? rewritten.join("\n") : message);
+      const filtered = filterConversationChange(message, contentToDrop, dropped);
+      if (dropped.value > 0 && filtered !== message) contentToDrop = null;
+      ws.send(filtered);
     });
   });
 
   return {
-    expireNextPluginSnapshot: () => {
-      requestIDs.clear();
-      armed = true;
+    dropChange: (content: string) => {
+      contentToDrop = content;
+      dropped.value = 0;
     },
-    modifiedCount: () => modified,
+    droppedCount: () => dropped.value,
     pluginSubscribeCount: () => pluginSubscribeRequests,
   };
 }

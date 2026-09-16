@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -27,6 +28,12 @@ type ConversationReader interface {
 		taskservice.ListMessagesRequest,
 	) ([]*taskmodels.Message, bool, error)
 	ListTurnsBySession(context.Context, string) ([]*taskmodels.Turn, error)
+}
+
+type conversationSourceReader interface {
+	ReadConversationRevision(context.Context, string) (taskmodels.ConversationRevision, error)
+	ReadConversationMessagesPage(context.Context, taskmodels.ConversationMessagePageRequest) (taskmodels.ConversationMessagePage, error)
+	ReadConversationTurnsPage(context.Context, taskmodels.ConversationTurnPageRequest) (taskmodels.ConversationTurnPage, error)
 }
 
 type conversationError struct {
@@ -99,6 +106,27 @@ type conversationTurnsResponse struct {
 	Turns []conversationTurnDTO `json:"turns"`
 }
 
+type conversationSourceMessagesResponse struct {
+	Messages []conversationMessageDTO `json:"messages"`
+	HasMore  bool                     `json:"hasMore"`
+	Cursor   *string                  `json:"cursor"`
+	Epoch    string                   `json:"epoch"`
+	Revision int64                    `json:"revision,string"`
+}
+
+type conversationSourceTurnsResponse struct {
+	Turns    []conversationTurnDTO `json:"turns"`
+	HasMore  bool                  `json:"hasMore"`
+	Cursor   *string               `json:"cursor"`
+	Epoch    string                `json:"epoch"`
+	Revision int64                 `json:"revision,string"`
+}
+
+type conversationSourceRevisionResponse struct {
+	Epoch    string `json:"epoch"`
+	Revision int64  `json:"revision,string"`
+}
+
 type conversationContinuationRenewRequest struct {
 	Cursor        string `json:"cursor"`
 	SnapshotToken string `json:"snapshot_token"`
@@ -122,9 +150,204 @@ type conversationMessageQuery struct {
 
 func registerConversationRoutes(api *gin.RouterGroup, ctrl *Controller) {
 	api.GET("/:id/conversation/binding", ctrl.conversationBinding)
+	api.GET("/:id/conversation/v2/task-sessions/:sessionId/messages", ctrl.conversationSourceMessages)
+	api.GET("/:id/conversation/v2/task-sessions/:sessionId/turns", ctrl.conversationSourceTurns)
+	api.GET("/:id/conversation/v2/task-sessions/:sessionId/revision", ctrl.conversationSourceRevision)
 	api.GET("/:id/conversation/task-sessions/:sessionId/messages", ctrl.conversationMessages)
 	api.GET("/:id/conversation/task-sessions/:sessionId/turns", ctrl.conversationTurns)
 	api.POST("/:id/conversation/continuation/renew", ctrl.conversationContinuationRenew)
+}
+
+func (c *Controller) conversationSourceMessages(ctx *gin.Context) {
+	ctx.Header("Cache-Control", conversationNoStore)
+	record, identity, ok := c.authorizeConversationRequest(ctx)
+	if !ok || !c.validBinding(ctx, record, identity.UserID) {
+		return
+	}
+	reader, ok := c.conversationReader.(conversationSourceReader)
+	if !ok {
+		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+		return
+	}
+	query, expected, cursorID, ok := c.parseSourceRequest(ctx, record, identity.UserID, true)
+	if !ok {
+		return
+	}
+	sessionID := ctx.Param("sessionId")
+	page, err := reader.ReadConversationMessagesPage(ctx.Request.Context(), taskmodels.ConversationMessagePageRequest{
+		SessionID: sessionID,
+		TaskID:    query.taskID,
+		Authors:   query.authors,
+		Sort:      query.sort,
+		CursorID:  cursorID,
+		Limit:     query.limit,
+	})
+	if !c.writeConversationSourceReadError(ctx, err) {
+		return
+	}
+	if expected != nil && page.Revision != *expected {
+		writeConversationError(ctx, http.StatusConflict, "reconciliation_required", "conversation revision changed", true)
+		return
+	}
+	response := conversationSourceMessagesResponse{
+		Messages: make([]conversationMessageDTO, 0, len(page.Messages)),
+		HasMore:  page.HasMore,
+		Epoch:    c.svc.conversationEpoch,
+		Revision: page.Revision,
+	}
+	for _, message := range page.Messages {
+		response.Messages = append(response.Messages, conversationMessageModelToDTO(message))
+	}
+	if page.HasMore {
+		cursor, mintErr := c.conversationTokens.mintSourceCursor(
+			record.ID, identity.UserID, conversationGeneration(record.InstalledAt), sessionID,
+			query.taskID, query.sort, query.authors, page.CursorID, c.svc.conversationEpoch, query.limit,
+		)
+		if mintErr != nil {
+			writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+			return
+		}
+		response.Cursor = &cursor
+	}
+	ctx.JSON(http.StatusOK, response)
+}
+
+func (c *Controller) conversationSourceTurns(ctx *gin.Context) {
+	ctx.Header("Cache-Control", conversationNoStore)
+	record, identity, ok := c.authorizeConversationRequest(ctx)
+	if !ok || !c.validBinding(ctx, record, identity.UserID) {
+		return
+	}
+	reader, ok := c.conversationReader.(conversationSourceReader)
+	if !ok {
+		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+		return
+	}
+	query, expected, cursorID, ok := c.parseSourceRequest(ctx, record, identity.UserID, false)
+	if !ok {
+		return
+	}
+	sessionID := ctx.Param("sessionId")
+	page, err := reader.ReadConversationTurnsPage(ctx.Request.Context(), taskmodels.ConversationTurnPageRequest{
+		SessionID: sessionID,
+		TaskID:    query.taskID,
+		Sort:      query.sort,
+		CursorID:  cursorID,
+		Limit:     query.limit,
+	})
+	if !c.writeConversationSourceReadError(ctx, err) {
+		return
+	}
+	if expected != nil && page.Revision != *expected {
+		writeConversationError(ctx, http.StatusConflict, "reconciliation_required", "conversation revision changed", true)
+		return
+	}
+	response := conversationSourceTurnsResponse{
+		Turns:    make([]conversationTurnDTO, 0, len(page.Turns)),
+		HasMore:  page.HasMore,
+		Epoch:    c.svc.conversationEpoch,
+		Revision: page.Revision,
+	}
+	for _, turn := range page.Turns {
+		response.Turns = append(response.Turns, conversationTurnModelToDTO(turn))
+	}
+	if page.HasMore {
+		cursor, mintErr := c.conversationTokens.mintSourceCursor(
+			record.ID, identity.UserID, conversationGeneration(record.InstalledAt), sessionID,
+			query.taskID, query.sort, nil, page.CursorID, c.svc.conversationEpoch, query.limit,
+		)
+		if mintErr != nil {
+			writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+			return
+		}
+		response.Cursor = &cursor
+	}
+	ctx.JSON(http.StatusOK, response)
+}
+
+func (c *Controller) conversationSourceRevision(ctx *gin.Context) {
+	ctx.Header("Cache-Control", conversationNoStore)
+	record, identity, ok := c.authorizeConversationRequest(ctx)
+	if !ok || !c.validBinding(ctx, record, identity.UserID) {
+		return
+	}
+	reader, ok := c.conversationReader.(conversationSourceReader)
+	if !ok {
+		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+		return
+	}
+	revision, err := reader.ReadConversationRevision(ctx.Request.Context(), ctx.Param("sessionId"))
+	if !c.writeConversationSourceReadError(ctx, err) {
+		return
+	}
+	if !revision.Exists {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return
+	}
+	ctx.JSON(http.StatusOK, conversationSourceRevisionResponse{Epoch: c.svc.conversationEpoch, Revision: revision.Revision})
+}
+
+func (c *Controller) parseSourceRequest(ctx *gin.Context, record *store.Record, userID string, allowAuthors bool) (conversationMessageQuery, *int64, string, bool) {
+	query, ok := parseConversationMessageQuery(ctx)
+	if !ok {
+		return conversationMessageQuery{}, nil, "", false
+	}
+	if !allowAuthors && len(query.authors) > 0 {
+		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "author_type is not supported for turns", false)
+		return conversationMessageQuery{}, nil, "", false
+	}
+	var expected *int64
+	if raw, exists := ctx.GetQuery("expected_revision"); exists {
+		revision, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || revision < 0 {
+			writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "expected_revision must be a nonnegative integer", false)
+			return conversationMessageQuery{}, nil, "", false
+		}
+		expected = &revision
+	}
+	sessionID := ctx.Param("sessionId")
+	if query.taskID != nil && c.conversationReader != nil {
+		session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
+		if err != nil || session == nil || session.ID != sessionID {
+			writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+			return conversationMessageQuery{}, nil, "", false
+		}
+		if *query.taskID != session.TaskID {
+			writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the task session", false)
+			return conversationMessageQuery{}, nil, "", false
+		}
+	}
+	if query.cursor == "" {
+		return query, expected, "", true
+	}
+	lastID, ok := c.parseSourceCursor(ctx, record, userID, query)
+	return query, expected, lastID, ok
+}
+
+func (c *Controller) parseSourceCursor(ctx *gin.Context, record *store.Record, userID string, query conversationMessageQuery) (string, bool) {
+	sessionID := ctx.Param("sessionId")
+	claims, err := c.conversationTokens.parse(query.cursor)
+	if err != nil || claims.Kind != tokenKindCursor || claims.PluginID != record.ID ||
+		claims.UserID != userID || claims.Generation != conversationGeneration(record.InstalledAt) ||
+		claims.SessionID != sessionID || !equalOptionalString(claims.TaskID, query.taskID) ||
+		claims.Sort != query.sort || !equalStrings(claims.Authors, query.authors) ||
+		claims.Epoch != c.svc.conversationEpoch || claims.PageSize != query.limit || claims.LastID == "" {
+		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "invalid cursor", false)
+		return "", false
+	}
+	return claims.LastID, true
+}
+
+func (c *Controller) writeConversationSourceReadError(ctx *gin.Context, err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return false
+	}
+	writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+	return false
 }
 
 func (c *Controller) conversationBinding(ctx *gin.Context) {
@@ -183,10 +406,8 @@ func (c *Controller) conversationMessages(ctx *gin.Context) {
 	}
 	session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
 	if err != nil || session == nil || session.ID != sessionID {
-		if !c.svc.isSessionRemoved(sessionID) {
-			writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
-			return
-		}
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return
 	} else if query.taskID != nil && *query.taskID != session.TaskID {
 		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the task session", false)
 		return
@@ -204,20 +425,7 @@ func (c *Controller) conversationMessages(ctx *gin.Context) {
 	if !c.applyConversationMessageCursor(ctx, record, identity.UserID, sessionID, query, snapshot, &request) {
 		return
 	}
-	var messages []*taskmodels.Message
-	var hasMore bool
-	if c.svc.HasConversationJournal() {
-		cursorID := request.After
-		if query.sort == "desc" {
-			cursorID = request.Before
-		}
-		messages, hasMore, err = c.svc.conversationMessagesAt(
-			ctx.Request.Context(), sessionID, uint64(snapshot.Cutoff),
-			query.taskID, query.authors, query.sort, cursorID, query.limit,
-		)
-	} else {
-		messages, hasMore, err = c.conversationReader.ListMessagesPaginated(ctx.Request.Context(), request)
-	}
+	messages, hasMore, err := c.conversationReader.ListMessagesPaginated(ctx.Request.Context(), request)
 	if err != nil {
 		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
 		return
@@ -339,7 +547,7 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 		return
 	}
 	sessionID := ctx.Param("sessionId")
-	snapshot, ok := c.validSnapshot(ctx, record, identity.UserID, sessionID)
+	_, ok = c.validSnapshot(ctx, record, identity.UserID, sessionID)
 	if !ok {
 		return
 	}
@@ -354,10 +562,8 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 	session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
 	sessionFound := err == nil && session != nil && session.ID == sessionID
 	if !sessionFound {
-		if !c.svc.isSessionRemoved(sessionID) {
-			writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
-			return
-		}
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return
 	} else if taskID != nil && *taskID != session.TaskID {
 		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the task session", false)
 		return
@@ -368,15 +574,10 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 	} else if sessionFound {
 		scopedTaskID = &session.TaskID
 	}
-	var turns []*taskmodels.Turn
-	if c.svc.HasConversationJournal() {
-		turns, err = c.svc.conversationTurnsAt(ctx.Request.Context(), sessionID, uint64(snapshot.Cutoff), scopedTaskID)
-	} else {
-		// The no-journal fallback must honor the requested/inherited task
-		// scope like the journal branch: a session that ever accumulated
-		// mixed-task turn rows must not leak turns outside the validated task.
-		turns, err = loadFallbackTurns(ctx.Request.Context(), c.conversationReader, sessionID, *scopedTaskID)
-	}
+	// The source repository remains authoritative. The task scope is already
+	// validated against the session above, so filter the source result before
+	// mapping it to the public DTO.
+	turns, err := loadFallbackTurns(ctx.Request.Context(), c.conversationReader, sessionID, optionalStringValue(scopedTaskID))
 	if err != nil {
 		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
 		return

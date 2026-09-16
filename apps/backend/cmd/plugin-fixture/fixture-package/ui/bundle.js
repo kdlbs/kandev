@@ -34,7 +34,7 @@
  * a tiny listener set, so it survives across route navigations (the page
  * component unmounts/remounts as the user navigates away and back).
  */
-/* eslint-disable max-lines, max-lines-per-function, sonarjs/no-duplicate-string -- The fixture is the literal self-contained, dependency-free browser bundle exercised and hashed by E2E. */
+/* eslint-disable max-lines, max-lines-per-function -- The fixture is the literal self-contained, dependency-free browser bundle exercised and hashed by E2E. */
 (function () {
   var moduleCount = 0;
   var listeners = new Set();

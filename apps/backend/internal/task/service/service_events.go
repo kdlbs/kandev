@@ -1007,8 +1007,13 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 // straight into the repository so specs can script clarification/permission
 // states deterministically, and without this it never triggers the
 // pending_action recompute a real agent turn would.
-func (s *Service) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
-	return s.publishMessageEvent(ctx, eventType, message)
+func (s *Service) PublishMessageEvent(
+	ctx context.Context,
+	eventType string,
+	message *models.Message,
+	receipts ...*models.ConversationMutationReceipt,
+) error {
+	return s.publishMessageEvent(ctx, eventType, message, receipts...)
 }
 
 // publishMessageEvent publishes message events to the event bus.
@@ -1017,12 +1022,17 @@ func (s *Service) PublishMessageEvent(ctx context.Context, eventType string, mes
 // Ordinary persistence callers intentionally treat delivery as best effort
 // after their durable write succeeds. Synchronization-sensitive callers, such
 // as clarification bundle convergence, check and propagate the returned error.
-func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message, receipts ...*models.ConversationMutationReceipt) error {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")
 		return errors.New("event bus is unavailable")
 	}
 	event := newMessageEvent(eventType, message)
+	if len(receipts) > 0 && receipts[0] != nil {
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			data["conversation_receipt"] = receipts[0]
+		}
+	}
 	pendingProjection := s.addMessagePendingAction(ctx, eventType, message, event)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish message event",

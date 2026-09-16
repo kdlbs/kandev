@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -19,6 +22,13 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sqlx.Tx, message *models.Message, metadataJSON []byte, requestsInput int) error {
 	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET id = id WHERE id = ?`), message.ID)
 	if err != nil {
 		return err
@@ -52,9 +62,6 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 	if err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
 	if sanitized != nil {
 		message.Metadata = sanitized
 		message.Type = nextType
@@ -66,20 +73,32 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 // insertMessageWithPayloadGuard prevents fallback-create and repeated start
 // frames from giving a removed tool call a fresh row identity.
 func (r *Repository) insertMessageWithPayloadGuard(ctx context.Context, message *models.Message, requestsInput int, messageType, metadataJSON string) error {
-	toolCallID, _ := message.Metadata["tool_call_id"].(string)
-	if toolCallID == "" || messageType == string(models.MessageTypePermissionRequest) {
-		return r.insertMessageRow(ctx, r.db, message, requestsInput, messageType, metadataJSON)
-	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.insertMessageWithPayloadGuardTx(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) insertMessageWithPayloadGuardTx(ctx context.Context, tx *sqlx.Tx, message *models.Message, requestsInput int, messageType, metadataJSON string) error {
+	toolCallID, _ := message.Metadata["tool_call_id"].(string)
+	if toolCallID == "" || messageType == string(models.MessageTypePermissionRequest) {
+		return r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON)
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_sessions SET id = id WHERE id = ?`), message.TaskSessionID); err != nil {
 		return err
 	}
 	var removed bool
-	err = tx.QueryRowContext(ctx, tx.Rebind(`SELECT EXISTS(SELECT 1 FROM task_session_messages WHERE task_session_id = ? AND json_extract(metadata, '$.tool_call_id') = ? AND type != 'permission_request' AND json_type(metadata, '$.payload_retention') IS NOT NULL)`), message.TaskSessionID, toolCallID).Scan(&removed)
+	driver := r.db.DriverName()
+	query := fmt.Sprintf(`SELECT EXISTS(SELECT 1 FROM task_session_messages WHERE task_session_id = ? AND %s = ? AND type != 'permission_request' AND %s)`,
+		dialect.JSONExtract(driver, "metadata", "tool_call_id"),
+		dialect.JSONExtractIsNotNull(driver, "metadata", "payload_retention"),
+	)
+	err := tx.QueryRowContext(ctx, tx.Rebind(query), message.TaskSessionID, toolCallID).Scan(&removed)
 	if err != nil {
 		return err
 	}
@@ -89,7 +108,7 @@ func (r *Repository) insertMessageWithPayloadGuard(ctx context.Context, message 
 	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func mergeRetainedMessageMetadata(stored, incoming []byte) ([]byte, map[string]any, error) {

@@ -14,6 +14,14 @@ legacy_specs: []
 
 # Implementation Plan: Prompt History Plugin Host Prerequisites
 
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
+
 ## Objective
 
 Land the complete public browser Host boundary required by a future external prompt-history plugin while keeping the shipped core panel unchanged. The package adds capability-gated session reads, typed live reconciliation, scoped native navigation, host-owned prompt display dependencies, and the missing generic task-panel context.
@@ -116,7 +124,7 @@ This package is complete when all six work orders are done and a fixture plugin 
 
 The [PR #3588 recovery package](../pr-3588-conversation-recovery/plan.md)
 tracks three newly identified defects: replay grants, core snapshot repair,
-and expired continuations. Its work orders remain pending.
+and expired continuations. Its work orders are complete, with results recorded in that package.
 The completion statements and results below describe the original delivery;
 they do not prove these recovery cases. Tasks 02, 04, and 05 link to the
 new repair work and its exact verification matrix. The full PR review and

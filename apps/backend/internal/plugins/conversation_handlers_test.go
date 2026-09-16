@@ -113,7 +113,6 @@ func TestConversationReadsRequireAuthenticationBeforeLookup(t *testing.T) {
 // @covers AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
 func TestConversationReadsRejectJournalFallbackForUnauthorizedLiveSession(t *testing.T) {
 	_, service := newTestRouter(t)
-	service.SetConversationJournalDB(newTestPool(t).Writer())
 	service.registry.Add(conversationPluginRecord("kandev-plugin-history", time.Now().UTC()))
 	router := registerPluginRoutesWithIdentity(
 		t,
@@ -134,11 +133,16 @@ func TestConversationReadsRejectJournalFallbackForUnauthorizedLiveSession(t *tes
 }
 
 type fakeConversationReader struct {
-	session  *taskmodels.TaskSession
-	messages []*taskmodels.Message
-	turns    []*taskmodels.Turn
-	hasMore  bool
-	request  taskservice.ListMessagesRequest
+	session              *taskmodels.TaskSession
+	messages             []*taskmodels.Message
+	turns                []*taskmodels.Turn
+	hasMore              bool
+	request              taskservice.ListMessagesRequest
+	sourceMessages       taskmodels.ConversationMessagePage
+	sourceTurns          taskmodels.ConversationTurnPage
+	sourceRevision       taskmodels.ConversationRevision
+	sourceMessageRequest taskmodels.ConversationMessagePageRequest
+	sourceTurnRequest    taskmodels.ConversationTurnPageRequest
 }
 
 func (f *fakeConversationReader) GetTaskSession(
@@ -161,6 +165,148 @@ func (f *fakeConversationReader) ListTurnsBySession(
 	_ string,
 ) ([]*taskmodels.Turn, error) {
 	return f.turns, nil
+}
+
+func (f *fakeConversationReader) ReadConversationRevision(
+	_ context.Context,
+	_ string,
+) (taskmodels.ConversationRevision, error) {
+	return f.sourceRevision, nil
+}
+
+func (f *fakeConversationReader) ReadConversationMessagesPage(
+	_ context.Context,
+	request taskmodels.ConversationMessagePageRequest,
+) (taskmodels.ConversationMessagePage, error) {
+	f.sourceMessageRequest = request
+	return f.sourceMessages, nil
+}
+
+func (f *fakeConversationReader) ReadConversationTurnsPage(
+	_ context.Context,
+	request taskmodels.ConversationTurnPageRequest,
+) (taskmodels.ConversationTurnPage, error) {
+	f.sourceTurnRequest = request
+	return f.sourceTurns, nil
+}
+
+func TestConversationSourceMessagesReturnRevisionBoundDTOs(t *testing.T) {
+	created := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	reader := &fakeConversationReader{
+		session: &taskmodels.TaskSession{ID: "session-source-http", TaskID: "task-source-http"},
+		sourceMessages: taskmodels.ConversationMessagePage{
+			Messages: []*taskmodels.Message{{
+				ID:            "message-source-http",
+				TaskSessionID: "session-source-http",
+				TaskID:        "task-source-http",
+				AuthorType:    taskmodels.MessageAuthorUser,
+				Content:       "<kandev-system>hidden</kandev-system>prompt",
+				CreatedAt:     created,
+				UpdatedAt:     created,
+			}},
+			Revision: 7,
+		},
+	}
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", created))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		reader,
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-source-http")
+
+	response := doAuthedRequest(
+		router,
+		http.MethodGet,
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-source-http/messages?task_id=task-source-http&author_type=user&limit=25&expected_revision=7",
+		"",
+		headers,
+	)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.JSONEq(t, `{"messages":[{"id":"message-source-http","taskId":"task-source-http","sessionId":"session-source-http","authorType":"user","type":"message","content":"prompt","createdAt":"2026-09-16T12:00:00Z","updatedAt":"2026-09-16T12:00:00Z"}],"hasMore":false,"cursor":null,"epoch":"`+service.conversationEpoch+`","revision":"7"}`, response.Body.String())
+	require.Equal(t, "session-source-http", reader.sourceMessageRequest.SessionID)
+	require.Equal(t, []string{"user"}, reader.sourceMessageRequest.Authors)
+}
+
+func TestConversationSourceReadsRequireMatchingRevision(t *testing.T) {
+	created := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	reader := &fakeConversationReader{
+		session:        &taskmodels.TaskSession{ID: "session-source-conflict", TaskID: "task-source-conflict"},
+		sourceMessages: taskmodels.ConversationMessagePage{Revision: 9},
+	}
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", created))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		reader,
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-source-conflict")
+	response := doAuthedRequest(
+		router,
+		http.MethodGet,
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-source-conflict/messages?expected_revision=8",
+		"",
+		headers,
+	)
+
+	require.Equal(t, http.StatusConflict, response.Code)
+	require.JSONEq(t, `{"error":{"code":"reconciliation_required","message":"conversation revision changed","retryable":true}}`, response.Body.String())
+}
+
+func TestConversationSourceRevisionUsesDecimalString(t *testing.T) {
+	created := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	reader := &fakeConversationReader{
+		session:        &taskmodels.TaskSession{ID: "session-source-revision-http", TaskID: "task-source-revision-http"},
+		sourceRevision: taskmodels.ConversationRevision{SessionID: "session-source-revision-http", Exists: true, Revision: 11},
+	}
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", created))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		reader,
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-source-revision-http")
+	response := doAuthedRequest(
+		router,
+		http.MethodGet,
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-source-revision-http/revision",
+		"",
+		headers,
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.JSONEq(t, `{"epoch":"`+service.conversationEpoch+`","revision":"11"}`, response.Body.String())
+}
+
+func TestConversationSourceTurnsRejectMessageOnlyAuthorFilter(t *testing.T) {
+	created := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	reader := &fakeConversationReader{session: &taskmodels.TaskSession{ID: "session-source-turn-http", TaskID: "task-source-turn-http"}}
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", created))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		reader,
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-source-turn-http")
+	response := doAuthedRequest(
+		router,
+		http.MethodGet,
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-source-turn-http/turns?author_type=user",
+		"",
+		headers,
+	)
+
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.JSONEq(t, `{"error":{"code":"invalid_query","message":"author_type is not supported for turns","retryable":false}}`, response.Body.String())
 }
 
 // @covers AC-PLUGINS-PROMPT-HISTORY-HOST-002.1
@@ -315,15 +461,16 @@ func TestConversationStreamGrantFirstPageRenewsQueryBoundCursor(t *testing.T) {
 		reader,
 	)
 	binding := conversationBindingToken(t, router, "kandev-plugin-history")
-	snapshot, _, _, err := service.MintSessionStreamGrant(
+	snapshot, err := service.conversationTokens.mintSnapshot(
 		"kandev-plugin-history",
 		"user_1",
 		conversationGeneration(installedAt),
 		"session-1",
-		"consumer-1",
+		nil,
 		"",
+		nil,
 		0,
-		0,
+		"consumer-1",
 	)
 	require.NoError(t, err)
 	headers := map[string]string{
@@ -573,15 +720,16 @@ func conversationReadHeaders(
 	binding := conversationBindingToken(t, router, pluginID)
 	record, err := service.Get(pluginID)
 	require.NoError(t, err)
-	snapshot, _, _, err := service.MintSessionStreamGrant(
+	snapshot, err := service.conversationTokens.mintSnapshot(
 		pluginID,
 		"user_1",
 		conversationGeneration(record.InstalledAt),
 		sessionID,
-		"test-consumer",
+		nil,
 		"",
-		service.SessionEvents().Watermark(sessionID),
-		service.SessionEvents().Watermark(sessionID),
+		nil,
+		0,
+		"test-consumer",
 	)
 	require.NoError(t, err)
 	return map[string]string{
@@ -589,6 +737,8 @@ func conversationReadHeaders(
 		"X-Kandev-Snapshot-Token": snapshot,
 	}
 }
+
+func stringPtr(value string) *string { return &value }
 
 func TestFilterTurnsByTaskNarrowsMixedTaskSession(t *testing.T) {
 	turns := []*taskmodels.Turn{
