@@ -176,6 +176,25 @@ const LazyChangeRequestDetail = React.lazy(async () => {
   return { default: module.ChangeRequestDetail };
 });
 
+const LazyWorkspaceAgentChat = React.lazy(async () => {
+  const module = await import("@/components/agent-conversation/workspace-agent-chat");
+  return { default: module.WorkspaceAgentChat };
+});
+
+function PluginWorkspaceAgentChat(props: React.ComponentProps<typeof LazyWorkspaceAgentChat>) {
+  return React.createElement(
+    React.Suspense,
+    {
+      fallback: React.createElement(
+        "div",
+        { className: "flex h-full items-center justify-center py-8" },
+        React.createElement(Spinner, { "aria-label": t("plugins:loadingWorkspaceAgentChat") }),
+      ),
+    },
+    React.createElement(LazyWorkspaceAgentChat, props),
+  );
+}
+
 /**
  * Keep Monaco and the markdown editor graph off the plugin boot path. The
  * shared detail view loads only when a plugin actually renders a review.
@@ -377,6 +396,7 @@ const PLUGIN_UI: PluginUIApi & Record<string, unknown> = {
   SettingsSection,
   SettingsCard,
   WorkspaceScopedSection,
+  WorkspaceAgentChat: PluginWorkspaceAgentChat,
 };
 
 function pluginSettingsContributorId(pluginId: string, contributorId: string): string {

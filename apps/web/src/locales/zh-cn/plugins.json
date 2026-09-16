@@ -39,6 +39,7 @@
   "installing": "正在安装…",
   "latestVersion": "最新版本 v{{version}}",
   "loadingMarketplace": "正在加载市场…",
+  "loadingWorkspaceAgentChat": "正在加载对话…",
   "webAppLoading": "正在加载画布…",
   "webAppUnavailable": "此画布不可用。",
   "loadingPlugins": "正在加载插件…",

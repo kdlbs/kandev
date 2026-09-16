@@ -39,6 +39,7 @@
   "installing": "Installing…",
   "latestVersion": "Latest v{{version}}",
   "loadingMarketplace": "Loading marketplace…",
+  "loadingWorkspaceAgentChat": "Loading conversation…",
   "webAppLoading": "Loading canvas…",
   "webAppUnavailable": "This canvas is unavailable.",
   "loadingPlugins": "Loading plugins...",
