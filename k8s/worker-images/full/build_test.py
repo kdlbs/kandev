@@ -7,6 +7,13 @@ import unittest
 
 
 class BuildCleanupTest(unittest.TestCase):
+    def test_verification_workspace_allows_built_binaries_to_execute(self):
+        script = (Path(__file__).resolve().parent / "build.sh").read_text()
+        self.assertIn(
+            "--tmpfs /workspace:rw,exec,uid=1000,gid=1000,size=2g",
+            script,
+        )
+
     def test_failed_verification_reclaims_its_container(self):
         recipe = Path(__file__).resolve().parent
         with tempfile.TemporaryDirectory() as directory:

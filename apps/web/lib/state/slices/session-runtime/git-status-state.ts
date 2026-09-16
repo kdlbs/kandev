@@ -28,6 +28,7 @@ function sameStringList(existing: string[] | undefined, incoming: string[] | und
 }
 
 const COMPARABLE_FILE_FIELDS = [
+  "is_symlink",
   "path",
   "status",
   "staged",
@@ -46,6 +47,7 @@ function comparableChangeFacet(facet: FileChangeFacet | undefined): string {
   if (!facet) return "";
   return [
     facet.status,
+    facet.is_symlink ?? "",
     facet.additions ?? 0,
     facet.deletions ?? 0,
     facet.old_path ?? "",
@@ -57,6 +59,7 @@ function comparableChangeFacet(facet: FileChangeFacet | undefined): string {
 function comparableFileInfo(file: FileInfo) {
   return {
     path: file.path,
+    is_symlink: file.is_symlink,
     status: file.status,
     staged: file.staged,
     additions: file.additions ?? 0,

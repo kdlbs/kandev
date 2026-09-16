@@ -199,7 +199,10 @@ or cluster-resource identity.
 3. **Scheduling:** Kandev creates the merged Pod and waits for the main
    container to run.
 4. **Bootstrapping:** Kandev uploads helper/config/credentials through
-   `pods/exec`, signals the managed entrypoint, and establishes port-forward.
+   `pods/exec`, executes the resolved preparation script within its setup
+   budget, signals the managed entrypoint only after preparation succeeds, and
+   establishes port-forward. Preparation failure returns a bounded sanitized
+   diagnostic without releasing agentctl.
 5. **Running:** the existing nonce handshake succeeds and agentctl owns the
    agent subprocess.
 6. **Preserved:** ordinary stop or backend shutdown closes local forwarding but

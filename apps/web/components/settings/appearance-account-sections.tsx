@@ -1,13 +1,14 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconActivity, IconGitBranch } from "@tabler/icons-react";
+import { IconActivity, IconGitBranch, IconLayoutSidebar } from "@tabler/icons-react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import type { AppearanceState } from "./appearance-settings-state";
+import { SidebarHoverSettingsCard } from "./sidebar-hover-settings-card";
 import { AppStatusBarSettingsCard } from "./app-status-bar-settings-card";
 import { SettingsCard } from "./settings-card";
 import { SettingsSection } from "./settings-section";
@@ -70,6 +71,13 @@ export function AppearanceAccountSections({
   const { t } = useTranslation();
   return (
     <>
+      <Separator />
+      <SettingsSection
+        icon={<IconLayoutSidebar className="h-5 w-5" />}
+        title={t("settings:sidebarHoverTitle")}
+      >
+        <SidebarHoverSettingsCard draft={draft} saved={saved} updateDraft={updateDraft} />
+      </SettingsSection>
       <Separator />
       <SettingsSection
         icon={<IconActivity className="h-5 w-5" />}

@@ -57,6 +57,7 @@ export function FileTabContent({
     <TabsContent value={`file:${getFileTabKey(tab)}`} className="flex-1 min-h-0">
       {category === "image" && (
         <FileImageViewer
+          isSymlink={!!tab.resolvedPath}
           path={tab.path}
           content={tab.content}
           worktreePath={workspacePath}
@@ -65,6 +66,7 @@ export function FileTabContent({
       )}
       {category === "binary" && (
         <FileBinaryViewer
+          isSymlink={!!tab.resolvedPath}
           path={tab.path}
           worktreePath={workspacePath}
           headerActions={externalLink}
@@ -72,6 +74,7 @@ export function FileTabContent({
       )}
       {category === "text" && (
         <FileEditorContent
+          isSymlink={!!tab.resolvedPath}
           path={tab.path}
           content={tab.content}
           originalContent={tab.originalContent}

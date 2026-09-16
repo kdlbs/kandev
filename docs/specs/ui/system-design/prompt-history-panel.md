@@ -132,3 +132,9 @@ The field is persisted per user message at creation: `prompt_seq` is allocated f
 ## Open questions
 
 None.
+
+## Related plugin prerequisites
+
+The current core implementation remains authoritative. The typed browser Host
+boundary required before an external plugin can replace it is defined by
+[Prompt History Plugin Host Prerequisites](../../plugins/system-design/prompt-history-extraction-host.md).

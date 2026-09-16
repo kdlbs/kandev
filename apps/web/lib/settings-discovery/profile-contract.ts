@@ -21,6 +21,7 @@ export const PROFILE_EDITABLE_FIELD_PATHS = [
   "model",
   "fallback_model",
   "auto_fallback",
+  "require_exact_model",
   "mode",
   "config_options",
   "allow_indexing",

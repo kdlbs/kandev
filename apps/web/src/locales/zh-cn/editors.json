@@ -89,5 +89,6 @@
   "toggleWordWrap": "切换自动换行",
   "underlineCmdU": "下划线（Cmd+U）",
   "failedToOpenEditor": "打开编辑器失败",
-  "downloadFile": "下载文件"
+  "downloadFile": "下载文件",
+  "symlink": "符号链接"
 }

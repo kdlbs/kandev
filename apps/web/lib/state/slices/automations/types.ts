@@ -1,6 +1,7 @@
-import type { Automation, AutomationRun } from "@/lib/types/automation";
+import type { Automation, AutomationRun, TriggerTypeInfo } from "@/lib/types/automation";
 
 export type AutomationsState = {
+  triggerTypes: Record<string, { items: TriggerTypeInfo[]; loading: boolean; generation: number }>;
   items: Automation[];
   loaded: boolean;
   loading: boolean;
@@ -30,6 +31,8 @@ export type AutomationsSliceState = {
 };
 
 export type AutomationsSliceActions = {
+  beginTriggerTypes: (workspaceId: string) => number | null;
+  finishTriggerTypes: (workspaceId: string, generation: number, items: TriggerTypeInfo[]) => void;
   setAutomations: (items: Automation[]) => void;
   setAutomationsLoading: (loading: boolean) => void;
   addAutomation: (automation: Automation) => void;

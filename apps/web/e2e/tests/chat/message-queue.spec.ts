@@ -8,7 +8,10 @@ import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
-import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
+import {
+  expectSendNowInterruptsRunningFIFOTurn,
+  expectSendNowWorkflowRunning,
+} from "./message-queue-workflow-helpers";
 import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
@@ -19,6 +22,12 @@ registerSeparateQueueRows(test);
 
 test("Send Now keeps a workflow transition running", async ({ testPage, apiClient, seedData }) => {
   await expectSendNowWorkflowRunning(testPage, apiClient, seedData, false);
+});
+
+test("Send Now interrupts a running FIFO turn", async ({ testPage, apiClient, seedData }) => {
+  test.setTimeout(150_000);
+  const gateway = watchWs(testPage);
+  await expectSendNowInterruptsRunningFIFOTurn(testPage, apiClient, seedData, false, gateway);
 });
 
 // ---------------------------------------------------------------------------

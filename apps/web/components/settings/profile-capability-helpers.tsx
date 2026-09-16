@@ -93,6 +93,15 @@ export function profileAutoFallbackIsDirty(
   );
 }
 
+export function profileRequireExactModelIsDirty(
+  profile: ProfileFormData,
+  baseline?: ProfileFormData,
+): boolean {
+  return Boolean(
+    baseline && (profile.require_exact_model ?? false) !== (baseline.require_exact_model ?? false),
+  );
+}
+
 export function profileModeIsDirty(profile: ProfileFormData, baseline?: ProfileFormData): boolean {
   return Boolean(baseline && profile.mode !== baseline.mode);
 }

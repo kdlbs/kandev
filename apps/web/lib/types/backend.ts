@@ -329,6 +329,7 @@ export type OfficeInboxItemNotificationPayload = {
 };
 
 export type FileChangeFacet = {
+  is_symlink?: boolean;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   additions?: number;
   deletions?: number;
@@ -338,6 +339,7 @@ export type FileChangeFacet = {
 };
 
 export type FileInfo = {
+  is_symlink?: boolean;
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   staged: boolean;
@@ -365,6 +367,9 @@ export type AgentProfilePayload = {
   name: string;
   agent_display_name: string;
   model: string;
+  fallback_model?: string;
+  auto_fallback?: boolean;
+  require_exact_model?: boolean;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;
@@ -380,6 +385,8 @@ export type AgentProfileDeletedPayload = {
 
 export type AgentProfileChangedPayload = {
   profile: AgentProfilePayload;
+  /** Sessionless-inference capability for profile events received before agent hydration. */
+  inference_capable?: boolean;
 };
 
 export type UserSettingsUpdatedPayload = Omit<

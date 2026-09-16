@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { devices, type Page } from "@playwright/test";
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -344,7 +344,7 @@ export const test = backendFixture.extend<
   // Resets user settings to the E2E workspace/workflow before each test so that
   // SSR always resolves to the correct workspace regardless of what commitSettings
   // may have written during previous tests.
-  testPage: async ({ browser, backend, apiClient, seedData }, use) => {
+  testPage: async ({ browser, backend, apiClient, seedData }, use, testInfo) => {
     await backend.ensureReady();
     // A suite-level test may restart the worker backend after the worker-scoped
     // seed fixture ran. Health only proves that the listener is serving; it does
@@ -410,6 +410,7 @@ export const test = backendFixture.extend<
       });
     });
     const context = await browser.newContext({
+      ...(testInfo.project.name === "mobile-chrome" ? devices["Pixel 5"] : {}),
       baseURL: backend.frontendUrl,
     });
     const page = await context.newPage();

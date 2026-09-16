@@ -11,6 +11,9 @@ export type ActionMeta = {
   action_visibility?: "running";
   variant?: string;
   recovery_actions?: boolean;
+  scope?: "session" | "task";
+  error_stamp?: string;
+  recovery_stamp?: string;
   is_auth_error?: boolean;
   auth_methods?: RecoveryAuthMethod[];
   error_output?: string;
