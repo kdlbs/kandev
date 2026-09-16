@@ -56,27 +56,27 @@ var officeLegacyTransientBackoff = []time.Duration{
 // user resolves via Resume session in the chat or Mark fixed in the
 // inbox.
 //
-// tryLegacyTransientRetry runs before MarkRunFailed, not after (Review
-// round 6, R6-1): every policy cancel (task-tree cancel, workspace
-// pause, participant eviction) guards its write to
-// status IN ('queued','claimed'), and MarkRunFailed always used its own
-// 'claimed' guard, so marking the run 'failed' first and requeuing
-// second left a claimed -> failed -> queued window neither guard
-// covers — a cancel landing in that window matches nothing, and the
-// unconditional requeue write resurrected the run anyway. Classifying
-// and attempting the guarded requeue first means a retry-eligible run
-// never visits 'failed' at all: it goes claimed -> queued directly, or
-// (if a concurrent writer already moved it off 'claimed') the requeue
-// itself no-ops and MarkRunFailed's identical guard below catches it the
-// same way it always has.
+// tryLegacyTransientRetry runs before MarkRunFailed, not after: every
+// policy cancel (task-tree cancel, workspace pause, participant
+// eviction) guards its write to status IN ('queued','claimed'), and
+// MarkRunFailed always used its own 'claimed' guard, so marking the run
+// 'failed' first and requeuing second would leave a claimed -> failed
+// -> queued window neither guard covers — a cancel landing in that
+// window matches nothing, and the unconditional requeue write would
+// resurrect the run anyway. Classifying and attempting the guarded
+// requeue first means a retry-eligible run never visits 'failed' at
+// all: it goes claimed -> queued directly, or (if a concurrent writer
+// already moved it off 'claimed') the requeue itself no-ops and
+// MarkRunFailed's identical guard below catches it the same way it
+// always has.
 //
 // Returns wrote=false when MarkRunFailed's guarded write was a no-op —
 // the run reached a terminal state through another writer (e.g. a
 // concurrent cancel) between the caller's read and this call — so
 // callers know not to treat a cancelled/already-terminal run as a
-// genuine agent failure (Review round 3, R3-1). wrote=false also
-// covers a scheduled transient retry: the run was requeued, not
-// terminalized, so callers must not escalate or publish for it either.
+// genuine agent failure. wrote=false also covers a scheduled transient
+// retry: the run was requeued, not terminalized, so callers must not
+// escalate or publish for it either.
 func (s *Service) HandleAgentFailure(
 	ctx context.Context,
 	run *models.Run,
@@ -147,8 +147,8 @@ func (s *Service) HandleAgentFailure(
 // letting HandleAgentFailure treat it as terminal, when the failure
 // classifies as transient (ClassTransient, AutoRetryable, FallbackAllowed)
 // and the run still has legacy-transient retry budget. Called before
-// MarkRunFailed runs at all (Review round 6, R6-1), so a successful
-// retry never marks the row 'failed' — the requeue write is itself
+// MarkRunFailed runs at all, so a successful retry never marks the row
+// 'failed' — the requeue write is itself
 // guarded to status = 'claimed', mirroring MarkRunFailed's own guard,
 // so the caller must not also run the terminal-shape/counter/auto-pause
 // accounting below — that is exactly what returning true signals. A
@@ -171,8 +171,7 @@ func (s *Service) HandleAgentFailure(
 // (internal/orchestrator/event_handlers_transient.go). Without this, a
 // provider rate limit — the canonical transient failure this retry exists
 // to cover — falls through the provider-specific rules unmatched and
-// classifies as an unretryable agent_runtime_error instead (Review round
-// 3, R3-1).
+// classifies as an unretryable agent_runtime_error instead.
 func (s *Service) tryLegacyTransientRetry(
 	ctx context.Context, run *models.Run, errorMessage string, agentID string,
 	providerError *streams.ProviderError,
