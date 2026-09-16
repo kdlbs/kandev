@@ -11,6 +11,7 @@ import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu"
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { WorkspaceContextReadError } from "@/lib/state/slices/kanban/types";
 import type { AppState } from "@/lib/state/store";
+import type { TaskRemovalState } from "@/lib/state/task-removal";
 import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
@@ -28,6 +29,17 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
 const NOOP_REFRESH = () => {};
 
 type SidebarTask = AggregatedSidebarTasks["allTasks"][number];
+
+function isPendingSidebarArchive(
+  task: SidebarTask,
+  removal: TaskRemovalState | undefined,
+  workspaceId: string | null,
+): boolean {
+  if (task.isArchived) return false;
+  const token = removal?.pendingTokenByTaskId[task.id];
+  const operation = token ? removal?.operationsByToken[token] : undefined;
+  return operation?.action === "archive" && operation.workspaceId === workspaceId;
+}
 
 function shallowTaskEqual(previous: SidebarTask, next: SidebarTask): boolean {
   const previousKeys = Object.keys(previous) as Array<keyof SidebarTask>;
@@ -180,6 +192,30 @@ export function mergeSidebarArchivedTasks(
   return archived.length > 0 ? [...activeTasks, ...archived] : activeTasks;
 }
 
+function useVisibleSidebarTasks(
+  activeTasks: SidebarTask[],
+  archivedTasks: KanbanState["tasks"],
+  workspaceId: string | null,
+  needsArchivedTasks: boolean,
+  taskRemoval: TaskRemovalState | undefined,
+) {
+  const previousTasksRef = useRef<SidebarTask[]>([]);
+  return useMemo(() => {
+    const merged = mergeSidebarArchivedTasks(
+      activeTasks,
+      archivedTasks,
+      workspaceId,
+      needsArchivedTasks,
+    );
+    const visible = merged.filter(
+      (task) => !isPendingSidebarArchive(task, taskRemoval, workspaceId),
+    );
+    const shared = reuseUnchangedTasks(previousTasksRef.current, visible);
+    previousTasksRef.current = shared;
+    return shared;
+  }, [activeTasks, archivedTasks, needsArchivedTasks, workspaceId, taskRemoval]);
+}
+
 /**
  * Shared data source for the desktop sidebar and the mobile task-switcher sheet.
  *
@@ -211,6 +247,7 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   const needsArchivedTasks = viewRequiresArchivedTasks(effectiveView);
   const archived = useSidebarArchivedTasks(workspaceId, needsArchivedTasks);
 
+  const taskRemoval = useAppStore((state) => state.taskRemoval);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const workflows = useAppStore((state) => state.workflows.items);
@@ -261,18 +298,13 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
 
   const { allSteps, stepsByWorkflowId } = useSharedStepMetadata(aggregated);
 
-  const previousTasksRef = useRef<SidebarTask[]>([]);
-  const allTasks = useMemo(() => {
-    const merged = mergeSidebarArchivedTasks(
-      aggregated.allTasks,
-      archived.tasks,
-      workspaceId,
-      needsArchivedTasks,
-    );
-    const shared = reuseUnchangedTasks(previousTasksRef.current, merged);
-    previousTasksRef.current = shared;
-    return shared;
-  }, [aggregated.allTasks, archived.tasks, needsArchivedTasks, workspaceId]);
+  const allTasks = useVisibleSidebarTasks(
+    aggregated.allTasks,
+    archived.tasks,
+    workspaceId,
+    needsArchivedTasks,
+    taskRemoval,
+  );
 
   const wipQueueByTaskId = useMemo(
     () => buildWipQueueByTaskId(allTasks, allSteps, stepsByWorkflowId),

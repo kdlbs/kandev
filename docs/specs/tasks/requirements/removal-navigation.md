@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-09-10
 owners:
@@ -79,6 +79,29 @@ removal, replacement eligibility, and recovery depend on the task lifecycle.
   restart a session because removal empties its session list. After confirmed
   failure, ordinary task behavior shall resume only for an available task.
 
+### REQ-TASKS-REMOVAL-NAVIGATION-003: Immediate archive visibility
+
+**Intent:** Remove accepted archive targets from active task navigation without
+waiting for network latency or destination selection.
+
+#### Acceptance criteria
+
+- **AC-TASKS-REMOVAL-NAVIGATION-003.1:** After archive acceptance, every visible
+  task in the removal set shall disappear from the active desktop sidebar and
+  phone task picker on the next render, before the archive request, destination
+  lookup, or live event completes. No retained row, exit delay, or empty row gap
+  shall remain. Opening or cancelling confirmation shall leave rows unchanged.
+- **AC-TASKS-REMOVAL-NAVIGATION-003.2:** Refreshes and live updates during the
+  operation shall not make its active rows reappear. Successful targets shall
+  remain absent after completion; failed targets that remain active shall become
+  available again without overwriting newer task data or user navigation. Bulk
+  partial failure shall not restore successful targets.
+- **AC-TASKS-REMOVAL-NAVIGATION-003.3:** Archiving an unselected task shall leave
+  the selected task and route unchanged. Non-cascade archive shall not hide
+  surviving subtasks. Existing archived-inclusive saved views shall continue to
+  show confirmed archived tasks according to their filters; pending archive
+  intent shall not manufacture a confirmed archived task.
+
 ## Compatibility and exclusions
 
 Existing archive confirmation preferences and cascade choices remain governed
@@ -97,3 +120,5 @@ Undo, animations, new settings, and a new mobile navigation composition are excl
 ## Implementation plans
 
 - [Task removal navigation](../../../plans/task-removal-navigation/plan.md)
+
+- [Immediate sidebar archive](../../../plans/immediate-sidebar-archive/plan.md)
