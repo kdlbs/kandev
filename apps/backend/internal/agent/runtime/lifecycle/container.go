@@ -162,6 +162,10 @@ type ContainerManager struct {
 	// Nil means the local provider built from the resolvers above; a remote
 	// daemon installs one that resolves on the remote host instead.
 	containerHostFiles ContainerHostFiles
+	// endpointResolver turns a container port into an address the backend can
+	// dial. Nil means the local resolver; a remote daemon installs one that
+	// forwards the remote host's published ports back to backend loopback.
+	endpointResolver containerEndpointResolver
 }
 
 // NewContainerManager creates a new ContainerManager. kandevHomeDir is the
@@ -286,7 +290,10 @@ func (cm *ContainerManager) createAndStartContainer(
 		containerIP = "127.0.0.1"
 	}
 
-	controlHost, controlPort := cm.resolveContainerEndpoint(ctx, containerID, AgentCtlPort, containerIP)
+	controlHost, controlPort, err := cm.resolveContainerEndpoint(ctx, containerID, AgentCtlPort, containerIP)
+	if err != nil {
+		return "", "", "", 0, fmt.Errorf("failed to resolve agentctl control endpoint: %w", err)
+	}
 	return containerID, containerIP, controlHost, controlPort, nil
 }
 
@@ -325,7 +332,11 @@ func (cm *ContainerManager) createInstanceAndClient(
 		return nil, fmt.Errorf("failed to create instance in container: %w", err)
 	}
 
-	instanceHost, instancePort := cm.resolveContainerEndpoint(ctx, containerID, resp.Port, containerIP)
+	instanceHost, instancePort, err := cm.resolveContainerEndpoint(ctx, containerID, resp.Port, containerIP)
+	if err != nil {
+		cm.removeContainerBestEffort(containerID)
+		return nil, fmt.Errorf("failed to resolve agent instance endpoint: %w", err)
+	}
 
 	// ControlClient already has the auth token set via Handshake —
 	// read it back for the per-instance Client.
@@ -337,17 +348,41 @@ func (cm *ContainerManager) createInstanceAndClient(
 	return client, nil
 }
 
-func (cm *ContainerManager) resolveContainerEndpoint(ctx context.Context, containerID string, containerPort int, fallbackHost string) (string, int) {
-	host, port, err := cm.dockerClient.GetContainerHostPort(ctx, containerID, containerPort)
-	if err == nil {
-		return host, port
+// resolveContainerEndpoint returns an address the backend can dial for a
+// container port.
+//
+// The error is propagated rather than absorbed into the fallback. The local
+// resolver owns its own container-IP fallback and does not fail, so an error
+// here means a remote endpoint that genuinely cannot be reached; substituting
+// a container IP in that case hands back an address that hangs on first use.
+func (cm *ContainerManager) resolveContainerEndpoint(ctx context.Context, containerID string, containerPort int, fallbackHost string) (string, int, error) {
+	host, port, err := cm.endpoints().Resolve(ctx, containerID, containerPort, fallbackHost)
+	if err != nil {
+		cm.logger.Warn("failed to resolve container endpoint",
+			zap.String("container_id", containerID),
+			zap.Int("container_port", containerPort),
+			zap.Error(err))
+		return "", 0, err
 	}
-	cm.logger.Warn("failed to resolve published Docker port, falling back to container IP",
-		zap.String("container_id", containerID),
-		zap.Int("container_port", containerPort),
-		zap.String("fallback_host", fallbackHost),
-		zap.Error(err))
-	return fallbackHost, containerPort
+	return host, port, nil
+}
+
+// endpoints returns the manager's resolver, defaulting to the local one built
+// over its own Docker client.
+func (cm *ContainerManager) endpoints() containerEndpointResolver {
+	if cm.endpointResolver != nil {
+		return cm.endpointResolver
+	}
+	return newLocalEndpointResolver(dockerPublishedPorts{client: cm.dockerClient})
+}
+
+// dockerPublishedPorts adapts the Docker client to containerPublishedPorts.
+type dockerPublishedPorts struct {
+	client *docker.Client
+}
+
+func (d dockerPublishedPorts) PublishedPort(ctx context.Context, containerID string, containerPort int) (string, int, error) {
+	return d.client.GetContainerHostPort(ctx, containerID, containerPort)
 }
 
 func (cm *ContainerManager) removeContainerBestEffort(containerID string) {
