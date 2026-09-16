@@ -196,3 +196,22 @@ func exactAssignmentRevision(exact *ExactProfileLaunchDecision) int64 {
 	}
 	return exact.Revision
 }
+
+func (s *Service) persistExactProfileSessionBinding(
+	ctx context.Context,
+	session *models.TaskSession,
+	exact *ExactProfileLaunchDecision,
+) error {
+	if exact == nil ||
+		(session.ExactProfileGeneration == exact.Generation && session.ExactProfileRevision == exact.Revision) {
+		return nil
+	}
+
+	observedState := session.State
+	session.ExactProfileGeneration = exact.Generation
+	session.ExactProfileRevision = exact.Revision
+	if err := s.persistFullTaskSessionIfCurrent(ctx, session, observedState); err != nil {
+		return fmt.Errorf("persist exact profile session binding: %w", err)
+	}
+	return nil
+}

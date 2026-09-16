@@ -749,13 +749,8 @@ func (s *Service) startCreatedSession(
 		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
 		s.promoteSessionIfTaskHasNoPrimary(ctx, taskID, session)
 	}
-	if exactAssignment != nil && (session.ExactProfileGeneration != exactAssignment.Generation || session.ExactProfileRevision != exactAssignment.Revision) {
-		observedState := session.State
-		session.ExactProfileGeneration = exactAssignment.Generation
-		session.ExactProfileRevision = exactAssignment.Revision
-		if err := s.persistFullTaskSessionIfCurrent(ctx, session, observedState); err != nil {
-			return nil, fmt.Errorf("persist exact profile session binding: %w", err)
-		}
+	if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
+		return nil, err
 	}
 
 	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor).
@@ -801,6 +796,9 @@ func (s *Service) startCreatedSession(
 		seam2Res.rekeyToSession(ctx, activeSession.ID)
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
+		if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
+			return nil, err
+		}
 	}
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
 
@@ -3024,7 +3022,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 				return nil, attemptErr
 			}
 			persistBranchRecovery()
-			return nil, decorateResumeFailure(err)
+			failure := decorateResumeFailure(err)
+			s.recordExactProfileLaunchReceipt(
+				resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), failure,
+			)
+			return nil, failure
 		}
 	}
 	if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
