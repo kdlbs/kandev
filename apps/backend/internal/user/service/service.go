@@ -36,14 +36,16 @@ const (
 )
 
 type Service struct {
-	repo          store.Repository
-	recentUseRepo store.AgentProfileRecentUseRepository
-	eventBus      bus.EventBus
-	logger        *logger.Logger
-	defaultUser   string
+	sidebarWorkspaceAccess func(context.Context) ([]string, error)
+	repo                   store.Repository
+	recentUseRepo          store.AgentProfileRecentUseRepository
+	eventBus               bus.EventBus
+	logger                 *logger.Logger
+	defaultUser            string
 }
 
 type UpdateUserSettingsRequest struct {
+	SidebarViewState                  *models.SidebarWorkspacePatch
 	WorkspaceID                       *string
 	KanbanViewMode                    *string
 	StartupPage                       *string
@@ -164,7 +166,7 @@ func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, er
 	if err != nil {
 		return nil, err
 	}
-	return settings, nil
+	return s.getSidebarWorkspaceSettings(ctx, settings)
 }
 
 // PreferredShell returns the user's configured shell.
@@ -198,6 +200,14 @@ func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, 
 // validates each group, persists the result under expected-revision CAS, and
 // publishes the settings update event.
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
+	if err := s.validateSidebarWorkspacePatch(ctx, req); err != nil {
+		return nil, err
+	}
+	if s.sidebarWorkspaceAccess != nil {
+		if _, err := s.GetUserSettings(ctx); err != nil {
+			return nil, err
+		}
+	}
 	var taskCreatePatch *models.TaskCreateLastUsed
 	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
 		taskCreatePatch = req.TaskCreateLastUsed
@@ -208,6 +218,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		// mutating them in place. In-place mutation would alias before and make
 		// DeepEqual miss the write.
 		before := *settings
+		if err := applySidebarWorkspacePatch(settings, req); err != nil {
+			return false, err
+		}
 		if err := applyBasicSettings(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
@@ -246,7 +259,7 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if err != nil {
 		return nil, err
 	}
-	return settings, nil
+	return s.getSidebarWorkspaceSettings(ctx, settings)
 }
 
 // applySidebarTaskColorAutomation replaces the complete personal automatic
@@ -1068,6 +1081,14 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 	if s.eventBus == nil || settings == nil {
 		return
 	}
+	if s.sidebarWorkspaceAccess != nil {
+		ids, err := s.sidebarWorkspaceAccess(ctx)
+		if err != nil {
+			s.logger.Warn("sidebar workspace projection failed", zap.Error(err))
+			return
+		}
+		settings = projectSidebarWorkspaces(settings, ids)
+	}
 	data := map[string]interface{}{
 		"user_id":                                  settings.UserID,
 		"workspace_id":                             settings.WorkspaceID,
@@ -1104,6 +1125,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            settings.SavedLayouts,
 		"sidebar_views":                            settings.SidebarViews,
+		"sidebar_views_by_workspace":               settings.SidebarViewsByWorkspace,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
 		"thread_views":                             settings.ThreadViews,

@@ -322,6 +322,7 @@ export type UISliceState = {
   updateAvailableNotification: UpdateAvailableNotification | null;
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
+  sidebarViewsByWorkspace: Record<string, SidebarSliceState>;
   threadViews: ThreadViewSliceState;
   /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
   collapsedSubtaskParents: string[];

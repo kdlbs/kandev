@@ -1,5 +1,7 @@
 "use client";
 
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
@@ -7,7 +9,7 @@ import { useToast } from "@/components/toast-provider";
 
 /** Surfaces sidebar preference sync errors. Mount once inside the app's ToastProvider. */
 export function useSidebarViewsSync() {
-  const syncError = useAppStore((s) => s.sidebarViews.syncError);
+  const syncError = useAppStore((s) => selectSidebarViews(s).syncError);
   const taskPrefsSyncError = useAppStore((s) => s.sidebarTaskPrefs.syncError);
   const clearError = useAppStore((s) => s.clearSidebarSyncError);
   const clearTaskPrefsError = useAppStore((s) => s.clearSidebarTaskPrefsSyncError);

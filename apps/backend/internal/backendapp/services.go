@@ -178,6 +178,17 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
+	userSvc.SetSidebarWorkspaceAccess(func(ctx context.Context) ([]string, error) {
+		workspaces, err := taskSvc.ListWorkspaces(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(workspaces))
+		for _, workspace := range workspaces {
+			ids = append(ids, workspace.ID)
+		}
+		return ids, nil
+	})
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
 	// Workspace membership needs to resolve colleague names and reject
 	// disabled or unknown accounts before writing a row.

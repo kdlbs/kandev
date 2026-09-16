@@ -1,3 +1,4 @@
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 import { useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
@@ -198,7 +199,7 @@ export function mergeSidebarArchivedTasks(
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
   useAllWorkflowSnapshots(workspaceId);
 
-  const sidebarViews = useAppStore((state) => state.sidebarViews);
+  const sidebarViews = useAppStore((state) => selectSidebarViews(state));
   const effectiveView = useMemo(() => {
     const active =
       sidebarViews?.views.find((view) => view.id === sidebarViews.activeViewId) ??

@@ -1,3 +1,4 @@
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
@@ -8,7 +9,7 @@ import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-t
  * actually drives `applyView` and not just the sort picker.
  */
 export function useEffectiveSidebarView() {
-  const sidebarSlice = useAppStore((state) => state.sidebarViews);
+  const sidebarSlice = useAppStore((state) => selectSidebarViews(state));
   return useMemo(() => {
     const active = sidebarSlice.views.find((v) => v.id === sidebarSlice.activeViewId);
     if (!active) return sidebarSlice.views[0];

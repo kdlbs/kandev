@@ -5,7 +5,8 @@ import { useSidebarViewsSync } from "./use-sidebar-views-sync";
 const mockToast = vi.fn();
 
 type MockState = {
-  sidebarViews: { syncError: string | null };
+  workspaces: { activeId: string };
+  sidebarViewsByWorkspace: { ws: { syncError: string | null } };
   sidebarTaskPrefs: { syncError?: string | null };
   clearSidebarSyncError: () => void;
   clearSidebarTaskPrefsSyncError: () => void;
@@ -25,7 +26,8 @@ describe("useSidebarViewsSync", () => {
   beforeEach(() => {
     mockToast.mockReset();
     mockState = {
-      sidebarViews: { syncError: null },
+      workspaces: { activeId: "ws" },
+      sidebarViewsByWorkspace: { ws: { syncError: null } },
       sidebarTaskPrefs: { syncError: null },
       clearSidebarSyncError: vi.fn(),
       clearSidebarTaskPrefsSyncError: vi.fn(),
@@ -48,7 +50,7 @@ describe("useSidebarViewsSync", () => {
   });
 
   it("toasts and clears sidebar view sync errors", async () => {
-    mockState.sidebarViews.syncError = "boom";
+    mockState.sidebarViewsByWorkspace.ws.syncError = "boom";
 
     renderHook(() => useSidebarViewsSync());
 

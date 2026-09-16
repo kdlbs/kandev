@@ -1212,6 +1212,10 @@ export class ApiClient {
 
   async getUserSettings(): Promise<{
     settings: {
+      sidebar_views_by_workspace: Record<
+        string,
+        { views: Array<Record<string, unknown>>; active_view_id: string; draft: unknown }
+      >;
       workspace_id?: string;
       workflow_filter_id?: string;
       terminal_link_behavior?: string;
@@ -1238,7 +1242,6 @@ export class ApiClient {
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
-    sidebar_active_view_id?: string;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
     show_scroll_to_start?: boolean;
@@ -1254,9 +1257,12 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     default_utility_agent_profile_id?: string;
-    sidebar_views?: unknown[];
-    sidebar_active_view_id?: string;
-    sidebar_draft?: unknown;
+    sidebar_view_state?: {
+      workspace_id: string;
+      views?: unknown[];
+      active_view_id?: string;
+      draft?: unknown;
+    };
     thread_views?: unknown[];
     thread_active_view_id?: string;
     thread_view_draft?: unknown;
