@@ -222,6 +222,7 @@ function TabletKanbanLayout({
   const { t } = useTranslation();
   const overflow = useKanbanOverflow(scrollRef, {
     axis: "horizontal",
+    contentRef: scrollRef,
     revision: steps.length,
   });
 

@@ -164,6 +164,84 @@ test("keeps horizontal cues and column geometry stable while the board scrolls",
   }
 });
 
+test("shows tablet cues for the full column strip", async ({
+  tabletTestPage,
+  apiClient,
+  seedData,
+}) => {
+  // @covers AC-UI-ADAPTIVE-KANBAN-003.1, AC-UI-ADAPTIVE-KANBAN-003.3
+  const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Tablet cues", "simple");
+  try {
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    for (let index = steps.length; index < 8; index++) {
+      await apiClient.createWorkflowStep(workflow.id, `Tablet cue step ${index}`, index);
+    }
+    await apiClient.saveUserSettings({ workflow_filter_id: workflow.id, repository_ids: [] });
+
+    await tabletTestPage.goto("/");
+    const scroll = tabletTestPage.getByTestId("tablet-kanban-scroll-window");
+    const leftFade = tabletTestPage.getByTestId("kanban-overflow-left-fade");
+    const rightFade = tabletTestPage.getByTestId("kanban-overflow-right-fade");
+    await expect(scroll).toBeVisible();
+    await expect
+      .poll(() => scroll.evaluate((element) => element.scrollWidth - element.clientWidth))
+      .toBeGreaterThan(1);
+    await expect(leftFade).toHaveAttribute("data-visible", "false");
+    await expect(rightFade).toHaveAttribute("data-visible", "true");
+
+    await scroll.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth - element.clientWidth;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(leftFade).toHaveAttribute("data-visible", "true");
+    await expect(rightFade).toHaveAttribute("data-visible", "false");
+  } finally {
+    await apiClient.deleteWorkflow(workflow.id);
+  }
+});
+
+test("does not treat a fitting board's drag reserve as hidden columns", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  // @covers AC-UI-ADAPTIVE-KANBAN-003.1, AC-UI-ADAPTIVE-KANBAN-003.4
+  await testPage.setViewportSize({ width: 1920, height: 900 });
+  const workflow = await apiClient.createWorkflow(
+    seedData.workspaceId,
+    "Fitting drag board",
+    "simple",
+  );
+  try {
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const task = await apiClient.createTask(seedData.workspaceId, "Fitting drag task", {
+      workflow_id: workflow.id,
+      workflow_step_id: steps[0]!.id,
+    });
+    await apiClient.saveUserSettings({ workflow_filter_id: workflow.id, repository_ids: [] });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const scroll = testPage.getByTestId("desktop-kanban-scroll-window");
+    const rightFade = testPage.getByTestId("kanban-overflow-right-fade");
+    await expect
+      .poll(() => scroll.evaluate((element) => element.scrollWidth - element.clientWidth))
+      .toBeLessThanOrEqual(1);
+    await expect(rightFade).toHaveAttribute("data-visible", "false");
+
+    const cardBox = await kanban.taskCard(task.id).boundingBox();
+    expect(cardBox).not.toBeNull();
+    await testPage.mouse.move(cardBox!.x + 80, cardBox!.y + 30);
+    await testPage.mouse.down();
+    await testPage.mouse.move(cardBox!.x + 100, cardBox!.y + 30, { steps: 4 });
+    await expect(testPage.getByTestId("desktop-kanban-drag-end-reserve")).toHaveCount(1);
+    await expect(rightFade).toHaveAttribute("data-visible", "false");
+    await testPage.mouse.up();
+  } finally {
+    await apiClient.deleteWorkflow(workflow.id);
+  }
+});
+
 test("keeps tablet horizontal access available in forced colors", async ({
   tabletTestPage,
   apiClient,
@@ -195,9 +273,11 @@ test("keeps tablet horizontal access available in forced colors", async ({
       .toBeGreaterThan(1);
     const styles = await scroll.evaluate((element) => ({
       forcedColors: matchMedia("(forced-colors: active)").matches,
+      scrollbarSuppressed: element.classList.contains("scrollbar-hide"),
       scrollbarWidth: getComputedStyle(element).scrollbarWidth,
     }));
     expect(styles.forcedColors).toBe(true);
+    expect(styles.scrollbarSuppressed).toBe(false);
     expect(styles.scrollbarWidth).not.toBe("none");
 
     await scroll.evaluate((element) => {

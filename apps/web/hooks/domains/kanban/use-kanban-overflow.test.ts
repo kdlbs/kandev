@@ -133,6 +133,20 @@ describe("useKanbanOverflow", () => {
     expect(result.current).toMatchObject({ canScrollLeft: true, canScrollRight: false });
   });
 
+  it("keeps a small horizontal range visible when borders change offset dimensions", () => {
+    const scroll = scrollElement({
+      clientWidth: 200,
+      offsetWidth: 210,
+      scrollWidth: 202,
+    });
+    const scrollRef = { current: scroll };
+    const { result } = renderHook(() => useKanbanOverflow(scrollRef, { axis: "horizontal" }));
+
+    flushFrame();
+
+    expect(result.current).toMatchObject({ canScrollLeft: false, canScrollRight: true });
+  });
+
   it("uses the real content extent when the scroll owner includes a drag reserve", () => {
     const scroll = scrollElement({ clientWidth: 200, scrollWidth: 700 });
     const content = scrollElement({ clientWidth: 200, scrollWidth: 200 });

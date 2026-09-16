@@ -41,7 +41,7 @@ The user requested this design package after confirming these choices. Implement
 
 Confirmed: all workflow swimlanes stay visible, six cards replace the earlier four-card suggestion, and hover-based scrollbar reveal is desired.
 Confirmed by the accepted proposal: keyboard focus and active scrolling also reveal scrollbars, and column boundaries permit outer scrolling.
-Verified: compact lanes currently use `clamp(12.5rem, naturalHeight, 25rem)` with shared column height and drag-time freeze.
+Verified: compact lanes currently use `max(12.5rem, naturalHeight)` with shared column height and drag-time freeze.
 Verified: each column already virtualizes rows. `AdaptiveDesktopKanban` owns horizontal pan, snap, and the drag reserve.
 Routine design choice: six means the first six logical task rows, including their metadata, gaps, and intervening WIP divider.
 Routine design choice: retain the 12.5rem sparse floor and full-height single-workflow behavior. The six-row rule does not truncate cards.
@@ -145,28 +145,28 @@ UI-01/04 map to 002.1-002.7. UI-02/03 map to 003.1-003.9.
 
 The following unit and component evidence is implemented and recorded below.
 
-| Criteria                  | Unit/component evidence                                                                                                                                                    |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 002.1-002.2, 002.5, 002.7 | `use-compact-swimlane-height.test.ts`: six-row height, sparse floor, stale steps, drag freeze.                                                                             |
+| Criteria                  | Unit/component evidence                                                                                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 002.1-002.2, 002.5, 002.7 | `use-compact-swimlane-height.test.ts`: six-row height, sparse floor, stale steps, drag freeze.                                                                                                                |
 | 002.1, 002.7              | `use-column-natural-height.test.ts`: chrome included once. Virtualized-list tests: prefix estimate, measured prefix, WIP divider, scroll-stable reporting, bounded mounts, and offscreen prefix invalidation. |
-| 003.1-003.4, 003.8-003.9  | New `use-kanban-overflow.test.ts`: each edge, client-dimension boundary tolerance, real-content extent, content resize, idle timer, unchanged-state isolation, cleanup. |
-| 001.9-001.10, 003.9       | `adaptive-desktop-kanban.test.tsx`: drag reserve and width remain stable.                                                                                                  |
+| 003.1-003.4, 003.8-003.9  | New `use-kanban-overflow.test.ts`: each edge, client-dimension boundary tolerance, real-content extent, content resize, idle timer, unchanged-state isolation, cleanup.                                       |
+| 001.9-001.10, 003.9       | `adaptive-desktop-kanban.test.tsx`: drag reserve and width remain stable.                                                                                                                                     |
 
 All unit paths are under `apps/web/hooks/domains/kanban` or `apps/web/components/kanban` as named in the work orders.
 
 ## E2E tests
 
-| Criteria                   | File, project, and scenario                                                                                                                                                                |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 002.1-002.2                | `swimlane-height.spec.ts`, chromium: six standard and mixed-height cards fully fit at the initial scroll position. A seventh card remains reachable. Sparse lanes shrink independently.    |
-| 002.3-002.5, 002.7         | Same file: collapse, filter to one workflow, restore multiple workflows, preview resize, empty recovery, metadata update, and unchanged height while scrolling.                            |
-| 001.5-001.7, 002.7         | Existing large-column suites: 440 tasks mount fewer than 100 bodies. Existing spacing suite checks actual row gaps.                                                                        |
-| 003.1-003.4                | New `swimlane-scroll-affordances.spec.ts`, chromium: vertical and horizontal start/middle/end, no-overflow state, hover/focus/scroll reveal, idle reset, and unchanged card/header bounds. |
-| 003.5-003.6                | Same file: keyboard region scrolling, final-card action, and real wheel gestures at both boundaries move the outer container. Sibling positions stay fixed.                                |
-| 003.7-003.8                | Same file: coarse-pointer tablet, reduced-motion, forced colors, empty/filter/resize transitions. Capture both light and dark themes.                                                      |
+| Criteria                   | File, project, and scenario                                                                                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 002.1-002.2                | `swimlane-height.spec.ts`, chromium: six standard and mixed-height cards fully fit at the initial scroll position. A seventh card remains reachable. Sparse lanes shrink independently.                                       |
+| 002.3-002.5, 002.7         | Same file: collapse, filter to one workflow, restore multiple workflows, preview resize, empty recovery, metadata update, and unchanged height while scrolling.                                                               |
+| 001.5-001.7, 002.7         | Existing large-column suites: 440 tasks mount fewer than 100 bodies. Existing spacing suite checks actual row gaps.                                                                                                           |
+| 003.1-003.4                | New `swimlane-scroll-affordances.spec.ts`, chromium: vertical and horizontal start/middle/end, no-overflow state, hover/focus/scroll reveal, idle reset, and unchanged card/header bounds.                                    |
+| 003.5-003.6                | Same file: keyboard region scrolling, final-card action, and real wheel gestures at both boundaries move the outer container. Sibling positions stay fixed.                                                                   |
+| 003.7-003.8                | Same file: coarse-pointer tablet, reduced-motion, forced colors, empty/filter/resize transitions. Capture both light and dark themes.                                                                                         |
 | 003.9, 001.4, 001.9-001.10 | Existing board, reorder, auto-hide, WIP, and multi-select suites. New affordance spec adds drag near faded edges, fitting-board reserve exclusion, last-real-column overflow, drop, and cancellation without geometry shifts. |
-| 002.6, 003.7               | `mobile-kanban.spec.ts`, mobile-chrome: scroll to final task, open and return, picker navigation, focus surface containment, and no document horizontal overflow.                          |
-| 003.7, 003.9               | Existing mobile reorder, auto-hide, and large-column suites retain touch actions and bounded mounts.                                                                                       |
+| 002.6, 003.7               | `mobile-kanban.spec.ts` and `mobile-kanban-navigation.spec.ts`, mobile-chrome: scroll to final task, open and return, picker navigation, focus surface containment, and no document horizontal overflow.                      |
+| 003.7, 003.9               | Existing mobile reorder, auto-hide, and large-column suites retain touch actions and bounded mounts.                                                                                                                          |
 
 All E2E files are under `apps/web/e2e/tests/kanban/`.
 Phone uses the configured Pixel 5, plus 767px and 768px checks with the same pointer mode.
@@ -212,12 +212,12 @@ Implemented and verified on 2026-09-16. The six-row compact sizing and local ove
 - `make -C apps/backend build` passed.
 - `make -C apps/backend e2e-plugin-package` passed.
 - `pnpm run build:e2e` passed.
-- Focused Kanban unit/component suites passed: 56 tests across eight sizing, render-stability, overflow, and drag-scroll files.
+- Focused Kanban unit/component suites passed: 57 tests across eight sizing, render-stability, overflow, and drag-scroll files.
 - The overflow hook uses client dimensions for native scroll boundaries and accepts the real lane-grid extent so synthetic drag reserve does not create a false cue.
 - Offscreen first-six prefix changes invalidate bounded measurements, use estimates until rows return, and remeasure returned rows without widening mounts.
-- Chromium height and overflow-affordance scenarios passed: 9 tests, including six-card mixed-height geometry, tablet forced colors, and drag-reserve exclusion.
+- Targeted Chromium height and overflow-affordance runs passed: 6 and 5 tests, including six-card mixed-height geometry, tablet full-strip cues, forced colors, and drag-reserve exclusion.
 - Neighboring desktop Kanban regression suites passed: 23 tests.
-- Mobile Kanban regression matrix passed: 29 tests.
+- Mobile Kanban regression matrix passed: 29 tests across the retained view suite and the extracted navigation/scrolling suite.
 - `pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
 - Full ESLint and targeted Prettier checks passed.
 - Catalog validation, specification lint, reference/path validation, and `git diff --check` passed.

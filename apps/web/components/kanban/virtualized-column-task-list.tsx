@@ -455,7 +455,11 @@ export function VirtualizedColumnTaskList({
         data-kanban-scroll-bottom={overflow.canScrollBottom}
         data-kanban-scroll-top={overflow.canScrollTop}
         data-testid="kanban-column-scroll"
-        tabIndex={presentation === "mobile" ? undefined : 0}
+        tabIndex={
+          presentation !== "mobile" && (overflow.canScrollTop || overflow.canScrollBottom)
+            ? 0
+            : undefined
+        }
       >
         <div
           ref={contentRef}

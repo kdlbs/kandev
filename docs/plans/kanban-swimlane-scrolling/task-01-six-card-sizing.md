@@ -67,7 +67,7 @@ Run from the repository root. The managed E2E runner rebuilds production assets.
 (cd apps/web && pnpm exec vitest run hooks/domains/kanban/use-compact-swimlane-height.test.ts hooks/domains/kanban/use-column-natural-height.test.ts components/kanban/virtualized-column-task-list.render-stability.test.tsx components/kanban/swimlane-kanban-content.render-stability.test.tsx components/kanban/swimlane-container.render-stability.test.tsx)
 (cd apps/web && pnpm exec eslint hooks/domains/kanban/use-compact-swimlane-height.ts hooks/domains/kanban/use-column-natural-height.ts components/kanban/virtualized-column-task-list.tsx components/kanban-column.tsx components/kanban/swimlane-kanban-content.tsx e2e/tests/kanban/swimlane-height.spec.ts e2e/tests/kanban/swimlane-height-helpers.ts)
 (cd apps/web && pnpm e2e:run --project chromium tests/kanban/swimlane-height.spec.ts tests/kanban/virtualized-column-spacing.spec.ts tests/kanban/large-column-virtualization.spec.ts tests/kanban/tablet-large-column-virtualization.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/kanban/mobile-kanban.spec.ts tests/kanban/mobile-large-column-virtualization.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/kanban/mobile-kanban.spec.ts tests/kanban/mobile-kanban-navigation.spec.ts tests/kanban/mobile-large-column-virtualization.spec.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -92,6 +92,7 @@ Inspect the plan scenario matrix as part of these runs. Add any extracted helper
 - `apps/web/e2e/tests/kanban/swimlane-height.spec.ts`
 - `apps/web/e2e/tests/kanban/swimlane-height-helpers.ts`
 - `apps/web/e2e/tests/kanban/mobile-kanban.spec.ts`
+- `apps/web/e2e/tests/kanban/mobile-kanban-navigation.spec.ts`
 
 ## Dependencies
 

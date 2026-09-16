@@ -64,9 +64,9 @@ Run from the repository root. The managed E2E runner rebuilds production assets.
 
 ```bash
 (cd apps/web && pnpm exec vitest run hooks/domains/kanban/use-kanban-overflow.test.ts components/kanban/adaptive-desktop-kanban.test.tsx components/kanban/virtualized-column-task-list.render-stability.test.tsx)
-(cd apps/web && pnpm exec eslint hooks/domains/kanban/use-kanban-overflow.ts hooks/domains/kanban/use-kanban-overflow.test.ts components/kanban/adaptive-desktop-kanban.tsx components/kanban/virtualized-column-task-list.tsx components/kanban/swimlane-kanban-content.tsx e2e/tests/kanban/swimlane-scroll-affordances.spec.ts e2e/tests/kanban/mobile-kanban.spec.ts)
+(cd apps/web && pnpm exec eslint hooks/domains/kanban/use-kanban-overflow.ts hooks/domains/kanban/use-kanban-overflow.test.ts hooks/domains/kanban/use-desktop-kanban-pan.ts components/kanban/adaptive-desktop-kanban.tsx components/kanban/virtualized-column-task-list.tsx components/kanban/swimlane-kanban-content.tsx e2e/tests/kanban/swimlane-scroll-affordances.spec.ts e2e/tests/kanban/mobile-kanban.spec.ts e2e/tests/kanban/mobile-kanban-navigation.spec.ts)
 (cd apps/web && pnpm e2e:run --project chromium tests/kanban/swimlane-scroll-affordances.spec.ts tests/kanban/swimlane-height.spec.ts tests/kanban/kanban-board.spec.ts tests/kanban/kanban-reorder.spec.ts tests/kanban/auto-hide-empty-columns.spec.ts tests/kanban/wip-overflow-queue.spec.ts tests/kanban/task-multi-select.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/kanban/mobile-kanban.spec.ts tests/kanban/mobile-auto-hide-empty-columns.spec.ts tests/kanban/mobile-kanban-reorder.spec.ts tests/kanban/mobile-large-column-virtualization.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/kanban/mobile-kanban.spec.ts tests/kanban/mobile-kanban-navigation.spec.ts tests/kanban/mobile-auto-hide-empty-columns.spec.ts tests/kanban/mobile-kanban-reorder.spec.ts tests/kanban/mobile-large-column-virtualization.spec.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -82,6 +82,7 @@ Inspect the plan scenario matrix as part of these runs. Add any extracted helper
 
 - `apps/web/hooks/domains/kanban/use-kanban-overflow.ts (new)`
 - `apps/web/hooks/domains/kanban/use-kanban-overflow.test.ts (new)`
+- `apps/web/hooks/domains/kanban/use-desktop-kanban-pan.ts (new)`
 - `apps/web/components/kanban/adaptive-desktop-kanban.tsx`
 - `apps/web/components/kanban/adaptive-desktop-kanban.test.tsx`
 - `apps/web/components/kanban/virtualized-column-task-list.tsx`
@@ -90,6 +91,7 @@ Inspect the plan scenario matrix as part of these runs. Add any extracted helper
 - `apps/web/app/globals.css`
 - `apps/web/e2e/tests/kanban/swimlane-scroll-affordances.spec.ts (new)`
 - `apps/web/e2e/tests/kanban/mobile-kanban.spec.ts`
+- `apps/web/e2e/tests/kanban/mobile-kanban-navigation.spec.ts (new)`
 - `apps/web/src/locales/*/kanban.json (only new accessible label frames)`
 - `docs/specs/ui/requirements/adaptive-kanban.md`
 - `docs/specs/ui/system-design/adaptive-kanban.md`
@@ -125,9 +127,10 @@ behavior, and forced-color fallbacks.
 The RED tests covered the missing overflow state and cues, incorrect offset
 dimension boundaries, and drag-reserve content extent. The GREEN overflow hook
 and integration suites passed, including client-dimension tolerance and
-real-content extent coverage. The Chromium affordance suite passed 3 tests,
-including tablet forced colors, fitting-board reserve exclusion, and an
-overflowing board at its last real column. Neighboring desktop Kanban suites
+real-content extent coverage. The Chromium affordance suite passed 5 tests,
+including tablet full-strip cues and forced colors, fitting-board reserve
+exclusion, and an overflowing board at its last real column. Neighboring
+desktop Kanban suites
 passed 23 tests, and the mobile Kanban regression matrix passed 29 tests,
 including final-card navigation and document-width containment. Backend
 build/plugin packaging, the E2E build, typecheck, i18n, full lint, formatting,

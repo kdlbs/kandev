@@ -129,7 +129,30 @@ test("dense and sparse workflows size independently and keep the final task reac
   await testPage.setViewportSize({ width: 1440, height: 900 });
   await withHeightWorkflows(apiClient, seedData, async (second) => {
     const denseTaskCount = 439;
-    await seedLargeColumnTasks(apiClient, seedData, "Dense height", denseTaskCount - 1);
+    const mixedPrefixTasks = [
+      { title: "Dense short prefix", description: "" },
+      { title: "Dense metadata prefix", description: "A measured metadata row" },
+      {
+        title: "Dense long prefix title that wraps inside six measured cards",
+        description: "A measured description row",
+      },
+      { title: "Dense fourth prefix", description: "" },
+      { title: "Dense fifth prefix", description: "Another measured row" },
+      { title: "Dense sixth prefix", description: "" },
+    ];
+    for (const task of mixedPrefixTasks) {
+      await apiClient.createTask(seedData.workspaceId, task.title, {
+        description: task.description,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      });
+    }
+    await seedLargeColumnTasks(
+      apiClient,
+      seedData,
+      "Dense height",
+      denseTaskCount - 1 - mixedPrefixTasks.length,
+    );
     // Create the tail after concurrent seeding so its assigned position is last.
     const finalTask = await apiClient.createTask(
       seedData.workspaceId,
@@ -158,6 +181,7 @@ test("dense and sparse workflows size independently and keep the final task reac
       }),
     );
     expect(initialSixCards).toHaveLength(6);
+    expect(new Set(initialSixCards.map((card) => Math.round(card.height))).size).toBeGreaterThan(1);
     for (const card of initialSixCards) {
       expect(card.top).toBeGreaterThanOrEqual(denseScrollBox!.y - 1);
       expect(card.bottom).toBeLessThanOrEqual(denseScrollBox!.y + denseScrollBox!.height + 2);
