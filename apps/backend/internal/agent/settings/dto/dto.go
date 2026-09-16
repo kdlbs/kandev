@@ -20,13 +20,14 @@ type AgentProfileDTO struct {
 	FallbackModel string `json:"fallback_model,omitempty"`
 	// AutoFallback opts the profile into the legacy automatic-fallback
 	// behavior (session-start best-effort, office re-dispatch).
-	AutoFallback   bool               `json:"auto_fallback"`
-	ConfigOptions  map[string]string  `json:"config_options,omitempty"`
-	AllowIndexing  bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
-	AutoApprove    bool               `json:"auto_approve"`
-	CLIFlags       []CLIFlagDTO       `json:"cli_flags"`
-	EnvVars        []ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CLIPassthrough bool               `json:"cli_passthrough"`
+	AutoFallback      bool               `json:"auto_fallback"`
+	RequireExactModel bool               `json:"require_exact_model"`
+	ConfigOptions     map[string]string  `json:"config_options,omitempty"`
+	AllowIndexing     bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
+	AutoApprove       bool               `json:"auto_approve"`
+	CLIFlags          []CLIFlagDTO       `json:"cli_flags"`
+	EnvVars           []ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CLIPassthrough    bool               `json:"cli_passthrough"`
 	// Enabled gates the profile from new-work selection. When false the
 	// profile is hidden from task/session creation pickers but still serves
 	// existing sessions and remains editable in settings.
@@ -143,8 +144,11 @@ type AgentDTO struct {
 	// flag agents that need login or reinstallation without fetching the
 	// full model config separately. "" for agents that aren't probed
 	// (mock, tui-only).
-	CapabilityStatus string    `json:"capability_status,omitempty"`
-	CapabilityError  string    `json:"capability_error,omitempty"`
+	CapabilityStatus string `json:"capability_status,omitempty"`
+	CapabilityError  string `json:"capability_error,omitempty"`
+	// InferenceCapable identifies agents accepted by the sessionless host
+	// utility runner. Profile pickers use it to prevent invalid selections.
+	InferenceCapable bool      `json:"inference_capable"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }

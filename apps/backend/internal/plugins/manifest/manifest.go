@@ -54,6 +54,8 @@ type Manifest struct {
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
+	AutomationConditions []AutomationCondition `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
+
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
 	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
 	// RepositoryProviders declares provider IDs this plugin owns while active.
@@ -133,8 +135,8 @@ type Capabilities struct {
 	APIWrite []string `yaml:"api_write,omitempty" json:"api_write,omitempty"`
 	State    bool     `yaml:"state,omitempty" json:"state,omitempty"`
 	Secrets  bool     `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-	// AgentInvoke gates Host.InvokeUtilityAgent (ADR 0048): a one-shot,
-	// non-interactive completion run by the operator-configured utility agent.
+	// AgentInvoke gates Host.InvokeUtilityAgent: a one-shot, non-interactive
+	// completion run by the platform default or an explicitly selected profile.
 	AgentInvoke bool `yaml:"agent_invoke,omitempty" json:"agent_invoke,omitempty"`
 	// Auth gates a plugin's ability to establish an authenticated kandev
 	// browser session for an external identity it has validated against an
@@ -152,6 +154,14 @@ type Capabilities struct {
 	// browser session's user with no Go backend of its own (Approach D1,
 	// docs/decisions/2026-08-01-per-user-plugin-storage.md).
 	UserState bool `yaml:"user_state,omitempty" json:"user_state,omitempty"`
+	// AgentConversation gates the plugin's access to managed workspace agent
+	// conversations (EnsureAgentConversation / DispatchAgentConversation /
+	// DeleteAgentConversation Host RPCs). A plugin holding this capability can
+	// create, prompt, and delete a hidden workflowless ephemeral task/session
+	// per (plugin_id, workspace_id, conversation_key). The host owns identity,
+	// visibility, and lifecycle — the plugin never receives raw database or
+	// user identity through this surface.
+	AgentConversation bool `yaml:"agent_conversation,omitempty" json:"agent_conversation,omitempty"`
 }
 
 // AuthProvider is a login option a plugin contributes to the pre-auth login

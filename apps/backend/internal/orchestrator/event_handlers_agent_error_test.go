@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -406,6 +407,45 @@ func TestDispatchKanbanAgentErrorTrigger_OfficeAndLoadFailureGuards(t *testing.T
 			t.Fatalf("got %d %q WARNINGs, want 1", len(got), msgAgentErrorTaskLoadFailed)
 		}
 	})
+}
+
+func TestHandleRecoverableFailurePersistsOfficeSessionHistory(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "office-history-task", WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: "step1",
+		ProjectID: "proj1", Title: "Office task", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
+	}))
+	requireNoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "office-history-session", TaskID: "office-history-task", State: models.TaskSessionStateRunning,
+		StartedAt: now, UpdatedAt: now,
+	}))
+
+	svc, _ := newAgentErrorTestService(t, repo, newMockStepGetter(), nil)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.handleRecoverableFailureLocked(ctx, watcher.AgentEventData{
+		TaskID:           "office-history-task",
+		SessionID:        "office-history-session",
+		AgentExecutionID: "office-history-execution",
+		ErrorMessage:     "The Office agent could not start.",
+		FailureCode:      models.LaunchErrorCategoryGenericLaunchFailure,
+		Phase:            models.LaunchErrorPhaseBootstrap,
+		AttemptID:        "office-history-attempt",
+		ErrorStamp:       "office-history-failure",
+	})
+
+	require.Len(t, messages.sessionMessages, 1, "Office failures must have one chronological session entry")
+	require.Equal(t, models.ErrorScopeSession, messages.sessionMessages[0].metadata["scope"])
+	require.Equal(t, "office-history-failure", messages.sessionMessages[0].metadata["error_stamp"])
+	require.Equal(t, true, messages.sessionMessages[0].metadata["recovery_actions"])
+
+	session, err := repo.GetTaskSession(ctx, "office-history-session")
+	requireNoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, session.State)
 }
 
 type agentErrorTaskLoadErrorRepo struct {

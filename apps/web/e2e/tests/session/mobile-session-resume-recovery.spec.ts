@@ -106,7 +106,7 @@ test.describe("mobile: delayed resume cancellation", () => {
 test.describe("mobile: failed resume recovery", () => {
   test.describe.configure({ retries: 1 });
 
-  test("failed saved-session load returns a usable recovery card", async ({
+  test("failed saved-session load retains a usable recovery entry", async ({
     testPage,
     apiClient,
     seedData,
@@ -133,14 +133,15 @@ test.describe("mobile: failed resume recovery", () => {
       await fixture.session.recoveryResumeButton().tap();
       await expect(fixture.session.recoveryResumeButton()).toBeVisible();
       // The resume endpoint waits through provider startup before it returns;
-      // keep the card usable throughout that failed-load path and ensure the
-      // old permanently pending label never replaces the recovery action.
+      // keep the persisted recovery entry usable throughout that failed-load
+      // path and ensure the old permanently pending label never replaces it.
       await expect(testPage.getByText(/Resume session requested/i)).toHaveCount(0, {
         timeout: 15_000,
       });
+      await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 90_000 });
       await expect(
         fixture.session.activeChat().getByTestId("session-bootstrap-recovery-card"),
-      ).toBeVisible({ timeout: 90_000 });
+      ).toHaveCount(0);
       await assertNoDocumentHorizontalOverflow(testPage, "mobile failed resume recovery");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => undefined);

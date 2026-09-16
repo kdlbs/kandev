@@ -111,12 +111,19 @@ type Host interface {
 	// prompt to a task session.
 	Messages() MessageReader
 
-	// InvokeUtilityAgent runs a one-shot, non-interactive completion using
-	// the operator-configured "utility agent" (Settings > System) and returns
-	// its text. Requires the `agent_invoke` capability. Returns a gRPC
-	// FailedPrecondition error when no utility agent is configured, so a
-	// plugin needs no API key of its own.
-	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
+	// InvokeUtilityAgent runs a one-shot, non-interactive completion. With no
+	// options, or an empty ProfileID, it uses the platform default utility
+	// profile. A non-empty ProfileID selects that profile for this call only.
+	// Requires the `agent_invoke` capability and returns gRPC FailedPrecondition
+	// for a missing or ineligible profile.
+	InvokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (string, error)
+}
+
+// UtilityAgentOptions contains per-call utility completion options. ProfileID
+// is an agent-profile ID, not a utility-agent record ID. An empty value uses
+// the platform default.
+type UtilityAgentOptions struct {
+	ProfileID string
 }
 
 // TaskReader is the accessor behind Host.Tasks(), mirroring the Host data
@@ -255,6 +262,51 @@ func PluginOwnedTaskTrees(host Host) (PluginOwnedTaskTreeManager, bool) {
 	return manager.PluginOwnedTaskTrees(), true
 }
 
+// ── Agent conversation host extension ────────────────────────────────────
+
+// AgentConversationHost is an optional Host extension for managing workspace
+// agent conversations. It is kept separate from Host so existing host
+// implementations remain source-compatible.
+type AgentConversationHost interface {
+	AgentConversations() AgentConversationManager
+}
+
+// AgentConversationManager is the interface for managing workspace agent
+// conversations. It lets a plugin create (or find), dispatch to, and
+// delete a hidden workflowless ephemeral task/session per
+// (plugin_id, workspace_id, conversation_key).
+type AgentConversationManager interface {
+	// Ensure creates or repairs one conversation per (workspace_id, conversation_key).
+	// Returns the existing descriptor when one already exists for this
+	// plugin/workspace/key. Returns a typed configuration-required result
+	// (status="configuration_required") when the referenced agent profile is
+	// missing, disabled, or incompatible — the conversation is neither created
+	// nor dispatched until the operator resolves the profile.
+	Ensure(ctx context.Context, spec AgentConversationSpec) (AgentConversationDescriptor, string, error)
+
+	// Dispatch sends text to an ensured conversation. OccurrenceKey provides
+	// stable idempotency: a key that was already claimed returns the prior
+	// dispatch result. Returns status "duplicate_occurrence" when
+	// occurrence_key matches a previously dispatched occurrence (same session
+	// for in-flight turns, skipped for busy-session coalesced drops).
+	// Returns "skipped_busy" when the session is mid-turn and the dispatch
+	// was coalesced rather than queued.
+	Dispatch(ctx context.Context, workspaceID, conversationKey, text, occurrenceKey string) (AgentConversationDispatch, error)
+
+	// Delete removes all conversations matching the workspace and key owned
+	// by this plugin. Returns the count of deleted conversations.
+	Delete(ctx context.Context, workspaceID, conversationKey string) (int32, error)
+}
+
+// AgentConversations returns the optional agent conversation manager.
+func AgentConversations(host Host) (AgentConversationManager, bool) {
+	manager, ok := host.(AgentConversationHost)
+	if !ok {
+		return nil, false
+	}
+	return manager.AgentConversations(), true
+}
+
 // newHostClient wraps a *grpc.ClientConn (dialed over the go-plugin broker)
 // as a Go-native Host implementation.
 func newHostClient(conn *grpc.ClientConn) Host {
@@ -271,6 +323,10 @@ func (h *grpcHostClient) ExecutorProfiles() ExecutorProfileReader {
 
 func (h *grpcHostClient) PluginOwnedTaskTrees() PluginOwnedTaskTreeManager {
 	return grpcPluginOwnedTaskTreeManager{client: h.client}
+}
+
+func (h *grpcHostClient) AgentConversations() AgentConversationManager {
+	return grpcAgentConversationManager{client: h.client}
 }
 
 func (h *grpcHostClient) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
@@ -381,8 +437,15 @@ func (h *grpcHostClient) Repositories() RepositoryReader {
 
 func (h *grpcHostClient) Messages() MessageReader { return grpcMessageReader{client: h.client} }
 
-func (h *grpcHostClient) InvokeUtilityAgent(ctx context.Context, prompt string) (string, error) {
-	resp, err := h.client.InvokeUtilityAgent(ctx, &pluginv1.InvokeUtilityAgentRequest{Prompt: prompt})
+func (h *grpcHostClient) InvokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (string, error) {
+	if len(options) > 1 {
+		return "", status.Error(codes.InvalidArgument, "InvokeUtilityAgent accepts at most one options value")
+	}
+	req := &pluginv1.InvokeUtilityAgentWithOptionsRequest{Prompt: prompt}
+	if len(options) == 1 {
+		req.ProfileId = options[0].ProfileID
+	}
+	resp, err := h.client.InvokeUtilityAgentWithOptions(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -584,6 +647,42 @@ func deletedTaskIDsFromStatus(err error) []string {
 	return nil
 }
 
+type grpcAgentConversationManager struct {
+	client pluginv1.HostClient
+}
+
+func (m grpcAgentConversationManager) Ensure(ctx context.Context, spec AgentConversationSpec) (AgentConversationDescriptor, string, error) {
+	resp, err := m.client.EnsureAgentConversation(ctx, &pluginv1.EnsureAgentConversationRequest{Spec: spec.toProto()})
+	if err != nil {
+		return AgentConversationDescriptor{}, "", err
+	}
+	return agentConversationDescriptorFromProto(resp.GetConvDescriptor()), resp.GetStatus(), nil
+}
+
+func (m grpcAgentConversationManager) Dispatch(ctx context.Context, workspaceID, conversationKey, text, occurrenceKey string) (AgentConversationDispatch, error) {
+	resp, err := m.client.DispatchAgentConversation(ctx, &pluginv1.DispatchAgentConversationRequest{
+		WorkspaceId:     workspaceID,
+		ConversationKey: conversationKey,
+		Text:            text,
+		OccurrenceKey:   occurrenceKey,
+	})
+	if err != nil {
+		return AgentConversationDispatch{}, err
+	}
+	return agentConversationDispatchFromProto(resp), nil
+}
+
+func (m grpcAgentConversationManager) Delete(ctx context.Context, workspaceID, conversationKey string) (int32, error) {
+	resp, err := m.client.DeleteAgentConversation(ctx, &pluginv1.DeleteAgentConversationRequest{
+		WorkspaceId:     workspaceID,
+		ConversationKey: conversationKey,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return resp.GetDeletedCount(), nil
+}
+
 func (r grpcMessageReader) List(ctx context.Context, filter MessageFilter, page Page) ([]Message, *PageInfo, error) {
 	resp, err := r.client.ListMessages(ctx, &pluginv1.ListMessagesRequest{Filter: filter.toProto(), Page: page.toProto()})
 	if err != nil {
@@ -715,7 +814,15 @@ func (s *grpcHostServer) EmitEvent(ctx context.Context, req *pluginv1.EmitEventR
 }
 
 func (s *grpcHostServer) InvokeUtilityAgent(ctx context.Context, req *pluginv1.InvokeUtilityAgentRequest) (*pluginv1.InvokeUtilityAgentResponse, error) {
-	text, err := s.impl.InvokeUtilityAgent(ctx, req.GetPrompt())
+	return s.invokeUtilityAgent(ctx, req.GetPrompt())
+}
+
+func (s *grpcHostServer) InvokeUtilityAgentWithOptions(ctx context.Context, req *pluginv1.InvokeUtilityAgentWithOptionsRequest) (*pluginv1.InvokeUtilityAgentResponse, error) {
+	return s.invokeUtilityAgent(ctx, req.GetPrompt(), UtilityAgentOptions{ProfileID: req.GetProfileId()})
+}
+
+func (s *grpcHostServer) invokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (*pluginv1.InvokeUtilityAgentResponse, error) {
+	text, err := s.impl.InvokeUtilityAgent(ctx, prompt, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -958,6 +1065,64 @@ func (s *grpcHostServer) DeletePluginOwnedTaskTree(ctx context.Context, req *plu
 	return &pluginv1.DeletePluginOwnedTaskTreeResponse{DeletedTaskIds: deletedTaskIDs}, nil
 }
 
+// agentConversationManagerFor resolves the impl's agent conversation manager.
+// The type assertion alone is not enough: AgentConversationHost is a public
+// interface, and an implementation signals "this caller may not use agent
+// conversations" (undeclared capability) or "not wired yet" by returning a nil
+// manager. Calling through that nil interface panics the whole gRPC server, so
+// the adapter answers Unimplemented instead.
+func (s *grpcHostServer) agentConversationManagerFor() (AgentConversationManager, error) {
+	host, ok := s.impl.(AgentConversationHost)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "agent_conversation capability not implemented on this host")
+	}
+	manager := host.AgentConversations()
+	if manager == nil {
+		return nil, status.Error(codes.Unimplemented, "agent_conversation capability not implemented on this host")
+	}
+	return manager, nil
+}
+
+func (s *grpcHostServer) EnsureAgentConversation(ctx context.Context, req *pluginv1.EnsureAgentConversationRequest) (*pluginv1.EnsureAgentConversationResponse, error) {
+	manager, err := s.agentConversationManagerFor()
+	if err != nil {
+		return nil, err
+	}
+	spec := agentConversationSpecFromProto(req.GetSpec())
+	descriptor, statusStr, err := manager.Ensure(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.EnsureAgentConversationResponse{
+		ConvDescriptor: descriptor.toProto(),
+		Status:         statusStr,
+	}, nil
+}
+
+func (s *grpcHostServer) DispatchAgentConversation(ctx context.Context, req *pluginv1.DispatchAgentConversationRequest) (*pluginv1.DispatchAgentConversationResponse, error) {
+	manager, err := s.agentConversationManagerFor()
+	if err != nil {
+		return nil, err
+	}
+	dispatch, err := manager.Dispatch(ctx, req.GetWorkspaceId(), req.GetConversationKey(), req.GetText(), req.GetOccurrenceKey())
+	if err != nil {
+		return nil, err
+	}
+	return dispatch.toProto(), nil
+}
+
+func (s *grpcHostServer) DeleteAgentConversation(ctx context.Context, req *pluginv1.DeleteAgentConversationRequest) (*pluginv1.DeleteAgentConversationResponse, error) {
+	manager, err := s.agentConversationManagerFor()
+	if err != nil {
+		return nil, err
+	}
+	deletedCount, err := manager.Delete(ctx, req.GetWorkspaceId(), req.GetConversationKey())
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.DeleteAgentConversationResponse{DeletedCount: deletedCount}, nil
+}
+
 var _ pluginv1.HostServer = (*grpcHostServer)(nil)
 
 // UnimplementedHostData is an embeddable default for the Host data API
@@ -990,12 +1155,20 @@ func (UnimplementedHostData) PluginOwnedTaskTrees() PluginOwnedTaskTreeManager {
 	return unimplementedPluginOwnedTaskTreeManager{}
 }
 
+// AgentConversations is the embeddable default for the agent_conversation
+// Host extension: a Host that hasn't wired a conversation manager still
+// satisfies AgentConversationHost, returning gRPC Unimplemented until
+// overridden.
+func (UnimplementedHostData) AgentConversations() AgentConversationManager {
+	return unimplementedAgentConversationManager{}
+}
+
 // InvokeUtilityAgent is the embeddable default for the agent_invoke Host
 // method (ADR 0048). It lives on UnimplementedHostData — the shared
 // "unimplemented Host extensions" embed both real Host implementations use —
 // so a Host that hasn't wired a utility agent (e.g. a test double) still
 // satisfies the interface, returning gRPC Unimplemented until overridden.
-func (UnimplementedHostData) InvokeUtilityAgent(context.Context, string) (string, error) {
+func (UnimplementedHostData) InvokeUtilityAgent(context.Context, string, ...UtilityAgentOptions) (string, error) {
 	return "", errUnimplementedHostData("utility_agent")
 }
 
@@ -1087,4 +1260,18 @@ func (unimplementedPluginOwnedTaskTreeManager) Preview(context.Context, string) 
 
 func (unimplementedPluginOwnedTaskTreeManager) Delete(context.Context, string) ([]string, error) {
 	return nil, errUnimplementedHostData("plugin_owned_task_trees")
+}
+
+type unimplementedAgentConversationManager struct{}
+
+func (unimplementedAgentConversationManager) Ensure(context.Context, AgentConversationSpec) (AgentConversationDescriptor, string, error) {
+	return AgentConversationDescriptor{}, "", errUnimplementedHostData("agent_conversation")
+}
+
+func (unimplementedAgentConversationManager) Dispatch(context.Context, string, string, string, string) (AgentConversationDispatch, error) {
+	return AgentConversationDispatch{}, errUnimplementedHostData("agent_conversation")
+}
+
+func (unimplementedAgentConversationManager) Delete(context.Context, string, string) (int32, error) {
+	return 0, errUnimplementedHostData("agent_conversation")
 }

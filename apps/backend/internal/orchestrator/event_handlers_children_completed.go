@@ -86,7 +86,7 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 	oldState := task.State
 	task.State = v1.TaskStateCompleted
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.taskRuntimeStateMu.Unlock()
 		s.logger.Warn("terminal step completion: failed to mark task completed",
 			zap.String("task_id", taskID),

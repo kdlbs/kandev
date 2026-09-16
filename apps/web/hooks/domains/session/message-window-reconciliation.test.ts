@@ -68,6 +68,22 @@ describe("reconcileLatestMessageWindow", () => {
     expect(result.oldestCursor).toBe("fetched-3");
   });
 
+  it("removes stale rows from an authoritative window while retaining older pages", () => {
+    const older = message("older-1", 1);
+    const stale = message("stale-3", 3);
+    const fetched = [message("fresh-3", 3), message("fresh-4", 4)];
+
+    const result = reconcileLatestMessageWindow({
+      cachedAtRequest: [older, stale],
+      cachedAtResponse: [older, stale],
+      fetched,
+      authoritative: true,
+    });
+
+    expect(result.messages.map(({ id }) => id)).toEqual(["older-1", "fresh-3", "fresh-4"]);
+    expect(result.oldestCursor).toBe("older-1");
+  });
+
   it("sorts timestamps using sub-millisecond precision before the id tie-breaker", () => {
     const earlier = message("z-earlier", 0, ".000001");
     const later = message("a-later", 0, ".000002");
