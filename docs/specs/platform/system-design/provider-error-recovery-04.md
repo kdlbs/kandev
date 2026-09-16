@@ -14,9 +14,10 @@ owners:
 
 Part 1 defines the dynamic-routing continuation package's data model
 (`## Data model`). This part carries one subsection relocated from Part 1 when
-Part 1 reached its file-size limit, and extended since: the two sanitization
+Part 1 reached its file-size limit, and extended since: the sanitization
 tiers `routingerr` applies to the continuation package's carrier text before
-persistence.
+persistence, and to the primary launch prompt `ContinuationPrompt` renders
+ahead of that package at each downstream launch.
 
 It does not change classification rules, policy values, retry ownership, or
 candidate ordering.
