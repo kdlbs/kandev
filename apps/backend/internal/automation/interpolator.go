@@ -63,7 +63,7 @@ func interpolate(prompt string, triggerType TriggerType, triggerData json.RawMes
 		// trigger type where that distinction matters; every other type
 		// resolves both prefixes against the same top-level data below.
 		if triggerType == TriggerTypePluginEvent {
-			if token == "webhook.body" {
+			if token == webhookBodyPlaceholderKey {
 				original, _ := data["webhook"].(map[string]interface{})
 				raw, _ := json.Marshal(original)
 				if !quoteValues {
@@ -82,7 +82,7 @@ func interpolate(prompt string, triggerType TriggerType, triggerData json.RawMes
 		// trigger; on any other trigger type the token falls through to the
 		// data./webhook. path branch below and resolves a top-level "body"
 		// field instead — a deliberate no-op preserving today's behavior.
-		if triggerType == TriggerTypeWebhook && token == "webhook.body" {
+		if triggerType == TriggerTypeWebhook && token == webhookBodyPlaceholderKey {
 			raw := string(triggerData)
 			if !quoteValues {
 				return raw

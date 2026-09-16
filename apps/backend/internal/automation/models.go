@@ -38,6 +38,7 @@ const (
 	triggerCategoryGitHub      = "github"
 	triggerDataSourceKey       = "source"
 	triggerDataSourceManual    = "manual"
+	webhookBodyPlaceholderKey  = "webhook.body"
 )
 
 // RunStatus tracks the outcome of a trigger firing.
