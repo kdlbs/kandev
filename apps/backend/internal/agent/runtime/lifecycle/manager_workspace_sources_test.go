@@ -168,7 +168,7 @@ func TestRebindWorkspaceForSessionRequiresExplicitRecoveryWhenProviderCannotChan
 	}
 }
 
-func TestRebindWorkspaceForSessionRestoresExistingACPSessionAfterStrictModelRestoreFailure(t *testing.T) {
+func TestRebindWorkspaceForSessionPreservesNativeSessionWithStrictModelPolicy(t *testing.T) {
 	server := newWorkspaceRebindAgentctlServer(t, false)
 	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
 	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{RequireExactModel: true}}
@@ -178,23 +178,23 @@ func TestRebindWorkspaceForSessionRestoresExistingACPSessionAfterStrictModelRest
 	mgr.registry = registry.NewRegistry(newTestLogger())
 	mgr.registry.LoadDefaults()
 
-	execution.AgentID = "opencode-acp"
+	execution.AgentID = "claude-acp"
 	execution.Status = v1.AgentStatusReady
 	execution.ACPSessionID = "acp-existing"
 	execution.SetModelState(&CachedModelState{CurrentModelID: "exact-model"})
 
 	err := mgr.RebindWorkspaceForSession(context.Background(), execution.SessionID, "/new-workspace")
-	if err == nil {
-		t.Fatal("RebindWorkspaceForSession unexpectedly succeeded")
+	if err != nil {
+		t.Fatalf("RebindWorkspaceForSession: %v", err)
 	}
 	if execution.ACPSessionID != "acp-existing" {
-		t.Fatalf("ACP session ID after rollback = %q, want existing ID", execution.ACPSessionID)
+		t.Fatalf("ACP session ID = %q, want existing ID", execution.ACPSessionID)
 	}
 	if model := execution.GetModelState(); model == nil || model.CurrentModelID != "exact-model" {
-		t.Fatalf("model state after rollback = %#v, want exact-model", model)
+		t.Fatalf("model state after native restore = %#v, want exact-model", model)
 	}
 	if loads := server.loads(); len(loads) != 1 || loads[0] != "acp-existing" {
-		t.Fatalf("rollback loaded ACP sessions = %v, want [acp-existing]", loads)
+		t.Fatalf("loaded ACP sessions = %v, want [acp-existing]", loads)
 	}
 }
 
