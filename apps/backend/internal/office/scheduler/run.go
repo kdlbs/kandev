@@ -380,25 +380,25 @@ func (ss *SchedulerService) QueueRunCtx(
 
 // actorFromRunContext maps RunContext's loosely-typed ActorType string
 // ("user" | "agent" | "", set independently across many reactivity/
-// approval call sites) onto models.ActorKind. Anything other than an
-// exact "user"/"agent" match — including an empty ActorType, or a
-// non-empty ActorType with no ActorID — resolves to ActorKindSystem, the
-// same fail-restrictive default runs/service.normalizeActor applies for a
-// delegated request; keeping the same rule here means the legacy inline
-// fallback (no runs service wired) classifies priority identically to the
-// delegated path.
+// approval call sites) onto models.ActorKind, applying the same
+// fail-restrictive rule runs/service.normalizeActor applies for a
+// delegated request: an unrecognised ActorType, or an "agent" ActorType
+// with no ActorID, resolves to ActorKindSystem and is counted
+// (AC-OFFICE-RUN-CAUSATION-001.16) so a caller failing to declare its
+// actor stays visible. A "user" ActorType is never downgraded for a
+// missing ActorID — a browser-originated status/assignee change has none
+// to give — so it always resolves to ActorKindUser.
 func actorFromRunContext(c RunContext) (models.ActorKind, string) {
-	if c.ActorID == "" {
-		return models.ActorKindSystem, ""
-	}
 	switch c.ActorType {
 	case "user":
 		return models.ActorKindUser, c.ActorID
 	case "agent":
-		return models.ActorKindAgent, c.ActorID
-	default:
-		return models.ActorKindSystem, ""
+		if c.ActorID != "" {
+			return models.ActorKindAgent, c.ActorID
+		}
 	}
+	shared.LaunchActorMissingTotal.Add(shared.LaunchSafetyLabel("reason", c.Reason), 1)
+	return models.ActorKindSystem, ""
 }
 
 func encodeRunContext(c RunContext) (string, error) {
