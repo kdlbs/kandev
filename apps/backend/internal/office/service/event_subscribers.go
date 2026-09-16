@@ -743,10 +743,12 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
 		return nil
 	}
-	// Office failure path (v1): every agent error is terminal. The
-	// retry-by-classifier path lives behind HandleRunFailure for
-	// rate-limit-retry callers; we deliberately do NOT call into it
-	// here. See docs/specs/office/requirements/runtime.md.
+	// Office failure path: terminal for every error except a classified-
+	// transient failure, which HandleAgentFailure itself retries a
+	// bounded number of times before it counts toward auto-pause
+	// (AC-OFFICE-RUNTIME-001.9). The rate-limit-retry path behind
+	// HandleRunFailure is a separate, pre-launch tier; we deliberately
+	// do NOT call into it here. See docs/specs/office/requirements/runtime.md.
 	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
 	wrote, err := s.HandleAgentFailure(ctx, run, errMsg, data.ProviderError)
 	if err != nil {

@@ -482,13 +482,24 @@ func TestCreateRun_DuplicateIdempotencyKeyIsRejected(t *testing.T) {
 
 // TestScheduleRetry_RequeuesAndClearsTerminalTimestamps asserts every
 // column the retry write owns, from a run that had already finished.
+// session_id is seeded to simulate a post-start failure (the run reached
+// a real launch before failing) and must come back empty: a relaunch
+// that resolved the prior attempt's session would mint its runtime JWT
+// and prompt against a session the new attempt never owns (review round
+// 1, R1-1).
 func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	run := queueRunAt(t, repo, "retryable", "a1", now.Add(-time.Hour))
+	if err := repo.UpdateRunRuntimeSnapshot(ctx, run.ID, "{}", "{}", "session-from-failed-attempt"); err != nil {
+		t.Fatalf("seed session_id: %v", err)
+	}
 	setStatus(t, repo, run.ID, "failed", timePtr(now.Add(-30*time.Minute)), timePtr(now))
 	untouched := queueRunAt(t, repo, "bystander", "a1", now.Add(-time.Hour))
+	if err := repo.UpdateRunRuntimeSnapshot(ctx, untouched.ID, "{}", "{}", "session-still-running"); err != nil {
+		t.Fatalf("seed bystander session_id: %v", err)
+	}
 
 	retryAt := time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
 	if err := repo.ScheduleRetry(ctx, run.ID, retryAt, 4); err != nil {
@@ -507,6 +518,7 @@ func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	if got.FinishedAt != nil {
 		t.Errorf("finished_at = %s, want nil", got.FinishedAt)
 	}
+	checkString(t, "session_id cleared", got.SessionID, "")
 	checkString(t, "payload preserved", got.Payload, `{"task_id":"retryable"}`)
 
 	bystander := mustGetRun(t, repo, untouched.ID)
@@ -514,6 +526,7 @@ func TestScheduleRetry_RequeuesAndClearsTerminalTimestamps(t *testing.T) {
 	if bystander.ScheduledRetryAt != nil {
 		t.Errorf("bystander scheduled_retry_at = %s, want nil", bystander.ScheduledRetryAt)
 	}
+	checkString(t, "bystander session_id untouched", bystander.SessionID, "session-still-running")
 }
 
 // TestScheduleRetry_WritesTheAttemptCountVerbatim pins that the caller

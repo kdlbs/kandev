@@ -611,12 +611,16 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 }
 
 // ScheduleRetry resets a run to queued with an incremented retry count
-// and a scheduled retry time.
+// and a scheduled retry time. session_id is cleared: every caller either
+// runs pre-launch (the run never had one) or post-start (the session it
+// had belongs to the failed attempt), and a relaunch must mint its
+// runtime credentials against the session the new attempt actually gets,
+// not a stale one from a previous attempt.
 func (r *Repository) ScheduleRetry(ctx context.Context, runID string, retryAt time.Time, retryCount int) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
 		SET status = 'queued', retry_count = ?, scheduled_retry_at = ?,
-		    claimed_at = NULL, finished_at = NULL
+		    claimed_at = NULL, finished_at = NULL, session_id = ''
 		WHERE id = ?
 	`), retryCount, retryAt, runID)
 	return err

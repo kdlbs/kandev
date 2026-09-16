@@ -269,3 +269,40 @@ func TestHandleAgentFailure_ProviderErrorMessagePreferred(t *testing.T) {
 		t.Fatalf("retry_count = %d, want 1", refreshed.RetryCount)
 	}
 }
+
+// TestHandleAgentFailure_TransientRetryClearsDeadSession pins review round
+// 1 finding R1-1: a run that already launched (and so already carries the
+// session_id of the attempt that just failed) must have that session_id
+// cleared on requeue. Otherwise the relaunch resolves the dead session in
+// context_builder, mints its runtime JWT and prompt against it, and every
+// runtime action the new attempt takes gets attributed to a terminated
+// session until persistLaunchedSession finally overwrites the row.
+func TestHandleAgentFailure_TransientRetryClearsDeadSession(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-dead-session")
+	taskID := "task-dead-session"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-dead-session")
+	run := queueAndReadRun(t, svc, "agent-dead-session", taskID)
+
+	const deadSessionID = "session-from-failed-attempt"
+	svc.ExecSQL(t, `UPDATE runs SET session_id = ? WHERE id = ?`, deadSessionID, run.ID)
+	run.SessionID = deadSessionID
+
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, nil)
+	if err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	if wrote {
+		t.Fatal("wrote = true, want false (retry scheduled, run not terminal)")
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.SessionID != "" {
+		t.Fatalf("session_id = %q, want empty: a relaunch must not resolve the dead session from the failed attempt", refreshed.SessionID)
+	}
+}
