@@ -591,13 +591,12 @@ func TestHandleAgentFailure_ProviderErrorIDSubstitutedWhenAgentIDHasNoRules(t *t
 }
 
 // TestHandleAgentFailure_ScheduleRetryErrorFallsThroughToTerminal pins
-// review round 3 finding R3-3: tryLegacyTransientRetry releases the
-// checkout and clears agent-working before calling ScheduleRetry, then
-// returns false on a write error expecting the caller to run terminal
-// accounting. Nothing previously proved that fallthrough happens rather
-// than the failure vanishing between MarkRunFailed and the retry write. A
-// trigger targets exactly the column ScheduleRetry sets and MarkRunFailed
-// does not, so MarkRunFailed's own write still succeeds.
+// review round 3 finding R3-3: when the retry write itself errors,
+// tryLegacyTransientRetry must return false so the caller falls through to
+// terminal accounting, rather than the failure vanishing between
+// MarkRunFailed and the retry write. A trigger targets exactly the column
+// ScheduleRetry sets and MarkRunFailed does not, so MarkRunFailed's own
+// write still succeeds.
 func TestHandleAgentFailure_ScheduleRetryErrorFallsThroughToTerminal(t *testing.T) {
 	svc, _ := newTestServiceWithBus(t)
 	ctx := context.Background()

@@ -221,8 +221,6 @@ func (s *Service) tryLegacyTransientRetry(
 	retryAt := time.Now().UTC().Add(delay)
 	newRetryCount := run.RetryCount + 1
 
-	s.releaseTaskCheckoutForRun(ctx, run)
-	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	wrote, err := s.repo.ScheduleRetryIfClaimed(ctx, run.ID, retryAt, newRetryCount)
 	if err != nil {
 		s.logger.Error("failed to schedule legacy transient retry",
@@ -236,6 +234,12 @@ func (s *Service) tryLegacyTransientRetry(
 		// will see the same thing and no-op the same way.
 		return false
 	}
+	// Release ownership only after the requeue is confirmed durable — the
+	// same ordering as the terminal path below. Releasing first would leave
+	// the run 'claimed' with no checkout or working owner if this write (or
+	// the caller's fallthrough MarkRunFailed) then failed.
+	s.releaseTaskCheckoutForRun(ctx, run)
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 	s.logger.Info("retrying transient post-start failure before it counts toward auto-pause",
 		zap.String("run_id", run.ID),
 		zap.String("code", string(classified.Code)),
