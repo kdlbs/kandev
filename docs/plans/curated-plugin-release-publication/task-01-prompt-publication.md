@@ -1,7 +1,7 @@
 ---
 id: "curated-plugin-release-publication"
 title: "Publish curated plugin releases promptly"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -85,3 +85,17 @@ the 06:00 UTC recovery rebuild are preserved.
 ## Dependencies
 
 None.
+
+## Final verification
+
+- Registry Node suites: 43 passed.
+- Package verifier, package archive, manifest, and platform-only pack Go
+  suites: passed.
+- E2E fixture packaging: passed with both verifier and fixture-identity
+  artifacts present.
+- The focused production-build Chromium release publication and supported
+  update-install flow passed.
+- The focused Pixel 5 update layout, containment, and touch-target flow passed
+  with retries disabled. The first mobile backend-start attempt overlapped a
+  separate Playwright runner on deterministic ports; the isolated retry passed.
+- `git diff --check`: passed.

@@ -7,7 +7,7 @@ requirements:
 system_design:
   - ../../specs/plugins/system-design/marketplace.md
 created: 2026-08-30
-status: building
+status: complete
 ---
 
 # Implementation Plan: Curated plugin release publication
@@ -52,3 +52,18 @@ cd apps/backend && go test ./cmd/plugin-package-verify/ ./internal/plugins/pkgta
 The full repository gates (`make -C apps/backend test`, web unit suites,
 typecheck, lint, i18n) must pass or be classified against a clean upstream
 baseline before delivery.
+
+## Final verification
+
+- `node --test plugin-registry/*.test.mjs`: 43 passed.
+- `go test ./cmd/plugin-package-verify ./internal/plugins/pkgtar
+  ./internal/plugins/manifest ./cmd/plugin-pack`: passed.
+- `make -C apps/backend e2e-plugin-package`: passed, including the package
+  verifier and E2E fixture identity artifacts.
+- Focused Chromium marketplace publication-to-install regression: passed in
+  the managed production-build runner.
+- Focused Pixel 5 marketplace update/containment/touch-target regression:
+  passed with retries disabled. An earlier backend-start failure was caused by
+  an overlapping Playwright runner sharing deterministic ports, not product
+  behavior.
+- `git diff --check`: passed.
