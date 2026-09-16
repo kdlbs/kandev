@@ -307,6 +307,16 @@ const (
 	AvailableCommandsUpdated = "available_commands.updated" // Available slash commands updated
 )
 
+// Event types for session launch warnings
+const (
+	// SessionLaunchWarning is published once, immediately before an SSH
+	// launch's CreateInstance call, when the target executor's stored
+	// reachability record is unreachable and the record is still within the
+	// probing window. It carries Kandev's own attribution of the target
+	// host, independent of whatever an agent process itself reports.
+	SessionLaunchWarning = "session.launch.warning"
+)
+
 // Event types for session mode
 const (
 	SessionModeChanged = "session_mode.changed" // Agent session mode changed
@@ -507,6 +517,16 @@ func BuildSessionModeWildcardSubject() string {
 // BuildAgentCapabilitiesSubject creates an agent capabilities subject for a specific session
 func BuildAgentCapabilitiesSubject(sessionID string) string {
 	return AgentCapabilitiesUpdated + "." + sessionID
+}
+
+// BuildSessionLaunchWarningSubject creates a session launch warning subject for a specific session
+func BuildSessionLaunchWarningSubject(sessionID string) string {
+	return SessionLaunchWarning + "." + sessionID
+}
+
+// BuildSessionLaunchWarningWildcardSubject creates a wildcard subscription for all session launch warning events
+func BuildSessionLaunchWarningWildcardSubject() string {
+	return SessionLaunchWarning + ".*"
 }
 
 // BuildAgentCapabilitiesWildcardSubject creates a wildcard subscription for all agent capabilities events

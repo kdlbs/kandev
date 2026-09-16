@@ -884,6 +884,19 @@ func startAgentInfrastructure(
 	sshReachabilityPoller.SetPublisher(reachabilitypkg.NewPublisher(eventBus))
 	services.Task.SetExecutorSaveObserver(reachabilitypkg.NewSaveObserver(sshReachabilityPoller))
 
+	// Launch-time session.launch.warning producer (task 05): repos.Task
+	// already implements the narrow read accessor (same method used by the
+	// reachability HTTP routes). probingEnabled mirrors the poller's own
+	// effective interval so a configured 0 (disabled) keeps the warning
+	// gated on staleness alone. warningWindowSeconds is 3x the reachability
+	// package's own default interval, not the configured one, per
+	// AC-EXECUTORS-SSH-REACHABILITY-001.28.
+	lifecycleMgr.SetSSHReachabilityWarningPolicy(
+		repos.Task,
+		sshReachabilityPoller.EffectiveIntervalSeconds() != 0,
+		3*reachabilitypkg.DefaultIntervalSeconds,
+	)
+
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
 	if services.Plugins != nil {

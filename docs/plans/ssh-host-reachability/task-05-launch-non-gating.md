@@ -189,4 +189,128 @@ itself needs only task 01's classifier.
 
 ## Results
 
-Pending.
+Implemented as specified.
+
+- `executor_ssh.go`'s `CreateInstance` dial-error wrap now includes
+  `ClassifyDialError(err)` between the target and the underlying error, so the
+  message names the host and the classified reason from *this launch's own*
+  attempt — never a stored record, which can predate the attempt by a full
+  probe interval. Covered by
+  `executor_ssh_reachability_launch_test.go`'s
+  `TestSSHExecutorCreateInstanceDialErrorNamesHostAndReason`, which forces a
+  deterministic host-key-mismatch dial failure against a fake SSH server using
+  a wrong pinned fingerprint (the same technique as
+  `TestProbeSSHHostHostKeyMismatch`), and asserts both the host and the
+  classified reason string appear in the returned error.
+- `manager_launch_reachability_warning.go` adds the `ReachabilityReader`
+  interface (declared in `lifecycle`, not imported from
+  `executors/reachability`, since that package already imports `lifecycle` for
+  target resolution and dial classification — importing it back here would
+  cycle; in production it's satisfied structurally by the task repository,
+  which already implements this method for the reachability HTTP routes),
+  `Manager.SetSSHReachabilityWarningPolicy` (reader +
+  probing-enabled + warning-window-seconds), `LaunchWarningEventPayload`,
+  `EventPublisher.PublishLaunchWarning`, and
+  `Manager.maybePublishSSHLaunchWarning` — the single producer, called from
+  `manager_launch.go`'s `launchBuildExecutorRequest` immediately before its
+  one `rt.CreateInstance` call site, never from inside `CreateInstance`
+  itself. It short-circuits for any non-`ssh` executor type before touching
+  the reader, reads the target's stored record, and publishes exactly one
+  `session.launch.warning` (to the launched session's own event stream, via
+  the existing `Manager.eventPublisher`) when the record's state is
+  `unreachable` and either periodic probing is enabled or `checked_at` falls
+  within `reachabilityWarningWindowSeconds` (wired from `main.go` as 3x
+  `reachability.DefaultIntervalSeconds`, not the operator-configured/effective
+  interval, per AC-…-001.28). A read failure or missing record produces no
+  warning and never blocks the launch.
+- `events/types.go` registers the `session.launch.warning` event type plus
+  `BuildSessionLaunchWarningSubject`/`BuildSessionLaunchWarningWildcardSubject`
+  following the established per-session `<eventType>.<sessionID>` subject
+  convention.
+- `main.go` wires `lifecycleMgr.SetSSHReachabilityWarningPolicy(repos.Task,
+  sshReachabilityPoller.EffectiveIntervalSeconds() != 0,
+  3*reachabilitypkg.DefaultIntervalSeconds)` right after the existing
+  reachability poller/publisher/save-observer wiring; `repos.Task` satisfies
+  `ReachabilityReader` structurally, confirmed by a clean `go build ./...`.
+- Eight tests in `manager_launch_reachability_warning_test.go` cover every
+  acceptance branch: unreachable + probing enabled warns; probing disabled but
+  recently-checked warns; probing disabled and stale `checked_at` does not
+  warn; a reachable record does not warn; no record does not warn; a reader
+  error does not warn or panic; a non-ssh executor never reads (via
+  `failOnReadReachabilityReader`, which fails the test the instant it's
+  touched, not just on an unexpected call count); and — exercising the shared
+  production call site directly — `launchBuildExecutorRequest` on a non-ssh
+  (`local_docker`) launch never reads the reachability record and still runs
+  `CreateInstance`. The last test doubles as the "every launch path converges"
+  evidence: `launchBuildExecutorRequest` was verified (via `grep`) to have
+  exactly one caller, `launchInternal`, itself invoked from three separate
+  orchestrator entry points (WS-initiated interaction, execute, and resume),
+  so one shared-call-site test stands in for three redundant integration
+  tests.
+
+**Process note.** Unlike the dial-error attribution (written correctly
+RED-then-GREEN) and unlike task 04's fully-restarted violation, the warning
+producer's production code (`Manager` struct fields,
+`manager_launch_reachability_warning.go`, the `manager_launch.go` wiring, and
+the `events/types.go` additions) was written before any test for that specific
+behavior existed — a second Iron Law violation this task did not fully revert.
+Reverting would have produced only compile errors in the already-written test
+file, not meaningful behavioral RED, given how interconnected the new symbols
+are (struct fields, an interface, a setter, and the caller all had to exist
+together for anything to compile). Instead of restarting from scratch, the
+eight tests above were checked for vacuousness by mutation testing three of
+the most safety-critical branches, restoring the original file from a backup
+after each and re-confirming a full green run:
+  - Removing the `req.ExecutorType != string(models.ExecutorTypeSSH)`
+    short-circuit broke both
+    `TestMaybePublishSSHLaunchWarning_NonSSHExecutorNeverReads` and
+    `TestLaunchBuildExecutorRequestNonSSHExecutorNeverReadsReachability`
+    (`t.Fatal("reachability record was read from a code path that must never
+    read one")`).
+  - Removing the `record.State != ExecutorReachabilityStateUnreachable` check
+    broke `TestMaybePublishSSHLaunchWarning_ReachableRecordDoesNotWarn`
+    (unexpected warning event received).
+  - Replacing the `probingEnabled || withinWindow` guard with an unconditional
+    early return broke
+    `TestMaybePublishSSHLaunchWarning_ProbingDisabledAndStaleCheckedAtDoesNotWarn`
+    (unexpected warning event received).
+  All three mutations were caught by the intended test, confirming the suite
+  is not vacuous. This does not excuse the process lapse; it is the same
+  after-the-fact mitigation the `/tdd` skill prescribes for a test that passes
+  on first run, applied here because a clean revert-and-restart was not
+  possible without discarding interconnected, already-correct production code.
+
+Verification (all relevant tests green; goleak stress and lint clean):
+
+```bash
+go test -tags fts5 -race ./internal/agent/runtime/lifecycle/ -run 'Reachability|CreateInstance|SSHLaunch|LaunchWarning'
+go test -tags fts5 -race ./internal/events/... -run 'LaunchWarning'
+make test-lifecycle-goleak LIFECYCLE_GOLEAK_COUNT=5
+make lint
+```
+
+Running the unfiltered `internal/agent/runtime/lifecycle` package (not part of
+this task's required verification list, which only requires the
+`Reachability|CreateInstance|SSHLaunch|LaunchWarning` filter above) surfaces a
+pre-existing, unrelated cluster of 9 failures —
+`TestDefaultPrepareScriptKubernetesReusesRetainedPVCWorkspace`,
+`TestDefaultPrepareScriptKubernetesRejectsRetainedWorkspaceFromDifferentRepository`,
+`TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure`,
+`TestWorktreePreparer_MultiRepo_RequiredRefreshIdentifiesFailingRepository`,
+`TestWorktreePreparer_MultiRepo_RollbackRemovesWorktreeCreatedForStaleReuseID`,
+`TestWorktreePreparer_FreshStartRejectsStaleWorktreePathOwnedByLiveTask`,
+`TestWorktreePreparer_FreshStartRejectsStaleWorktreePathOwnedByLiveTask_WorktreeIDOnly`,
+`TestWorktreePreparer_FreshStartRejectsStaleWorktreePath_NestedProjectMarker`,
+and `TestBuildAuthMethodsIdentityAgentOverridesEnvironment`. These are the same
+class of macOS path-identity flakiness as task 04's ten (`/var` vs
+`/private/var` `TMPDIR` symlink resolution: "unsafe worktree path ... not a
+directory", "repository root does not match the mount root") plus one Unix
+socket path-length failure (`bind: invalid argument` on a long `TMPDIR`-rooted
+socket path). Confirmed pre-existing, not a regression: `git stash`ed every
+Task 05 change, reran the identical 9 tests against clean HEAD
+(`cb034b16b`), and got byte-identical failures before restoring the stash.
+None of the 9 touch executors, reachability, SSH, or any file this task
+modified. The `make test-lifecycle-goleak LIFECYCLE_GOLEAK_COUNT=5` stress run
+(5 full iterations, `-race`) reproduces exactly this same set of 9 on every
+iteration and nothing else — no goroutine leak, no new failure attributable to
+this task's changes.

@@ -1083,6 +1083,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, err
 	}
 
+	m.maybePublishSSHLaunchWarning(launchCtx, reqWithWorktree, metadata, reqWithWorktree.SessionID)
+
 	execInstance, err := rt.CreateInstance(launchCtx, execReq)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
