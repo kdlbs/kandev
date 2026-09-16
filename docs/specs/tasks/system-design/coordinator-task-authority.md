@@ -6,6 +6,7 @@ requirements:
   - REQ-TASKS-COORDINATOR-AUTHORITY-001
   - REQ-TASKS-COORDINATOR-AUTHORITY-002
   - REQ-TASKS-COORDINATOR-AUTHORITY-003
+  - REQ-TASKS-COORDINATOR-AUTHORITY-004
 ---
 
 # Coordinator task authority System Design
@@ -51,7 +52,7 @@ and accessed through
   `... WHERE revoked_at IS NULL`. Principal grants are not foreign-keyed to a
   replaceable backing task, so task rotation or deletion cannot erase durable
   operator consent. Capabilities serialize as a normalized comma-separated
-  list (`inspect`, `orchestrate`).
+  list (`inspect`, `orchestrate`, `execute`).
 - `task_coordinator_audit_events` — append-only privileged-attempt log,
   carrying durable `principal_id` plus concrete actor task/session and using
   claim-then-resolve (`pending` → `ok`/`error`). Pruned at 10k rows with
