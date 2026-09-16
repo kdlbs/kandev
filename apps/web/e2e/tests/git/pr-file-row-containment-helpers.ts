@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
@@ -99,6 +100,8 @@ export async function expectLongPRRowContained(row: Locator) {
   await expect(additions).toBeVisible();
   await expect(deletions).toBeVisible();
   await expect(status).toBeVisible();
+  await row.scrollIntoViewIfNeeded();
+  await waitForFiniteAnimations(row);
 
   await expect
     .poll(async () => {

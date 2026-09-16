@@ -21,13 +21,21 @@ import {
 // workaround for testing HTML5 DnD in Playwright and mirrors what the user
 // would do.
 
-async function setupTask(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
-  profileName: string,
-  taskTitle: string,
-) {
+async function setupTask({
+  testPage,
+  apiClient,
+  seedData,
+  profileName,
+  taskTitle,
+  requiredPath,
+}: {
+  testPage: Page;
+  apiClient: ApiClient;
+  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string };
+  profileName: string;
+  taskTitle: string;
+  requiredPath: string;
+}) {
   const profile = await createStandardProfile(apiClient, profileName);
   const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
@@ -40,12 +48,28 @@ async function setupTask(
   // for the environment's durable ready state before the first tree request;
   // otherwise the tree can legitimately snapshot the repository while the
   // agent session is still being attached to it.
+  let workspacePath = "";
   await expect
     .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
       timeout: 30_000,
       message: `Waiting for ${taskTitle} task environment to be ready`,
     })
     .toBe("ready");
+
+  // Environment readiness and repository materialization are separate
+  // transitions. Wait for the exact fixture file in the task worktree before
+  // the first tree snapshot, otherwise a valid early tree can be retained
+  // while the checkout is still being populated.
+  await expect
+    .poll(
+      async () => {
+        const environment = await apiClient.getTaskEnvironment(task.id);
+        workspacePath = environment?.workspace_path ?? environment?.repos?.[0]?.worktree_path ?? "";
+        return Boolean(workspacePath && fs.existsSync(path.join(workspacePath, requiredPath)));
+      },
+      { timeout: 60_000, message: `Waiting for ${requiredPath} in the ${taskTitle} worktree` },
+    )
+    .toBe(true);
 
   const session = await openTaskSession(testPage, taskTitle);
   await session.clickTab("Files");
@@ -104,12 +128,19 @@ test.describe("File tree drag and drop", () => {
     git.stageAll();
     git.commit("seed dnd");
 
-    const session = await setupTask(testPage, apiClient, seedData, "ft-dnd-move", "FT DnD Move");
+    const session = await setupTask({
+      testPage,
+      apiClient,
+      seedData,
+      profileName: "ft-dnd-move",
+      taskTitle: "FT DnD Move",
+      requiredPath: "movable.ts",
+    });
 
     const file = session.fileTreeNode("movable.ts");
     const folder = session.fileTreeNode("target-dir");
-    await expect(file).toBeVisible({ timeout: 15_000 });
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await expect(file).toBeVisible({ timeout: 30_000 });
+    await expect(folder).toBeVisible({ timeout: 30_000 });
 
     await dispatchHtmlDnd(testPage, file, folder);
 
@@ -140,16 +171,17 @@ test.describe("File tree drag and drop", () => {
     git.stageAll();
     git.commit("seed selfdir");
 
-    const session = await setupTask(
+    const session = await setupTask({
       testPage,
       apiClient,
       seedData,
-      "ft-dnd-self",
-      "FT DnD Self Reject",
-    );
+      profileName: "ft-dnd-self",
+      taskTitle: "FT DnD Self Reject",
+      requiredPath: "selfdir/leaf.ts",
+    });
 
     const folder = session.fileTreeNode("selfdir");
-    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await expect(folder).toBeVisible({ timeout: 30_000 });
 
     // Drop onto self: handleDragOver short-circuits via isDropInvalid so
     // preventDefault is never called, which means the browser would never
