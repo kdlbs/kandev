@@ -116,6 +116,7 @@ func TestExactProfileStartModelPolicyDisablesSubstitution(t *testing.T) {
 	require.Equal(t, "claude-opus-5", policy.Model)
 	require.Empty(t, policy.FallbackModel)
 	require.False(t, policy.AutoFallback)
+	require.True(t, policy.RequireExactModel)
 }
 
 func TestResolveProfileSessionConfigAndPolicyDegradesGracefully(t *testing.T) {

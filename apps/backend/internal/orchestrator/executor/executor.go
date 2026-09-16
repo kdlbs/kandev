@@ -484,6 +484,10 @@ type LaunchAgentRequest struct {
 	SessionID         string
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
 	ExactProfile      bool
+	// ExactProfileModel and ExactProfileRevision are the immutable profile
+	// snapshot validated by the orchestrator for this launch.
+	ExactProfileModel    string
+	ExactProfileRevision int64
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
@@ -661,6 +665,7 @@ type LaunchOptions struct {
 	ExactProfile           bool
 	ExactProfileGeneration int64
 	ExactProfileRevision   int64
+	ExactProfileModel      string
 	OfficeAgentProfileID   string
 	ExecutorID             string
 	TurnID                 string

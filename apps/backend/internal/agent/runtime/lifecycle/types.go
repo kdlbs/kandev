@@ -46,7 +46,9 @@ type AgentExecution struct {
 	// MCP, env, and command construction all consume this value.
 	AgentProfileID string
 	// ExactProfile prevents model fallback for a task-owned exact assignment.
-	ExactProfile bool
+	ExactProfile         bool
+	ExactProfileModel    string
+	ExactProfileRevision int64
 	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
 	// launches, where AgentProfileID owns both identity and execution config.
 	OfficeAgentProfileID string
@@ -1115,11 +1117,16 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID            string
-	WorkspaceID       string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID         string
-	ExactProfile      bool
-	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	TaskID       string
+	WorkspaceID  string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID    string
+	ExactProfile bool
+	// ExactProfileModel and ExactProfileRevision were resolved and validated
+	// before entering lifecycle. Exact launches must not re-read a mutable
+	// profile model during startup.
+	ExactProfileModel    string
+	ExactProfileRevision int64
+	TaskEnvironmentID    string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.

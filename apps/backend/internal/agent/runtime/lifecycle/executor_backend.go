@@ -596,6 +596,8 @@ type ExecutorCreateRequest struct {
 	WorkspaceReuseRequired bool
 	AgentProfileID         string
 	ExactProfile           bool
+	ExactProfileModel      string
+	ExactProfileRevision   int64
 	OfficeAgentProfileID   string
 	PromptTurnID           string
 	WorkspacePath          string
@@ -748,6 +750,8 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		TaskEnvironmentID:    req.TaskEnvironmentID,
 		AgentProfileID:       req.AgentProfileID,
 		ExactProfile:         req.ExactProfile,
+		ExactProfileModel:    req.ExactProfileModel,
+		ExactProfileRevision: req.ExactProfileRevision,
 		OfficeAgentProfileID: req.OfficeAgentProfileID,
 		promptTurnID:         req.PromptTurnID,
 		AgentID:              agentID,

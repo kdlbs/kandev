@@ -431,6 +431,8 @@ func buildLifecycleLaunchRequest(
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		ExactProfile:                  req.ExactProfile,
+		ExactProfileModel:             req.ExactProfileModel,
+		ExactProfileRevision:          req.ExactProfileRevision,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
 		AllowBranchReplacement:        req.AllowBranchReplacement,

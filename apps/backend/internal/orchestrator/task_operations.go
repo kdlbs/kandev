@@ -899,7 +899,19 @@ func (s *Service) startCreatedSession(
 		mcpMode = executor.McpModeOffice
 	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExactProfile: exactProfile, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
+		AgentProfileID:         effectiveProfileID,
+		ExactProfile:           exactProfile,
+		ExactProfileGeneration: exactAssignmentGeneration(exactAssignment),
+		ExactProfileRevision:   exactAssignmentRevision(exactAssignment),
+		ExactProfileModel:      exactProfileModel(exactAssignment),
+		ExecutorID:             executorID,
+		Prompt:                 effectivePrompt,
+		StartAgent:             true,
+		McpMode:                mcpMode,
+		Attachments:            attachments,
+		TurnID:                 initialTurnID,
+	})
 	if err != nil {
 		s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
@@ -1681,6 +1693,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		ExactProfile:           opts.ExactProfile,
 		ExactProfileGeneration: exactAssignmentGeneration(exactAssignment),
 		ExactProfileRevision:   exactAssignmentRevision(exactAssignment),
+		ExactProfileModel:      exactProfileModel(exactAssignment),
 		OfficeAgentProfileID:   officeAgentProfileID,
 		ExecutorID:             executorID,
 		TurnID:                 initialTurnID,
@@ -2814,9 +2827,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	var exactAssignment *ExactProfileLaunchDecision
 	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
 		return nil, err
 	} else {
+		exactAssignment = exact
 		if exact == nil && session.ExactProfileGeneration != 0 {
 			return nil, ErrExactProfileAssignmentInvalid
 		}
@@ -2825,6 +2840,8 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		}
 		if exact != nil {
 			options.ExactProfile = true
+			options.ExactProfileModel = exact.Model
+			options.ExactProfileRevision = exact.Revision
 		}
 	}
 	allowCompletedResume := options.AllowCompletedSessionResume &&
@@ -2992,9 +3009,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 			// LaunchPreparedSession. Record this failure with the same state CAS,
 			// persisted recovery claim, and archive-safe task CAS as early launch.
 			err = s.branchRecoveryError(resumeCtx, taskID, sessionID, err)
-			return nil, decorateResumeFailure(s.handleSessionLaunchFailure(
+			failure := decorateResumeFailure(s.handleSessionLaunchFailure(
 				resumeCtx, taskID, sessionID, err, session,
 			))
+			s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), failure)
+			return nil, failure
 		}
 	}
 	if readySession == nil {
@@ -3013,6 +3032,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, attemptErr
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
+	s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 	seam4Res.consume()
 	persistBranchRecovery()
 
