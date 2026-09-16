@@ -64,6 +64,7 @@ dashboard projections, and Office testing contracts.
 - [Office Launch Backpressure](requirements/launch-backpressure.md)
 - [Office Launch Budgets](requirements/launch-budgets.md)
 - [Office Run Causation Chain](requirements/run-causation-chain.md)
+- [Office Self-Triggered Launch Suppression](requirements/self-trigger-suppression.md)
 - [Office Unattended Launch Safety](requirements/unattended-launch-safety.md)
 - [Office: E2E Mock Harness for Task Sessions and Messages](requirements/testing.md)
 - [Office: Slack-Style Unread Divider](requirements/unread-divider.md)

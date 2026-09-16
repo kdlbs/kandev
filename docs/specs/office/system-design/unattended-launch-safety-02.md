@@ -33,7 +33,7 @@ identifier used here is defined there.
 `runs/service.Service.QueueRun` gains a guard, in this order, inside one transaction
 as AC-OFFICE-LAUNCH-SAFETY-003.8 requires. On Postgres the transaction also takes an
 advisory lock keyed on the woken `agent_profile_id`, for the same reason the claim
-gate takes one: the self-trigger check is a *count over other rows* that the insert
+gate takes one: each self-trigger check is a *count over other rows* that the insert
 does not lock, so `READ COMMITTED` lets two concurrent enqueues both read the last
 remaining allowance and both pass. The claim gate's lock is instance-wide because its
 broadest limit is; the enqueue gate's narrowest scope is the agent profile, which is
@@ -62,9 +62,14 @@ parallel.
 5. Inherit `human_rooted` from the causing run or the carrier, or set it from the
    actor at a root. Resolve `routine_id` from the request or the carrier.
 6. If depth exceeds the configured maximum, refuse.
-7. If the wake is self-caused, apply the self-trigger window count for that
-   `(agent_profile_id, reason)` pair against persisted rows, per
-   AC-OFFICE-LAUNCH-SAFETY-004.7. If the allowance is spent, refuse.
+7. If the wake is self-caused, apply both self-trigger window counts against
+   persisted rows, per AC-OFFICE-LAUNCH-SAFETY-004.7, in the order
+   AC-OFFICE-LAUNCH-SAFETY-004.8 fixes: first the per-reason count for that
+   `(agent_profile_id, reason)` pair, then the reason-independent count for that
+   `agent_profile_id` alone. Refuse at the first spent allowance, so a wake over both
+   is refused once and recorded as a per-reason refusal. Both counts read the same
+   window and the same actor predicate and differ only in whether `reason` is matched,
+   so they are two statements over one pair of indexes, not two mechanisms.
 8. A refusal at step 3, 4, 6 or 7 returns a typed error, writes an activity record,
    and increments the refusal counter, **without recording an idempotency key**.
 9. Compute and stamp `priority_class`, then insert.
@@ -253,8 +258,16 @@ accuracy in a counter whose worst error is one misleading increment.
   because it keeps failing would invert its purpose.
 - **Depth refusal.** Terminal for that request. It is not retried, because retrying
   would produce the same depth.
-- **Self-trigger refusal.** Bounded by the rolling window and clears without
-  intervention.
+- **Self-trigger refusal.** Either allowance, bounded by the rolling window and clears
+  without intervention. The refusal record names which allowance refused, per
+  AC-OFFICE-LAUNCH-SAFETY-004.8, so an operator can tell one agent looping on a single
+  reason from one spreading the same loop across the registry.
+- **Unregistered wake reason.** Rejected at the runtime-action boundary before the
+  enqueue is called (AC-OFFICE-LAUNCH-SAFETY-004.3), so it burns no idempotency key
+  and consumes no allowance. Terminal for that request: the reason set is fixed, so
+  retrying the same reason produces the same rejection. This does not narrow the
+  unmapped-reason fallback of AC-OFFICE-BACKPRESSURE-001.6, which still has to absorb
+  reasons the system itself records and reasons read off historical rows.
 - **Coalescing.** The surviving run keeps its own causation triple, actor, routine
   and priority class, per AC-OFFICE-RUN-CAUSATION-001.7 and `001.22`. A merged
   request contributes none of them, because the surviving run's depth already

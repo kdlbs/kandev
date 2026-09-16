@@ -24,9 +24,8 @@ envelope are all Office concepts. The task system owns task rows and the agent
 system owns agent profiles, but neither decides when a process starts.
 
 This document bounds concurrency **at an instant**: how many Office agent processes
-may be running at once, how deep a chain of agent-caused launches may go, and how
-often an agent may wake itself. Three sibling documents carry the rest of the
-capability and none duplicates another:
+may run at once, and how deep a chain of agent-caused launches may go. Sibling
+documents carry the rest, none duplicating another:
 
 - [Office Enqueue Consolidation](enqueue-consolidation.md) defines the single seam
   every gate here attaches to. It is a delivery prerequisite for this document.
@@ -37,6 +36,10 @@ capability and none duplicates another:
   owns the durable launch record those budgets count.
 - [Office Launch Backpressure](launch-backpressure.md) defines who wins when
   capacity is scarce: claim order, age promotion, and gate observability.
+- [Office Self-Triggered Launch Suppression](self-trigger-suppression.md) bounds how
+  often an agent may wake itself. It owns `REQ-OFFICE-LAUNCH-SAFETY-004` and every
+  `AC-OFFICE-LAUNCH-SAFETY-004.x`, which this document's criteria still cite by those
+  identifiers; the identifiers did not change when the requirement moved.
 
 This capability is a prerequisite for arming any unattended schedule. The
 workspace kill switch and the fail-closed cost budget are the other two safety
@@ -44,8 +47,8 @@ controls, and neither is in scope here.
 
 ## Prior art
 
-Two prior-art legs were attempted. Each receipt names what was searched before what
-was found, because a degraded search reads like a healthy one that found nothing.
+Two prior-art legs were attempted; each receipt names what was searched, because a
+degraded search reads like a healthy one that found nothing.
 
 **Leg 1, the compiled wiki.** Searched: vault `@henry`, resolved to
 `OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`, QMD collection `wiki`.
@@ -62,13 +65,11 @@ query ran. Nothing is claimed here about how other platforms bound concurrency.
 - The claim query already holds a run `claimed` for the process's lifetime, so this
   document counts `claimed` rather than sessions or operating-system processes.
 - `system-design/scheduler-01.md` specifies the agent ceiling as
-  `< a.max_concurrent_sessions`, and that **predicate** is carried forward here. The
-  rest of that document is superseded and is not cited as authority: its claim query
-  reads `office_wakeup_queue` joined to `office_agent_instances`, a table removed in
-  ADR 0005 Wave C, and counts `task_sessions`, which this document's Terminology
-  explicitly rejects as the unit of account. Only the ceiling expression survives.
-- A self-trigger carve-out already exists for agent-authored comments; this extends
-  it rather than replacing it.
+  `< a.max_concurrent_sessions`, and only that **predicate** is carried forward. The
+  rest is superseded and is not authority here: its claim query reads
+  `office_wakeup_queue` joined to `office_agent_instances`, a table removed in ADR
+  0005 Wave C, and counts `task_sessions`, which Terminology below rejects as the
+  unit of account.
 - `shared.IsPeriodicTasklessWake` already refuses to guess a legacy
   `routine_dispatch` row's trigger source.
   [Office Launch Backpressure](launch-backpressure.md) follows that precedent
@@ -191,8 +192,9 @@ known depth and say so, so that a runaway loop ends by itself and leaves evidenc
   exceeding the maximum depth or for any other reason, the system shall not consume
   the request's idempotency key, so that a later legitimate request carrying the same
   key is not silently discarded as a duplicate. This holds for every refusal defined
-  by these documents, including the self-trigger refusal of
-  AC-OFFICE-LAUNCH-SAFETY-004.3, the unreadable-causing-run refusal of
+  by these documents, including the per-reason self-trigger refusal of
+  AC-OFFICE-LAUNCH-SAFETY-004.3, the total self-trigger refusal of
+  AC-OFFICE-LAUNCH-SAFETY-004.8, the unreadable-causing-run refusal of
   AC-OFFICE-RUN-CAUSATION-001.21, and the missing-workspace refusal of
   AC-OFFICE-RUN-CAUSATION-001.20. Reading the key to find a coalescing target is not
   consuming it.
@@ -206,15 +208,15 @@ known depth and say so, so that a runaway loop ends by itself and leaves evidenc
 - **AC-OFFICE-LAUNCH-SAFETY-003.7:** The recovery sweep, retry of an existing run,
   and provider-routing re-dispatch shall not increment causation depth, because
   they re-attempt work already admitted rather than causing new work.
-- **AC-OFFICE-LAUNCH-SAFETY-003.8:** The depth check, the self-trigger window count,
-  the idempotency check, and the insert shall share one transaction, and shall be
-  serialized against every other concurrent enqueue for the same agent profile, on
+- **AC-OFFICE-LAUNCH-SAFETY-003.8:** The depth check, both self-trigger window
+  counts, the idempotency check, and the insert shall share one transaction, and
+  shall be serialized against every other concurrent enqueue for the same profile, on
   every supported database engine, so that two concurrent enqueues cannot both observe
   the last remaining allowance. As in AC-OFFICE-LAUNCH-SAFETY-001.6, one transaction
   is sufficient only where the engine already serializes writers; where it does not,
   the system shall take an explicit lock for the duration of the enqueue. The
-  self-trigger window is a count over rows the insert does not lock, so transaction
-  scope alone does not serialize it.
+  self-trigger windows are counts over rows the insert does not lock, so transaction
+  scope alone does not serialize them.
 - **AC-OFFICE-LAUNCH-SAFETY-003.9:** Every **refusal** gate in this document, meaning
   the depth limit of this requirement and the self-trigger suppression of
   REQ-OFFICE-LAUNCH-SAFETY-004, shall attach to the authoritative enqueue API defined
@@ -226,62 +228,13 @@ known depth and say so, so that a runaway loop ends by itself and leaves evidenc
 - **AC-OFFICE-LAUNCH-SAFETY-003.10:** The authoritative enqueue shall resolve
   idempotency and coalescing **before** every refusal gate. A request that merges into
   an existing run creates no run row, so it shall not be evaluated against any refusal
-  gate: not the depth limit, not the self-trigger allowance, not the unreadable causing
+  gate: not the depth limit, neither self-trigger allowance, not the unreadable causing
   run of AC-OFFICE-RUN-CAUSATION-001.21, and not the missing workspace of
-  AC-OFFICE-RUN-CAUSATION-001.20. The four refusals are one class and are ordered
-  alike. Reading the idempotency key to find a merge target does not record one, so
+  AC-OFFICE-RUN-CAUSATION-001.20. Those refusals are one class and are ordered
+  alike. The registered-reason check of AC-OFFICE-LAUNCH-SAFETY-004.3 is not in that
+  class and is not ordered here: it runs before the authoritative enqueue is called.
+  Reading the idempotency key to find a merge target does not record one, so
   AC-OFFICE-LAUNCH-SAFETY-003.4 still holds for a request that is then refused.
-
-### REQ-OFFICE-LAUNCH-SAFETY-004: Self-triggered launch suppression
-
-**Intent:** Prevent an agent waking itself in a tight cycle. One carve-out exists
-already: an agent's own comment does not wake that agent as assignee. Every other
-self-directed path has no such guard.
-
-**User story:** As an operator, I want an agent's own actions not to restart that
-same agent unchecked, so that a single agent cannot spin on itself.
-
-#### Acceptance criteria
-
-- **AC-OFFICE-LAUNCH-SAFETY-004.1:** When a wake would be caused by an action whose
-  actor is the same agent profile as the agent to be woken, the system shall treat
-  that wake as caused by the actor's causing run and shall apply causation depth
-  accordingly.
-- **AC-OFFICE-LAUNCH-SAFETY-004.2:** The existing behavior by which an agent's own
-  comment does not wake that agent as assignee shall be retained unchanged.
-- **AC-OFFICE-LAUNCH-SAFETY-004.3:** The self-trigger allowance shall default to `3`
-  and be overridable by operator configuration. When an allowance of `N` self-caused
-  wakes for the same agent profile and the same wake reason have already been queued
-  within a rolling `60` minute window, the system shall refuse the next such wake and
-  every later one until the window has passed, and shall record the refusal as in
-  AC-OFFICE-LAUNCH-SAFETY-003.5. An allowance of `N` permits `N` wakes in a window and
-  refuses the `N+1`th. A configured allowance less than `1` shall be replaced by the
-  default and logged at warn level.
-- **AC-OFFICE-LAUNCH-SAFETY-004.7:** The self-trigger window shall be counted from
-  persisted run rows, matching the woken agent profile, the wake reason, and the
-  persisted actor of AC-OFFICE-RUN-CAUSATION-001.19 whose actor kind is `agent` and
-  whose actor identifier is that same agent profile, positioned in the window by
-  `runs.requested_at`. The kind is part of the match, so an identifier that happens to
-  be shared by a user and an agent profile cannot be counted as self-caused. It shall not be counted by joining
-  a run to its parent's agent profile, which reports a two-agent cycle as
-  non-self-caused and fails when the parent is pruned, and shall not be held in
-  process memory, which would reset the allowance on restart and would not be shared
-  between processes.
-- **AC-OFFICE-LAUNCH-SAFETY-004.4:** A wake whose actor is a human user shall never
-  be treated as self-caused, regardless of which agent is woken.
-- **AC-OFFICE-LAUNCH-SAFETY-004.5:** The self-trigger window shall count wakes that
-  were queued, whatever their later status, so that a self-trigger loop cannot reset
-  its own allowance by completing or failing quickly. A wake that was refused shall
-  not be counted. A wake merged into an existing run by coalescing shall be counted
-  once, against the surviving run; AC-OFFICE-LAUNCH-SAFETY-003.10 orders coalescing
-  before this and every other refusal gate, so a request that merges is never refused
-  for an allowance it does not consume.
-- **AC-OFFICE-LAUNCH-SAFETY-004.6:** When the acting agent has more than one run in
-  flight, the causing run shall be the run inside which the action was performed,
-  taken from the runtime context that carried the action. When the action did not
-  originate inside a run, the resulting wake shall be a root as defined by
-  AC-OFFICE-RUN-CAUSATION-001.2 rather than being attributed to an arbitrary
-  in-flight run.
 
 ## Out of scope
 
@@ -289,6 +242,11 @@ same agent unchecked, so that a single agent cannot spin on itself.
   [Office Run Causation Chain](run-causation-chain.md). This document consumes the
   identifier, the depth, the actor, the human-rooted flag, and the routine
   attribution; it does not define how any of them are derived or carried.
+- **How often an agent may wake itself.** Owned by
+  [Office Self-Triggered Launch Suppression](self-trigger-suppression.md), which
+  carries `REQ-OFFICE-LAUNCH-SAFETY-004` under its original identifiers. The refusal
+  seam, ordering and idempotency rules of REQ-OFFICE-LAUNCH-SAFETY-003 still bind
+  those criteria; this document defines those rules and that one consumes them.
 - **Claim order, promotion, and gate telemetry.** Owned by
   [Office Launch Backpressure](launch-backpressure.md). This document decides
   whether a run may be claimed; that one decides which claimable run goes first and

@@ -77,11 +77,13 @@ and this design names the seam below.
 | `REQ-OFFICE-BACKPRESSURE-002` | Part 2 [Claim](unattended-launch-safety-02.md#claim) |
 | `REQ-OFFICE-BACKPRESSURE-003` | Part 2 [Attributing a deferral](unattended-launch-safety-02.md#attributing-a-deferral) |
 
-The requirements are spread over five documents: `unattended-launch-safety.md`
-(ceilings, depth, self-trigger), `launch-budgets.md` (the ledger and the budgets it
-feeds), `run-causation-chain.md` (identity), `launch-backpressure.md` (order and
-observability), and `enqueue-consolidation.md` (the seam every gate attaches to,
-and a delivery prerequisite for the rest).
+The requirements are spread over six documents: `unattended-launch-safety.md`
+(ceilings and depth), `self-trigger-suppression.md` (the two self-trigger
+allowances, carrying `REQ-OFFICE-LAUNCH-SAFETY-004` under its original identifiers),
+`launch-budgets.md` (the ledger and the budgets it feeds), `run-causation-chain.md`
+(identity), `launch-backpressure.md` (order and observability), and
+`enqueue-consolidation.md` (the seam every gate attaches to, and a delivery
+prerequisite for the rest).
 
 ## Components and responsibilities
 
@@ -100,8 +102,15 @@ and a delivery prerequisite for the rest).
   itself rather than a list of known callers, because a caller list is what fell
   behind and produced three `IdempotencyWindowHours` constants.
 - **Enqueue gate.** A guard inside that one API. It resolves causation and actor,
-  applies the depth and self-trigger limits, stamps the priority class and the
+  applies the depth and both self-trigger limits, stamps the priority class and the
   routine attribution, and either creates the run or refuses.
+- **Wake-reason admission.** `runtime.Actions.SpawnAgentRun`
+  (`internal/office/runtime/actions.go`) rejects a `SpawnAgentRunInput.Reason` that is
+  not a member of `shared.WakeReasonRegistry` before it calls the enqueue API at all,
+  per AC-OFFICE-LAUNCH-SAFETY-004.3. That field is the only wake reason an agent
+  supplies directly, so it is the only place this check belongs; putting it inside the
+  enqueue API instead would have to refuse the system's own reasons and the historical
+  ones, which AC-OFFICE-BACKPRESSURE-001.6 requires stay admissible.
 - **Claim gate.** The rewritten `ClaimNextEligibleRun`. It applies the three
   ceilings, the two launch budgets, and the ordering, and appends the launch ledger
   row, inside one serialized transaction.
@@ -143,10 +152,16 @@ workspace_id    TEXT    NOT NULL DEFAULT ''
 
 An index on `(causation_id)` supports chain reconstruction, the claim ordering
 index becomes `(status, priority_class, requested_at, id)`, and the self-trigger
-window needs `(agent_profile_id, reason, actor_id, requested_at)`.
+windows need two: `(agent_profile_id, reason, actor_id, requested_at)` for the
+per-reason count of AC-OFFICE-LAUNCH-SAFETY-004.3, and
+`(agent_profile_id, actor_id, requested_at)` for the reason-independent count of
+AC-OFFICE-LAUNCH-SAFETY-004.8. The second is not redundant with the first: with
+`reason` in position two, the per-reason index cannot serve a window range on
+`requested_at` for a query that names no reason, so the total count would degrade to a
+scan of every run the agent profile ever queued.
 
-`actor_kind` and `actor_id` are persisted because the self-trigger window of
-AC-OFFICE-LAUNCH-SAFETY-004.7 counts *past* wakes, and nothing today records that a
+`actor_kind` and `actor_id` are persisted because the self-trigger windows of
+AC-OFFICE-LAUNCH-SAFETY-004.7 count *past* wakes, and nothing today records that a
 queued run was self-caused. The alternatives were rejected on their behaviour, not
 their cost: joining a run to its parent's `agent_profile_id` reports a two-agent
 A→B→A cycle as not self-caused and stops working when the parent is pruned, and an
@@ -345,16 +360,31 @@ chargeable.
 Added to the operator settings catalog (`internal/common/config/catalog.go`), each
 with the default named in the requirements:
 
-| Key | Default |
-| --- | --- |
-| `office.launch.maxConcurrentInstance` | `8` |
-| `office.launch.maxConcurrentWorkspace` | `4` |
-| `office.launch.maxCausationDepth` | `8` |
-| `office.launch.workspaceBudgetPerHour` | `120` |
-| `office.launch.routineBudgetPerHour` | `20` |
-| `office.launch.selfTriggerPerHour` | `3` |
-| `office.launch.promotionAgeMinutes` | `15` |
-| `office.launch.failClosedEscalationAfter` | `3` |
+| Key | Environment variable | Default |
+| --- | --- | --- |
+| `office.maxConcurrentInstance` | `KANDEV_OFFICE_MAX_CONCURRENT_INSTANCE` | `8` |
+| `office.maxConcurrentWorkspace` | `KANDEV_OFFICE_MAX_CONCURRENT_WORKSPACE` | `4` |
+| `office.maxCausationDepth` | `KANDEV_OFFICE_MAX_CAUSATION_DEPTH` | `8` |
+| `office.workspaceBudgetPerHour` | `KANDEV_OFFICE_WORKSPACE_BUDGET_PER_HOUR` | `120` |
+| `office.routineBudgetPerHour` | `KANDEV_OFFICE_ROUTINE_BUDGET_PER_HOUR` | `20` |
+| `office.selfTriggerAllowance` | `KANDEV_OFFICE_SELF_TRIGGER_ALLOWANCE` | `3` |
+| `office.selfTriggerTotalAllowance` | `KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE` | `8` |
+| `office.promotionAgeMinutes` | `KANDEV_OFFICE_PROMOTION_AGE_MINUTES` | `15` |
+| `office.gateFailureThreshold` | `KANDEV_OFFICE_GATE_FAILURE_THRESHOLD` | `3` |
+
+These are the key spellings the catalog carries, flat under the `office.` owner
+alongside `office.schedulerTickMs` and `office.jwtSigningKey`. An earlier draft of
+this table wrote them as `office.launch.*`, which named no key the system reads: an
+operator following it would have set `KANDEV_OFFICE_LAUNCH_*` and seen the default
+apply with no error. The flat spelling is authoritative because it is the one that
+ships, it matches every other key this owner already has, and no acceptance criterion
+requires the nested form. The environment column is part of the contract here for the
+same reason — a table of keys alone is what let the two spellings diverge unnoticed.
+`office.selfTriggerAllowance` is the per-reason bound of
+AC-OFFICE-LAUNCH-SAFETY-004.3 and `office.selfTriggerTotalAllowance` the
+reason-independent bound of AC-OFFICE-LAUNCH-SAFETY-004.8; a total below the
+per-reason value is honored as configured and logged once at resolution, per that
+criterion, rather than being corrected.
 
 A resolved value below the minimum stated in its AC is replaced by the default and
 logged at warn level. Per AC-OFFICE-LAUNCH-SAFETY-001.5 the clamp is applied wherever
