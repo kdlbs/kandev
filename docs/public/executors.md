@@ -43,11 +43,11 @@ download requirements.
 
 ## Create and select a profile
 
-Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Kubernetes**, **Sprites.dev**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
+Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Kubernetes**, **Sprites.dev**, **Remote Docker**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
 
 Open a saved profile from the Executors hub, the Settings tree, an executor profile list, Settings search, or a task's executor disclosure to use the same complete profile editor.
 
-![Settings > Executors showing existing Local, Worktree, and Sprites profiles plus Local, Worktree, Docker, Sprites.dev, and SSH profile creation options.](../screenshots/settings-executors.png)
+![Settings > Executors showing existing Local, Worktree, and Sprites profiles plus Local, Worktree, Docker, Kubernetes, Sprites.dev, Remote Docker, and SSH profile creation options.](../screenshots/settings-executors.png)
 
 <DocsVideo
   webm="./media/feature-guides/profile-executor-selection.webm"
