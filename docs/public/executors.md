@@ -49,7 +49,7 @@ Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, 
 
 Open a saved profile from the Executors hub, the Settings tree, an executor profile list, Settings search, or a task's executor disclosure to use the same complete profile editor.
 
-![Settings > Executors showing existing Local, Worktree, and Sprites profiles plus Local, Worktree, Docker, Kubernetes, Sprites.dev, Remote Docker, and SSH profile creation options.](../screenshots/settings-executors.png)
+![Settings > Executors showing existing Local and Worktree profiles plus Local, Worktree, Docker, Sprites.dev, Remote Docker, SSH, and Kubernetes profile creation options.](../screenshots/settings-executors.png)
 
 <DocsVideo
   webm="./media/feature-guides/profile-executor-selection.webm"

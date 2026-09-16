@@ -125,6 +125,20 @@ Task 05.
   - `pnpm vitest run components/settings/profile-edit lib/api/domains` (71 files, 479 tests)
   - `scripts/list-docs.py validate`, `scripts/lint-spec-files.py --all`
 
+### Screenshot
+
+- `docs/screenshots/settings-executors.png` was stale: it predates the Remote
+  Docker card, and nothing regenerates it. The PR skill's screenshot step
+  captures assets for the PR body on an orphan branch, not this committed doc
+  asset, so it would have stayed stale indefinitely.
+- Added `e2e/tests/settings/executors-docs-screenshots.spec.ts`, following the
+  existing `plugins-docs-screenshots.spec.ts` convention: skipped unless
+  `CAPTURE_DOCS_MEDIA=1`, writes straight into `docs/screenshots/`. The
+  recapture is now a command rather than a manual chore.
+- Recaptured at 2x density to match the published asset, compressed with
+  `pngquant` per the PR skill's recipe (239 KB to 75 KB), and corrected the alt
+  text, which claimed an existing Sprites profile the capture does not show.
+
 ## Known gaps
 
 - No Playwright spec in the `containers` project. The Go integration test
