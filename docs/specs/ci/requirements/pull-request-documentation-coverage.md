@@ -2,6 +2,7 @@
 status: draft
 system: ci
 created: 2026-09-10
+updated: 2026-09-16
 owners:
   - kandev
 ---
@@ -33,6 +34,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - **AC-CI-PR-DOCS-001.4:** Existing plans and specifications shall qualify when the work order references them and they exist in the proposed revision. Contributors shall update contracts when behavior changes, but shall not need meaningless edits to unchanged contracts.
 - **AC-CI-PR-DOCS-001.5:** A deleted artifact, empty file, unresolved reference, unrelated unlinked document, or work order without requirement and acceptance references shall not satisfy coverage.
 - **AC-CI-PR-DOCS-001.6:** The result shall identify triggering paths, accepted references, missing artifacts, and corrective steps. Structural coverage shall not claim semantic completeness or prove that planning preceded coding.
+- **AC-CI-PR-DOCS-001.7:** A pull request that changes only `plugin-registry/plugins.yaml` and other already exempt paths shall pass without a delivery package. Any additional non-exempt path shall continue to require coverage.
 
 ### REQ-CI-PR-DOCS-002: Explicit documentation exception
 

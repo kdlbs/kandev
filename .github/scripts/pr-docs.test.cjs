@@ -39,6 +39,34 @@ test('recognized documentation-only paths are exempt', () => {
   assert.equal(result.exemptPaths.length, 9);
 });
 
+// @covers AC-CI-PR-DOCS-001.7
+test('the canonical plugin registry source is exempt', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: 'plugin-registry/plugins.yaml', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, false);
+  assert.deepEqual(result.triggeringPaths, []);
+  assert.deepEqual(result.exemptPaths, ['plugin-registry/plugins.yaml']);
+});
+
+// @covers AC-CI-PR-DOCS-001.7
+test('the registry exemption does not cover other registry files or mixed changes', () => {
+  const otherRegistryFile = validator.classifyChangedFiles([
+    { filename: 'plugin-registry/schema.json', status: 'modified' },
+  ]);
+  assert.equal(otherRegistryFile.requiresCoverage, true);
+  assert.deepEqual(otherRegistryFile.triggeringPaths, ['plugin-registry/schema.json']);
+
+  const mixedChange = validator.classifyChangedFiles([
+    { filename: 'plugin-registry/plugins.yaml', status: 'modified' },
+    { filename: 'apps/backend/runtime.go', status: 'modified' },
+  ]);
+  assert.equal(mixedChange.requiresCoverage, true);
+  assert.deepEqual(mixedChange.exemptPaths, ['plugin-registry/plugins.yaml']);
+  assert.deepEqual(mixedChange.triggeringPaths, ['apps/backend/runtime.go']);
+});
+
 // @covers AC-CI-PR-DOCS-001.2
 test('recognized harness configuration paths are exempt', () => {
   const result = validator.classifyChangedFiles([
