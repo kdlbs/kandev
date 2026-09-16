@@ -216,6 +216,7 @@ function WorkflowStepItem({
   agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
   const isCurrent = !isArchived && index === currentIndex;
   const isAdjacent =
@@ -242,6 +243,7 @@ function WorkflowStepItem({
         <PopoverTrigger asChild>
           <button
             type="button"
+            ref={triggerRef}
             data-testid={`workflow-step-${step.name}`}
             aria-current={isCurrent ? "step" : undefined}
             className={cn(
@@ -279,7 +281,7 @@ function WorkflowStepItem({
           agentLabelsByProfileId={agentLabelsByProfileId}
           onMove={onMove}
           hover={hover}
-          suppressFocusReturn={openStepId !== null && openStepId !== step.id}
+          onReturnFocus={() => triggerRef.current?.focus()}
         />
       </Popover>
     </div>
@@ -308,7 +310,7 @@ function StepHoverContent({
   agentLabelsByProfileId,
   onMove,
   hover,
-  suppressFocusReturn,
+  onReturnFocus,
 }: {
   step: Step;
   isCurrent: boolean;
@@ -320,7 +322,7 @@ function StepHoverContent({
   agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
   hover: ReturnType<typeof useHoverPopover>;
-  suppressFocusReturn: boolean;
+  onReturnFocus: () => void;
 }) {
   const { t } = useTranslation();
   const stepDetails = (
@@ -351,10 +353,9 @@ function StepHoverContent({
       onFocusCapture={hover.onContentEnter}
       onBlurCapture={hover.onContentLeave}
       onOpenAutoFocus={(event) => event.preventDefault()}
-      onCloseAutoFocus={(event) => {
-        // Switching steps must not restore focus to the previous trigger and reopen it.
-        if (suppressFocusReturn) event.preventDefault();
-      }}
+      // Restoring focus after pointer exit would trigger another hover open.
+      onCloseAutoFocus={(event) => event.preventDefault()}
+      onEscapeKeyDown={onReturnFocus}
     >
       {canMove && (
         <StepMoveControls

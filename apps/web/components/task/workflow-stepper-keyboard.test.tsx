@@ -60,6 +60,8 @@ vi.mock("./workflow-move-options", () => ({
   workflowMoveOptionsPayload: () => undefined,
 }));
 
+const POPOVER_TEST_ID = "workflow-step-popover";
+const REVIEW_TRIGGER_TEST_ID = "workflow-step-Review";
 const EXPANDED_ATTRIBUTE = "aria-expanded";
 
 const STEPS: WorkflowStepperStep[] = [
@@ -91,7 +93,7 @@ describe("WorkflowStepper full-layout keyboard disclosure", () => {
 
     await waitFor(
       () => {
-        expect(screen.getByTestId("workflow-step-popover")).toBeTruthy();
+        expect(screen.getByTestId(POPOVER_TEST_ID)).toBeTruthy();
         expect(screen.getByTestId("workflow-step-progress-work").textContent).toContain(
           "Preparing agent",
         );
@@ -109,7 +111,7 @@ describe("WorkflowStepper full-layout keyboard disclosure", () => {
         workflowId="workflow-1"
       />,
     );
-    const destinationTrigger = screen.getByTestId("workflow-step-Review");
+    const destinationTrigger = screen.getByTestId(REVIEW_TRIGGER_TEST_ID);
     destinationTrigger.focus();
     await waitFor(() => {
       expect(destinationTrigger.getAttribute("aria-current")).toBe("step");
@@ -130,7 +132,7 @@ describe("WorkflowStepper full-layout keyboard disclosure", () => {
       />,
     );
 
-    const destinationTrigger = screen.getByTestId("workflow-step-Review");
+    const destinationTrigger = screen.getByTestId(REVIEW_TRIGGER_TEST_ID);
     destinationTrigger.focus();
     const moveButton = await screen.findByTestId("workflow-step-move-here");
 
@@ -163,7 +165,7 @@ describe("WorkflowStepper exclusive hover", () => {
         />,
       );
       const work = screen.getByTestId("workflow-step-Work");
-      const review = screen.getByTestId("workflow-step-Review");
+      const review = screen.getByTestId(REVIEW_TRIGGER_TEST_ID);
       act(() => work.focus());
       await act(() => vi.advanceTimersByTimeAsync(200));
       expect(work.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
@@ -171,7 +173,7 @@ describe("WorkflowStepper exclusive hover", () => {
       fireEvent.pointerEnter(review);
       await act(() => vi.advanceTimersByTimeAsync(200));
       expect(review.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
-      expect(screen.getAllByTestId("workflow-step-popover")).toHaveLength(1);
+      expect(screen.getAllByTestId(POPOVER_TEST_ID)).toHaveLength(1);
       expect(work.getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
 
       // The old close timer and focus restoration must not reclaim the disclosure.
@@ -180,7 +182,67 @@ describe("WorkflowStepper exclusive hover", () => {
       await act(() => vi.advanceTimersByTimeAsync(200));
       expect(work.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
       expect(review.getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
-      expect(screen.getAllByTestId("workflow-step-popover")).toHaveLength(1);
+      expect(screen.getAllByTestId(POPOVER_TEST_ID)).toHaveLength(1);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("WorkflowStepper hover dismissal", () => {
+  it.each([false, true])(
+    "stays closed after pointer exit (entered content: %s)",
+    async (enterContent) => {
+      vi.useFakeTimers();
+      try {
+        render(
+          <WorkflowStepper
+            steps={STEPS}
+            currentStepId="work"
+            taskId="task-1"
+            workflowId="workflow-1"
+          />,
+        );
+        const trigger = screen.getByTestId("workflow-step-Work");
+        fireEvent.pointerEnter(trigger);
+        await act(() => vi.advanceTimersByTimeAsync(200));
+        const popover = screen.getByTestId(POPOVER_TEST_ID);
+        if (enterContent) fireEvent.pointerEnter(popover);
+        fireEvent.pointerLeave(trigger);
+        if (enterContent) fireEvent.pointerLeave(popover);
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        expect(screen.queryByTestId(POPOVER_TEST_ID)).toBeNull();
+        await act(() => vi.advanceTimersByTimeAsync(500));
+        expect(screen.queryByTestId(POPOVER_TEST_ID)).toBeNull();
+        expect(document.activeElement).not.toBe(trigger);
+      } finally {
+        cleanup();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("returns keyboard focus on Escape without reopening", async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <WorkflowStepper
+          steps={STEPS}
+          currentStepId="work"
+          taskId="task-1"
+          workflowId="workflow-1"
+        />,
+      );
+      const trigger = screen.getByTestId(REVIEW_TRIGGER_TEST_ID);
+      act(() => trigger.focus());
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      const move = screen.getByTestId("workflow-step-move-here");
+      act(() => move.focus());
+      fireEvent.keyDown(move, { key: "Escape" });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(screen.queryByTestId(POPOVER_TEST_ID)).toBeNull();
+      expect(document.activeElement).toBe(trigger);
     } finally {
       cleanup();
       vi.useRealTimers();
