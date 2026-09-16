@@ -10,6 +10,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -23,26 +25,49 @@ const (
 	RunReasonManualResumeAfterFailure = "manual_resume_after_failure"
 )
 
+// officeLegacyTransientMaxRetries bounds how many times a classified-transient
+// post-start failure on the legacy (HandleAgentFailure) path is retried
+// before it counts toward auto-pause like any other failure. Shared with
+// the pre-launch retry tier's run.RetryCount rather than a dedicated
+// column: a run that already burned pre-launch retries gets no transient
+// retry here, which under-retries in a rare case but can never lengthen
+// the pre-launch budget.
+const officeLegacyTransientMaxRetries = 2
+
+// officeLegacyTransientBackoff mirrors the first two steps of the routing
+// tier's short-retry backoff (routing_lifecycle.go's officeShortRetryBackoff).
+var officeLegacyTransientBackoff = []time.Duration{
+	5 * time.Second,
+	10 * time.Second,
+}
+
 // HandleAgentFailure is the v1 office failure path: every agent error
-// is treated as terminal. The run is marked failed with the verbatim
-// error message, the consecutive-failure counter is incremented, and
-// when it crosses the effective threshold the agent is auto-paused.
-// It also stamps office_agent_runtime.last_run_finished_at the same as
-// the completed/stopped paths, so cooldown_sec paces the agent's next
-// heartbeat-driven fire regardless of why the previous run ended.
+// is treated as terminal, except a classified-transient post-start
+// failure that still has retry budget, which is requeued instead (see
+// tryLegacyTransientRetry). A terminal failure marks the run failed with
+// the verbatim error message, increments the consecutive-failure
+// counter, and auto-pauses the agent once it crosses the effective
+// threshold. It also stamps office_agent_runtime.last_run_finished_at
+// the same as the completed/stopped paths, so cooldown_sec paces the
+// agent's next heartbeat-driven fire regardless of why the previous run
+// ended.
 //
-// No retry is scheduled — the user resolves via Resume session in the
-// chat or Mark fixed in the inbox.
+// Beyond the transient retry above, no other retry is scheduled — the
+// user resolves via Resume session in the chat or Mark fixed in the
+// inbox.
 //
 // Returns wrote=false when MarkRunFailed's guarded write was a no-op —
 // the run reached a terminal state through another writer (e.g. a
 // concurrent cancel) between the caller's read and this call — so
 // callers know not to treat a cancelled/already-terminal run as a
-// genuine agent failure (Review round 3, R3-1).
+// genuine agent failure (Review round 3, R3-1). wrote=false also
+// covers a scheduled transient retry: the run was requeued, not
+// terminalized, so callers must not escalate or publish for it either.
 func (s *Service) HandleAgentFailure(
 	ctx context.Context,
 	run *models.Run,
 	errorMessage string,
+	providerError *streams.ProviderError,
 ) (bool, error) {
 	wrote, err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage)
 	if err != nil {
@@ -53,6 +78,9 @@ func (s *Service) HandleAgentFailure(
 		// terminal state was written by someone else. Still make sure
 		// the agent isn't left stuck "working" from the launch.
 		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+		return false, nil
+	}
+	if s.tryLegacyTransientRetry(ctx, run, errorMessage, providerError) {
 		return false, nil
 	}
 	// MarkRunFailed bypasses transitionRunTerminal (this is the office v1
@@ -97,6 +125,64 @@ func (s *Service) HandleAgentFailure(
 	}
 
 	return true, nil
+}
+
+// tryLegacyTransientRetry requeues run for another attempt instead of
+// letting HandleAgentFailure treat it as terminal, when the failure
+// classifies as transient (ClassTransient, AutoRetryable, FallbackAllowed)
+// and the run still has legacy-transient retry budget. Called after
+// MarkRunFailed has already recorded the row as failed, so on success the
+// caller must not also run the terminal-shape/counter/auto-pause
+// accounting below — that is exactly what returning true signals.
+//
+// providerError.Message and .ResetAt are preferred over the bare
+// errorMessage when present: a raw agent stderr string ("Overloaded", a
+// bare 429) usually classifies unclassified, while the structured
+// provider error carries the signal the classifier needs.
+func (s *Service) tryLegacyTransientRetry(
+	ctx context.Context, run *models.Run, errorMessage string,
+	providerError *streams.ProviderError,
+) bool {
+	if run.RetryCount >= officeLegacyTransientMaxRetries {
+		return false
+	}
+	if stale, _ := isRetryStale(run); stale {
+		return false
+	}
+	message := errorMessage
+	var resetHint *time.Time
+	if providerError != nil {
+		if providerError.Message != "" {
+			message = providerError.Message
+		}
+		resetHint = providerError.ResetAt
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:     routingerr.PhaseStreaming,
+		Stderr:    message,
+		ResetHint: resetHint,
+	})
+	if !classified.ShouldShortRetry() {
+		return false
+	}
+
+	delay := officeLegacyTransientBackoff[run.RetryCount]
+	retryAt := time.Now().UTC().Add(delay)
+	newRetryCount := run.RetryCount + 1
+
+	s.releaseTaskCheckoutForRun(ctx, run)
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	if err := s.repo.ScheduleRetry(ctx, run.ID, retryAt, newRetryCount); err != nil {
+		s.logger.Error("failed to schedule legacy transient retry",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return false
+	}
+	s.logger.Info("retrying transient post-start failure before it counts toward auto-pause",
+		zap.String("run_id", run.ID),
+		zap.String("code", string(classified.Code)),
+		zap.Int("retry_count", newRetryCount),
+		zap.Duration("delay", delay))
+	return true
 }
 
 // RecordAgentSuccess resets the consecutive-failure counter for the

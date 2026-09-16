@@ -144,6 +144,12 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.ClassifierRule)
 }
 
+// ShouldShortRetry reports whether a classified failure is worth retrying
+// against the same provider before falling back or escalating.
+func (e *Error) ShouldShortRetry() bool {
+	return e != nil && e.Class == ClassTransient && e.AutoRetryable && e.FallbackAllowed
+}
+
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
 	Phase         Phase

@@ -748,7 +748,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// rate-limit-retry callers; we deliberately do NOT call into it
 	// here. See docs/specs/office/requirements/runtime.md.
 	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
-	wrote, err := s.HandleAgentFailure(ctx, run, errMsg)
+	wrote, err := s.HandleAgentFailure(ctx, run, errMsg, data.ProviderError)
 	if err != nil {
 		return err
 	}
