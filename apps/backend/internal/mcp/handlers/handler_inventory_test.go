@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -144,6 +146,11 @@ func TestHandleAddWorkspaceSourcesRejectsUnrelatedAndMismatchedCallers(t *testin
 			}))
 			require.NoError(t, err)
 			assertWSError(t, response, ws.ErrorCodeForbidden)
+			if testCase.name == "sibling" {
+				var payload ws.ErrorPayload
+				require.NoError(t, json.Unmarshal(response.Payload, &payload))
+				assert.Contains(t, payload.Message, "active granted coordinator scope")
+			}
 
 			folders, listErr := repo.ListTaskWorkspaceFolders(ctx, testCase.targetTaskID)
 			require.NoError(t, listErr)

@@ -2146,7 +2146,7 @@ func (h *Handlers) authorizeWorkspaceSourceTarget(ctx context.Context, msg *ws.M
 		var authErr error
 		decision, authErr = h.authorizeCoordinatorAction(ctx, caller, target, req.CallerSessionID, "add_workspace_sources", coordinator.CapabilityOrchestrate)
 		if authErr != nil || !decision.Allowed {
-			return nil, false, decision, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "only a task's direct parent in the same workspace can attach its sources")
+			return nil, false, decision, newWorkspaceSourceError(msg, ws.ErrorCodeForbidden, "attaching sources requires a same-workspace direct parent or active granted coordinator scope")
 		}
 	}
 	return target, isChildTarget, decision, nil
@@ -2704,15 +2704,14 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// relationship alone no longer drives interruption (see
 	// dispatchTaskMessage's interruptIfBusy parameter and
 	// queueThenInterruptTaskMessage). The server still authorizes
-	// delivery_mode="interrupt" only when the sender is the target's
-	// direct parent — the same relationship check as before, now gating
-	// an explicit request instead of driving an implicit one. A non-parent
-	// sender explicitly requesting "interrupt" is hard-rejected rather than
-	// silently downgraded to "queued": a silent downgrade would misreport
-	// what happened and hide caller misuse instead of telling the caller
-	// its request was rejected. Omitted or "queued" keeps the default
-	// queue-and-wait behavior documented on message_task_kandev, even for
-	// a parent sender.
+	// delivery_mode="interrupt" for the target's direct parent or a sender
+	// with active granted coordinator scope. Both paths gate an explicit
+	// request instead of driving an implicit one. A sender outside both paths
+	// is hard-rejected rather than silently downgraded to "queued": a silent
+	// downgrade would misreport what happened and hide caller misuse instead
+	// of telling the caller its request was rejected. Omitted or "queued"
+	// keeps the default queue-and-wait behavior documented on
+	// message_task_kandev, including for a parent sender.
 	wantsInterrupt := req.DeliveryMode == deliveryModeInterrupt
 	interruptDecision := coordinator.Decision{}
 	if wantsInterrupt {
@@ -2720,7 +2719,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	}
 	if wantsInterrupt && (err != nil || !interruptDecision.Allowed) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
-			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
+			`delivery_mode="interrupt" requires a direct parent or active granted coordinator scope`, nil)
 	}
 	if parentReply != nil {
 		// Claim the durable question before dispatch. A failed status update after

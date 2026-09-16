@@ -914,13 +914,14 @@ func TestHandleMessageTask_ParentToChildRunningSession_ExplicitQueued_DoesNotInt
 }
 
 // TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected pins
-// the authorization contract: delivery_mode="interrupt" is only ever
-// honored when the sender is the target's direct parent. A non-parent
-// (sibling/unrelated) sender explicitly requesting "interrupt" must get a
-// hard rejection — not a silent downgrade to "queued" — and the rejection
-// must have no side effect: nothing is queued, dispatched, or interrupted.
-// A silent downgrade would misreport what happened and hide caller misuse
-// instead of telling the caller its request was rejected.
+// the authorization contract: delivery_mode="interrupt" is honored for the
+// target's direct parent or a caller with active granted coordinator scope. A
+// non-parent (sibling/unrelated) sender without that scope explicitly
+// requesting "interrupt" must get a hard rejection — not a silent downgrade
+// to "queued" — and the rejection must have no side effect: nothing is
+// queued, dispatched, or interrupted. A silent downgrade would misreport what
+// happened and hide caller misuse instead of telling the caller its request
+// was rejected.
 func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
@@ -935,6 +936,7 @@ func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *test
 	var errPayload ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &errPayload))
 	assert.Contains(t, errPayload.Message, "direct parent")
+	assert.Contains(t, errPayload.Message, "active granted coordinator scope")
 
 	// No side effect from the rejected request: the target's queue stays
 	// empty and neither the interrupt nor any other dispatch path ran.
