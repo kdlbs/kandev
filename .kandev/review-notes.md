@@ -1,3 +1,5 @@
 ## Fixed during review
 - apps/backend/internal/orchestrator/messagequeue/pending_move_exact_cancel.go:134 — Redacted a same-workspace pending row when the submitted session resolves to a task outside the authorized task-tree target. (commit 3f221d84f1d1831dc61ef348ab3655cdcdd8eab2)
 - apps/backend/internal/mcp/handlers/pending_move_read.go:30 — Preserved identifier presence and canonicality in malformed census-request audit evidence. (commit 3f221d84f1d1831dc61ef348ab3655cdcdd8eab2)
+- apps/backend/internal/agent/runtime/lifecycle/start_model.go:116 -- auto-fallback decisions retained a configured fallback model in provider-default warning metadata; normalized the policy so auto-fallback ignores the fallback model consistently with the runtime contract (commit 649b4fa22)
+- apps/backend/internal/agent/runtime/lifecycle/start_model.go:140 -- auto-fallback profiles failed when ACP model selection was unsupported; restored provider-default continuation with selection_unsupported warning metadata (commit fdfbffc9a)

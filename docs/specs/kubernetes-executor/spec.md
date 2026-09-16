@@ -31,8 +31,11 @@ first-class Pod with an administrator-reviewed workload template.
 - The template can define images, sidecars, init containers, resource and
   security settings, scheduling policy, image-pull secrets, and workload
   service accounts. Kandev retains exclusive control of the fields needed for
-  runtime identity, bootstrap, transport, workspace access, recovery, and
-  cleanup.
+  runtime identity, bootstrap, transport, workspace storage, recovery, and
+  cleanup. Ordinary non-main containers may explicitly request one RO/RW
+  `kandev-workspace` mount at exactly `/workspace`; admission must preserve
+  its recipient and shape. Runtime/auth mounts and init/ephemeral containers
+  remain excluded. See [workspace grants](../executors/system-design/kubernetes-docker-workloads.md).
 - Profiles support a Kandev-managed per-session PVC, a Pod-scoped `emptyDir`,
   or an existing namespaced PVC. Kandev never deletes an existing PVC.
 - Ordinary Stop and backend shutdown preserve the Pod and workspace for
@@ -196,7 +199,10 @@ or cluster-resource identity.
 3. **Scheduling:** Kandev creates the merged Pod and waits for the main
    container to run.
 4. **Bootstrapping:** Kandev uploads helper/config/credentials through
-   `pods/exec`, signals the managed entrypoint, and establishes port-forward.
+   `pods/exec`, executes the resolved preparation script within its setup
+   budget, signals the managed entrypoint only after preparation succeeds, and
+   establishes port-forward. Preparation failure returns a bounded sanitized
+   diagnostic without releasing agentctl.
 5. **Running:** the existing nonce handshake succeeds and agentctl owns the
    agent subprocess.
 6. **Preserved:** ordinary stop or backend shutdown closes local forwarding but

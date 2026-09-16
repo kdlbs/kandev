@@ -31,5 +31,9 @@
   "openTask": "Abrir tarefa",
   "questionCount_one": "{{count}} pergunta neste conjunto",
   "questionCount_other": "{{count}} perguntas neste conjunto",
-  "emptyTitleUnnamedWorkspace": "Nada está à sua espera neste espaço de trabalho."
+  "emptyTitleUnnamedWorkspace": "Nada está à sua espera neste espaço de trabalho.",
+  "tabLabel": "Precisa de si",
+  "failedClauseSome_one": "Esta lista não conta tarefas falhadas. {{count}} tarefa também falhou. Consulte o separador Falhadas.",
+  "failedClauseSome_other": "Esta lista não conta tarefas falhadas. {{count}} tarefas também falharam. Consulte o separador Falhadas.",
+  "failedClauseNone": "Esta lista não conta tarefas falhadas. Nenhuma falhou neste espaço de trabalho neste momento; pode consultar o separador Falhadas a qualquer momento."
 }

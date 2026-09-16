@@ -9,7 +9,11 @@ import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scrol
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
-import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
+import { watchWs } from "../../helpers/causal-waits";
+import {
+  expectSendNowInterruptsRunningFIFOTurn,
+  expectSendNowWorkflowRunning,
+} from "./message-queue-workflow-helpers";
 
 registerSeparateQueueRows(test);
 
@@ -19,6 +23,17 @@ test("mobile Send Now keeps a workflow transition running", async ({
   seedData,
 }) => {
   await expectSendNowWorkflowRunning(testPage, apiClient, seedData, true);
+});
+
+test("mobile Send Now interrupts a running FIFO turn", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(150_000);
+  const gateway = watchWs(testPage);
+  await expectSendNowInterruptsRunningFIFOTurn(testPage, apiClient, seedData, true, gateway);
+  await assertNoDocumentHorizontalOverflow(testPage);
 });
 
 async function expectTouchTarget(locator: Locator): Promise<void> {

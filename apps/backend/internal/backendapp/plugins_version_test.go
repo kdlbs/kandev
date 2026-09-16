@@ -134,6 +134,9 @@ func provideTestServices(t *testing.T, version string) (*Services, *config.Confi
 	if err != nil {
 		t.Fatalf("provideServices: %v", err)
 	}
+	if services.PluginsCleanup != nil {
+		t.Cleanup(func() { _ = services.PluginsCleanup() })
+	}
 	if services.Workflow != nil {
 		t.Cleanup(func() { _ = services.Workflow.Close() })
 	}

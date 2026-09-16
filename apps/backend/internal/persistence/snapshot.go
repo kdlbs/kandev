@@ -33,6 +33,11 @@ func SnapshotSQLite(writer *sqlx.DB, path string) (int64, error) {
 	return snapshotSQLite(writer, path)
 }
 
+// SnapshotSQLiteContext creates a cancellable SQLite snapshot.
+func SnapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (int64, error) {
+	return snapshotSQLiteContext(ctx, writer, path)
+}
+
 // snapshotSQLite copies the live database to path using VACUUM INTO,
 // which produces a clean, defragmented snapshot including all WAL frames.
 // Returns the size of the created file in bytes.

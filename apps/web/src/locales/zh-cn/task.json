@@ -685,7 +685,11 @@
   "hidePreparationDetails": "隐藏准备详情",
   "hidePreviousAgentError": "隐藏先前的智能体错误",
   "hideRightPanel": "隐藏右侧面板",
+  "hideRightPane": "隐藏右侧窗格",
   "hideRightPanels": "隐藏右侧面板",
+  "rightPaneUnavailable": "没有可隐藏的独立右侧窗格",
+  "rightPaneUnavailableWhileMaximized": "面板最大化时，右侧窗格不可用",
+  "rightPanelsUnavailableWhileMaximized": "面板最大化时，右侧面板不可用",
   "hideSidebar": "隐藏侧边栏",
   "hideTheCommentListTheComments": "隐藏评论列表。评论仍会排队，下次提交时仍会发送（在此处或从聊天框）。",
   "host": "主机",
@@ -1470,6 +1474,8 @@
   "showPreparationDetails": "显示准备详情",
   "showRawText": "显示原始文本",
   "showRightPanel": "显示右侧面板",
+  "showRightPane": "显示右侧窗格",
+  "showRightPanels": "显示右侧面板",
   "showSidebar": "显示侧边栏",
   "sibling": "同级",
   "sidebarFilters": "侧边栏筛选",
@@ -2174,5 +2180,7 @@
   "primarySessionChangedRetry": "主会话已更改。请再次运行。",
   "planCommentMigrationFailed": "无法恢复部分已保存的计划评论。",
   "planCommentMigrationNeedsPlan": "请创建或恢复计划，以恢复已保存的评论。",
-  "planCommentMigrationPending": "仍在恢复已保存的计划评论。您的消息会保留。"
+  "planCommentMigrationPending": "仍在恢复已保存的计划评论。您的消息会保留。",
+  "toolPayloadRemovedAt": "工具详细数据已于 {{date}} 删除。",
+  "toolPayloadRemoved": "工具详细数据已删除。"
 }

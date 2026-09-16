@@ -137,3 +137,9 @@ Targeted product tests and review regressions: passed.
 A hung preflight can take longer to report failure. Cancellation must still work.
 A new card reveal can conflict with bottom-follow or hidden-panel restoration.
 Short viewports require the full card to share the transcript scroll area.
+
+## September 14 presentation successor
+
+The [error scope package](../error-scope-and-history/plan.md) supersedes the session card placement and removal behavior.
+Completed results here remain historical evidence. Provider recovery, timeout budgets, cancellation, and authorization remain unchanged.
+The successor owns chronological error retention, ordinary scroll behavior, and shared task alerts.

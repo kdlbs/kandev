@@ -27,3 +27,16 @@ describe("quick chat hydration state", () => {
     expect(state.quickChat.selectionReadyByWorkspace).toEqual({ "workspace-1": true });
   });
 });
+
+describe("failed Inbox hydration state", () => {
+  it("keeps the request revision map when older persisted state omits it", () => {
+    const state = mergeInitialState({
+      failedInbox: {
+        byWorkspaceId: {},
+        generationByWorkspaceId: {},
+      },
+    } as unknown as HydrationState);
+
+    expect(state.failedInbox.readRevisionByWorkspaceId).toEqual({});
+  });
+});

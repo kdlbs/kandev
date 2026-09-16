@@ -207,3 +207,9 @@ pass.
 - Cleanup by session ID alone can terminate a replacement execution.
 - Error deduplication without attempt correlation can hide historical failures.
 - Request disconnect must remain distinct from explicit cancellation.
+
+## September 14 presentation successor
+
+The [error scope package](../error-scope-and-history/plan.md) supersedes the session card placement and removal behavior.
+Completed results here remain historical evidence. Provider recovery, timeout budgets, cancellation, and authorization remain unchanged.
+The successor owns chronological error retention, ordinary scroll behavior, and shared task alerts.

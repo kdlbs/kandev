@@ -18,6 +18,8 @@ import { ToolCallMessage } from "@/components/task/chat/messages/tool-call-messa
 import { ToolEditMessage } from "@/components/task/chat/messages/tool-edit-message";
 import { ToolReadMessage } from "@/components/task/chat/messages/tool-read-message";
 import { ToolSearchMessage } from "@/components/task/chat/messages/tool-search-message";
+import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
+import { ToolPayloadRemovedMessage } from "./messages/tool-payload-removed-message";
 import { ToolExecuteMessage } from "@/components/task/chat/messages/tool-execute-message";
 import { ThinkingMessage } from "@/components/task/chat/messages/thinking-message";
 import { TodoMessage } from "@/components/task/chat/messages/todo-message";
@@ -214,6 +216,11 @@ type MessageAdapter = {
 };
 
 const adapters: MessageAdapter[] = [
+  {
+    matches: (comment) =>
+      comment.type !== "tool_execute" && Boolean(payloadRetentionMarker(comment.metadata)),
+    render: (comment) => <ToolPayloadRemovedMessage comment={comment} />,
+  },
   {
     matches: (comment) => comment.type === "thinking",
     render: (comment, ctx) => (
