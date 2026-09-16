@@ -70,3 +70,4 @@ This refinement replaces the initial invalidation-only plan. Database cleanup re
 - [Replacement design](../specs/plugins/system-design/conversation-source-reconciliation.md)
 - [Implementation plan](../plans/conversation-storage-replacement/plan.md)
 - [Browser facade decision](2026-09-06-browser-plugin-conversation-facade.md)
+- [Remaining validation and remediation](../plans/conversation-storage-follow-up/plan.md)

@@ -21,7 +21,8 @@ Deliver compatible readers first, migrate plugin and core consumers, then remove
 Ship the package as one release. Intermediate dual-path work orders are not release candidates.
 
 The user requested and authorized implementation of this design package on 2026-09-16.
-No production database mutation, commit, push, or PR is part of this workspace task.
+The user later authorized committing the implementation and this follow-up plan.
+Production database mutation, push, and PR creation remain outside this request.
 
 ## Inputs and authority
 
@@ -217,3 +218,16 @@ reuse, moving unchanged trigger SQL to a package constant, and flattening one
 error branch. `go test -race ./internal/task/repository/sqlite -run
 '^TestConversation' -count=1` passed. The remaining PostgreSQL, backend failure,
 and recovery E2E work will be tracked in a separate follow-up package.
+
+
+## Committed implementation and remaining work
+
+Implementation is committed as `c0a048bc128f7ef9a1051caf95ed442627faf9df`.
+Normal commit hooks passed, including Go lint and zero-warning web lint.
+Earlier uncommitted and lint-failure notes describe their historical verification phase.
+
+The [remaining-gates package](../conversation-storage-follow-up/plan.md) now owns
+PostgreSQL coverage, the Office migration failure, the task-service failure,
+and desktop/mobile recovery checks after final remediation.
+This package remains in progress until those gates pass.
+No automatic startup VACUUM was added. Physical compaction remains explicit.

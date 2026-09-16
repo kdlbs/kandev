@@ -126,3 +126,9 @@ See [the verification report](verification/large-sqlite-upgrade.md) for workload
 commands, measurements, evidence, and limits. The public operations guide now
 includes explicit post-upgrade compaction. PostgreSQL and other existing plan
 gates remain open. All changes remain uncommitted.
+
+## Remaining-gate handoff
+
+See the [follow-up package](../conversation-storage-follow-up/plan.md) for remaining
+PostgreSQL, backend failure, and final recovery evidence. Existing results remain historical.
+Do not mark this work order complete until its outstanding gates pass.

@@ -111,3 +111,9 @@ None.
 - `GOCACHE=/tmp/kandev-go-cache go run ./cmd/sqlguard ./internal`: passed.
 - Focused source, receipt, route, and gateway tests passed.
 - Status remains in progress because the required PostgreSQL source and receipt variants could not run without `KANDEV_TEST_POSTGRES_DSN`.
+
+## Remaining-gate handoff
+
+See the [follow-up package](../conversation-storage-follow-up/plan.md) for remaining
+PostgreSQL, backend failure, and final recovery evidence. Existing results remain historical.
+Do not mark this work order complete until its outstanding gates pass.

@@ -187,3 +187,9 @@ PR review. The broader durable transport scope decision remains separate.
   overwrite newer snapshot state, and deleted rows must not reappear.
 - Expiry, removal, access revocation, and panel replacement can race.
 - Real transport tests must use fresh binaries and bundles.
+
+## Replacement validation handoff
+
+The [remaining-gates package](../conversation-storage-follow-up/plan.md) owns the
+replacement PostgreSQL matrix, backend failure remediation, and final recovery E2E evidence.
+Historical counts in this package do not prove the replacement implementation.

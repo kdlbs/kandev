@@ -141,3 +141,9 @@ ownership. Retention now runs from the live service maintenance lifecycle.
 All six work orders are complete. External plugin creation, publication, core
 removal, and saved-layout migration remain blocked on a later explicitly
 approved design and implementation package.
+
+## Replacement validation handoff
+
+The [remaining-gates package](../conversation-storage-follow-up/plan.md) owns the
+replacement PostgreSQL matrix, backend failure remediation, and final recovery E2E evidence.
+Historical counts in this package do not prove the replacement implementation.

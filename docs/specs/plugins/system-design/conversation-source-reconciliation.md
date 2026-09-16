@@ -352,3 +352,8 @@ Separate backup time, cleanup time, and ordinary boot time.
 Structural gates require zero legacy payload tables/files after successful cleanup and no per-message plugin-history writes.
 Revision-row count cannot exceed surviving session count and cannot grow with repeated writes to one session.
 Timing results inform review. They do not invent a hardware-independent startup SLA.
+
+## Implementation plans
+
+- [Storage replacement](../../../plans/conversation-storage-replacement/plan.md) records the implementation and SQLite operational evidence.
+- [Remaining gates](../../../plans/conversation-storage-follow-up/plan.md) owns PostgreSQL coverage, backend failures, and final recovery E2E checks.

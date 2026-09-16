@@ -90,7 +90,7 @@ does not extract or remove the shipped core panel.
 The user requested a replacement for the storage architecture in PR #3588.
 The plugin system owns this contract because it owns Host conversation access.
 Task records remain the source of truth.
-The new criteria define the intended replacement. Implementation remains pending.
+The new criteria define the replacement. The linked plans track implementation and remaining validation.
 Existing panel, navigation, display, authorization, and SDK criteria still apply.
 
 ### REQ-PLUGINS-PROMPT-HISTORY-HOST-006: Conversation access without transcript copies
@@ -138,6 +138,7 @@ The following text records the prior contract and does not govern new implementa
 
 ## Implementation plans
 
+- [Remaining validation and remediation](../../../plans/conversation-storage-follow-up/plan.md) owns the outstanding delivery gates.
 - [Storage replacement](../../../plans/conversation-storage-replacement/plan.md) owns the new implementation and validation.
 - The original Host and recovery packages retain their historical results.
   Their durable replay work orders are not instructions to rebuild the retired transport.
@@ -152,9 +153,9 @@ product behavior; this document is authoritative only for Host prerequisites.
 
 ## Decision and implementation boundary
 
-The original prerequisite package is implemented. The storage replacement is a
-planning package and does not authorize implementation or plugin extraction. The plan assigns each criterion to one work order and stops after a
-fixture parity proof. Any implementation must preserve the Host-owned security,
+The original prerequisite package and storage replacement are implemented.
+The linked plans track remaining validation and remediation.
+Plugin extraction requires a separate approved package. Any implementation must preserve the Host-owned security,
 lifecycle, and transport invariants above.
 
 See [the system design](../system-design/prompt-history-extraction-host.md) and
