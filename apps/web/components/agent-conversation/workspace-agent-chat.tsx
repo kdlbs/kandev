@@ -1,234 +1,189 @@
 "use client";
 
-import { memo, useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
-import { IconChevronDown, IconChevronUp, IconMessageQuestion } from "@tabler/icons-react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
-import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
-import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
-import { MessageList } from "@/components/task/chat/message-list";
-import { useChatPanelState } from "@/components/task/chat/use-chat-panel-state";
-import {
-  ChatInputArea,
-  useSubmitHandler,
-  useChatPanelHandlers,
-} from "@/components/task/chat/chat-input-area";
-import { ClarificationInputOverlay } from "@/components/task/chat/clarification-input-overlay";
-import { ResizeHandle } from "@/components/task/chat/resize-handle";
-import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
-import type { Message } from "@/lib/types/http";
-import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
-import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
-import type { WorkspaceAgentChatProps, WorkspaceAgentChatStatus } from "@kandev/plugin-sdk";
+import { Textarea } from "@kandev/ui/textarea";
 import { useTranslation } from "react-i18next";
+import { generateUUID } from "@/lib/utils";
+import {
+  pluginConversationUrl,
+  PluginConversationScopeProvider,
+} from "@/lib/plugins/conversation-scope";
+import { pluginConversationApi } from "@/lib/plugins/conversation-host";
+import type { WorkspaceAgentChatProps, WorkspaceAgentChatStatus } from "@kandev/plugin-sdk";
 
-type ClarificationSectionProps = {
-  pending: boolean;
-  messages: readonly Message[] | null | undefined;
-  onResolved: () => void;
-  shortcutScopeRef: RefObject<HTMLElement | null>;
-};
+type ManagedDescriptor = { taskId: string; sessionId: string; workspaceId: string };
+type InternalProps = WorkspaceAgentChatProps & { pluginId?: string };
 
-const noop = () => {};
-
-function ClarificationSection({
-  pending,
-  messages,
-  onResolved,
-  shortcutScopeRef,
-}: ClarificationSectionProps) {
-  const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState(false);
-  const contentId = useId();
-  const { height, containerRef, resetHeight, resizeHandleProps } =
-    useResizableClarificationOverlay();
-
-  useEffect(() => {
-    if (!pending) {
-      setCollapsed(false);
-      resetHeight();
-    }
-  }, [pending, resetHeight]);
-
-  if (!pending) return null;
-  const actionLabel = collapsed ? t("chat:expandClarification") : t("chat:collapseClarification");
-
-  return (
-    <div className="relative shrink-0 border-t border-sky-400/30 bg-card">
-      {!collapsed && <ResizeHandle {...resizeHandleProps} />}
-      <div
-        ref={containerRef}
-        className={
-          collapsed
-            ? "h-11"
-            : "flex min-h-[7.5rem] max-h-[35vh] flex-col overflow-hidden overscroll-contain"
-        }
-        style={!collapsed && height !== null ? { height } : undefined}
-      >
-        <div className="flex h-11 shrink-0 items-center justify-between gap-2 pl-4">
-          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-            <IconMessageQuestion className="h-4 w-4 shrink-0 text-blue-500" />
-            <span className="truncate">{t("chat:clarificationNeeded")}</span>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 cursor-pointer rounded-none"
-            aria-label={actionLabel}
-            aria-expanded={!collapsed}
-            aria-controls={contentId}
-            onClick={() => setCollapsed((current) => !current)}
-          >
-            {collapsed ? (
-              <IconChevronUp className="h-4 w-4" />
-            ) : (
-              <IconChevronDown className="h-4 w-4" />
-            )}
-          </Button>
-        </div>
-        <div
-          id={contentId}
-          className={collapsed ? "hidden" : "min-h-0 flex-1 overflow-y-auto px-1"}
-        >
-          <ClarificationInputOverlay
-            messages={messages}
-            onResolved={onResolved}
-            onDismiss={noop}
-            shortcutScopeRef={shortcutScopeRef}
-            keyboardShortcutsEnabled={!collapsed}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function useManagedConversationLifecycle(
-  taskWorkspaceId: string | undefined,
+function useManagedDescriptor(
+  pluginId: string | undefined,
   workspaceId: string,
-  hasSession: boolean,
-  onStatus: WorkspaceAgentChatProps["onStatus"],
+  conversationId: string,
+  resourceVersion: string,
 ) {
-  const hasResolvedConversation = useRef(false);
-  let lifecycleStatus: WorkspaceAgentChatStatus;
-  if (taskWorkspaceId === undefined) {
-    lifecycleStatus = "loading";
-  } else if (taskWorkspaceId !== workspaceId) {
-    lifecycleStatus = "permission-denied";
-  } else if (hasSession) {
-    lifecycleStatus = "ready";
-  } else {
-    lifecycleStatus = hasResolvedConversation.current ? "deleted" : "unavailable";
-  }
-
+  const [descriptor, setDescriptor] = useState<ManagedDescriptor | null>(null);
+  const [status, setStatus] = useState<WorkspaceAgentChatStatus>("loading");
   useEffect(() => {
-    if (hasSession) hasResolvedConversation.current = true;
-    onStatus?.(lifecycleStatus);
-  }, [hasSession, lifecycleStatus, onStatus]);
-
-  return lifecycleStatus;
+    const controller = new AbortController();
+    if (!pluginId) {
+      setStatus("unavailable");
+      return () => controller.abort();
+    }
+    setDescriptor(null);
+    setStatus("loading");
+    fetch(
+      pluginConversationUrl(
+        pluginId,
+        `/conversation/managed/${encodeURIComponent(conversationId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+      ),
+      { credentials: "include", cache: "no-store", signal: controller.signal },
+    )
+      .then(async (response) => {
+        if (response.ok) return response.json() as Promise<ManagedDescriptor>;
+        if (response.status === 403) throw new Error("permission-denied");
+        if (response.status === 404) throw new Error("deleted");
+        throw new Error("unavailable");
+      })
+      .then((next) => {
+        if (next.workspaceId !== workspaceId || next.sessionId !== conversationId)
+          throw new Error("permission-denied");
+        setDescriptor(next);
+        setStatus("ready");
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setStatus(
+            error instanceof Error && ["permission-denied", "deleted"].includes(error.message)
+              ? (error.message as WorkspaceAgentChatStatus)
+              : "unavailable",
+          );
+      });
+    return () => controller.abort();
+  }, [conversationId, pluginId, resourceVersion, workspaceId]);
+  return { descriptor, status };
 }
 
-function ManagedConversationChat({
-  workspaceId,
-  conversationId,
-  readOnly = false,
+function ManagedTranscript({
+  pluginId,
+  descriptor,
+  readOnly,
   placeholderOverride,
-  onStatus,
-}: Omit<WorkspaceAgentChatProps, "resourceVersion">) {
+}: {
+  pluginId: string;
+  descriptor: ManagedDescriptor;
+  readOnly: boolean;
+  placeholderOverride?: string;
+}) {
   const { t } = useTranslation();
-  const [clarificationKey, setClarificationKey] = useState(0);
-  const shortcutScopeRef = useRef<HTMLDivElement>(null);
-  const chatInputRef = useRef<ChatInputContainerHandle>(null);
-  useSettingsData(true);
-  const panelState = useChatPanelState({
-    sessionId: conversationId,
-    onOpenFile: undefined,
-    onOpenFileAtLine: undefined,
-    disableWorkbenchEffects: true,
+  const { messages, loading, removed } = pluginConversationApi.useSessionMessages({
+    sessionId: descriptor.sessionId,
+    taskId: descriptor.taskId,
+    sort: "asc",
+    pageSize: 50,
   });
-  const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
-  const { handleCancelTurn } = useChatPanelHandlers(panelState.resolvedSessionId, chatInputRef);
-  const lifecycleStatus = useManagedConversationLifecycle(
-    panelState.task?.workspaceId,
-    workspaceId,
-    Boolean(panelState.session),
-    onStatus,
-  );
-
-  const handleClarificationResolved = useCallback(() => setClarificationKey((key) => key + 1), []);
-  const handleShortcutScopeMouseDown = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
-    [],
-  );
-
-  if (lifecycleStatus !== "ready") {
+  const [content, setContent] = useState("");
+  const [sending, setSending] = useState(false);
+  const send = useCallback(async () => {
+    if (!content.trim() || sending) return;
+    setSending(true);
+    try {
+      const response = await fetch(
+        pluginConversationUrl(
+          pluginId,
+          `/conversation/managed/${encodeURIComponent(descriptor.sessionId)}/dispatch?workspace_id=${encodeURIComponent(descriptor.workspaceId)}`,
+        ),
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, occurrenceKey: generateUUID() }),
+        },
+      );
+      if (!response.ok) throw new Error("send failed");
+      setContent("");
+    } finally {
+      setSending(false);
+    }
+  }, [content, descriptor, pluginId, sending]);
+  if (removed)
     return (
       <div
         data-testid="workspace-agent-chat-status"
-        data-status={lifecycleStatus}
-        className="flex h-full min-h-0 items-center justify-center p-4"
+        data-status="deleted"
+        className="flex h-full items-center justify-center"
       >
         <Spinner aria-label={t("plugins:loadingWorkspaceAgentChat")} />
       </div>
     );
-  }
-
   return (
-    <div
-      ref={shortcutScopeRef}
-      data-testid="workspace-agent-chat"
-      data-workspace-id={workspaceId}
-      tabIndex={-1}
-      onMouseDown={handleShortcutScopeMouseDown}
-      className="flex h-full min-h-0 flex-col outline-none"
-    >
-      <div className="min-h-0 flex-1 overflow-hidden bg-popover">
-        <MessageList
-          items={panelState.groupedItems}
-          messages={panelState.allMessages}
-          permissionsByToolCallId={panelState.permissionsByToolCallId}
-          childrenByParentToolCallId={panelState.childrenByParentToolCallId}
-          taskId={panelState.taskId ?? undefined}
-          sessionId={panelState.resolvedSessionId}
-          messagesLoading={panelState.messagesLoading}
-          isWorking={panelState.isWorking}
-          sessionState={panelState.session?.state}
-          worktreePath={getSessionWorkspacePath(panelState.session)}
-          onOpenFile={undefined}
-        />
+    <div data-testid="workspace-agent-chat" className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3" aria-busy={loading}>
+        {messages.map((message) => (
+          <div key={message.id} className="rounded-md bg-muted p-3 text-sm">
+            {message.content}
+          </div>
+        ))}
       </div>
-      <ClarificationSection
-        pending={Boolean(panelState.pendingClarification)}
-        messages={panelState.pendingClarificationGroup}
-        onResolved={handleClarificationResolved}
-        shortcutScopeRef={shortcutScopeRef}
-      />
       {!readOnly && (
-        <ChatInputArea
-          chatInputRef={chatInputRef}
-          clarificationKey={clarificationKey}
-          onClarificationResolved={handleClarificationResolved}
-          handleSubmit={handleSubmit}
-          handleCancelTurn={handleCancelTurn}
-          showRequestChangesTooltip={false}
-          panelState={panelState}
-          isSending={isSending}
-          hideSessionsDropdown
-          hideAgentControls
-          hidePlanMode
-          placeholderOverride={placeholderOverride}
-          surfaceClassName="bg-popover"
-        />
+        <div className="flex gap-2 border-t p-3">
+          <Textarea
+            aria-label={t("plugins:workspaceAgentChatInput")}
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            placeholder={placeholderOverride}
+          />
+          <Button type="button" onClick={send} disabled={sending || !content.trim()}>
+            {t("plugins:workspaceAgentChatSend")}
+          </Button>
+        </div>
       )}
     </div>
   );
 }
 
 export const WorkspaceAgentChat = memo(function WorkspaceAgentChat({
+  pluginId,
+  workspaceId,
+  conversationId,
   resourceVersion,
-  ...props
-}: WorkspaceAgentChatProps) {
-  return <ManagedConversationChat key={resourceVersion} {...props} />;
+  readOnly = false,
+  placeholderOverride,
+  onStatus,
+}: InternalProps) {
+  const { t } = useTranslation();
+  const { descriptor, status } = useManagedDescriptor(
+    pluginId,
+    workspaceId,
+    conversationId,
+    resourceVersion,
+  );
+  useEffect(() => {
+    onStatus?.(status);
+  }, [onStatus, status]);
+  if (status !== "ready" || !descriptor || !pluginId)
+    return (
+      <div
+        data-testid="workspace-agent-chat-status"
+        data-status={status}
+        className="flex h-full items-center justify-center"
+      >
+        <Spinner aria-label={t("plugins:loadingWorkspaceAgentChat")} />
+      </div>
+    );
+  return (
+    <PluginConversationScopeProvider
+      pluginId={pluginId}
+      taskId={descriptor.taskId}
+      sessionId={descriptor.sessionId}
+      generation={Number(resourceVersion) || 0}
+    >
+      <ManagedTranscript
+        pluginId={pluginId}
+        descriptor={descriptor}
+        readOnly={readOnly}
+        placeholderOverride={placeholderOverride}
+      />
+    </PluginConversationScopeProvider>
+  );
 });

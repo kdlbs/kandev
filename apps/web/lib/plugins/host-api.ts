@@ -415,6 +415,8 @@ function createPluginSettingsSaveContributorHook(pluginId: string) {
 function createPluginUIApi(pluginId: string): PluginUIApi & Record<string, unknown> {
   return {
     ...PLUGIN_UI,
+    WorkspaceAgentChat: (props) =>
+      React.createElement(PluginWorkspaceAgentChat, { ...props, pluginId }),
     IntegrationEnabledControl: function PluginIntegrationEnabledControl(
       props: React.ComponentProps<typeof DraftedIntegrationEnabledControl>,
     ) {

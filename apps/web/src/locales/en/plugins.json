@@ -40,6 +40,8 @@
   "latestVersion": "Latest v{{version}}",
   "loadingMarketplace": "Loading marketplace…",
   "loadingWorkspaceAgentChat": "Loading conversation…",
+  "workspaceAgentChatInput": "Message",
+  "workspaceAgentChatSend": "Send",
   "webAppLoading": "Loading canvas…",
   "webAppUnavailable": "This canvas is unavailable.",
   "loadingPlugins": "Loading plugins...",

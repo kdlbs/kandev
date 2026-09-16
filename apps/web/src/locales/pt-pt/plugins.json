@@ -40,6 +40,8 @@
   "latestVersion": "Mais recente: v{{version}}",
   "loadingMarketplace": "A carregar o marketplace…",
   "loadingWorkspaceAgentChat": "A carregar conversa…",
+  "workspaceAgentChatInput": "Mensagem",
+  "workspaceAgentChatSend": "Enviar",
   "webAppLoading": "A carregar o canvas…",
   "webAppUnavailable": "Este canvas não está disponível.",
   "loadingPlugins": "A carregar os plugins...",

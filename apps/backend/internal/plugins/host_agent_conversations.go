@@ -39,6 +39,13 @@ type AgentConversationService interface {
 	DeleteAllForPlugin(ctx context.Context, pluginID string) (int32, error)
 }
 
+// managedConversationResolver is deliberately optional so existing host
+// implementations remain source-compatible while the browser bridge fails
+// closed until the concrete managed service is wired.
+type managedConversationResolver interface {
+	ResolveManagedConversation(ctx context.Context, pluginID, workspaceID, sessionID string) (pluginsdk.AgentConversationDescriptor, error)
+}
+
 // pluginHostAgentConversationManager implements pluginsdk.AgentConversationManager,
 // wrapping the service layer with the plugin's identity for ownership checks.
 // Every method re-checks the agent_conversation capability and the live
