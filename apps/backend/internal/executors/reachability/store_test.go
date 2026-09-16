@@ -164,6 +164,73 @@ func TestStoreObserveStickyFailureIsUnreachableOnFirstProbe(t *testing.T) {
 	}
 }
 
+// @covers AC-EXECUTORS-SSH-REACHABILITY-002.3
+//
+// The change-publish trigger is broader than StateChanged: a steady
+// unreachable executor can still swap failure reasons (network, then
+// timeout) between probes without ever leaving the unreachable state. A
+// publisher that only watched StateChanged would miss this and never tell a
+// client the diagnostic reason on screen just went stale.
+func TestStoreObserveReportsChangedOnReasonChangeWithoutStateChange(t *testing.T) {
+	repo := newStoreTestRepo(t)
+	executor := newStoreTestExecutor(t, repo)
+	s := &store{repo: repo, log: logger.Default()}
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Two failures reach failureThreshold and flip to unreachable.
+	for i := 0; i < 2; i++ {
+		executor.UpdatedAt = mustGetUpdatedAt(t, repo, executor.ID)
+		s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{
+			Host: "10.0.0.1", Reason: lifecycle.SSHReachabilityReasonNetwork, Message: "connection refused",
+		}, base.Add(time.Duration(i)*time.Second))
+	}
+
+	// A third failure with a different transient reason keeps the state
+	// unreachable (already above threshold) but changes the stored reason.
+	executor.UpdatedAt = mustGetUpdatedAt(t, repo, executor.ID)
+	result := s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{
+		Host: "10.0.0.1", Reason: lifecycle.SSHReachabilityReasonTimeout, Message: "handshake timed out",
+	}, base.Add(2*time.Second))
+
+	if result.StateChanged {
+		t.Fatalf("StateChanged = true, want false — state was already unreachable")
+	}
+	if !result.Changed {
+		t.Fatalf("Changed = false, want true — reason moved from network to timeout")
+	}
+	if result.After == nil || result.After.Reason != models.ExecutorReachabilityReasonTimeout {
+		t.Fatalf("After = %+v, want a record carrying reason %q", result.After, models.ExecutorReachabilityReasonTimeout)
+	}
+}
+
+// @covers AC-EXECUTORS-SSH-REACHABILITY-002.3
+//
+// A probe outcome that reproduces the same state and reason as the stored
+// record must not be reported as a change — this is what keeps a steady host
+// silent on the event bus.
+func TestStoreObserveReportsUnchangedWhenStateAndReasonBothRepeat(t *testing.T) {
+	repo := newStoreTestRepo(t)
+	executor := newStoreTestExecutor(t, repo)
+	s := &store{repo: repo, log: logger.Default()}
+	ctx := context.Background()
+
+	executor.UpdatedAt = mustGetUpdatedAt(t, repo, executor.ID)
+	first := s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{Success: true, Host: "10.0.0.1"}, time.Now().UTC())
+	if !first.Changed {
+		t.Fatalf("first observation: Changed = false, want true (unknown -> reachable)")
+	}
+
+	executor.UpdatedAt = mustGetUpdatedAt(t, repo, executor.ID)
+	second := s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{Success: true, Host: "10.0.0.1"}, time.Now().UTC().Add(time.Second))
+	if second.Changed {
+		t.Fatalf("second observation: Changed = true, want false — same state (reachable) and reason (success)")
+	}
+	if second.After == nil {
+		t.Fatalf("After = nil, want the current stored record")
+	}
+}
+
 func mustGetUpdatedAt(t *testing.T, repo *sqlite.Repository, id string) time.Time {
 	t.Helper()
 	executor, err := repo.GetExecutor(context.Background(), id)

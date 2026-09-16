@@ -185,6 +185,10 @@ const (
 	ExecutorCreated = "executor.created"
 	ExecutorUpdated = "executor.updated"
 	ExecutorDeleted = "executor.deleted"
+	// ExecutorReachabilityChanged is published only when a probe or a
+	// connection-configuration reset actually changes the stored state or
+	// reason — a steady host never publishes.
+	ExecutorReachabilityChanged = "executor.reachability.changed"
 )
 
 // Event types for executor profiles

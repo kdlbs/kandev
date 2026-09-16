@@ -1,7 +1,7 @@
 ---
 id: "04-reachability-api-and-events"
 title: "Reachability API, change event, and immediate probe"
-status: pending
+status: done
 wave: 3
 depends_on: ["03-reachability-poller"]
 plan: "plan.md"
@@ -214,4 +214,96 @@ statement and task 03's off-cycle-probe primitive, both consumed by the new
 
 ## Results
 
-Pending.
+Implemented as specified.
+
+- `internal/executors/reachability/publish.go` adds `RecordDTO`, `BuildRecordDTO`
+  (the nil-record → `unknown` placeholder, `updated_at`/`probing_enabled`/
+  `probe_interval_seconds`/`persisted` projection), and `Publisher.PublishChanged`,
+  wired via `Poller.SetPublisher`. `Poller.probeAndPersist` and the new
+  `ProbeAndWait` (`probe_and_wait.go`) both route through a shared
+  `observeAndPublish` so every probe primitive (scheduled pass, `ProbeNow`,
+  `ProbeAndWait`) publishes through the one path, only on an actual state/reason
+  change.
+- `ProbeAndWait` coalesces concurrent callers for the same executor id through a
+  `golang.org/x/sync/singleflight` group and copies the shared record out before
+  returning, so no caller can mutate another's copy. It runs on the poller's own
+  context/`WaitGroup` (via `acquire()`), never the caller's request context, so
+  `Stop` still drains it and a disconnecting HTTP client neither cancels it nor
+  affects a sibling still waiting on the same coalesced result.
+- `internal/task/service`: added the `ExecutorSaveObserver` interface and
+  `SetExecutorSaveObserver`; `CreateExecutor`/`UpdateExecutor` call
+  `notifyExecutorSaved` unconditionally on every save (mirroring
+  `publishExecutorEvent`'s unconditional-fire shape) — all SSH-type/active-status/
+  connection-config-diff gating lives in the observer implementation, not the
+  service. `UpdateExecutor` captures `before := *executor` strictly before
+  `applyExecutorUpdates` mutates the loaded executor in place.
+- `internal/executors/reachability/save_observer.go` implements
+  `ExecutorSaveObserver`: eligible only for an active `ssh` executor, resets via
+  `ResetExecutorReachability` only when one of the eight connection-config keys
+  actually changed (a nil `before` — create — always counts as changed), publishes
+  the reset when the previous record was worth announcing, and dispatches an
+  off-cycle probe via `Poller.ProbeNow` without waiting for the next scheduled pass.
+- `events.ExecutorReachabilityChanged`, `ws.ActionExecutorReachabilityChanged`, and
+  the `task_notifications.go` bridge subscription (bumping `wantSubscriptions` to
+  72) route the change event to WS clients on the broadcaster's default (global)
+  path, matching `ExecutorUpdated`.
+- `internal/ssh/reachability_handlers.go` adds the three routes. `loadSSHExecutor`
+  enforces 404 (nonexistent/soft-deleted) vs. 400 (wrong type) without attempting
+  config resolution — deliberately not reusing `resolveSSHTarget`, whose 400 also
+  covers an unresolvable config. `buildReachabilityDTOFromRecord` synthesizes the
+  `unknown` placeholder for an eligible executor with no record, or a `reason:
+  config` record (never a 400) when the executor's own config can't resolve a
+  target via `lifecycle.SSHTargetFromExecutorConfig`. `listReachability` lists all
+  executors and all records in one query each (no N+1), filters to type `ssh`,
+  sorts by `ID` ascending, and includes a deactivated executor's retained record.
+  `probeReachability` returns 409 for a non-active `ssh` executor without probing,
+  otherwise delegates to the shared `*reachability.Poller.ProbeAndWait`.
+- `internal/backendapp`: `startAgentInfrastructure` now captures
+  `startSSHReachabilityPoller`'s return value, wires its publisher
+  (`reachabilitypkg.NewPublisher(eventBus)`) and the task service's
+  `ExecutorSaveObserver` (`reachabilitypkg.NewSaveObserver`), and threads the one
+  running `*reachability.Poller` instance through `startGatewayAndServe` →
+  `buildHTTPServer` → `routeParams.sshReachabilityPoller` → `sshhandlers.RegisterRoutes`.
+  A nil poller is passed as a nil `ReachabilityProber` interface (not a typed-nil
+  `*Poller`), avoiding the classic Go nil-interface trap in `helpers.go`.
+- Process note: production code for `reachability_handlers.go` was written once,
+  in full, before any test existed for it — a Iron Law violation caught before
+  it compiled cleanly. The file was deleted and rebuilt from the work order's
+  mandated RED test first (`TestProbeReachability_CoalescesConcurrentProbes`,
+  confirmed to fail on a missing `probeReachability`/extended `NewHandler`
+  signature), then GREEN, then the remaining acceptance criteria were each
+  covered by a dedicated test (404/400/409/reason-config/ordering/filtering).
+  Three of those — the config-resolution branch, the ascending sort, and the 409
+  short-circuit — were confirmed non-vacuous by temporarily breaking the
+  corresponding production logic and observing the test fail, then restoring it.
+
+Verification (all green):
+
+```bash
+go test -tags fts5 -race ./internal/ssh/...
+go test -tags fts5 -race ./internal/executors/reachability/... -run 'Publish|Change|SaveObserver'
+go test -tags fts5 -race ./internal/task/service/ -run 'Executor.*Reachability|SaveObserver'
+go test -tags fts5 -race ./internal/gateway/websocket/ -run 'Reachability|Executor'
+go test -tags fts5 -race ./internal/events/...
+go test -tags fts5 -race ./internal/backendapp/...
+make lint
+```
+
+Running the full, unfiltered `internal/task/service` suite (not part of this
+task's verification list, which only requires the `Executor.*Reachability|
+SaveObserver` filter) surfaces a pre-existing, unrelated cluster of failures —
+`TestDesktopDiscoveryRootPersistsAcrossServiceRestart`,
+`TestReconnectDesktopDiscoveryRootNormalizesOldPath`,
+`TestDesktopDiscoveryFailurePreservesCachedRepositories`,
+`TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity`,
+`TestArchiveUnarchiveResumeReactivatesLocalOnlyBranch`,
+`TestDeleteTaskCleanupFindsWorktreeAfterLastSessionDeletedAndRestart`,
+`TestDeleteTaskCleanupRemovesEveryWorktreeAfterLastSessionDeletedAndRestart`,
+`TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree`,
+`TestDirtyWorktreeCleanupBatchOrderRemainsRetryable`, and
+`TestRepositoryBranchPolicyServiceGitflowStarterIsAtomicAndOneTime`. All ten
+are the same class of macOS `/var` vs `/private/var` `TMPDIR` symlink
+resolution issue ("unsafe worktree path ... not a directory", "saved
+repository path resolves to a different location"), confined to worktree
+cleanup, repository discovery, and branch-policy files this task never
+touches — none reference executors, reachability, or SSH.

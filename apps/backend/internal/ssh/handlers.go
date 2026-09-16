@@ -25,7 +25,10 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-const errorJSONKey = "error"
+const (
+	errorJSONKey          = "error"
+	errExecutorIDRequired = "executor id required"
+)
 
 // ExecutorRunningLister is the narrow repository slice we need to surface
 // active SSH sessions. We list all running executors and resolve each row's
@@ -54,11 +57,13 @@ type AgentLister interface {
 
 // Handler exposes /api/v1/ssh routes used by the settings UI.
 type Handler struct {
-	repo            ExecutorRunningLister
-	executorFetcher ExecutorFetcher
-	agents          AgentLister
-	resolver        *lifecycle.AgentctlResolver
-	logger          *logger.Logger
+	repo               ExecutorRunningLister
+	executorFetcher    ExecutorFetcher
+	agents             AgentLister
+	resolver           *lifecycle.AgentctlResolver
+	logger             *logger.Logger
+	reachabilityRepo   ReachabilityLister
+	reachabilityPoller ReachabilityProber
 }
 
 // NewHandler builds an SSH HTTP/WS handler.
@@ -68,13 +73,17 @@ func NewHandler(
 	agents AgentLister,
 	resolver *lifecycle.AgentctlResolver,
 	log *logger.Logger,
+	reachabilityRepo ReachabilityLister,
+	reachabilityPoller ReachabilityProber,
 ) *Handler {
 	return &Handler{
-		repo:            repo,
-		executorFetcher: executorFetcher,
-		agents:          agents,
-		resolver:        resolver,
-		logger:          log.WithFields(zap.String("component", "ssh-handler")),
+		repo:               repo,
+		executorFetcher:    executorFetcher,
+		agents:             agents,
+		resolver:           resolver,
+		logger:             log.WithFields(zap.String("component", "ssh-handler")),
+		reachabilityRepo:   reachabilityRepo,
+		reachabilityPoller: reachabilityPoller,
 	}
 }
 
@@ -87,12 +96,14 @@ func RegisterRoutes(
 	registry *registry.Registry,
 	resolver *lifecycle.AgentctlResolver,
 	log *logger.Logger,
+	reachabilityRepo ReachabilityLister,
+	reachabilityPoller ReachabilityProber,
 ) {
 	var agentLister AgentLister
 	if registry != nil {
 		agentLister = registry
 	}
-	h := NewHandler(repo, executorFetcher, agentLister, resolver, log)
+	h := NewHandler(repo, executorFetcher, agentLister, resolver, log, reachabilityRepo, reachabilityPoller)
 	h.registerHTTP(router)
 	h.registerWS(dispatcher)
 }
@@ -103,6 +114,9 @@ func (h *Handler) registerHTTP(router *gin.Engine) {
 	api.GET("/executors/:id/sessions", h.httpListSessions)
 	api.POST("/executors/:id/probe-agents", h.httpProbeAgents)
 	api.POST("/executors/:id/probe-shells", h.httpProbeShells)
+	api.GET("/reachability", h.httpListReachability)
+	api.GET("/executors/:id/reachability", h.httpGetReachability)
+	api.POST("/executors/:id/reachability/probe", h.httpProbeReachability)
 }
 
 func (h *Handler) registerWS(dispatcher *ws.Dispatcher) {
@@ -179,7 +193,7 @@ func (h *Handler) httpTest(c *gin.Context) {
 func (h *Handler) httpListSessions(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: errExecutorIDRequired})
 		return
 	}
 	rows, err := h.listSessions(c.Request.Context(), id)
@@ -232,7 +246,7 @@ type ProbeAgentsRequest struct {
 func (h *Handler) httpProbeAgents(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: errExecutorIDRequired})
 		return
 	}
 	if h.executorFetcher == nil || h.agents == nil {
@@ -332,7 +346,7 @@ type ProbeShellsResponse struct {
 func (h *Handler) httpProbeShells(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: "executor id required"})
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: errExecutorIDRequired})
 		return
 	}
 	if h.executorFetcher == nil {

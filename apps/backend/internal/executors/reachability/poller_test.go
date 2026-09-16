@@ -2,6 +2,7 @@ package reachability
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -23,9 +24,15 @@ type fakeRepository struct {
 	executors []*models.Executor
 	records   map[string]*models.ExecutorReachability
 	listErr   error
+	upsertErr error
 
 	upsertCalls int32
 }
+
+// errRepoRefused simulates a repository-level write failure — a test double
+// for the last-write-wins WHERE clause silently refusing a write, without
+// needing a real SQLite race to reproduce it.
+var errRepoRefused = errors.New("write refused")
 
 func newFakeRepository(executors ...*models.Executor) *fakeRepository {
 	return &fakeRepository{executors: executors, records: map[string]*models.ExecutorReachability{}}
@@ -57,6 +64,9 @@ func (f *fakeRepository) UpsertExecutorReachability(_ context.Context, obs model
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	atomic.AddInt32(&f.upsertCalls, 1)
+	if f.upsertErr != nil {
+		return f.upsertErr
+	}
 	state := obs.InitialState
 	failures := obs.InitialFailures
 	if existing, ok := f.records[obs.ExecutorID]; ok {

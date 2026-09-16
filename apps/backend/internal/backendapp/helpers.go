@@ -46,6 +46,7 @@ import (
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
+	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
 	"github.com/kandev/kandev/internal/failedinbox"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
@@ -728,6 +729,7 @@ type routeParams struct {
 	planCoalesceWindowConfigured  bool
 	homeDir                       string
 	interimSettingsInterlockToken string
+	sshReachabilityPoller         *reachabilitypkg.Poller
 	log                           *logger.Logger
 }
 
@@ -1465,6 +1467,14 @@ func registerSecondaryRoutes(
 		)
 		p.log.Debug("Registered Kubernetes handlers (HTTP + WebSocket)")
 
+		// A nil *reachabilitypkg.Poller must not be passed directly as the
+		// sshhandlers.ReachabilityProber interface parameter — that would
+		// produce a non-nil interface holding a nil pointer, defeating the
+		// handler's own nil check and panicking on first use.
+		var reachabilityPoller sshhandlers.ReachabilityProber
+		if p.sshReachabilityPoller != nil {
+			reachabilityPoller = p.sshReachabilityPoller
+		}
 		sshhandlers.RegisterRoutes(
 			p.router,
 			p.gateway.Dispatcher,
@@ -1473,6 +1483,8 @@ func registerSecondaryRoutes(
 			p.agentRegistry,
 			lifecycle.NewAgentctlResolver(p.log),
 			p.log,
+			p.taskRepo,
+			reachabilityPoller,
 		)
 		p.log.Debug("Registered SSH handlers (HTTP + WebSocket)")
 	}

@@ -43,6 +43,9 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 
+	// SSH executor reachability poller
+	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
+
 	// GitHub integration
 	azuredevopspkg "github.com/kandev/kandev/internal/azuredevops"
 	githubpkg "github.com/kandev/kandev/internal/github"
@@ -872,8 +875,14 @@ func startAgentInfrastructure(
 
 	// Start SSH executor reachability poller: sweeps every eligible SSH
 	// executor on a configurable interval, probing reachability and
-	// persisting results through a hysteresis-owning write path.
-	startSSHReachabilityPoller(ctx, repos.Task, cfg.Executors.SSHReachabilityIntervalSeconds, log, addRuntimeCleanup)
+	// persisting results through a hysteresis-owning write path. Wired with
+	// a publisher (state/reason changes reach WS clients) and registered as
+	// the task service's executor-save observer (a changed host resets the
+	// record and dispatches an off-cycle probe) so both the poller and the
+	// reachability HTTP routes below share the one running instance.
+	sshReachabilityPoller := startSSHReachabilityPoller(ctx, repos.Task, cfg.Executors.SSHReachabilityIntervalSeconds, log, addRuntimeCleanup)
+	sshReachabilityPoller.SetPublisher(reachabilitypkg.NewPublisher(eventBus))
+	services.Task.SetExecutorSaveObserver(reachabilitypkg.NewSaveObserver(sshReachabilityPoller))
 
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
@@ -915,7 +924,8 @@ func startAgentInfrastructure(
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
-		func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers, restoreCleanups, databaseQuiesce)
+		func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers, restoreCleanups, databaseQuiesce,
+		sshReachabilityPoller)
 }
 
 // startOrchestratorAndAutomationConsumers establishes the startup chain in
@@ -983,6 +993,7 @@ func startGatewayAndServe(
 	cancelWorkers context.CancelFunc,
 	restoreCleanups []func() error,
 	databaseQuiesce func() error,
+	sshReachabilityPoller *reachabilitypkg.Poller,
 ) bool {
 	// ============================================
 	// WEBSOCKET GATEWAY
@@ -1311,7 +1322,7 @@ func startGatewayAndServe(
 	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, persistenceHealth)
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -2537,6 +2548,7 @@ func buildHTTPServer(
 	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	sshReachabilityPoller *reachabilitypkg.Poller,
 	persistenceHealth ...*requiredstores.Health,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
@@ -2667,6 +2679,7 @@ func buildHTTPServer(
 		planCoalesceWindowConfigured:  true,
 		homeDir:                       cfg.ResolvedHomeDir(),
 		interimSettingsInterlockToken: interimSettingsInterlockToken,
+		sshReachabilityPoller:         sshReachabilityPoller,
 		log:                           log,
 	})
 

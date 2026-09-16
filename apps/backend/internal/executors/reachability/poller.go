@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -33,6 +34,14 @@ type Poller struct {
 	log             *logger.Logger
 	intervalSeconds int
 	probe           probeFunc
+	// publisher is optional: nil until SetPublisher wires the event bus, so
+	// task 03's own tests and callers that never call it keep working
+	// unchanged. Set once at construction time in production.
+	publisher *Publisher
+
+	// inflight coalesces concurrent ProbeAndWait callers for the same
+	// executor id into a single dial. Zero value is ready to use.
+	inflight singleflight.Group
 
 	// mu guards started/stopping/ctx/cancel/wg against concurrent
 	// Start/Stop/ProbeNow calls. acquire() registers new work on wg under mu
@@ -65,6 +74,13 @@ func New(repo Repository, intervalSeconds int, log *logger.Logger) *Poller {
 		intervalSeconds: effective,
 		probe:           defaultProbe,
 	}
+}
+
+// SetPublisher wires the event publisher used to announce a state/reason
+// change. Optional — a Poller with no publisher still probes and persists
+// exactly as before, it just never publishes.
+func (p *Poller) SetPublisher(publisher *Publisher) {
+	p.publisher = publisher
 }
 
 // Start launches the background loop. Calling Start more than once without
@@ -226,5 +242,17 @@ func (p *Poller) probeAndPersist(ctx context.Context, executor *models.Executor)
 		probeDiscardedTotal.Add(1)
 		return
 	}
-	p.store.Observe(ctx, executor, outcome, time.Now().UTC())
+	p.observeAndPublish(ctx, executor, outcome)
+}
+
+// observeAndPublish records outcome through store.Observe and, when the
+// write actually changed the stored state or reason, announces it through
+// the publisher — the one propagation path every probe primitive
+// (scheduled pass, ProbeNow, ProbeAndWait) shares.
+func (p *Poller) observeAndPublish(ctx context.Context, executor *models.Executor, outcome lifecycle.SSHProbeOutcome) observeResult {
+	result := p.store.Observe(ctx, executor, outcome, time.Now().UTC())
+	if result.Changed && p.publisher != nil {
+		p.publisher.PublishChanged(ctx, result.After, p.EffectiveIntervalSeconds())
+	}
+	return result
 }

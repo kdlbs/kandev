@@ -247,6 +247,17 @@ type WorkflowStepCreator interface {
 	CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error
 }
 
+// ExecutorSaveObserver is notified after an executor create or update
+// commits, with before the pre-update snapshot (nil on create) and after the
+// saved executor. CreateExecutor and UpdateExecutor are the only call sites
+// that can form this before/after comparison — before must be captured prior
+// to any in-place mutation of the loaded executor. Implementations decide for
+// themselves whether the save is worth acting on (e.g. only SSH executors
+// whose connection configuration changed).
+type ExecutorSaveObserver interface {
+	OnExecutorSaved(ctx context.Context, before, after *models.Executor)
+}
+
 // WorkspaceBootstrapper owns the atomic persistence of a standard Kanban
 // workspace and its initial workflow state.
 type WorkspaceBootstrapper interface {
@@ -442,6 +453,7 @@ type Service struct {
 	providerProber                  ProviderDefaultBranchProber
 	gitArchiveCapture               GitArchiveCapture
 	workflowStepCreator             WorkflowStepCreator
+	executorSaveObserver            ExecutorSaveObserver
 	workspaceBootstrapper           WorkspaceBootstrapper
 	workflowStepGetter              WorkflowStepGetter
 	workflowMovePreflight           WorkflowMovePreflight
@@ -824,6 +836,13 @@ func (s *Service) SetGitArchiveCapture(capture GitArchiveCapture) {
 // SetWorkflowStepCreator wires the workflow step creator for workflow creation.
 func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
 	s.workflowStepCreator = creator
+}
+
+// SetExecutorSaveObserver wires the observer notified after every executor
+// create/update commits. Optional — a Service with no observer wired saves
+// executors exactly as before.
+func (s *Service) SetExecutorSaveObserver(observer ExecutorSaveObserver) {
+	s.executorSaveObserver = observer
 }
 
 func (s *Service) SetWorkspaceBootstrapper(bootstrapper WorkspaceBootstrapper) {

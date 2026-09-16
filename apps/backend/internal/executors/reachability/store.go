@@ -24,12 +24,20 @@ type Repository interface {
 
 // observeResult reports what Observe actually did, for the poller's logging
 // and metrics and as the change signal a future consumer (the HTTP/event
-// surface) reads off the write path rather than re-deriving.
+// surface) reads off the write path rather than re-deriving. Changed is
+// broader than StateChanged: the destination state can hold steady
+// (unreachable stays unreachable) while the stored reason moves between two
+// different failure causes, and that is still worth telling a client about.
 type observeResult struct {
 	Applied      bool
 	StateChanged bool
+	Changed      bool
 	Previous     models.ExecutorReachabilityState
 	Current      models.ExecutorReachabilityState
+	// After is the full record as written, for a caller (the HTTP immediate-
+	// probe route, the change-event publisher) that needs more than the bare
+	// state enum without a second read-back.
+	After *models.ExecutorReachability
 }
 
 // store owns the write path's hysteresis. The consecutive-failure counter
@@ -77,15 +85,21 @@ func (s *store) Observe(ctx context.Context, executor *models.Executor, outcome 
 	}
 
 	previous := models.ExecutorReachabilityStateUnknown
+	var previousReason models.ExecutorReachabilityReason
 	if before != nil {
 		previous = before.State
+		previousReason = before.Reason
 	}
-	changed := previous != after.State
-	if changed {
+	stateChanged := previous != after.State
+	if stateChanged {
 		s.logTransition(executor, previous, after.State, obs.Reason, after.ConsecutiveFailures)
 		recordStateTransition(string(after.State))
 	}
-	return observeResult{Applied: true, StateChanged: changed, Previous: previous, Current: after.State}
+	changed := stateChanged || previousReason != after.Reason
+	return observeResult{
+		Applied: true, StateChanged: stateChanged, Changed: changed,
+		Previous: previous, Current: after.State, After: after,
+	}
 }
 
 // logTransition logs at Warn going into unreachable and Info coming out of

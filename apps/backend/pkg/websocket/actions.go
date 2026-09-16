@@ -295,6 +295,7 @@ const (
 	ActionExecutorCreated               = "executor.created"
 	ActionExecutorUpdated               = "executor.updated"
 	ActionExecutorDeleted               = "executor.deleted"
+	ActionExecutorReachabilityChanged   = "executor.reachability.changed"
 	ActionEnvironmentCreated            = "environment.created"
 	ActionEnvironmentUpdated            = "environment.updated"
 	ActionEnvironmentDeleted            = "environment.deleted"
