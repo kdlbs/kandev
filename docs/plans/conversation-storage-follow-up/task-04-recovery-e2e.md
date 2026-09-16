@@ -3,7 +3,7 @@ id: "04-recovery-e2e"
 title: "Close desktop and mobile recovery coverage"
 status: pending
 wave: 2
-depends_on: 
+depends_on:
   - "01-postgres-coverage"
   - "02-office-migration"
   - "03-task-service"
