@@ -17,6 +17,30 @@ test.describe("Mobile plugin modal content", () => {
     await installFixturePlugin(testPage);
     await testPage.goto("/");
     await testPage.reload();
+
+    // The route registration and the global shortcut dispatcher are fed by
+    // separate React updates. Wait for the store's active-plugin snapshot so
+    // the dispatcher has the manifest keybinding before sending the shortcut.
+    await testPage.waitForFunction(
+      (pluginId) => {
+        const store = (
+          window as Window & {
+            __KANDEV_E2E_STORE__?: {
+              getState: () => {
+                plugins?: { loaded: boolean; items: Array<{ id: string; status: string }> };
+              };
+            };
+          }
+        ).__KANDEV_E2E_STORE__;
+        const plugins = store?.getState().plugins;
+        return Boolean(
+          plugins?.loaded &&
+          plugins.items.some((plugin) => plugin.id === pluginId && plugin.status === "active"),
+        );
+      },
+      PLUGIN_ID,
+      { timeout: 30_000 },
+    );
     await testPage.goto("/plugins/e2e-hello");
     await expect(testPage.locator("#hello-plugin-page")).toBeVisible({ timeout: 15_000 });
     await testPage.keyboard.press("ControlOrMeta+Shift+J");

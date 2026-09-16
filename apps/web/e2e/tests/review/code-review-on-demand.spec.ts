@@ -67,7 +67,9 @@ test.describe("Native code review — on demand", () => {
     const changesTab = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTab).toBeVisible();
     await changesTab.click();
-    await expect(testPage.getByTestId(`file-row-${REVIEWED_FILE}`)).toBeVisible({
+    await expect(
+      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+    ).toBeVisible({
       timeout: 30_000,
     });
 
@@ -150,11 +152,12 @@ test.describe("Native code review — on demand", () => {
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const reopened = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reopened).toBeVisible();
-    await expect(reopened.getByTestId("review-finding-card").first()).toHaveAttribute(
-      "data-finding-status",
-      "resolved",
-      { timeout: 30_000 },
-    );
+    // The API does not promise finding order across a reload. Assert the
+    // persisted status directly instead of treating the first returned card
+    // as the one resolved above.
+    await expect(
+      reopened.locator('[data-testid="review-finding-card"][data-finding-status="resolved"]'),
+    ).toHaveCount(1, { timeout: 30_000 });
   });
 
   test("explains how to configure a reviewer when none is available", async ({
@@ -195,7 +198,9 @@ test.describe("Native code review — on demand", () => {
     git.createFile(REVIEWED_FILE, "export const unreviewable = 1;\n");
 
     await testPage.getByTestId("dockview-tab-changes").click();
-    await expect(testPage.getByTestId(`file-row-${REVIEWED_FILE}`)).toBeVisible({
+    await expect(
+      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+    ).toBeVisible({
       timeout: 30_000,
     });
     await testPage

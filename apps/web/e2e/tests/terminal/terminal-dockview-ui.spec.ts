@@ -523,7 +523,9 @@ test.describe("Terminals — dockview UI", () => {
 
     // Create a second terminal so we have a non-default row to click.
     await clickNewTerminalInPlusMenu(testPage, session);
-    await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 10_000 });
+    const secondTab = testPage.getByTestId("terminal-tab-seq-2");
+    await expect(secondTab).toBeVisible({ timeout: 30_000 });
+    await session.expectTerminalConnected(30_000);
 
     // Count terminal tab content elements before the focus click. Polling the
     // count is the wait: it returns as soon as the second tab has rendered
@@ -535,7 +537,7 @@ test.describe("Terminals — dockview UI", () => {
     });
     await expect
       .poll(() => terminalContent.count(), {
-        timeout: 10_000,
+        timeout: 30_000,
         message: "two terminal tabs before clicking reopen",
       })
       .toBeGreaterThanOrEqual(2);

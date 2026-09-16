@@ -11,6 +11,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -149,6 +150,7 @@ test.describe("mobile PR CI chip drawer", () => {
 
     const statusBar = session.activeChat().getByTestId("chat-status-bar");
     await expect(statusBar).toHaveCSS("flex-wrap", "wrap");
+    await waitForFiniteAnimations(statusBar);
     await expect
       .poll(
         () =>

@@ -1,6 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -47,7 +46,7 @@ test.describe("Session resume — CLI fallback after fast-fail", () => {
 
     const profile = await createTUIProfileWithFailOnResume(apiClient, "TUI Resume Fallback");
 
-    await apiClient.createTaskWithAgent(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "TUI Resume Fallback Task",
       profile.id,
@@ -59,14 +58,10 @@ test.describe("Session resume — CLI fallback after fast-fail", () => {
       },
     );
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("TUI Resume Fallback Task");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    // The fallback contract starts on the task session. Navigate by the API
+    // returned id so a delayed Kanban snapshot cannot hide a ready session
+    // behind a list-hydration race.
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForPassthroughLoad();
     await session.waitForPassthroughLoaded();
