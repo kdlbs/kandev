@@ -176,6 +176,56 @@ func TestUpdateTrigger_RejectsInvalidWebhookFilters(t *testing.T) {
 	}
 }
 
+// CreateAutomation writes initial triggers directly rather than through
+// AddTrigger, so it needs its own call to validateWebhookConfig. Without it, a
+// filter saved at creation time — not just on a later edit — fails every
+// subsequent delivery closed forever while the webhook keeps returning 200.
+func TestCreateAutomation_RejectsInvalidWebhookFilters(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	cfg, err := json.Marshal(WebhookTriggerConfig{Filters: []WebhookFilter{
+		{Path: "", Op: WebhookFilterOpEq, Values: []string{"v"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID: "ws-1", Name: "bad webhook filter",
+		Triggers: []CreateTriggerSpec{{
+			Type:    TriggerTypeWebhook,
+			Config:  cfg,
+			Enabled: true,
+		}},
+	}); err == nil {
+		t.Fatal("expected an invalid filter to be rejected at creation, as it is on edit")
+	}
+}
+
+func TestCreateAutomation_AcceptsValidWebhookFilters(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	cfg, err := json.Marshal(WebhookTriggerConfig{Filters: []WebhookFilter{
+		{Path: "a", Op: WebhookFilterOpEq, Values: []string{"v"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID: "ws-1", Name: "good webhook filter",
+		Triggers: []CreateTriggerSpec{{
+			Type:    TriggerTypeWebhook,
+			Config:  cfg,
+			Enabled: true,
+		}},
+	}); err != nil {
+		t.Fatalf("expected a valid filter to be accepted, got %v", err)
+	}
+}
+
 type stubWorkflowLocator struct{ workspaceID string }
 
 func (s stubWorkflowLocator) WorkflowWorkspaceID(context.Context, string) (string, error) {

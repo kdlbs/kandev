@@ -535,6 +535,9 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		if err := validateScheduledConfig(ts.Type, ts.Config); err != nil {
 			return nil, err
 		}
+		if err := validateWebhookConfig(ts.Type, ts.Config); err != nil {
+			return nil, err
+		}
 		t := &AutomationTrigger{
 			AutomationID: a.ID,
 			Type:         ts.Type,

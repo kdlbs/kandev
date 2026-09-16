@@ -68,7 +68,16 @@ func (h *WebhookHandler) Handle(c *gin.Context) {
 		return
 	}
 	var cfg WebhookTriggerConfig
-	_ = json.Unmarshal(trigger.Config, &cfg)
+	if unmarshalErr := json.Unmarshal(trigger.Config, &cfg); unmarshalErr != nil {
+		// Save-time validation (validateWebhookConfig) blocks a malformed
+		// config from ever being stored; a failure here means the stored
+		// config was corrupted after the fact. cfg stays zero-valued (no
+		// filters, no dedup key, no selector), so the trigger fires
+		// unconditionally — log it so that corruption is observable rather
+		// than silently changing trigger behavior.
+		h.logger.Warn("failed to parse stored webhook trigger config; firing with defaults",
+			zap.String("automation_id", automationID), zap.String("trigger_id", trigger.ID), zap.Error(unmarshalErr))
+	}
 
 	// Read body as trigger data.
 	body, readErr := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20)) // 1MB limit
