@@ -101,6 +101,10 @@ image build loop, and lifecycle semantics of the Local Docker executor.
 - **AC-EXECUTORS-REMOTE-DOCKER-001.15:** Local Git repository sources and
   arbitrary host folders shall be rejected for `remote_docker` tasks, matching
   the existing Local Docker and remote-executor source rules.
+- **AC-EXECUTORS-REMOTE-DOCKER-001.17:** Creating, editing, testing, and
+  building a `remote_docker` executor shall require an administrator. A saved
+  profile grants effective root on the remote host, so it is not an ordinary
+  member operation.
 - **AC-EXECUTORS-REMOTE-DOCKER-001.16:** The profile editor shall state that a
   remote Docker profile grants effective root on the remote host, because the
   SSH user must reach the Docker socket and Dockerfile instructions execute with

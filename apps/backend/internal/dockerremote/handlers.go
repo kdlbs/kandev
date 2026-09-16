@@ -45,9 +45,11 @@ func NewHandler(executors ExecutorFetcher, log *logger.Logger) *Handler {
 // RegisterRoutes mounts the remote Docker routes.
 func RegisterRoutes(router *gin.Engine, executors ExecutorFetcher, log *logger.Logger) {
 	h := NewHandler(executors, log)
-	router.POST("/api/v1/remote-docker/test", h.httpTest)
-	// Building runs arbitrary Dockerfile instructions with the remote
-	// daemon's authority, so it is an administrative operation.
+	// Both routes are administrative. The test dials a host the caller
+	// names, and a saved profile grants effective root on that host; the
+	// build then runs arbitrary Dockerfile instructions with the remote
+	// daemon's authority. Kubernetes executors are gated the same way.
+	router.POST("/api/v1/remote-docker/test", authn.RequireAdmin(), h.httpTest)
 	router.POST("/api/v1/remote-docker/executors/:id/build", authn.RequireAdmin(), h.httpBuild)
 }
 

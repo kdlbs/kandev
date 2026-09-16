@@ -208,6 +208,10 @@ which is the one piece of fixture work this design adds.
   package. Only `internal/agent/runtime/` may import `runtime/lifecycle`, and
   the architecture lint's baseline is per-file, so a new package had no
   legitimate exemption. `internal/dockerremote` is HTTP only.
+- Both HTTP routes require an administrator. The SSH executor's test endpoint
+  is not admin-gated, so this deliberately diverges from that precedent: a
+  remote Docker profile grants root on the remote host, which matches how
+  Kubernetes executors are gated rather than how SSH is.
 - Image builds are executor-scoped (`/api/v1/remote-docker/executors/:id/build`)
   and run on that executor's daemon. The create form cannot build, because the
   daemon is not trusted until the profile is saved.
