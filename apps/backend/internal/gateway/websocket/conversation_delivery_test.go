@@ -216,6 +216,35 @@ func TestConversationDeliveryStopsAfterRevocation(t *testing.T) {
 	}
 }
 
+func TestConversationDeliveryKeepsSyntheticSubscriptionWhenActiveUserCheckFails(t *testing.T) {
+	hub := NewHub(ws.NewDispatcher(), testLogger())
+	hub.setAuthPolicy(AuthPolicy{ActiveUser: func(context.Context, string) bool { return false }})
+	client := NewClient("synthetic-client", authn.Identity{UserID: "default-user", Synthetic: true}, nil, hub, testLogger())
+	hub.clients[client] = true
+	client.conversationSubscriptions["scope-1"] = conversationSubscription{
+		ScopeID: "scope-1", SessionID: "session-1", ConsumerKind: conversationConsumerCore, Epoch: "epoch-1",
+	}
+
+	hub.BroadcastConversationMutation(&models.ConversationMutationReceipt{
+		SessionID: "session-1", BaseRevision: 1, Revision: 2, Complete: true,
+	})
+
+	var frame ws.Message
+	if err := json.Unmarshal(<-client.send, &frame); err != nil {
+		t.Fatalf("decode changed frame: %v", err)
+	}
+	if frame.Action != ws.ActionSessionConversationChanged {
+		t.Fatalf("action = %q", frame.Action)
+	}
+	var payload conversationChangedPayload
+	if err := json.Unmarshal(frame.Payload, &payload); err != nil {
+		t.Fatalf("decode changed payload: %v", err)
+	}
+	if payload.Terminal || payload.Revision != "2" {
+		t.Fatalf("changed payload = %+v", payload)
+	}
+}
+
 func TestConversationRevisionWorkerChecksIdleSubscriptions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		hub := NewHub(ws.NewDispatcher(), testLogger())

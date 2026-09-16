@@ -102,6 +102,11 @@ function filterServerFrame(
         dropped.push({ action: targetAction(parsed), content: parsed.payload.content });
         continue;
       }
+      if (hasConversationChangeContent(parsed, prompt)) {
+        didDrop = true;
+        dropped.push({ action: "session.conversation.changed", content: prompt });
+        continue;
+      }
     } catch {
       // Preserve non-JSON frames; the app's WS client handles parse failures too.
     }

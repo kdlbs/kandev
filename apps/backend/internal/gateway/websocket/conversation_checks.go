@@ -78,7 +78,10 @@ func (h *Hub) conversationAuthorized(client *Client, subscription conversationSu
 	policy, service := h.authPolicy, h.pluginConversationService
 	h.mu.RUnlock()
 	ctx := client.dispatchContext()
-	if policy.ActiveUser != nil && !policy.ActiveUser(ctx, subscription.UserID) {
+	// Synthetic and identity-less clients are the unscoped single-user mode.
+	// They do not have an account to revalidate, so an account-backed active
+	// user hook must not terminate their conversation subscriptions.
+	if identityIsScoped(client.identity) && policy.ActiveUser != nil && !policy.ActiveUser(ctx, subscription.UserID) {
 		return false
 	}
 	if policy.Subscriptions.Session != nil && policy.Subscriptions.Session(ctx, subscription.SessionID) != nil {
