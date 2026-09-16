@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -487,6 +488,68 @@ func TestConversationJournalBackfillsExistingRowsIdempotently(t *testing.T) {
 	}
 	if content != "existing" {
 		t.Fatalf("backfill content = %q, want existing", content)
+	}
+}
+
+func TestConversationJournalBackfillPagesAcrossSessionsAndTimestampTies(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	sessions := []string{"session-page-a", "session-page-b", "session-page-c"}
+	const perSession = conversationJournalBackfillBatchSize + 17
+	sharedCreatedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, sessionID := range sessions {
+		turnID := "turn-" + sessionID
+		seedForMsgTest(t, repo, "task-"+sessionID, sessionID, turnID)
+		for i := 0; i < perSession; i++ {
+			message := &models.Message{
+				ID: fmt.Sprintf("%s-message-%03d", sessionID, i), TaskSessionID: sessionID,
+				TaskID: "task-" + sessionID, TurnID: turnID, AuthorType: models.MessageAuthorAgent,
+				Type: models.MessageTypeMessage, Content: "paged",
+			}
+			if err := repo.CreateMessage(ctx, message); err != nil {
+				t.Fatalf("create message %s: %v", message.ID, err)
+			}
+		}
+	}
+	// Every message shares one created_at so a batch boundary always falls inside a
+	// timestamp tie and only the id term of the keyset can order the next page.
+	if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE task_session_messages SET created_at = ?`), sharedCreatedAt); err != nil {
+		t.Fatalf("collapse message timestamps: %v", err)
+	}
+	if _, err := repo.db.Exec(`
+		DELETE FROM conversation_session_events;
+		DELETE FROM conversation_message_versions;
+		DELETE FROM conversation_turn_versions;
+		DELETE FROM conversation_session_streams;
+	`); err != nil {
+		t.Fatalf("clear journal: %v", err)
+	}
+
+	if err := repo.backfillConversationJournal(); err != nil {
+		t.Fatalf("backfill conversation journal: %v", err)
+	}
+
+	var sourceCount, journaledCount, duplicateCount int
+	if err := repo.db.Get(&sourceCount, `SELECT COUNT(*) FROM task_session_messages`); err != nil {
+		t.Fatalf("count source messages: %v", err)
+	}
+	if err := repo.db.Get(&journaledCount, `SELECT COUNT(DISTINCT message_id) FROM conversation_message_versions`); err != nil {
+		t.Fatalf("count journaled messages: %v", err)
+	}
+	if err := repo.db.Get(&duplicateCount, `
+		SELECT COUNT(*) FROM (
+			SELECT message_id FROM conversation_message_versions GROUP BY message_id HAVING COUNT(*) > 1
+		)`); err != nil {
+		t.Fatalf("count duplicate journal rows: %v", err)
+	}
+	if want := len(sessions) * perSession; sourceCount != want {
+		t.Fatalf("source message count = %d, want %d", sourceCount, want)
+	}
+	if journaledCount != sourceCount {
+		t.Fatalf("journaled messages = %d, want every one of %d source messages", journaledCount, sourceCount)
+	}
+	if duplicateCount != 0 {
+		t.Fatalf("messages journaled more than once = %d, want 0", duplicateCount)
 	}
 }
 

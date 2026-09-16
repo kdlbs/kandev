@@ -203,11 +203,12 @@ func (r *Repository) backfillConversationJournal() error {
 			)`
 		args := []any{}
 		if lastTurnID != "" {
+			// A row-value comparison lets the planner seek the (task_session_id,
+			// started_at) index; the equivalent OR chain makes it collect and sort
+			// every remaining turn on each batch.
 			query += `
-				AND (t.task_session_id > ? OR
-					(t.task_session_id = ? AND
-						(t.started_at > ? OR (t.started_at = ? AND t.id > ?))))`
-			args = append(args, lastSessionID, lastSessionID, lastStartedAt, lastStartedAt, lastTurnID)
+				AND (t.task_session_id, t.started_at, t.id) > (?, ?, ?)`
+			args = append(args, lastSessionID, lastStartedAt, lastTurnID)
 		}
 		query += ` ORDER BY t.task_session_id, t.started_at, t.id LIMIT ?`
 		args = append(args, conversationJournalBackfillBatchSize)
@@ -252,11 +253,12 @@ func (r *Repository) backfillConversationJournal() error {
 			)`
 		args := []any{}
 		if lastMessageID != "" {
+			// A row-value comparison lets the planner seek the (task_session_id,
+			// created_at) index; the equivalent OR chain makes it collect and sort
+			// every remaining message on each batch.
 			query += `
-				AND (m.task_session_id > ? OR
-					(m.task_session_id = ? AND
-						(m.created_at > ? OR (m.created_at = ? AND m.id > ?))))`
-			args = append(args, lastSessionID, lastSessionID, lastCreatedAt, lastCreatedAt, lastMessageID)
+				AND (m.task_session_id, m.created_at, m.id) > (?, ?, ?)`
+			args = append(args, lastSessionID, lastCreatedAt, lastMessageID)
 		}
 		query += ` ORDER BY m.task_session_id, m.created_at, m.id LIMIT ?`
 		args = append(args, conversationJournalBackfillBatchSize)
