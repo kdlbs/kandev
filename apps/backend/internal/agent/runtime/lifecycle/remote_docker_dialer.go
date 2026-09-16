@@ -19,14 +19,14 @@ import (
 // daemon, which is why a missing command is its own reported cause.
 const dockerDialStdioCommand = "docker system dial-stdio"
 
-// newSSHDockerDialer returns a dialer that carries the Docker Engine API over
+// NewSSHDockerDialer returns a dialer that carries the Docker Engine API over
 // an existing Kandev SSH connection.
 //
 // This deliberately does not use the Docker CLI's connection helper, which
 // shells out to the system ssh binary. Kandev already owns native SSH dialing
 // with host-key pinning, IdentityAgent expansion, and ProxyJump, and a second
 // SSH implementation would not share any of it.
-func newSSHDockerDialer(client *ssh.Client, log *logger.Logger) docker.DialContextFunc {
+func NewSSHDockerDialer(client *ssh.Client, log *logger.Logger) docker.DialContextFunc {
 	return func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return dialDockerOverSSH(ctx, client, log)
 	}

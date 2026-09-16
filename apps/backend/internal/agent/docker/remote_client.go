@@ -74,3 +74,13 @@ func newRemoteClientWithOptionOrder(dial DialContextFunc, log *logger.Logger, re
 		config:  config.DockerConfig{Host: remoteEngineHost},
 	}, nil
 }
+
+// PingVersion pings the daemon and reports its API version, so a connection
+// test can name the daemon that answered instead of only reporting success.
+func (c *Client) PingVersion(ctx context.Context) (string, error) {
+	result, err := c.cli.Ping(ctx, client.PingOptions{})
+	if err != nil {
+		return "", fmt.Errorf("docker ping failed: %w", err)
+	}
+	return result.APIVersion, nil
+}

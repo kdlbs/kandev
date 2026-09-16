@@ -156,7 +156,7 @@ func (r *RemoteDockerExecutor) dialRemote(ctx context.Context, req *ExecutorCrea
 		return nil, fmt.Errorf("remote docker: %w", err)
 	}
 
-	dockerClient, err := docker.NewRemoteClient(newSSHDockerDialer(sshClient, r.logger), r.logger)
+	dockerClient, err := docker.NewRemoteClient(NewSSHDockerDialer(sshClient, r.logger), r.logger)
 	if err != nil {
 		_ = sshClient.Close()
 		return nil, fmt.Errorf("remote docker: create client for %s: %w", target.Host, err)

@@ -98,7 +98,7 @@ func TestSSHDockerDialerCarriesEngineAPI(t *testing.T) {
 	sshClient := server.dial(t)
 	defer func() { _ = sshClient.Close() }()
 
-	cli, err := docker.NewRemoteClient(newSSHDockerDialer(sshClient, dialerTestLogger(t)), dialerTestLogger(t))
+	cli, err := docker.NewRemoteClient(NewSSHDockerDialer(sshClient, dialerTestLogger(t)), dialerTestLogger(t))
 	if err != nil {
 		t.Fatalf("NewRemoteClient: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestSSHDockerDialerReportsMissingCLI(t *testing.T) {
 			sshClient := server.dial(t)
 			defer func() { _ = sshClient.Close() }()
 
-			dial := newSSHDockerDialer(sshClient, dialerTestLogger(t))
+			dial := NewSSHDockerDialer(sshClient, dialerTestLogger(t))
 			cli, err := docker.NewRemoteClient(dial, dialerTestLogger(t))
 			if err != nil {
 				t.Fatalf("NewRemoteClient: %v", err)
@@ -189,7 +189,7 @@ func TestSSHDockerDialerRejectsClosedConnection(t *testing.T) {
 	_ = sshClient.Close()
 	server.Close()
 
-	dial := newSSHDockerDialer(sshClient, dialerTestLogger(t))
+	dial := NewSSHDockerDialer(sshClient, dialerTestLogger(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

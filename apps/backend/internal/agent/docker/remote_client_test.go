@@ -189,3 +189,27 @@ func TestRemoteClientCorrectOrderUsesDialer(t *testing.T) {
 		t.Fatal("Ping succeeded without using the supplied dialer")
 	}
 }
+
+// TestPingVersionReportsTheDaemonAPIVersion gives the connection test
+// something concrete to show. A bare success tells the user nothing about
+// which daemon answered.
+func TestPingVersionReportsTheDaemonAPIVersion(t *testing.T) {
+	engine := newStubEngine(t, "1.51")
+
+	cli, err := NewRemoteClient(engine.dial(), testLogger(t))
+	if err != nil {
+		t.Fatalf("NewRemoteClient: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	version, err := cli.PingVersion(ctx)
+	if err != nil {
+		t.Fatalf("PingVersion: %v", err)
+	}
+	if version != "1.51" {
+		t.Fatalf("PingVersion = %q, want 1.51", version)
+	}
+}
