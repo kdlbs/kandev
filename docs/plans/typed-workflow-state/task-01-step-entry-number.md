@@ -55,12 +55,12 @@ review-round cap.
 
 - Entry number is 1-based and inclusive of the current entry
   (AC-TWS-001.2), derived from `COUNT(*) FROM task_step_transitions WHERE
-  task_id = ? AND to_workflow_step_id = ?` (AC-TWS-001.3), floored at 1 for a
-  task predating the ledger (AC-TWS-001.4).
+  task_id = ? AND to_workflow_step_id = ?` (AC-TWS-001.3). The orchestrator
+  maps zero to 1 for a task predating the ledger (AC-TWS-001.4).
 - Substitution runs at both production call sites (AC-TWS-001.5), is a no-op
   when the template does not contain the token (AC-TWS-001.6), renders in
-  base 10 with no separator or sign (AC-TWS-001.7), and leaves an empty
-  task/step identifier unsubstituted (AC-TWS-001.8). `{task_id}` and
+  base 10 with no separator or sign (AC-TWS-001.7), and resolves an empty
+  task or step identifier to 1 without a query (AC-TWS-001.8). `{task_id}` and
   `{step_entry_number}` may both appear in one template (AC-TWS-001.9), and
   every occurrence of the exact token is replaced (AC-TWS-001.10).
 - A count-query error leaves the token literal and does not fail prompt

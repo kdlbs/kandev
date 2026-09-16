@@ -24,12 +24,14 @@ and
 ## Backend
 
 - `apps/backend/internal/sysprompt/sysprompt.go`: add `InterpolateStepEntryNumber`,
-  a pure function substituting `{step_entry_number}` (and `{task_id}`) with no
-  DB or context access of its own.
+  a pure function substituting `{step_entry_number}` with no DB or context
+  access of its own. Task-ID substitution remains a separate prompt-building
+  operation.
 - `apps/backend/internal/task/repository/sqlite/step_transitions.go`: add
   `Repository.CountStepEntries`, backed by `SELECT COUNT(*) FROM
-  task_step_transitions WHERE task_id = ? AND to_workflow_step_id = ?`, floored
-  at 1 so a pre-ledger task still resolves to entry 1.
+  task_step_transitions WHERE task_id = ? AND to_workflow_step_id = ?`. The
+  repository returns the raw count; the orchestrator maps zero to 1 so a
+  pre-ledger task still resolves to entry 1.
 - `apps/backend/internal/orchestrator/task_operations.go`: both prompt-building
   call sites in `buildWorkflowPromptWithContext` compute the count and pass it
   through, gated on literal-token presence (no query when the template does not
@@ -57,7 +59,8 @@ and
 ## Verification
 
 Backend-only change: no workflow YAML, plan write API, or plan revision model
-touched. E2E and Postgres were both determined not required (no UI surface,
-SQLite-only path). Full validation receipts, review history, and the E2E
-decision are recorded in the requirement and system-design documents linked
-above.
+touched. E2E was not required because there is no UI surface. The repository
+method uses the shared database adapter and parameter rebinding, so it supports
+SQLite and PostgreSQL without a schema change. Full validation receipts, review
+history, and the E2E decision are recorded in the requirement and system-design
+documents linked above.
