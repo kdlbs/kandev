@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/configloader"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -360,6 +361,22 @@ func (h *Handler) searchTasks(c *gin.Context) {
 // -- Tasks --
 
 func (h *Handler) listTasks(c *gin.Context) {
+	// An in-sandbox agent JWT authenticates this route the same as it does
+	// every other route under the Office group (AgentAuthMiddleware only
+	// validates the token and workspace claim; it does not gate individual
+	// routes), so without this check an agent whose capability snapshot
+	// lacks list_tasks — or a taskless run with no board-read grant at all —
+	// could reach the same board here, ungated and unaudited, through the
+	// route the UI happens to use. Reject the same way createComment
+	// rejects an agent caller: send it to the capability-checked, audited
+	// runtime endpoint instead.
+	if agents.CallerFromContext(c) != nil {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "agent callers must use the runtime tasks endpoint",
+		})
+		return
+	}
+
 	ctx := c.Request.Context()
 	wsID := c.Param("wsId")
 
