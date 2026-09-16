@@ -471,6 +471,9 @@ export function buildSidebarViewActions(
       (...args: unknown[]) => {
         const workspaceId = (get() as UISlice & WorkspaceSliceState).workspaces?.activeId;
         if (!workspaceId) return name === "createSidebarView" ? null : undefined;
+        if (name === "clearSidebarSyncError" && args[0] !== undefined && args[0] !== workspaceId) {
+          return;
+        }
         const action = forWorkspace(workspaceId)[name] as (...values: unknown[]) => unknown;
         return action(...args);
       },

@@ -457,7 +457,7 @@ export type UISliceActions = {
   reorderSidebarViews: (activeViewId: string, overViewId: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
-  clearSidebarSyncError: () => void;
+  clearSidebarSyncError: (workspaceId?: string) => void;
   setThreadActiveView: (viewId: string) => void;
   createThreadView: () => string | null;
   updateThreadViewDraft: (

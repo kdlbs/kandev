@@ -199,7 +199,7 @@ export function mergeSidebarArchivedTasks(
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
   useAllWorkflowSnapshots(workspaceId);
 
-  const sidebarViews = useAppStore((state) => selectSidebarViews(state));
+  const sidebarViews = useAppStore((state) => selectSidebarViews(state, workspaceId));
   const effectiveView = useMemo(() => {
     const active =
       sidebarViews?.views.find((view) => view.id === sidebarViews.activeViewId) ??

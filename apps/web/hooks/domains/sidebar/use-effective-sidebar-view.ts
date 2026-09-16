@@ -8,8 +8,8 @@ import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-t
  * and mobile sidebars so a draft (e.g. sort flipped to "custom" by a drag)
  * actually drives `applyView` and not just the sort picker.
  */
-export function useEffectiveSidebarView() {
-  const sidebarSlice = useAppStore((state) => selectSidebarViews(state));
+export function useEffectiveSidebarView(workspaceId?: string | null) {
+  const sidebarSlice = useAppStore((state) => selectSidebarViews(state, workspaceId));
   return useMemo(() => {
     const active = sidebarSlice.views.find((v) => v.id === sidebarSlice.activeViewId);
     if (!active) return sidebarSlice.views[0];

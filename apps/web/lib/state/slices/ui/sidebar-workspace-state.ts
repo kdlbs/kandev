@@ -7,7 +7,7 @@ import { DEFAULT_VIEW, createDefaultSidebarView } from "./sidebar-view-builtins"
 
 export type SidebarWorkspaceSource = {
   workspaces: { activeId: string | null };
-  sidebarViewsByWorkspace: Record<string, SidebarSliceState>;
+  sidebarViewsByWorkspace?: Record<string, SidebarSliceState>;
 };
 
 const EMPTY_SIDEBAR: SidebarSliceState = {
@@ -30,10 +30,13 @@ export function createSidebarWorkspaceState(): SidebarSliceState {
   };
 }
 
-export function selectSidebarViews(state: SidebarWorkspaceSource): SidebarSliceState {
-  const id = state.workspaces.activeId;
+export function selectSidebarViews(
+  state: SidebarWorkspaceSource,
+  workspaceId: string | null = state.workspaces.activeId,
+): SidebarSliceState {
+  const id = workspaceId;
   if (!id) return EMPTY_SIDEBAR;
-  return state.sidebarViewsByWorkspace[id] ?? DEFAULT_SIDEBAR;
+  return state.sidebarViewsByWorkspace?.[id] ?? DEFAULT_SIDEBAR;
 }
 
 export function mapSidebarWorkspaces(

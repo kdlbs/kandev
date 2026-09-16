@@ -74,7 +74,7 @@ it("keeps pending workspace edits when a different workspace broadcasts settings
     payload: {
       revision: 100,
       sidebar_views_by_workspace: {
-        a: {
+        b: {
           views: [
             {
               id: "original",
