@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,96 @@ func TestKubernetesWriteFileDoesNotOpenStdinForEmptySentinel(t *testing.T) {
 	command := strings.Join(execs.requests[0].request.Command, " ")
 	require.Contains(t, command, "temporary=$(mktemp")
 	require.Contains(t, command, "mv -f \"$temporary\" \"$destination\"")
+}
+
+func TestKubernetesBootstrapRunsPrepareBeforeSignallingEntrypoint(t *testing.T) {
+	execs := &recordingKubernetesExec{}
+	streams := kubeexecutor.NewStreamOperations(execs, nil)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "kandev-agents", Name: "agent-pod"}}
+	executor := NewKubernetesExecutor(nil, newTestLogger())
+	req := validKubernetesCreateRequest()
+
+	err := executor.bootstrapPod(
+		context.Background(),
+		&kubernetesRuntimeClient{streams: streams},
+		req,
+		pod,
+		kubeexecutor.ProfileConfig{MainContainer: "kandev-agent"},
+		"nonce",
+		[]byte("agentctl"),
+	)
+
+	require.NoError(t, err)
+	prepareIndex, signalIndex := -1, -1
+	for index, recorded := range execs.requests {
+		command := strings.Join(recorded.request.Command, " ")
+		if strings.Contains(command, "sh "+kubernetesPreparePath) {
+			prepareIndex = index
+		}
+		if strings.Contains(command, kubernetesStartPath) && recorded.request.Stdin == nil {
+			signalIndex = index
+		}
+	}
+	require.NotEqual(t, -1, prepareIndex)
+	require.NotEqual(t, -1, signalIndex)
+	require.Less(t, prepareIndex, signalIndex)
+	require.NotContains(t, kubernetesBootstrapCommand(), "sh "+kubernetesPreparePath)
+}
+
+func TestKubernetesBootstrapReturnsSanitizedPrepareFailure(t *testing.T) {
+	execs := &recordingKubernetesExec{}
+	execs.execFunc = func(_ context.Context, request kubeexecutor.ExecRequest) error {
+		if !strings.Contains(strings.Join(request.Command, " "), "sh "+kubernetesPreparePath) {
+			return nil
+		}
+		_, _ = request.Stderr.Write([]byte(
+			"token=do-not-persist\nDocker daemon did not become ready before preparation deadline\n",
+		))
+		return errors.New("remote command exited with status 1")
+	}
+	streams := kubeexecutor.NewStreamOperations(execs, nil)
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "kandev-agents", Name: "agent-pod"}}
+	executor := NewKubernetesExecutor(nil, newTestLogger())
+
+	err := executor.bootstrapPod(
+		context.Background(),
+		&kubernetesRuntimeClient{streams: streams},
+		validKubernetesCreateRequest(),
+		pod,
+		kubeexecutor.ProfileConfig{MainContainer: "kandev-agent"},
+		"nonce",
+		[]byte("agentctl"),
+	)
+
+	require.ErrorContains(t, err, "Docker daemon did not become ready before preparation deadline")
+	require.NotContains(t, err.Error(), "do-not-persist")
+	for _, recorded := range execs.requests {
+		command := strings.Join(recorded.request.Command, " ")
+		require.False(t,
+			strings.Contains(command, kubernetesStartPath) && recorded.request.Stdin == nil,
+			"failed preparation must not signal the managed entrypoint",
+		)
+	}
+}
+
+func TestKubernetesPrepareOutputDropsOversizeDiagnosticsBeforeRedaction(t *testing.T) {
+	output := &kubernetesPrepareOutput{}
+	secret := strings.Repeat("Zx.", 100_000)
+	_, err := output.Write([]byte("token=" + secret + "\nlate failure"))
+
+	require.NoError(t, err)
+	require.Empty(t, output.diagnostic(),
+		"oversize raw output must be dropped instead of cutting away a credential marker")
+}
+
+func TestKubernetesPrepareOutputKeepsLatestSanitizedDiagnostic(t *testing.T) {
+	output := &kubernetesPrepareOutput{}
+	_, err := output.Write([]byte(strings.Repeat("ordinary setup output\n", 400) +
+		"token=do-not-persist\nlate failure"))
+
+	require.NoError(t, err)
+	require.Contains(t, output.diagnostic(), "late failure")
+	require.NotContains(t, output.diagnostic(), "do-not-persist")
 }
 
 func TestKubernetesWriteFileCommandRejectsSymlinkedAncestor(t *testing.T) {
@@ -153,8 +244,8 @@ func TestKubernetesBootstrapPublishesManagedCredentialHelperPath(t *testing.T) {
 	)
 	require.NotContains(t, authData, "/tmp/hostile-agentctl")
 	command := kubernetesBootstrapCommand()
-	require.Less(t, strings.Index(command, ". "+kubernetesAuthEnvPath), strings.Index(command, "sh "+kubernetesPreparePath))
 	require.Less(t, strings.Index(command, ". "+kubernetesAuthEnvPath), strings.Index(command, "exec "+kubernetesAgentctlPath))
+	require.NotContains(t, command, "sh "+kubernetesPreparePath)
 }
 
 func TestKubernetesPrepareScriptUsesManagedAgentctlPathWithoutStartingSecondProcess(t *testing.T) {

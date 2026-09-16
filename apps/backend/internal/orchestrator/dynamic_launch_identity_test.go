@@ -78,7 +78,7 @@ func TestRelaunchDynamicTaskAfterFailurePreservesActingOfficeIdentity(t *testing
 		SessionID:        sessionID,
 		AgentExecutionID: executionID,
 		AgentProfileID:   "reviewer",
-	}, "fallback-profile"))
+	}, "fallback-profile", launchOriginAutomatic))
 	require.NotNil(t, launchRequest)
 	require.Equal(t, "reviewer", launchRequest.OfficeAgentProfileID,
 		"dynamic successor must keep the acting Office identity from the failure event")

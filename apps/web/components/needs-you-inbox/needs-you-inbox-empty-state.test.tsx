@@ -68,3 +68,37 @@ describe("NeedsYouInboxEmptyState", () => {
     expect(screen.getByTestId("needs-you-inbox-hidden-panel")).not.toBeNull();
   });
 });
+
+// AC-UI-INBOX-FAILED-001.4: this is the single permitted delta to the
+// Needs-you empty state; every case above (workspace naming, no
+// congratulation, hidden-bundle disclosure) renders identically when the new
+// props are omitted, which is this suite's own before/after proof.
+describe("NeedsYouInboxEmptyState — AC-UI-INBOX-FAILED-001.23 failed-tasks clause", () => {
+  it("omits the clause entirely when the failed count is not yet known", () => {
+    render(<NeedsYouInboxEmptyState hiddenCount={0} />);
+    expect(screen.queryByText(/Failed tab/)).toBeNull();
+  });
+
+  it("omits the clause when the last failed read failed", () => {
+    render(<NeedsYouInboxEmptyState hiddenCount={0} failedCountKnown={false} failedCount={3} />);
+    expect(screen.queryByText(/Failed tab/)).toBeNull();
+  });
+
+  it("says a failed task exists rather than implying the workspace is quiet, on first render", () => {
+    render(<NeedsYouInboxEmptyState hiddenCount={0} failedCountKnown={true} failedCount={2} />);
+    expect(
+      screen.getByText(
+        "This list does not count failed tasks. 2 tasks have also failed. See the Failed tab.",
+      ),
+    ).not.toBeNull();
+  });
+
+  it("does not imply any failed task exists when the workspace holds none", () => {
+    render(<NeedsYouInboxEmptyState hiddenCount={0} failedCountKnown={true} failedCount={0} />);
+    expect(
+      screen.getByText(
+        "This list does not count failed tasks. None have failed in this workspace right now; check the Failed tab any time.",
+      ),
+    ).not.toBeNull();
+  });
+});

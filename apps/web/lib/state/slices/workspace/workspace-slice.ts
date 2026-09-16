@@ -3,7 +3,7 @@ import type { WorkspaceSlice, WorkspaceSliceState } from "./types";
 import type { RepositoryBranchPolicy, RepositorySet } from "@/lib/types/http";
 
 export const defaultWorkspaceState: WorkspaceSliceState = {
-  workspaces: { items: [], activeId: null },
+  workspaces: { items: [], activeId: null, activeIdRevision: 0 },
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
   repositorySets: {
     itemsByWorkspaceId: {},
@@ -48,6 +48,7 @@ export const createWorkspaceSlice: StateCreator<
     (get() as WorkspaceSliceWithKanbanReset).resetKanbanWorkspaceContext?.();
     set((draft) => {
       draft.workspaces.activeId = workspaceId;
+      draft.workspaces.activeIdRevision = (draft.workspaces.activeIdRevision ?? 0) + 1;
     });
   },
   setWorkspaces: (workspaces) =>

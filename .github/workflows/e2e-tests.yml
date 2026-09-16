@@ -214,7 +214,7 @@ jobs:
       # (the build job has the Go toolchain) and shipped to the shards as its
       # own artifact; global-setup fails fast if it is missing.
       - name: Build E2E fixture plugin package
-        run: make -C apps/backend e2e-plugin-package
+        run: make -C apps/backend e2e-plugin-ui e2e-plugin-package
 
       # Linux/amd64 helper binaries (agentctl + mock-agent) bind-mounted into
       # containers by the Docker E2E project. Cheap to build (~1s each) so we
@@ -396,6 +396,7 @@ jobs:
           path: |
             apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz
             apps/backend/.build/plugin-package-verify
+            apps/backend/.build/e2e-plugin-identity.json
           retention-days: 1
 
       # Tar the Vite dist directory so shards can reuse the same static web build.

@@ -150,6 +150,12 @@ describe("buildSettingsInitialStateForRoute", () => {
 
     expect(state.system).toBeUndefined();
   });
+
+  it("stamps the agent snapshot with the request generation", () => {
+    const state = buildState({ agentProfilesVersion: 4 });
+
+    expect(state.agentProfiles?.version).toBe(4);
+  });
 });
 
 describe("message queue settings route", () => {

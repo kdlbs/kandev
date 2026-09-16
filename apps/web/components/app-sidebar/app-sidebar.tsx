@@ -8,6 +8,7 @@ import { useEnsureWorkspaceWorkflows } from "@/hooks/use-workflows";
 import { useOfficeModeState } from "@/hooks/use-in-office";
 import type { WorkspaceMode } from "@/components/workspace-scope-provider";
 import { useOfficeWorkspaceData } from "@/hooks/use-office-workspace-data";
+import { useSidebarHoverReveal } from "@/hooks/domains/sidebar/use-sidebar-hover-reveal";
 import { cn } from "@/lib/utils";
 import {
   APP_SIDEBAR_COLLAPSED_WIDTH,
@@ -180,6 +181,14 @@ export function AppSidebar() {
   const toggleCollapsed = useAppStore((s) => s.toggleAppSidebar);
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
+  const enabled = useAppStore((s) => s.userSettings.sidebarHoverEnabled);
+  const delayMs = useAppStore((s) => s.userSettings.sidebarHoverDelayMs);
+  const hover = useSidebarHoverReveal({ collapsed, pathname, enabled, delayMs });
+  const visuallyCollapsed = collapsed && !hover.revealed;
+  const handleToggleCollapse = () => {
+    hover.dismiss();
+    toggleCollapsed();
+  };
   const mode = useOfficeModeState();
   const [isResizing, setIsResizing] = useState(false);
 
@@ -244,6 +253,9 @@ export function AppSidebar() {
       style={{ width: targetWidth }}
     >
       <aside
+        ref={hover.ref}
+        {...hover.handlers}
+        data-hover-revealed={hover.revealed ? "true" : "false"}
         data-testid="app-sidebar"
         data-collapsed={collapsed ? "true" : "false"}
         className={cn(
@@ -256,15 +268,26 @@ export function AppSidebar() {
             ? "transition-none"
             : "transition-[width] duration-300 ease-out motion-reduce:transition-none",
         )}
-        style={{ width: targetWidth }}
+        style={{ width: visuallyCollapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : expandedWidth }}
       >
-        <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
+        <AppSidebarHeader
+          collapsed={visuallyCollapsed}
+          hoverRevealed={hover.revealed}
+          onToggleCollapse={handleToggleCollapse}
+        />
         <div
           data-testid="app-sidebar-content"
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          <AppSidebarNavigation collapsed={collapsed} mode={mode} settingsMode={settingsMode} />
-          <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={handleToggleSettingsMode} />
+          <AppSidebarNavigation
+            collapsed={visuallyCollapsed}
+            mode={mode}
+            settingsMode={settingsMode}
+          />
+          <AppSidebarFooter
+            collapsed={visuallyCollapsed}
+            onToggleSettingsMode={handleToggleSettingsMode}
+          />
         </div>
         {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}
       </aside>

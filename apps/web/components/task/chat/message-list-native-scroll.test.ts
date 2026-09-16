@@ -4,24 +4,11 @@ import { resolveCompetingInitialScrollOwner } from "./message-list-native-scroll
 const noProgrammaticLock = () => false;
 
 describe("resolveCompetingInitialScrollOwner", () => {
-  it("gives a new recovery failure the initial reveal before unread placement", () => {
-    expect(
-      resolveCompetingInitialScrollOwner({
-        hasPendingLayoutRestore: false,
-        hasExplicitScrollTarget: false,
-        hasRecoveryReveal: true,
-        hasUnreadDivider: true,
-        isProgrammaticScrollLocked: noProgrammaticLock,
-      }),
-    ).toBe("recovery");
-  });
-
   it("preserves layout and explicit message placement precedence", () => {
     expect(
       resolveCompetingInitialScrollOwner({
         hasPendingLayoutRestore: true,
         hasExplicitScrollTarget: true,
-        hasRecoveryReveal: true,
         hasUnreadDivider: true,
         isProgrammaticScrollLocked: noProgrammaticLock,
       }),
@@ -30,10 +17,28 @@ describe("resolveCompetingInitialScrollOwner", () => {
       resolveCompetingInitialScrollOwner({
         hasPendingLayoutRestore: false,
         hasExplicitScrollTarget: true,
-        hasRecoveryReveal: true,
         hasUnreadDivider: true,
         isProgrammaticScrollLocked: noProgrammaticLock,
       }),
     ).toBe("explicit-target");
+  });
+
+  it("uses the unread divider and then the programmatic owner for ordinary placement", () => {
+    expect(
+      resolveCompetingInitialScrollOwner({
+        hasPendingLayoutRestore: false,
+        hasExplicitScrollTarget: false,
+        hasUnreadDivider: true,
+        isProgrammaticScrollLocked: noProgrammaticLock,
+      }),
+    ).toBe("unread-divider");
+    expect(
+      resolveCompetingInitialScrollOwner({
+        hasPendingLayoutRestore: false,
+        hasExplicitScrollTarget: false,
+        hasUnreadDivider: false,
+        isProgrammaticScrollLocked: () => true,
+      }),
+    ).toBe("programmatic-scroll");
   });
 });

@@ -11,9 +11,15 @@ import { NeedsYouInboxHiddenPanel } from "./needs-you-inbox-hidden-panel";
 export function NeedsYouInboxEmptyState({
   hiddenCount,
   listRevision = 0,
+  failedCount,
+  failedCountKnown = false,
 }: {
   hiddenCount: number;
   listRevision?: number;
+  /** The Failed tab's own count, read only for the AC-UI-INBOX-FAILED-001.23
+   * clause below -- never written from here (design-01#Count-separation). */
+  failedCount?: number;
+  failedCountKnown?: boolean;
 }) {
   const { t } = useTranslation();
   const workspaceName = useAppStore(
@@ -31,6 +37,16 @@ export function NeedsYouInboxEmptyState({
             : t("needsYouInbox:emptyTitleUnnamedWorkspace")}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">{t("needsYouInbox:emptyDescription")}</p>
+        {/* AC-UI-INBOX-FAILED-001.23: omitted while the failed count is not
+            known (no read applied yet, or the last one failed), so this never
+            asserts presence or absence it cannot back up. */}
+        {failedCountKnown && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {failedCount && failedCount > 0
+              ? t("needsYouInbox:failedClauseSome", { count: failedCount })
+              : t("needsYouInbox:failedClauseNone")}
+          </p>
+        )}
       </div>
       {hiddenCount > 0 && (
         <NeedsYouInboxHiddenPanel hiddenCount={hiddenCount} listRevision={listRevision} />

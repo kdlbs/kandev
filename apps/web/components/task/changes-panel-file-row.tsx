@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import {
   IconArrowBackUp,
   IconPlus,
@@ -133,6 +135,7 @@ export function FileRow({
             onUnstage={onUnstage}
           />
         )}
+        <SymlinkIndicator isSymlink={file.isSymlink} />
         <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
           <p className="flex text-foreground text-xs min-w-0">
             {showFolder && (

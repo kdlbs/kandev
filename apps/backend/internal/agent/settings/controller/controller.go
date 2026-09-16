@@ -49,6 +49,8 @@ var (
 	ErrCommandRequired                      = errors.New("command is required")
 	ErrInvalidProfileEnvVars                = errors.New("invalid profile env vars")
 	ErrInvalidCommandPrefix                 = errors.New("invalid command prefix")
+	ErrRequireExactModelNeedsModel          = errors.New("exact model requires a concrete model")
+	ErrRequireExactModelUnsupported         = errors.New("exact model is not supported for this profile")
 	ErrUnknownMCPStrategy                   = errors.New("unknown MCP strategy")
 	ErrNotCustomTUIAgent                    = errors.New("agent is not a custom TUI agent")
 	ErrDynamicAgentRoutingDisabled          = errors.New("dynamic agent routing is disabled")

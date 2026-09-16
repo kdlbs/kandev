@@ -23,6 +23,16 @@ async function seedTaskWithPR(
   title: string,
   prOverrides: Partial<Parameters<ApiClient["mockGitHubAssociateTaskPR"]>[0]> = {},
 ) {
+  // The task-mode MCP catalog is derived from the providers attached to the
+  // task repository before the agent session starts. Keep this fixture's
+  // local checkout paired with the GitHub identity of its linked PR so the
+  // bound auto-fix outcome tool is discoverable during the first turn.
+  await apiClient.updateRepository(seedData.repositoryId, {
+    provider: "github",
+    provider_host: "https://github.com",
+    provider_owner: OWNER,
+    provider_name: REPO,
+  });
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
   const task = await apiClient.createTaskWithAgent(
