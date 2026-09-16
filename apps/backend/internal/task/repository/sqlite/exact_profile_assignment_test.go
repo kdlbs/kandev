@@ -203,3 +203,37 @@ func newExactProfileAssignmentRepo(t *testing.T) (*Repository, *models.ExactProf
 	}
 	return repo, a
 }
+
+func TestFindExactProfileReusableSessionFiltersGenerationRevisionAndTerminalState(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	ctx := context.Background()
+	const revision int64 = 42
+	for _, session := range []*models.TaskSession{
+		{ID: "exact-terminal", TaskID: assignment.TaskID, State: models.TaskSessionStateCompleted, ExactProfileGeneration: 1, ExactProfileRevision: revision},
+		{ID: "exact-wrong-generation", TaskID: assignment.TaskID, State: models.TaskSessionStateWaitingForInput, ExactProfileGeneration: 2, ExactProfileRevision: revision},
+		{ID: "exact-wrong-revision", TaskID: assignment.TaskID, State: models.TaskSessionStateWaitingForInput, ExactProfileGeneration: 1, ExactProfileRevision: revision + 1},
+		{ID: "exact-reusable", TaskID: assignment.TaskID, State: models.TaskSessionStateWaitingForInput, ExactProfileGeneration: 1, ExactProfileRevision: revision},
+	} {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("create session %s: %v", session.ID, err)
+		}
+	}
+
+	matching, err := repo.FindExactProfileReusableSession(ctx, assignment.TaskID, 1, revision)
+	if err != nil || matching == nil || matching.ID != "exact-reusable" {
+		t.Fatalf("matching session = %#v, %v; want exact-reusable", matching, err)
+	}
+	for _, query := range []struct {
+		generation int64
+		revision   int64
+	}{
+		{generation: 2, revision: revision + 1},
+		{generation: 3, revision: revision},
+		{generation: 1, revision: revision + 2},
+	} {
+		found, err := repo.FindExactProfileReusableSession(ctx, assignment.TaskID, query.generation, query.revision)
+		if err != nil || found != nil {
+			t.Fatalf("lookup (%d, %d) = %#v, %v; want nil", query.generation, query.revision, found, err)
+		}
+	}
+}

@@ -4677,6 +4677,18 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	if move.MoveID == "" {
 		move.MoveID = legacyPendingMoveID(sessionID, move)
 	}
+	if !s.pendingMoveExactProfileGenerationCurrent(ctx, taskID, move.ExactProfileGeneration) {
+		s.logger.Warn("discarding stale exact-profile pending move",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID),
+			zap.String("move_id", move.MoveID), zap.Int64("exact_profile_generation", move.ExactProfileGeneration))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		if s.messageQueue != nil {
+			if _, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, ""); err != nil {
+				s.logger.Warn("failed to discard stale exact-profile pending move", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			}
+		}
+		return
+	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Error("failed to load task for pending move",
@@ -4848,6 +4860,21 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		context.WithoutCancel(ctx), identity, freshSession,
 		fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions,
 	)
+}
+
+func (s *Service) pendingMoveExactProfileGenerationCurrent(ctx context.Context, taskID string, generation int64) bool {
+	assignments, ok := s.repo.(exactProfileAssignmentStore)
+	if !ok {
+		return generation == 0
+	}
+	assignment, err := assignments.GetExactProfileAssignment(ctx, taskID)
+	if err != nil {
+		return false
+	}
+	if assignment == nil || !assignment.Active {
+		return generation == 0
+	}
+	return generation > 0 && assignment.Generation == generation
 }
 
 func (s *Service) consumeUnfencedPendingMove(
