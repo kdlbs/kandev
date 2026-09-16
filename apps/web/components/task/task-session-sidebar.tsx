@@ -76,6 +76,7 @@ function useSidebarData(workspaceId: string | null) {
 
   const {
     allTasks,
+    pendingArchiveTaskIds,
     allSteps,
     stepsByWorkflowId,
     wipQueueByTaskId,
@@ -115,6 +116,7 @@ function useSidebarData(workspaceId: string | null) {
       repositoriesById,
       stepColorById,
       automaticColorSettings,
+      pendingArchiveTaskIds,
     };
     const items: TaskSwitcherItem[] = allTasks.map((task) => buildSidebarItem(task, mapCtx));
     if (
@@ -136,6 +138,7 @@ function useSidebarData(workspaceId: string | null) {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     automaticColorSettings,
+    pendingArchiveTaskIds,
   ]);
 
   return {

@@ -753,7 +753,7 @@ On a phone, archive uses a focused confirmation step in the open Tasks sheet,
 or a compact bottom sheet from a page. [Phone confirmation controls](mobile-remote-access.md#confirm-an-action-on-a-phone)
 explain how to review the action and return to your list without losing your place.
 
-After you confirm archive, the task disappears from the active sidebar and phone task picker while the request is pending. If the request fails, an active task becomes available again. Saved views that include archived tasks still show confirmed archives.
+After you confirm archive, the task stays in the active sidebar and phone task picker in a dimmed, busy state with a spinner while the request is pending. It disappears after a successful archive. If the request fails, the task returns to its normal state. Saved views that include archived tasks still show confirmed archives.
 
 Archive records the task as archived and removes it from active views immediately. Runtime stopping and physical cleanup then run in the background with a 60-second timeout. Cleanup is best-effort: a stop or deletion failure is logged and does not undo the archive, and Kandev preserves a runtime or environment when a nonterminal session cannot be stopped. Shared inherited environments and borrowed worktrees are also preserved while another active task still uses them.
 

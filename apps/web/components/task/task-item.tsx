@@ -54,6 +54,7 @@ type TaskItemProps = {
    */
   parkedOnBackgroundWork?: boolean;
   isArchived?: boolean;
+  isPendingArchive?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
   isMultiSelected?: boolean;
@@ -177,6 +178,15 @@ function taskItemRowClick(
   onClick: (() => void) | undefined,
 ): (e: React.MouseEvent) => void {
   return (e) => (onSelect ? onSelect(e) : onClick?.());
+}
+
+function pendingArchiveRowProps(isPendingArchive?: boolean) {
+  if (!isPendingArchive) return {};
+  return {
+    "aria-busy": true as const,
+    "aria-disabled": true as const,
+    className: "cursor-wait opacity-60",
+  };
 }
 
 function TaskItemTitle({ title }: { title: string }) {
@@ -334,6 +344,7 @@ export const TaskItem = memo(function TaskItem({
   foregroundActivity,
   parkedOnBackgroundWork,
   isArchived,
+  isPendingArchive,
   isSelected = false,
   isMultiSelected = false,
   onClick,
@@ -374,6 +385,7 @@ export const TaskItem = memo(function TaskItem({
   taskRowPresentation,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
+  const pendingProps = pendingArchiveRowProps(isPendingArchive);
   const resolvedTaskRow = resolveTaskRowPresentation(taskRowPresentation, { showRepository });
   const relativeTime = showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt;
   const taskColor = useTaskColor(taskId);
@@ -386,6 +398,7 @@ export const TaskItem = memo(function TaskItem({
       tabIndex={0}
       data-testid="sidebar-task-item"
       data-task-row-id={taskId}
+      {...pendingProps}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
       onClick={taskItemRowClick(onSelect, onClick)}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
@@ -397,6 +410,7 @@ export const TaskItem = memo(function TaskItem({
           indent.depth === 0,
           resolvedTaskRow.detailsEnabled,
         ),
+        pendingProps.className,
         archiveConfirmation && "flex-wrap",
       )}
     >
@@ -412,6 +426,7 @@ export const TaskItem = memo(function TaskItem({
         parkedOnBackgroundWork={parkedOnBackgroundWork}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
+        isPendingArchive={isPendingArchive}
         interrupted={interrupted}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
         showBackgroundTooltip

@@ -62,7 +62,7 @@ beforeEach(() => {
 
 describe("sidebar pending archive projection", () => {
   // @covers AC-TASKS-REMOVAL-NAVIGATION-003.1, AC-TASKS-REMOVAL-NAVIGATION-003.2, AC-TASKS-REMOVAL-NAVIGATION-003.3
-  it("hides before mutation settles and restores latest data after rejection", async () => {
+  it("marks before mutation settles and restores latest data after rejection", async () => {
     const view = setup();
     const pending = deferred();
     const sibling = view.result.current.sidebar.allTasks[1];
@@ -72,11 +72,17 @@ describe("sidebar pending archive projection", () => {
         { taskId: "a", mutate: () => pending.promise },
       ]);
     });
-    expect(view.result.current.sidebar.allTasks.map((row) => row.id)).toEqual(["b", "child"]);
-    expect(view.result.current.sidebar.allTasks[0]).toBe(sibling);
+    expect(view.result.current.sidebar.allTasks.map((row) => row.id)).toEqual(["a", "b", "child"]);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set(["a"]));
+    expect(view.result.current.sidebar.allTasks[1]).toBe(sibling);
     expect(store.getState().kanban.tasks).toHaveLength(3);
     act(() => setTasks([{ ...task("a"), title: "New title" }, task("b"), task("child", "a")]));
-    expect(view.result.current.sidebar.allTasks.map((row) => row.id)).toEqual(["b", "child"]);
+    expect(view.result.current.sidebar.allTasks.map((row) => row.title)).toEqual([
+      "New title",
+      "b",
+      "child",
+    ]);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set(["a"]));
     await act(async () => {
       pending.reject(new Error("refused"));
       await operation;
@@ -86,9 +92,10 @@ describe("sidebar pending archive projection", () => {
       "b",
       "child",
     ]);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set());
   });
 
-  it("hides a bulk cascade and only restores failed targets", async () => {
+  it("marks a bulk cascade and only retains failed targets", async () => {
     const view = setup();
     const first = deferred();
     const second = deferred();
@@ -103,13 +110,15 @@ describe("sidebar pending archive projection", () => {
         { cascade: true },
       );
     });
-    expect(view.result.current.sidebar.allTasks).toEqual([]);
+    expect(view.result.current.sidebar.allTasks.map((row) => row.id)).toEqual(["a", "b", "child"]);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set(["a", "b", "child"]));
     await act(async () => {
       first.resolve();
       second.reject(new Error("refused"));
       await operation;
     });
     expect(view.result.current.sidebar.allTasks.map((row) => row.id)).toEqual(["b"]);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set());
   });
 });
 
@@ -126,7 +135,8 @@ describe("sidebar archive compatibility", () => {
       });
       store.getState().setActiveTask("b");
     });
-    expect(view.result.current.sidebar.allTasks.map((row) => row.id)).toEqual(["b", "child"]);
+    expect(view.result.current.sidebar.allTasks.map((row) => row.id)).toEqual(["a", "b", "child"]);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set(["a"]));
     act(() => {
       const state = store.getState();
       const tasks = state.kanban.tasks.map((row) =>
@@ -143,10 +153,11 @@ describe("sidebar archive compatibility", () => {
     expect(view.result.current.sidebar.allTasks.find((row) => row.id === "a")?.isArchived).toBe(
       true,
     );
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set());
     expect(store.getState().tasks.activeTaskId).toBe("b");
   });
 
-  it("keeps the last row absent when success releases pending intent", async () => {
+  it("removes the last row when success releases pending intent", async () => {
     setTasks([task("a")]);
     const view = setup();
     const pending = deferred();
@@ -156,12 +167,14 @@ describe("sidebar archive compatibility", () => {
         { taskId: "a", mutate: () => pending.promise },
       ]);
     });
-    expect(view.result.current.sidebar.allTasks).toEqual([]);
+    expect(view.result.current.sidebar.allTasks).toHaveLength(1);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set(["a"]));
     await act(async () => {
       pending.resolve();
       await operation;
     });
-    expect(view.result.current.sidebar.allTasks).toEqual([]);
+    expect(view.result.current.sidebar.allTasks).toHaveLength(0);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set());
     expect(store.getState().taskRemoval.operationsByToken).toEqual({});
   });
 
@@ -184,5 +197,6 @@ describe("sidebar archive compatibility", () => {
       });
     });
     expect(view.result.current.sidebar.allTasks.map((row) => row.id)).toEqual(["a", "b", "child"]);
+    expect(view.result.current.sidebar.pendingArchiveTaskIds).toEqual(new Set());
   });
 });

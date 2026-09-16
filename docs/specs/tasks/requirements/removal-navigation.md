@@ -81,21 +81,22 @@ removal, replacement eligibility, and recovery depend on the task lifecycle.
 
 ### REQ-TASKS-REMOVAL-NAVIGATION-003: Immediate archive visibility
 
-**Intent:** Remove accepted archive targets from active task navigation without
-waiting for network latency or destination selection.
+**Intent:** Show accepted archive targets as busy until they are removed from
+active task navigation after the archive operation completes.
 
 #### Acceptance criteria
 
 - **AC-TASKS-REMOVAL-NAVIGATION-003.1:** After archive acceptance, every visible
-  task in the removal set shall disappear from the active desktop sidebar and
-  phone task picker on the next render, before the archive request, destination
-  lookup, or live event completes. No retained row, exit delay, or empty row gap
-  shall remain. Opening or cancelling confirmation shall leave rows unchanged.
+  active task in the removal set shall remain in the desktop sidebar and phone
+  task picker in a dimmed, busy state with a spinner on the next render, before
+  the archive request, destination lookup, or live event completes. The row
+  shall keep its place and expose no stale interactive state. Opening or
+  cancelling confirmation shall leave rows unchanged.
 - **AC-TASKS-REMOVAL-NAVIGATION-003.2:** Refreshes and live updates during the
-  operation shall not make its active rows reappear. Successful targets shall
-  remain absent after completion; failed targets that remain active shall become
-  available again without overwriting newer task data or user navigation. Bulk
-  partial failure shall not restore successful targets.
+  operation shall preserve the pending presentation. Successful targets shall
+  be removed after completion and failed targets that remain active shall return
+  to their normal presentation without overwriting newer task data or user
+  navigation. Bulk partial failure shall restore only failed targets.
 - **AC-TASKS-REMOVAL-NAVIGATION-003.3:** Archiving an unselected task shall leave
   the selected task and route unchanged. Non-cascade archive shall not hide
   surviving subtasks. Existing archived-inclusive saved views shall continue to
@@ -111,7 +112,7 @@ This adds local user-action presentation guarantees; it does not change task API
 permissions, session-only deletion, Quick Chat expiration/close, or server cleanup.
 Remote/API/MCP removal retains existing lifecycle reconciliation and redirects.
 Cold unavailable task routes retain [their current contract](missing-task-route-recovery.md).
-Undo, animations, new settings, and a new mobile navigation composition are excluded.
+Undo, new settings, and a new mobile navigation composition are excluded.
 
 ## System design
 

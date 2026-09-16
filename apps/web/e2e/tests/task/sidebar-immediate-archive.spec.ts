@@ -1,7 +1,7 @@
 import { test } from "../../fixtures/test-base";
 import { checkImmediateArchive } from "./sidebar-immediate-archive-helpers";
 
-test("sidebar archive disappears before server processing and recovers on failure", async ({
+test("sidebar shows archive progress before removal and recovers on failure", async ({
   testPage,
   apiClient,
   seedData,

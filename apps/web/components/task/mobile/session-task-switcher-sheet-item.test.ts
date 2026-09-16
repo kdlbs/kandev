@@ -54,6 +54,24 @@ describe("toSheetItem repository projection", () => {
 
     expect(item.priority).toBe("critical");
   });
+
+  it("marks active rows covered by a pending archive", () => {
+    const item = toSheetItem(task(), {
+      ...emptyCtx(),
+      pendingArchiveTaskIds: new Set(["t1"]),
+    });
+
+    expect(item.isPendingArchive).toBe(true);
+  });
+
+  it("does not mark confirmed archived rows as pending", () => {
+    const item = toSheetItem(task({ isArchived: true }), {
+      ...emptyCtx(),
+      pendingArchiveTaskIds: new Set(["t1"]),
+    });
+
+    expect(item.isPendingArchive).toBe(false);
+  });
 });
 
 describe("toSheetItem remote executor projection", () => {

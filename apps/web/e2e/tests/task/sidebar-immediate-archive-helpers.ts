@@ -57,7 +57,10 @@ export async function checkImmediateArchive(options: {
     await press(page.getByTestId("archive-task-confirm"));
     await expect.poll(() => pending !== null).toBe(true);
     if (mobile) await page.getByTestId("mobile-session-menu").tap();
-    await expect(targetRow()).toHaveCount(0);
+    await expect(targetRow()).toBeVisible();
+    await expect(targetRow()).toHaveAttribute("aria-busy", "true");
+    await expect(targetRow()).toHaveClass(/opacity-60/);
+    await expect(targetRow().getByTestId("task-state-archive-pending")).toBeVisible();
     await expect(rows().filter({ hasText: "Keep selected" })).toBeInViewport();
     await expect(page).toHaveURL(new RegExp(`/t/${nav.task_id}$`));
     await (mobile ? sheet : session.sidebar).screenshot({ path: options.screenshotPath });
@@ -74,13 +77,17 @@ export async function checkImmediateArchive(options: {
       await expect(page.getByText("Failed to archive task", { exact: true })).toBeVisible();
     }
     await expect(targetRow()).toBeVisible();
+    await expect(targetRow()).not.toHaveAttribute("aria-busy");
+    await expect(targetRow().getByTestId("task-state-archive-pending")).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/t/${nav.task_id}$`));
 
     await openArchive();
     await press(page.getByTestId("archive-task-confirm"));
     await expect.poll(() => pending !== null).toBe(true);
     if (mobile) await page.getByTestId("mobile-session-menu").tap();
-    await expect(targetRow()).toHaveCount(0);
+    await expect(targetRow()).toBeVisible();
+    await expect(targetRow()).toHaveAttribute("aria-busy", "true");
+    await expect(targetRow().getByTestId("task-state-archive-pending")).toBeVisible();
     await pending!.continue();
     pending = null;
     await expect(

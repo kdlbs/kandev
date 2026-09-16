@@ -15,6 +15,7 @@ import type { TaskRemovalState } from "@/lib/state/task-removal";
 import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
+  pendingArchiveTaskIds: ReadonlySet<string>;
   workflows: TaskMoveWorkflow[];
   wipQueueByTaskId: Map<string, WipQueueStatus>;
   isLoading: boolean;
@@ -29,17 +30,6 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
 const NOOP_REFRESH = () => {};
 
 type SidebarTask = AggregatedSidebarTasks["allTasks"][number];
-
-function isPendingSidebarArchive(
-  task: SidebarTask,
-  removal: TaskRemovalState | undefined,
-  workspaceId: string | null,
-): boolean {
-  if (task.isArchived) return false;
-  const token = removal?.pendingTokenByTaskId[task.id];
-  const operation = token ? removal?.operationsByToken[token] : undefined;
-  return operation?.action === "archive" && operation.workspaceId === workspaceId;
-}
 
 function shallowTaskEqual(previous: SidebarTask, next: SidebarTask): boolean {
   const previousKeys = Object.keys(previous) as Array<keyof SidebarTask>;
@@ -192,7 +182,7 @@ export function mergeSidebarArchivedTasks(
   return archived.length > 0 ? [...activeTasks, ...archived] : activeTasks;
 }
 
-function useVisibleSidebarTasks(
+function useSidebarTaskProjection(
   activeTasks: SidebarTask[],
   archivedTasks: KanbanState["tasks"],
   workspaceId: string | null,
@@ -200,20 +190,34 @@ function useVisibleSidebarTasks(
   taskRemoval: TaskRemovalState | undefined,
 ) {
   const previousTasksRef = useRef<SidebarTask[]>([]);
-  return useMemo(() => {
-    const merged = mergeSidebarArchivedTasks(
-      activeTasks,
-      archivedTasks,
-      workspaceId,
-      needsArchivedTasks,
-    );
-    const visible = merged.filter(
-      (task) => !isPendingSidebarArchive(task, taskRemoval, workspaceId),
-    );
-    const shared = reuseUnchangedTasks(previousTasksRef.current, visible);
+  const merged = useMemo(
+    () => mergeSidebarArchivedTasks(activeTasks, archivedTasks, workspaceId, needsArchivedTasks),
+    [activeTasks, archivedTasks, needsArchivedTasks, workspaceId],
+  );
+  const allTasks = useMemo(() => {
+    const shared = reuseUnchangedTasks(previousTasksRef.current, merged);
     previousTasksRef.current = shared;
     return shared;
-  }, [activeTasks, archivedTasks, needsArchivedTasks, workspaceId, taskRemoval]);
+  }, [merged]);
+  const pendingArchiveTaskIds = useMemo(() => {
+    const pending = new Set<string>();
+    if (!workspaceId) return pending;
+    const activeTaskIds = new Set(
+      allTasks.filter((task) => task.isArchived !== true).map((task) => task.id),
+    );
+    for (const [taskId, token] of Object.entries(taskRemoval?.pendingTokenByTaskId ?? {})) {
+      const operation = taskRemoval?.operationsByToken[token];
+      if (
+        activeTaskIds.has(taskId) &&
+        operation?.action === "archive" &&
+        operation.workspaceId === workspaceId
+      ) {
+        pending.add(taskId);
+      }
+    }
+    return pending;
+  }, [allTasks, taskRemoval, workspaceId]);
+  return { allTasks, pendingArchiveTaskIds };
 }
 
 /**
@@ -298,7 +302,7 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
 
   const { allSteps, stepsByWorkflowId } = useSharedStepMetadata(aggregated);
 
-  const allTasks = useVisibleSidebarTasks(
+  const { allTasks, pendingArchiveTaskIds } = useSidebarTaskProjection(
     aggregated.allTasks,
     archived.tasks,
     workspaceId,
@@ -330,6 +334,7 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   return {
     ...aggregated,
     allTasks,
+    pendingArchiveTaskIds,
     allSteps,
     stepsByWorkflowId,
     wipQueueByTaskId,

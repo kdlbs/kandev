@@ -1,7 +1,7 @@
 import { test } from "../../fixtures/test-base";
 import { checkImmediateArchive } from "./sidebar-immediate-archive-helpers";
 
-test("phone picker hides pending archive and restores failed archive", async ({
+test("phone picker shows archive progress and restores failed archive", async ({
   testPage,
   apiClient,
   seedData,

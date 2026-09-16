@@ -35,10 +35,11 @@ controlled delayed-response regressions before production changes.
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
-| REQ-TASKS-REMOVAL-NAVIGATION-001 | Presentation boundary, navigation, entry points, mobile |
+| Requirement                      | Design sections                                          |
+| -------------------------------- | -------------------------------------------------------- |
+| REQ-TASKS-REMOVAL-NAVIGATION-001 | Presentation boundary, navigation, entry points, mobile  |
 | REQ-TASKS-REMOVAL-NAVIGATION-002 | Operation state, reconciliation, failure recovery, tests |
+| REQ-TASKS-REMOVAL-NAVIGATION-003 | Pending archive presentation in shared task navigation   |
 
 ## Immediate sidebar archive projection
 
@@ -51,34 +52,42 @@ without subscribing to removal intent. This accounts for the retained row under
 latency; it is source-trace evidence, not a measured browser reproduction.
 
 Subscribe the shared desktop/phone `useWorkspaceSidebarTasks` projection to
-`taskRemoval`. Exclude active rows covered by an archive operation using its
-`taskIds`, `pendingTokenByTaskId`, and `operationsByToken`. Apply the exclusion
-before returning rows to grouping/tree/view consumers and deriving queue data.
-Scope by task identity and operation workspace; preserve unchanged row references.
-Do not reuse a navigation-ownership predicate: unselected tasks and operations
-whose user has navigated still require immediate row removal. Delete behavior
-is outside this extension.
+`taskRemoval`. Derive archive-pending task IDs from `taskIds`,
+`pendingTokenByTaskId`, and `operationsByToken`, scoped by task identity and
+operation workspace. Return the rows with their existing order and references,
+plus a pending marker for active rows. Do not reuse a navigation-ownership
+predicate: unselected tasks and operations whose user has navigated still need
+the pending presentation. Delete behavior is outside this extension.
 
-Retain this visibility overlay through operation reconciliation and release it
-through the existing coordinator. Cache refreshes cannot bypass the overlay.
+Pass the marker through the sidebar and phone item projections to the shared
+task row. A pending row keeps its normal geometry, becomes visually dimmed,
+sets busy/disabled accessibility state, and replaces its task-state icon with a
+muted spinner. Keep the row in the list so neighboring rows do not jump while
+the request is in flight; prevent stale actions from presenting it as settled.
+
+Retain this pending presentation through operation reconciliation and release it
+through the existing coordinator. Cache refreshes cannot bypass the marker.
 Success must prune active caches before release, as the coordinator currently
-does. On failure, releasing the overlay reveals the latest eligible cache row;
-do not restore an old snapshot or write synthetic archive metadata. Continue
-applying archive events and archived-cache updates so archived-inclusive saved
-views preserve their existing semantics. A confirmed archived row can remain in
-such a view; an active pending row is hidden.
+does; the row then disappears and its gap collapses. On failure, releasing the
+marker reveals the latest eligible cache row; do not restore an old snapshot or
+write synthetic archive metadata. Continue applying archive events and
+archived-cache updates so archived-inclusive saved views preserve their existing
+semantics. A confirmed archived row can remain in such a view; it is no longer
+marked pending.
 
-The overlay does not alter selection, recent-task preferences, persistence, or
-server cleanup. Existing navigation recovery remains authoritative. Unknown
-outcomes use existing authoritative refresh/recovery; never reconstruct a row
-removed by a server event. Cascade membership uses the operation's captured
-known descendants; later authoritative cascade events handle uncached children.
+The presentation marker does not alter selection, recent-task preferences,
+persistence, or server cleanup. Existing navigation recovery remains
+authoritative. Unknown outcomes use existing authoritative refresh/recovery;
+never reconstruct a row removed by a server event. Cascade membership uses the
+operation's captured known descendants; later authoritative cascade events
+handle uncached children.
 
 Desktop uses the existing sidebar; phone uses the existing task-switcher sheet
-and visible overflow actions. Their shared data hook owns visibility. Keep the
-existing sheet dismissal, scroll owner, safe areas, touch targets, and task
-navigation. Reopening the phone picker while a request is pending must still
-exclude the target. No new copy, geometry, animation, or controls are required.
+and visible overflow actions. Their shared data hook owns the pending marker.
+Keep the existing sheet dismissal, scroll owner, safe areas, touch targets, and
+task navigation. Reopening the phone picker while a request is pending must
+still show the dimmed spinner row. No new copy, geometry, or navigation
+composition is required.
 
 ## Operation state
 

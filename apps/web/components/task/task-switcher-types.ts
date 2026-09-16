@@ -62,6 +62,8 @@ export type TaskSwitcherItem = {
   lastActivityAt?: string;
   createdAt?: string;
   isArchived?: boolean;
+  /** True while an accepted archive request is still in flight. */
+  isPendingArchive?: boolean;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
