@@ -356,12 +356,12 @@ func (r *Repository) evalAgentCeilingGate(
 		return true
 	}
 	if agentCap <= 0 {
-		// No resolvable agent_profiles row (or an invalid non-positive
-		// value): a missing ceiling input defers rather than admitting
-		// an unbounded agent, per AC-OFFICE-LAUNCH-SAFETY-001.8. The read
-		// itself succeeded (an authoritative "no profile"), so this is a
-		// successful evaluation for AC-OFFICE-BACKPRESSURE-003.10.
-		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, true)
+		// No resolvable agent_profiles row: defer rather than admit an
+		// unbounded agent. AC-OFFICE-LAUNCH-SAFETY-001.8 names this
+		// alongside an unreadable ceiling input, not an ordinary
+		// saturated-pool block, so it records the same gate failure.
+		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
+		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, false)
 		return true
 	}
 	agentClaimed, err := r.countClaimed(ctx, tx, "agent_profile_id = ?", candidate.AgentProfileID)

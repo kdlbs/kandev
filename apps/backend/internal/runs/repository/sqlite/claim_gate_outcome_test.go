@@ -8,13 +8,14 @@ import (
 	"time"
 )
 
-// TestClaimNextEligibleRun_MissingAgentProfileRecordsSuccessfulGateOutcome
-// pins AC-OFFICE-BACKPRESSURE-003.10: a gate that correctly blocks a
-// candidate (here, agent_ceiling deferring for a missing agent_profiles
-// row) is a *successful* evaluation for failure-tracking purposes, not a
-// failure — a readable "no profile" answer is not the same as an
-// unreadable input, so it must not move the durable failure count.
-func TestClaimNextEligibleRun_MissingAgentProfileRecordsSuccessfulGateOutcome(t *testing.T) {
+// TestClaimNextEligibleRun_MissingAgentProfileRecordsGateFailure pins
+// AC-OFFICE-LAUNCH-SAFETY-001.8's explicit carve-out from the general
+// AC-OFFICE-BACKPRESSURE-003.10 rule: a claiming run naming an agent
+// profile that does not exist is named alongside an unreadable ceiling
+// input, not alongside an ordinary saturated-pool block, so it must
+// record the failure described in AC-OFFICE-BACKPRESSURE-003.3 rather
+// than a successful evaluation.
+func TestClaimNextEligibleRun_MissingAgentProfileRecordsGateFailure(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	workspace := claimTestWorkspace("ghost-agent")
@@ -29,11 +30,9 @@ func TestClaimNextEligibleRun_MissingAgentProfileRecordsSuccessfulGateOutcome(t 
 	if err != nil {
 		t.Fatalf("get gate failure state: %v", err)
 	}
-	if state.ConsecutiveFailures != 0 {
-		t.Errorf("consecutive_failures = %d, want 0 (a correctly-blocking gate is a success)", state.ConsecutiveFailures)
-	}
-	if state.LastEscalationAt != nil {
-		t.Errorf("last_escalation_at = %v, want nil", state.LastEscalationAt)
+	if state.ConsecutiveFailures != 1 {
+		t.Errorf("consecutive_failures = %d, want 1 (a missing agent profile records a gate failure)",
+			state.ConsecutiveFailures)
 	}
 }
 
