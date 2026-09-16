@@ -25,3 +25,22 @@ export async function testRemoteDockerConnection(
     },
   });
 }
+
+/**
+ * Builds an image on a remote Docker executor's own daemon.
+ *
+ * The executor ID is required because the daemon is a property of that
+ * executor's connection. Building on the install-wide daemon would place the
+ * image where the task container will never run.
+ */
+export function buildRemoteDockerImage(
+  executorId: string,
+  payload: { dockerfile: string; tag: string; build_args?: Record<string, string | null> },
+): Promise<Response> {
+  return fetch(`/api/v1/remote-docker/executors/${encodeURIComponent(executorId)}/build`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+}

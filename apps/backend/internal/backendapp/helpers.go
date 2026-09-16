@@ -1479,7 +1479,7 @@ func registerSecondaryRoutes(
 
 		// The remote Docker connection test rides the same SSH transport, so
 		// it is mounted alongside the SSH routes.
-		dockerremote.RegisterRoutes(p.router, p.log)
+		dockerremote.RegisterRoutes(p.router, p.taskRepo, p.log)
 		p.log.Debug("Registered remote Docker handlers (HTTP)")
 	}
 
