@@ -21,6 +21,10 @@ type ManagedDescriptor = {
   workspaceId: string;
   managedConversationToken: string;
 };
+
+// i18n-exempt: managed conversation dispatch protocol statuses, not user-facing copy.
+const ACCEPTED_DISPATCH_STATUSES = new Set(["started", "sent", "duplicate_occurrence"]);
+
 type InternalProps = WorkspaceAgentChatProps & { pluginId?: string };
 const permissionDeniedStatus: WorkspaceAgentChatStatus = "permission-denied";
 
@@ -142,7 +146,9 @@ function ManagedTranscript({
         },
       );
       const delivery = (await response.json().catch(() => null)) as { status?: string } | null;
-      if (!response.ok || delivery?.status !== "sent") throw new Error("send failed");
+      if (!response.ok || !delivery?.status || !ACCEPTED_DISPATCH_STATUSES.has(delivery.status)) {
+        throw new Error("send failed");
+      }
       setContent("");
     } catch {
       setSendFailed(true);

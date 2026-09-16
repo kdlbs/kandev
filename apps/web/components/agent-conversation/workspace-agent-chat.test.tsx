@@ -75,6 +75,36 @@ describe("WorkspaceAgentChat", () => {
     );
   });
 
+  it("clears the prompt when dispatch starts a new managed session", async () => {
+    transport.fetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            taskId: "task-1",
+            sessionId: "session-1",
+            workspaceId: "ws-1",
+            managedConversationToken: "managed-token",
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "started" }), { status: 200 }));
+    render(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="1"
+      />,
+    );
+    await screen.findByTestId("workspace-agent-chat");
+    const composer = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "start the conversation" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(composer.value).toBe(""));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("fails closed for a foreign descriptor and replaces the old scope when the resource version changes", async () => {
     transport.fetch
       .mockResolvedValueOnce(

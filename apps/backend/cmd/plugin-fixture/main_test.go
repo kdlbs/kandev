@@ -154,6 +154,31 @@ func TestHandleAction_ReturnsAuthenticatedConnectionStatus(t *testing.T) {
 	require.JSONEq(t, `{"connected":true,"workspace_id":"workspace-42"}`, string(resp.Body))
 }
 
+func TestHandleAction_EnsuresManagedConversation(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	host := &fakeHost{
+		managedDescriptor: pluginsdk.AgentConversationDescriptor{
+			TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-42",
+		},
+		managedStatus: "created",
+	}
+	p.SetHost(host)
+
+	resp, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: "managed-chat.ensure",
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-42"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "workspace-42", host.lastManagedSpec.WorkspaceID)
+	require.Equal(t, "fixture-managed-chat", host.lastManagedSpec.ConversationKey)
+	require.JSONEq(t, `{
+		"workspaceId":"workspace-42",
+		"conversationId":"session-1",
+		"resourceVersion":"session-1",
+		"status":"created"
+	}`, string(resp.Body))
+}
+
 func TestHandleAction_UtilityDefaultOmitsOptions(t *testing.T) {
 	p := &fixturePlugin{dataDir: t.TempDir()}
 	host := &fakeHost{utilityText: "executed mock-fast"}
@@ -428,10 +453,33 @@ type fakeHost struct {
 	lastCreateInput pluginsdk.CreateTaskInput
 	lastSendTask    string
 	lastSendText    string
+
+	managedDescriptor pluginsdk.AgentConversationDescriptor
+	managedStatus     string
+	managedErr        error
+	lastManagedSpec   pluginsdk.AgentConversationSpec
 }
 
 func (h *fakeHost) Tasks() pluginsdk.TaskReader       { return fakeHostTaskReader{h} }
 func (h *fakeHost) Messages() pluginsdk.MessageReader { return fakeHostMessageReader{h} }
+func (h *fakeHost) AgentConversations() pluginsdk.AgentConversationManager {
+	return fakeHostAgentConversations{h}
+}
+
+type fakeHostAgentConversations struct{ h *fakeHost }
+
+func (m fakeHostAgentConversations) Ensure(_ context.Context, spec pluginsdk.AgentConversationSpec) (pluginsdk.AgentConversationDescriptor, string, error) {
+	m.h.lastManagedSpec = spec
+	return m.h.managedDescriptor, m.h.managedStatus, m.h.managedErr
+}
+
+func (fakeHostAgentConversations) Dispatch(context.Context, string, string, string, string) (pluginsdk.AgentConversationDispatch, error) {
+	return pluginsdk.AgentConversationDispatch{}, nil
+}
+
+func (fakeHostAgentConversations) Delete(context.Context, string, string) (int32, error) {
+	return 0, nil
+}
 
 type fakeHostTaskReader struct{ h *fakeHost }
 
