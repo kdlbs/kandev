@@ -89,7 +89,6 @@ import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
 import {
   applyLayout,
-  defaultLayout,
   fromDockviewApi,
   getPresetLayout,
   resolveNamedIntent,
@@ -185,6 +184,7 @@ describe("persistEnvLayoutNow", () => {
 // previously held isRestoringLayout=true for the whole rAF and never wrote.
 function resetStoreForIntegration() {
   vi.clearAllMocks();
+  vi.mocked(fromDockviewApi).mockReset().mockReturnValue({ columns: [] });
   useDockviewStore.setState({
     api: null,
     currentLayoutEnvId: null,
@@ -194,6 +194,7 @@ function resetStoreForIntegration() {
     pinnedWidths: new Map(),
     userDefaultLayout: null,
     userDefaultLayoutProfile: { kind: "built-in", id: "default" },
+    defaultPreset: "default",
   });
 }
 
@@ -465,95 +466,6 @@ describe("buildDefaultLayout — effective default widths", () => {
 
     expect(applyLayout).toHaveBeenLastCalledWith(api, planLayout, new Map(), 800, 600);
     expect(useDockviewStore.getState().pinnedWidths).toEqual(new Map());
-  });
-});
-
-describe("toggleRightPanels — center fallback", () => {
-  beforeEach(resetStoreForIntegration);
-
-  it("keeps a center fallback PR Details tab when hiding right panels", async () => {
-    const api = makeStoreApi();
-    vi.mocked(fromDockviewApi).mockReturnValue({
-      columns: [
-        {
-          id: "center",
-          groups: [
-            {
-              id: "group-center",
-              panels: [
-                { id: "chat", component: "chat", title: "Agent" },
-                { id: "pr-detail", component: "pr-detail", title: "PR Details" },
-              ],
-            },
-          ],
-        },
-        {
-          id: "right",
-          pinned: true,
-          groups: [
-            {
-              id: "group-right-top",
-              panels: [{ id: "files", component: "files", title: "Files" }],
-            },
-          ],
-        },
-      ],
-    });
-    useDockviewStore.setState({ api, rightPanelsVisible: true, defaultPreset: "default" });
-
-    useDockviewStore.getState().toggleRightPanels();
-
-    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-    expect(appliedState?.columns.map((column) => column.id)).toEqual(["center"]);
-    expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-      "chat",
-      "pr-detail",
-    ]);
-    await flushRaf();
-  });
-
-  it("keeps a center fallback PR Details tab when showing right panels", async () => {
-    const api = makeStoreApi();
-    vi.mocked(fromDockviewApi).mockReturnValue({
-      columns: [
-        {
-          id: "center",
-          groups: [
-            {
-              id: "group-center",
-              panels: [
-                { id: "chat", component: "chat", title: "Agent" },
-                { id: "pr-detail", component: "pr-detail", title: "PR Details" },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-    vi.mocked(defaultLayout).mockReturnValue({
-      columns: [
-        {
-          id: "right",
-          pinned: true,
-          groups: [
-            {
-              id: "group-right-top",
-              panels: [{ id: "files", component: "files", title: "Files" }],
-            },
-          ],
-        },
-      ],
-    });
-    useDockviewStore.setState({ api, rightPanelsVisible: false, defaultPreset: "default" });
-
-    useDockviewStore.getState().toggleRightPanels();
-
-    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-    expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-      "chat",
-      "pr-detail",
-    ]);
-    await flushRaf();
   });
 });
 

@@ -19,12 +19,21 @@ type moveTaskUpdateHookRepository struct {
 }
 
 func (r *moveTaskUpdateHookRepository) UpdateTask(ctx context.Context, task *models.Task) error {
+	r.fireBeforeUpdate()
+	return r.Repository.UpdateTask(ctx, task)
+}
+
+func (r *moveTaskUpdateHookRepository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
+	r.fireBeforeUpdate()
+	return r.Repository.UpdateTaskPreservingDeferredLaunch(ctx, task)
+}
+
+func (r *moveTaskUpdateHookRepository) fireBeforeUpdate() {
 	r.updateOnce.Do(func() {
 		if r.beforeUpdate != nil {
 			r.beforeUpdate()
 		}
 	})
-	return r.Repository.UpdateTask(ctx, task)
 }
 
 // TestService_MoveTaskEventsUseTransactionalSourceWorkflow covers a stale

@@ -18,6 +18,7 @@ vi.mock("./backups-table", () => ({ BackupsTable: () => null }));
 vi.mock("./database-stats-card", () => ({ DatabaseStatsCard: () => null }));
 vi.mock("./log-viewer", () => ({ LogViewer: () => null }));
 vi.mock("./retention-settings-card", () => ({ RetentionSettingsCard: () => null }));
+vi.mock("./tool-payload-retention-card", () => ({ ToolPayloadRetentionCard: () => null }));
 afterEach(() => {
   cleanup();
   databaseState.value = null;

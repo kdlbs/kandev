@@ -20,6 +20,7 @@ import {
   doFetchMessages,
   getHydratedMessagesForGeneration,
   recordHydratedGeneration,
+  type MessageFetchOptions,
   type SessionHydrationRef,
 } from "./use-session-message-fetch";
 import { useMessageFetchState } from "./use-message-fetch-state";
@@ -35,6 +36,11 @@ const INITIAL_FETCH_LIMIT = 100;
 const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
 const RUNNING_BACKFILL_INTERVAL_MS = 5000;
 const MAX_HISTORY_FETCH_ATTEMPTS = 2;
+const TERMINAL_SESSION_STATES: Partial<Record<TaskSessionState, true>> = {
+  WAITING_FOR_INPUT: true,
+  COMPLETED: true,
+  FAILED: true,
+};
 
 // Monotonic guard against stale concurrent fetches. Each fetch claims an
 // increasing sequence number before awaiting; a completion only merges if no
@@ -204,9 +210,10 @@ function requestSessionMessages(
   sessionId: string,
   readiness: Promise<void>,
   cachedAtRequest: Message[],
+  force = false,
 ): InFlightMessageRequest {
   const existing = inFlightMessageRequests.get(sessionId);
-  if (existing?.readiness === readiness && !existing.settled) return existing;
+  if (!force && existing?.readiness === readiness && !existing.settled) return existing;
 
   const requestParams = {
     session_id: sessionId,
@@ -242,13 +249,22 @@ function requestSessionMessages(
 }
 
 /** Fetch latest messages via WS and merge with any that arrived via live notifications. */
-async function fetchAndStoreMessagesAttempt(
-  sessionId: string,
-  store: ReturnType<typeof useAppStoreApi>,
-  isActive?: () => boolean,
-  hydrationRef?: SessionHydrationRef,
-  hydrationKey?: string,
-): Promise<Message[]> {
+// eslint-disable-next-line complexity -- The ordered snapshot path keeps its guards adjacent to the commit fence.
+async function fetchAndStoreMessagesAttempt({
+  sessionId,
+  store,
+  isActive,
+  hydrationRef,
+  hydrationKey,
+  options,
+}: {
+  sessionId: string;
+  store: ReturnType<typeof useAppStoreApi>;
+  isActive?: () => boolean;
+  hydrationRef?: SessionHydrationRef;
+  hydrationKey?: string;
+  options?: MessageFetchOptions;
+}): Promise<Message[]> {
   const client = getWebSocketClient();
   if (!client) {
     return [];
@@ -260,25 +276,32 @@ async function fetchAndStoreMessagesAttempt(
   const readiness = client.getSessionSubscriptionReadiness(sessionId);
   await readiness;
   if (isActive && !isActive()) return [];
-  const hydratedMessages = getHydratedMessagesForGeneration(
+  const hydratedMessages = getHydratedMessagesForGeneration({
     hydrationRef,
     sessionId,
     readiness,
     hydrationKey,
     store,
-  );
+    force: options?.force,
+  });
   if (hydratedMessages !== undefined) return hydratedMessages;
   // The messages fetch is the session-entry chokepoint: any path that opens a
   // session's transcript must also make its turns resolvable. Start it only
   // after subscription acknowledgement so the REST snapshot cannot race the
   // initial WebSocket subscription registration.
-  void ensureSessionTurnsLoaded(sessionId, store, { readiness });
+  if (!options?.force) void ensureSessionTurnsLoaded(sessionId, store, { readiness });
   const cachedAtRequest = store.getState().messages.bySession[sessionId] ?? [];
   const seq = nextFetchSeq();
   // Keep the snapshot on the deduplicated request. Concurrent callers may
   // observe different cache contents, but reconciliation must use the
   // baseline captured by the caller that actually issued the network request.
-  const request = requestSessionMessages(client, sessionId, readiness, cachedAtRequest);
+  const request = requestSessionMessages(
+    client,
+    sessionId,
+    readiness,
+    cachedAtRequest,
+    options?.force,
+  );
   const response = await request.promise;
   if (isActive && !isActive()) return [];
   const fetched = [...(response.messages ?? [])].reverse();
@@ -287,6 +310,7 @@ async function fetchAndStoreMessagesAttempt(
     cachedAtRequest: request.cachedAtRequest,
     cachedAtResponse: store.getState().messages.bySession[sessionId] ?? [],
     fetched,
+    authoritative: options?.authoritative,
   });
   // Stale-fetch guard: if a newer fetch for this session already merged while
   // this one was in flight, skip the merge so the older snapshot can't drop
@@ -331,16 +355,18 @@ async function fetchAndStoreMessages(
   hydrationRef?: SessionHydrationRef,
   hydrationKey?: string,
   onRetry?: () => void,
+  options?: MessageFetchOptions,
 ): Promise<Message[]> {
   for (let attempt = 0; attempt < MAX_HISTORY_FETCH_ATTEMPTS; attempt += 1) {
     try {
-      return await fetchAndStoreMessagesAttempt(
+      return await fetchAndStoreMessagesAttempt({
         sessionId,
         store,
         isActive,
         hydrationRef,
         hydrationKey,
-      );
+        options,
+      });
     } catch (error) {
       const retryable =
         isWebSocketRequestTimeoutError(error) &&
@@ -352,6 +378,7 @@ async function fetchAndStoreMessages(
   }
   return [];
 }
+
 /**
  * When the initial fetch window contains no user/agent message rows (common
  * when the latest turn produced hundreds of tool calls), the chat would render
@@ -387,9 +414,8 @@ function useTerminalStateFetch(
       active = false;
     };
     if (!taskSessionId || connectionStatus !== "connected") return deactivate;
-    if (!taskSessionState || hasAgentMessage) return deactivate;
-    const terminalStates = new Set<TaskSessionState>(["WAITING_FOR_INPUT", "COMPLETED", "FAILED"]);
-    if (!terminalStates.has(taskSessionState)) return deactivate;
+    if (!taskSessionState) return deactivate;
+    if (!TERMINAL_SESSION_STATES[taskSessionState]) return deactivate;
     const key = `${taskSessionId}:${taskSessionState}`;
     if (lastFetchStateKeyRef.current === key) return deactivate;
     lastFetchStateKeyRef.current = key;
@@ -896,6 +922,13 @@ function useSessionHistoryRecoveryState({
       return;
     }
     const generation = sessionFetchGenerationRef.current;
+    const clientRecovery = getWebSocketClient()?.retryCoreSessionRecovery(retrySessionId);
+    if (clientRecovery) {
+      hydrationRef.current = null;
+      fetchState.lastFetchedSessionIdRef.current = null;
+      void clientRecovery;
+      return;
+    }
     fetchState.lastFetchedSessionIdRef.current = null;
     fetchState.cachedRefreshGenerationRef.current += 1;
     hydrationRef.current = null;
@@ -926,6 +959,74 @@ function useSessionHistoryRecoveryState({
   ]);
 
   return { retryHistory, sessionFetchGenerationRef };
+}
+
+function useCoreSessionRecovery({
+  taskSessionId,
+  connectionStatus,
+  store,
+  fetchRefs,
+  hydrationRef,
+  hydrationKey,
+  sessionFetchGenerationRef,
+}: {
+  taskSessionId: string | null;
+  connectionStatus: string;
+  store: ReturnType<typeof useAppStoreApi>;
+  fetchRefs: ReturnType<typeof useMessageFetchState>["refs"];
+  hydrationRef: SessionHydrationRef;
+  hydrationKey: string;
+  sessionFetchGenerationRef: MutableRefObject<number>;
+}): void {
+  useEffect(() => {
+    if (!taskSessionId || connectionStatus !== "connected") return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    const generation = sessionFetchGenerationRef.current;
+    let active = true;
+    const isActive = () =>
+      active &&
+      sessionFetchGenerationRef.current === generation &&
+      store.getState().taskSessions.items[taskSessionId] !== undefined;
+
+    const unregister = client.registerCoreSessionRecovery(taskSessionId, async () => {
+      if (!isActive()) return false;
+      fetchRefs.lastFetchedSessionIdRef.current = null;
+      hydrationRef.current = null;
+      const readiness = client.getSessionSubscriptionReadiness(taskSessionId);
+      const [messagesReady, turnsReady] = await Promise.all([
+        doFetchMessages({
+          taskSessionId,
+          ...fetchRefs,
+          fetchAndStoreMessages,
+          isActive,
+          canFinalizeLoading: () => isActive(),
+          hydrationRef,
+          hydrationKey,
+          options: { force: true, authoritative: true },
+        }),
+        ensureSessionTurnsLoaded(taskSessionId, store, {
+          readiness,
+          force: true,
+          replace: true,
+        }),
+      ]);
+      return isActive() && messagesReady && turnsReady;
+    });
+
+    return () => {
+      active = false;
+      unregister();
+    };
+  }, [
+    connectionStatus,
+    fetchRefs,
+    hydrationKey,
+    hydrationRef,
+    sessionFetchGenerationRef,
+    store,
+    taskSessionId,
+  ]);
 }
 
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
@@ -961,6 +1062,15 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     fetchState,
     hydrationRef,
     hydrationKey,
+  });
+  useCoreSessionRecovery({
+    taskSessionId,
+    connectionStatus,
+    store,
+    fetchRefs,
+    hydrationRef,
+    hydrationKey,
+    sessionFetchGenerationRef,
   });
   useSessionLifecycleSubscriptions({
     taskSessionId,

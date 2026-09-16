@@ -82,7 +82,7 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 
 	if existing := s.findExistingSession(ctx, taskID); existing != nil {
 		if o.EnsureExecution {
-			s.tryEnsureExecution(ctx, existing.SessionID)
+			s.tryEnsureExecution(ctx, existing.SessionID, seam3CallShapeViewing, launchOriginManual, "")
 		}
 		return existing, nil
 	}
@@ -256,16 +256,42 @@ func (s *Service) existingResponse(ctx context.Context, taskID string, sess *mod
 // Failures are logged but not propagated — the session is still usable for chat
 // even if the execution can't be resumed (file/terminal panels will show
 // appropriate "not available" states).
-func (s *Service) tryEnsureExecution(ctx context.Context, sessionID string) {
+//
+// callShape distinguishes this call's two production shapes (AC-47e): a seam-3
+// refusal is swallowed for the viewing shape (nothing to replay, nobody
+// waiting) but deferred for the queue-drain shape, which supplies
+// queuedMessageID so the deferred record can be matched back to its queued
+// message at retry time. An unrecognized shape defaults to deferring
+// (AC-47e1) — the unsafe direction here is silently dropping a launch, not
+// refusing one.
+func (s *Service) tryEnsureExecution(
+	ctx context.Context, sessionID string, callShape seam3CallShape, origin launchOrigin, queuedMessageID string,
+) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return
 	}
-	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
-		s.logger.Debug("ensure execution for existing session (non-fatal)",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+	err = s.ensureSessionRunning(ctx, sessionID, session, origin)
+	if err == nil {
+		return
 	}
+	if refusal, ok := isSeam3Refusal(err); ok {
+		switch callShape {
+		case seam3CallShapeViewing:
+			return
+		case seam3CallShapeQueueDrain:
+			s.deferSeam3QueueDrainRefusal(ctx, session.TaskID, sessionID, queuedMessageID, refusal)
+			return
+		default:
+			s.logger.Zap().Warn("tryEnsureExecution saw an unrecognized seam-3 call shape; defaulting to deferring",
+				zap.String("session_id", sessionID), zap.String("call_shape", string(callShape)))
+			s.deferSeam3QueueDrainRefusal(ctx, session.TaskID, sessionID, queuedMessageID, refusal)
+			return
+		}
+	}
+	s.logger.Debug("ensure execution for existing session (non-fatal)",
+		zap.String("session_id", sessionID),
+		zap.Error(err))
 }
 
 // resolveTaskAgentProfile applies the 5-step resolution chain on the backend:

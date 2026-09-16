@@ -98,6 +98,7 @@ async function assertRequestedModel(
   const saved = await apiClient.getAgentProfile(profile.id);
   expect(saved.model).toBe(profile.model);
   expect(saved.config_options).toEqual(profile.config_options);
-  expect(saved.fallback_model).toBe(profile.fallback_model);
-  expect(saved.auto_fallback).toBe(profile.auto_fallback);
+  expect(saved.fallbackModel).toBe(profile.fallbackModel);
+  expect(saved.autoFallback).toBe(profile.autoFallback);
+  expect(saved.requireExactModel).toBe(profile.requireExactModel);
 }

@@ -31,6 +31,7 @@ import {
   restoreSavedActiveViews,
 } from "./dockview-env-switch-active-views";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
+import { stripHiddenRightPaneMetadata } from "./dockview-right-pane";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   snapshotColumnWidths,
@@ -69,7 +70,24 @@ const EPHEMERAL_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 function getHealthyEnvLayout(envId: string): object | null {
   const saved = getEnvLayout(envId);
   if (!saved) return null;
-  return isLayoutShapeHealthy(saved) ? saved : null;
+  const dockviewLayout = stripHiddenRightPaneMetadata(saved);
+  return isLayoutShapeHealthy(dockviewLayout) ? dockviewLayout : null;
+}
+
+function restoreSerializedDockview(api: DockviewApi, next: SerializedDockview): void {
+  const previous = typeof api.toJSON === "function" ? api.toJSON() : null;
+  try {
+    api.fromJSON(next);
+  } catch (error) {
+    if (previous) {
+      try {
+        api.fromJSON(previous);
+      } catch {
+        // A failed rollback cannot be repaired by retrying without risking another partial mutation.
+      }
+    }
+    throw error;
+  }
 }
 
 /** Check whether a serialized dockview layout contains ephemeral panels. */
@@ -602,7 +620,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
             `savedRight=${savedRightColumnWidth(saved as SerializedDockview) ?? "-"}`,
         );
       }
-      api.fromJSON(saved as SerializedDockview);
+      restoreSerializedDockview(api, saved as SerializedDockview);
       // Saved layout may carry a stale session panel from a previously-deleted
       // task (phantom). Replace stale session panels with the incoming active
       // session in the same (group, tab-index), then close the stale ones —

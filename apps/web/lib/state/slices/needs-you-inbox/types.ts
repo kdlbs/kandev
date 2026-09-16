@@ -23,6 +23,13 @@ export type NeedsYouInboxWorkspaceState = {
   // The generation of the last response actually applied to this workspace's
   // rows, for the stale-response guard.
   appliedGeneration: number;
+  // Whether the last applied response was a successful page, as opposed to an
+  // error or no response ever having applied. `status` alone cannot answer
+  // this during a refresh: `beginNeedsYouInboxRead` overwrites `status` to
+  // "loading" without touching what preceded it, so a refresh that follows a
+  // failed read and a refresh that follows a successful one are otherwise the
+  // same tuple.
+  lastAppliedOk: boolean;
 };
 
 export type NeedsYouInboxSliceState = {

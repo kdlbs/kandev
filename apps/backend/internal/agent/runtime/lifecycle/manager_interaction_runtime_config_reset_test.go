@@ -99,8 +99,9 @@ func TestManager_ResetAgentContext_ReappliesSessionRuntimeConfig(t *testing.T) {
 	require.Equal(t, v1.AgentStatusReady, exec.Status)
 }
 
-func TestReapplySessionModel_UsesUniqueAdvertisedVariation(t *testing.T) {
+func TestReapplySessionModel_RejectsUnadvertisedExactModel(t *testing.T) {
 	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{RequireExactModel: true}}
 	mock := newRestartMockAgentctlServer(t, false, false)
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -114,12 +115,14 @@ func TestReapplySessionModel_UsesUniqueAdvertisedVariation(t *testing.T) {
 		Models:         []streams.SessionModelInfo{{ModelID: "opus[1m]"}},
 	})
 
-	require.NoError(t, mgr.reapplySessionModelAfterReset(ctx, exec, "reset-session", "opus"))
-	require.Equal(t, []string{"opus[1m]"}, mock.getSetModelIDs())
+	err := mgr.reapplySessionModelAfterReset(ctx, exec, "reset-session", "opus")
+	require.ErrorContains(t, err, "requested_not_advertised")
+	require.Empty(t, mock.getSetModelIDs())
 }
 
-func TestWorkspaceRebindModel_UsesUniqueAdvertisedVariation(t *testing.T) {
+func TestWorkspaceRebindModel_RejectsUnadvertisedExactModel(t *testing.T) {
 	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{RequireExactModel: true}}
 	mock := newRestartMockAgentctlServer(t, false, false)
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
@@ -133,15 +136,16 @@ func TestWorkspaceRebindModel_UsesUniqueAdvertisedVariation(t *testing.T) {
 		Models:         []streams.SessionModelInfo{{ModelID: "opus[1m]"}},
 	})
 
-	require.NoError(t, mgr.reapplyReboundSessionConfig(
+	err := mgr.reapplyReboundSessionConfig(
 		ctx,
 		exec,
 		"rebind-session",
 		&CachedModelState{},
 		"opus",
 		nil,
-	))
-	require.Equal(t, []string{"opus[1m]"}, mock.getSetModelIDs())
+	)
+	require.ErrorContains(t, err, "requested_not_advertised")
+	require.Empty(t, mock.getSetModelIDs())
 }
 
 func TestManager_RestartAgentProcess_ReappliesSessionRuntimeConfig(t *testing.T) {

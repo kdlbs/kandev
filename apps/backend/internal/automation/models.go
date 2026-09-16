@@ -21,6 +21,7 @@ const (
 	TriggerTypeGitHubPush     TriggerType = "github_push"
 	TriggerTypeGitHubCI       TriggerType = "github_ci"
 	TriggerTypeWebhook        TriggerType = "webhook"
+	TriggerTypePluginEvent    TriggerType = "plugin_event"
 )
 
 const (

@@ -77,6 +77,8 @@ type UserSettingsDTO struct {
 	AgentTabCloseBehavior             string                              `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                `json:"app_status_bar_enabled"`
+	SidebarHoverEnabled               bool                                `json:"sidebar_hover_enabled"`
+	SidebarHoverDelayMs               int                                 `json:"sidebar_hover_delay_ms"`
 	ResolveSessionHostnames           bool                                `json:"resolve_session_hostnames"`
 	AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
@@ -190,6 +192,8 @@ type UpdateUserSettingsRequest struct {
 	AgentTabCloseBehavior             *string                            `json:"agent_tab_close_behavior,omitempty"`
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
+	SidebarHoverEnabled               *bool                              `json:"sidebar_hover_enabled,omitempty"`
+	SidebarHoverDelayMs               *int                               `json:"sidebar_hover_delay_ms,omitempty"`
 	ResolveSessionHostnames           *bool                              `json:"resolve_session_hostnames,omitempty"`
 	AppStatusBarOrder                 *models.AppStatusBarOrder          `json:"app_status_bar_order,omitempty"`
 	QuickChatTabOrderByWorkspace      *map[string][]string               `json:"quick_chat_tab_order_by_workspace,omitempty"`
@@ -387,6 +391,8 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		AgentTabCloseBehavior:             models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
+		SidebarHoverEnabled:               settings.SidebarHoverEnabled,
+		SidebarHoverDelayMs:               settings.SidebarHoverDelayMs,
 		ResolveSessionHostnames:           settings.ResolveSessionHostnames,
 		AppStatusBarOrder:                 settings.AppStatusBarOrder,
 		QuickChatTabOrderByWorkspace:      settings.QuickChatTabOrderByWorkspace,

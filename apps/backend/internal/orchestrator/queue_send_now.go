@@ -349,9 +349,6 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *message
 	} else {
 		reservation = s.markQueuedDispatchInFlightWithSourceLocked(sessionID, claim.Dispatch.ID, nil)
 	}
-	if reservation != nil {
-		reservation.liveEligible.Store(true)
-	}
 	if !s.launchSendNowClaim(claim, reservation) {
 		if restoreErr := s.restoreSendNowClaimWithRetry(context.Background(), claim); restoreErr != nil {
 			s.logger.Error("failed to restore send-now claim after service shutdown",
@@ -574,7 +571,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	}
 
 	_, err := s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
-		claim.Dispatch.PlanMode, attachments, false, promptTaskOptions{
+		claim.Dispatch.PlanMode, attachments, false, launchOriginManual, promptTaskOptions{
 			claimEntryID:         claim.Dispatch.ID,
 			afterClaim:           s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
 			beforeDispatch:       s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),

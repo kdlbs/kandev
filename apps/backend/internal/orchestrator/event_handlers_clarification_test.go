@@ -1749,7 +1749,7 @@ func TestClarificationRecoveryCancellationFrameRejectsNormalAgentActivity(t *tes
 // test for the production hang where a clarification-timeout recovery left a
 // session permanently unstoppable. retryClarificationAfterCancel used to send
 // its retry prompt inline while holding the per-session cancelInFlight guard.
-// executor.Prompt blocks until a jammed agent accepts the prompt (observed:
+// executor.Prompt blocks after a jammed agent accepts the prompt (observed:
 // minutes, stuck in an MCP call), so the guard stayed held the whole time —
 // and every user Cancel-button click TryLocks that same guard, so it was
 // starved and silently no-op'd ("cancel already in flight; skipping
@@ -1763,16 +1763,21 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 	repo := setupTestRepo(t)
 	retryPromptBlock := make(chan struct{})
 	retryPromptEntered := make(chan struct{})
-	agentMgr := &mockAgentManager{
+	baseAgentMgr := &mockAgentManager{
 		isAgentRunning:         true,
 		repoForExecutionLookup: repo,
+	}
+	agentMgr := &callbackAfterPromptEntryAgentManager{
+		mockAgentManager: baseAgentMgr,
+		promptEntries:    []<-chan struct{}{retryPromptEntered},
 	}
 	taskRepo := newMockTaskRepo()
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
-	// The retry prompt (the only prompt this test dispatches) blocks in-flight,
-	// standing in for a jammed agent that never accepts the resume prompt.
+	// The retry prompt (the only prompt this test dispatches) blocks in-flight
+	// after its provider-acceptance callback, standing in for a jammed agent
+	// whose turn remains open while it is stuck in an MCP call.
 	var enteredOnce sync.Once
 	agentMgr.promptAgentFunc = func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
 		enteredOnce.Do(func() { close(retryPromptEntered) })

@@ -20,6 +20,8 @@ export const GENERAL_SETTINGS_TARGETS = {
   settingsMenuMode: "setting-settings-menu-mode",
   startupPage: "setting-startup-page",
   displayLanguage: "setting-display-language",
+  sidebarHover: "setting-sidebar-hover",
+  sidebarHoverDelay: "setting-sidebar-hover-delay",
   appStatusBar: "setting-status-bar",
   changesPanelLayout: "setting-changes-panel-layout",
   resourceMetrics: "setting-resource-metrics",
@@ -46,6 +48,29 @@ export const GENERAL_SETTINGS_TARGETS = {
 } as const;
 
 export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
+  {
+    id: "appearance-sidebar-hover-enabled",
+    kind: "control",
+    labelKey: "settings:sidebarHoverEnabled",
+    aliasesKey: "settings:discoveryAliasesSidebarHover",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sidebarHover,
+    order: 24,
+  },
+  {
+    id: "appearance-sidebar-hover-delay",
+    kind: "control",
+    labelKey: "settings:sidebarHoverDelay",
+    aliasesKey: "settings:discoveryAliasesSidebarHover",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sidebarHoverDelay,
+    order: 25,
+  },
+
   {
     id: APPEARANCE_ID,
     kind: "page",
