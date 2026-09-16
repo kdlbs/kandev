@@ -103,6 +103,45 @@ function starInTab(session: SessionPage, sessionId: string) {
 }
 
 test.describe("Session tab management — close behavior", () => {
+  test("opt-in tab close hides a panel through reload until explicit reopen", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Opt-in tab close hides panel",
+    );
+
+    try {
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
+      await testPage.reload();
+      await session.waitForLoad();
+
+      await session.sessionTabBySessionId(session1Id).click();
+      await expect(session.sessionTabCloseButton(session1Id)).toHaveAccessibleName("Hide panel");
+      await session.sessionTabCloseButton(session1Id).click();
+      await expect(session.alertDialog()).not.toBeVisible();
+      await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 5_000 });
+      await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
+
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 5_000 });
+      expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(2);
+
+      await session.addPanelButton().click();
+      await expect(session.sessionReopenItem(session1Id)).toBeVisible();
+      await session.sessionReopenItem(session1Id).click();
+      await expect(session.sessionTabBySessionId(session1Id)).toBeVisible({ timeout: 5_000 });
+    } finally {
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: "delete_session" });
+    }
+  });
+
   test("tab close button shows delete confirmation and removes session on confirm", async ({
     testPage,
     apiClient,

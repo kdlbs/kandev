@@ -176,7 +176,7 @@ describe("agent tab close behavior defaults", () => {
       "hide_panel",
     );
     expect(
-      buildCoreFields({ agent_tab_close_behavior: "unknown" } as Parameters<
+      buildCoreFields({ agent_tab_close_behavior: "unknown" } as unknown as Parameters<
         typeof buildCoreFields
       >[0]).agentTabCloseBehavior,
     ).toBe("delete_session");

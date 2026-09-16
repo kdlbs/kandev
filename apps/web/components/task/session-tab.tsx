@@ -349,6 +349,7 @@ function SessionTabBody({
   isActive: boolean;
   showDeleteOnClose: boolean;
   isDeleting: boolean;
+  closeBehavior: "delete_session" | "hide_panel";
   onCloseTab: () => void;
 }) {
   if (isRenaming) {

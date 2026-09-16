@@ -1237,6 +1237,7 @@ export class ApiClient {
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
+    agent_tab_close_behavior?: "delete_session" | "hide_panel";
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     sidebar_active_view_id?: string;
     show_anchored_prompt_bar?: boolean;
