@@ -240,11 +240,11 @@ func (r *Repository) insertNormalized(c *worktreeCutover, tx *sqlx.Tx) error {
 		if _, err := tx.ExecContext(r.migrationContext(), tx.Rebind(`
 			INSERT INTO task_environments_shadow (
 				id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
-				control_port, status, materialization_session_id, workspace_path, container_id,
+				control_port, status, materialization_session_id, workspace_path, workspace_layout, container_id,
 				container_bootstrap_nonce_secret_id, container_control_auth_token_secret_id, sandbox_id, task_dir_name, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 			env.id, taskID, int64(1), env.executorType, env.executorID, env.executorProfileID,
-			env.controlPort, env.status, "", env.workspacePath, env.containerID,
+			env.controlPort, env.status, "", env.workspacePath, "", env.containerID,
 			env.containerBootstrapNonceSecretID, env.containerControlAuthTokenSecretID,
 			env.sandboxID, env.taskDirName, env.createdAt, env.updatedAt); err != nil {
 			return fmt.Errorf("cutover: insert shadow environment %s: %w", env.id, err)
@@ -295,11 +295,11 @@ func (c *worktreeCutover) insertRepoRow(tx *sqlx.Tx, taskID, envID string, targe
 	}
 	if _, err := tx.ExecContext(c.ctx, tx.Rebind(`
 		INSERT INTO task_environment_repos_shadow (
-			id, task_environment_id, repository_id, branch_slug,
+			id, task_environment_id, repository_id, workspace_relative_path, branch_slug,
 			worktree_id, worktree_path, worktree_branch, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		uuid.New().String(), envID, target.repositoryID, target.branchSlug,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		uuid.New().String(), envID, target.repositoryID, "", target.branchSlug,
 		target.worktreeID, target.worktreePath, target.worktreeBranch, target.position,
 		target.errorMessage, target.status, target.createdAt, target.updatedAt,
 		mergedAt, deletedAt); err != nil {
@@ -436,7 +436,7 @@ func (r *Repository) checkShadowFinalSchema(tx *sqlx.Tx) error {
 			return fmt.Errorf("cutover: task_environments_shadow still carries legacy column %s", legacy)
 		}
 	}
-	for _, required := range []string{"id", "task_id", "ownership_generation", "executor_type", columnStatus, "workspace_path", columnCreatedAt, columnUpdatedAt} {
+	for _, required := range []string{"id", "task_id", "ownership_generation", "executor_type", columnStatus, "workspace_path", "workspace_layout", columnCreatedAt, columnUpdatedAt} {
 		if !envColumns[required] {
 			return fmt.Errorf("cutover: task_environments_shadow missing final column %s", required)
 		}
@@ -446,7 +446,7 @@ func (r *Repository) checkShadowFinalSchema(tx *sqlx.Tx) error {
 	if err != nil {
 		return err
 	}
-	for _, required := range []string{"id", "task_environment_id", columnRepositoryID, "branch_slug",
+	for _, required := range []string{"id", "task_environment_id", columnRepositoryID, "workspace_relative_path", "branch_slug",
 		columnWorktreeID, columnWorktreePath, columnWorktreeBranch, "position", "error_message",
 		columnStatus, columnCreatedAt, columnUpdatedAt, "merged_at", "deleted_at"} {
 		if !repoColumns[required] {

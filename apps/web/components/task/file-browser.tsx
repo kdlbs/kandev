@@ -552,7 +552,7 @@ export function FileBrowser({
           onStartCreate={!workspaceBlocked && onCreateFile ? handlers.handleStartCreate : undefined}
           onOpenFolder={openFolder}
           onCollapseAll={treeState.collapseAll}
-          showCreateButton={!workspaceBlocked && Boolean(onCreateFile)}
+          showCreateButton={!workspaceBlocked && Boolean(onCreateFile || onAddSources)}
           onUploadFiles={!workspaceBlocked && sessionId ? handleToolbarUpload : undefined}
           onAddSources={workspaceBlocked ? undefined : onAddSources}
           addSourcesButtonRef={addSourcesButtonRef}

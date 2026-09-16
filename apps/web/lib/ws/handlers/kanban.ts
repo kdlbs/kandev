@@ -74,6 +74,7 @@ type KanbanUpdateTask = {
   priority?: KanbanTask["priority"];
   repository_id?: string;
   repositories?: KanbanTask["repositories"];
+  initial_workspace_layout?: "repository" | "task_root";
   is_ephemeral?: boolean;
   wip_admitted?: boolean;
   queued_for_step_id?: string;
@@ -348,6 +349,8 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               description: task.description,
               position: task.position ?? 0,
               state: task.state,
+              initialWorkspaceLayout:
+                task.initial_workspace_layout ?? existing?.initialWorkspaceLayout,
               ...repoFields,
               primarySessionId: existing?.primarySessionId,
               primarySessionState: existing?.primarySessionState,

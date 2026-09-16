@@ -1200,6 +1200,8 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		TaskTitle:                  req.TaskTitle,
 		ExecutorType:               execName,
 		WorkspacePath:              workspacePath,
+		WorkspaceLayout:            req.WorkspaceLayout,
+		WorkspaceRelativePath:      req.WorkspaceRelativePath,
 		RepositoryPath:             req.RepositoryPath,
 		RepositoryID:               req.RepositoryID,
 		TaskRepositoryID:           req.TaskRepositoryID,
@@ -1263,6 +1265,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				RepoSetupScript:            setup,
 				BranchSlug:                 r.BranchSlug,
 				BranchIdentitySlug:         r.BranchIdentitySlug,
+				WorkspaceRelativePath:      r.WorkspaceRelativePath,
 				ContributionDestination:    r.ContributionDestination,
 			})
 		}
@@ -1569,11 +1572,11 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		return nil, err
 	}
 	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
-	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
+	if err := reconcileWorkspaceSourcesAtLayout(ctx, workspacePath, req.WorkspaceLayout, req.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
 	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
-		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger, owner); err != nil {
+		if err := reconcileWorkspaceRepositoriesAtLayout(workspacePath, req.WorkspaceLayout, workspaceRepositorySpecsFromLaunch(req), m.logger, owner); err != nil {
 			return nil, err
 		}
 	}
@@ -1729,22 +1732,24 @@ func validateLaunchWorkspaceAdmission(ctx context.Context, req *LaunchRequest, w
 		return nil
 	}
 	for index, repository := range repositories {
-		candidate := workspacePath
-		entry := workspaceRepositoryEntryName(repository.RepoName)
-		if index > 0 {
-			candidate = filepath.Join(workspacePath, entry)
-		} else if len(repositories) > 1 && validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath) != nil {
-			candidate = filepath.Join(workspacePath, entry)
-		}
+		candidates := workspaceRepositoryValidationCandidates(workspacePath, req.WorkspaceLayout, repositories, index)
 		// A missing worktree during ACP resume must reach WorktreePreparer.
 		// It classifies a deleted branch and returns the typed recovery error
 		// used by the explicit replacement action. The preparer still validates
 		// the saved worktree and task environment identity before any reuse.
-		if shouldDeferMissingWorktreeResumeValidation(req, candidate) {
-			continue
+		var validationErr error
+		for _, candidate := range candidates {
+			if shouldDeferMissingWorktreeResumeValidation(req, candidate) {
+				validationErr = nil
+				break
+			}
+			validationErr = validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath)
+			if validationErr == nil {
+				break
+			}
 		}
-		if err := validateLocalRepositoryWorkspace(ctx, candidate, repository.RepositoryPath); err != nil {
-			return fmt.Errorf("validate launch workspace repository %q: %w", repository.RepositoryID, err)
+		if validationErr != nil {
+			return fmt.Errorf("validate launch workspace repository %q: %w", repository.RepositoryID, validationErr)
 		}
 	}
 	return nil

@@ -409,6 +409,41 @@ test.describe("Task creation", () => {
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
   });
 
+  test("creates a single-repository task in the optional parent workspace layout", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("task-title-input").fill("Parent workspace task");
+    await dialog.getByTestId("task-description-input").fill("Create beside the repository");
+    await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+      timeout: START_ENABLED_TIMEOUT,
+    });
+
+    await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+    const layoutSetting = dialog.getByTestId("task-create-initial-workspace-layout-setting");
+    await expect(layoutSetting).toBeVisible();
+    const checkbox = layoutSetting.getByTestId("task-create-initial-workspace-layout-checkbox");
+    await checkbox.click();
+    await expect(checkbox).toHaveAttribute("data-state", "checked");
+
+    await dialog.getByTestId("submit-start-agent-chevron").click();
+    await testPage.getByTestId("submit-create-without-agent").click();
+    await expect(dialog).not.toBeVisible();
+
+    const createdTaskId = await getTaskIdFromPage(testPage);
+    await expect
+      .poll(() => apiClient.getTask(createdTaskId), { timeout: 15_000 })
+      .toMatchObject({ initial_workspace_layout: "task_root" });
+    expect(createdTaskId).not.toBe(seedData.repositoryId);
+  });
+
   test("explains when a Docker executor has no compatible agent credentials", async ({
     testPage,
     apiClient,

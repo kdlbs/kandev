@@ -106,6 +106,9 @@ type RepoPrepareSpec struct {
 	// persisted environment metadata. It may be non-empty even when BranchSlug
 	// is empty so primary branches can keep the flat legacy path.
 	BranchIdentitySlug string
+	// WorkspaceRelativePath is a server-owned destination relative to the task
+	// root. It is empty for the legacy repository layout.
+	WorkspaceRelativePath string
 }
 
 // EnvPrepareRequest contains the parameters for environment preparation.
@@ -158,6 +161,13 @@ type EnvPrepareRequest struct {
 	// It may be non-empty when BranchSlug is empty to preserve a flat path.
 	// Empty leaves the synthesized spec identity empty; worktree code falls back.
 	BranchIdentitySlug string
+	// WorkspaceRelativePath is a server-owned destination relative to the task
+	// root. It is empty for the legacy repository layout.
+	WorkspaceRelativePath string
+	// WorkspaceLayout controls the effective agent root for Worktree launches.
+	// Empty preserves legacy behavior until a validated environment row supplies
+	// its classification.
+	WorkspaceLayout string
 
 	// Repositories carries one entry per repository when the request is
 	// multi-repo. When non-empty it is the source of truth; the legacy
@@ -227,6 +237,7 @@ type PrepareStep struct {
 type RepoWorktreeResult struct {
 	TaskRepositoryID          string `json:"task_repository_id,omitempty"`
 	RepositoryID              string `json:"repository_id"`
+	WorkspaceRelativePath     string `json:"workspace_relative_path,omitempty"`
 	BranchSlug                string `json:"branch_slug,omitempty"`
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`

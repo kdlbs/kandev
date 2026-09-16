@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
-import type { Repository } from "@/lib/types/http";
+import type { InitialWorkspaceLayout, Repository } from "@/lib/types/http";
 import type { RepositoryBranchesState } from "@/lib/state/slices/workspace/types";
 import { branchOptionValue } from "@/components/branch-picker-options";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -33,6 +33,12 @@ import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import { t } from "@/lib/i18n";
 import { listRepositoryBranchPolicies } from "@/lib/api";
 import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
+import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
+import {
+  resolveInitialWorkspaceLayout,
+  resolveInitialWorkspaceLayoutMode,
+  resolveSelectedExecutorType,
+} from "@/components/task-create-dialog-helpers";
 
 // Catalog key: module scope, so it is resolved at the call site.
 const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
@@ -140,6 +146,7 @@ type SubmitWiringArgs = {
   editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
+  initialWorkspaceLayout: InitialWorkspaceLayout | undefined;
 };
 
 function useSubmitHandlersWiring({
@@ -154,6 +161,7 @@ function useSubmitHandlersWiring({
   editDependencies,
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
+  initialWorkspaceLayout,
 }: SubmitWiringArgs) {
   const {
     workspaceId,
@@ -208,6 +216,7 @@ function useSubmitHandlersWiring({
     setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
     setFetchedSteps: fs.setFetchedSteps,
+    setInitialWorkspaceLayout: fs.setInitialWorkspaceLayout ?? (() => undefined),
     clearDraft: fs.clearDraft,
     freshBranchEnabled: fs.freshBranchEnabled,
     isLocalExecutor: computed.isLocalExecutor,
@@ -215,6 +224,7 @@ function useSubmitHandlersWiring({
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
     priority: fs.priority,
+    initialWorkspaceLayout,
     blockedBy: fs.blockedBy,
     editDependencies,
   });
@@ -395,6 +405,28 @@ function useDialogSetupData(
   };
 }
 
+function resolveInitialWorkspaceLayoutForDialog(
+  fs: DialogFormState,
+  data: ReturnType<typeof useTaskCreateDialogData>,
+  isCreateMode: boolean,
+  isTaskStarted: boolean,
+) {
+  const mode = resolveInitialWorkspaceLayoutMode({
+    isCreateMode,
+    isTaskStarted,
+    noRepository: fs.noRepository,
+    repositoryCount: computeSelectedRepoCount(fs),
+    executorType: resolveSelectedExecutorType(data.executors, fs.executorProfileId),
+  });
+  return {
+    mode,
+    layout: resolveInitialWorkspaceLayout({
+      requested: fs.initialWorkspaceLayout ?? "repository",
+      mode,
+    }),
+  };
+}
+
 export function useTaskCreateDialogSetup(
   props: TaskCreateDialogProps,
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
@@ -413,6 +445,7 @@ export function useTaskCreateDialogSetup(
     (state) => state.userSettings.agentGeneratedTaskTitles,
   );
   const autoTitle = mode === "create" && agentGeneratedTaskTitles;
+  const isCreateMode = mode === "create";
   const fs = useDialogFormState(
     open,
     workspaceId,
@@ -436,6 +469,8 @@ export function useTaskCreateDialogSetup(
     refreshBranchPolicies,
     savedBaseSubmitBlockedReason,
   } = data;
+  const { mode: initialWorkspaceLayoutMode, layout: initialWorkspaceLayout } =
+    resolveInitialWorkspaceLayoutForDialog(fs, data, isCreateMode, isTaskStarted);
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
@@ -448,6 +483,7 @@ export function useTaskCreateDialogSetup(
     editDependencies,
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
+    initialWorkspaceLayout,
   });
   const guardedHandleSubmit = useGuardedSubmit(
     submitHandlers.handleSubmit,
@@ -473,7 +509,7 @@ export function useTaskCreateDialogSetup(
     fs,
     isSessionMode,
     isEditMode,
-    isCreateMode: mode === "create",
+    isCreateMode,
     autoTitle,
     isTaskStarted,
     sessionRepoName,
@@ -488,6 +524,7 @@ export function useTaskCreateDialogSetup(
     handleLinearImport,
     editDependencies,
     savedBaseSubmitBlockedReason,
+    initialWorkspaceLayoutMode,
   };
 }
 

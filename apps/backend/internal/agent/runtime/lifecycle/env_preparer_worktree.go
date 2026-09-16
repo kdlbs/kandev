@@ -88,10 +88,14 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		return &EnvPrepareResult{Success: false, Steps: steps, ErrorMessage: err.Error(), Error: err, Duration: time.Since(start)}, nil
 	}
 	if req.WorkspaceReuseRequired {
+		workspacePath, err := p.effectiveWorkspacePath(req, wt.Path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve workspace root: %w", err)
+		}
 		return &EnvPrepareResult{
 			Success:        true,
 			Steps:          steps,
-			WorkspacePath:  wt.Path,
+			WorkspacePath:  workspacePath,
 			Duration:       time.Since(start),
 			WorktreeID:     wt.ID,
 			WorktreeBranch: wt.Branch,
@@ -106,7 +110,14 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		stepIdx++
 	}
 
-	workspacePath := wt.Path
+	workspacePath, err := p.effectiveWorkspacePath(req, wt.Path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace root: %w", err)
+	}
+	// Repository setup already ran at wt.Path inside worktree.Manager.Create.
+	// The executor-level setup belongs to the agent's effective workspace root,
+	// which can be the task directory for a parent-root layout.
+	setupPath := workspacePath
 	mainRepoGitDir := filepath.Join(req.RepositoryPath, ".git")
 
 	// Step 3 (optional): Fetch PR branch is handled inside worktree.Manager.Create
@@ -134,13 +145,13 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	// isScriptEffectivelyEmpty.
 	scriptReq := *req // shallow copy — Env map is shared (read-only in runSetupScriptStep)
 	scriptReq.RepoSetupScript = ""
-	resolvedScript, err := resolvePreparerSetupScript(&scriptReq, workspacePath)
+	resolvedScript, err := resolvePreparerSetupScript(&scriptReq, setupPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve setup script: %w", err)
 	}
 	if resolvedScript != "" {
 		totalSteps++
-		steps = runSetupScriptStep(ctx, &scriptReq, workspacePath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)
+		steps = runSetupScriptStep(ctx, &scriptReq, setupPath, resolvedScript, stepIdx, totalSteps, onProgress, steps, p.logger)
 	}
 
 	return &EnvPrepareResult{
@@ -155,6 +166,14 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		BaseBranch:                wt.BaseBranch,
 		BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
 	}, nil
+}
+
+func (p *WorktreePreparer) effectiveWorkspacePath(req *EnvPrepareRequest, worktreePath string) (string, error) {
+	parentLayout := req.WorkspaceLayout == workspaceLayoutTaskRoot || (req.WorkspaceLayout == "" && len(req.Repositories) > 1)
+	if !parentLayout || req.TaskDirName == "" {
+		return worktreePath, nil
+	}
+	return p.worktreeMgr.TaskRoot(req.TaskDirName)
 }
 
 // validateWorktreeRequest runs the "Validate repository" step.
@@ -312,6 +331,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RepoName:                   req.RepoName,
 		BranchSlug:                 req.BranchSlug,
 		BranchIdentitySlug:         req.BranchIdentitySlug,
+		WorkspaceRelativePath:      req.WorkspaceRelativePath,
 		ContributionDestination:    req.ContributionDestination,
 		// Export resolved executor-profile env vars into the repository setup
 		// script so tokens (e.g. an npm auth token) are available during
@@ -442,6 +462,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		worktrees = append(worktrees, RepoWorktreeResult{
 			TaskRepositoryID:          spec.TaskRepositoryID,
 			RepositoryID:              spec.RepositoryID,
+			WorkspaceRelativePath:     spec.WorkspaceRelativePath,
 			BranchSlug:                repoBranchIdentitySlug(spec),
 			WorktreeID:                wt.ID,
 			WorktreeBranch:            wt.Branch,
@@ -453,11 +474,16 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		})
 	}
 
-	// Workspace path = task root (parent of any repo subdir). All repos share
-	// the same TaskDirName, so any worktree's parent works.
+	// Workspace path is the effective agent root. New parent-root layouts place
+	// repositories below the task root, so taking the first worktree's parent
+	// would incorrectly select an intermediate repository directory.
 	workspacePath := ""
 	if len(worktrees) > 0 {
-		workspacePath = filepath.Dir(worktrees[0].WorktreePath)
+		workspaceErr := error(nil)
+		workspacePath, workspaceErr = p.effectiveWorkspacePath(req, worktrees[0].WorktreePath)
+		if workspaceErr != nil {
+			return nil, fmt.Errorf("resolve workspace root: %w", workspaceErr)
+		}
 	}
 
 	res := &EnvPrepareResult{
@@ -544,6 +570,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.RemoteRefState = spec.RemoteRefState
 	subReq.BranchSlug = spec.BranchSlug
 	subReq.BranchIdentitySlug = repoBranchIdentitySlug(spec)
+	subReq.WorkspaceRelativePath = spec.WorkspaceRelativePath
 	// Strip the multi-repo list to avoid re-entering the multi-repo branch.
 	subReq.Repositories = nil
 

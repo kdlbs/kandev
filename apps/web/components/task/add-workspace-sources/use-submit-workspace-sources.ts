@@ -2,6 +2,7 @@ import { useCallback, type Dispatch, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { t } from "@/lib/i18n";
 import { attachTaskWorkspaceSources } from "@/lib/api/domains/kanban-api";
+import type { WorkspaceRepositoryPlacement } from "@/lib/types/http";
 import {
   buildWorkspaceSourcesPayload,
   type WorkspaceSourceRow,
@@ -13,6 +14,8 @@ type Props = {
   onSuccess: () => void;
   reconcileWorkspaceSourcesAdopted: (sessionIds: string[]) => void;
   rows: WorkspaceSourceRow[];
+  repositoryPlacement?: WorkspaceRepositoryPlacement;
+  previewRevision?: string;
   setSubmitting: Dispatch<SetStateAction<boolean>>;
   setSubmitError: Dispatch<SetStateAction<string | null>>;
   submitting: boolean;
@@ -25,6 +28,8 @@ export function useSubmitWorkspaceSources({
   onSuccess,
   reconcileWorkspaceSourcesAdopted,
   rows,
+  repositoryPlacement,
+  previewRevision,
   setSubmitting,
   setSubmitError,
   submitting,
@@ -38,7 +43,14 @@ export function useSubmitWorkspaceSources({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const result = await attachTaskWorkspaceSources(taskId, buildWorkspaceSourcesPayload(rows));
+      const payload = buildWorkspaceSourcesPayload(rows);
+      if (repositoryPlacement) {
+        payload.repository_placement = repositoryPlacement;
+      }
+      if (previewRevision) {
+        payload.preview_revision = previewRevision;
+      }
+      const result = await attachTaskWorkspaceSources(taskId, payload);
       flushSync(() => {
         reconcileWorkspaceSourcesAdopted(result.adopted_session_ids ?? result.session_ids);
         onSuccess();
@@ -55,6 +67,8 @@ export function useSubmitWorkspaceSources({
     onSuccess,
     reconcileWorkspaceSourcesAdopted,
     rows,
+    repositoryPlacement,
+    previewRevision,
     setSubmitting,
     setSubmitError,
     submitting,

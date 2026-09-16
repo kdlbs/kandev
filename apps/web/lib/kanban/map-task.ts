@@ -6,6 +6,7 @@ import {
 import type { KanbanState, TaskDependencyRef } from "@/lib/state/slices/kanban/types";
 import type {
   ForegroundActivity,
+  InitialWorkspaceLayout,
   TaskPendingAction,
   TaskOrigin,
   TaskPriority,
@@ -43,6 +44,7 @@ export type TaskLike = {
     repository_id: string;
     base_branch?: string;
     checkout_branch?: string;
+    workspace_relative_path?: string;
     branch_policy_id?: string;
     branch_policy_name?: string;
     branch_policy_base_branch?: string;
@@ -57,6 +59,7 @@ export type TaskLike = {
     position: number;
   }>;
   repository_id?: string;
+  initial_workspace_layout?: InitialWorkspaceLayout;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
   primary_session_pending_action?: TaskPendingAction | null;
@@ -163,6 +166,7 @@ function pickRepositories(source: TaskLike): KanbanTaskRepository[] | undefined 
     repository_id: r.repository_id,
     base_branch: r.base_branch ?? "",
     checkout_branch: r.checkout_branch,
+    workspace_relative_path: r.workspace_relative_path,
     branch_policy_id: r.branch_policy_id,
     branch_policy_name: r.branch_policy_name,
     branch_policy_base_branch: r.branch_policy_base_branch,
@@ -285,6 +289,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     repositoryId: pickRepositoryId(source),
     repositories: pickRepositories(source),
     workspaceFolders: pickWorkspaceFolders(source),
+    initialWorkspaceLayout: source.initial_workspace_layout,
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),

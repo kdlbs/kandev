@@ -211,6 +211,26 @@ describe("useDialogFormState — remoteRepos mode", () => {
   });
 });
 
+describe("useDialogFormState — initial workspace layout", () => {
+  it("defaults to repository and resets an opt-in when the dialog reopens", () => {
+    const { result, rerender } = renderHook(
+      ({ open }: { open: boolean }) => useDialogFormState(open, "ws-1", null),
+      { initialProps: { open: true } },
+    );
+
+    expect(result.current.initialWorkspaceLayout).toBe("repository");
+    act(() => {
+      result.current.setInitialWorkspaceLayout?.("task_root");
+    });
+    expect(result.current.initialWorkspaceLayout).toBe("task_root");
+
+    rerender({ open: false });
+    rerender({ open: true });
+
+    expect(result.current.initialWorkspaceLayout).toBe("repository");
+  });
+});
+
 describe("useDialogFormState — canvas task preset", () => {
   it("restores the repository-free source and launch-only local preference", async () => {
     const { result } = renderHook(() =>

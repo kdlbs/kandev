@@ -1270,6 +1270,31 @@ func TestApplyRepositoryConfig_PropagatesRepositoryID(t *testing.T) {
 	}
 }
 
+func TestApplyRepositoryConfig_PropagatesWorkspaceRelativePath(t *testing.T) {
+	e := newEnvTestExecutor(t)
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	info := &repoInfo{
+		RepositoryID:          "repo-abc",
+		RepositoryPath:        "/repos/myrepo",
+		WorkspaceRelativePath: "myrepo/kandev/added",
+		BaseBranch:            "main",
+		Repository: &models.Repository{
+			ID:   "repo-abc",
+			Name: "myrepo",
+		},
+	}
+	execCfg := executorConfig{ExecutorID: "exec-1", ExecutorType: string(models.ExecutorTypeLocal)}
+
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); err != nil {
+		t.Fatalf("applyRepositoryConfig: %v", err)
+	}
+
+	if req.WorkspaceRelativePath != info.WorkspaceRelativePath {
+		t.Errorf("req.WorkspaceRelativePath = %q, want %q", req.WorkspaceRelativePath, info.WorkspaceRelativePath)
+	}
+}
+
 func TestApplyRepositoryConfig_ReuseRequiredDoesNotRequireCloneURL(t *testing.T) {
 	e := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 	req := &LaunchAgentRequest{TaskID: "task-1", WorkspaceReuseRequired: true}

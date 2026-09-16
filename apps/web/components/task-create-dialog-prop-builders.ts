@@ -128,6 +128,7 @@ export function buildDialogFormBodyProps(
     workflowLocked: props.lockedFields?.workflow,
     runnerEditable: computeRunnerEditable(setup.isEditMode, props.editingTask),
     runnerIneligibleReason: computeRunnerIneligibleReason(props.editingTask),
+    initialWorkspaceLayoutMode: setup.initialWorkspaceLayoutMode,
   };
 }
 
