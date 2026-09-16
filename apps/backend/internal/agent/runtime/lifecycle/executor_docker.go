@@ -19,7 +19,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -273,37 +272,7 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 }
 
 func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) (ContainerConfig, error) {
-	prepareScript, err := r.resolvePrepareScript(req)
-	if err != nil {
-		return ContainerConfig{}, err
-	}
-	return ContainerConfig{
-		AgentConfig:                    req.AgentConfig,
-		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
-		TaskID:                         req.TaskID,
-		TaskTitle:                      req.TaskTitle,
-		TaskEnvironmentID:              req.TaskEnvironmentID,
-		SessionID:                      req.SessionID,
-		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
-		InstanceID:                     req.InstanceID,
-		Credentials:                    req.Env,
-		AutoApprovePermissions:         req.AutoApprovePermissions,
-		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
-		McpServers:                     req.McpServers,
-		McpProviders:                   req.McpProviders,
-		McpProfile:                     req.McpProfile,
-		PrepareScript:                  prepareScript,
-		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
-		AllowUserNamespaces:            getMetadataString(req.Metadata, MetadataKeyAllowUserNamespaces) == boolStringTrue,
-		LocalClonePath:                 localCloneMountPath(req.Metadata),
-		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		RemoteContributions:            req.RemoteContributions,
-		ContributionDestinations:       req.ContributionDestinations,
-		ComparisonTargets:              req.ComparisonTargets,
-		AgentctlStartupConfig:          req.AgentctlStartupConfig,
-		ProviderGatewayAuth:            req.ProviderGatewayAuth,
-		Metadata:                       req.Metadata,
-	}, nil
+	return buildDockerContainerConfig(req, string(models.ExecutorTypeLocalDocker))
 }
 
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {
@@ -815,57 +784,7 @@ func (r *DockerExecutor) IsAlwaysResumable() bool         { return true }
 // so simply updating DefaultPrepareScript wouldn't reach those users. The
 // postlude runs after the user's prepare script and is idempotent.
 func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (string, error) {
-	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
-	if script == "" {
-		script = DefaultPrepareScript("local_docker")
-	}
-	if script == "" {
-		return "", nil
-	}
-	script = withBranchCheckout(req, script)
-	if binding, ok := req.RemoteContributions[""]; ok {
-		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
-		if err != nil {
-			return "", err
-		}
-		script += contributionScript
-	}
-	if destination, ok := req.ContributionDestinations[""]; ok {
-		destinationScript, err := scriptengine.ContributionDestinationSetupScript(&destination)
-		if err != nil {
-			return "", err
-		}
-		script += destinationScript
-	}
-
-	resolver := scriptengine.NewResolver().
-		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).
-		WithProvider(scriptengine.GitIdentityProvider(req.Metadata)).
-		WithProvider(scriptengine.GitHubAuthProvider(req.Env)).
-		WithProvider(scriptengine.WorktreeProvider(
-			"",
-			dockerWorkspacePath,
-			getMetadataString(req.Metadata, MetadataKeyWorktreeID),
-			getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
-			getMetadataString(req.Metadata, MetadataKeyBaseBranch),
-		)).
-		WithProvider(scriptengine.RepositoryProvider(
-			req.Metadata,
-			req.Env,
-			getGitRemoteURL,
-			injectGitHubTokenIntoCloneURL,
-		)).
-		// Docker image has agents and agentctl pre-installed;
-		// resolve these to empty so stored scripts with these placeholders don't break.
-		// The entrypoint handles agentctl startup, so install/start must be no-ops.
-		WithProvider(scriptengine.AgentInstallProvider(nil)).
-		WithStatic(map[string]string{
-			"kandev.agentctl.port":    "9999",
-			"kandev.agentctl.install": "",
-			"kandev.agentctl.start":   "",
-		})
-
-	return resolver.Resolve(script), nil
+	return resolveDockerPrepareScript(req, string(models.ExecutorTypeLocalDocker))
 }
 
 func localCloneMountPath(metadata map[string]interface{}) string {
