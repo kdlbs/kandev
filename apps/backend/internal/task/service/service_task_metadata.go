@@ -24,13 +24,15 @@ func cloneTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
 // replace, or remove the launch record that carries deferred-start
 // ownership, and it can never set, reset, or lower the causation carrier —
 // no update path writes that carrier, so any office_carrier_* key in the
-// request is always stripped rather than preserved from existing.
+// request is always stripped, then the task's own existing carrier (if
+// any) is restored in its place.
 func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map[string]interface{} {
 	updated := cloneTaskMetadata(requested)
 	if updated == nil {
 		updated = make(map[string]interface{})
 	}
 	models.StripOfficeCarrierMetadata(updated)
+	models.RestoreOfficeCarrierMetadata(updated, existing)
 	if deferred, ok := existing[models.MetaKeyDeferredLaunch]; ok {
 		updated[models.MetaKeyDeferredLaunch] = deferred
 	} else {
