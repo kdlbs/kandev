@@ -288,6 +288,7 @@ func (s *Service) checkSelfTriggerAllowance(
 	since := time.Now().UTC().Add(-SelfTriggerWindow)
 	count, err := s.repo.CountSelfTriggeredRunsTx(ctx, tx, agentInstanceID, reason, since)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTrigger)), 1)
 		s.logRefusal(RefusalSelfTrigger, agentInstanceID, req, causationID)
 		if !isShutdownCanceled(ctx, err) {
 			// A shutdown cancellation is not an unreadable-input gate
