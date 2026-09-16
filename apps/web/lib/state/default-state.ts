@@ -16,6 +16,8 @@ import {
   defaultAutomationsState,
   defaultSystemState,
   defaultReviewState,
+  defaultNeedsYouInboxState,
+  defaultFailedInboxState,
 } from "./slices";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
@@ -67,6 +69,8 @@ export const defaultState = {
   taskPlans: defaultSessionState.taskPlans,
   walkthroughs: defaultSessionState.walkthroughs,
   taskReview: defaultReviewState.taskReview,
+  needsYouInbox: defaultNeedsYouInboxState.needsYouInbox,
+  failedInbox: defaultFailedInboxState.failedInbox,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -181,7 +185,7 @@ function mergeCodeHostFields(
 /** Merge quick-chat state from hydration over defaults, applying locally stored chat names to the SSR-provided sessions. */
 function mergeQuickChatState(initialState: HydrationState): DefaultState["quickChat"] {
   const { sessions, ...hydratedQuickChat } = initialState.quickChat ?? {};
-  const quickChat = {
+  const quickChat: DefaultState["quickChat"] = {
     ...defaultState.quickChat,
     ...hydratedQuickChat,
     unseenIdleByWorkspace: {},
@@ -189,8 +193,21 @@ function mergeQuickChatState(initialState: HydrationState): DefaultState["quickC
     sessionOwnership: {},
     syncRevisionByWorkspace: {},
     tombstonedSessions: {},
+    rememberedSelectionByWorkspace: {},
+    rememberedSelectionOrder: [],
+    selectionStorageIdentity: null,
+    selectionReadyByWorkspace: {},
+    selectionRevisionByWorkspace: {},
+    pendingOpen: null,
   };
-  return sessions ? mergeHydratedQuickChatSessions(quickChat, sessions) : quickChat;
+  const merged = sessions ? mergeHydratedQuickChatSessions(quickChat, sessions) : quickChat;
+  for (const session of sessions ?? []) {
+    merged.selectionReadyByWorkspace[session.workspaceId] = true;
+  }
+  if (sessions?.length === 0 && initialState.workspaces?.activeId) {
+    merged.selectionReadyByWorkspace[initialState.workspaces.activeId] = true;
+  }
+  return merged;
 }
 
 /** Merge sidebar view state, preferring the server-provided views, active view, and draft from user settings when present. */
@@ -510,6 +527,15 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       ...initialState.linearIssueWatches,
     },
     office: { ...defaultState.office, ...initialState.office },
+    needsYouInbox: { ...defaultState.needsYouInbox, ...initialState.needsYouInbox },
+    failedInbox: {
+      ...defaultState.failedInbox,
+      ...initialState.failedInbox,
+      readRevisionByWorkspaceId: {
+        ...defaultState.failedInbox.readRevisionByWorkspaceId,
+        ...initialState.failedInbox?.readRevisionByWorkspaceId,
+      },
+    },
     features: { ...defaultState.features, ...initialState.features },
     auth: { ...defaultState.auth, ...initialState.auth },
     ...mergeSessionHostnamesState(initialState),

@@ -530,6 +530,7 @@ describe("useMessageHandler input routing", () => {
       planMode: false,
       attachments: undefined,
       entityReferences: undefined,
+      clientQueueId: expect.any(String),
     });
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });

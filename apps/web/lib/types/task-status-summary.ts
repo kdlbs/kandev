@@ -8,6 +8,7 @@ export type AgentErrorCause = {
 };
 
 export type TaskStatusSummaryActiveError = {
+  scope?: "session" | "task";
   session_id?: string;
   task_repository_id?: string;
   stamp: string;
@@ -37,6 +38,8 @@ export type TaskStatusSummary = {
   /** Number of prompts currently en-queued for the task (all sessions). */
   queued_prompt_count?: number;
   active_error?: TaskStatusSummaryActiveError | null;
+  /** Current task-owned failure, independent of the selected session. */
+  task_error?: TaskStatusSummaryActiveError | null;
   git?: {
     additions?: number;
     deletions?: number;

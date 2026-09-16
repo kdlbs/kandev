@@ -89,5 +89,6 @@
   "toggleWordWrap": "Alternar a quebra de linha",
   "underlineCmdU": "Sublinhado (Cmd+U)",
   "failedToOpenEditor": "Falha ao abrir o editor",
-  "downloadFile": "Transferir ficheiro"
+  "downloadFile": "Transferir ficheiro",
+  "symlink": "Ligação simbólica"
 }

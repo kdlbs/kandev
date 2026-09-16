@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import { memo } from "react";
 import { IconBrowser, IconCode, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -19,6 +21,7 @@ import { useTranslation } from "react-i18next";
 
 type HtmlPreviewContentProps = {
   path: string;
+  isSymlink?: boolean;
   previewUrl?: string | null;
   isLoading?: boolean;
   error?: HtmlPreviewPublishErrorCode | null;
@@ -37,6 +40,7 @@ type HtmlPreviewContentProps = {
 
 function HtmlPreviewContentToolbar({
   path,
+  isSymlink,
   worktreePath,
   sessionId,
   taskId,
@@ -58,6 +62,7 @@ function HtmlPreviewContentToolbar({
       left={
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate font-mono">{toRelativePath(path, worktreePath)}</span>
+          <SymlinkIndicator isSymlink={isSymlink} showLabel />
           <span className="shrink-0 text-xs text-muted-foreground/60">{t("task:htmlPreview")}</span>
         </div>
       }
@@ -126,6 +131,7 @@ function HtmlPreviewContentToolbar({
 
 export const HtmlPreviewContent = memo(function HtmlPreviewContent({
   path,
+  isSymlink,
   previewUrl,
   isLoading = false,
   error = null,
@@ -147,6 +153,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
   return (
     <div className="relative flex h-full min-h-0 flex-col" data-testid="html-preview">
       <HtmlPreviewContentToolbar
+        isSymlink={isSymlink}
         path={path}
         worktreePath={worktreePath}
         sessionId={sessionId}

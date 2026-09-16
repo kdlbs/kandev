@@ -32,12 +32,15 @@ and instance IDs provide correlation with lifecycle evidence.
 | --- | --- | --- |
 | `storage` | Before `launch.provisionWorkspace` | After workspace verification/provisioning and its checkpoint |
 | `pod_ready` | Before `launch.createRunningPod` | After admitted main-container-running observation and checkpoint |
-| `bootstrap` | Before nonce generation and binary resolution | After `bootstrapPod` returns |
+| `bootstrap` | Before nonce generation and binary resolution | After bootstrap uploads, remote preparation, and entrypoint signaling return |
 | `agentctl_connect` | Before `connectNewAgentctl` | After its health/nonce handshake and forward setup return |
 
 `pod_ready` includes scheduling, image pulls, init work, and storage binding waits
 that occur inside that call. It does not measure those substeps independently.
 `storage` can complete before a deferred-binding PVC becomes Bound.
+`bootstrap` includes the bounded administrator preparation script executed
+through Pod exec. A preparation failure therefore ends this stage with an error
+before the managed entrypoint is signaled.
 
 The total begins at `createFresh` entry and ends at its final return.
 It includes `launch.complete`, bookkeeping, and failure rollback.

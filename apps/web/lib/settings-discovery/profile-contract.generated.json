@@ -76,6 +76,21 @@
           "settings_href": "/settings/agents"
         },
         {
+          "key": "agent_profile.require_exact_model",
+          "field_path": "require_exact_model",
+          "label": "require_exact_model",
+          "description": "Require the configured model to be advertised and applied.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "agent-settings",
+          "writable": true,
+          "validator": "agent-settings.profile",
+          "authority": "org.config.manage",
+          "change_timing": "future_sessions",
+          "settings_href": "/settings/agents"
+        },
+        {
           "key": "agent_profile.mode",
           "field_path": "mode",
           "label": "mode",
@@ -317,12 +332,14 @@
       "fallback_model",
       "mode",
       "model",
-      "name"
+      "name",
+      "require_exact_model"
     ],
     "user_settings": [
       "agent_generated_task_titles",
       "app_status_bar_enabled",
       "app_status_bar_order",
+      "auto_focus_new_tasks",
       "azure_devops_browse_preferences",
       "changes_panel_layout",
       "chat_submit_key",
@@ -366,6 +383,8 @@
       "show_transcript_auto_scroll_control",
       "sidebar_active_view_id",
       "sidebar_draft",
+      "sidebar_hover_delay_ms",
+      "sidebar_hover_enabled",
       "sidebar_task_color_automation",
       "sidebar_task_color_patch",
       "sidebar_task_colors",

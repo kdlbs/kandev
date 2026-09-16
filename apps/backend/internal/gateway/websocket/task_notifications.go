@@ -95,6 +95,8 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.AgentctlError, ws.ActionSessionAgentctlError)
 	b.subscribe(eventBus, events.TurnStarted, ws.ActionSessionTurnStarted)
 	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
+	b.subscribe(eventBus, events.TurnRemoved, ws.ActionSessionTurnRemoved)
+	b.subscribe(eventBus, events.SessionRemoved, ws.ActionSessionRemoved)
 	b.subscribe(eventBus, events.MessageQueueStatusChanged, ws.ActionMessageQueueStatusChanged)
 	b.subscribe(eventBus, events.GitHubTaskPRUpdated, ws.ActionGitHubTaskPRUpdated)
 	b.subscribe(eventBus, events.GitHubTaskPRDeleted, ws.ActionGitHubTaskPRDeleted)
@@ -102,6 +104,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.GitHubRateLimitUpdated, ws.ActionGitHubRateLimitUpdated)
 	b.subscribe(eventBus, events.GitHubPRDiscoveryHealthUpdated, ws.ActionGitHubPRDiscoveryHealthUpdated)
 	b.subscribe(eventBus, events.GitLabTaskMRUpdated, ws.ActionGitLabTaskMRUpdated)
+	b.subscribe(eventBus, events.GitLabTaskMRDeleted, ws.ActionGitLabTaskMRDeleted)
 	b.subscribe(eventBus, events.GitLabTaskMROptionsUpdated, ws.ActionGitLabTaskMRAutomationUpdated)
 
 	go func() {
@@ -276,9 +279,15 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		// the owning workspace's user when auth is enabled.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
-	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
+	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted,
+		ws.ActionSessionTurnStarted, ws.ActionSessionTurnCompleted, ws.ActionSessionTurnRemoved:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionSessionRemoved:
+		if sessionID != "" {
+			b.hub.appendAndBroadcastOrderedSessionEvent(sessionID, msg)
 			return nil
 		}
 	case ws.ActionSessionWorkspaceSourcesUpdated:
@@ -314,7 +323,7 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		return nil
 	case ws.ActionGitHubTaskPRUpdated, ws.ActionGitHubTaskPRDeleted,
 		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitHubPRDiscoveryHealthUpdated,
-		ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+		ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRDeleted, ws.ActionGitLabTaskMRAutomationUpdated:
 		// These payloads carry per-task PR/MR automation and lifecycle state. Fail closed
 		// (drop, don't fall back to a global broadcast) when workspace
 		// resolution came back empty and auth is enforced — an unattributed

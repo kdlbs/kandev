@@ -331,6 +331,7 @@ export function useTaskSubmitHandlers({
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
   const router = useRouter();
+  const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
   const { toast } = useToast();
   const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
@@ -743,13 +744,19 @@ export function useTaskSubmitHandlers({
       if (!taskResponse) return;
       notifyQueuedTask(taskResponse, toast);
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
-      const willNavigate = shouldNavigateAfterTaskCreate(
-        opts.withAgent,
-        isPassthroughProfile,
-        opts.planMode,
-        newSessionId,
-      );
-      onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
+      const willNavigate =
+        autoFocusNewTasks &&
+        shouldNavigateAfterTaskCreate(
+          opts.withAgent,
+          isPassthroughProfile,
+          opts.planMode,
+          newSessionId,
+        );
+      onSuccess?.(taskResponse, "create", {
+        taskSessionId: newSessionId,
+        willNavigate,
+        autoFocus: autoFocusNewTasks,
+      });
       clearDraft();
       queueTaskCreateLastUsedFromPayload(submittedPayload);
       preserveTaskCreateLastUsedOnClose?.();
@@ -758,17 +765,19 @@ export function useTaskSubmitHandlers({
         activatePlanMode({
           sessionId: newSessionId,
           taskId: taskResponse.id,
+          autoFocus: autoFocusNewTasks,
           setActiveDocument,
           setPlanMode,
           router,
         });
-      } else if (opts.withAgent && isPassthroughProfile) {
+      } else if (autoFocusNewTasks && opts.withAgent && isPassthroughProfile) {
         router.push(linkToTask(taskResponse.id));
       }
     },
     [
       workspaceId,
       effectiveWorkflowId,
+      autoFocusNewTasks,
       autoTitle,
       blockedBy,
       agentProfileId,
@@ -1027,7 +1036,7 @@ export function useTaskSubmitHandlers({
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consent);
       if (!taskResponse) return;
       notifyQueuedTask(taskResponse, toast);
-      onSuccess?.(taskResponse, "create");
+      onSuccess?.(taskResponse, "create", { autoFocus: autoFocusNewTasks });
       clearDraft();
       queueTaskCreateLastUsedFromPayload(submittedPayload);
       preserveTaskCreateLastUsedOnClose?.();
@@ -1060,6 +1069,7 @@ export function useTaskSubmitHandlers({
     ensureFreshBranchConsent,
     createTaskWithFreshBranchRetry,
     refreshStaleBranchPolicies,
+    autoFocusNewTasks,
     onSuccess,
     onOpenChange,
     preserveTaskCreateLastUsedOnClose,

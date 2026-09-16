@@ -248,6 +248,26 @@
     #canvas-wrap.canvas-full-bleed { width: 100vw; margin-left: 50%; transform: translateX(-50vw); }
     /* 100vw counts the scrollbar, so clip the tiny horizontal overflow it adds. */
     body { overflow-x: hidden; }
+    .impact-summary, .impact-counts { padding-left: 1.25rem; list-style: disc; }
+    .impact-summary li, .impact-counts li { margin-bottom: .4rem; }
+    .impact-detail { margin-top: 1.75rem; }
+    .impact-detail h3 { font-size: 1.1rem; font-weight: 650; margin-bottom: .75rem; }
+    .impact-alert #impact-breaking { border-left: 3px solid #e11d48; padding-left: 1rem; }
+    .impact-table { width: 100%; table-layout: fixed; font-size: .875rem; border-collapse: collapse; }
+    .impact-table th, .impact-table td {
+      padding: .65rem; text-align: left; vertical-align: top;
+      border-bottom: 1px solid var(--wt-border); overflow-wrap: anywhere;
+    }
+    .impact-table th { font-weight: 650; }
+    .impact-table a { text-decoration: underline; }
+    @media (max-width: 767px) {
+      .impact-table, .impact-table tbody { display: block; }
+      .impact-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+      .impact-table tr { display: block; border: 1px solid var(--wt-border); border-radius: .75rem; margin-bottom: .75rem; padding: .5rem; }
+      .impact-table td { display: block; border: 0; padding: .4rem; }
+      .impact-table td::before { content: attr(data-label); display: block; font-weight: 650; margin-bottom: .15rem; }
+      .impact-table a { display: inline-flex; align-items: center; min-height: 44px; }
+    }
     /* Suppress text selection so panning does not highlight node text. */
     #canvas-wrap { cursor: grab; user-select: none; -webkit-user-select: none; }
     #canvas-wrap.panning { cursor: grabbing; }
@@ -409,21 +429,23 @@
         <span class="wt-brand-divider hidden sm:inline" aria-hidden="true"></span>
         <span class="wt-brand-pr">PR #{{PR_NUMBER}}</span>
       </a>
-      <nav class="hidden md:flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
+      <nav class="hidden lg:flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
         <a href="#why" class="hover:text-brand">Why</a>
+        <a id="nav-impact" href="#impact" class="hover:text-brand">Impact</a>
+        <a id="nav-data" href="#data" class="hover:text-brand">Data</a>
         <a id="nav-architecture" href="#architecture" class="hover:text-brand">Architecture</a>
         <a href="#changes" class="hover:text-brand">Changes</a>
-        <a id="nav-data" href="#data" class="hover:text-brand">Data</a>
         <a href="#risk" class="hover:text-brand">Risk</a>
         <a href="#review" class="hover:text-brand">Review</a>
       </nav>
-      <details id="mobile-nav" class="wt-mobile-nav md:hidden">
+      <details id="mobile-nav" class="wt-mobile-nav lg:hidden">
         <summary aria-label="Jump to walkthrough section">Sections</summary>
         <nav class="wt-mobile-menu" aria-label="Walkthrough sections">
           <a href="#why">Why</a>
+          <a id="mobile-nav-impact" href="#impact">Impact</a>
+          <a id="mobile-nav-data" href="#data">Data</a>
           <a id="mobile-nav-architecture" href="#architecture">Architecture</a>
           <a href="#changes">Changes</a>
-          <a id="mobile-nav-data" href="#data">Data</a>
           <a href="#risk">Risk</a>
           <a href="#review">Review</a>
         </nav>
@@ -484,7 +506,7 @@
     // build.py drops the Architecture and Data sections on a PR that has no
     // such data, so their topbar anchors would scroll nowhere. Hide each link
     // unless its section exists.
-    for (const id of ['architecture', 'data']) {
+    for (const id of ['architecture', 'data', 'impact']) {
       if (!document.getElementById(id)) {
         const link = document.getElementById('nav-' + id);
         if (link) link.hidden = true;

@@ -1,6 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { watchWs } from "../../helpers/causal-waits";
+import {
+  expandDisplaySettingsGroup,
+  type DisplaySettingsGroup,
+} from "../../helpers/display-settings";
 
 // docs/specs/tasks/requirements/board-priority-sort-filter*.md
 //
@@ -34,12 +38,13 @@ async function columnTaskTitles(kanban: KanbanPage, stepId: string): Promise<str
   return kanban.columnByStepId(stepId).locator('[data-testid="task-card-title"]').allTextContents();
 }
 
-async function openDisplayDropdown(kanban: KanbanPage) {
+async function openDisplayDropdown(kanban: KanbanPage, group?: DisplaySettingsGroup) {
   const trigger = kanban.page.getByTestId("display-button");
   if ((await trigger.getAttribute("data-state")) !== "open") {
     await trigger.click();
   }
   await expect(trigger).toHaveAttribute("data-state", "open");
+  if (group) await expandDisplaySettingsGroup(kanban.page, group);
 }
 
 async function closeDisplayDropdown(kanban: KanbanPage) {
@@ -55,7 +60,7 @@ async function setBoardSort(
   value: "created_desc" | "priority_desc",
   wsWatcher?: ReturnType<typeof watchWs>,
 ) {
-  await openDisplayDropdown(kanban);
+  await openDisplayDropdown(kanban, "sort");
   const persisted = wsWatcher?.waitForResponse("user.settings.update");
   await kanban.page.getByTestId("display-board-sort").click();
   const label = value === "priority_desc" ? "Priority" : "Newest first";
@@ -69,7 +74,7 @@ async function togglePriorityFilter(
   token: string,
   wsWatcher?: ReturnType<typeof watchWs>,
 ) {
-  await openDisplayDropdown(kanban);
+  await openDisplayDropdown(kanban, "filters");
   const persisted = wsWatcher?.waitForResponse("user.settings.update");
   await kanban.page.getByTestId(`display-priority-filter-option-${token}`).click();
   await closeDisplayDropdown(kanban);
@@ -196,6 +201,7 @@ test.describe("Board priority sort and filter", () => {
     await expect(kanban.taskCardByTitle(TASK_CRITICAL)).not.toBeVisible();
 
     await openDisplayDropdown(kanban);
+    await expandDisplaySettingsGroup(kanban.page, "filters");
     const option = kanban.page.getByTestId("display-priority-filter-option-high");
     await expect(option).toHaveAttribute("data-state", "checked");
     await closeDisplayDropdown(kanban);
@@ -261,6 +267,8 @@ test.describe("Board priority sort and filter", () => {
       .toEqual([TASK_CRITICAL, TASK_HIGH]);
 
     await openDisplayDropdown(kanban);
+    await expandDisplaySettingsGroup(kanban.page, "filters");
+    await expandDisplaySettingsGroup(kanban.page, "sort");
     await expect(kanban.page.getByTestId("display-board-sort")).toContainText("Priority");
     await expect(
       kanban.page.getByTestId("display-priority-filter-option-critical"),

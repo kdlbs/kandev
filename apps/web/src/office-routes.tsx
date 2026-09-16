@@ -193,7 +193,7 @@ type OfficeBootstrapState = {
   onboardingComplete: boolean | null;
 };
 
-function useOfficeRouteBootstrap(
+export function useOfficeRouteBootstrap(
   officeEnabled: boolean,
   routeWorkspaceId: string | null,
 ): OfficeBootstrapState {
@@ -241,13 +241,21 @@ function useOfficeRouteBootstrap(
         userSettingsResponse?.settings?.workspace_id ?? null,
       );
 
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        workspaces: { items: workspaceItems, activeId: workspaceBeforeHydration },
         userSettings: {
           ...mapUserSettingsResponse(userSettingsResponse),
           workspaceId: activeWorkspaceId,
         },
       });
+      // Routing the actual switch through `setActiveWorkspace` (rather than
+      // letting `hydrate` overwrite `activeId` directly) keeps
+      // `activeIdRevision` accurate for consumers that key staleness off it,
+      // such as the Failed-inbox cache.
+      if (activeWorkspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(activeWorkspaceId);
+      }
       // Data loading is not this bootstrap's job: agents, projects, inbox and
       // meta follow the active workspace via `useOfficeWorkspaceData`, mounted
       // in the always-present `AppSidebar`. Setting the active workspace above

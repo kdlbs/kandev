@@ -109,6 +109,7 @@ export async function createAgentProfileAction(
     kind?: AgentProfileKind;
     fallback_model?: string;
     auto_fallback?: boolean;
+    require_exact_model?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
@@ -136,6 +137,7 @@ export async function updateAgentProfileAction(
     kind?: AgentProfileKind;
     fallback_model?: string;
     auto_fallback?: boolean;
+    require_exact_model?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     allow_indexing?: boolean;

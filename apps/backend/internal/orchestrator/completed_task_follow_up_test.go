@@ -30,12 +30,9 @@ func TestCompletedTaskFollowUpAdmissionIsConversationalOnly(t *testing.T) {
 
 			agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 			svc := createEngineService(t, repo, steps, agentMgr)
-			// The Done step's on_enter dispatch runs on a background goroutine
-			// (launchProcessOnEnter) and tags the reused session as a workflow
-			// switch, which clears the conversational follow-up marker. Phase B
-			// writes that marker, so it must observe the on_enter settle first —
-			// otherwise the marker read races the goroutine and flakes.
-			onEnterDone := make(chan struct{})
+			// Finish terminal-step session preparation before admitting a follow-up.
+			// The callback can fire more than once, so use a nonblocking send.
+			onEnterDone := make(chan struct{}, 1)
 			svc.onProcessOnEnterComplete = func() {
 				select {
 				case onEnterDone <- struct{}{}:

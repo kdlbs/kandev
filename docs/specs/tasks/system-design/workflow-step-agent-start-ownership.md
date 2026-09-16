@@ -23,7 +23,7 @@ The design preserves runtime configuration through the existing reset contract. 
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-001` | [Session states](#session-states) |
-| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002` | [Active-turn reset flow](#active-turn-reset-flow), [Bounded predecessor wait](#bounded-predecessor-wait) |
+| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002` | [Active-turn reset flow](#active-turn-reset-flow), [Bounded predecessor wait](#bounded-predecessor-wait), [Reset failure containment](#reset-failure-containment) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003` | [Prompt fallback ownership](#prompt-fallback-ownership), [Prompt-history contract](#prompt-history-contract), [Workflow-entry prompt flow](#workflow-entry-prompt-flow) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004` | [Creation destination routing](#creation-destination-routing) |
 
@@ -113,7 +113,74 @@ Provider completion events keep their `(agent_execution_id, prompt_generation)` 
 
 An unnumbered completion cannot release a pending numbered dispatch-only prompt. This prevents a delayed synthetic completion from being consumed as the predecessor's completion.
 
-Internal cancellation finishes or escalates the old generation before provider replacement. The reset does not drain a completion signal from an active generation.
+Internal cancellation reconciles the old generation before provider replacement. Escalation releases local completion state but does not prove that the provider stopped. The reset does not drain a completion signal from an active generation.
+
+## Reset failure containment
+
+This draft extension covers `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002`.
+Its delivery package is [Workflow reset failure containment](../../../plans/workflow-reset-failure-containment/plan.md).
+The task system owns this contract because workflow entry controls successor prompt admission.
+
+### Preserve the provider cancellation outcome
+
+The cancellation coordinator retains the raw provider outcome separately from its reconciliation result.
+`cancelOperation` owns this outcome under the existing coordinator synchronization.
+`cancelAgentWhileUnlocked` must not erase `lifecycle.ErrCancelEscalated` before that outcome is captured.
+
+Explicit cancellation, clarification, peer interruption, and queue cancellation retain their current success semantics after escalation.
+They still reconcile the captured turn and session. Their shared operation error must not become an escalation error.
+Joined explicit callers must still perform their own reconciliation.
+
+The exclusive reset helper reads the provider outcome after the owned cancellation operation completes.
+`quiesceActiveResetTurn` rejects escalation even when local reconciliation succeeds.
+An unset outcome cannot count as provider confirmation for an active execution.
+Missing executions retain the existing persisted-resume cleanup behavior after lookup confirms their absence.
+
+This path returns reset failure. It does not attempt automatic process replacement after escalation.
+Process replacement needs stronger evidence than local cancellation reconciliation.
+The existing restart helper tolerates a stop error, so calling it alone does not prove provider termination.
+The reset marker and guard retain their existing ownership and release order.
+
+### Bound the provider reset request
+
+`Manager.ResetAgentContext` supplies a child context with a 10-second deadline to `client.ResetSession`.
+The earlier caller deadline wins. The child context covers both the WebSocket write and response wait.
+The HTTP client timeout does not apply to this WebSocket request.
+
+On reset timeout or caller cancellation, return a wrapped error before the restart fallback.
+Do not classify a timeout as unsupported reset. Do not launch a goroutine that returns while provider work still owns the guard.
+The WebSocket pending-request cleanup removes the abandoned correlation ID.
+Late replies cannot publish reset success, clear a successor generation, or dispatch a step prompt.
+
+Ordinary unsupported-reset errors retain the existing restart fallback and captured runtime configuration.
+Timeout changes neither that fallback's semantics nor its separate initialization budget.
+Contention on `remoteInstanceLifecycleMu` or `streamWriteMu` is a separate wait from the unanswered request addressed here.
+Tests must establish that the peer received the request before measuring its response deadline.
+
+### Persist a visible failure
+
+The workflow reset returns an error through an error-bearing helper.
+The existing boolean wrapper can remain for callers that need only success or failure.
+`processOnEnter` records the error and preserves its early return before automatic prompt dispatch.
+It must not call the general agent-failure handler, which can run `on_agent_error` workflow actions.
+
+Use the existing `LastAgentError` metadata and `persistLastAgentError` publication path.
+Store a bounded, sanitized reset-specific message with the session and current execution identity.
+The message states that context reset failed and that the workflow step prompt did not start.
+Publish the waiting-state projection from fresh metadata so it cannot overwrite the error with the pre-reset session snapshot.
+Use a short bounded cleanup context if the request context has expired.
+Log persistence failure with task, session, and step identity; never report a successful reset after that failure.
+
+Desktop and phone reuse `LastAgentErrorNotice` in the existing conversation flow.
+The notice remains visible after reload and uses the existing dismissal behavior.
+No new control, navigation surface, or workflow recovery action is introduced.
+The phone conversation remains its own scroll surface, with the existing dismissal control.
+Give that control a coarse-pointer target of at least 44 pixels without changing its desktop dimensions.
+Any new static frontend copy must use the existing five-language localization contract.
+
+Automatic prompting remains blocked on every reset failure.
+An operator can remove the affected session after reset releases its guard.
+This change does not make re-entering an idle step an automatic restart gesture.
 
 ## Prompt fallback ownership
 

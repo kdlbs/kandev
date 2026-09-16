@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
+	"github.com/kandev/kandev/internal/task/archivecascade"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
@@ -639,6 +640,10 @@ func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpGetWorkflowTaskCount(c *gin.Context) {
+	if err := h.service.AuthorizeWorkflowAccess(c.Request.Context(), c.Param("id")); err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return
+	}
 	count, err := h.service.CountTasksByWorkflow(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to count tasks by workflow", zap.Error(err))
@@ -649,6 +654,10 @@ func (h *TaskHandlers) httpGetWorkflowTaskCount(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpGetStepTaskCount(c *gin.Context) {
+	if err := h.service.AuthorizeWorkflowStepAccess(c.Request.Context(), c.Param("id")); err != nil {
+		handleNotFound(c, h.logger, err, "workflow step not found")
+		return
+	}
 	count, err := h.service.CountTasksByWorkflowStep(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to count tasks by step", zap.Error(err))
@@ -1006,7 +1015,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	if err := h.service.ClaimMessageAttachments(c.Request.Context(), task.ID, "", body.Attachments); err != nil {
 		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
 		defer cancel()
-		if deleteErr := h.service.DeleteTask(rollbackCtx, task.ID); deleteErr != nil {
+		if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
 			h.logger.Warn("failed to roll back task after attachment claim", zap.String("task_id", task.ID), zap.Error(deleteErr))
 		}
 		switch {
@@ -1240,7 +1249,7 @@ func (h *TaskHandlers) commitFreshBranch(
 }
 
 func (h *TaskHandlers) rollbackFreshBranchTask(ctx context.Context, taskID string) {
-	if err := h.service.DeleteTask(ctx, taskID); err != nil {
+	if err := h.service.DeleteTaskWithLifecycle(ctx, taskID); err != nil {
 		h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
@@ -1868,7 +1877,17 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 				DiscardWorktreeChanges: discardWorktreeChanges,
 			},
 		); err != nil {
-			handleNotFound(c, h.logger, err, "task not deleted")
+			if !isCascadePostCommitError(err) {
+				handleNotFound(c, h.logger, err, "task not deleted")
+				return
+			}
+			h.logger.Warn("task deleted but post-commit housekeeping failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				responseKeySuccess: false,
+				responseKeyPending: true,
+				"task_id":          taskID,
+			})
 			return
 		}
 		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
@@ -1877,6 +1896,16 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	if err := h.service.DeleteTaskWithOptions(deleteCtx, taskID, service.DeleteTaskOptions{
 		DiscardWorktreeChanges: discardWorktreeChanges,
 	}); err != nil {
+		if isCascadePostCommitError(err) {
+			h.logger.Warn("task deleted but post-commit housekeeping failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				responseKeySuccess: false,
+				responseKeyPending: true,
+				"task_id":          taskID,
+			})
+			return
+		}
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
@@ -1886,21 +1915,55 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
+	// WithoutCancel, not Background: archiving cancels sessions and starts
+	// cleanup, so it must survive the client navigating away — but
+	// context.Background() also drops the request identity used by auth checks.
+	archiveCtx, cancel := archivecascade.ContinuationContext(c.Request.Context())
+	defer cancel()
 	// Office task-handoffs phase 6: when a HandoffService is wired,
 	// archive the whole subtree under a single cascade ID so
 	// descendants get tagged for scoped unarchive AND workspace-group
 	// memberships are released. When HandoffService is unconfigured
 	// (legacy / tests) fall back to the single-task path.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID, cascade); err != nil {
+		out, err := h.handoffSvc.ArchiveTaskTree(archiveCtx, taskID, cascade)
+		if err != nil {
+			if !isCascadePostCommitError(err) {
+				handleNotFound(c, h.logger, err, "task not archived")
+				return
+			}
+			h.logger.Warn("task archived but post-commit housekeeping failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				responseKeySuccess: false,
+				responseKeyPending: true,
+				"task_id":          taskID,
+			})
+			return
+		}
+		response := gin.H{responseKeySuccess: true}
+		if out != nil && len(out.ArchivedTaskIDs) == 0 && len(out.SkippedTaskIDs) > 0 {
+			response["already_archived"] = true
+		}
+		c.JSON(http.StatusOK, response)
+		return
+	}
+	if err := h.service.ArchiveTask(archiveCtx, taskID); err != nil {
+		if errors.Is(err, service.ErrTaskAlreadyArchived) {
+			c.JSON(http.StatusOK, gin.H{responseKeySuccess: true, "already_archived": true})
+			return
+		}
+		if !isCascadePostCommitError(err) {
 			handleNotFound(c, h.logger, err, "task not archived")
 			return
 		}
-		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
-		return
-	}
-	if err := h.service.ArchiveTask(c.Request.Context(), taskID); err != nil {
-		handleNotFound(c, h.logger, err, "task not archived")
+		h.logger.Warn("task archived but post-commit task projection failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			responseKeySuccess: false,
+			responseKeyPending: true,
+			"task_id":          taskID,
+		})
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
@@ -1913,6 +1976,11 @@ func cascadeQueryParam(c *gin.Context) bool {
 	return strings.EqualFold(c.Query("cascade"), "true")
 }
 
+func isCascadePostCommitError(err error) bool {
+	var postCommitErr *service.CascadePostCommitError
+	return errors.As(err, &postCommitErr)
+}
+
 func discardWorktreeChangesQueryParam(c *gin.Context) bool {
 	return strings.EqualFold(c.Query("discard_worktree_changes"), "true")
 }
@@ -1923,6 +1991,12 @@ func discardWorktreeChangesQueryParam(c *gin.Context) bool {
 // "Also archive/delete subtasks" checkbox.
 func (h *TaskHandlers) httpTaskSubtaskCount(c *gin.Context) {
 	taskID := c.Param("id")
+	if h.service != nil {
+		if err := h.service.AuthorizeTaskAccess(c.Request.Context(), taskID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			return
+		}
+	}
 	children, err := h.repo.ListChildren(c.Request.Context(), taskID)
 	if err != nil {
 		// Don't surface the raw repo error to the client — it can leak
@@ -1948,10 +2022,18 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 		return
 	}
 	taskID := c.Param("id")
-	outcome, err := h.handoffSvc.UnarchiveTaskTree(c.Request.Context(), taskID)
+	unarchiveCtx, cancelUnarchive := archivecascade.ContinuationContext(c.Request.Context())
+	defer cancelUnarchive()
+	outcome, err := h.handoffSvc.UnarchiveTaskTree(unarchiveCtx, taskID)
+	postCommitError := false
 	if err != nil {
-		handleNotFound(c, h.logger, err, "task not unarchived")
-		return
+		if !isCascadePostCommitError(err) {
+			handleNotFound(c, h.logger, err, "task not unarchived")
+			return
+		}
+		h.logger.Warn("task unarchive committed with post-commit errors",
+			zap.String("task_id", taskID), zap.Error(err))
+		postCommitError = true
 	}
 	// Probe branch recoverability for every restored task: archive deleted
 	// the local branch + worktree, so report whether the branch still
@@ -1974,6 +2056,20 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 		for _, id := range outcome.ArchivedTaskIDs {
 			workspaceRecovery = append(workspaceRecovery, h.workspaceRestorer.RestoreTask(recoveryCtx, id))
 		}
+	}
+	if postCommitError {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			responseKeySuccess:   false,
+			"error":              "task unarchive requires retry",
+			"task_id":            taskID,
+			"cascade_id":         outcome.CascadeID,
+			"unarchived_ids":     outcome.ArchivedTaskIDs,
+			"skipped_ids":        outcome.SkippedTaskIDs,
+			"affected_group_ids": outcome.ReleasedGroupIDs,
+			"workspace_recovery": workspaceRecovery,
+			"recovery":           recovery,
+		})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
@@ -2166,7 +2262,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		// in this file so a future change to the constant covers this path too.
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 		defer cancel()
-		if deleteErr := h.service.DeleteTask(rollbackCtx, task.ID); deleteErr != nil {
+		if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
 			h.logger.Error("failed to rollback quick chat task",
 				zap.String("task_id", task.ID),
 				zap.Error(deleteErr))
@@ -2345,7 +2441,7 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 }
 
 func (h *TaskHandlers) deleteTaskOnError(taskID, label string, err error) {
-	if deleteErr := h.service.DeleteTask(context.Background(), taskID); deleteErr != nil {
+	if deleteErr := h.service.DeleteTaskWithLifecycle(context.Background(), taskID); deleteErr != nil {
 		h.logger.Error("failed to rollback "+label+" task",
 			zap.String("task_id", taskID), zap.Error(deleteErr))
 	}

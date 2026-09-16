@@ -11,7 +11,10 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
-const responseKeySuccess = "success"
+const (
+	responseKeySuccess = "success"
+	responseKeyPending = "pending"
+)
 
 func (h *TaskHandlers) httpGetTaskEnvironment(c *gin.Context) {
 	taskID := c.Param("id")

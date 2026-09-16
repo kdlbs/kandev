@@ -1209,6 +1209,31 @@ func TestConvertNotification_SessionInfoUpdateFixture(t *testing.T) {
 	}
 }
 
+func TestConvertNotification_SessionInfoUpdateGoalFixture(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"session_info_update","_meta":{"goal":{"objective":"Coordinate contributor PR reviews","status":"active","createdAt":1789079689000,"updatedAt":1789287777000,"tokenBudget":null,"tokensUsed":9547009,"timeUsedSeconds":47312,"controlMethod":"_session/goal"}}}}`)
+	var notification acp.SessionNotification
+	if err := json.Unmarshal(raw, &notification); err != nil {
+		t.Fatalf("unmarshal goal fixture: %v", err)
+	}
+	if notification.Update.SessionInfoUpdate == nil {
+		t.Fatal("generated SDK did not decode goal session_info_update")
+	}
+
+	result := a.convertNotification(notification)
+	if result == nil {
+		t.Fatal("expected non-nil result for goal session_info_update")
+	}
+	goal, ok := result.SessionMeta["goal"].(map[string]any)
+	if !ok {
+		t.Fatalf("goal metadata type = %T, want map[string]any", result.SessionMeta["goal"])
+	}
+	if goal["status"] != "active" || goal["objective"] != "Coordinate contributor PR reviews" {
+		t.Fatalf("goal metadata = %#v", goal)
+	}
+}
+
 func TestConvertUsageUpdate_ZeroUsed(t *testing.T) {
 	a := newTestAdapter()
 

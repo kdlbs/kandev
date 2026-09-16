@@ -10,6 +10,8 @@ const mockWebSocketClient = {
   request: vi.fn(),
   subscribeSession: vi.fn(),
   subscribeSessionWithReady: vi.fn(),
+  registerCoreSessionRecovery: vi.fn(() => vi.fn()),
+  retryCoreSessionRecovery: vi.fn(() => undefined),
 };
 
 const mockState = {
@@ -371,6 +373,91 @@ describe("cached session entry history readiness", () => {
       await response.promise;
     });
     expect(result.current.historyRefreshPending).toBe(false);
+    expect(result.current.isLoading).toBe(false);
+    unmount();
+  });
+});
+
+describe("session entry loading state", () => {
+  it("clears local loading after a live row rerenders the entry effect", async () => {
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    const subscriptionReadiness = deferred<void>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(Promise.resolve());
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: subscriptionReadiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+    mockState.messages.bySession["sess-1"] = [makeMessage({ id: "cached" })];
+
+    const { result, rerender, unmount } = renderHook(() => useSessionMessages("sess-1"));
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1));
+
+    mockState.messages.bySession["sess-1"] = [
+      makeMessage({ id: "cached" }),
+      makeMessage({ id: "live" }),
+    ];
+    rerender();
+
+    await act(async () => {
+      response.resolve({ messages: [], has_more: false });
+      await response.promise;
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    unmount();
+  });
+
+  it("keeps a cached session switch fetch current across live message updates", async () => {
+    const sessionAResponse = deferred<{ messages: Message[]; has_more: boolean }>();
+    const sessionBResponse = deferred<{ messages: Message[]; has_more: boolean }>();
+    const sessionBSubscriptionReadiness = deferred<void>();
+    const sessionAReadiness = Promise.resolve();
+    const messagesBySession = mockState.messages.bySession as Record<string, Message[]>;
+    const sessions = mockState.taskSessions.items as Record<string, { state: TaskSessionState }>;
+    const sessionAUser = makeMessage({ id: "session-a-user", session_id: sessionId("sess-a") });
+    const sessionBUser = makeMessage({ id: "session-b-user", session_id: sessionId("sess-b") });
+    messagesBySession["sess-a"] = [sessionAUser];
+    messagesBySession["sess-b"] = [sessionBUser];
+    sessions["sess-a"] = { state: "RUNNING" };
+    sessions["sess-b"] = { state: "RUNNING" };
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockImplementation((id: string) =>
+      id === "sess-a" ? sessionAReadiness : Promise.resolve(),
+    );
+    mockWebSocketClient.subscribeSessionWithReady.mockImplementation((id: string) => ({
+      ready: id === "sess-a" ? sessionAReadiness : sessionBSubscriptionReadiness.promise,
+      unsubscribe: vi.fn(),
+    }));
+    mockWebSocketClient.request.mockImplementation(
+      (_action: string, payload: { session_id: string }) =>
+        payload.session_id === "sess-a" ? sessionAResponse.promise : sessionBResponse.promise,
+    );
+
+    const { result, rerender, unmount } = renderHook(
+      ({ activeSessionId }: { activeSessionId: string }) => useSessionMessages(activeSessionId),
+      { initialProps: { activeSessionId: "sess-a" } },
+    );
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      sessionAResponse.resolve({ messages: [sessionAUser], has_more: false });
+      await sessionAResponse.promise;
+    });
+
+    rerender({ activeSessionId: "sess-b" });
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(2));
+
+    messagesBySession["sess-b"] = [
+      sessionBUser,
+      makeMessage({ id: "session-b-live", session_id: sessionId("sess-b") }),
+    ];
+    rerender({ activeSessionId: "sess-b" });
+
+    await act(async () => {
+      sessionBResponse.resolve({ messages: [sessionBUser], has_more: false });
+      await sessionBResponse.promise;
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
     unmount();
   });
 });

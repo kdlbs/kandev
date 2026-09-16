@@ -165,6 +165,15 @@ export type MockGitHubPersonalConnection = {
   access_expires_at?: string;
 };
 
+export type E2ERemoteContributionBinding = {
+  source_repository: {
+    remote_url: string;
+  };
+  base_branch: string;
+  head_branch: string;
+  head_sha: string;
+};
+
 export type MockGitHubCLIAccount = {
   host: string;
   login: string;
@@ -233,6 +242,37 @@ function buildWorkflowStepCreateBody(
   }
   setIf(body, "events", opts?.events);
   return body;
+}
+
+type CreateRepositoryOpts = {
+  name?: string;
+  provider?: string;
+  provider_host?: string;
+  provider_owner?: string;
+  provider_name?: string;
+  remote_url?: string;
+  pull_before_worktree?: boolean;
+};
+
+function buildRepositoryCreateBody(
+  localPath: string,
+  defaultBranch: string,
+  opts?: CreateRepositoryOpts,
+): Record<string, unknown> {
+  return {
+    name: opts?.name ?? "E2E Repo",
+    source_type: "local",
+    local_path: localPath,
+    default_branch: defaultBranch,
+    ...(opts?.provider ? { provider: opts.provider } : {}),
+    ...(opts?.provider_host ? { provider_host: opts.provider_host } : {}),
+    ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
+    ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
+    ...(opts?.remote_url ? { remote_url: opts.remote_url } : {}),
+    ...(opts?.pull_before_worktree !== undefined
+      ? { pull_before_worktree: opts.pull_before_worktree }
+      : {}),
+  };
 }
 
 type CreateTaskOpts = {
@@ -359,6 +399,8 @@ type OptionalAgentTaskOpts = {
   blocked_by?: string[];
   /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
   start_when_unblocked?: boolean;
+  /** Prepare the task without launching its session so E2E fixtures can bind it first. */
+  start_agent?: boolean;
 };
 
 /** `repositories` (with per-entry branches) takes precedence over the shorthand
@@ -387,6 +429,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   if (opts.start_when_unblocked !== undefined) {
     fields.start_when_unblocked = opts.start_when_unblocked;
   }
+  if (opts.start_agent !== undefined) fields.start_agent = opts.start_agent;
   return fields;
 }
 
@@ -675,6 +718,7 @@ export class ApiClient {
       model: string;
       fallback_model?: string;
       auto_fallback?: boolean;
+      require_exact_model?: boolean;
       auto_approve?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
@@ -689,6 +733,7 @@ export class ApiClient {
       model: opts.model,
       fallback_model: opts.fallback_model,
       auto_fallback: opts.auto_fallback,
+      require_exact_model: opts.require_exact_model,
       auto_approve: opts.auto_approve,
       mode: opts.mode,
       config_options: opts.config_options,
@@ -719,6 +764,9 @@ export class ApiClient {
     patch: {
       name?: string;
       model?: string;
+      fallback_model?: string;
+      auto_fallback?: boolean;
+      require_exact_model?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
@@ -787,13 +835,15 @@ export class ApiClient {
       blocked_by?: string[];
       /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
       start_when_unblocked?: boolean;
+      /** Prepare the task without launching its session so E2E fixtures can bind it first. */
+      start_agent?: boolean;
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
       workspace_id: workspaceId,
       title,
       description: opts?.description ?? "",
-      start_agent: true,
+      start_agent: opts?.start_agent ?? true,
       agent_profile_id: agentProfileId,
       ...buildOptionalAgentTaskFields(opts),
     });
@@ -847,28 +897,13 @@ export class ApiClient {
     workspaceId: string,
     localPath: string,
     defaultBranch = "main",
-    opts?: {
-      name?: string;
-      provider?: string;
-      provider_host?: string;
-      provider_owner?: string;
-      provider_name?: string;
-      pull_before_worktree?: boolean;
-    },
+    opts?: CreateRepositoryOpts,
   ): Promise<{ id: string }> {
-    return this.request("POST", `/api/v1/workspaces/${workspaceId}/repositories`, {
-      name: opts?.name ?? "E2E Repo",
-      source_type: "local",
-      local_path: localPath,
-      default_branch: defaultBranch,
-      ...(opts?.provider ? { provider: opts.provider } : {}),
-      ...(opts?.provider_host ? { provider_host: opts.provider_host } : {}),
-      ...(opts?.provider_owner ? { provider_owner: opts.provider_owner } : {}),
-      ...(opts?.provider_name ? { provider_name: opts.provider_name } : {}),
-      ...(opts?.pull_before_worktree !== undefined
-        ? { pull_before_worktree: opts.pull_before_worktree }
-        : {}),
-    });
+    return this.request(
+      "POST",
+      `/api/v1/workspaces/${workspaceId}/repositories`,
+      buildRepositoryCreateBody(localPath, defaultBranch, opts),
+    );
   }
 
   /**
@@ -1116,6 +1151,14 @@ export class ApiClient {
     });
   }
 
+  async updateExecutorProfile(
+    executorId: string,
+    profileId: string,
+    updates: { config: Record<string, string> },
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/executors/${executorId}/profiles/${profileId}`, updates);
+  }
+
   async deleteExecutorProfile(profileId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/executor-profiles/${profileId}`);
   }
@@ -1196,6 +1239,7 @@ export class ApiClient {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
     prevent_auto_start_agent_on_open?: boolean;
+    auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -1403,6 +1447,7 @@ export class ApiClient {
       repositoryId?: string;
       startedAt?: string;
       completedAt?: string;
+      errorMessage?: string;
       commandCount?: number;
       metadata?: Record<string, unknown>;
     },
@@ -1416,6 +1461,7 @@ export class ApiClient {
     if (opts.repositoryId !== undefined) body.repository_id = opts.repositoryId;
     if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
     if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
+    if (opts.errorMessage !== undefined) body.error_message = opts.errorMessage;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
     return this.request("POST", "/api/v1/_test/task-sessions", body);
@@ -1480,7 +1526,7 @@ export class ApiClient {
       turnStartedAt?: string;
       turnCompletedAt?: string;
     },
-  ): Promise<void> {
+  ): Promise<{ messageId: string; turnId: string | null }> {
     const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
     if (opts.content !== undefined) body.content = opts.content;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
@@ -1490,7 +1536,24 @@ export class ApiClient {
     if (opts.newTurn !== undefined) body.new_turn = opts.newTurn;
     if (opts.turnStartedAt !== undefined) body.turn_started_at = opts.turnStartedAt;
     if (opts.turnCompletedAt !== undefined) body.turn_completed_at = opts.turnCompletedAt;
-    await this.request("POST", "/api/v1/_test/messages", body);
+    const result = await this.request<{ message_id: string; turn_id?: string | null }>(
+      "POST",
+      "/api/v1/_test/messages",
+      body,
+    );
+    return { messageId: result.message_id, turnId: result.turn_id ?? null };
+  }
+
+  async updateSessionMessage(messageId: string, content: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/_test/messages/${messageId}`, { content });
+  }
+
+  async deleteSessionMessage(messageId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/_test/messages/${messageId}`);
+  }
+
+  async completeSessionTurn(turnId: string): Promise<void> {
+    await this.request("POST", `/api/v1/_test/turns/${turnId}/complete`);
   }
 
   async seedToolCallMessages(
@@ -1681,6 +1744,15 @@ export class ApiClient {
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/prs", { prs });
     await this.seedMockGitHubRepositoryAccess(prs);
+  }
+
+  async attachE2EGitHubContribution(
+    taskId: string,
+    prUrl: string,
+  ): Promise<{ binding: E2ERemoteContributionBinding; remote_name: string }> {
+    return this.request("POST", `/api/v1/e2e/tasks/${taskId}/remote-contribution`, {
+      pr_url: prUrl,
+    });
   }
 
   async mockGitHubSetMergeOutcome(
@@ -2551,7 +2623,7 @@ export class ApiClient {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/task-sessions/${sessionId}`);
+    await this.request("DELETE", `/api/v1/_test/task-sessions/${sessionId}`);
   }
 
   async getTask(taskId: string): Promise<{
@@ -2864,6 +2936,18 @@ export class ApiClient {
     enabled: boolean,
   ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
     return this.wsRequest("message.queue.auto_run.set", {
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
+      enabled,
+    });
+  }
+
+  async setQueueAutoMerge(
+    identity: QueueSessionIdentityInput,
+    enabled: boolean,
+  ): Promise<{ session_id: string; auto_merge_enabled: boolean }> {
+    return this.wsRequest("message.queue.auto_merge.set", {
       task_id: identity.taskId,
       session_id: identity.sessionId,
       session_incarnation_id: identity.sessionIncarnationId,

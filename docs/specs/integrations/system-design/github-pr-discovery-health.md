@@ -38,6 +38,41 @@ field contract, in addition to exercising response conversion and persistence.
 Record the upstream schema reference in the fixture. A canned response that
 accepts any query cannot detect this defect.
 
+## Watch target reconciliation
+
+Discovery AC .4 uses the same session repository/worktree target resolution
+for watch creation and refresh. In `internal/github/poller.go`,
+`TaskBranchProvider.ResolveBranchForWatch` carries session, repository, and
+current branch identity. The orchestrator implementation lives in
+`event_handlers_github_watch_reconciliation.go`; the poller does not choose a
+task's primary branch for every watch.
+
+The session inventory can contain one row per distinct worktree branch without
+repository identity. Expand each session once and do not pass an inventory
+row's branch as the primary repository fallback; load branches from the
+session's per-repository worktrees instead.
+
+Resolve targets from the source session's task through
+`resolveSessionWatchTargets`, matching creation's fallback and worktree rules.
+`watch.TaskID` may name a workspace-group owner and remains the association
+destination, not a substitute source of checkout identity. Reuse target
+resolution without invoking effective-owner redirection for branch selection.
+
+Keep an exact repository/branch match. Only select a replacement when there
+is exactly one distinct branch target for that repository and the current
+branch is absent. Missing session or repository identity, lookup failure, no
+matching targets, or multiple unmatched candidates leaves the watch unchanged.
+Never use a sibling repository as a fallback. Preserve single-repository
+checkout-branch precedence and real unambiguous rename handling.
+
+Keep the existing `pr_number = 0` atomic writer and collision handling.
+Numbered watches, associations, detached tombstones, and attribution remain
+unchanged. No migration or live database cleanup is required. Reconciliation
+must reach a stable set of watch IDs and branches across repeated cycles;
+tests include mixed numbered/searching watches and multi-branch sessions.
+
+Delivery: [watch reconciliation repair](../../../plans/github-pr-watch-reconciliation/plan.md).
+
 ## Failure state and admission
 
 Add a service-owned runtime discovery-health component. Key each target by

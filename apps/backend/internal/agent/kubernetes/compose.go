@@ -73,6 +73,9 @@ func ComposePod(template *corev1.PodTemplate, profile ProfileConfig, options Pod
 		return nil, nil, err
 	}
 	pod.Spec.Volumes = append(pod.Spec.Volumes, managedVolumes(workspace)...)
+	if err := validateWorkspaceClaimAliases(pod.Spec.Volumes, pod.Spec.Volumes); err != nil {
+		return nil, nil, err
+	}
 	return pod, collectWarnings(pod), nil
 }
 

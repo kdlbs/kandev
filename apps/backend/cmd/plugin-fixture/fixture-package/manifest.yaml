@@ -6,6 +6,7 @@
 # cmd/plugin-pack into apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz.
 id: "kandev-plugin-e2e"
 api_version: 2
+min_kandev_version: "0.91.1"
 version: "1.0.0"
 display_name: "Kandev E2E Fixture Plugin"
 description: "SDK-based plugin backend used by backend integration tests and Playwright e2e tests"
@@ -23,8 +24,10 @@ runtime:
     windows-amd64: "server/plugin-windows-amd64.exe"
 
 capabilities:
+  api_read: ["messages"]
   events: ["task.created"]
   api_write: ["tasks"]
+  agent_invoke: true
   state: true
   secrets: true
   user_state: true
@@ -37,6 +40,12 @@ repository_providers: ["fixture-source-control"]
 
 actions:
   - key: "connection-status"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "utility-default"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "utility-preference"
     scope: "workspace"
     max_body_bytes: 4096
   - key: "repositories.inspect"
@@ -115,3 +124,20 @@ config_schema:
     greeting:
       type: string
       title: "Greeting"
+    agent_profile:
+      type: string
+      format: agent-profile
+      title: "Utility agent profile"
+      description: "Optional profile used for utility-agent completion actions."
+
+automation_conditions:
+  - key: "signed-event"
+    access: "public"
+    verification_headers: ["x-fixture-signature"]
+    config_version: 1
+    label: "Fixture signed event"
+    description: "Signed event fixture"
+    default_config: {}
+    config_schema:
+      type: "object"
+      properties: {}
