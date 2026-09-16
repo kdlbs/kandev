@@ -1,3 +1,4 @@
+import { request as playwrightRequest } from "@playwright/test";
 import { test, expect, type Page } from "../fixtures/test-base";
 import { AutomationsPage } from "../pages/automations-page";
 
@@ -29,14 +30,25 @@ async function revealWebhookSecret(
   return secret;
 }
 
-async function postWebhook(testPage: Page, webhookUrl: string, secret: string, body: unknown) {
-  const res = await testPage.request.post(webhookUrl, {
-    headers: { "X-Webhook-Secret": secret },
-    data: body,
-  });
-  expect(res.status()).toBe(200);
-  const json = (await res.json()) as { status: string };
-  expect(json.status).toBe("triggered");
+// Uses an isolated APIRequestContext rather than testPage.request: the page's
+// request context shares cookies with the authenticated browser session, so a
+// webhook route that incorrectly required or trusted that session could still
+// pass. A fresh context with no storage state proves the route works from an
+// unauthenticated caller carrying only X-Webhook-Secret, matching how a real
+// external vendor calls it.
+async function postWebhook(webhookUrl: string, secret: string, body: unknown) {
+  const context = await playwrightRequest.newContext();
+  try {
+    const res = await context.post(webhookUrl, {
+      headers: { "X-Webhook-Secret": secret },
+      data: body,
+    });
+    expect(res.status()).toBe(200);
+    const json = (await res.json()) as { status: string };
+    expect(json.status).toBe("triggered");
+  } finally {
+    await context.dispose();
+  }
 }
 
 /** Poll the runs list by clicking Refresh until `predicate` is satisfied. */
@@ -144,8 +156,8 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     const webhookUrl = `${new URL(testPage.url()).origin}/api/v1/automations/webhook/${automation.id}`;
 
     const payload = { issue: { id: "e2e-dedup-key-001" } };
-    await postWebhook(testPage, webhookUrl, secret, payload);
-    await postWebhook(testPage, webhookUrl, secret, payload);
+    await postWebhook(webhookUrl, secret, payload);
+    await postWebhook(webhookUrl, secret, payload);
 
     await waitForRuns(testPage, async () => (await testPage.getByTestId(/^run-row-/).count()) >= 2);
 
@@ -185,8 +197,8 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     const webhookUrl = `${new URL(testPage.url()).origin}/api/v1/automations/webhook/${automation.id}`;
 
     const payload = { issue: { id: "same-value-every-time" } };
-    await postWebhook(testPage, webhookUrl, secret, payload);
-    await postWebhook(testPage, webhookUrl, secret, payload);
+    await postWebhook(webhookUrl, secret, payload);
+    await postWebhook(webhookUrl, secret, payload);
 
     await waitForRuns(testPage, async () => (await testPage.getByTestId(/^run-row-/).count()) >= 2);
 
@@ -220,7 +232,7 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     await expandRunsSection(testPage);
     const webhookUrl = `${new URL(testPage.url()).origin}/api/v1/automations/webhook/${automation.id}`;
 
-    await postWebhook(testPage, webhookUrl, secret, { severity: "info" });
+    await postWebhook(webhookUrl, secret, { severity: "info" });
 
     await waitForRuns(testPage, async () => (await testPage.getByTestId(/^run-row-/).count()) >= 1);
 
@@ -268,7 +280,7 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     // resolveGitHubPRTriggerRepository would have consumed as owner/name —
     // the shape a vendor console emits — and matches no configured
     // repository's Name. It must never be resolved as a new repository.
-    await postWebhook(testPage, webhookUrl, secret, { service: "acme/unconfigured-webapp" });
+    await postWebhook(webhookUrl, secret, { service: "acme/unconfigured-webapp" });
 
     // Row count flips as soon as the run is admitted, but repository_reason is
     // only written moments later by the async task-creation path (BindRunTask).
@@ -286,12 +298,21 @@ test.describe("automations — webhook alert ingest (T01)", () => {
 
     // The same selector path, when its resolved value matches a configured
     // repository's Name exactly, DOES bind — proven in the same test so the
-    // comparator can't pass vacuously.
-    await postWebhook(testPage, webhookUrl, secret, { service: configuredRepo!.name });
+    // comparator can't pass vacuously. Poll for the admitted row's own
+    // task binding (data-task-id), not just row/reason counts: the reason
+    // suffix already on the *other* row satisfies a count-based predicate
+    // before this row's async bind (BindRunTask) has run, which would let a
+    // regression in that bind — e.g. admitting the wrong repository — pass
+    // silently.
+    await postWebhook(webhookUrl, secret, { service: configuredRepo!.name });
+    let admittedTaskId = "";
     await waitForRuns(testPage, async () => {
       const rows = testPage.getByTestId(/^run-row-/);
       if ((await rows.count()) < 2) return false;
-      return (await rows.filter({ has: testPage.getByTestId("run-outcome-reason") }).count()) >= 1;
+      const admitted = rows.filter({ hasNot: testPage.getByTestId("run-outcome-reason") });
+      if ((await admitted.count()) !== 1) return false;
+      admittedTaskId = (await admitted.getAttribute("data-task-id")) ?? "";
+      return admittedTaskId !== "";
     });
 
     const rows = testPage.getByTestId(/^run-row-/);
@@ -299,5 +320,11 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     // Exactly one of the two rows carries the no-match reason; the other (the
     // successful bind) records nothing, because the binding is its own record.
     await expect(rows.filter({ has: testPage.getByTestId("run-outcome-reason") })).toHaveCount(1);
+
+    // Prove the admitted task actually bound to configuredRepo, not merely
+    // that some task exists — an assertion on the row's absence of a
+    // no-match reason cannot distinguish the two.
+    const admittedTask = await apiClient.getTask(admittedTaskId);
+    expect(admittedTask.repositories?.map((r) => r.repository_id)).toEqual([configuredRepo!.id]);
   });
 });
