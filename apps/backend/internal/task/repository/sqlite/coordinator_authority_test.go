@@ -263,6 +263,19 @@ func TestIssueCoordinatorAuthorityGrantRejectsConflictingDesignationWithoutCapab
 	}
 }
 
+func TestIssueCoordinatorAuthorityGrantRejectsMismatchedWorkspaceScope(t *testing.T) {
+	repo := newUsageEventsTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	err := repo.IssueCoordinatorAuthorityGrant(ctx,
+		&models.WorkspaceCoordinatorGrant{WorkspaceID: "ws-1", CoordinatorTaskID: "coordinator", CreatedAt: now},
+		&models.CoordinatorGrant{ID: "grant", CoordinatorTaskID: "coordinator", PrincipalID: "principal", WorkspaceID: "ws-1", ScopeKind: "workspace", ScopeID: "wrong-workspace", Capabilities: "inspect", GrantedAt: now},
+	)
+	if !errors.Is(err, repoerrors.ErrCoordinatorGrantConflict) {
+		t.Fatalf("IssueCoordinatorAuthorityGrant mismatch = %v, want conflict", err)
+	}
+}
+
 func TestRevokeCoordinatorGrantRemovesDesignationWithFinalPrincipalBoundGrant(t *testing.T) {
 	repo := newUsageEventsTestRepo(t)
 	ctx := context.Background()

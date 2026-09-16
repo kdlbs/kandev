@@ -82,7 +82,8 @@ func (r *Repository) IssueCoordinatorAuthorityGrant(ctx context.Context, designa
 
 func validCoordinatorAuthorityIssue(designation *models.WorkspaceCoordinatorGrant, grant *models.CoordinatorGrant) bool {
 	return designation != nil && grant != nil && designation.WorkspaceID != "" && designation.CoordinatorTaskID != "" &&
-		grant.PrincipalID != "" && grant.WorkspaceID == designation.WorkspaceID && grant.CoordinatorTaskID == designation.CoordinatorTaskID
+		grant.PrincipalID != "" && grant.WorkspaceID == designation.WorkspaceID && grant.CoordinatorTaskID == designation.CoordinatorTaskID &&
+		(grant.ScopeKind != "workspace" || grant.ScopeID == grant.WorkspaceID)
 }
 
 func (r *Repository) ensureWorkspaceCoordinatorDesignationTx(ctx context.Context, tx *sqlx.Tx, designation *models.WorkspaceCoordinatorGrant) error {
