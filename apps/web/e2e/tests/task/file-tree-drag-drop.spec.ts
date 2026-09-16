@@ -137,10 +137,8 @@ test.describe("File tree drag and drop", () => {
       requiredPath: "movable.ts",
     });
 
-    const file = session.fileTreeNode("movable.ts");
-    const folder = session.fileTreeNode("target-dir");
-    await expect(file).toBeVisible({ timeout: 30_000 });
-    await expect(folder).toBeVisible({ timeout: 30_000 });
+    const file = await session.fileTree.waitForFileTreeNode("movable.ts");
+    const folder = await session.fileTree.waitForFileTreeNode("target-dir");
 
     await dispatchHtmlDnd(testPage, file, folder);
 
@@ -180,8 +178,7 @@ test.describe("File tree drag and drop", () => {
       requiredPath: "selfdir/leaf.ts",
     });
 
-    const folder = session.fileTreeNode("selfdir");
-    await expect(folder).toBeVisible({ timeout: 30_000 });
+    const folder = await session.fileTree.waitForFileTreeNode("selfdir");
 
     // Drop onto self: handleDragOver short-circuits via isDropInvalid so
     // preventDefault is never called, which means the browser would never

@@ -156,10 +156,16 @@ test.describe("mobile PR CI chip drawer", () => {
           await waitForFiniteAnimations(statusBar);
           return statusBar.evaluate((element) => {
             const bar = element.getBoundingClientRect();
-            return Array.from(element.children).every((child) => {
+            const visibleChildren = Array.from(element.children).filter((child) => {
+              const style = getComputedStyle(child);
+              const rect = child.getBoundingClientRect();
+              return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0;
+            });
+            const childrenFit = visibleChildren.every((child) => {
               const rect = child.getBoundingClientRect();
               return rect.left >= bar.left - 1 && rect.right <= bar.right + 1;
             });
+            return childrenFit && element.scrollWidth <= element.clientWidth + 1;
           });
         },
         {
