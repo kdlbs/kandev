@@ -172,6 +172,7 @@ test("keeps the desktop next-step form open when clicking a checkbox label", asy
   const form = testPage.getByTestId("proceed-next-step-options");
   await expect(form).toBeVisible();
 
+  await form.hover();
   await form.getByText("Skip the step prompt", { exact: true }).click();
 
   await expect(form).toBeVisible();
