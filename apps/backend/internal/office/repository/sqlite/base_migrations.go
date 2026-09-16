@@ -74,6 +74,7 @@ func (r *Repository) migrateLaunchSafetyColumns() {
 		`ALTER TABLE runs ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("runs.workspace_id",
 		`ALTER TABLE runs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`)
+	r.backfillLaunchSafetyWorkspaceIDs()
 
 	// Indexes reference the new columns, so they run after the ADD
 	// COLUMN statements above rather than in schema init.
@@ -108,6 +109,33 @@ func (r *Repository) migrateLaunchSafetyColumns() {
 		updated_at           TIMESTAMP NOT NULL,
 		PRIMARY KEY (workspace_id, gate)
 	)`)
+}
+
+// backfillLaunchSafetyWorkspaceIDs repairs runs.workspace_id for runs still
+// active (queued/claimed) when the ADD COLUMN migration above ran: their
+// workspace_id starts as ” regardless of which workspace they belong to,
+// which pools every such legacy run into the shared empty-bucket for
+// per-workspace concurrency ceilings and budgets
+// (AC-OFFICE-RUN-CAUSATION-001.19) instead of scoping it correctly. Only
+// active rows are repaired; a finished run's workspace_id is historical and
+// not read by any ceiling or budget check. A database that has not yet run
+// the agent-settings migrations (agent_profiles missing) fails this step
+// exactly like every other statement in this file: logged and swallowed,
+// non-fatal to boot.
+func (r *Repository) backfillLaunchSafetyWorkspaceIDs() {
+	stmt := r.db.Rebind(`
+		UPDATE runs SET workspace_id = (
+			SELECT workspace_id FROM agent_profiles WHERE id = runs.agent_profile_id
+		)
+		WHERE workspace_id = ''
+		  AND status IN ('queued', 'claimed')
+		  AND EXISTS (SELECT 1 FROM agent_profiles WHERE id = runs.agent_profile_id)
+	`)
+	if _, err := r.db.Exec(stmt); err != nil {
+		if r.log != nil {
+			r.log.Warn("launch safety workspace_id backfill failed", zap.Error(err))
+		}
+	}
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases
