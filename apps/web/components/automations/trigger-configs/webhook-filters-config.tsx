@@ -36,6 +36,20 @@ const FILTER_OPS_WITHOUT_VALUES = new Set<WebhookFilterOp>(["exists", "not_exist
 // error" for `contains` — is not split into two values and rejected at save.
 const SINGLE_VALUE_OPS = new Set<WebhookFilterOp>(["eq", "ne", "contains"]);
 
+// Reconciles a filter's stored values with a newly-selected operator: none
+// for exists/not_exists, only the first value for a scalar op (so switching
+// from `in` with ["a","b"] to `eq` can't save a hidden second value that
+// FilterScalarValueInput never shows), otherwise unchanged.
+function valuesForOperator(op: WebhookFilterOp, values: string[]): string[] {
+  if (FILTER_OPS_WITHOUT_VALUES.has(op)) {
+    return [];
+  }
+  if (SINGLE_VALUE_OPS.has(op)) {
+    return values.slice(0, 1);
+  }
+  return values;
+}
+
 type WebhookFiltersConfigProps = {
   filters: WebhookFilter[];
   onChange: (next: WebhookFilter[]) => void;
@@ -107,7 +121,7 @@ function FilterRow({
           onChange({
             ...filter,
             op: nextOp,
-            values: FILTER_OPS_WITHOUT_VALUES.has(nextOp) ? [] : filter.values,
+            values: valuesForOperator(nextOp, filter.values ?? []),
           });
         }}
       >

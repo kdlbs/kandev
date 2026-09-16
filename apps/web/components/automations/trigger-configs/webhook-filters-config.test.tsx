@@ -68,6 +68,19 @@ describe("WebhookFiltersConfig", () => {
     expect(onChange).toHaveBeenCalledWith([{ path: "severity", op: "ne", values: ["critical"] }]);
   });
 
+  // Switching from a list operator to a scalar one must drop every value past
+  // the first: FilterScalarValueInput only ever shows/edits values[0], so an
+  // untouched extra element would silently save a hidden multi-value scalar
+  // filter that the backend's cardinality check would then reject anyway.
+  it("truncates to one value when switching from a list operator to a scalar operator", () => {
+    const onChange = renderFilters([{ path: "severity", op: "in", values: ["critical", "fatal"] }]);
+
+    fireEvent.click(screen.getByText("In list"));
+    fireEvent.click(screen.getByText("Equals"));
+
+    expect(onChange).toHaveBeenCalledWith([{ path: "severity", op: "eq", values: ["critical"] }]);
+  });
+
   it("hides the values input for exists and not_exists operators", () => {
     renderFilters([{ path: "severity", op: "exists" }]);
 
