@@ -200,8 +200,8 @@ There are **two** precedences, because refusal and deferral see disjoint gate se
 
 - **Deferral**, most specific first: `agent_ceiling`, `workspace_ceiling`,
   `instance_ceiling`, `routine_budget`, `workspace_budget`.
-- **Refusal**, at enqueue: `causation_depth`, `self_trigger`, `causing_run_unreadable`,
-  `workspace_missing`.
+- **Refusal**, at enqueue: `causation_depth`, `self_trigger`, `self_trigger_total`,
+  `causing_run_unreadable`, `workspace_missing`.
 
 `causation_depth` and `self_trigger` are deliberately **absent** from the deferral
 precedence. An earlier draft listed them first, as the most specific gates; but they
@@ -356,7 +356,7 @@ Office stall detectors:
 - `office_launch_deferred_total`, labelled by `gate` (`agent_ceiling`,
   `workspace_ceiling`, `instance_ceiling`, `workspace_budget`, `routine_budget`).
 - `office_launch_refused_total`, labelled by `gate` (`causation_depth`,
-  `self_trigger`, `causing_run_unreadable`, `workspace_missing`).
+  `self_trigger`, `self_trigger_total`, `causing_run_unreadable`, `workspace_missing`).
 - `office_launch_check_failed_total`, labelled by `gate`, so a gate that is failing
   closed is visible rather than looking like a quiet system.
 - `office_launch_priority_unmapped_total`, labelled by `reason`.

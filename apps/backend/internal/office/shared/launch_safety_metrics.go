@@ -20,7 +20,7 @@ var (
 	LaunchDeferredTotal = expvar.NewMap("office_launch_deferred_total")
 
 	// LaunchRefusedTotal counts an enqueue refused by a gate, labelled by
-	// the refusing gate (causation_depth, self_trigger,
+	// the refusing gate (causation_depth, self_trigger, self_trigger_total,
 	// causing_run_unreadable, workspace_missing).
 	LaunchRefusedTotal = expvar.NewMap("office_launch_refused_total")
 

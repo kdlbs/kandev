@@ -41,9 +41,10 @@ the three and is what protects the shared machine. A lock keyed narrower than th
 serialize only the ceiling it matches while leaving the instance ceiling racing across
 every workspace or agent it does not cover — the exact defect AC-OFFICE-LAUNCH-SAFETY-001.6
 exists to prevent. The enqueue-time self-trigger lock stays per-agent-profile: it counts
-over one `(agent_profile_id, reason)` scope with no broader ceiling in the same statement,
-so per-agent is sufficient there and keeps unrelated enqueues parallel. The two locks are
-deliberately scoped differently because they guard different statements.
+over a `(agent_profile_id, reason)` scope and a `(agent_profile_id)` scope, both no broader
+than the agent profile itself, so per-agent is sufficient there and keeps unrelated
+enqueues parallel. The two locks are deliberately scoped differently because they guard
+different statements.
 
 **The launch-count budgets (workspace, routine) fail closed; the pre-existing cost budget
 stays fail open.** These are two different risks, not one mechanism applied
