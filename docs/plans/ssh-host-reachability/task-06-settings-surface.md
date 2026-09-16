@@ -160,4 +160,97 @@ are that task's contract.
 
 ## Results
 
-Pending.
+Implemented under strict `/tdd` (RED confirmed before every GREEN
+implementation):
+
+- `SSHReachabilityRecord` (+ `SSHReachabilityState`/`SSHReachabilityReason`)
+  added to `apps/web/lib/types/http-ssh.ts`, mirroring the backend
+  `reachability.RecordDTO` wire shape used by both the GET responses and the
+  `executor.reachability.changed` WS payload.
+- `getSSHReachability`, `getSSHExecutorReachability`, and
+  `probeSSHExecutorReachability` added to `lib/api/domains/ssh-api.ts`,
+  covered by `lib/api/domains/ssh-api.test.ts` (GET list, GET single with
+  executor-id URL-encoding, POST probe-now).
+- A `sshReachability: { byExecutorId }` slice in the settings store
+  (`lib/state/slices/settings/{types,settings-slice}.ts`), reconciled on
+  `updated_at` — never `checked_at` — via `setSSHReachability`. A `null`
+  `updated_at` (the synthesized never-probed placeholder) always loses to a
+  record that carries a real timestamp; a first write for an executor is
+  always applied. Covered by 6 tests in `settings-slice.test.ts`, including
+  the reset case (`checked_at: null`, newer `updated_at`) that a
+  `checked_at`-based reconciliation would silently discard.
+- `executor.reachability.changed` registered in `BackendMessageMap`
+  (`lib/types/backend.ts`) and wired in
+  `lib/ws/handlers/executors.ts` to call `setSSHReachability` directly, so a
+  pushed event and a card's own fetch share one reconciliation path.
+- Adding `sshReachability`/`setSSHReachability` required updating both the
+  settings slice's own type file *and* the hand-written `AppState` type in
+  `lib/state/app-state-types.ts` (which does not derive from the slice types
+  by intersection) — missed on the first pass, caught by `pnpm run
+  typecheck`.
+- `SSHReachabilityCard` (`components/settings/ssh-reachability-card.tsx`),
+  mounted in `SSHExecutorView`
+  (`app/settings/executors/ssh/[executorId]/page.tsx`) between
+  `SSHConnectionCard` and `SSHSessionsCard`, and exported from
+  `ssh-settings.tsx`. Fetches on mount through the store (never into
+  component-local-only state), so a live WS push and its own fetch/probe-now
+  results converge on the same rendered state. Renders state, probed host,
+  reason + message when `unreachable` (reason via a translated lookup, never
+  the raw token), consecutive-failure count, and the age of the last
+  completed and last successful probe. Marks a record stale past three
+  probe intervals (`isReachabilityStale`, a pure exported helper, covered by
+  2 direct unit tests plus integration coverage through the card). Refetches
+  on the record's own `probe_interval_seconds` (never a constant) while
+  probing is enabled, and arms no timer at all when `probing_enabled` is
+  false. A load failure with no prior record renders "not known" copy, never
+  `unreachable`. 12 tests in `ssh-reachability-card.test.tsx`, split across
+  4 `describe` blocks (rendering, live updates, refresh cadence,
+  errors/probe-now) to stay under the per-function line lint budget, cover:
+  per-state field rendering, staleness on/off, the live pushed-event update
+  (via a `PushReachability` test helper calling the same store action the WS
+  handler uses — the same pattern as the existing
+  `archive-confirmation-settings.test.tsx` "remote update" helper), the
+  reset-over-stored-record case, the probing-off no-timer guarantee (a
+  `setInterval` spy, filtering out React Testing Library's own internal
+  50ms polling interval), the enabled-cadence timer args, the load-failure
+  "not known" fallback, and the probe-now round trip.
+- Twelve reachability keys (state labels, six reason tokens, staleness,
+  probing-off, probe-now, host/age/failure-count copy, load-failure copy)
+  added to `src/locales/en/executors.json`, hand-translated into `pt-pt` and
+  `zh-cn`, and propagated to `zh-hk`/`zh-tw` via `pnpm run i18n:zh-hant`
+  (which also incidentally re-derives unrelated already-translated `zh-hk`/
+  `zh-tw`/`pseudo` catalog entries outside the `executors` namespace from
+  current `zh-cn`/`en` source; those out-of-scope regenerated files were
+  reverted with `git checkout --` before committing, keeping this commit
+  scoped to the `executors` namespace this task owns).
+- Followed the `ssh-agent-readiness-card.tsx` precedent for the card shape
+  (a `useReachabilityState` hook separating fetch/refresh/probe-now from a
+  thin view component) and the `ssh-connection-card.test.tsx` /
+  `archive-confirmation-settings.test.tsx` precedent for real React Testing
+  Library component coverage (`StateProvider` + `useAppStoreApi`) rather than
+  pure-helper-only tests — justified here because the acceptance criteria are
+  about store-integration behavior (live WS update without reload, timer
+  arm/no-arm, reconciliation-through-render) that a pure helper test cannot
+  exercise.
+
+Verification (all from `apps/web`, after `pnpm install --frozen-lockfile`
+from `apps/`):
+
+```bash
+pnpm vitest run components/settings/ssh-reachability-card.test.tsx lib/state/slices/settings/settings-slice.test.ts lib/api/domains/ssh-api.test.ts
+# 3 files, 32 tests passed
+
+pnpm run typecheck
+# clean
+
+pnpm run lint
+# clean (0 warnings; fixed sonarjs/no-duplicate-string, max-lines-per-function,
+# and no-nested-ternary findings during the refactor step)
+
+pnpm run i18n:check
+# ✓ all 6 sub-checks pass; pt-pt/zh-cn/zh-hk/zh-tw complete, pseudo in sync
+# (135 pre-existing unrelated orphan-key warnings, unchanged by this task)
+
+pnpm run i18n:ratchet
+# ✓ 0 added + 9 modified file(s) clean; guard allowlist intact
+```

@@ -365,3 +365,104 @@ describe("setAvailableAgents capability propagation", () => {
     expect(store.getState().agentProfiles.items[0]?.capability_status).toBe("probing");
   });
 });
+
+describe("ssh reachability", () => {
+  const EXEC_ID = "exec-1";
+  const BASE_TIMESTAMP = "2026-09-17T00:00:00Z";
+
+  function reachabilityRecord(
+    overrides: Partial<import("@/lib/types/http-ssh").SSHReachabilityRecord> = {},
+  ): import("@/lib/types/http-ssh").SSHReachabilityRecord {
+    return {
+      executor_id: EXEC_ID,
+      state: "reachable",
+      reason: "",
+      consecutive_failures: 0,
+      host: "build.example",
+      checked_at: BASE_TIMESTAMP,
+      last_success_at: BASE_TIMESTAMP,
+      updated_at: BASE_TIMESTAMP,
+      probing_enabled: true,
+      probe_interval_seconds: 60,
+      persisted: true,
+      ...overrides,
+    };
+  }
+
+  it("stores a record keyed by executor id", () => {
+    const store = makeStore();
+    store.getState().setSSHReachability(reachabilityRecord());
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(reachabilityRecord());
+  });
+
+  it("keeps the record with the later updated_at and discards an older one", () => {
+    const store = makeStore();
+    const newer = reachabilityRecord({ state: "unreachable", updated_at: "2026-09-17T01:00:00Z" });
+    const older = reachabilityRecord({ state: "reachable", updated_at: BASE_TIMESTAMP });
+
+    store.getState().setSSHReachability(newer);
+    store.getState().setSSHReachability(older);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(newer);
+  });
+
+  it("applies a reset (null checked_at, newer updated_at) over a stored reachable/unreachable record", () => {
+    // A connection-configuration reset clears checked_at but still advances
+    // updated_at. Reconciling on checked_at would make this reset compare as
+    // older than the record it just invalidated and get discarded, leaving a
+    // stale reachable/unreachable state showing for a host the user just
+    // re-pointed.
+    const store = makeStore();
+    const stale = reachabilityRecord({
+      state: "unreachable",
+      checked_at: "2026-09-17T02:00:00Z",
+      updated_at: "2026-09-17T02:00:00Z",
+    });
+    const reset = reachabilityRecord({
+      state: "unknown",
+      checked_at: null,
+      updated_at: "2026-09-17T03:00:00Z",
+      persisted: false,
+    });
+
+    store.getState().setSSHReachability(stale);
+    store.getState().setSSHReachability(reset);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(reset);
+  });
+
+  it("discards a null-updated_at placeholder applied after a record with a real timestamp", () => {
+    // The synthesized never-probed placeholder always loses.
+    const store = makeStore();
+    const real = reachabilityRecord({ updated_at: BASE_TIMESTAMP });
+    const placeholder = reachabilityRecord({ state: "unknown", updated_at: null });
+
+    store.getState().setSSHReachability(real);
+    store.getState().setSSHReachability(placeholder);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(real);
+  });
+
+  it("applies the first record for an executor even when its updated_at is null", () => {
+    const store = makeStore();
+    const placeholder = reachabilityRecord({ state: "unknown", updated_at: null });
+
+    store.getState().setSSHReachability(placeholder);
+
+    expect(store.getState().sshReachability.byExecutorId[EXEC_ID]).toEqual(placeholder);
+  });
+
+  it("tracks distinct executors independently", () => {
+    const store = makeStore();
+    const first = reachabilityRecord({ executor_id: EXEC_ID });
+    const second = reachabilityRecord({ executor_id: "exec-2", state: "unreachable" });
+
+    store.getState().setSSHReachability(first);
+    store.getState().setSSHReachability(second);
+
+    expect(store.getState().sshReachability.byExecutorId).toEqual({
+      [EXEC_ID]: first,
+      "exec-2": second,
+    });
+  });
+});

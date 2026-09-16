@@ -44,6 +44,7 @@ import type {
 } from "@/lib/types/github";
 import type { TaskMR, TaskMRDeletedEvent, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
 import type { SystemMetricsSnapshot, StorageAnalysisUpdatedPayload } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
@@ -551,6 +552,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "executor.prepare.completed": BackendMessage<
       "executor.prepare.completed",
       PrepareCompletedPayload
+    >;
+    "executor.reachability.changed": BackendMessage<
+      "executor.reachability.changed",
+      SSHReachabilityRecord
     >;
     "environment.created": BackendMessage<"environment.created", EnvironmentPayload>;
     "environment.updated": BackendMessage<"environment.updated", EnvironmentPayload>;

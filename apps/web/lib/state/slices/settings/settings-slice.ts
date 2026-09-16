@@ -36,6 +36,7 @@ export const defaultSettingsState: SettingsSliceState = {
   sleepInhibition: { response: null, loaded: false, loading: false, error: false },
   userSettings: createDefaultUserSettings(),
   agentProfileRecentUse: { records: {}, loaded: false },
+  sshReachability: { byExecutorId: {} },
 };
 
 type ImmerSet = Parameters<
@@ -417,6 +418,26 @@ function createSecretAndSpriteActions(
   };
 }
 
+// reachabilityUpdatedAtMs parses updated_at to epoch ms for reconciliation.
+// A null updated_at (the synthesized never-probed placeholder) sorts as
+// "always older" so any real record replaces it.
+function reachabilityUpdatedAtMs(updatedAt: string | null): number {
+  return updatedAt ? Date.parse(updatedAt) : -Infinity;
+}
+
+function createSSHReachabilityActions(set: ImmerSet): Pick<SettingsSlice, "setSSHReachability"> {
+  return {
+    setSSHReachability: (record) =>
+      set((draft) => {
+        const current = draft.sshReachability.byExecutorId[record.executor_id];
+        if (current && reachabilityUpdatedAtMs(current.updated_at) > reachabilityUpdatedAtMs(record.updated_at)) {
+          return;
+        }
+        draft.sshReachability.byExecutorId[record.executor_id] = record;
+      }),
+  };
+}
+
 export const createSettingsSlice: StateCreator<
   SettingsSlice,
   [["zustand/immer", never]],
@@ -430,4 +451,5 @@ export const createSettingsSlice: StateCreator<
   ...createInstallJobActions(set),
   ...createAgentUpdateJobActions(set),
   ...createSecretAndSpriteActions(set),
+  ...createSSHReachabilityActions(set),
 });
