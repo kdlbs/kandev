@@ -1166,6 +1166,9 @@ func (s *Service) queuedMessageHasDispatchInput(ctx context.Context, queuedMsg *
 	}
 	session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID)
 	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) || errors.Is(err, context.Canceled) {
+			return false, nil
+		}
 		return false, err
 	}
 	if session == nil {
