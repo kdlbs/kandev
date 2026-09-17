@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"golang.org/x/crypto/ssh"
 
 	"github.com/kandev/kandev/internal/agent/docker"
@@ -82,12 +84,28 @@ func dialDockerOverSSH(ctx context.Context, client *ssh.Client, log *logger.Logg
 // The remote command's exit status is the only place a transport-level cause
 // appears: a missing CLI or a denied socket produces a clean stream that
 // simply ends, so without capturing it the caller sees an unexplained EOF.
+// dialSession is the part of an SSH session this adapter uses. Narrowed from
+// *ssh.Session so the close path's bounded wait is testable without a host.
+type dialSession interface {
+	Wait() error
+	Close() error
+}
+
+// dialCloseWaitBudget bounds how long Close waits for the remote command to
+// reap after stdin EOF. A remote that never exits must not be able to hold the
+// caller, which still has to close the Docker client and the SSH client behind
+// this connection.
+const dialCloseWaitBudget = 5 * time.Second
+
 type sshDockerConn struct {
-	session *ssh.Session
+	session dialSession
 	stdin   io.WriteCloser
 	stdout  io.Reader
 	stderr  *syncBuffer
 	logger  *logger.Logger
+
+	// closeWaitBudget overrides dialCloseWaitBudget; zero means the default.
+	closeWaitBudget time.Duration
 
 	mu       sync.Mutex
 	exitErr  error
@@ -136,8 +154,38 @@ func (c *sshDockerConn) Close() error {
 	c.mu.Unlock()
 
 	_ = c.stdin.Close()
-	c.wait()
+	// Closing the session unblocks a Wait that is not going to return on its
+	// own, so a remote command that ignores stdin EOF costs a bounded delay
+	// rather than stranding the caller's cleanup.
+	c.waitBounded(c.closeBudget())
 	return c.session.Close()
+}
+
+// closeBudget is the wait this connection allows on close.
+func (c *sshDockerConn) closeBudget() time.Duration {
+	if c.closeWaitBudget > 0 {
+		return c.closeWaitBudget
+	}
+	return dialCloseWaitBudget
+}
+
+// waitBounded reaps the remote command, giving up after budget so Close can
+// proceed. The reaper keeps running: it still records the exit cause if the
+// command exits later, and Wait returns once the session is closed.
+func (c *sshDockerConn) waitBounded(budget time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.wait()
+	}()
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		c.logger.Warn("remote docker: dial-stdio did not exit after stdin EOF; closing the session",
+			zap.Duration("budget", budget))
+	}
 }
 
 // wait reaps the remote command once and classifies its failure.
