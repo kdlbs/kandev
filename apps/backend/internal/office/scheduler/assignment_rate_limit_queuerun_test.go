@@ -254,6 +254,49 @@ func TestQueueRun_AssignmentRateLimit_DedupedWakeDoesNotConsumeAllowance(t *test
 	}
 }
 
+// TestQueueRun_AssignmentRateLimit_KeylessRedeliveryConsumesAllowanceAgain
+// covers AC-OFFICE-ASSIGN-RATE-002.5's second clause: a keyless wake has no
+// dedup identity, so redelivering the same keyless occurrence consumes the
+// allowance again rather than deduping — the opposite of
+// TestQueueRun_AssignmentRateLimit_DedupedWakeDoesNotConsumeAllowance, which
+// covers the keyed case.
+func TestQueueRun_AssignmentRateLimit_KeylessRedeliveryConsumesAllowanceAgain(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-1")
+	ctx := context.Background()
+	taskID := "rl-task-11"
+
+	first, err := ss.QueueRun(ctx, "agent-1", RunReasonTaskAssigned, agentActorPayload(taskID), "")
+	if err != nil {
+		t.Fatalf("QueueRun first: %v", err)
+	}
+	if first != runsservice.QueueOutcomeQueued {
+		t.Fatalf("first outcome = %q, want queued", first)
+	}
+
+	// Past CoalesceRun's 5s window but inside the 10-minute rate-limit
+	// window, so the redelivery below reaches the gate as a genuinely new
+	// wake instead of coalescing with the first row.
+	ageRunsRequestedAt(t, ss, time.Minute)
+
+	second, err := ss.QueueRun(ctx, "agent-1", RunReasonTaskAssigned, agentActorPayload(taskID), "")
+	if err != nil {
+		t.Fatalf("QueueRun redelivery: %v", err)
+	}
+	if second != runsservice.QueueOutcomeQueued {
+		t.Fatalf("redelivery outcome = %q, want queued (keyless redelivery has no identity to dedup on)", second)
+	}
+
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, taskID, RunReasonTaskAssigned, time.Now().UTC().Add(-AssignmentWakeAllowanceWindow))
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2 (both keyless deliveries consumed the allowance independently)", count)
+	}
+}
+
 // TestQueueRun_AssignmentRateLimit_OrderIndependenceAtBoundary covers
 // AC-OFFICE-ASSIGN-RATE-001's window-count query having no ORDER BY: N
 // admitted wakes sharing one requested_at timestamp (a real possibility
