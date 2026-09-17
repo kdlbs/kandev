@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
+import { act, cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 
 import { CreateRoutineDialog } from "./create-routine-dialog";
@@ -101,5 +101,60 @@ describe("CreateRoutineDialog catch-up policy labeling (AC-003.6)", () => {
       name: /summarize missed/i,
     });
     expect(option.textContent).toMatch(/once|single/i);
+  });
+});
+
+// The backend has no create idempotency/uniqueness guard, so a second
+// concurrent submission (double-click, or a repeated Enter activation per
+// this repo's dialog Enter-to-confirm behavior) while the first is still
+// in flight would otherwise persist a duplicate routine and arm a second
+// schedule for it.
+describe("CreateRoutineDialog concurrent submission guard", () => {
+  it("does not call onSubmit again while the first create is still in flight", async () => {
+    let resolveSubmit: (value: boolean) => void = () => {};
+    const onSubmit = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
+    render(
+      <CreateRoutineDialog open onOpenChange={vi.fn()} agents={[AGENT]} onSubmit={onSubmit} />,
+    );
+    goToScheduleStep();
+    fireEvent.change(screen.getByPlaceholderText("0 9 * * *"), { target: { value: "0 9 * * *" } });
+
+    const createButton = screen.getByRole("button", { name: /create/i });
+    fireEvent.click(createButton);
+    fireEvent.click(createButton);
+    fireEvent.click(createButton);
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect((createButton as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      resolveSubmit(true);
+      await Promise.resolve();
+    });
+    // Still only ever called once, even after settling.
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-enables Create for a retry after a rejected create resolves", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(false);
+    render(
+      <CreateRoutineDialog open onOpenChange={vi.fn()} agents={[AGENT]} onSubmit={onSubmit} />,
+    );
+    goToScheduleStep();
+    fireEvent.change(screen.getByPlaceholderText("0 9 * * *"), { target: { value: "0 9 * * *" } });
+
+    const createButton = screen.getByRole("button", { name: /create/i });
+    fireEvent.click(createButton);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((createButton as HTMLButtonElement).disabled).toBe(false));
+
+    fireEvent.click(createButton);
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
   });
 });

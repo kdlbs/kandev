@@ -246,6 +246,24 @@ describe("RoutineDetailView save failure (TS-005)", () => {
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByRole("button", { name: /save/i }).textContent).not.toMatch(/saving/i);
   });
+
+  it("shows an error toast and re-enables Save if reconcileCronTrigger throws instead of resolving with a failure outcome", async () => {
+    // reconcileCronTrigger is designed to always resolve (every internal call
+    // is its own try/catch), but nothing in its type enforces that. Save must
+    // still catch it, toast, and clear the saving flag if a future change
+    // breaks that invariant, rather than leaving an unhandled rejection and a
+    // permanently-disabled button.
+    reconcileCronTriggerMock.mockRejectedValueOnce(new Error("unexpected"));
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    const saveButton = screen.getByRole("button", { name: /save/i });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("unexpected"));
+    expect((screen.getByRole("button", { name: /save/i }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
 });
 
 // AC-002.9 / SRF-34: describeCronOutcome (through handleSave) must map every

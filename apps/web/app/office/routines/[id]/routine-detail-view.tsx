@@ -154,18 +154,28 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
       return;
     }
 
-    const outcome = await reconcileCronTrigger(routine.id, draft, triggers);
-    if (outcome.kind !== "unchanged" && outcome.triggers !== null) {
-      setTriggers(outcome.triggers);
+    try {
+      const outcome = await reconcileCronTrigger(routine.id, draft, triggers);
+      if (outcome.kind !== "unchanged" && outcome.triggers !== null) {
+        setTriggers(outcome.triggers);
+      }
+      const result = describeCronOutcome(outcome, t);
+      if (result.toastKind === "success") {
+        toast.success(result.message);
+      } else {
+        toast.error(result.message);
+      }
+      if (result.refresh) router.refresh();
+    } catch (err) {
+      // reconcileCronTrigger is designed to always resolve (every internal
+      // call is its own try/catch) rather than throw, but nothing enforces
+      // that contract. Catching here — not just the `finally` below — keeps
+      // a future violation from becoming an unhandled rejection out of an
+      // unawaited click handler on top of a stuck Save button.
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveRoutine"));
+    } finally {
+      setSaving(false);
     }
-    const result = describeCronOutcome(outcome, t);
-    if (result.toastKind === "success") {
-      toast.success(result.message);
-    } else {
-      toast.error(result.message);
-    }
-    if (result.refresh) router.refresh();
-    setSaving(false);
   }, [routine.id, draft, triggers, router, t]);
 
   const handleRunNow = useCallback(async () => {
