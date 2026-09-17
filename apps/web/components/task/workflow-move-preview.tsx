@@ -278,11 +278,15 @@ function WorkflowMovePreviewDetails({
   );
 }
 
+type CompactWorkflowMovePreviewProps = Omit<WorkflowMovePreviewDisclosureProps, "className"> & {
+  expanded: boolean;
+};
+
 export function CompactWorkflowMovePreview({
   state,
   isTouchSurface,
   expanded,
-}: WorkflowMovePreviewDisclosureProps & { expanded: boolean }) {
+}: CompactWorkflowMovePreviewProps) {
   const { t } = useTranslation();
   if (state.status === "idle") return null;
   if (state.status === "loading") {

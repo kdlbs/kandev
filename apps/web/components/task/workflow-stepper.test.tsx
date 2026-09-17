@@ -457,6 +457,44 @@ describe("WorkflowStepper compact disclosure options", () => {
     fireEvent.click(screen.getByTestId("workflow-step-disclosure-options-c"));
     expect(screen.getByTestId("workflow-step-disclosure-options-panel-c")).toBeTruthy();
   });
+
+  it("keeps the direct move action before the options toggle in the DOM", () => {
+    collapsedMock.mockReturnValue(true);
+    render(
+      <WorkflowStepper
+        steps={DISCLOSURE_STEPS}
+        currentStepId="b"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: TRIGGER_LABEL }));
+
+    const row = screen.getByTestId("workflow-step-disclosure-row-c");
+    expect(
+      Array.from(row.querySelectorAll<HTMLButtonElement>("button")).map(
+        (button) => button.dataset.testid,
+      ),
+    ).toEqual(["workflow-step-disclosure-move-c", "workflow-step-disclosure-options-c"]);
+  });
+
+  it("keeps completed and future non-movable labels visually muted", () => {
+    collapsedMock.mockReturnValue(true);
+    render(
+      <WorkflowStepper
+        steps={DISCLOSURE_STEPS}
+        currentStepId="b"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: TRIGGER_LABEL }));
+
+    expect(screen.getByText("Spec").className).toContain("text-muted-foreground");
+    expect(screen.getByText("Done").className).toContain("text-muted-foreground/60");
+  });
 });
 
 describe("WorkflowStepper compact disclosure preview queue", () => {

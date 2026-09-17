@@ -511,7 +511,7 @@ function StepDisclosureRow({
           progress?.isPending ? t(workflowStepProgressTranslationKey(progress.status)) : undefined
         }
       />
-      <span className={cn("min-w-0 truncate text-xs text-foreground", isCurrent && "font-medium")}>
+      <span className={cn("min-w-0 truncate text-xs", getStepLabelClass(isCurrent, isCompleted))}>
         {step.name}
       </span>
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
