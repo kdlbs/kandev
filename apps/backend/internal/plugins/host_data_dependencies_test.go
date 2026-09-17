@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -131,6 +132,54 @@ func TestAttachDependencies_NoopOnEmptyTasks(t *testing.T) {
 	err := d.host.attachDependencies(context.Background(), nil, nil, true)
 	require.NoError(t, err)
 	require.Equal(t, 0, d.tasks.dependencyViewsBoundedCalls)
+}
+
+func TestPluginHost_Tasks_GetAttachesDependencyProjectionUnbounded(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", Title: "Task 1"}}
+	d.tasks.dependencyViews = map[string]taskservice.DependencyView{
+		"task-1": {Blocked: true, BlockedReason: taskservice.BlockedReasonUnknown},
+	}
+
+	got, err := d.host.Tasks().Get(context.Background(), "task-1")
+	require.NoError(t, err)
+	require.True(t, got.Blocked)
+	require.Equal(t, taskservice.BlockedReasonUnknown, got.BlockedReason)
+	require.Equal(t, 1, d.tasks.dependencyViewsCalls)
+	require.Equal(t, 0, d.tasks.dependencyViewsBoundedCalls, "Get is one of the single-task flows exempt from the fan-out cap")
+}
+
+func TestPluginHost_Tasks_ListAttachesDependencyProjectionBoundedOverThePageOnly(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	d.tasks.workspaces = []*taskmodels.Workspace{{ID: "ws-1"}}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{
+		"ws-1": {
+			{ID: "task-1", WorkspaceID: "ws-1", CreatedAt: time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)},
+			{ID: "task-2", WorkspaceID: "ws-1", CreatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)},
+			{ID: "task-3", WorkspaceID: "ws-1", CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		},
+	}
+	d.tasks.dependencyViews = map[string]taskservice.DependencyView{
+		"task-1": {Blocked: true, BlockedReason: taskservice.BlockedReasonPending},
+	}
+
+	tasks, _, err := d.host.Tasks().List(context.Background(), pluginsdk.TaskFilter{}, pluginsdk.Page{Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.True(t, tasks[0].Blocked)
+	require.Equal(t, []string{"task-1"}, d.tasks.dependencyViewsTasks, "derivation runs over the returned page only, not the whole workspace")
+	require.Equal(t, 1, d.tasks.dependencyViewsBoundedCalls, "ListTasks is bound by the fan-out cap")
+}
+
+func TestPluginHost_Tasks_ListTranslatesFanOutRefusalToResourceExhausted(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	d.tasks.workspaces = []*taskmodels.Workspace{{ID: "ws-1"}}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{"ws-1": {{ID: "task-1", WorkspaceID: "ws-1"}}}
+	d.tasks.dependencyViewsErr = taskservice.ErrDependencyFanOutExceeded
+
+	_, _, err := d.host.Tasks().List(context.Background(), pluginsdk.TaskFilter{}, pluginsdk.Page{})
+	require.Error(t, err)
+	require.Equal(t, codes.ResourceExhausted, status.Code(err))
 }
 
 func TestAttachDependencies_NoopWhenTaskDataSourceNil(t *testing.T) {

@@ -345,6 +345,28 @@ const taskFetchPageSize = 1000
 
 type taskReader struct{ host *pluginHost }
 
+// fetchTaskPage resolves, filters, sorts, and paginates matching tasks,
+// returning the raw models backing exactly the returned page (not the whole
+// matching set). Both taskReader.List (gRPC ListTasks, which has no further
+// narrowing) and the canvas task-list route (which narrows further by
+// binding scope, and so must derive dependencies AFTER that narrowing
+// rather than trust this method's caller to have already bounded the set)
+// call this to fetch.
+func (h *pluginHost) fetchTaskPage(ctx context.Context, filter pluginsdk.TaskFilter, page pluginsdk.Page) ([]*taskmodels.Task, *pluginsdk.PageInfo, error) {
+	workspaceIDs, err := h.resolveWorkspaceIDs(ctx, filter.WorkspaceIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	tasks, err := h.fetchTasksForWorkspaces(ctx, workspaceIDs, filter.IncludeEphemeral, filter.IncludeArchived)
+	if err != nil {
+		return nil, nil, err
+	}
+	tasks = filterTasks(tasks, filter)
+	sortTasksNewestFirst(tasks)
+	models, info := paginate(tasks, page)
+	return models, info, nil
+}
+
 func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
 	if !r.host.capabilities.CanRead(resourceTasks) {
 		return nil, nil, permissionDenied(apiReadCapability(resourceTasks))
@@ -352,21 +374,19 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 	if r.host.taskData == nil {
 		return r.host.UnimplementedHostData.Tasks().List(ctx, filter, page)
 	}
-	workspaceIDs, err := r.host.resolveWorkspaceIDs(ctx, filter.WorkspaceIDs)
+	models, info, err := r.host.fetchTaskPage(ctx, filter, page)
 	if err != nil {
 		return nil, nil, err
 	}
-	tasks, err := r.host.fetchTasksForWorkspaces(ctx, workspaceIDs, filter.IncludeEphemeral, filter.IncludeArchived)
-	if err != nil {
-		return nil, nil, err
-	}
-	tasks = filterTasks(tasks, filter)
-	sortTasksNewestFirst(tasks)
-	items, info := paginate(tasksToDTOs(tasks), page)
-	// Attached AFTER pagination so the PR lookup covers one page, not the whole
-	// workspace: a campaign-sized read would otherwise fan out over every task
-	// kandev holds to fill a list the caller already bounded.
+	items := tasksToDTOs(models)
+	// Attached AFTER pagination so the PR lookup and dependency derivation
+	// cover one page, not the whole workspace: a campaign-sized read would
+	// otherwise fan out over every task kandev holds to fill a list the
+	// caller already bounded.
 	r.host.attachPullRequests(ctx, items)
+	if err := r.host.attachDependencies(ctx, items, models, true); err != nil {
+		return nil, nil, err
+	}
 	return items, info, nil
 }
 
@@ -418,6 +438,9 @@ func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error)
 	}
 	items := []pluginsdk.Task{taskModelToDTO(task)}
 	r.host.attachPullRequests(ctx, items)
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{task}, false); err != nil {
+		return nil, err
+	}
 	return &items[0], nil
 }
 
