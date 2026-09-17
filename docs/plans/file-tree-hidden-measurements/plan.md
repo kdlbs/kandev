@@ -122,7 +122,7 @@ These cases support `.10` while preserving compact spacing `.9` and touch action
 Use the real TanStack measurement function with controlled element geometry.
 The zero-height regression must fail before the guard is implemented.
 
-`e2e/tests/task/large-file-tree-virtualization-helpers.test.ts` covers the shared
+`components/task/file-tree-geometry.test.ts` covers the shared
 viewport validator. It rejects a blank top edge, rejects a blank bottom edge when
 the tree overflows the viewport, and permits legitimate trailing space for a short
 tree or the file-tree container's end padding.

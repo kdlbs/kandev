@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { fileTreeGeometryIssues, type FileTreeViewportGeometry } from "./file-tree-geometry";
+import {
+  fileTreeGeometryIssues,
+  type FileTreeViewportGeometry,
+} from "../../e2e/tests/task/file-tree-geometry";
 
 function geometry(overrides: Partial<FileTreeViewportGeometry>): FileTreeViewportGeometry {
   return {

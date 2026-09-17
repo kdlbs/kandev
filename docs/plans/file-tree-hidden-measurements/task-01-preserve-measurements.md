@@ -83,9 +83,9 @@ Run from the repository root. If dependencies are absent, first run
 `(cd apps && pnpm install --frozen-lockfile)`.
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/file-tree-measurement.test.ts components/task/file-browser-render-identity.test.tsx components/task/file-browser-responsive.test.tsx e2e/tests/task/large-file-tree-virtualization-helpers.test.ts)
+(cd apps/web && pnpm exec vitest run components/task/file-tree-measurement.test.ts components/task/file-browser-render-identity.test.tsx components/task/file-browser-responsive.test.tsx components/task/file-tree-geometry.test.ts)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint components/task/file-tree-measurement.ts components/task/file-tree-measurement.test.ts components/task/file-browser-parts.tsx e2e/tests/task/file-tree-geometry.ts e2e/tests/task/large-file-tree-virtualization-helpers.ts e2e/tests/task/large-file-tree-virtualization-helpers.test.ts e2e/tests/task/large-file-tree-virtualization.spec.ts e2e/tests/task/mobile-large-file-tree-virtualization.spec.ts)
+(cd apps/web && pnpm exec eslint components/task/file-tree-measurement.ts components/task/file-tree-measurement.test.ts components/task/file-tree-geometry.test.ts components/task/file-browser-parts.tsx e2e/tests/task/file-tree-geometry.ts e2e/tests/task/large-file-tree-virtualization-helpers.ts e2e/tests/task/large-file-tree-virtualization.spec.ts e2e/tests/task/mobile-large-file-tree-virtualization.spec.ts)
 (cd apps/web && pnpm e2e:run --project chromium tests/task/large-file-tree-virtualization.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-large-file-tree-virtualization.spec.ts tests/task/mobile-file-tree-chat-context.spec.ts)
 (cd apps/web && pnpm run lint:e2e-sleeps -- e2e/tests/task/large-file-tree-virtualization.spec.ts e2e/tests/task/mobile-large-file-tree-virtualization.spec.ts)
@@ -103,7 +103,7 @@ Run desktop and mobile commands sequentially.
 - `apps/web/components/task/file-tree-measurement.test.ts` (new).
 - `apps/web/components/task/file-browser-parts.tsx`.
 - `apps/web/e2e/tests/task/file-tree-geometry.ts` (new).
-- `apps/web/e2e/tests/task/large-file-tree-virtualization-helpers.test.ts` (new).
+- `apps/web/components/task/file-tree-geometry.test.ts` (new).
 - `apps/web/e2e/tests/task/large-file-tree-virtualization.spec.ts`.
 - `apps/web/e2e/tests/task/mobile-large-file-tree-virtualization.spec.ts`.
 - `apps/web/e2e/tests/task/large-file-tree-virtualization-helpers.ts`.
