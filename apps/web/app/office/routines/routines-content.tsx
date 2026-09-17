@@ -119,7 +119,7 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
       }
 
       onDone();
-      await fetchRoutines();
+      await fetchRoutines().catch(() => {});
       toast.success(t("office:routineCreated"));
     },
     [workspaceId, fetchRoutines],

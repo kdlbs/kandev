@@ -153,6 +153,21 @@ describe("RoutinesContent create-routine trigger failure (AC-002.8)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("still reports success when the post-creation refresh fails after both the routine and its trigger are created", async () => {
+    createRoutineMock.mockResolvedValue({ id: "routine-1" });
+    createRoutineTriggerMock.mockResolvedValue({ trigger: null });
+    listRoutinesMock.mockResolvedValueOnce({ routines: [] });
+    listRoutinesMock.mockRejectedValueOnce(new Error("network down"));
+    renderContent();
+
+    fireEvent.click(screen.getByRole("button", { name: /new routine/i }));
+    goToScheduleStepAndSetCron("0 9 * * *");
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Routine created"));
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
   it("reports the generic create failure, not the AC-002.8 message, when the routine itself fails to create", async () => {
     createRoutineMock.mockRejectedValue(new Error("workspace not found"));
     renderContent();

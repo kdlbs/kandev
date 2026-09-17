@@ -67,6 +67,7 @@ const DEFAULT_CRON_EXPRESSION = "*/5 * * * *";
 const CHANGED_CRON_EXPRESSION = "0 9 * * *";
 const NEXT_FIRE_NONE = "Next fire: -";
 const LAST_FIRED_NEVER = "Last fired: never";
+const LAST_FIRED_TIMESTAMP = "2026-05-01T00:00:00Z";
 const AMERICA_NEW_YORK = "America/New_York";
 
 const cronTrigger: RoutineTrigger = {
@@ -227,7 +228,7 @@ describe("RoutineDetailView editable field seeding (AC-003.5, AC-003.7)", () => 
 
 describe("RoutineDetailView last-fired display (AC-003.5, AC-003.6)", () => {
   it("shows the primary cron trigger's lastFiredAt, not the placeholder, when one is set", () => {
-    renderDetailView(baseRoutine, [{ ...cronTrigger, lastFiredAt: "2026-05-01T00:00:00Z" }]);
+    renderDetailView(baseRoutine, [{ ...cronTrigger, lastFiredAt: LAST_FIRED_TIMESTAMP }]);
     expect(screen.queryByText(LAST_FIRED_NEVER)).toBeNull();
     expect(screen.getByText(/^Last fired: (?!never)/)).toBeTruthy();
   });
@@ -239,7 +240,7 @@ describe("RoutineDetailView last-fired display (AC-003.5, AC-003.6)", () => {
 
   it("shows the not-first-in-array primary trigger's lastFiredAt, not the placeholder array position would surface", () => {
     const other = { ...cronTrigger, id: "b", nextRunAt: undefined, enabled: false };
-    const primary = { ...cronTrigger, id: "a", lastFiredAt: "2026-05-01T00:00:00Z" };
+    const primary = { ...cronTrigger, id: "a", lastFiredAt: LAST_FIRED_TIMESTAMP };
     // Primary is listed second: reading by array position would surface
     // `other`'s unset lastFiredAt (the never placeholder) instead.
     renderDetailView(baseRoutine, [other, primary]);
@@ -249,7 +250,7 @@ describe("RoutineDetailView last-fired display (AC-003.5, AC-003.6)", () => {
 
   it("shows last-fired even when the routine is not currently firing", () => {
     renderDetailView({ ...baseRoutine, status: "paused" }, [
-      { ...cronTrigger, lastFiredAt: "2026-05-01T00:00:00Z" },
+      { ...cronTrigger, lastFiredAt: LAST_FIRED_TIMESTAMP },
     ]);
     expect(screen.queryByText(LAST_FIRED_NEVER)).toBeNull();
     expect(screen.getByText(/^Last fired: (?!never)/)).toBeTruthy();
@@ -266,6 +267,19 @@ describe("RoutineDetailView next-fire isPrimary gate (AC-003.5)", () => {
     renderDetailView(baseRoutine, [fallbackOnly]);
     expect(screen.getByText(NEXT_FIRE_NONE)).toBeTruthy();
     expect(screen.queryByText(/Next fire: 1\/1\/2020/)).toBeNull();
+  });
+
+  it("still shows a fallback (non-primary) cron trigger's lastFiredAt even though its nextRunAt is hidden", () => {
+    const fallbackOnly: RoutineTrigger = {
+      ...cronTrigger,
+      enabled: false,
+      nextRunAt: "2020-01-01T00:00:00Z",
+      lastFiredAt: LAST_FIRED_TIMESTAMP,
+    };
+    renderDetailView(baseRoutine, [fallbackOnly]);
+    expect(screen.getByText(NEXT_FIRE_NONE)).toBeTruthy();
+    expect(screen.queryByText(LAST_FIRED_NEVER)).toBeNull();
+    expect(screen.getByText(/^Last fired: (?!never)/)).toBeTruthy();
   });
 });
 
