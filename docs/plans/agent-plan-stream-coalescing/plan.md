@@ -1,9 +1,9 @@
 ---
 status: done
 requirements:
-  - docs/specs/agents/requirements/agent-plan-stream-coalescing.md
+  - REQ-AGENTS-AGENT-PLAN-STREAM-COALESCING-001
 system_design:
-  - docs/specs/agents/system-design/agent-plan-stream-coalescing.md
+  - ../../specs/agents/system-design/agent-plan-stream-coalescing.md
 ---
 
 # Agent plan stream coalescing
