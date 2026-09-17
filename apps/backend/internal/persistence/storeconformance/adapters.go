@@ -94,6 +94,8 @@ var schemaInitializers = map[string]testconformance.Scenario{
 	"prompts":               promptSchema,
 	"utility":               utilitySchema,
 	"office":                officeSchema,
+	"runs":                  runsSchema,
+	"orchestration":         orchestrationSchema,
 	"terminal":              terminalSchema,
 	"quick-terminal":        quickTerminalSchema,
 	"runtime-flags":         runtimeFlagsSchema,
@@ -222,6 +224,9 @@ func utilitySchema(s testconformance.ScenarioContext) error {
 }
 
 func officeSchema(s testconformance.ScenarioContext) error {
+	if err := agentSettingsSchema(s); err != nil {
+		return err
+	}
 	if err := workflowSchema(s); err != nil {
 		return err
 	}

@@ -49,6 +49,7 @@ function workspaceDefinitions(
       });
     }
     for (const [index, [suffix, labelKey]] of [
+      ["orchestration", "office:orchestration"],
       ["repositories", "sidebar:repositories"],
       ["workflows", "workflows:workflows"],
       ["automations", "common:automations"],
@@ -62,6 +63,7 @@ function workspaceDefinitions(
         parentId: workspaceId,
         groupId: "workspaces",
         href: `${href}/${suffix}`,
+        ...(suffix === "orchestration" ? { requires: "orchestration" as const } : {}),
         order: order + index + 10,
       });
     }
@@ -192,6 +194,7 @@ function dynamicDefinitions(context: SettingsDiscoveryContext): SettingsDiscover
 }
 
 function isVisible(entry: SettingsDiscoveryDefinition, context: SettingsDiscoveryContext) {
+  if (entry.requires === "orchestration") return !!context.showOrchestration;
   if (entry.requires === "account") return context.showAccount;
   if (entry.requires === "users") return context.showUsers;
   if (entry.requires === "organizations") return context.showOrganizations;

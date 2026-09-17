@@ -196,7 +196,7 @@ func officeWorkspaceScopeMiddleware(
 			return
 		}
 		if err := authorizeOfficeRequest(c, taskSvc, officeRepo, resolvers); err != nil {
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{errKey: "workspace not found"})
 			return
 		}
 		c.Next()
@@ -520,9 +520,11 @@ func mountOfficeRoutes(
 	officeRepo *officesqlite.Repository,
 	handoffSvc *taskservice.HandoffService,
 	log *logger.Logger,
+	compatibility ...gin.HandlerFunc,
 ) {
 	api := router.Group(officeRoutePrefix)
 	api.Use(officeagents.AgentAuthMiddleware(svcs.Agents))
 	api.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
+	api.Use(compatibility...)
 	office.RegisterAllRoutes(api, svcs, handoffSvc, log)
 }

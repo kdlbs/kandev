@@ -14,6 +14,7 @@ type Surface string
 const (
 	SurfaceKanbanTask    Surface = "kanban-task"
 	SurfaceOfficeTask    Surface = "office-task"
+	SurfaceConversation  Surface = "conversation"
 	SurfaceConfiguration Surface = "configuration"
 	SurfaceExternal      Surface = "external"
 	SurfaceAutomation    Surface = "automation"
@@ -82,6 +83,8 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 	surface := SurfaceKanbanTask
 	capabilities := []Capability{}
 	switch mode {
+	case mcpmode.Conversation:
+		surface = SurfaceConversation
 	case mcpmode.Office:
 		surface = SurfaceOfficeTask
 	case mcpmode.Config:
@@ -101,7 +104,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation:
+	case SurfaceKanbanTask, SurfaceConversation, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation:
 		return surface
 	default:
 		return SurfaceKanbanTask

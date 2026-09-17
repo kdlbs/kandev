@@ -1,5 +1,6 @@
 "use client";
 
+import { PersonaExecutorField } from "./persona-executor-field";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -79,6 +80,7 @@ type FormState = {
   budgetMonthlyCents: number;
   maxConcurrentSessions: number;
   executorType: string;
+  executorProfileId: string;
 };
 
 type FormField = keyof FormState;
@@ -90,6 +92,7 @@ const FORM_FIELDS: FormField[] = [
   "budgetMonthlyCents",
   "maxConcurrentSessions",
   "executorType",
+  "executorProfileId",
 ];
 
 function initialForm(agent: AgentProfile): FormState {
@@ -100,6 +103,7 @@ function initialForm(agent: AgentProfile): FormState {
     budgetMonthlyCents: agent.budgetMonthlyCents,
     maxConcurrentSessions: agent.maxConcurrentSessions,
     executorType: agent.executorPreference?.type ?? "",
+    executorProfileId: agent.executorPreference?.executor_profile_id ?? "",
   };
 }
 
@@ -142,7 +146,11 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
         executorTypes={executorTypes}
         onBudgetChange={(v) => patch({ budgetMonthlyCents: v })}
         onMaxConcurrentChange={(v) => patch({ maxConcurrentSessions: v })}
-        onExecutorChange={(v) => patch({ executorType: v })}
+        onExecutorChange={(v) => patch({ executorType: v, executorProfileId: "" })}
+      />
+      <PersonaExecutorField
+        value={form.executorProfileId}
+        onChange={(executorProfileId, executorType) => patch({ executorProfileId, executorType })}
       />
       <AgentRoutingCard agentId={agent.id} />
       {dirty && (
@@ -186,7 +194,9 @@ function buildAgentUpdate(
     reportsTo: valueFor("reportsTo"),
     budgetMonthlyCents: valueFor("budgetMonthlyCents"),
     maxConcurrentSessions: valueFor("maxConcurrentSessions"),
-    executorPreference: executorType ? { type: executorType } : undefined,
+    executorPreference: executorType
+      ? { type: executorType, executor_profile_id: valueFor("executorProfileId") || undefined }
+      : undefined,
   };
 }
 

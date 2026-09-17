@@ -6,7 +6,7 @@ import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutat
 import { ApiError } from "@/lib/api/client";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { BlockersPicker, formatBlockerCycleMessage } from "./blockers-picker";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 
 // Hoisted mocks so the API module is replaced before the component imports it.
 const addBlockerMock = vi.hoisted(() => vi.fn());

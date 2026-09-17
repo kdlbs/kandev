@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import { ApprovalActionBar } from "./approval-action-bar";
-import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskDecision } from "@/components/task/simple/types";
 
 const approveMock = vi.hoisted(() => vi.fn());
 const requestChangesMock = vi.hoisted(() => vi.fn());

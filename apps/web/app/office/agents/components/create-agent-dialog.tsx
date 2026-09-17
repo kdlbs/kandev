@@ -36,6 +36,26 @@ const INITIAL_STATE: FormState = {
   executorPref: "",
 };
 
+function ChiefPresetButton({ onSelect }: { onSelect: (state: Partial<FormState>) => void }) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      variant="outline"
+      data-testid="chief-of-staff-preset"
+      onClick={() =>
+        onSelect({
+          name: t("office:chiefOfStaff"),
+          role: "assistant",
+          maxConcurrent: 1,
+          executorPref: "local_pc",
+        })
+      }
+    >
+      {t("office:chiefOfStaffPreset")}
+    </Button>
+  );
+}
+
 function NameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { t } = useTranslation();
   return (
@@ -270,6 +290,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
           <DialogTitle>{t("office:createAgent")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          <ChiefPresetButton onSelect={handleChange} />
           <NameField value={state.name} onChange={(v) => handleChange({ name: v })} />
           <RoleAndReports
             role={state.role}

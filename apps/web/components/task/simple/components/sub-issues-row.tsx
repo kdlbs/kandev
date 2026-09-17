@@ -6,7 +6,7 @@ import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 
 type SubIssuesRowProps = {

@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"database/sql"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"path/filepath"
 	"testing"
 	"time"
@@ -18,6 +19,8 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -259,6 +262,9 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 	if _, err := worktree.NewSQLiteStore(database, database); err != nil {
 		t.Fatalf("worktree store: %v", err)
 	}
+	if _, _, err := settingsstore.Provide(database, database, nil); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := officesqlite.NewWithDB(database, database, nil); err != nil {
 		t.Fatalf("office migrations: %v", err)
 	}
@@ -291,5 +297,49 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 		t.Fatalf("ensure office workflow: %v", err)
 	}
 	taskSvc.SetStartStepResolver(&adapterStartStepResolver{repo: repo})
-	return &taskCreatorAdapter{taskSvc: taskSvc}, taskSvc
+	workflow, err := workflowrepo.NewWithDB(database, database, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskSvc.SetWorkflowStepGetter(&assistantTestSteps{Repository: workflow})
+	return &taskCreatorAdapter{taskSvc: taskSvc, taskRepo: repo, workflow: workflow}, taskSvc
+}
+
+type assistantTestSteps struct{ *workflowrepo.Repository }
+
+func (s *assistantTestSteps) GetNextStepByPosition(ctx context.Context, id string, position int) (*wfmodels.WorkflowStep, error) {
+	rows, err := s.ListStepsByWorkflow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, step := range rows {
+		if step.Position > position {
+			return step, nil
+		}
+	}
+	return nil, nil
+}
+
+func TestChiefCreatesTaskOnExistingKanbanWorkflow(t *testing.T) {
+	adapter, svc := newOfficeTaskAdapterHarness(t)
+	ctx := context.Background()
+	ws, err := svc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{Name: "Existing board"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, err := svc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{WorkspaceID: ws.ID, Name: "Delivery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := adapter.CreateOfficeTaskAsAgent(ctx, ws.ID, "", "", "Review", "Read-only review")
+	if err != nil {
+		t.Fatalf("chief must create on existing board: %v", err)
+	}
+	task, err := svc.GetTask(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.WorkflowID != wf.ID || task.IsFromOffice {
+		t.Fatalf("task must retain Kanban ownership: %+v", task)
+	}
 }

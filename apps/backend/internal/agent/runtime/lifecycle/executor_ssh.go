@@ -40,18 +40,19 @@ const (
 // when many short-lived channels race the long-lived stream channels), and
 // the local port forwarder.
 type sshSessionState struct {
-	target         *SSHTarget
-	client         *ssh.Client
-	forwarder      *SSHPortForwarder
-	agentctlClient *agentctl.Client
-	pid            int
-	remoteDir      string
-	remoteTaskDir  string
-	authToken      string
-	reusingProcess bool
-	metadata       map[string]interface{}
-	prepareEnv     map[string]string
-	platform       SSHRemotePlatform
+	prepareAgentEnv func(map[string]string) error
+	target          *SSHTarget
+	client          *ssh.Client
+	forwarder       *SSHPortForwarder
+	agentctlClient  *agentctl.Client
+	pid             int
+	remoteDir       string
+	remoteTaskDir   string
+	authToken       string
+	reusingProcess  bool
+	metadata        map[string]interface{}
+	prepareEnv      map[string]string
+	platform        SSHRemotePlatform
 }
 
 // SSHExecutor implements ExecutorBackend for SSH-reachable Linux and macOS hosts.
@@ -193,6 +194,9 @@ func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
 // backend restart), reuse the resumed SSH client + forwarder + remote pid
 // instead of starting a second remote agentctl on top of the live one.
 func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	// Keep tunnel-local environment rewrites out of the caller's retry request.
+	requestCopy := *req
+	req = &requestCopy
 	baseCtx := preparationContext(ctx)
 	if err := validateAgentctlStartupConfig(req.AgentctlStartupConfig); err != nil {
 		return nil, fmt.Errorf("invalid agentctl startup configuration: %w", err)
@@ -253,6 +257,10 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 			return nil, err
 		}
 	}
+	officeRuntime, err := prepareSSHManagedRuntime(client, req, agentctlBin)
+	if err != nil {
+		return nil, err
+	}
 	launchCtx, launchCancel := withLaunchPhaseTimeout(baseCtx)
 	defer launchCancel()
 	if !req.WorkspaceReuseRequired {
@@ -277,21 +285,26 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 
 	r.mu.Lock()
 	r.sessions[req.InstanceID] = &sshSessionState{
-		target:        target,
-		client:        client,
-		forwarder:     fwd,
-		pid:           pid,
-		remoteDir:     sessionDir,
-		remoteTaskDir: taskDir,
-		authToken:     authToken,
-		metadata:      cloneSSHMetadata(req.Metadata),
-		prepareEnv:    sshRemoteContributionEnv(req, agentctlBin),
-		platform:      platform,
+		prepareAgentEnv: officeRuntime.envPreparer(),
+		target:          target,
+		client:          client,
+		forwarder:       fwd,
+		pid:             pid,
+		remoteDir:       sessionDir,
+		remoteTaskDir:   taskDir,
+		authToken:       authToken,
+		metadata:        cloneSSHMetadata(req.Metadata),
+		prepareEnv:      sshRemoteContributionEnv(req, agentctlBin),
+		platform:        platform,
 	}
 	r.mu.Unlock()
 	released = true // ownership transferred to session state; released on StopInstance
 
-	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken), nil
+	instance := r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken)
+	if officeRuntime != nil {
+		instance.PrepareAgentEnv = officeRuntime.prepareEnv
+	}
+	return instance, nil
 }
 
 func reuseRequiredRemoteTaskDir(req *ExecutorCreateRequest) (string, error) {
@@ -573,13 +586,14 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(state.authToken))
 	}
 	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		Client:        client,
-		WorkspacePath: taskDir,
-		AuthToken:     state.authToken,
+		InstanceID:      req.InstanceID,
+		PrepareAgentEnv: state.prepareAgentEnv,
+		TaskID:          req.TaskID,
+		SessionID:       req.SessionID,
+		RuntimeName:     r.Name(),
+		Client:          client,
+		WorkspacePath:   taskDir,
+		AuthToken:       state.authToken,
 		Metadata: map[string]interface{}{
 			MetadataKeySSHHost:               state.target.Host,
 			MetadataKeySSHPort:               strconv.Itoa(state.target.Port),
@@ -688,7 +702,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if pidStr == "" || portStr == "" || sessionDir == "" || taskDir == "" {
 		return nil // not a resume — proceed with normal create
 	}
-	if hasManagedGitHubBrokerEnv(req.Env) {
+	if hasManagedGitHubBrokerEnv(req.Env) || req.Env["KANDEV_RUN_TOKEN"] != "" {
 		return r.resetManagedBrokerResume(ctx, req, pidStr, sessionDir)
 	}
 	if err := requireSSHAgentctlAuthToken(req.AuthToken); err != nil {

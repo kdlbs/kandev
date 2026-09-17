@@ -9,7 +9,7 @@ import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation"
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import { formatRelativeTime } from "@/lib/utils";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
-import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskDecision } from "@/components/task/simple/types";
 import { MultiSelectPopover, type MultiSelectItem } from "./multi-select-popover";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";

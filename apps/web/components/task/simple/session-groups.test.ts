@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { groupSessionsForTimeline } from "./session-groups";
-import type { TaskSession } from "@/app/office/tasks/[id]/types";
+import type { TaskSession } from "@/components/task/simple/types";
 
 function session(overrides: Partial<TaskSession> = {}): TaskSession {
   return {

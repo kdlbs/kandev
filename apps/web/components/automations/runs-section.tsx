@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "@/components/routing/app-link";
+
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
@@ -32,6 +34,7 @@ const STATUS_BADGE: Record<
   RunStatus,
   { variant: "default" | "destructive" | "secondary" | "outline"; labelKey: string }
 > = {
+  dispatched: { variant: "default", labelKey: "automations:runDispatched" },
   triggered: { variant: "secondary", labelKey: "automations:runStatusTriggered" },
   task_created: { variant: "secondary", labelKey: "automations:runStatusRunning" },
   succeeded: { variant: "default", labelKey: "automations:runStatusSucceeded" },
@@ -76,7 +79,17 @@ function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
       // lives here instead of being inferred from rendered copy.
       data-task-id={run.task_id || undefined}
     >
-      <TableCell className="text-sm">{run.trigger_type}</TableCell>
+      <TableCell className="text-sm">
+        {run.trigger_type}
+        {run.conversation_task_id && (
+          <Link
+            className="block underline"
+            href={`/workspace/conversations/${run.conversation_task_id}`}
+          >
+            {t("automations:openOrchestratorChat")}
+          </Link>
+        )}
+      </TableCell>
       <TableCell>
         <Badge variant={badge.variant}>{t(badge.labelKey)}</Badge>
       </TableCell>
@@ -121,6 +134,7 @@ function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
  */
 const STATUS_FILTERS: { value: RunStatus | "all"; labelKey: string }[] = [
   { value: "all", labelKey: "automations:runAll" },
+  { value: "dispatched", labelKey: "automations:runDispatched" },
   { value: "task_created", labelKey: "automations:runStatusRunning" },
   { value: "succeeded", labelKey: "automations:runStatusSucceeded" },
   { value: "failed", labelKey: "automations:runStatusFailed" },

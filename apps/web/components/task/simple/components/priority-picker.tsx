@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@/lib/utils";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import { updateTask } from "@/lib/api/domains/office-extended-api";
-import type { Task, TaskPriority } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskPriority } from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 
 type PriorityMeta = {

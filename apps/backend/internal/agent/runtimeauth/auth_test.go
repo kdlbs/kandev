@@ -1,11 +1,11 @@
-package agents_test
+package runtimeauth_test
 
 import (
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/agents"
+	agents "github.com/kandev/kandev/internal/agent/runtimeauth"
 )
 
 func TestAgentAuth_MintAndValidate(t *testing.T) {

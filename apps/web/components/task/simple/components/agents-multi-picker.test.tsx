@@ -9,7 +9,7 @@ import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 import { ApproversPicker } from "./approvers-picker";
 import { buildDecisionLookup } from "./agents-multi-picker";
-import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskDecision } from "@/components/task/simple/types";
 
 afterEach(() => cleanup());
 

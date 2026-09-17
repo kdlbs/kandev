@@ -10,6 +10,7 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useRouter } from "@/lib/routing/client-router";
 import {
   getWorkspaceSettingsTabs,
+  workspaceTabVisible,
   workspaceSettingsHref,
   type WorkspaceSettingsTab,
 } from "@/lib/settings/workspace-settings-tabs";
@@ -133,7 +134,10 @@ export function WorkspaceSettingsShell({
   const workspaces = useAppStore((s) => s.workspaces.items);
   const canvasesEnabled = useFeature("canvases");
   const workspace = workspaces.find((item) => item.id === workspaceId);
-  const tabs = getWorkspaceSettingsTabs(canvasesEnabled);
+  const features = useAppStore((s) => s.features);
+  const tabs = getWorkspaceSettingsTabs(canvasesEnabled).filter(({ tab }) =>
+    workspaceTabVisible(tab, features),
+  );
   const tabsRef = useRef<HTMLElement | null>(null);
 
   // Each tab is its own route, so navigating remounts this shell and the

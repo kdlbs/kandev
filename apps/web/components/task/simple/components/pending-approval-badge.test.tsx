@@ -11,7 +11,7 @@ import {
   computePendingApprovers,
   pickActiveDecisions,
 } from "./pending-approval-badge";
-import type { Task, TaskDecision } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskDecision } from "@/components/task/simple/types";
 
 afterEach(() => cleanup());
 

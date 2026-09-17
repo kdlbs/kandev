@@ -8,7 +8,7 @@ import { searchTasks, updateTask } from "@/lib/api/domains/office-extended-api";
 import { detachTask, fetchTask } from "@/lib/api/domains/kanban-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 import { workspaceModeFromMetadata, type WorkspaceMode } from "@/lib/kanban/map-task";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";

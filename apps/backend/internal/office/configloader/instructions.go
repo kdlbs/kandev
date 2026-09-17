@@ -18,6 +18,7 @@ type InstructionTemplate struct {
 // LoadRoleTemplates returns the embedded instruction templates for a given role.
 // Returns nil if no templates exist for the role.
 func LoadRoleTemplates(role string) ([]InstructionTemplate, error) {
+
 	dirPath := fmt.Sprintf("instructions/%s", role)
 
 	entries, err := bundledInstructions.ReadDir(dirPath)
@@ -49,7 +50,7 @@ func AvailableInstructionRoles() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	roles := make([]string, 0, len(entries))
+	roles := []string{}
 	for _, e := range entries {
 		if e.IsDir() {
 			roles = append(roles, e.Name())

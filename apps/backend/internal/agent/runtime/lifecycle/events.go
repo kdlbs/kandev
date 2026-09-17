@@ -128,7 +128,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 ) AgentEventPayload {
 	payload := AgentEventPayload{
 		AgentExecutionID:   execution.ID,
-		RunID:              execution.RunID,
+		RunID:              execution.RuntimeRunID(),
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
 		TaskEnvironmentID:  execution.TaskEnvironmentID,

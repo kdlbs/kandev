@@ -254,5 +254,14 @@
   "nextFiringScheduleOff": "Schedule trigger is switched off",
   "nextFiringSwitchedOff": "Switched off - it will not fire",
   "runNoReportRecorded": "No report recorded.",
-  "runStillRunningNoReport": "Still running - no report yet."
+  "runStillRunningNoReport": "Still running - no report yet.",
+  "runTarget": "Run with",
+  "agentRunTarget": "Agent profile",
+  "orchestratorUnavailable": "Orchestrator unavailable",
+  "orchestratorTargetHint": "Send this prompt to the selected workspace orchestrator. It uses its configured agent, environment and workspace context. Turns are processed in order in its existing chat.",
+  "manageOrchestrators": "Manage workspace orchestrators",
+  "runDispatched": "Delivered to orchestrator",
+  "openOrchestratorChat": "Open orchestrator chat",
+  "orchestratorDeliveryHint": "The automation delivered its prompt. Follow the orchestrator conversation for progress, results or execution errors; delivery does not mean the requested work is complete.",
+  "thenOrchestratorDescription": "Send the prompt to this orchestrator’s existing conversation each time the automation triggers."
 }

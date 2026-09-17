@@ -7,6 +7,8 @@ import (
 
 // CreateAgentRequest is the request body for creating an agent instance.
 type CreateAgentRequest struct {
+	DelegationContext     string `json:"delegation_context"`
+	ExecutionProfileID    string `json:"execution_profile_id"`
 	Name                  string `json:"name"`
 	AgentProfileID        string `json:"agent_profile_id"`
 	Role                  string `json:"role"`
@@ -22,6 +24,7 @@ type CreateAgentRequest struct {
 
 // UpdateAgentRequest is the request body for updating an agent instance.
 type UpdateAgentRequest struct {
+	DelegationContext     *string `json:"delegation_context,omitempty"`
 	Name                  *string `json:"name,omitempty"`
 	AgentProfileID        *string `json:"agent_profile_id,omitempty"`
 	Role                  *string `json:"role,omitempty"`

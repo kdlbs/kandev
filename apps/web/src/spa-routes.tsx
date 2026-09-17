@@ -1,3 +1,5 @@
+import { OrchestrationConversationRoute } from "@/app/settings/orchestration/conversation-route";
+import { readTaskId } from "./spa-routing";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { GitHubPageClient } from "@/app/github/github-page-client";
 import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
@@ -105,6 +107,7 @@ type SpaRoute =
   | { kind: "canvasSettings"; workspaceId: string }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
+  | { kind: "orchestrationConversation"; taskId: string }
   | { kind: "plugin"; path: string }
   | { kind: "login" }
   | { kind: "setup" }
@@ -262,6 +265,12 @@ function resolveNestedRoute(normalized: string): SpaRoute | null {
   if (normalized === "/settings" || normalized.startsWith("/settings/")) {
     return { kind: "settings", pathname: normalized };
   }
+  if (normalized.startsWith("/workspace/conversations/")) {
+    return {
+      kind: "orchestrationConversation",
+      taskId: normalized.slice("/workspace/conversations/".length),
+    };
+  }
   if (normalized === "/office" || normalized.startsWith("/office/")) {
     return { kind: "office", pathname: normalized };
   }
@@ -278,6 +287,12 @@ function resolveKanbanRoute(searchParams: URLSearchParams): SpaRoute {
   };
 }
 
+function isAuthRoute(
+  route: SpaRoute,
+): route is Extract<SpaRoute, { kind: "login" | "setup" | "invite" }> {
+  return route.kind === "login" || route.kind === "setup" || route.kind === "invite";
+}
+
 export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   // Subscribe so a plugin route registered after first paint (async bundle
   // load) re-resolves without requiring a navigation.
@@ -290,9 +305,7 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   // Reaching /login, /setup, or /invite here means the pre-auth gate in
   // main.tsx already decided the app shell should render (authenticated, or
   // auth disabled) — those paths are stale, so bounce to the kanban home.
-  if (route.kind === "login" || route.kind === "setup" || route.kind === "invite") {
-    return <AuthRouteRedirect />;
-  }
+  if (isAuthRoute(route)) return <AuthRouteRedirect />;
   if (route.kind === "canvas" || route.kind === "canvasSettings") {
     if (!canvasesEnabled) return <AuthRouteRedirect />;
     if (route.kind === "canvas") return <CanvasHostRoute canvasId={route.canvasId} />;
@@ -304,9 +317,7 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
       </SettingsLayoutClient>
     );
   }
-  if (route.kind === "plugin") {
-    return <PluginRoute path={route.path} />;
-  }
+  if (route.kind === "plugin") return <PluginRoute path={route.path} />;
   if (route.kind === "kanban") {
     return <KanbanRoute route={route} fallback={<RouteLoading routeNameKey="sidebar:office" />} />;
   }
@@ -336,6 +347,8 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
       </Suspense>
     );
   }
+  if (route.kind === "orchestrationConversation")
+    return <OrchestrationConversationRoute taskId={route.taskId} />;
   if (route.kind === "office") {
     return (
       <Suspense fallback={<RouteLoading routeNameKey="sidebar:office" />}>
@@ -664,14 +677,4 @@ function mapWorkflowItem(workflow: Workflow) {
 function normalizePath(pathname: string): string {
   if (!pathname || pathname === "/") return "/";
   return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
-}
-
-function readTaskId(pathname: string): string | undefined {
-  for (const prefix of ["/t/", "/tasks/"]) {
-    if (!pathname.startsWith(prefix)) continue;
-    const suffix = pathname.slice(prefix.length);
-    if (!suffix || suffix.includes("/")) return undefined;
-    return decodeURIComponent(suffix);
-  }
-  return undefined;
 }

@@ -58,6 +58,32 @@ type recordingAgentReader struct {
 	agent *models.AgentInstance
 }
 
+func TestAssistantManagementScopeHonorsAssignmentPermission(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		role        models.AgentRole
+		permissions string
+		want        string
+	}{
+		{"chief", models.AgentRoleAssistant, "{}", WildcardTaskScope},
+		{"restricted assistant", models.AgentRoleAssistant, `{"can_assign_tasks":false}`, "task-1"},
+		{"worker", models.AgentRoleWorker, "{}", "task-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			builder := ContextBuilder{Agents: &recordingAgentReader{agent: &models.AgentInstance{
+				ID: "agent-1", WorkspaceID: "ws-1", Role: tc.role, Permissions: tc.permissions,
+			}}}
+			got, err := builder.Build(context.Background(), &models.Run{AgentProfileID: "agent-1", Payload: `{"task_id":"task-1"}`})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.WorkspaceID != "ws-1" || len(got.Capabilities.AllowedTaskIDs) != 1 || got.Capabilities.AllowedTaskIDs[0] != tc.want {
+				t.Fatalf("unexpected scope: %+v", got)
+			}
+		})
+	}
+}
+
 func (r *recordingAgentReader) GetAgentInstance(_ context.Context, _ string) (*models.AgentInstance, error) {
 	return r.agent, nil
 }

@@ -220,7 +220,7 @@ describe("officeRouteKey", () => {
       OFFICE_SETUP_PATH,
     );
     expect(resolveOfficeHomeSetupRedirect(OFFICE_HOME_PATH, true, true, [])).toBe(
-      `${OFFICE_SETUP_PATH}?mode=new`,
+      OFFICE_SETUP_PATH,
     );
     expect(
       resolveOfficeHomeSetupRedirect(OFFICE_HOME_PATH, true, true, [

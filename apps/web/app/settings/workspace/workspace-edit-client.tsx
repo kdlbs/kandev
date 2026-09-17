@@ -1,4 +1,5 @@
 "use client";
+import { WorkspaceOverviewOrchestration } from "@/components/settings/workspaces/workspace-overview-orchestration";
 
 import { useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
@@ -556,6 +557,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
   return (
     <div className="space-y-8">
       <WorkspaceSectionHeader tab="overview" description={t("workspaces:manageWorkspaceDetails")} />
+      <WorkspaceOverviewOrchestration workspaceId={workspace.id} />
       <Separator />
       <WorkspaceSettingsCard
         canManage={canManage}

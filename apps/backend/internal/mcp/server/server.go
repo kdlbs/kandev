@@ -59,7 +59,8 @@ const (
 	ModeOffice = mcpmode.Office
 	// ModeAutomation registers the fixed workspace coordinator catalog for
 	// scheduled automation agents.
-	ModeAutomation = mcpmode.Automation
+	ModeAutomation   = mcpmode.Automation
+	ModeConversation = mcpmode.Conversation
 )
 
 const pluginToolArgumentsKey = "arguments"
@@ -97,7 +98,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending:
+	case ModeConfig, ModeConversation, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending:
 		return mode
 	default:
 		return ModeTask
@@ -343,6 +344,8 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		return ModeConfig
 	case mcpprofile.SurfaceExternal:
 		return ModeExternal
+	case mcpprofile.SurfaceConversation:
+		return ModeConversation
 	case mcpprofile.SurfaceOfficeTask:
 		return ModeOffice
 	case mcpprofile.SurfaceAutomation:
@@ -760,6 +763,8 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceConfiguration
 	case ModeExternal:
 		return mcpprofile.SurfaceExternal
+	case ModeConversation:
+		return mcpprofile.SurfaceConversation
 	case ModeOffice:
 		return mcpprofile.SurfaceOfficeTask
 	case ModeAutomation:
@@ -1067,7 +1072,9 @@ func andProfilePredicates(predicates ...func(mcpprofile.Context) bool) func(mcpp
 func (s *Server) profileToolGroups() []profileToolGroup {
 	config := surfaceEnabled(mcpprofile.SurfaceConfiguration)
 	external := surfaceEnabled(mcpprofile.SurfaceExternal)
+	conversation := surfaceEnabled(mcpprofile.SurfaceConversation)
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
+	documents := func(ctx mcpprofile.Context) bool { return office(ctx) || conversation(ctx) }
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
 	return []profileToolGroup{
@@ -1088,12 +1095,12 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
 		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
-		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
-		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
+		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || documents(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
+		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || documents(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
 		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
-		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
-		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
+		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || documents(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
+		{name: "task-documents", enabled: documents, register: func(s *Server) { s.registerTaskDocumentTools() }},
 		{name: "office-decisions", enabled: office, register: func(s *Server) { s.registerRecordStepDecisionTool() }},
 		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
 			s.registerAddBranchToTaskTool()

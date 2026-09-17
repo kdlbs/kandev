@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   featureEnabled: true,
+  orchestrationEnabled: false,
+  listOrchestrators: vi.fn(),
   listWorkspaceCanvases: vi.fn(),
   listRepositories: vi.fn(),
   listWorkflows: vi.fn(),
@@ -18,7 +20,12 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => mocks.featureEnabled,
+  useFeature: (feature: string) =>
+    feature === "orchestration" ? mocks.orchestrationEnabled : mocks.featureEnabled,
+}));
+vi.mock("@/lib/api/domains/orchestration-api", () => ({
+  listOrchestrators: mocks.listOrchestrators,
+  ORCHESTRATION_CHANGED: "orchestration:changed",
 }));
 vi.mock("@/lib/api/domains/canvas-api", () => ({
   listWorkspaceCanvases: mocks.listWorkspaceCanvases,
@@ -85,6 +92,8 @@ vi.mock("react-i18next", () => ({
 import { useWorkspaceSectionCounts, WorkspaceSectionStats } from "./workspace-section-links";
 
 function resetApiMocks() {
+  mocks.orchestrationEnabled = false;
+  mocks.listOrchestrators.mockReset().mockResolvedValue({ orchestrators: [] });
   mocks.listWorkspaceCanvases.mockReset().mockResolvedValue({ canvases: [] });
   mocks.listRepositories.mockReset().mockResolvedValue({ repositories: [] });
   mocks.listWorkflows.mockReset().mockResolvedValue({ workflows: [] });

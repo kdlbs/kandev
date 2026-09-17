@@ -12,6 +12,8 @@
 // struct field gets re-typed.
 package models
 
+import runmodels "github.com/kandev/kandev/internal/runs/models"
+
 // ApprovalStatus is the lifecycle state of an Approval row.
 type ApprovalStatus string
 
@@ -28,18 +30,14 @@ func (s ApprovalStatus) String() string { return string(s) }
 
 // RunStatus is the scheduler queue state for a Run row.
 // See internal/office/scheduler/run.go for the state machine.
-type RunStatus string
+type RunStatus = runmodels.RunStatus
 
-// Run queue status values.
 const (
-	RunStatusQueued   RunStatus = "queued"
-	RunStatusClaimed  RunStatus = "claimed"
-	RunStatusFinished RunStatus = "finished"
-	RunStatusFailed   RunStatus = "failed"
+	RunStatusQueued   = runmodels.RunStatusQueued
+	RunStatusClaimed  = runmodels.RunStatusClaimed
+	RunStatusFinished = runmodels.RunStatusFinished
+	RunStatusFailed   = runmodels.RunStatusFailed
 )
-
-// String implements fmt.Stringer.
-func (s RunStatus) String() string { return string(s) }
 
 // RoutineRunStatus is the lifecycle state of a RoutineRun row.
 // See internal/office/routines/service.go for the state machine.
@@ -241,16 +239,12 @@ func (s ProviderHealthState) String() string { return string(s) }
 
 // RoutingBlockedStatus is the "park reason" written onto Run when no
 // provider can be selected.
-type RoutingBlockedStatus string
+type RoutingBlockedStatus = runmodels.RoutingBlockedStatus
 
-// Routing blocked-status values.
 const (
-	RoutingBlockedWaitingForCapacity RoutingBlockedStatus = "waiting_for_provider_capacity"
-	RoutingBlockedActionRequired     RoutingBlockedStatus = "blocked_provider_action_required"
+	RoutingBlockedWaitingForCapacity = runmodels.RoutingBlockedWaitingForCapacity
+	RoutingBlockedActionRequired     = runmodels.RoutingBlockedActionRequired
 )
-
-// String implements fmt.Stringer.
-func (s RoutingBlockedStatus) String() string { return string(s) }
 
 // RouteAttemptOutcome is the result of one route attempt persisted to
 // office_route_attempts. See internal/office/scheduler/dispatch_routing.go
@@ -338,36 +332,28 @@ func (s SkillApprovalState) String() string { return string(s) }
 
 // RunEventLevel is the severity classification of a RunEvent row.
 // Free-form by convention: info | warn | error.
-type RunEventLevel string
+type RunEventLevel = runmodels.RunEventLevel
 
-// Run event level values.
 const (
-	RunEventLevelInfo  RunEventLevel = "info"
-	RunEventLevelWarn  RunEventLevel = "warn"
-	RunEventLevelError RunEventLevel = "error"
+	RunEventLevelInfo  = runmodels.RunEventLevelInfo
+	RunEventLevelWarn  = runmodels.RunEventLevelWarn
+	RunEventLevelError = runmodels.RunEventLevelError
 )
-
-// String implements fmt.Stringer.
-func (l RunEventLevel) String() string { return string(l) }
 
 // RunEventType is the kind of a RunEvent. Open set (init, step,
 // adapter.invoke, complete, error, runtime.denied, runtime.action, …).
 // Typed for documentation, not for exhaustiveness.
-type RunEventType string
+type RunEventType = runmodels.RunEventType
 
-// Well-known run event types. Adapters may emit additional values.
 const (
-	RunEventTypeInit          RunEventType = "init"
-	RunEventTypeAdapterInvoke RunEventType = "adapter.invoke"
-	RunEventTypeStep          RunEventType = "step"
-	RunEventTypeComplete      RunEventType = "complete"
-	RunEventTypeError         RunEventType = "error"
-	RunEventTypeRuntimeDenied RunEventType = "runtime.denied"
-	RunEventTypeRuntimeAction RunEventType = "runtime.action"
+	RunEventTypeInit          = runmodels.RunEventTypeInit
+	RunEventTypeAdapterInvoke = runmodels.RunEventTypeAdapterInvoke
+	RunEventTypeStep          = runmodels.RunEventTypeStep
+	RunEventTypeComplete      = runmodels.RunEventTypeComplete
+	RunEventTypeError         = runmodels.RunEventTypeError
+	RunEventTypeRuntimeDenied = runmodels.RunEventTypeRuntimeDenied
+	RunEventTypeRuntimeAction = runmodels.RunEventTypeRuntimeAction
 )
-
-// String implements fmt.Stringer.
-func (t RunEventType) String() string { return string(t) }
 
 // ChannelPlatform is the external service a Channel row relays to.
 // Open set — new adapters add new platforms.

@@ -139,6 +139,8 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 		}},
 	}
 
+	behaviors["runs"] = ownerBehavior{actions: []apiAction{runsAction()}}
+	behaviors["orchestration"] = ownerBehavior{actions: []apiAction{orchestrationMemoryAction()}}
 	behaviors["office"] = ownerBehavior{actions: []apiAction{officeAction()}}
 	behaviors["terminal"] = ownerBehavior{actions: []apiAction{terminalAction()}}
 	behaviors["quick-terminal"] = ownerBehavior{actions: []apiAction{quickTerminalAction()}}
@@ -1191,7 +1193,7 @@ func messageQueueAction() apiAction {
 		if err != nil {
 			return nil, err
 		}
-		msg := &messagequeue.QueuedMessage{ID: id, SessionID: sessionID, TaskID: taskID, Content: "initial", Model: "model", QueuedBy: "conformance", Metadata: map[string]interface{}{}}
+		msg := &messagequeue.QueuedMessage{ID: id, SessionID: sessionID, TaskID: taskID, Content: "initial", Model: "model", QueuedBy: conformanceValue, Metadata: map[string]interface{}{}}
 		if err := store.(messagequeue.Repository).Insert(s.Context, msg, 10); err != nil {
 			return nil, err
 		}
@@ -1226,7 +1228,7 @@ func messageQueueAction() apiAction {
 		if err != nil {
 			return err
 		}
-		return store.(messagequeue.Repository).UpdateContent(s.Context, id+"-session", id, "updated", nil, "conformance")
+		return store.(messagequeue.Repository).UpdateContent(s.Context, id+"-session", id, "updated", nil, conformanceValue)
 	}
 	action.assertUpdated = func(_ any, after any, _ string) error {
 		message, ok := after.(*queueRecord)
@@ -1261,7 +1263,7 @@ func messageQueueAction() apiAction {
 		if err != nil {
 			return err
 		}
-		msg := &messagequeue.QueuedMessage{ID: id, SessionID: id + "-session", TaskID: id + "-task", Content: "duplicate", QueuedBy: "conformance"}
+		msg := &messagequeue.QueuedMessage{ID: id, SessionID: id + "-session", TaskID: id + "-task", Content: "duplicate", QueuedBy: conformanceValue}
 		if err := store.(messagequeue.Repository).Insert(s.Context, msg, 10); err == nil {
 			return fmt.Errorf("duplicate queued message succeeded")
 		}
@@ -1748,7 +1750,7 @@ func pluginInstanceStateAction() apiAction {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := store.(*pluginstate.InstanceStore).Set(s.Context, instanceID(id), "value", json.RawMessage(`false`), nil, "conformance"); err != nil {
+		if _, err := store.(*pluginstate.InstanceStore).Set(s.Context, instanceID(id), "value", json.RawMessage(`false`), nil, conformanceValue); err != nil {
 			return nil, err
 		}
 		return readEntry(s, id)
@@ -1759,7 +1761,7 @@ func pluginInstanceStateAction() apiAction {
 		if err != nil {
 			return err
 		}
-		_, err = store.(*pluginstate.InstanceStore).Set(s.Context, instanceID(id), "value", json.RawMessage(`true`), nil, "conformance")
+		_, err = store.(*pluginstate.InstanceStore).Set(s.Context, instanceID(id), "value", json.RawMessage(`true`), nil, conformanceValue)
 		return err
 	}
 	action.delete = func(s testconformance.ScenarioContext, id string) error {
@@ -1767,7 +1769,7 @@ func pluginInstanceStateAction() apiAction {
 		if err != nil {
 			return err
 		}
-		_, err = store.(*pluginstate.InstanceStore).Delete(s.Context, instanceID(id), "value", nil, "conformance")
+		_, err = store.(*pluginstate.InstanceStore).Delete(s.Context, instanceID(id), "value", nil, conformanceValue)
 		return err
 	}
 	action.assertDeleted = func(s testconformance.ScenarioContext, id string, _ any) error {
@@ -1793,7 +1795,7 @@ func pluginInstanceStateAction() apiAction {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := store.(*pluginstate.InstanceStore).Set(s.Context, instanceID(id), "value", value, nil, "conformance"); err != nil {
+		if _, err := store.(*pluginstate.InstanceStore).Set(s.Context, instanceID(id), "value", value, nil, conformanceValue); err != nil {
 			return nil, err
 		}
 		return readEntry(s, id)
@@ -1808,7 +1810,7 @@ func pluginInstanceStateAction() apiAction {
 			return err
 		}
 		stale := int64(0)
-		if _, err := store.(*pluginstate.InstanceStore).Set(s.Context, instanceID(id), "value", json.RawMessage(`true`), &stale, "conformance"); err == nil {
+		if _, err := store.(*pluginstate.InstanceStore).Set(s.Context, instanceID(id), "value", json.RawMessage(`true`), &stale, conformanceValue); err == nil {
 			return fmt.Errorf("stale plugin instance state write succeeded")
 		}
 		return nil
@@ -2426,7 +2428,7 @@ func gitlabAction() apiAction {
 		if err != nil {
 			return nil, err
 		}
-		cfg := &gitlab.GitLabConfig{WorkspaceID: workspaceID, Host: "https://gitlab.example.test", AuthMethod: "pat", Username: "conformance"}
+		cfg := &gitlab.GitLabConfig{WorkspaceID: workspaceID, Host: "https://gitlab.example.test", AuthMethod: "pat", Username: conformanceValue}
 		if err := store.(*gitlab.Store).UpsertConfigForWorkspace(s.Context, workspaceID, cfg); err != nil {
 			return nil, err
 		}
@@ -2871,7 +2873,7 @@ func workflowSyncAction() apiAction {
 		if err != nil {
 			return nil, err
 		}
-		req := request("conformance", "workflow-sync", true)
+		req := request(conformanceValue, "workflow-sync", true)
 		if err := req.Normalize(); err != nil {
 			return nil, err
 		}
@@ -2964,7 +2966,7 @@ func officeConfigSyncAction() apiAction {
 			return nil, err
 		}
 		workspaceID := "conformance-office-workspace"
-		req := request("conformance", "office-sync", true)
+		req := request(conformanceValue, "office-sync", true)
 		if err := req.Normalize(); err != nil {
 			return nil, err
 		}
@@ -3049,7 +3051,7 @@ func automationAction() apiAction {
 		record := &automation.Automation{
 			ID: id, WorkspaceID: workspaceID, Name: "Conformance " + id,
 			TaskMode: automation.TaskModeAutomationRun, RepositoryMode: automation.RepositoryModeNone,
-			AgentProfileID: "conformance-agent", ExecutorProfileID: "conformance-executor",
+			AgentProfileID: conformanceAgentID, ExecutorProfileID: "conformance-executor",
 			Prompt: "conformance prompt", TaskTitleTemplate: "Conformance task",
 			MaxConcurrentRuns: 1, ContinuationPolicy: automation.ContinuationPolicyNewTask,
 		}

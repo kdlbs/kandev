@@ -14,7 +14,8 @@ import (
 
 // PromptContext holds the data needed to build a run prompt.
 type PromptContext struct {
-	Reason string
+	WorkspaceTaskCallback *WorkspaceTaskCallback
+	Reason                string
 
 	// Task fields
 	TaskID          string
@@ -82,6 +83,8 @@ type PromptContext struct {
 func BuildPrompt(pc *PromptContext) string {
 	var prompt string
 	switch pc.Reason {
+	case RunReasonWorkspaceTaskCallback:
+		prompt = buildWorkspaceTaskCallbackPrompt(pc)
 	case RunReasonTaskAssigned:
 		prompt = buildTaskAssignedPrompt(pc)
 	case legacyRunReasonReviewStarted:

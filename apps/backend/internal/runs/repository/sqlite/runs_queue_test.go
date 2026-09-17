@@ -474,3 +474,18 @@ func seedTerminal(
 	run := queueRunAt(t, repo, id, "a1", time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
 	setStatus(t, repo, run.ID, status, nil, finishedAt)
 }
+
+func TestRecoverStaleExceptDoesNotReplayOrchestratorWrites(t *testing.T) {
+	repo := newTestRepo(t)
+	cutoff := time.Now().UTC()
+	for _, profile := range []string{"chief", "legacy"} {
+		run := queueRunAt(t, repo, profile, profile, cutoff.Add(-time.Hour))
+		setStatus(t, repo, run.ID, "claimed", timePtr(cutoff.Add(-time.Hour)), nil)
+	}
+	count, err := repo.RecoverStaleExcept(context.Background(), cutoff, []string{"chief"})
+	if err != nil || count != 1 {
+		t.Fatalf("recovery: %d %v", count, err)
+	}
+	checkString(t, "chief status", string(mustGetRun(t, repo, "chief").Status), "claimed")
+	checkString(t, "legacy status", string(mustGetRun(t, repo, "legacy").Status), "queued")
+}

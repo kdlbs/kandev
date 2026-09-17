@@ -1,10 +1,11 @@
 "use client";
 /* eslint-disable max-lines -- this component owns the chat timeline and composer composition. */
+import { ChatIdentityContext, PersonaIdentityContext } from "./persona-identity-context";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { toast } from "@/lib/toast/sonner";
 import { IconCode, IconChevronDown, IconSend, IconPaperclip, IconUser } from "@tabler/icons-react";
-import { AgentAvatar } from "@/app/office/components/agent-avatar";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
@@ -14,9 +15,8 @@ import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useAppStore } from "@/components/state-provider";
-import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
-import { createComment } from "@/lib/api/domains/office-api";
+import { CommentTransportContext } from "./comment-transport";
 import { formatRelativeTime } from "@/lib/utils";
 import { MarkdownComment } from "./markdown-comment";
 import { AgentTurnPanel } from "./components/agent-turn-panel";
@@ -31,7 +31,7 @@ import type {
   TaskDecision,
   TaskSession,
   TimelineEvent,
-} from "@/app/office/tasks/[id]/types";
+} from "@/components/task/simple/types";
 import {
   buildLaterAgentReplyMap,
   buildRunErrorsFromSessions,
@@ -90,6 +90,18 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${remaining}s`;
 }
 
+function useCommentIdentity(comment: TaskComment) {
+  const { t } = useTranslation();
+  const isAgent = comment.authorType === "agent";
+  const identities = useContext(ChatIdentityContext);
+  const resolvedAgentName = identities[comment.authorId] || comment.authorName || t("task:agent");
+  const persona = useContext(PersonaIdentityContext);
+  const identity = isAgent && persona?.id === comment.authorId ? persona : null;
+  const userName = comment.source === "automation" ? t("automations:automation") : t("task:you");
+  const displayName = isAgent ? (identity?.name ?? resolvedAgentName) : userName;
+  return { displayName, identity };
+}
+
 function CommentEntry({
   comment,
   taskId,
@@ -103,24 +115,14 @@ function CommentEntry({
 }) {
   const { t } = useTranslation();
   const isAgent = comment.authorType === "agent";
-  // Resolve the agent name from the office agents store so renames
-  // flow through automatically. Backend session-bridged comments don't
-  // carry a name; the mapper leaves authorName empty for agents.
-  const resolvedAgentName = useAppStore((s) =>
-    isAgent
-      ? (selectOfficeAgentProfiles(s).find((a) => a.id === comment.authorId)?.name ??
-        comment.authorName ??
-        t("task:agent"))
-      : "",
-  );
-  const displayName = isAgent ? resolvedAgentName : t("task:you");
+  const { displayName, identity } = useCommentIdentity(comment);
   return (
     <div
       id={`comment-${comment.id}`}
       className="flex gap-3 py-3 border-b border-border/50 scroll-mt-16"
     >
       {isAgent ? (
-        <AgentAvatar name={displayName} size="md" />
+        <AgentAvatar name={displayName} icon={identity?.icon} size="md" />
       ) : (
         <div className="h-8 w-8 rounded-md bg-muted flex items-center justify-center shrink-0">
           <IconUser className="h-4 w-4 text-muted-foreground" />
@@ -344,6 +346,7 @@ function CommentComposerFooter({
 }
 
 function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInputProps) {
+  const createComment = useContext(CommentTransportContext);
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -382,7 +385,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, taskId, onSubmitted, setInputAndSync, t]);
+  }, [submitting, taskId, onSubmitted, setInputAndSync, t, createComment]);
 
   const handleEnhance = useCallback(() => {
     const current = inputValueRef.current;

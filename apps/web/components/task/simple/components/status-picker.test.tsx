@@ -6,7 +6,7 @@ import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutat
 import { ApiError } from "@/lib/api/client";
 import { StatusPicker } from "./status-picker";
 import { formatPendingApproversMessage } from "@/lib/api/domains/office-status-gate";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 
 const updateTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
 const toastErrorMock = vi.hoisted(() => vi.fn());

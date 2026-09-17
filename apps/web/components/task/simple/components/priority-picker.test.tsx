@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import { PriorityPicker } from "./priority-picker";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 
 vi.mock("@/lib/api/domains/office-extended-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/office-extended-api")>(

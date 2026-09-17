@@ -7,8 +7,8 @@ import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { updateTask } from "@/lib/api/domains/office-extended-api";
 import { listAgentProfiles } from "@/lib/api/domains/office-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
-import { AgentAvatar } from "@/app/office/components/agent-avatar";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
+import type { Task } from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 
 type AssigneePickerProps = {

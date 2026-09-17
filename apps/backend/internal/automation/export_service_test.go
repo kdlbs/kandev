@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -365,5 +366,31 @@ func TestBuildExportTriggers_OrdersByTypeThenID(t *testing.T) {
 	// sorts before "t-b" (Enabled=false).
 	if !triggers[1].Enabled || triggers[2].Enabled {
 		t.Errorf("expected t-a (enabled) before t-b (disabled), got %+v", triggers[1:])
+	}
+}
+
+func TestExportAutomationsRejectsCoordinatorDestination(t *testing.T) {
+	svc, lookup := exportServiceTestFixture(t)
+	lookup.exists["ws-1"] = true
+	ctx := context.Background()
+	if err := svc.store.CreateAutomation(ctx, &Automation{
+		ID: "coordinator-automation", WorkspaceID: "ws-1", Name: "Daily summary",
+		OrchestratorID: "coordinator", Prompt: "Summarize the open tasks.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for name, export := range map[string]func(context.Context, string) ([]byte, error){
+		"document": svc.ExportAutomationsDocument,
+		"zip":      svc.ExportAutomationsZip,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, err := export(ctx, "ws-1")
+			if err == nil || !strings.Contains(err.Error(), "targets a workspace coordinator") {
+				t.Fatalf("export error = %v, want unsupported coordinator destination", err)
+			}
+			if len(body) != 0 {
+				t.Fatal("export returned a document that loses its coordinator destination")
+			}
+		})
 	}
 }

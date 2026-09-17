@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/office/shared"
 	"strings"
 	"time"
 
@@ -42,6 +43,10 @@ type TaskCreator interface {
 
 // CreateTaskInput contains the supported root and child task fields.
 type CreateTaskInput struct {
+	WorkflowID            string   `json:"workflow_id"`
+	WorkflowStepID        string   `json:"workflow_step_id"`
+	RepositoryID          string   `json:"repository_id"`
+	ExternalID            string   `json:"external_id"`
 	Title                 string   `json:"title"`
 	Description           string   `json:"description"`
 	ParentTaskID          string   `json:"parent_id"`
@@ -99,6 +104,20 @@ func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input Creat
 	input.AssigneeAgentID = strings.TrimSpace(input.AssigneeAgentID)
 	if a.deps.Tasks == nil {
 		return "", fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
+	}
+	if creator, ok := a.deps.Tasks.(interface {
+		CreateWorkspaceTaskAsAgent(context.Context, string, shared.WorkspaceTaskSpec) (string, error)
+	}); ok && (input.WorkflowID != "" || input.RepositoryID != "" || input.ExternalID != "" || input.WorkflowStepID != "") {
+		relations := input
+		relations.AssigneeAgentID = ""
+		if err := a.validateTaskRelations(ctx, runCtx.WorkspaceID, relations); err != nil {
+			return "", err
+		}
+		return creator.CreateWorkspaceTaskAsAgent(ctx, runCtx.AgentID, shared.WorkspaceTaskSpec{
+			WorkspaceID: runCtx.WorkspaceID, WorkflowID: input.WorkflowID, WorkflowStepID: input.WorkflowStepID,
+			RepositoryID: input.RepositoryID, ParentID: input.ParentTaskID, ChiefID: runCtx.AgentID,
+			AssigneeID: input.AssigneeAgentID, Title: input.Title, Description: input.Description, ExternalID: input.ExternalID,
+		})
 	}
 	if input.ParentTaskID == "" {
 		if err := a.resolveRootTaskProject(ctx, runCtx, &input); err != nil {
@@ -579,6 +598,18 @@ func (a *Actions) SpawnAgentRun(
 	payloadMap := input.Payload
 	if payloadMap == nil {
 		payloadMap = map[string]interface{}{}
+	}
+	if taskID, ok := payloadMap["task_id"].(string); ok && taskID != "" {
+		if !runCtx.CanMutateTask(taskID) {
+			return ErrTaskOutOfScope
+		}
+		if validator, ok := a.deps.Tasks.(interface {
+			ValidatePersonaRunTask(context.Context, string, string) error
+		}); ok {
+			if err := validator.ValidatePersonaRunTask(ctx, runCtx.WorkspaceID, taskID); err != nil {
+				return err
+			}
+		}
 	}
 	payload, err := json.Marshal(payloadMap)
 	if err != nil {

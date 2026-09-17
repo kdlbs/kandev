@@ -25,12 +25,19 @@ type RunResolver interface {
 
 // ChannelService manages channel CRUD and inbound message routing.
 type ChannelService struct {
-	repo     *sqlite.Repository
-	logger   *logger.Logger
-	activity shared.ActivityLogger
-	agents   shared.AgentReader
-	runs     RunResolver
-	eb       bus.EventBus
+	workflowEnsurer     WorkflowEnsurer
+	repo                *sqlite.Repository
+	logger              *logger.Logger
+	activity            shared.ActivityLogger
+	agents              shared.AgentReader
+	runs                RunResolver
+	eb                  bus.EventBus
+	publishConversation func(context.Context, string)
+}
+
+// SetConversationPublisher wires the canonical task service's event publisher.
+func (s *ChannelService) SetConversationPublisher(publish func(context.Context, string)) {
+	s.publishConversation = publish
 }
 
 // SetEventBus wires an event bus for publishing comment events.

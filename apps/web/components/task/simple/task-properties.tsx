@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Separator } from "@kandev/ui/separator";
 import { formatRelativeTime } from "@/lib/utils";
 import { getTreeCostSummary, type TreeCostSummary } from "@/lib/api/domains/tree-api";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 import { PropertyRow } from "./components/property-row";
 import { StatusPicker } from "./components/status-picker";
 import { PriorityPicker } from "./components/priority-picker";

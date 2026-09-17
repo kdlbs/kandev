@@ -1,6 +1,6 @@
 # Frontend (Vite/React SPA) — architecture and conventions
 
-Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`.
+Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`. For workspace-coordinator changes, read [ORCHESTRATION.md](ORCHESTRATION.md).
 
 ## Plugin authoring
 

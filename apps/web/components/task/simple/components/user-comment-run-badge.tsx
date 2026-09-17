@@ -3,7 +3,7 @@
 import { IconAlertCircle, IconLoader2 } from "@tabler/icons-react";
 import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import type { TaskRunStatus } from "@/app/office/tasks/[id]/types";
+import type { TaskRunStatus } from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 
 type UserCommentRunBadgeProps = {

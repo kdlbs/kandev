@@ -8,6 +8,7 @@ package service
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/instructionrefs"
 )
@@ -37,15 +38,21 @@ func (si *SchedulerIntegration) resolveInstructionsForPrompt(manifest *SkillMani
 	}
 	dir := instructionsDirForExecutor(si.svc.kandevBasePath(), manifest.WorkspaceSlug, manifest.AgentID, executorType)
 	agentsMD := ""
+	roleMD := ""
 	for _, instr := range manifest.Instructions {
+		if instr.Filename == "ROLE.md" {
+			roleMD = instructionrefs.Rewrite(instr.Content, dir)
+		}
 		if instr.Filename == "AGENTS.md" {
 			// Rewrite ./HEARTBEAT.md style sibling refs to absolute paths so
 			// the agent can act on them without resolving manually. Mirrors
 			// the rewrite the runtime applies when materialising the file
 			// to disk — the prompt copy and the on-disk copy stay aligned.
 			agentsMD = instructionrefs.Rewrite(instr.Content, dir)
-			break
 		}
+	}
+	if strings.TrimSpace(roleMD) != "" {
+		agentsMD += "\n\n## Configured role instructions\n" + roleMD
 	}
 	return dir, agentsMD
 }

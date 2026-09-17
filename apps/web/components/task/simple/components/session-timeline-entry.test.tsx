@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
-import type { TaskSession } from "@/app/office/tasks/[id]/types";
+import type { TaskSession } from "@/components/task/simple/types";
 
 // Provide a simple in-memory localStorage mock so the tests are not sensitive
 // to how the test runner exposes window.localStorage.

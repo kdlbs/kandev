@@ -21,6 +21,8 @@ const DefaultTickInterval = 5 * time.Second
 // if no agent lifecycle event returned it to a terminal queue state.
 const staleClaimedRunAge = 30 * time.Minute
 
+const runEventPhaseKey = "phase"
+
 // TickIntervalFromConfig converts the resolved typed millisecond setting into
 // the office scheduler duration. Invalid values retain the safe default.
 func TickIntervalFromConfig(milliseconds int) time.Duration {
@@ -191,28 +193,33 @@ func (si *SchedulerIntegration) reapStaleCheckouts(ctx context.Context) {
 // processRun runs guard checks, checkout, budget check, resolves executor,
 // builds prompt, logs the result, and marks the run finished.
 func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run) {
+
 	runID := run.ID
+	if !si.svc.allowPersonaRun(ctx, run.AgentProfileID) {
+		_ = si.svc.HandleRunFailure(ctx, run, fmt.Errorf("orchestration feature disabled"))
+		return
+	}
 	agentInstanceID := run.AgentProfileID
 
 	// Lifecycle: run picked up by the scheduler. Drives the first
 	// row in the run detail page's Events log.
 	si.svc.AppendRunEvent(ctx, runID, "init", "info", map[string]interface{}{
-		"agent_profile_id": agentInstanceID,
-		"reason":           run.Reason,
+		eventKeyAgentProfileID: agentInstanceID,
+		conversationReasonKey:  run.Reason,
 	})
 
 	// Guard: check agent status.
 	agent, err := si.svc.GetAgentFromConfig(ctx, agentInstanceID)
 	if err != nil {
 		si.logger.Error("failed to get agent instance",
-			zap.String("run_id", runID), zap.Error(err))
+			zap.String(conversationRunIDKey, runID), zap.Error(err))
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
 
 	if !isAgentActive(agent.Status) {
 		si.logger.Info("run skipped (agent not active)",
-			zap.String("run_id", runID),
+			zap.String(conversationRunIDKey, runID),
 			zap.String("agent_status", string(agent.Status)))
 		_ = si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive)
 		return
@@ -222,7 +229,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	cancel, reason, staleErr := si.evaluateRunStaleness(ctx, run)
 	if staleErr != nil {
 		si.logger.Warn("run staleness check failed; retrying run",
-			zap.String("run_id", runID), zap.Error(staleErr))
+			zap.String(conversationRunIDKey, runID), zap.Error(staleErr))
 		_ = si.svc.HandleRunFailure(ctx, run, staleErr)
 		return
 	}
@@ -234,14 +241,14 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	// Idle skip: heartbeat with no actionable tasks.
 	if si.checkIdleSkip(ctx, run, agent) {
 		si.logger.Info("run skipped (no actionable tasks)",
-			zap.String("run_id", runID),
-			zap.String("agent", agent.Name))
+			zap.String(conversationRunIDKey, runID),
+			zap.String(participantTypeAgent, agent.Name))
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",
 			"run_idle_skipped", "run", runID,
 			mustJSON(map[string]string{
-				"agent":    agent.Name,
-				"agent_id": agent.ID,
+				participantTypeAgent:   agent.Name,
+				conversationAgentIDKey: agent.ID,
 			}), runID, "")
 		si.svc.clearAgentWorking(ctx, agent.ID, runID)
 		_ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
@@ -263,7 +270,7 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 	execCfg, err := si.resolveExecutorForRun(ctx, agent, run.Payload)
 	if err != nil {
 		si.logger.Warn("executor resolution failed; retrying run",
-			zap.String("run_id", runID), zap.Error(err))
+			zap.String(conversationRunIDKey, runID), zap.Error(err))
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
@@ -294,24 +301,24 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	}).BuildAndPersist(ctx, run)
 	if err != nil {
 		si.logger.Warn("runtime context build failed; retrying run",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
 	}
 	si.svc.AppendRunEvent(ctx, run.ID, "runtime.context", "info", map[string]interface{}{
-		"agent_id":     runCtx.AgentID,
-		"task_id":      runCtx.TaskID,
-		"capabilities": run.Capabilities,
-		"session_id":   runCtx.SessionID,
-		"workspace_id": runCtx.WorkspaceID,
-		"wake_reason":  runCtx.Reason,
+		conversationAgentIDKey:   runCtx.AgentID,
+		conversationTaskIDKey:    runCtx.TaskID,
+		"capabilities":           run.Capabilities,
+		conversationSessionIDKey: runCtx.SessionID,
+		eventKeyWorkspaceID:      runCtx.WorkspaceID,
+		"wake_reason":            runCtx.Reason,
 	})
 
 	token, err := si.mintRuntimeToken(run, agent, runCtx)
 	if err != nil {
 		si.logger.Warn("runtime token mint failed; retrying run",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return
@@ -329,13 +336,14 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	profileID := si.resolveProfileForRun(ctx, run.Reason, taskID, agent)
 
 	si.logger.Debug("session env vars prepared",
-		zap.String("run_id", run.ID),
+		zap.String(conversationRunIDKey, run.ID),
 		zap.Int("env_count", len(env)))
 
 	launchCtx := LaunchContext{
-		Prompt:    prompt,
-		Env:       env,
-		ProfileID: profileID,
+		ExecutorProfileID: execCfg.ExecutorProfileID,
+		Prompt:            prompt,
+		Env:               env,
+		ProfileID:         profileID,
 	}
 	// launchAgent returns true only when the adapter was actually invoked.
 	// When it was, leave the run `claimed` and let the AgentCompleted/
@@ -373,18 +381,28 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 	instructionsDir, agentsMD string,
 ) string {
 	pc := si.buildPromptContext(ctx, run.Reason, run.Payload)
+	nativeConversation, _ := si.svc.repo.IsNativeConversation(ctx, taskID)
+	if nativeConversation {
+		pc.CommentBody = clipConversationText(pc.CommentBody, 6000)
+	}
 	pc.RunID = runCtx.RunID
 	pc.AgentID = runCtx.AgentID
 	pc.SessionID = runCtx.SessionID
 	pc.TaskScope = append([]string(nil), runCtx.Capabilities.AllowedTaskIDs...)
 	pc.AllowedActions = append(runCtx.Capabilities.AllowedKeys(), runCtx.AvailableActions...)
 	wakeContext := BuildPrompt(pc)
+	if directory := si.delegationContext(ctx, agent); directory != "" {
+		wakeContext = directory + "\n\n" + wakeContext
+	}
+	if nativeConversation {
+		wakeContext = si.conversationContext(ctx, taskID) + "\n\n" + wakeContext
+	}
 
 	// Resume = the (task, agent_instance) session has run before. On resume
 	// the agent CLI's --resume restores the prior conversation (which already
 	// contains the role prompt), so we skip re-sending AGENTS.md.
 	isResume := false
-	if taskID != "" {
+	if taskID != "" && !nativeConversation {
 		if has, hErr := si.svc.repo.HasPriorSessionForAgent(ctx, taskID, agent.ID); hErr == nil {
 			isResume = has
 		}
@@ -449,7 +467,7 @@ func (si *SchedulerIntegration) persistPromptArtifacts(
 	run.SummaryInjected = summaryInjected
 	if err := si.svc.repo.UpdateRunPromptArtifacts(ctx, run.ID, prompt, summaryInjected); err != nil {
 		si.logger.Warn("failed to persist run prompt artifacts",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 	}
 }
 
@@ -468,7 +486,7 @@ func (si *SchedulerIntegration) snapshotRunSkills(ctx context.Context, runID str
 		})
 	}
 	if err := si.svc.repo.CreateRunSkillSnapshots(ctx, snapshots); err != nil {
-		si.logger.Warn("failed to snapshot run skills", zap.String("run_id", runID), zap.Error(err))
+		si.logger.Warn("failed to snapshot run skills", zap.String(conversationRunIDKey, runID), zap.Error(err))
 	}
 }
 
@@ -521,15 +539,15 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 	if err != nil || hold == nil {
 		if err != nil {
 			si.logger.Warn("tree hold gate check failed",
-				zap.String("run_id", runID),
-				zap.String("task_id", taskID),
+				zap.String(conversationRunIDKey, runID),
+				zap.String(conversationTaskIDKey, taskID),
 				zap.Error(err))
 		}
 		return false
 	}
 	si.logger.Info("run gated by active task tree hold",
-		zap.String("run_id", runID),
-		zap.String("task_id", taskID),
+		zap.String(conversationRunIDKey, runID),
+		zap.String(conversationTaskIDKey, taskID),
 		zap.String("hold_id", hold.ID),
 		zap.String("mode", hold.Mode))
 	_ = si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld)
@@ -550,9 +568,9 @@ func (si *SchedulerIntegration) launchAgent(
 
 	if taskID == "" {
 		si.logger.Error("cannot launch taskless run",
-			zap.String("run_id", runID),
-			zap.String("agent", agent.Name),
-			zap.String("reason", run.Reason),
+			zap.String(conversationRunIDKey, runID),
+			zap.String(participantTypeAgent, agent.Name),
+			zap.String(conversationReasonKey, run.Reason),
 			zap.String("executor_type", executorType),
 		)
 		si.failTasklessRun(ctx, run, agent,
@@ -561,9 +579,9 @@ func (si *SchedulerIntegration) launchAgent(
 	}
 	if si.svc.taskStarter == nil {
 		si.logger.Error("cannot launch run: no task starter configured",
-			zap.String("run_id", runID),
-			zap.String("agent", agent.Name),
-			zap.String("task_id", taskID),
+			zap.String(conversationRunIDKey, runID),
+			zap.String(participantTypeAgent, agent.Name),
+			zap.String(conversationTaskIDKey, taskID),
 		)
 		si.failUnlaunchableRun(ctx, run, agent,
 			"scheduler cannot launch run: no task starter is configured")
@@ -571,9 +589,9 @@ func (si *SchedulerIntegration) launchAgent(
 	}
 
 	si.logger.Info("launching agent for run",
-		zap.String("run_id", runID),
-		zap.String("agent", agent.Name),
-		zap.String("task_id", taskID),
+		zap.String(conversationRunIDKey, runID),
+		zap.String(participantTypeAgent, agent.Name),
+		zap.String(conversationTaskIDKey, taskID),
 		zap.String("executor_type", executorType),
 		zap.Int("prompt_len", len(launch.Prompt)),
 	)
@@ -581,29 +599,29 @@ func (si *SchedulerIntegration) launchAgent(
 	// model + executor on the event so the run detail Events log can
 	// render them inline.
 	si.svc.AppendRunEvent(ctx, runID, "adapter.invoke", "info", map[string]interface{}{
-		"agent":         agent.Name,
-		"task_id":       taskID,
-		"profile_id":    launch.ProfileID,
-		"executor_type": executorType,
-		"prompt_len":    len(launch.Prompt),
+		participantTypeAgent:  agent.Name,
+		conversationTaskIDKey: taskID,
+		"profile_id":          launch.ProfileID,
+		"executor_type":       executorType,
+		"prompt_len":          len(launch.Prompt),
 	})
 	if handled, launched := si.tryRoutingDispatch(ctx, run, agent, taskID, launch); handled {
 		return launched
 	}
 	var err error
 	if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
-		err = starter.StartTaskWithEnv(ctx, taskID, launch.ProfileID, "", "", "",
+		err = starter.StartTaskWithEnv(ctx, taskID, launch.ProfileID, launch.ExecutorID, launch.ExecutorProfileID, "",
 			launch.Prompt, "", false, nil, launch.Env)
 	} else {
-		err = si.svc.taskStarter.StartTask(ctx, taskID, launch.ProfileID, "", "", "",
+		err = si.svc.taskStarter.StartTask(ctx, taskID, launch.ProfileID, launch.ExecutorID, launch.ExecutorProfileID, "",
 			launch.Prompt, "", false, nil)
 	}
 	if err != nil {
 		si.logger.Error("agent launch failed",
-			zap.String("run_id", runID), zap.Error(err))
+			zap.String(conversationRunIDKey, runID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
-			"phase":         "adapter.invoke",
-			"error_message": err.Error(),
+			runEventPhaseKey:            "adapter.invoke",
+			conversationErrorMessageKey: err.Error(),
 		})
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
@@ -649,13 +667,13 @@ func (si *SchedulerIntegration) failTasklessRun(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
 ) {
 	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"phase":         "scheduler.launch",
-		"error_message": msg,
+		runEventPhaseKey:            "scheduler.launch",
+		conversationErrorMessageKey: msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
 	if err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg); err != nil {
 		si.logger.Error("failed to mark taskless run as failed",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		return // don't publish a terminal event when persistence failed
 	}
 	run.ErrorMessage = msg
@@ -670,15 +688,15 @@ func (si *SchedulerIntegration) failTasklessRun(
 	)
 	if err != nil {
 		si.logger.Error("failed to check prior taskless failures for scope",
-			zap.String("run_id", run.ID),
-			zap.String("agent_id", agent.ID),
+			zap.String(conversationRunIDKey, run.ID),
+			zap.String(conversationAgentIDKey, agent.ID),
 			zap.String("continuation_scope", run.ContinuationScope),
 			zap.Error(err))
 	} else if hasPrior {
 		if err := si.svc.repo.DismissInboxItem(ctx, autoDismissUserID, InboxKindAgentRunFailed, run.ID); err != nil {
 			si.logger.Error("failed to auto-dismiss repeat taskless failure",
-				zap.String("run_id", run.ID),
-				zap.String("agent_id", agent.ID),
+				zap.String(conversationRunIDKey, run.ID),
+				zap.String(conversationAgentIDKey, agent.ID),
 				zap.String("continuation_scope", run.ContinuationScope),
 				zap.Error(err))
 		}
@@ -707,13 +725,13 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
 ) {
 	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"phase":         "scheduler.launch",
-		"error_message": msg,
+		runEventPhaseKey:            "scheduler.launch",
+		conversationErrorMessageKey: msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
 	if err := si.svc.HandleAgentFailure(ctx, run, msg); err != nil {
 		si.logger.Error("failed to handle agent failure for unlaunchable run",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		return // don't publish a terminal event when persistence failed
 	}
 	run.ErrorMessage = msg
@@ -737,10 +755,10 @@ func (si *SchedulerIntegration) tryRoutingDispatch(
 	launched, parked, err := rd.DispatchWithRouting(ctx, run, agent, launch)
 	if err != nil {
 		si.logger.Error("routing dispatch failed",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-			"phase":         "routing.dispatch",
-			"error_message": err.Error(),
+			runEventPhaseKey:            "routing.dispatch",
+			conversationErrorMessageKey: err.Error(),
 		})
 		si.releaseCheckoutIfNeeded(ctx, run)
 		_ = si.svc.HandleRunFailure(ctx, run, err)
@@ -780,7 +798,7 @@ func (si *SchedulerIntegration) tryCheckout(
 	acquired, err := si.svc.repo.CheckoutTaskForRun(ctx, taskID, agentID, run.ID)
 	if err != nil {
 		si.logger.Error("task checkout error",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		// A transient CheckoutTask error (e.g. SQLITE_BUSY) is not a
 		// successful completion: route it through the same
 		// retry-then-escalate path as every other run failure in this
@@ -792,8 +810,8 @@ func (si *SchedulerIntegration) tryCheckout(
 	}
 	if !acquired {
 		si.logger.Info("run skipped (task checked out by another agent)",
-			zap.String("run_id", run.ID),
-			zap.String("task_id", taskID))
+			zap.String(conversationRunIDKey, run.ID),
+			zap.String(conversationTaskIDKey, taskID))
 		// Requeue rather than FinishRun: a run that did not acquire the
 		// checkout must not be reported as completed work.
 		si.requeueContendedCheckout(ctx, run, taskID)
@@ -812,20 +830,20 @@ func (si *SchedulerIntegration) tryCheckout(
 // exhausted retry.
 func (si *SchedulerIntegration) requeueContendedCheckout(ctx context.Context, run *models.Run, taskID string) {
 	si.svc.AppendRunEvent(ctx, run.ID, "checkout.contended", "info", map[string]interface{}{
-		"task_id":     taskID,
-		"retry_count": run.RetryCount,
+		conversationTaskIDKey: taskID,
+		"retry_count":         run.RetryCount,
 	})
 	if run.RetryCount >= MaxRetryCount {
 		if err := si.svc.escalateFailure(ctx, run, fmt.Errorf("task checkout contended past max retries")); err != nil {
 			si.logger.Error("failed to escalate contended checkout",
-				zap.String("run_id", run.ID), zap.Error(err))
+				zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		}
 		return
 	}
 	retryAt := time.Now().UTC().Add(checkoutContendedRetryDelay)
 	if err := si.svc.repo.ScheduleRetry(ctx, run.ID, retryAt, run.RetryCount+1); err != nil {
 		si.logger.Error("failed to requeue contended checkout",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 	}
 }
 
@@ -839,12 +857,12 @@ func (si *SchedulerIntegration) checkBudget(
 		ctx, agent.ID, projectID, agent.WorkspaceID)
 	if err != nil {
 		si.logger.Error("budget check failed",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		return true // fail-open on error
 	}
 	if !allowed {
 		si.logger.Info("run skipped (budget exceeded)",
-			zap.String("run_id", run.ID), zap.String("reason", reason))
+			zap.String(conversationRunIDKey, run.ID), zap.String(conversationReasonKey, reason))
 		si.releaseCheckoutIfNeeded(ctx, run)
 		si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
 		_ = si.svc.FinishRun(ctx, run.ID, RunOutcomeBudgetBlocked)
@@ -852,9 +870,9 @@ func (si *SchedulerIntegration) checkBudget(
 			"scheduler", "office-scheduler",
 			"run_budget_blocked", "run", run.ID,
 			mustJSON(map[string]string{
-				"agent":    agent.Name,
-				"agent_id": agent.ID,
-				"reason":   reason,
+				participantTypeAgent:   agent.Name,
+				conversationAgentIDKey: agent.ID,
+				conversationReasonKey:  reason,
 			}), run.ID, "")
 		return false
 	}
@@ -874,12 +892,12 @@ func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, run
 
 // extractTaskID parses the task_id from a run payload.
 func (si *SchedulerIntegration) extractTaskID(payload string) string {
-	return ParseRunPayload(payload)["task_id"]
+	return ParseRunPayload(payload)[conversationTaskIDKey]
 }
 
 // extractProjectID looks up the project ID for a task in the payload.
 func (si *SchedulerIntegration) extractProjectID(ctx context.Context, payload string) string {
-	taskID := ParseRunPayload(payload)["task_id"]
+	taskID := ParseRunPayload(payload)[conversationTaskIDKey]
 	if taskID == "" {
 		return ""
 	}
@@ -910,7 +928,7 @@ func (si *SchedulerIntegration) checkIdleSkip(
 	count, err := si.svc.repo.CountActionableTasksForAgent(ctx, agent.ID)
 	if err != nil {
 		si.logger.Warn("idle skip check failed; proceeding",
-			zap.String("run_id", run.ID), zap.Error(err))
+			zap.String(conversationRunIDKey, run.ID), zap.Error(err))
 		return false // fail open
 	}
 	return count == 0
@@ -933,8 +951,11 @@ func (si *SchedulerIntegration) buildPromptContext(
 ) *PromptContext {
 	parsed := ParseRunPayload(payload)
 	pc := &PromptContext{Reason: reason}
+	if reason == RunReasonWorkspaceTaskCallback {
+		enrichWorkspaceTaskCallback(pc, payload)
+	}
 
-	if taskID := parsed["task_id"]; taskID != "" {
+	if taskID := parsed[conversationTaskIDKey]; taskID != "" {
 		si.enrichTaskContext(ctx, pc, taskID)
 		si.enrichHandoffContext(ctx, pc, taskID)
 		if reason == RunReasonTaskChildrenCompleted || reason == legacyRunReasonChildrenCompleted {
@@ -993,7 +1014,7 @@ func (si *SchedulerIntegration) enrichHandoffContext(
 	hc, err := si.taskContexts.GetTaskContext(ctx, taskID)
 	if err != nil {
 		si.logger.Debug("load handoff context for prompt failed",
-			zap.String("task_id", taskID), zap.Error(err))
+			zap.String(conversationTaskIDKey, taskID), zap.Error(err))
 		return
 	}
 	pc.HandoffContext = hc
@@ -1025,7 +1046,7 @@ func (si *SchedulerIntegration) enrichCommentContext(
 func (si *SchedulerIntegration) resolveCommentAuthor(
 	ctx context.Context, comment *models.TaskComment,
 ) string {
-	if comment.AuthorType == "agent" && comment.AuthorID != "" {
+	if comment.AuthorType == participantTypeAgent && comment.AuthorID != "" {
 		agent, err := si.svc.GetAgentFromConfig(ctx, comment.AuthorID)
 		if err == nil && agent != nil && agent.Name != "" {
 			return agent.Name
@@ -1070,7 +1091,7 @@ func (si *SchedulerIntegration) enrichChildrenContext(
 		// Warn, not debug: an empty section is indistinguishable from a parent
 		// with no children, so a silent failure looks like correct output.
 		si.logger.Warn("load child summaries for prompt failed",
-			zap.String("task_id", parentTaskID), zap.Error(err))
+			zap.String(conversationTaskIDKey, parentTaskID), zap.Error(err))
 		return
 	}
 	if len(children) == 0 {
@@ -1111,3 +1132,12 @@ func (si *SchedulerIntegration) enrichTaskContext(
 		}
 	}
 }
+
+// ProcessRun executes an Office-owned run already claimed by the core dispatcher.
+func (si *SchedulerIntegration) ProcessRun(ctx context.Context, run *models.Run) (bool, error) {
+	si.processRun(ctx, run)
+	return true, nil
+}
+
+// PrepareDispatch lifts Office routing backoff before the core claim loop.
+func (si *SchedulerIntegration) PrepareDispatch(ctx context.Context) { si.liftParkedRoutingRuns(ctx) }

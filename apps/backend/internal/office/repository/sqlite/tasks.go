@@ -66,18 +66,20 @@ func systemTasksPlaceholders() (string, []interface{}) {
 // Phase 4 of task-model-unification; stage progression is now owned by
 // the workflow engine.
 type TaskExecutionFields struct {
-	ID                     string `db:"id"`
-	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
-	State                  string `db:"state"`
-	WorkspaceID            string `db:"workspace_id"`
-	IsFromOffice           bool   `db:"is_from_office"`
+	Title                  string    `db:"title"`
+	UpdatedAt              time.Time `db:"updated_at"`
+	ID                     string    `db:"id"`
+	AssigneeAgentProfileID string    `db:"assignee_agent_profile_id"`
+	State                  string    `db:"state"`
+	WorkspaceID            string    `db:"workspace_id"`
+	IsFromOffice           bool      `db:"is_from_office"`
 }
 
 // GetTaskExecutionFields returns the execution-related fields for a task.
 func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) (*TaskExecutionFields, error) {
 	var fields TaskExecutionFields
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
-		SELECT tasks.id,
+		SELECT tasks.id, tasks.title, tasks.updated_at,
 		       `+RunnerProjection("tasks")+` as assignee_agent_profile_id,
 		       COALESCE(tasks.state, '') as state,
 		       COALESCE(tasks.workspace_id, '') as workspace_id,

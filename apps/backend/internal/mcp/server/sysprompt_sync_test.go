@@ -526,3 +526,18 @@ func TestWalkthroughDocs_MatchSchema(t *testing.T) {
 			"ChangesWalkthrough must identify required walkthrough step field %q", field)
 	}
 }
+
+func TestConversationPromptMatchesIndependentToolSurface(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+	server := New(backend, "session", "task", 10005, log, "", false, ModeConversation)
+	registered := make(map[string]struct{})
+	for _, name := range getRegisteredToolNames(server) {
+		registered[name] = struct{}{}
+	}
+	prompt := sysprompt.InjectConversationContext("task", "session", "")
+	assert.Equal(t, registered, extractKandevTools(prompt))
+	assert.NotContains(t, strings.ToLower(prompt), "office")
+	assert.NotContains(t, registered, "step_complete_kandev")
+}

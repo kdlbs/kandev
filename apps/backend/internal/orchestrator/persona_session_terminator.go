@@ -8,28 +8,28 @@ import (
 	"go.uber.org/zap"
 )
 
-// officeSessionTerminator implements office/dashboard.SessionTerminator and
+// personaSessionTerminator implements office/dashboard.SessionTerminator and
 // office/agents.SessionTerminator on top of the orchestrator's session repo.
 // Flipping a session row to COMPLETED is the persistent-row counterpart of
 // the reactivity pipeline's hard-cancel: it removes the row from "live"
 // indicators and forces the next EnsureSessionForAgent to create a fresh row
 // rather than reusing this one.
-type officeSessionTerminator struct {
+type personaSessionTerminator struct {
 	svc *Service
 }
 
-// newOfficeSessionTerminator wires a Service-bound terminator. The returned
+// newPersonaSessionTerminator wires a Service-bound terminator. The returned
 // value satisfies the SessionTerminator interfaces defined in the dashboard
 // and agents packages without those packages importing orchestrator.
-func newOfficeSessionTerminator(svc *Service) *officeSessionTerminator {
-	return &officeSessionTerminator{svc: svc}
+func newPersonaSessionTerminator(svc *Service) *personaSessionTerminator {
+	return &personaSessionTerminator{svc: svc}
 }
 
 // TerminateOfficeSession flips the (task, agent) office session row to
 // COMPLETED. Idempotent: skips when the row is missing or already terminal,
 // or when the inputs are empty (which never indicates a bug — the caller
 // just wants the no-op convenience).
-func (t *officeSessionTerminator) TerminateOfficeSession(
+func (t *personaSessionTerminator) TerminateOfficeSession(
 	ctx context.Context, taskID, agentInstanceID, reason string,
 ) error {
 	if taskID == "" || agentInstanceID == "" {
@@ -55,7 +55,7 @@ func (t *officeSessionTerminator) TerminateOfficeSession(
 // TerminateAllForAgent cascades termination across every live session
 // belonging to agentInstanceID (every task it participates on). Idempotent.
 // Used by the agent-instance deletion path.
-func (t *officeSessionTerminator) TerminateAllForAgent(
+func (t *personaSessionTerminator) TerminateAllForAgent(
 	ctx context.Context, agentInstanceID, reason string,
 ) error {
 	if agentInstanceID == "" {
@@ -79,6 +79,11 @@ func (t *officeSessionTerminator) TerminateAllForAgent(
 // OfficeSessionTerminator returns a SessionTerminator backed by the Service's
 // session repo. Exposed so cmd/kandev can wire it into both the dashboard
 // service and the agents service without leaking orchestrator internals.
-func (s *Service) OfficeSessionTerminator() *officeSessionTerminator {
-	return newOfficeSessionTerminator(s)
+func (s *Service) OfficeSessionTerminator() *personaSessionTerminator {
+	return s.PersonaSessionTerminator()
+}
+
+// PersonaSessionTerminator exposes core session cleanup to persona features.
+func (s *Service) PersonaSessionTerminator() *personaSessionTerminator {
+	return newPersonaSessionTerminator(s)
 }

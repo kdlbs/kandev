@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
-import type { Task, TaskSession } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskSession } from "@/components/task/simple/types";
 import {
   OfficeTopbarChromeProvider,
   useOfficeTopbarChrome,

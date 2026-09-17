@@ -1,3 +1,5 @@
+import { useKanbanOnboardingComplete } from "@/hooks/use-kanban-onboarding-complete";
+import { WorkspaceOfficeSetup } from "@/app/office/setup/workspace-office-setup";
 import { useEffect, useState } from "react";
 import ProjectDetailPage from "@/app/office/projects/[id]/page";
 import AgentDetailLayout from "@/app/office/agents/[id]/layout";
@@ -124,12 +126,11 @@ export function officeRouteKey(pathname: string): string {
 export function resolveOfficeHomeSetupRedirect(
   pathname: string,
   bootstrapComplete: boolean,
-  onboardingComplete: boolean | null,
+  _onboardingComplete: boolean | null,
   workspaceItems: WorkspaceState["items"],
 ): "/office/setup" | "/office/setup?mode=new" | null {
   if (pathname !== "/office" || !bootstrapComplete) return null;
-  if (onboardingComplete === false) return "/office/setup";
-  return hasOfficeWorkspace(workspaceItems) ? null : "/office/setup?mode=new";
+  return hasOfficeWorkspace(workspaceItems) ? null : "/office/setup";
 }
 
 // The Next.js App Router page/layout convention passes route params as a
@@ -220,10 +221,6 @@ function useOfficeRouteBootstrap(
       if (cancelled) return;
 
       const onboardingComplete = onboardingResponse.completed;
-      if (!onboardingComplete) {
-        setBootstrap({ complete: true, onboardingComplete: false });
-        return;
-      }
 
       const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
       promoteLegacyWorkspaceSelection(workspaceItems);
@@ -394,6 +391,12 @@ type OfficeSetupState =
   | { status: "error"; message: string };
 
 function OfficeSetupRoute() {
+  const mode = useSearchParams().get("mode");
+  const completed = useKanbanOnboardingComplete();
+  return completed && mode === "new" ? <LegacyOfficeSetupRoute /> : <WorkspaceOfficeSetup />;
+}
+
+function LegacyOfficeSetupRoute() {
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();

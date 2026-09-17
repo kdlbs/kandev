@@ -3,6 +3,8 @@ package backendapp
 import (
 	"context"
 	"fmt"
+	orchestrationstore "github.com/kandev/kandev/internal/orchestration/repository/sqlite"
+	runstore "github.com/kandev/kandev/internal/runs/repository/sqlite"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -48,9 +50,13 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	if err := recordRequiredStore(tracker, "schema-meta", nil); err != nil {
 		return nil, nil, nil, err
 	}
+	runsRepo := runstore.NewWithDB(writer, reader)
+	if err := recordRequiredStore(tracker, "runs", runsRepo.Migrate()); err != nil {
+		return nil, nil, nil, fmt.Errorf("runs schema: %w", err)
+	}
 
 	taskRepoImpl, cleanup, err := repository.Provide(writer, reader, log)
-	if err := recordRequiredStore(tracker, "task", err); err != nil {
+	if err := recordRequiredStore(tracker, workspaceResultTaskKey, err); err != nil {
 		return nil, nil, nil, fmt.Errorf("task store: %w", err)
 	}
 	cleanups = append(cleanups, cleanup)
@@ -75,6 +81,10 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		return nil, nil, nil, err
 	}
 	cleanups = append(cleanups, supportCleanups...)
+	orchestrationRepo := orchestrationstore.New(writer, reader)
+	if err := recordRequiredStore(tracker, "orchestration", orchestrationRepo.Migrate()); err != nil {
+		return nil, nil, nil, fmt.Errorf("orchestration repo: %w", err)
+	}
 	officeRepo, officeCleanup, err := office.Provide(writer, reader, log)
 	if err := recordRequiredStore(tracker, "office", err); err != nil {
 		return nil, nil, nil, fmt.Errorf("office repo: %w", err)
@@ -136,6 +146,8 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		Workflow:       workflowRepo,
 		Secrets:        secretStore,
 		Office:         officeRepo,
+		Orchestration:  orchestrationRepo,
+		Runs:           runsRepo,
 		Terminal:       terminalRepoImpl,
 		QuickTerminal:  quickTerminalRepoImpl,
 		RuntimeFlags:   runtimeFlagsStore,

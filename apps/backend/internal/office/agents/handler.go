@@ -3,6 +3,7 @@ package agents
 import (
 	"encoding/json"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/runtimeauth"
 	"io"
 	"net/http"
 	"strings"
@@ -61,33 +62,7 @@ func RegisterRoutes(group *gin.RouterGroup, svc *AgentService, log *logger.Logge
 
 // AgentAuthMiddleware returns a gin.HandlerFunc that extracts and validates agent JWTs.
 // Requests without a JWT are treated as UI/admin requests and pass through.
-func AgentAuthMiddleware(svc *AgentService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		auth := c.GetHeader("Authorization")
-		if auth == "" || !strings.HasPrefix(auth, "Bearer ") {
-			c.Next()
-			return
-		}
-		token := strings.TrimPrefix(auth, "Bearer ")
-		claims, err := svc.ValidateAgentJWT(token)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-			return
-		}
-		agent, err := svc.GetAgentInstance(c.Request.Context(), claims.AgentProfileID)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "agent not found"})
-			return
-		}
-		if wsID := c.Param("wsId"); wsID != "" && claims.WorkspaceID != wsID {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token workspace mismatch"})
-			return
-		}
-		c.Set(ctxKeyAgentClaims, claims)
-		c.Set(ctxKeyAgentCaller, agent)
-		c.Next()
-	}
-}
+func AgentAuthMiddleware(svc *AgentService) gin.HandlerFunc { return runtimeauth.Middleware(svc, svc) }
 
 // agentCallerFromCtx returns the authenticated agent or nil for UI requests.
 func agentCallerFromCtx(c *gin.Context) *models.AgentInstance {
@@ -182,6 +157,16 @@ func (h *Handler) createAgent(c *gin.Context) {
 			return
 		}
 	}
+	if req.ExecutionProfileID != "" {
+		if err := h.svc.ConfigurePinnedProfile(c.Request.Context(), agent, req.ExecutionProfileID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if err := models.SetDelegationContext(agent, req.DelegationContext); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if err := h.svc.CreateAgentInstanceWithCaller(c.Request.Context(), agent, agentCallerFromCtx(c), req.Reason); err != nil {
 		if code := agentValidationErrorCode(err); code != "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
@@ -235,6 +220,12 @@ func (h *Handler) updateAgent(c *gin.Context) {
 			"error": "agent_profile_id no longer selects an Office runtime; update the agent routing override or workspace tier profiles",
 		})
 		return
+	}
+	if req.DelegationContext != nil {
+		if err := models.SetDelegationContext(agent, *req.DelegationContext); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	applyAgentUpdates(agent, req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {
@@ -310,6 +301,12 @@ func requestBodyHasKey(body []byte, key string) (bool, error) {
 func (h *Handler) applyRoutingOverride(
 	c *gin.Context, agent *models.AgentInstance, ov routing.AgentOverrides,
 ) error {
+	if ov.ExecutionProfileID != "" {
+		if err := h.svc.ConfigurePinnedProfile(c.Request.Context(), agent, ov.ExecutionProfileID); err != nil {
+			respondRoutingValidation(c, err)
+			return err
+		}
+	}
 	known := h.svc.KnownProviders()
 	cfg, err := h.svc.GetWorkspaceRouting(c.Request.Context(), agent.WorkspaceID)
 	if err != nil {

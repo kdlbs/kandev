@@ -6,7 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import { selectOfficeProjects } from "@/lib/state/slices/office/selectors";
 import { updateTask } from "@/lib/api/domains/office-extended-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 
 type ProjectPickerProps = {

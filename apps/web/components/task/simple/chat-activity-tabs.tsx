@@ -1,11 +1,15 @@
 "use client";
 
+import { ChatIdentityContext } from "./persona-identity-context";
+import { createComment } from "@/lib/api/domains/office-api";
+import { CommentTransportContext } from "./comment-transport";
+
 import { useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { CompositorPulse } from "@kandev/ui/compositor-pulse";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
-import { agentTint } from "@/app/office/components/agent-avatar";
+import { agentTint } from "@/components/shared/agent-avatar";
 import { TaskChat } from "./task-chat";
 import { TaskActivity } from "./task-activity";
 import { AdvancedChatPanel } from "@/app/office/tasks/[id]/advanced-panels/chat-panel";
@@ -22,7 +26,7 @@ import type {
   TaskComment,
   TaskSession,
   TimelineEvent,
-} from "@/app/office/tasks/[id]/types";
+} from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 
 // TAB_TRIGGER_BASE adds a 1px ring to the active tab on top of
@@ -131,50 +135,59 @@ export function ChatActivityTabs({
   onCommentsChanged,
 }: ChatActivityTabsProps) {
   const { t } = useTranslation();
+  const profiles = useAppStore(selectOfficeAgentProfiles);
+  const identities = useMemo(
+    () => Object.fromEntries(profiles.map((p) => [p.id, p.name])),
+    [profiles],
+  );
   const officeGroups = useMemo(
     () => groupSessionsForTimeline(sessions, task.reviewers, task.approvers).filter(isOfficeGroup),
     [sessions, task.reviewers, task.approvers],
   );
 
   return (
-    <Tabs defaultValue="chat" className="mt-6">
-      <TabsList>
-        <TabsTrigger value="chat" className={TAB_TRIGGER_BASE}>
-          {t("task:chat")}
-        </TabsTrigger>
-        <TabsTrigger value="activity" className={TAB_TRIGGER_BASE}>
-          {t("task:activity")}
-        </TabsTrigger>
+    <ChatIdentityContext.Provider value={identities}>
+      <Tabs defaultValue="chat" className="mt-6">
+        <TabsList>
+          <TabsTrigger value="chat" className={TAB_TRIGGER_BASE}>
+            {t("task:chat")}
+          </TabsTrigger>
+          <TabsTrigger value="activity" className={TAB_TRIGGER_BASE}>
+            {t("task:activity")}
+          </TabsTrigger>
+          {officeGroups.map((g) => (
+            <AgentTabTrigger key={g.id} group={g} />
+          ))}
+        </TabsList>
+        <TabsContent value="chat">
+          <ApprovalActionBar task={task} />
+          <CommentTransportContext.Provider value={createComment}>
+            <TaskChat
+              taskId={task.id}
+              workspaceId={task.workspaceId}
+              statusSummary={task.statusSummary}
+              repositories={task.repositories}
+              comments={comments}
+              timeline={timeline}
+              sessions={sessions}
+              decisions={task.decisions}
+              reviewers={task.reviewers}
+              approvers={task.approvers}
+              scrollParent={scrollParent}
+              readOnly={readOnly}
+              onCommentsChanged={onCommentsChanged}
+              taskTitle={task.title}
+              taskDescription={task.description}
+            />
+          </CommentTransportContext.Provider>
+        </TabsContent>
+        <TabsContent value="activity">
+          <TaskActivity taskId={task.id} entries={activity} />
+        </TabsContent>
         {officeGroups.map((g) => (
-          <AgentTabTrigger key={g.id} group={g} />
+          <AgentTabContent key={g.id} taskId={task.id} group={g} />
         ))}
-      </TabsList>
-      <TabsContent value="chat">
-        <ApprovalActionBar task={task} />
-        <TaskChat
-          taskId={task.id}
-          workspaceId={task.workspaceId}
-          statusSummary={task.statusSummary}
-          repositories={task.repositories}
-          comments={comments}
-          timeline={timeline}
-          sessions={sessions}
-          decisions={task.decisions}
-          reviewers={task.reviewers}
-          approvers={task.approvers}
-          scrollParent={scrollParent}
-          readOnly={readOnly}
-          onCommentsChanged={onCommentsChanged}
-          taskTitle={task.title}
-          taskDescription={task.description}
-        />
-      </TabsContent>
-      <TabsContent value="activity">
-        <TaskActivity taskId={task.id} entries={activity} />
-      </TabsContent>
-      {officeGroups.map((g) => (
-        <AgentTabContent key={g.id} taskId={task.id} group={g} />
-      ))}
-    </Tabs>
+      </Tabs>
+    </ChatIdentityContext.Provider>
   );
 }

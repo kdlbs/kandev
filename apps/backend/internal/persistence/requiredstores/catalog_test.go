@@ -12,7 +12,7 @@ func TestCatalog(t *testing.T) {
 		"agent-settings": {}, "analytics": {}, "auth": {}, "auth-hostnames": {}, "automation": {},
 		"azure-devops": {}, "canvas": {}, "delivery": {}, "editor": {},
 		"github": {}, "gitlab": {}, "jira": {}, "linear": {}, "message-queue": {},
-		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
+		"notification": {}, "runs": {}, "orchestration": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
 		"organizations": {}, "plugin-instance-state": {}, "plugin-instances": {},
 		"plugin-marketplace": {}, "plugin-settings": {}, "plugin-state": {},
 		"plugin-user-state": {}, "prompts": {}, "quick-terminal": {}, "runtime-flags": {},

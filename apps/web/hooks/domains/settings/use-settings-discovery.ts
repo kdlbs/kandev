@@ -8,6 +8,7 @@ import { resolveSettingsDiscovery } from "@/lib/settings-discovery/resolve";
 
 export function useSettingsDiscovery() {
   const { t } = useTranslation();
+  const showOrchestration = useFeature("orchestration");
   const authEnabled = useFeature("auth");
   const multiTenancyEnabled = useFeature("multiTenancy");
   const authMode = useAppStore((state) => state.auth.mode);
@@ -26,6 +27,7 @@ export function useSettingsDiscovery() {
     () =>
       resolveSettingsDiscovery({
         t,
+        showOrchestration,
         showAccount,
         showUsers,
         showOrganizations,
@@ -33,6 +35,15 @@ export function useSettingsDiscovery() {
         agents,
         executors,
       }),
-    [agents, executors, showAccount, showOrganizations, showUsers, t, workspaces],
+    [
+      showOrchestration,
+      agents,
+      executors,
+      showAccount,
+      showOrganizations,
+      showUsers,
+      t,
+      workspaces,
+    ],
   );
 }

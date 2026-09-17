@@ -210,3 +210,31 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
     expect(createRepositoryAction).not.toHaveBeenCalled();
   });
 });
+
+it("orchestrator targets inherit execution settings and clear stale task overrides", () => {
+  const form = baseForm({
+    orchestratorId: "chief",
+    taskMode: "normal_task",
+    continuationPolicy: "reuse_thread",
+    repositoryMode: "selected",
+  });
+  const create = buildCreatePayload(
+    "ws",
+    form,
+    [{ repository_id: "repo", base_branch: "main" }],
+    [],
+  );
+  const update = buildUpdatePayload(form, [{ repository_id: "repo", base_branch: "main" }]);
+  for (const payload of [create, update]) {
+    expect(payload.orchestrator_id).toBe("chief");
+    expect(payload.agent_profile_id).toBe("");
+    expect(payload.executor_profile_id).toBe("");
+    expect(payload.workflow_id).toBe("");
+    expect(payload.workflow_step_id).toBe("");
+    expect(payload.repository_ids).toEqual([]);
+    expect(payload.repositories).toEqual([]);
+    expect(payload.repository_mode).toBe("none");
+    expect(payload.task_mode).toBe("automation_run");
+    expect(payload.continuation_policy).toBe("new_task");
+  }
+});

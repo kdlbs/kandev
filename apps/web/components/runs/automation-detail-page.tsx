@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "@/components/routing/app-link";
+
 import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useState } from "react";
 import { IconBolt, IconPlayerPlay, IconPlayerStop, IconRefresh } from "@tabler/icons-react";
@@ -50,7 +52,7 @@ function useWorkspaceGuard(automation: Automation | null, onLeave: () => void): 
  * empty pane that reads as a broken link.
  */
 function selectRun(runs: AutomationRun[], requestedId: string | undefined): AutomationRun | null {
-  const openable = runs.filter((run) => Boolean(run.session_id));
+  const openable = runs.filter((run) => Boolean(run.session_id || run.conversation_task_id));
   if (openable.length === 0) return null;
   const requested = requestedId ? openable.find((run) => run.id === requestedId) : undefined;
   if (requested) return requested;
@@ -226,6 +228,18 @@ function ActivityView({
       </p>
     );
   }
+  if (selected.conversation_task_id)
+    return (
+      <div className="p-6 space-y-3" data-testid="automation-orchestrator-delivery">
+        <p>{selected.error_message || t("automations:orchestratorDeliveryHint")}</p>
+        <Link
+          className="underline"
+          href={`/workspace/conversations/${selected.conversation_task_id}`}
+        >
+          {t("automations:openOrchestratorChat")}
+        </Link>
+      </div>
+    );
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="automation-activity">
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2">

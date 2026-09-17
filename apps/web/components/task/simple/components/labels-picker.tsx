@@ -8,7 +8,7 @@ import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { addLabel, removeLabel } from "@/lib/api/domains/office-extended-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
-import type { Task, TaskLabelLocal } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskLabelLocal } from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 
 type LabelsPickerProps = {

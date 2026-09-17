@@ -171,6 +171,7 @@ export function SettingsTree({
   const { t } = useTranslation();
   const authEnabled = useFeature("auth");
   const multiTenancyEnabled = useFeature("multiTenancy");
+  const orchestration = useFeature("orchestration");
   const authMode = useAppStore((s) => s.auth.mode);
   const isAdmin = useIsAdmin();
   const showAccountItems = authEnabled && authMode === "enabled";
@@ -189,6 +190,7 @@ export function SettingsTree({
   const expansion = useSettingsMenuExpansion(mode, forest, pathname);
 
   const itemVisible = (item: SettingsMenuItem) => {
+    if (item.requires === "orchestration") return orchestration;
     if (item.requires === "account") return showAccountItems;
     if (item.requires === "users") return showUsersItem;
     if (item.requires === "organizations") return showOrganizationsItem;

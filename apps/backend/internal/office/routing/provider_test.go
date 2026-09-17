@@ -681,3 +681,17 @@ func TestProvider_RetryRoutesThrough(t *testing.T) {
 		t.Fatalf("status = %q", status)
 	}
 }
+
+func TestPinnedProfilePreviewShowsSelectedProfileWithoutWorkspaceMapping(t *testing.T) {
+	settings, _ := WriteAgentOverrides("", AgentOverrides{ExecutionProfileID: "codex-global"})
+	p, _ := newProviderTest(nil, []*models.AgentInstance{{ID: "chief", WorkspaceID: "ws-1", Settings: settings}})
+	p.SetExecutionProfileStore(testExecutionProfiles())
+	p.resolver.SetExecutionProfileStore(testExecutionProfiles(), nil)
+	got, err := p.PreviewAgent(context.Background(), "chief")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PrimaryExecutionProfileID != "codex-global" {
+		t.Fatalf("wrong primary: %+v", got)
+	}
+}

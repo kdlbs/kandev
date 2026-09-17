@@ -99,7 +99,7 @@ func TestSchedulerIntegration_RoutingReceivesBuiltPromptAndEnv(t *testing.T) {
 		Name:               "routing-worker",
 		Role:               models.AgentRoleWorker,
 		Status:             models.AgentStatusIdle,
-		ExecutorPreference: `{"type":"worktree"}`,
+		ExecutorPreference: `{"type":"ssh","executor_profile_id":"work-machine-profile"}`,
 	}
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -119,6 +119,9 @@ func TestSchedulerIntegration_RoutingReceivesBuiltPromptAndEnv(t *testing.T) {
 		t.Fatalf("expected exactly 1 DispatchWithRouting call; got %d", dispatcher.callCount())
 	}
 	got := dispatcher.lastCall()
+	if got.ExecutorProfileID != "work-machine-profile" {
+		t.Fatalf("worker execution profile was dropped: %q", got.ExecutorProfileID)
+	}
 	if got.Prompt == "" {
 		t.Fatal("LaunchContext.Prompt empty — the office prompt is being dropped before reaching the routing dispatcher")
 	}

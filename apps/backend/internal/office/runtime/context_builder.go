@@ -56,6 +56,12 @@ func (b *ContextBuilder) Build(ctx context.Context, run *models.Run) (RunContext
 	if err != nil {
 		return RunContext{}, err
 	}
+	// An assistant with assignment permission coordinates workspace tasks.
+	// The signed workspace claim still bounds the wildcard; worker runs retain
+	// their individual task scope even when they may create subtasks.
+	if agent.Role == models.AgentRoleAssistant && caps.CanSpawnAgentRun {
+		caps = caps.WithTaskScope(WildcardTaskScope)
+	}
 	runCtx := RunContext{
 		WorkspaceID:      agent.WorkspaceID,
 		AgentID:          agent.ID,

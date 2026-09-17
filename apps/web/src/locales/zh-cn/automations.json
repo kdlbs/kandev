@@ -254,5 +254,14 @@
   "scheduleIntervalEvery5Minutes": "每 5 分钟",
   "scheduleIntervalEvery6Hours": "每 6 小时",
   "scheduleNone": "无计划",
-  "scheduleUnparseable": "我们无法解析这个计划。请尝试 5 字段的 cron，例如 0 9 * * 1-5。"
+  "scheduleUnparseable": "我们无法解析这个计划。请尝试 5 字段的 cron，例如 0 9 * * 1-5。",
+  "runTarget": "运行目标",
+  "agentRunTarget": "代理配置",
+  "orchestratorUnavailable": "编排器不可用",
+  "orchestratorTargetHint": "将此提示发送给工作区编排器。它使用已配置的代理、执行环境和工作区上下文，并在现有对话中按顺序处理各轮请求。",
+  "manageOrchestrators": "管理工作区编排器",
+  "runDispatched": "已发送至编排器",
+  "openOrchestratorChat": "打开编排器对话",
+  "orchestratorDeliveryHint": "自动化已发送提示。请在编排器对话中查看进度、结果或执行错误；发送成功并不表示所请求的工作已完成。",
+  "thenOrchestratorDescription": "每次触发自动化时，将提示发送到此编排器的现有对话。"
 }

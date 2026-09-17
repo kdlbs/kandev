@@ -10,6 +10,7 @@ export const ALL_STATUSES: RunStatusFilter = "all";
  * per-automation table uses.
  */
 export const RUN_STATUS_LABEL_KEY: Record<RunStatus, string> = {
+  dispatched: "automations:runDispatched",
   triggered: "automations:runTriggered",
   task_created: "automations:runRunning",
   succeeded: "automations:runSucceeded",
@@ -20,6 +21,7 @@ export const RUN_STATUS_LABEL_KEY: Record<RunStatus, string> = {
 };
 
 export const RUN_STATUS_DOT: Record<RunStatus, string> = {
+  dispatched: "bg-emerald-500",
   triggered: "bg-muted-foreground",
   task_created: "bg-blue-500",
   succeeded: "bg-emerald-500",
@@ -37,6 +39,7 @@ export const STATUS_FILTER_OPTIONS: { value: RunStatusFilter; labelKey: string }
   { value: ALL_STATUSES, labelKey: "automations:runAll" },
   // Every status the backend can hand us is offered. A status that renders in
   // the feed but cannot be filtered leaves the reader unable to narrow to it.
+  { value: "dispatched", labelKey: RUN_STATUS_LABEL_KEY.dispatched },
   { value: "triggered", labelKey: RUN_STATUS_LABEL_KEY.triggered },
   { value: "task_created", labelKey: RUN_STATUS_LABEL_KEY.task_created },
   { value: "succeeded", labelKey: RUN_STATUS_LABEL_KEY.succeeded },

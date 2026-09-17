@@ -22,8 +22,8 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	"github.com/kandev/kandev/internal/runs/models"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -83,12 +83,14 @@ const (
 //     when set; serialised before insert. QueueRun adds the resolved
 //     task / workflow / agent envelope before persisting.
 type QueueRunRequest struct {
-	AgentProfileID string
-	TaskID         string
-	WorkflowStepID string
-	Reason         string
-	IdempotencyKey string
-	Payload        map[string]any
+	// DisableCoalescing preserves individually addressed callbacks instead of replacing their payload.
+	DisableCoalescing bool
+	AgentProfileID    string
+	TaskID            string
+	WorkflowStepID    string
+	Reason            string
+	IdempotencyKey    string
+	Payload           map[string]any
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two
@@ -314,7 +316,7 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 }
 
 func shouldCoalesceRun(req QueueRunRequest) bool {
-	return !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
+	return !req.DisableCoalescing && !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

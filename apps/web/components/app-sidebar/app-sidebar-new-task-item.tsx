@@ -8,7 +8,6 @@ import { IconMessageCircle, IconSquarePlus, IconTerminal2 } from "@tabler/icons-
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
-import { useInOffice } from "@/hooks/use-in-office";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
@@ -173,7 +172,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const steps = useAppStore((s) => s.kanban.steps);
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const inOffice = useInOffice();
+  const inOffice = false;
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const { activity: quickChatActivity, label: quickChatLabel } = useQuickChatActivity(workspaceId);
   const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);

@@ -1,5 +1,6 @@
 "use client";
 
+import { MobileTaskOrchestratorLink } from "@/components/task/task-orchestrator-link";
 import { memo } from "react";
 import Link from "@/components/routing/app-link";
 import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
@@ -265,6 +266,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
             <IconArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
+        <MobileTaskOrchestratorLink />
         <MobileTaskTitle
           taskTitle={props.taskTitle}
           repositoryLabel={props.repositoryLabel}

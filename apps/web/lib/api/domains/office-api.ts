@@ -141,6 +141,12 @@ function normalizeAgent(raw: unknown): AgentProfile {
     id,
     workspaceId: workspaceId(stringField(agent, "workspaceId", "workspace_id")),
     name: agent.name as string,
+    executionProfileId: parseJSONField<{ routing?: { execution_profile_id?: string } }>(
+      agent.settings,
+      {},
+    ).routing?.execution_profile_id,
+    delegationContext:
+      parseJSONField<{ delegation_context?: string }>(agent.settings, {}).delegation_context ?? "",
     agentProfileId: rawAgentProfileId ? agentProfileId(rawAgentProfileId) : id,
     role: agent.role as AgentRole,
     icon: agent.icon as string | undefined,
@@ -199,6 +205,8 @@ function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
     desired_skills: stringifyJSONField(data.desiredSkills),
     executor_preference: stringifyJSONField(data.executorPreference),
     skill_ids: stringifyJSONField(data.skillIds),
+    execution_profile_id: data.executionProfileId,
+    delegation_context: data.delegationContext,
   };
   if (data.autoApprove !== undefined) {
     payload.auto_approve = data.autoApprove;

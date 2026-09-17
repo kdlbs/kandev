@@ -51,6 +51,9 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 	if task != nil && task.Origin == models.TaskOriginAutomationRun {
 		return McpModeAutomation, nil
 	}
+	if task != nil && task.Origin == "native_conversation" {
+		return McpModeConversation, nil
+	}
 	if task != nil && task.IsFromOffice {
 		return McpModeOffice, nil
 	}
@@ -86,6 +89,9 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
 		surface = mcpprofile.SurfaceOfficeTask
+	}
+	if task.Origin == "native_conversation" {
+		surface = mcpprofile.SurfaceConversation
 	}
 	capabilities := make([]mcpprofile.Capability, 0, 2)
 	if task.Autopilot {
@@ -153,7 +159,7 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 		defer cancel()
 		updateCtx := context.WithoutCancel(ctx)
 
-		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
+		if err := e.guardedProcessStart(startCtx, taskID, sessionID, agentExecutionID); err != nil {
 			e.handleAgentProcessStartFailure(
 				updateCtx, taskID, sessionID, agentExecutionID, err,
 				escalateTaskOnFailure, fromResume,
@@ -1189,6 +1195,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		// workspace default (or an empty config).
 		executorID = strings.TrimSpace(session.ExecutorID)
 	}
+	if err := e.CheckDispatch(ctx, task.ID, sessionID, agentProfileID); err != nil {
+		return nil, err
+	}
 	if opts.McpMode == "" {
 		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
 		if err != nil {
@@ -1372,7 +1381,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	// Call the AgentManager to launch the container
-	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	resp, err := e.guardedLaunch(ctx, req)
 	if err != nil || resp == nil {
 		if err == nil {
 			err = errors.New("agent launch returned no response")

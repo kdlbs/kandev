@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/dispatchcontext"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1033,7 +1034,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	queuedMsg *messagequeue.QueuedMessage,
 	reservation *queuedDispatchReservation,
 ) {
-	promptCtx := context.Background() // Use a fresh context for async execution
+	promptCtx := dispatchcontext.FromMetadata(context.Background(), queuedMsg.Metadata)
 	reservedSessionID := queuedMsg.SessionID
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(reservedSessionID, queuedMsg.ID)
@@ -1051,6 +1052,9 @@ func (s *Service) executeQueuedMessageWithReservation(
 		promptCtx, callerSessionID, queuedMsg, reservation,
 	)
 	if handoffDone {
+		return
+	}
+	if !s.checkQueuedContext(promptCtx, queuedMsg) {
 		return
 	}
 
@@ -1312,6 +1316,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
+	manualRecovery = manualRecovery || errors.Is(err, dispatchcontext.ErrStale)
 	// ErrSessionRuntimeUnavailable: the runtime for a just-promoted session has
 	// not finished launching. Requeue so the drain on agent.boot_ready delivers it.
 	if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||

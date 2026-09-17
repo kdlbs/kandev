@@ -10,7 +10,7 @@ import {
   requestTaskChanges,
   type TaskDecisionDTO,
 } from "@/lib/api/domains/office-extended-api";
-import type { Task, TaskDecision, TaskDecisionRole } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskDecision, TaskDecisionRole } from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 

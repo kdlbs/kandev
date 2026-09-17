@@ -781,6 +781,9 @@ func (e *Executor) resumeSession(
 	}
 	defer unlock()
 
+	if err := e.CheckDispatch(ctx, session.TaskID, session.ID, session.AgentProfileID); err != nil {
+		return nil, err
+	}
 	resumeInitialState := session.State
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
 	wasTerminalResume := isTerminalSessionState(resumeInitialState)
@@ -841,7 +844,7 @@ func (e *Executor) resumeSession(
 
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
 
-	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	resp, err := e.guardedLaunch(ctx, req)
 	if err != nil && isAgentAlreadyRunningError(err) {
 		// "already has an agent running" fires both for live executions (a concurrent
 		// resume raced us) and stale ones (agent never started or exited without
@@ -870,7 +873,7 @@ func (e *Executor) resumeSession(
 				zap.String("session_id", session.ID),
 				zap.Error(cleanupErr))
 		}
-		resp, err = e.agentManager.LaunchAgent(ctx, req)
+		resp, err = e.guardedLaunch(ctx, req)
 	}
 	if err != nil {
 		if startAgent {

@@ -78,6 +78,7 @@ function formFromAutomation(a: Automation): FormState {
     description: a.description,
     workflowId: a.workflow_id,
     workflowStepId: "",
+    orchestratorId: a.orchestrator_id || "",
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
     taskMode: a.task_mode ?? "automation_run",
@@ -160,8 +161,8 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
       // same invariant right before persisting.
       const { repositories, selections: promotedSelections } = await resolveRepositoryIdsForMode(
         workspaceId,
-        form.repositorySelections,
-        form.repositorySelections.length > 0 ? "selected" : "none",
+        form.orchestratorId ? [] : form.repositorySelections,
+        !form.orchestratorId && form.repositorySelections.length > 0 ? "selected" : "none",
         {
           supportsMultiRepo,
         },

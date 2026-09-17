@@ -11,6 +11,7 @@ import {
 } from "@/lib/settings/executor-settings-routes";
 import {
   getWorkspaceSettingsTabs,
+  workspaceTabVisible,
   workspaceSettingsHref,
 } from "@/lib/settings/workspace-settings-tabs";
 import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
@@ -126,6 +127,8 @@ export type BranchExecutor = {
 };
 
 export type WorkspaceBranchOptions = {
+  office?: boolean;
+  orchestration?: boolean;
   pluginIntegrationEnabled?: (integrationId: string, workspaceId: string) => boolean | undefined;
   canvasesEnabled?: boolean;
 };
@@ -218,12 +221,12 @@ export function buildWorkspacesBranch(
    */
   visibleIntegrationSlugsFor?: (workspaceId: string) => ReadonlySet<IntegrationSlug> | undefined,
   integrationContributions: ReadonlyArray<BranchIntegrationContribution> = [],
-  { pluginIntegrationEnabled, canvasesEnabled = false }: WorkspaceBranchOptions = {},
+  { pluginIntegrationEnabled, canvasesEnabled = false, ...features }: WorkspaceBranchOptions = {},
 ): SettingsMenuNode[] {
   return orderWorkspacesForDisplay(workspaces, activeWorkspaceId).map((workspace) => {
     const integrationsHref = workspaceSettingsHref(workspace.id, "integrations");
     const workspaceTabs = getWorkspaceSettingsTabs(canvasesEnabled)
-      .filter(({ tab }) => tab !== "overview")
+      .filter(({ tab }) => tab !== "overview" && workspaceTabVisible(tab, features))
       .map(({ tab, labelKey, icon }) => ({
         key: `workspace:${workspace.id}:${tab}`,
         href: workspaceSettingsHref(workspace.id, tab),

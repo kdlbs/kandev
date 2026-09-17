@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
-import type { Task, TaskSession } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskSession } from "@/components/task/simple/types";
 
 // Stub heavy descendants so the test stays focused on the tabs and the
 // live-dot logic. AdvancedChatPanel renders WS-driven hook trees we don't

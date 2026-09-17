@@ -4,7 +4,7 @@ import { useEffect, type ReactNode } from "react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 import { ParentPicker } from "./parent-picker";
 
 const detachTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "child" }));

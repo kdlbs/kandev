@@ -965,6 +965,13 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 		return nil
 	}
 	env := make(map[string]string)
+	if req.Env["KANDEV_RUN_TOKEN"] != "" {
+		for _, key := range sshManagedEnvKeys {
+			if value := req.Env[key]; value != "" {
+				env[key] = value
+			}
+		}
+	}
 	for _, key := range sshRemoteAgentCredentialEnvKeys {
 		if val := req.Env[key]; val != "" {
 			env[key] = val

@@ -789,3 +789,50 @@ func TestResolveEmptyEffectiveOrderErrors(t *testing.T) {
 		t.Fatalf("want ErrEmptyOrder, got %v", err)
 	}
 }
+
+func TestPinnedExecutionProfileOverridesWorkspaceAndRejectsForeignProfile(t *testing.T) {
+	store := &resolverProfileStore{
+		agents: map[string]*settingsmodels.Agent{"cli": {ID: "cli", Name: "claude-acp"}},
+		profiles: map[string]*settingsmodels.AgentProfile{
+			"personal": {ID: "personal", AgentID: "cli", Model: "opus"},
+			"foreign":  {ID: "foreign", AgentID: "cli", Model: "opus", WorkspaceID: "other"},
+		},
+	}
+	resolver := routing.NewResolver(&fakeRepo{}, nil)
+	resolver.SetExecutionProfileStore(store, nil)
+	for _, id := range []string{"personal", "foreign", "deleted"} {
+		settings, err := routing.WriteAgentOverrides("", routing.AgentOverrides{ExecutionProfileID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := resolver.Resolve(context.Background(), "ws", settingsmodels.AgentProfile{Settings: settings}, routing.ResolveOptions{})
+		if id != "personal" {
+			if err == nil {
+				t.Fatalf("accepted %s", id)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.Enabled || len(res.Candidates) != 1 || res.Candidates[0].ExecutionProfileID != "personal" {
+			t.Fatalf("wrong pinned resolution: %+v", res)
+		}
+	}
+}
+
+func TestPinnedProfileHasNoAccountFallbackAfterFailure(t *testing.T) {
+	resolver := routing.NewResolver(&fakeRepo{cfg: twoProviderCfg()}, nil)
+	resolver.SetExecutionProfileStore(&resolverProfileStore{
+		agents:   map[string]*settingsmodels.Agent{"cli": {ID: "cli", Name: "claude-acp"}},
+		profiles: map[string]*settingsmodels.AgentProfile{"personal": {ID: "personal", AgentID: "cli", Model: "opus"}},
+	}, nil)
+	settings, _ := routing.WriteAgentOverrides("", routing.AgentOverrides{ExecutionProfileID: "personal"})
+	res, err := resolver.Resolve(context.Background(), "ws", settingsmodels.AgentProfile{Settings: settings}, routing.ResolveOptions{ExcludeProviders: []routing.ProviderID{"claude-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Candidates) != 0 || res.BlockReason.Status != routing.StatusBlockedActionRequired {
+		t.Fatalf("unexpected fallback: %+v", res)
+	}
+}

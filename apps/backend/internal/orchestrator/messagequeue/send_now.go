@@ -69,6 +69,9 @@ func ValidateSendNowEntries(entries []QueuedMessage) error {
 	if len(entries) == 0 {
 		return ErrSendNowEmpty
 	}
+	if err := validateSendNowContexts(entries); err != nil {
+		return err
+	}
 
 	attachmentCount := 0
 	attachmentBytes := int64(0)

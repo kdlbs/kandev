@@ -9,6 +9,7 @@ export type TriggerType =
   | "webhook";
 
 export type RunStatus =
+  | "dispatched"
   | "triggered"
   | "task_created"
   | "succeeded"
@@ -27,6 +28,7 @@ export type AutomationRepository = {
 };
 
 export type Automation = {
+  orchestrator_id?: string;
   id: string;
   workspace_id: string;
   name: string;
@@ -75,6 +77,7 @@ export type AutomationTrigger = {
 };
 
 export type AutomationRun = {
+  conversation_task_id?: string;
   id: string;
   automation_id: string;
   trigger_id: string;
@@ -181,6 +184,7 @@ export type TriggerTypeInfo = {
 // --- Request/response DTOs ---
 
 export type CreateAutomationRequest = {
+  orchestrator_id?: string;
   workspace_id: string;
   name: string;
   description?: string;
@@ -204,6 +208,7 @@ export type CreateAutomationRequest = {
 };
 
 export type UpdateAutomationRequest = {
+  orchestrator_id?: string;
   name?: string;
   description?: string;
   workflow_id?: string;

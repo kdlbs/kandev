@@ -221,6 +221,9 @@ func TestCreateAgentInstance_RequiresWorkspace(t *testing.T) {
 // enforcement. Reuses the FK-enabled repo helper for exactly that reason.
 func TestCreateAgentInstance_InheritsAgentIDUnderForeignKeys(t *testing.T) {
 	repo, db := newRouteAttemptsRepoWithFK(t)
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY); CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 
 	now := time.Now().UTC()

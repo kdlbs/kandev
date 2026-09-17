@@ -804,6 +804,8 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
+		"state":                     string(task.State),
+		"updated_at":                task.UpdatedAt.Format(time.RFC3339Nano),
 		"step_transition_id":        task.WorkflowStepTransitionID,
 		"from_workflow_id":          fromWorkflowID,
 		"to_workflow_id":            task.WorkflowID,

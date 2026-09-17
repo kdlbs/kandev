@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const state = {
+  features: { office: false },
   workspaces: { activeId: "ws-1" as string | null },
   office: { inboxCountByWorkspaceId: {} as Record<string, number> },
   quickChat: {

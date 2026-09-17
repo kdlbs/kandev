@@ -619,6 +619,9 @@ func (p *Provider) previewForAgent(
 // the workspace ProviderProfiles tier map for the requested tier; empty
 // when the mapping isn't set.
 func primaryProviderModel(res *Resolution, cfg *WorkspaceConfig) (string, string, string) {
+	if res != nil && res.PinnedProfile != nil {
+		return string(res.PinnedProfile.ProviderID), res.PinnedProfile.ExecutionProfileID, res.PinnedProfile.Model
+	}
 	if res == nil || cfg == nil || len(res.ProviderOrder) == 0 {
 		return "", "", ""
 	}

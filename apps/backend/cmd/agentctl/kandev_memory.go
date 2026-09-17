@@ -31,6 +31,7 @@ func memoryGet(args []string) int {
 	fs := flag.NewFlagSet("memory get", flag.ContinueOnError)
 	layerFlag := fs.String("layer", "", "Filter by layer")
 	keyFlag := fs.String("key", "", "Filter by key")
+	idFlag := fs.String("id", "", "Exact orchestration memory ID")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
@@ -39,8 +40,9 @@ func memoryGet(args []string) int {
 	agentID := os.Getenv("KANDEV_AGENT_ID")
 	path := fmt.Sprintf("/api/v1/office/agents/%s/memory", agentID)
 	return getWithParams(path, "KANDEV_AGENT_ID", agentID, map[string]string{
-		"layer": *layerFlag,
-		"key":   *keyFlag,
+		"layer":     *layerFlag,
+		"key":       *keyFlag,
+		"memory_id": *idFlag,
 	})
 }
 

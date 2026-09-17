@@ -130,6 +130,8 @@ func TestMigrate_PriorityIdempotent(t *testing.T) {
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			identifier TEXT NOT NULL DEFAULT '',
 			priority TEXT NOT NULL DEFAULT 'medium'
 				CHECK (priority IN ('critical','high','medium','low')),
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

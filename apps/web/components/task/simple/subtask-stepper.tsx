@@ -4,7 +4,7 @@ import Link from "@/components/routing/app-link";
 import { Badge } from "@kandev/ui/badge";
 import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
 import { topoSort } from "./workflow-sort";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 import type { TreeHold } from "@/lib/api/domains/tree-api";
 import { useTranslation } from "react-i18next";
 

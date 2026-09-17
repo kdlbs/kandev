@@ -9,7 +9,7 @@ import {
   ApprovalGateError,
   updateTaskStatusOrTranslateGate,
 } from "@/lib/api/domains/office-status-gate";
-import type { Task, TaskStatus } from "@/app/office/tasks/[id]/types";
+import type { Task, TaskStatus } from "@/components/task/simple/types";
 import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
 import { normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 import { useTranslation } from "react-i18next";

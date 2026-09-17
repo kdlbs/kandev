@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/orchestrator/dispatchcontext"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -495,6 +496,12 @@ func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {
 }
 
 func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) error {
+	ctx = dispatchcontext.FromMetadata(ctx, claim.Dispatch.Metadata)
+	if s.executor != nil {
+		if err := s.executor.CheckDispatch(ctx, claim.Dispatch.TaskID, claim.Dispatch.SessionID, ""); err != nil {
+			return err
+		}
+	}
 	sessionID := claim.Dispatch.SessionID
 	attachments := make([]v1.MessageAttachment, len(claim.Dispatch.Attachments))
 	for i, attachment := range claim.Dispatch.Attachments {

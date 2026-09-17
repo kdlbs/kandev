@@ -11,17 +11,18 @@ import (
 	"time"
 )
 
-// kandevClient is a thin HTTP client for the kandev office API.
+// kandevClient is a thin HTTP client for the selected Kandev runtime API.
 // It reads configuration from environment variables set by the kandev backend
 // when launching agent containers or processes.
 type kandevClient struct {
-	apiURL      string // KANDEV_API_URL
-	apiKey      string // KANDEV_API_KEY
-	runID       string // KANDEV_RUN_ID
-	agentID     string // KANDEV_AGENT_ID
-	taskID      string // KANDEV_TASK_ID (default for --id/--task flags)
-	workspaceID string // KANDEV_WORKSPACE_ID
-	http        *http.Client
+	apiURL        string // KANDEV_API_URL
+	runtimePrefix string
+	apiKey        string // KANDEV_API_KEY
+	runID         string // KANDEV_RUN_ID
+	agentID       string // KANDEV_AGENT_ID
+	taskID        string // KANDEV_TASK_ID (default for --id/--task flags)
+	workspaceID   string // KANDEV_WORKSPACE_ID
+	http          *http.Client
 }
 
 // newKandevClient creates a client from environment variables.
@@ -31,17 +32,18 @@ func newKandevClient() (*kandevClient, error) {
 	apiKey := os.Getenv("KANDEV_API_KEY")
 	if apiURL == "" || apiKey == "" {
 		return nil, fmt.Errorf(
-			"KANDEV_API_URL and KANDEV_API_KEY are injected automatically for Office runs; regular task sessions should use their Kandev MCP tools",
+			"KANDEV_API_URL and KANDEV_API_KEY are injected automatically for managed runs; regular task sessions should use their Kandev MCP tools",
 		)
 	}
 	return &kandevClient{
-		apiURL:      apiURL,
-		apiKey:      apiKey,
-		runID:       os.Getenv("KANDEV_RUN_ID"),
-		agentID:     os.Getenv("KANDEV_AGENT_ID"),
-		taskID:      os.Getenv("KANDEV_TASK_ID"),
-		workspaceID: os.Getenv("KANDEV_WORKSPACE_ID"),
-		http:        &http.Client{Timeout: 30 * time.Second},
+		apiURL:        apiURL,
+		runtimePrefix: os.Getenv("KANDEV_RUNTIME_API_PREFIX"),
+		apiKey:        apiKey,
+		runID:         os.Getenv("KANDEV_RUN_ID"),
+		agentID:       os.Getenv("KANDEV_AGENT_ID"),
+		taskID:        os.Getenv("KANDEV_TASK_ID"),
+		workspaceID:   os.Getenv("KANDEV_WORKSPACE_ID"),
+		http:          &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
 
@@ -74,6 +76,9 @@ func (c *kandevClient) do(method, path string, body any) ([]byte, int, error) {
 		bodyReader = bytes.NewReader(data)
 	}
 
+	if c.runtimePrefix == orchestrationAPIPrefix {
+		path = strings.Replace(path, "/api/v1/office/", c.runtimePrefix+"/", 1)
+	}
 	url := c.apiURL + path
 	req, err := http.NewRequest(method, url, bodyReader)
 	if err != nil {

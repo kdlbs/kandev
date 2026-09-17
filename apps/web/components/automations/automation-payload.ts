@@ -19,6 +19,7 @@ import {
 // under the file-length lint cap.
 
 export type FormState = {
+  orchestratorId?: string;
   name: string;
   description: string;
   workflowId: string;
@@ -164,18 +165,21 @@ export function buildCreatePayload(
     // in practice: canSave requires a non-empty name.)
     name: form.name || "New Automation",
     description: form.description,
-    workflow_id: form.workflowId,
+    workflow_id: form.orchestratorId ? "" : form.workflowId,
     workflow_step_id: "",
-    agent_profile_id: form.agentProfileId,
-    executor_profile_id: form.executorProfileId,
-    task_mode: form.taskMode,
-    repository_mode: repositories.length > 0 ? "selected" : "none",
-    repository_ids: repositories.map((repository) => repository.repository_id),
-    repositories,
+    orchestrator_id: form.orchestratorId || "",
+    agent_profile_id: form.orchestratorId ? "" : form.agentProfileId,
+    executor_profile_id: form.orchestratorId ? "" : form.executorProfileId,
+    task_mode: form.orchestratorId ? "automation_run" : form.taskMode,
+    repository_mode: !form.orchestratorId && repositories.length > 0 ? "selected" : "none",
+    repository_ids: form.orchestratorId
+      ? []
+      : repositories.map((repository) => repository.repository_id),
+    repositories: form.orchestratorId ? [] : repositories,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     max_concurrent_runs: form.maxConcurrentRuns,
-    continuation_policy: form.continuationPolicy,
+    continuation_policy: form.orchestratorId ? "new_task" : form.continuationPolicy,
     triggers: pending.map((t) => ({ type: t.type, config: t.config, enabled: t.enabled })),
   };
 }
@@ -187,19 +191,22 @@ export function buildUpdatePayload(
   return {
     name: form.name,
     description: form.description,
-    workflow_id: form.workflowId,
+    workflow_id: form.orchestratorId ? "" : form.workflowId,
     workflow_step_id: "",
-    agent_profile_id: form.agentProfileId,
-    executor_profile_id: form.executorProfileId,
-    task_mode: form.taskMode,
-    repository_mode: repositories.length > 0 ? "selected" : "none",
-    repository_ids: repositories.map((repository) => repository.repository_id),
-    repositories,
+    orchestrator_id: form.orchestratorId || "",
+    agent_profile_id: form.orchestratorId ? "" : form.agentProfileId,
+    executor_profile_id: form.orchestratorId ? "" : form.executorProfileId,
+    task_mode: form.orchestratorId ? "automation_run" : form.taskMode,
+    repository_mode: !form.orchestratorId && repositories.length > 0 ? "selected" : "none",
+    repository_ids: form.orchestratorId
+      ? []
+      : repositories.map((repository) => repository.repository_id),
+    repositories: form.orchestratorId ? [] : repositories,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
-    continuation_policy: form.continuationPolicy,
+    continuation_policy: form.orchestratorId ? "new_task" : form.continuationPolicy,
   };
 }
 

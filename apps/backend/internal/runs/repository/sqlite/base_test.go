@@ -70,6 +70,12 @@ func newTestRepoWithHandles(t *testing.T) (*runssqlite.Repository, *sqlx.DB, *sq
 	if err != nil {
 		t.Fatalf("office repo init: %v", err)
 	}
+	// The orchestration registry has foreign keys to these core tables. They
+	// must exist when profile updates fire registry cleanup triggers.
+	if _, err := writer.Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE tasks (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("core foreign-key tables: %v", err)
+	}
 	return officeRepo.RunsRepository(), writer, reader
 }
 

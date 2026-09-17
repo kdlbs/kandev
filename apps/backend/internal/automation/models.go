@@ -43,6 +43,7 @@ const (
 type RunStatus string
 
 const (
+	RunStatusDispatched  RunStatus = "dispatched"
 	RunStatusTriggered   RunStatus = "triggered"
 	RunStatusTaskCreated RunStatus = "task_created"
 	RunStatusSucceeded   RunStatus = "succeeded"
@@ -116,10 +117,11 @@ const (
 
 // Automation is a named rule with triggers, a prompt template, and agent/executor config.
 type Automation struct {
-	ID          string `json:"id" db:"id"`
-	WorkspaceID string `json:"workspace_id" db:"workspace_id"`
-	Name        string `json:"name" db:"name"`
-	Description string `json:"description" db:"description"`
+	OrchestratorID string `json:"orchestrator_id" db:"orchestrator_id"`
+	ID             string `json:"id" db:"id"`
+	WorkspaceID    string `json:"workspace_id" db:"workspace_id"`
+	Name           string `json:"name" db:"name"`
+	Description    string `json:"description" db:"description"`
 	// TaskModeAutomationRun is coordinator-only and may omit a workflow. A
 	// TaskModeNormalTask must name a workflow so the generated task enters the
 	// normal task lifecycle and appears in the Kanban/sidebar.
@@ -181,17 +183,18 @@ type AutomationTrigger struct {
 
 // AutomationRun records a single trigger firing for audit/observability.
 type AutomationRun struct {
-	ID              string          `json:"id" db:"id"`
-	AutomationID    string          `json:"automation_id" db:"automation_id"`
-	TriggerID       string          `json:"trigger_id" db:"trigger_id"`
-	TriggerType     TriggerType     `json:"trigger_type" db:"trigger_type"`
-	TaskID          string          `json:"task_id,omitempty" db:"task_id"`
-	Status          RunStatus       `json:"status" db:"status"`
-	DedupKey        string          `json:"dedup_key" db:"dedup_key"`
-	TriggerData     json.RawMessage `json:"trigger_data" db:"-"`
-	TriggerDataJSON string          `json:"-" db:"trigger_data"`
-	ErrorMessage    string          `json:"error_message,omitempty" db:"error_message"`
-	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
+	ConversationTaskID string          `json:"conversation_task_id,omitempty" db:"conversation_task_id"`
+	ID                 string          `json:"id" db:"id"`
+	AutomationID       string          `json:"automation_id" db:"automation_id"`
+	TriggerID          string          `json:"trigger_id" db:"trigger_id"`
+	TriggerType        TriggerType     `json:"trigger_type" db:"trigger_type"`
+	TaskID             string          `json:"task_id,omitempty" db:"task_id"`
+	Status             RunStatus       `json:"status" db:"status"`
+	DedupKey           string          `json:"dedup_key" db:"dedup_key"`
+	TriggerData        json.RawMessage `json:"trigger_data" db:"-"`
+	TriggerDataJSON    string          `json:"-" db:"trigger_data"`
+	ErrorMessage       string          `json:"error_message,omitempty" db:"error_message"`
+	CreatedAt          time.Time       `json:"created_at" db:"created_at"`
 
 	// Summary is the tail of the agent's last message on the generated task,
 	// read at list time and truncated for display. Hidden automation-run tasks
@@ -295,6 +298,7 @@ type TaskOriginLookup interface {
 
 // CreateAutomationRequest is the payload for creating an automation.
 type CreateAutomationRequest struct {
+	OrchestratorID     string                 `json:"orchestrator_id"`
 	WorkspaceID        string                 `json:"workspace_id"`
 	Name               string                 `json:"name"`
 	Description        string                 `json:"description"`
@@ -322,6 +326,7 @@ type CreateTriggerSpec struct {
 
 // UpdateAutomationRequest is the payload for updating an automation.
 type UpdateAutomationRequest struct {
+	OrchestratorID    *string `json:"orchestrator_id,omitempty"`
 	Name              *string `json:"name,omitempty"`
 	Description       *string `json:"description,omitempty"`
 	WorkflowID        *string `json:"workflow_id,omitempty"`

@@ -108,9 +108,15 @@ type RecordDecisionResult struct {
 // Dispatcher resolves a task's active session and invokes the workflow
 // engine. It implements shared.WorkflowEngineDispatcher.
 type Dispatcher struct {
-	engine   EngineHandle
-	sessions SessionResolver
-	logger   *logger.Logger
+	engine       EngineHandle
+	sessions     SessionResolver
+	logger       *logger.Logger
+	conversation func(context.Context, string, engine.Trigger, any, string) (bool, error)
+}
+
+// SetConversationHandler handles standing conversations without a workflow step.
+func (d *Dispatcher) SetConversationHandler(handler func(context.Context, string, engine.Trigger, any, string) (bool, error)) {
+	d.conversation = handler
 }
 
 // New builds a Dispatcher. Both engine and sessions must be non-nil; the
@@ -153,6 +159,11 @@ func (d *Dispatcher) HandleTriggerHandled(
 ) (bool, error) {
 	if taskID == "" {
 		return false, fmt.Errorf("task_id is required")
+	}
+	if d.conversation != nil {
+		if handled, err := d.conversation(ctx, taskID, trigger, payload, operationID); handled || err != nil {
+			return handled, err
+		}
 	}
 	session, err := d.resolveSession(ctx, taskID, trigger, payload)
 	if err != nil {

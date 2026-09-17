@@ -16,6 +16,16 @@ export const SETTINGS_TARGETS = {
 
 export const STANDALONE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
   {
+    id: "orchestration",
+    kind: "page",
+    labelKey: "office:orchestration",
+    aliasesKey: "office:orchestrationKeywords",
+    groupId: "agents",
+    href: "/settings/orchestration",
+    requires: "orchestration",
+    order: 530,
+  },
+  {
     id: "prompts",
     kind: "page",
     labelKey: "common:prompts",

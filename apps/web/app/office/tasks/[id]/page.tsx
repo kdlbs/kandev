@@ -38,6 +38,7 @@ import {
   mergeLiveSessionMetadata,
 } from "@/components/task/simple/chat-entries";
 import { OfficeSimplePane } from "@/components/task/simple/OfficeSimplePane";
+import { TaskAgentNavigation } from "./task-agent-navigation";
 import { TaskAdvancedMode } from "./task-advanced-mode";
 import { IssueDetailSkeleton } from "./task-detail-skeleton";
 import { TaskBody, resolveTaskBodyMode, type TaskBodyMode } from "@/components/task/TaskBody";
@@ -673,20 +674,10 @@ export default function IssueDetailPage({ params }: IssueDetailPageProps) {
 }
 
 function IssueDetailContent({ params }: IssueDetailPageProps) {
-  const { t } = useTranslation();
   const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Office shell defaults to simple. Both `?advanced` (Phase 7) and the
-  // legacy `?mode=advanced` flip to advanced.
-  const mode: TaskBodyMode = resolveTaskBodyMode(
-    {
-      simple: searchParams.has("simple") ? "" : undefined,
-      advanced: searchParams.has("advanced") ? "" : undefined,
-      mode: searchParams.get("mode") ?? undefined,
-    },
-    "simple",
-  );
+  const mode = issueBodyMode(searchParams);
 
   const {
     task,
@@ -713,21 +704,7 @@ function IssueDetailContent({ params }: IssueDetailPageProps) {
     return <IssueDetailSkeleton />;
   }
 
-  if (errorKey && !task) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <p className="text-sm text-muted-foreground">{t(errorKey)}</p>
-          <button
-            className="mt-2 text-sm text-primary underline cursor-pointer"
-            onClick={() => router.push("/office/tasks")}
-          >
-            {t("office:backToTasks")}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  if (errorKey && !task) return <IssueLoadError errorKey={errorKey} />;
 
   if (!task) return null;
 
@@ -764,7 +741,43 @@ function IssueDetailContent({ params }: IssueDetailPageProps) {
 
   return (
     <TaskOptimisticContextProvider value={optimisticContext}>
+      <TaskAgentNavigation
+        workspaceId={task.workspaceId}
+        agentId={task.assigneeAgentProfileId}
+        parentId={task.parentId}
+      />
       <TaskBody mode={mode} simpleSlot={simpleSlot} advancedSlot={advancedSlot} />
     </TaskOptimisticContextProvider>
+  );
+}
+
+function IssueLoadError({ errorKey }: { errorKey: string }) {
+  const { t } = useTranslation();
+  const router = useRouter();
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="text-center">
+        <p className="text-sm text-muted-foreground">{t(errorKey)}</p>
+        <button
+          className="mt-2 text-sm text-primary underline cursor-pointer"
+          onClick={() => router.push("/?home=overview")}
+        >
+          {t("sidebar:home")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function issueBodyMode(searchParams: URLSearchParams): TaskBodyMode {
+  // Office shell defaults to simple. Both `?advanced` (Phase 7) and the
+  // legacy `?mode=advanced` flip to advanced.
+  return resolveTaskBodyMode(
+    {
+      simple: searchParams.has("simple") ? "" : undefined,
+      advanced: searchParams.has("advanced") ? "" : undefined,
+      mode: searchParams.get("mode") ?? undefined,
+    },
+    "simple",
   );
 }

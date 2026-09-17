@@ -11,7 +11,7 @@ import {
 import { ApiError } from "@/lib/api/client";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 import { MultiSelectPopover, type MultiSelectItem } from "./multi-select-popover";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";

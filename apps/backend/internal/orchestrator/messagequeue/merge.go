@@ -33,6 +33,9 @@ func mergeAllowed(source, target *QueuedMessage, queuedBy string) bool {
 	if target == nil || target.IsReservedInFlight() {
 		return false
 	}
+	if !sameDispatchContext(source.Metadata, target.Metadata) {
+		return false
+	}
 	if source.QueuedBy == QueuedByAgent {
 		if target.QueuedBy != QueuedByAgent {
 			return false

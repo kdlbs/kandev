@@ -124,6 +124,7 @@ type BlockReason struct {
 // fall through to the existing concrete-profile launch path and ignore
 // the other fields.
 type Resolution struct {
+	PinnedProfile *Candidate
 	Enabled       bool
 	RequestedTier Tier
 	// TierSource names the precedence level that supplied
@@ -162,6 +163,13 @@ func (r *Resolver) Resolve(
 	agent settingsmodels.AgentProfile,
 	opts ResolveOptions,
 ) (*Resolution, error) {
+	ov, err := ReadAgentOverrides(agent.Settings)
+	if err != nil {
+		return nil, err
+	}
+	if ov.ExecutionProfileID != "" {
+		return r.resolvePinnedProfile(ctx, workspaceID, ov.ExecutionProfileID, opts)
+	}
 	cfg, err := r.repo.GetWorkspaceRouting(ctx, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("routing: load workspace config: %w", err)
@@ -175,10 +183,6 @@ func (r *Resolver) Resolve(
 		); err != nil {
 			return nil, err
 		}
-	}
-	ov, err := ReadAgentOverrides(agent.Settings)
-	if err != nil {
-		return nil, fmt.Errorf("routing: load agent overrides: %w", err)
 	}
 	tier, tierSource := effectiveTier(cfg, ov, string(agent.Role), opts.Reason)
 	order := effectiveOrder(cfg, ov)

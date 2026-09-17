@@ -11,7 +11,7 @@ export type SettingsDiscoveryDefinition = {
   href: string;
   targetId?: string;
   order: number;
-  requires?: "account" | "users" | "workspace" | "organizations";
+  requires?: "account" | "users" | "workspace" | "organizations" | "orchestration";
 };
 
 export type SettingsDiscoveryGroupDefinition = {
@@ -35,6 +35,7 @@ export type ResolvedSettingsDiscoveryItem = {
 
 export type SettingsDiscoveryContext = {
   t: (key: string) => string;
+  showOrchestration?: boolean;
   showAccount: boolean;
   showUsers: boolean;
   showOrganizations: boolean;

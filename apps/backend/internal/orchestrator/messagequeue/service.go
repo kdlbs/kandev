@@ -28,15 +28,16 @@ type autoMergePolicyLoader struct {
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	repo            Repository
-	maxPerSession   atomic.Int64
-	mergeEnabled    atomic.Bool
-	autoMergePolicy atomic.Pointer[AutoMergePolicy]
-	autoMergeLoader atomic.Pointer[autoMergePolicyLoader]
-	statusEpoch     string
-	logger          *logger.Logger
-	admissionMu     sync.Mutex
-	admissions      map[string]*sessionAdmission
+	dispatchContextResolver func(context.Context, string) (string, error)
+	repo                    Repository
+	maxPerSession           atomic.Int64
+	mergeEnabled            atomic.Bool
+	autoMergePolicy         atomic.Pointer[AutoMergePolicy]
+	autoMergeLoader         atomic.Pointer[autoMergePolicyLoader]
+	statusEpoch             string
+	logger                  *logger.Logger
+	admissionMu             sync.Mutex
+	admissions              map[string]*sessionAdmission
 }
 
 type sessionAdmission struct {
@@ -604,6 +605,10 @@ func (s *Service) insertQueueMessage(
 // insertQueueMessageWithMetadata inserts a message with metadata under the per-session admission lock.
 func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, maxPerSession int, policy *AutoMergePolicy) (*QueuedMessage, error) {
 	metadataCopy := copyMessageMetadata(metadata, 0)
+	metadataCopy, err := s.captureDispatchContext(ctx, taskID, metadataCopy)
+	if err != nil {
+		return nil, err
+	}
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
 		TaskID:      taskID,
@@ -614,7 +619,7 @@ func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, identity *
 		Metadata:    metadataCopy,
 		QueuedBy:    userID,
 	}
-	err := s.insertQueueMessage(ctx, identity, msg, claim, maxPerSession, policy)
+	err = s.insertQueueMessage(ctx, identity, msg, claim, maxPerSession, policy)
 	if err != nil {
 		if errors.Is(err, ErrQueueFull) {
 			s.logger.Info("queue full",

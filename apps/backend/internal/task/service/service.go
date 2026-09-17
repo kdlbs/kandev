@@ -365,6 +365,7 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	taskAccessChecker               func(context.Context, string) error
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
 	unitPlacer                      UnitPlacer

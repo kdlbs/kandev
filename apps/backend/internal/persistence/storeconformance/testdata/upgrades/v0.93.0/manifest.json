@@ -24,7 +24,7 @@
         {"owner": "prompts", "table": "custom_prompts", "key_column": "id", "key_value": "fixture-v0930-prompt", "values": {"content": "preserved prompt content", "name": "Fixture Prompt"}},
         {"owner": "utility", "table": "utility_agents", "key_column": "id", "key_value": "fixture-v0930-utility", "values": {"name": "Fixture Utility", "prompt": "preserved utility prompt"}},
         {"owner": "office", "table": "office_projects", "key_column": "id", "key_value": "fixture-v0930-office-project", "values": {"description": "preserved office project", "name": "Fixture Office Project", "status": "active", "workspace_id": "fixture-v0930-task-workspace"}},
-        {"owner": "office", "table": "runs", "key_column": "id", "key_value": "fixture-v0930-run", "values": {"agent_profile_id": "fixture-v0930-agent-profile", "reason": "fixture run", "status": "queued"}},
+        {"owner": "runs", "table": "runs", "key_column": "id", "key_value": "fixture-v0930-run", "values": {"agent_profile_id": "fixture-v0930-agent-profile", "reason": "fixture run", "status": "queued"}},
         {"owner": "terminal", "table": "user_terminals", "key_column": "id", "key_value": "fixture-v0930-terminal", "values": {"custom_name": "Fixture Terminal", "environment_id": "fixture-v0930-environment", "state": "open", "task_id": "fixture-v0930-task"}},
         {"owner": "quick-terminal", "table": "quick_terminal_tabs", "key_column": "tab_id", "key_value": "fixture-v0930-quick-terminal", "values": {"status": "connecting", "user_id": "fixture-v0930-user", "workspace_id": "fixture-v0930-task-workspace"}},
         {"owner": "runtime-flags", "table": "runtime_flag_overrides", "key_column": "key", "key_value": "fixture.v0930.flag", "values": {"value": "1"}},
@@ -56,7 +56,7 @@
         {"owner": "prompts", "table": "custom_prompts", "key_column": "id", "key_value": "fixture-v0930-prompt", "values": {"content": "preserved prompt content", "name": "Fixture Prompt"}},
         {"owner": "utility", "table": "utility_agents", "key_column": "id", "key_value": "fixture-v0930-utility", "values": {"name": "Fixture Utility", "prompt": "preserved utility prompt"}},
         {"owner": "office", "table": "office_projects", "key_column": "id", "key_value": "fixture-v0930-office-project", "values": {"description": "preserved office project", "name": "Fixture Office Project", "status": "active", "workspace_id": "fixture-v0930-task-workspace"}},
-        {"owner": "office", "table": "runs", "key_column": "id", "key_value": "fixture-v0930-run", "values": {"agent_profile_id": "fixture-v0930-agent-profile", "reason": "fixture run", "status": "queued"}},
+        {"owner": "runs", "table": "runs", "key_column": "id", "key_value": "fixture-v0930-run", "values": {"agent_profile_id": "fixture-v0930-agent-profile", "reason": "fixture run", "status": "queued"}},
         {"owner": "terminal", "table": "user_terminals", "key_column": "id", "key_value": "fixture-v0930-terminal", "values": {"custom_name": "Fixture Terminal", "environment_id": "fixture-v0930-environment", "state": "open", "task_id": "fixture-v0930-task"}},
         {"owner": "quick-terminal", "table": "quick_terminal_tabs", "key_column": "tab_id", "key_value": "fixture-v0930-quick-terminal", "values": {"status": "connecting", "user_id": "fixture-v0930-user", "workspace_id": "fixture-v0930-task-workspace"}},
         {"owner": "runtime-flags", "table": "runtime_flag_overrides", "key_column": "key", "key_value": "fixture.v0930.flag", "values": {"value": "1"}},
@@ -68,6 +68,7 @@
     }
   ],
   "known_missing_required_stores": [
+    "orchestration",
     "system-settings",
     "auth-hostnames",
     "organizations",

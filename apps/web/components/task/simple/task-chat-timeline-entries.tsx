@@ -4,7 +4,7 @@ import { Trans, useTranslation } from "react-i18next";
 
 import { formatRelativeTime } from "@/lib/utils";
 import { t as translateStatic } from "@/lib/i18n";
-import type { TaskDecision, TimelineEvent } from "@/app/office/tasks/[id]/types";
+import type { TaskDecision, TimelineEvent } from "@/components/task/simple/types";
 
 // formatDecisionLine renders the human-readable summary for a single
 // task decision entry in the timeline. Approve rows read like

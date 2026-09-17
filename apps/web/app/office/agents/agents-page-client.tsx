@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
@@ -9,7 +9,8 @@ import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { AgentCard } from "./components/agent-card";
-import { CreateAgentDialog } from "./components/create-agent-dialog";
+import { useRouter } from "@/lib/routing/client-router";
+import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import { EmptyState } from "../components/shared/empty-state";
 import { PageHeader } from "../components/shared/page-header";
 import { useTranslation } from "react-i18next";
@@ -24,7 +25,10 @@ export function AgentsPageClient({ initialAgents, initialWorkspaceId }: AgentsPa
   const agents = useAppStore(selectOfficeAgentProfiles);
   const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
-  const [showCreate, setShowCreate] = useState(false);
+  const router = useRouter();
+  const openSetup = () => {
+    if (workspaceId) router.push(workspaceSettingsHref(workspaceId, "agents"));
+  };
   // Mounting these hooks fetches workspace routing config + preview once;
   // every agent card reads the resolved preview from the store.
   useWorkspaceRouting(workspaceId);
@@ -52,7 +56,7 @@ export function AgentsPageClient({ initialAgents, initialWorkspaceId }: AgentsPa
       <PageHeader
         title={t("office:agents")}
         action={
-          <Button size="sm" className="cursor-pointer" onClick={() => setShowCreate(true)}>
+          <Button size="sm" className="cursor-pointer" onClick={openSetup}>
             <IconPlus className="h-4 w-4 mr-1" />
             {t("office:newAgent")}
           </Button>
@@ -64,12 +68,7 @@ export function AgentsPageClient({ initialAgents, initialWorkspaceId }: AgentsPa
           message={t("office:noAgentsYet")}
           description={t("office:createACeoAgentToStart")}
           action={
-            <Button
-              variant="outline"
-              size="sm"
-              className="cursor-pointer"
-              onClick={() => setShowCreate(true)}
-            >
+            <Button variant="outline" size="sm" className="cursor-pointer" onClick={openSetup}>
               <IconPlus className="h-4 w-4 mr-1" />
               {t("office:createAgent")}
             </Button>
@@ -82,8 +81,6 @@ export function AgentsPageClient({ initialAgents, initialWorkspaceId }: AgentsPa
           ))}
         </div>
       )}
-
-      <CreateAgentDialog open={showCreate} onOpenChange={setShowCreate} />
     </div>
   );
 }

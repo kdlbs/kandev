@@ -1,3 +1,4 @@
+import { OrchestratorTargetField } from "./orchestrator-target-field";
 import { IconTrash } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
@@ -142,6 +143,7 @@ export function ThenSection({
   const dirtyFields: Array<keyof FormState> = [
     "taskTitleTemplate",
     "prompt",
+    "orchestratorId",
     "workflowId",
     "taskMode",
     "agentProfileId",
@@ -153,26 +155,39 @@ export function ThenSection({
     <div className="space-y-2">
       <div>
         <h3 className="text-base font-medium">{t("automations:thenTitle")}</h3>
-        <p className="text-sm text-muted-foreground">{t("automations:thenDescription")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t(
+            form.orchestratorId
+              ? "automations:thenOrchestratorDescription"
+              : "automations:thenDescription",
+          )}
+        </p>
       </div>
       <div
         className="rounded-lg border bg-card p-4 space-y-4"
         data-settings-dirty={isDirty}
         data-settings-dirty-level="container"
       >
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t("automations:taskTitleLabel")}</Label>
-          <Input
-            ref={inputRef}
-            value={form.taskTitleTemplate}
-            data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
-            onChange={(event) => updateField("taskTitleTemplate", clampChange(event))}
-            // defaultTaskTitle is the backend trigger type's own template — a
-            // persisted value, not copy. The fallback is the example hint.
-            placeholder={defaultTaskTitle || t("automations:taskTitlePlaceholder")}
-          />
-          <p className="text-xs text-muted-foreground">{t("automations:taskTitleHelp")}</p>
-        </div>
+        <OrchestratorTargetField
+          workspaceId={workspaceId}
+          value={form.orchestratorId || ""}
+          onChange={(value) => updateField("orchestratorId", value)}
+        />
+        {!form.orchestratorId && (
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t("automations:taskTitleLabel")}</Label>
+            <Input
+              ref={inputRef}
+              value={form.taskTitleTemplate}
+              data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
+              onChange={(event) => updateField("taskTitleTemplate", clampChange(event))}
+              // defaultTaskTitle is the backend trigger type's own template — a
+              // persisted value, not copy. The fallback is the example hint.
+              placeholder={defaultTaskTitle || t("automations:taskTitlePlaceholder")}
+            />
+            <p className="text-xs text-muted-foreground">{t("automations:taskTitleHelp")}</p>
+          </div>
+        )}
         <PromptSection
           value={form.prompt}
           isDirty={isAutomationFieldDirty(form, savedForm, "prompt")}
@@ -180,30 +195,32 @@ export function ThenSection({
           placeholders={placeholders}
         />
         <Separator />
-        <ConfigSection
-          workspaceId={workspaceId}
-          workflowId={form.workflowId}
-          agentProfileId={form.agentProfileId}
-          executorProfileId={form.executorProfileId}
-          taskMode={form.taskMode}
-          repositorySelections={form.repositorySelections}
-          dirtyFields={{
-            workflowId: isAutomationFieldDirty(form, savedForm, "workflowId"),
-            agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
-            executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
-            repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
-          }}
-          onWorkflowChange={(value) => {
-            updateField("workflowId", value);
-            updateField("workflowStepId", "");
-          }}
-          onAgentProfileChange={(value) => updateField("agentProfileId", value)}
-          onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
-          onRepositoriesChange={(value) => {
-            updateField("repositorySelections", value);
-            updateField("repositoryMode", value.length > 0 ? "selected" : "none");
-          }}
-        />
+        {!form.orchestratorId && (
+          <ConfigSection
+            workspaceId={workspaceId}
+            workflowId={form.workflowId}
+            agentProfileId={form.agentProfileId}
+            executorProfileId={form.executorProfileId}
+            taskMode={form.taskMode}
+            repositorySelections={form.repositorySelections}
+            dirtyFields={{
+              workflowId: isAutomationFieldDirty(form, savedForm, "workflowId"),
+              agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
+              executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
+              repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
+            }}
+            onWorkflowChange={(value) => {
+              updateField("workflowId", value);
+              updateField("workflowStepId", "");
+            }}
+            onAgentProfileChange={(value) => updateField("agentProfileId", value)}
+            onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
+            onRepositoriesChange={(value) => {
+              updateField("repositorySelections", value);
+              updateField("repositoryMode", value.length > 0 ? "selected" : "none");
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -425,23 +442,29 @@ export function SettingsSection({
           />
           <Label className="text-sm">{t("automations:enabledLabel")}</Label>
         </div>
-        <div className="flex items-center gap-2">
-          <Label className="text-sm">{t("automations:maxConcurrentRuns")}</Label>
-          <Input
-            type="number"
-            min={1}
-            value={reusesThread ? 1 : form.maxConcurrentRuns}
-            data-settings-dirty={maxRunsIsDirty}
-            disabled={reusesThread}
-            onChange={(event) =>
-              updateField("maxConcurrentRuns", Number.parseInt(event.target.value) || 1)
-            }
-            className="w-20"
-          />
-        </div>
+        {!form.orchestratorId && (
+          <div className="flex items-center gap-2">
+            <Label className="text-sm">{t("automations:maxConcurrentRuns")}</Label>
+            <Input
+              type="number"
+              min={1}
+              value={reusesThread ? 1 : form.maxConcurrentRuns}
+              data-settings-dirty={maxRunsIsDirty}
+              disabled={reusesThread}
+              onChange={(event) =>
+                updateField("maxConcurrentRuns", Number.parseInt(event.target.value) || 1)
+              }
+              className="w-20"
+            />
+          </div>
+        )}
       </div>
-      <TargetModeSection form={form} savedForm={savedForm} updateField={updateField} />
-      <ContinuationPolicySection form={form} savedForm={savedForm} updateField={updateField} />
+      {!form.orchestratorId && (
+        <>
+          <TargetModeSection form={form} savedForm={savedForm} updateField={updateField} />
+          <ContinuationPolicySection form={form} savedForm={savedForm} updateField={updateField} />
+        </>
+      )}
     </div>
   );
 }

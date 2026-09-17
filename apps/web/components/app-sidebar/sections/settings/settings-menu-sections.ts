@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import {
+  IconSitemap,
   IconActivity,
   IconArchive,
   IconBell,
@@ -20,7 +21,6 @@ import {
   IconRobot,
   IconShieldLock,
   IconTerminal2,
-  IconSitemap,
   IconUsers,
   IconWand,
 } from "@tabler/icons-react";
@@ -72,7 +72,7 @@ export type SettingsMenuItem = {
    * the page that owns them.
    */
   activePrefixes?: string[];
-  requires?: "account" | "users" | "organizations";
+  requires?: "account" | "users" | "organizations" | "orchestration";
   /** Rows whose page owns a list show its size as a trailing badge. */
   countKey?: MenuCountKey;
 };
@@ -147,6 +147,12 @@ export const SETTINGS_MENU_SECTIONS: SettingsMenuSection[] = [
     id: "agents",
     labelKey: "common:agents",
     items: [
+      {
+        href: "/settings/orchestration",
+        labelKey: "office:orchestration",
+        icon: IconSitemap,
+        requires: "orchestration",
+      },
       {
         href: AGENTS_SETTINGS_HREF,
         labelKey: "common:agents",

@@ -94,7 +94,7 @@ func TestNewKandevClient_MissingOfficeContextExplainsTaskModeAlternative(t *test
 	if captured.Method != "" {
 		t.Fatalf("server contacted without Office context: %s %s", captured.Method, captured.Path)
 	}
-	if !strings.Contains(string(output), "injected automatically for Office runs") {
+	if !strings.Contains(string(output), "injected automatically for managed runs") {
 		t.Fatalf("stderr = %q, want Office injection guidance", output)
 	}
 	if !strings.Contains(string(output), "Kandev MCP tools") {
@@ -398,7 +398,7 @@ func TestTaskCreate_SharedGroupReportsUnsupported(t *testing.T) {
 			if code == 0 {
 				t.Fatal("expected unsupported workspace mode to fail")
 			}
-			if !strings.Contains(string(output), "--workspace-mode is not supported by Office runtime task create") {
+			if !strings.Contains(string(output), "--workspace-mode is not supported by runtime task create") {
 				t.Fatalf("stderr = %q, want unsupported workspace mode", output)
 			}
 		})

@@ -118,3 +118,18 @@ func TestIsFromOfficeProjection_RealWorkspaceWorkflow(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeConversationKeepsSingleRuntimeOwner(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "native", WorkspaceID: "ws", Title: "Chief", State: "IN_PROGRESS", Origin: "native_conversation", IsEphemeral: true}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.GetTask(ctx, "native")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !task.IsFromOffice {
+		t.Fatal("native conversation must retain the persona runtime without a delivery workflow")
+	}
+}

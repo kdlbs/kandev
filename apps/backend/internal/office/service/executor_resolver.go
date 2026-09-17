@@ -8,16 +8,17 @@ import (
 
 // ExecutorConfig represents resolved executor configuration.
 type ExecutorConfig struct {
-	Type             string `json:"type"`
-	Image            string `json:"image,omitempty"`
-	ResourceLimits   string `json:"resource_limits,omitempty"`
-	EnvironmentID    string `json:"environment_id,omitempty"`
-	WorktreeStrategy string `json:"worktree_strategy,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
+	Type              string `json:"type"`
+	Image             string `json:"image,omitempty"`
+	ResourceLimits    string `json:"resource_limits,omitempty"`
+	EnvironmentID     string `json:"environment_id,omitempty"`
+	WorktreeStrategy  string `json:"worktree_strategy,omitempty"`
 }
 
 // IsEmpty returns true if the config has no executor type set.
 func (c ExecutorConfig) IsEmpty() bool {
-	return c.Type == ""
+	return c.Type == "" && c.ExecutorProfileID == ""
 }
 
 // ResolveExecutor walks the resolution chain to determine executor config.

@@ -19,6 +19,7 @@ import (
 
 // Run reason constants.
 const (
+	RunReasonWorkspaceTaskCallback = "workspace_task_callback"
 	RunReasonTaskAssigned          = "task_assigned"
 	RunReasonTaskComment           = "task_comment"
 	RunReasonTaskBlockersResolved  = "task_blockers_resolved"
@@ -85,15 +86,19 @@ func (s *Service) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) error {
+	if !s.allowPersonaRun(ctx, agentInstanceID) {
+		return fmt.Errorf("orchestration feature disabled")
+	}
 	if err := s.guardAgentStatus(ctx, agentInstanceID); err != nil {
 		return err
 	}
 
 	if s.runsService != nil {
 		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
-			Reason:         reason,
-			IdempotencyKey: idempotencyKey,
-			Payload:        payloadWithAgent(payload, agentInstanceID),
+			DisableCoalescing: reason == RunReasonWorkspaceTaskCallback,
+			Reason:            reason,
+			IdempotencyKey:    idempotencyKey,
+			Payload:           payloadWithAgent(payload, agentInstanceID),
 		})
 		return err
 	}
@@ -119,15 +124,18 @@ func (s *Service) queueRunInline(
 		}
 	}
 
-	coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
-	if err != nil {
-		return fmt.Errorf("coalesce check: %w", err)
-	}
-	if coalesced {
-		s.logger.Debug("run coalesced",
-			zap.String("agent", agentInstanceID),
-			zap.String("reason", reason))
-		return nil
+	if reason != RunReasonWorkspaceTaskCallback {
+		coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
+		if err != nil {
+			return fmt.Errorf("coalesce check: %w", err)
+		}
+		if coalesced {
+			s.logger.Debug("run coalesced",
+				zap.String(participantTypeAgent, agentInstanceID),
+				zap.String(conversationReasonKey, reason))
+			return nil
+		}
+
 	}
 
 	var idemKeyPtr *string
@@ -150,8 +158,8 @@ func (s *Service) queueRunInline(
 
 	s.logger.Info("run queued",
 		zap.String("id", req.ID),
-		zap.String("agent", agentInstanceID),
-		zap.String("reason", reason))
+		zap.String(participantTypeAgent, agentInstanceID),
+		zap.String(conversationReasonKey, reason))
 
 	s.publishRunQueued(ctx, req, idempotencyKey)
 	return nil
@@ -167,7 +175,7 @@ func payloadWithAgent(payload, agentInstanceID string) map[string]any {
 	if payload != "" {
 		_ = json.Unmarshal([]byte(payload), &out)
 	}
-	out["agent_profile_id"] = agentInstanceID
+	out[eventKeyAgentProfileID] = agentInstanceID
 	return out
 }
 
@@ -182,17 +190,17 @@ func (s *Service) publishRunQueued(ctx context.Context, req *models.Run, idempot
 	}
 	taskID, commentID := commentkeys.IdentityFromPayload(req.Payload)
 	data := map[string]interface{}{
-		"run_id":           req.ID,
-		"agent_profile_id": req.AgentProfileID,
-		"reason":           req.Reason,
-		"task_id":          taskID,
-		"comment_id":       commentID,
-		"idempotency_key":  idempotencyKey,
+		conversationRunIDKey:   req.ID,
+		eventKeyAgentProfileID: req.AgentProfileID,
+		conversationReasonKey:  req.Reason,
+		conversationTaskIDKey:  taskID,
+		"comment_id":           commentID,
+		"idempotency_key":      idempotencyKey,
 	}
 	event := bus.NewEvent(events.OfficeRunQueued, "office-service", data)
 	if err := s.eb.Publish(ctx, events.OfficeRunQueued, event); err != nil {
 		s.logger.Debug("publish run queued event failed",
-			zap.String("run_id", req.ID),
+			zap.String(conversationRunIDKey, req.ID),
 			zap.Error(err))
 	}
 }

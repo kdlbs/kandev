@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "@/components/routing/app-link";
+
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
@@ -83,6 +85,16 @@ export function RunFeedItem({ run, automationName, onOpen }: RunFeedItemProps) {
   // A run that never produced a task has no transcript to open — a skipped
   // schedule is the whole story already — so it renders inert rather than
   // offering a click that would go nowhere.
+  if (run.conversation_task_id)
+    return (
+      <Link
+        className={baseClass}
+        data-testid={testId}
+        href={`/workspace/conversations/${run.conversation_task_id}`}
+      >
+        <RunFeedItemBody run={run} automationName={automationName} />
+      </Link>
+    );
   if (!run.task_id) {
     return (
       <div className={cn(baseClass, "opacity-80")} data-testid={testId}>

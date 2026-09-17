@@ -1,4 +1,4 @@
-import type { TaskComment, TaskSession } from "@/app/office/tasks/[id]/types";
+import type { TaskComment, TaskSession } from "@/components/task/simple/types";
 
 /**
  * Per-comment turn context. The chat layer attaches a collapsible panel

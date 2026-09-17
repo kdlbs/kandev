@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { KanbanWithPreview } from "@/components/kanban-with-preview";
+import { ONBOARDING_CHANGED } from "@/hooks/use-kanban-onboarding-complete";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { getLocalStorage, setLocalStorage } from "@/lib/local-storage";
@@ -51,6 +52,7 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
 
   const handleOnboardingComplete = () => {
     setLocalStorage(STORAGE_KEYS.ONBOARDING_COMPLETED, true);
+    window.dispatchEvent(new Event(ONBOARDING_CHANGED));
     setShowOnboarding(false);
     setBoardKey((prev) => prev + 1);
   };
@@ -60,7 +62,7 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
   }, []);
 
   useEffect(() => {
-    if (isResolvingStartupTask) return;
+    if (showOnboarding || isResolvingStartupTask) return;
     if (startupTaskId) {
       router.replace(linkToTask(startupTaskId));
       return;
@@ -74,6 +76,7 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
     if (routedView === "list") router.replace(linkToTasks(workspaceId));
     if (routedView === "threads") router.replace(linkToThreads(workspaceId));
   }, [
+    showOnboarding,
     hasWorkflowFilter,
     initialSessionId,
     initialTaskId,
@@ -84,7 +87,7 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
     workspaceId,
   ]);
 
-  if (isResolvingStartupTask || startupTaskId) {
+  if (!showOnboarding && (isResolvingStartupTask || startupTaskId)) {
     return (
       <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground">

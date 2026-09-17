@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { addTaskReviewer, removeTaskReviewer } from "@/lib/api/domains/office-extended-api";
-import type { Task } from "@/app/office/tasks/[id]/types";
+import type { Task } from "@/components/task/simple/types";
 import { AgentsMultiPicker, buildDecisionLookup } from "./agents-multi-picker";
 import { useTranslation } from "react-i18next";
 

@@ -182,7 +182,7 @@ const (
 // closes once. Projecting the mode itself would hand every future caller a
 // mode to branch on, and the whole point of withdrawing it is that no firing
 // path has one. See docs/specs/office/requirements/automations-settings.md § Migration.
-const automationColumns = `id, workspace_id, name, description, workflow_id, workflow_step_id,
+const automationColumns = `orchestrator_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
 	agent_profile_id, executor_profile_id, task_mode, repository_mode, prompt, task_title_template,
 	 enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
 	 last_triggered_at, created_at, updated_at,
@@ -220,6 +220,9 @@ func (s *Store) initSchema() error {
 		return fmt.Errorf("required automation migration: %w", err)
 	}
 	if err := s.backfillLegacyRepositoryIDs(); err != nil {
+		return err
+	}
+	if err := s.migrateOrchestratorTargets(); err != nil {
 		return err
 	}
 	return s.backfillRepositoryModes()
@@ -338,13 +341,13 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	// never stop being true. Empty means "no mode was ever chosen", which is
 	// the honest record for a row created after the choice was withdrawn.
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
-		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
+		INSERT INTO automations (orchestrator_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
 			agent_profile_id, executor_profile_id,
 			task_mode, repository_mode, prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
 			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`),
-		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`),
+		a.OrchestratorID, a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
@@ -587,12 +590,12 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
+		UPDATE automations SET orchestrator_id = ?, name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			task_mode = ?, repository_mode = ?, prompt = ?, task_title_template = ?,
 			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?, updated_at = ?
 		WHERE id = ?`),
-		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
+		a.OrchestratorID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
@@ -616,6 +619,9 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 }
 
 func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
+	if req.OrchestratorID != nil {
+		a.OrchestratorID = *req.OrchestratorID
+	}
 	if req.Name != nil {
 		a.Name = *req.Name
 	}
@@ -1115,11 +1121,11 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 	r.CreatedAt = time.Now().UTC()
 	r.TriggerDataJSON = string(r.TriggerData)
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO automation_runs (id, automation_id, trigger_id, trigger_type, task_id, status,
+		INSERT INTO automation_runs (conversation_task_id, id, automation_id, trigger_id, trigger_type, task_id, status,
 			dedup_key, trigger_data, error_message, session_id, turn_id, thread_action, thread_reason,
 			display_title, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		r.ConversationTaskID, r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
 		r.DedupKey, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
 		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.CreatedAt)
 	return err
@@ -1407,7 +1413,7 @@ func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) 
 // is_primary=1 row per task" invariant is ever violated — a join would fan
 // out and duplicate the run.
 const runTaskStateColumnsSQL = `
-		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
+		ar.conversation_task_id, ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
 		-- A run keeps its task_id after the task row is deleted, which reads as a
 		-- transcript that can still be opened. Report no task rather than a link
 		-- that dead-ends; the derived cancelled status below already says why.

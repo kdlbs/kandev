@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { toast } from "@/lib/toast/sonner";
+import { ChatIdentityContext, PersonaIdentityContext } from "../persona-identity-context";
+import { RecoveryTransportContext } from "../recovery-transport";
 import {
   IconAlertTriangle,
   IconChevronDown,
@@ -9,10 +12,8 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
-import { useAppStore } from "@/components/state-provider";
-import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { formatRelativeTime } from "@/lib/utils";
-import { AgentAvatar } from "@/app/office/components/agent-avatar";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { RemediationLink } from "@/components/task/remediation-link";
 import {
   EnsureSessionErrorBanner,
@@ -23,7 +24,7 @@ import type {
   BranchRecoveryDetails,
   SessionRecoveryAction,
 } from "@/lib/services/session-recovery-service";
-import type { RunError } from "@/app/office/tasks/[id]/types";
+import type { RunError } from "@/components/task/simple/types";
 import type { TaskRepository } from "@/lib/types/http";
 import { ManagedRuntimeNpmRunError } from "./managed-runtime-npm-run-error";
 import { isLaunchErrorCategory, TaskLaunchErrorEntry } from "./task-launch-error-entry";
@@ -241,11 +242,12 @@ export function RunErrorEntry({
   error,
 }: RunErrorEntryProps) {
   const { t } = useTranslation();
-  const agentName = useAppStore(
-    (s) =>
-      selectOfficeAgentProfiles(s).find((a) => a.id === error.agentProfileId)?.name ??
-      t("task:agent"),
-  );
+  const persona = useContext(PersonaIdentityContext);
+  const identities = useContext(ChatIdentityContext);
+  const recover = useContext(RecoveryTransportContext);
+  const agentName = persona?.name ?? identities[error.agentProfileId ?? ""] ?? t("task:agent");
+  const [customBusy, setCustomBusy] = useState<SessionRecoveryAction | null>(null);
+
   const {
     busyAction,
     recoveryError,
@@ -256,6 +258,37 @@ export function RunErrorEntry({
     handleRetry,
     handleNewBranch,
   } = useSessionRecoveryActions({ taskId, sessionId: error.sessionId });
+
+  if (recover) {
+    const recoverConversation = async (action: SessionRecoveryAction): Promise<boolean> => {
+      if (action !== "resume" && action !== "fresh_start") return false;
+      setCustomBusy(action);
+      try {
+        await recover(taskId, error.sessionId, action);
+        return true;
+      } catch (cause) {
+        toast.error(String(cause));
+        return false;
+      } finally {
+        setCustomBusy(null);
+      }
+    };
+    return (
+      <LegacyRunErrorEntry
+        agentName={agentName}
+        error={error}
+        onRecover={recoverConversation}
+        onRetry={() => void recoverConversation("resume")}
+        onRestore={() => {}}
+        onNewBranch={() => {}}
+        workspaceId={workspaceId}
+        recoveryError={null}
+        recoveryNotice={null}
+        branchDetails={null}
+        busyAction={customBusy}
+      />
+    );
+  }
 
   if (isLaunchErrorCategory(error.failureCode) && error.errorStamp) {
     return (

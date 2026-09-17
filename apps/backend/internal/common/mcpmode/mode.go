@@ -9,6 +9,7 @@ const (
 	Config           = "config"
 	External         = "external"
 	Office           = "office"
+	Conversation     = "conversation"
 	Automation       = "automation"
 )
 
@@ -17,6 +18,7 @@ var instanceModes = [...]string{
 	TaskTitlePending,
 	Config,
 	Office,
+	Conversation,
 	Automation,
 }
 

@@ -579,6 +579,7 @@ const McpModeOffice = mcpmode.Office
 // McpModeAutomation selects the fixed coordinator MCP surface for tasks
 // created by a user-configured automation.
 const McpModeAutomation = mcpmode.Automation
+const McpModeConversation = mcpmode.Conversation
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
@@ -617,6 +618,8 @@ type RouteOverride struct {
 // preserve the Office-built prompt and configuration that the legacy
 // path receives via StartTaskWithEnv.
 type LaunchContext struct {
+	// OnSessionPrepared binds a durable run before any runtime events can arrive.
+	OnSessionPrepared func(context.Context, string) error
 	ExecutorID        string
 	ExecutorProfileID string
 	Priority          string
@@ -816,6 +819,7 @@ type GitLabCredentialResolver interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
+	dispatchGuard     DispatchGuard
 	agentManager      AgentManagerClient
 	attachmentReader  AttachmentReader
 	repo              executorStore

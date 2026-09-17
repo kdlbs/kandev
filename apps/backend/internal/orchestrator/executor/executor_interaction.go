@@ -372,6 +372,9 @@ func (e *Executor) dispatchToAgent(
 }
 
 func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), steer bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+	if err := e.CheckDispatch(ctx, taskID, sessionID, ""); err != nil {
+		return nil, err
+	}
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -697,6 +700,9 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 // validate a replacement request. It deliberately does not stop the current
 // agent; Kubernetes must prove exact recorded authority first.
 func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID string) (*models.TaskSession, *models.Task, string, string, *models.ExecutorRunning, error) {
+	if err := e.CheckDispatch(ctx, taskID, sessionID, ""); err != nil {
+		return nil, nil, "", "", nil, err
+	}
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, nil, "", "", nil, fmt.Errorf("failed to get session: %w", err)
@@ -851,7 +857,7 @@ func (e *Executor) stopPreparedModelSwitchAgent(
 
 // launchModelSwitchAgent launches the new agent, persists state, and starts the process.
 func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID, newModel string, session *models.TaskSession, req *LaunchAgentRequest, existingRunning *models.ExecutorRunning) error {
-	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	resp, err := e.guardedLaunch(ctx, req)
 	if err != nil {
 		e.logger.Error("failed to launch agent with new model",
 			zap.String("task_id", taskID),
@@ -865,7 +871,7 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 		return err
 	}
 
-	if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
+	if err := e.guardedProcessStart(ctx, taskID, sessionID, resp.AgentExecutionID); err != nil {
 		e.logger.Error("failed to start agent process after model switch",
 			zap.String("task_id", taskID),
 			zap.String("agent_execution_id", resp.AgentExecutionID),

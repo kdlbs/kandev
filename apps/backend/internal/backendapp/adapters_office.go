@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/orchestrator"
 
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/github"
 	officeconfig "github.com/kandev/kandev/internal/office/config"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -16,10 +18,12 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
 	officeservice "github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 )
 
 type officeCommentWindowReader interface {
@@ -158,6 +162,12 @@ func (a *childTaskCreatorAdapter) CreateChildTask(
 
 // taskCreatorAdapter adapts the task service to the office TaskCreator interface.
 type taskCreatorAdapter struct {
+	workflow *workflowrepository.Repository
+	orch     *orchestrator.Service
+	taskRepo *tasksqlite.Repository
+	profiles interface {
+		GetAgentProfile(context.Context, string) (*settingsmodels.AgentProfile, error)
+	}
 	taskSvc *taskservice.Service
 }
 
@@ -166,6 +176,15 @@ func (a *taskCreatorAdapter) CreateOfficeTask(ctx context.Context, workspaceID, 
 }
 
 func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (string, error) {
+	if projectID == "" {
+		workspace, err := a.taskSvc.GetWorkspace(ctx, workspaceID)
+		if err != nil {
+			return "", err
+		}
+		if workspace.OfficeWorkflowID == "" {
+			return a.CreateWorkspaceTask(ctx, shared.WorkspaceTaskSpec{WorkspaceID: workspaceID, AssigneeID: assigneeAgentID, Title: title, Description: description})
+		}
+	}
 	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated)
 }
 

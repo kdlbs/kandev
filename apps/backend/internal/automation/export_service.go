@@ -109,6 +109,9 @@ func (s *Service) collectExportAutomations(ctx context.Context, workspaceID stri
 // key entirely for an empty prompt, before any fidelity rule applies), and
 // each trigger's config node, with triggers ordered by type then id (AC-8).
 func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Automation) (exportAutomation, []exportWarning, error) {
+	if a.OrchestratorID != "" {
+		return exportAutomation{}, nil, fmt.Errorf("automation %q targets a workspace coordinator, which the export format does not support", a.ID)
+	}
 	resolved, warnings, err := s.resolveDescriptors(ctx, tx, a)
 	if err != nil {
 		return exportAutomation{}, nil, fmt.Errorf("resolve descriptors for automation %q: %w", a.ID, err)

@@ -14,6 +14,7 @@ import { AgentStatusDot } from "../components/agent-status-dot";
 import { AgentRoleBadge } from "../components/agent-role-badge";
 import { BudgetGauge } from "../components/budget-gauge";
 import { AgentRouteStrip } from "./components/agent-route-strip";
+import { OpenConversationButton } from "./components/open-conversation-button";
 import { Trans, useTranslation } from "react-i18next";
 
 type AgentDetailLayoutProps = {
@@ -89,7 +90,14 @@ export default function AgentDetailLayout({ children, params }: AgentDetailLayou
         </div>
       </div>
 
+      <Link
+        className="text-sm underline cursor-pointer"
+        href={`/settings/workspaces/${agent.workspaceId}/agents`}
+      >
+        {t("office:backToWorkspaceAgents")}
+      </Link>
       <AgentRouteStrip agentId={id} />
+      <OpenConversationButton agentId={id} workspaceId={agent.workspaceId} />
 
       <nav className="flex border-b border-border gap-1" aria-label={t("office:agentSections")}>
         {TABS.map((tab) => (

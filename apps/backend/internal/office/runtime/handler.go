@@ -48,6 +48,9 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/runtime/tasks/:id/status", h.updateTaskStatus)
 	group.POST("/runtime/tasks/:id/subtasks", h.createSubtask)
 	group.POST("/runtime/tasks", h.createTask)
+	group.GET("/runtime/workspace", h.workspaceCatalog)
+	group.GET("/runtime/tasks/:id/details", h.workspaceTaskDetails)
+	group.POST("/runtime/tasks/:id/manage", h.manageWorkspaceTask)
 	group.POST("/runtime/agents", h.createAgent)
 	group.GET("/runtime/projects", h.listProjects)
 	group.POST("/runtime/projects", h.createProject)
@@ -70,7 +73,7 @@ func (h *Handler) createTask(c *gin.Context) {
 		return
 	}
 	if field := req.unsupportedField(); field != "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": field + " is not supported by Office runtime task create"})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: field + " is not supported by Office runtime task create"})
 		return
 	}
 	taskID, err := h.actions.CreateTask(c.Request.Context(), runCtx, req)
@@ -257,7 +260,7 @@ func (h *Handler) getMemory(c *gin.Context) {
 	}
 	ns, err := ParseMemoryNamespace(c.Param("path"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 	if !CanAccessMemory(runCtx, ns, false) {
@@ -267,7 +270,7 @@ func (h *Handler) getMemory(c *gin.Context) {
 	layer, key := memoryLayerAndKey(ns)
 	mem, err := h.agentSvc.GetMemory(c.Request.Context(), runCtx.AgentID, layer, key)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "memory not found"})
+		c.JSON(http.StatusNotFound, gin.H{errorResponseKey: "memory not found"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"memory": mem})
@@ -280,7 +283,7 @@ func (h *Handler) putMemory(c *gin.Context) {
 	}
 	ns, err := ParseMemoryNamespace(c.Param("path"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 	if !CanAccessMemory(runCtx, ns, true) {
@@ -356,17 +359,17 @@ func memoryLayerAndKey(ns MemoryNamespace) (string, string) {
 func (h *Handler) contextFromRequest(c *gin.Context) (RunContext, *models.AgentInstance, bool) {
 	token := bearerToken(c.GetHeader("Authorization"))
 	if token == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing runtime token"})
+		c.JSON(http.StatusUnauthorized, gin.H{errorResponseKey: "missing runtime token"})
 		return RunContext{}, nil, false
 	}
 	claims, err := h.agentSvc.ValidateAgentJWT(token)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid runtime token"})
+		c.JSON(http.StatusUnauthorized, gin.H{errorResponseKey: "invalid runtime token"})
 		return RunContext{}, nil, false
 	}
 	agent, err := h.agentSvc.GetAgentInstance(c.Request.Context(), claims.AgentProfileID)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "agent not found"})
+		c.JSON(http.StatusUnauthorized, gin.H{errorResponseKey: "agent not found"})
 		return RunContext{}, nil, false
 	}
 	caps := FromAgent(agent)
@@ -386,7 +389,7 @@ func (h *Handler) contextFromRequest(c *gin.Context) (RunContext, *models.AgentI
 
 func bindJSON(c *gin.Context, target any) bool {
 	if err := c.ShouldBindJSON(target); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return false
 	}
 	return true
@@ -410,15 +413,15 @@ func (h *Handler) respondRuntimeError(
 ) {
 	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 	if errors.Is(err, shared.ErrForbidden) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{errorResponseKey: err.Error()})
 		return
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: err.Error()})
 }
 
 func (h *Handler) respondTaskStatusError(c *gin.Context, runCtx RunContext, taskID string, err error) {
@@ -430,7 +433,7 @@ func (h *Handler) respondTaskStatusError(c *gin.Context, runCtx RunContext, task
 	if errors.As(err, &pending) {
 		h.appendActionRunEvent(c.Request.Context(), runCtx, "update_task_status", "task", taskID)
 		c.JSON(http.StatusConflict, gin.H{
-			"error":             err.Error(),
+			errorResponseKey:    err.Error(),
 			"pending_approvers": h.resolvePendingApprovers(c.Request.Context(), pending.PendingApproverIDs()),
 			"status":            "in_review",
 		})
@@ -438,7 +441,7 @@ func (h *Handler) respondTaskStatusError(c *gin.Context, runCtx RunContext, task
 	}
 	var validation StatusValidationError
 	if errors.As(err, &validation) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: err.Error()})
 		return
 	}
 	h.respondRuntimeError(c, runCtx, "update_task_status", "task", taskID, err)
@@ -478,12 +481,12 @@ func (h *Handler) appendDeniedRunEvent(
 		return
 	}
 	h.runEvents.AppendRunEvent(ctx, runCtx.RunID, "runtime.denied", "warn", map[string]interface{}{
-		"action":      action,
-		"target_type": targetType,
-		"target_id":   targetID,
-		"agent_id":    runCtx.AgentID,
-		"session_id":  runCtx.SessionID,
-		"error":       err.Error(),
+		"action":         action,
+		"target_type":    targetType,
+		"target_id":      targetID,
+		"agent_id":       runCtx.AgentID,
+		"session_id":     runCtx.SessionID,
+		errorResponseKey: err.Error(),
 	})
 }
 

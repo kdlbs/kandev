@@ -61,6 +61,12 @@ func callerScope(ctx context.Context) (string, bool) {
 	return identity.UserID, true
 }
 
+// SetTaskAccessChecker adds a resource-specific guard without replacing native
+// workspace authorization. Wire at startup, including when its feature is off.
+func (s *Service) SetTaskAccessChecker(check func(context.Context, string) error) {
+	s.taskAccessChecker = check
+}
+
 // callerSubject builds the authz subject for the request identity.
 func callerSubject(ctx context.Context) authz.Subject {
 	identity, ok := authn.IdentityFromContext(ctx)
@@ -182,6 +188,11 @@ func (s *Service) AuthorizeTaskScope(ctx context.Context, taskID string, scope a
 }
 
 func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope authz.Scope) error {
+	if s.taskAccessChecker != nil {
+		if err := s.taskAccessChecker(ctx, taskID); err != nil {
+			return err
+		}
+	}
 	if _, scoped := callerScope(ctx); !scoped {
 		return nil
 	}
@@ -282,7 +293,7 @@ func (s *Service) AuthorizeSessionAccess(ctx context.Context, sessionID string) 
 // authz.ScopeSessionExec so a viewer who may read a transcript never gets a
 // shell in the worktree.
 func (s *Service) AuthorizeSessionScope(ctx context.Context, sessionID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if _, scoped := callerScope(ctx); !scoped && s.taskAccessChecker == nil {
 		return nil
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
@@ -337,7 +348,7 @@ func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmen
 
 // AuthorizeEnvironmentScope enforces one scope on a task environment.
 func (s *Service) AuthorizeEnvironmentScope(ctx context.Context, taskEnvironmentID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if _, scoped := callerScope(ctx); !scoped && s.taskAccessChecker == nil {
 		return nil
 	}
 	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)

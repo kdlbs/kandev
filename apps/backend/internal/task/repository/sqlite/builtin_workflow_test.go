@@ -326,6 +326,27 @@ func TestEnsureRoutineWorkflow_AutoCompletingShape(t *testing.T) {
 	}
 }
 
+func TestRoutineWorkflowTaskHasOfficeOwnership(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	workflowID, err := repo.EnsureRoutineWorkflow(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	task := &taskmodels.Task{ID: "routine-task", WorkspaceID: "ws-1", WorkflowID: workflowID, Title: "Review blockers", State: "TODO", CreatedAt: now, UpdatedAt: now}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsFromOffice {
+		t.Fatal("routine task must launch through Office credentials and scheduling")
+	}
+}
+
 func TestEnsureRoutineWorkflow_HealsExistingWorkflowVisibility(t *testing.T) {
 	repo := newRepoForBuiltinWorkflowTests(t)
 	ctx := context.Background()

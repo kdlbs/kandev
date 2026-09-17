@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+const (
+	runsStoreID = "runs"
+)
+
 // Capability identifies a SQL behavior that a store conformance adapter must
 // exercise on every supported database engine.
 type Capability string
@@ -49,7 +53,9 @@ var catalog = []Descriptor{
 	{ID: "editor", OwnerPackage: "internal/editors/store", RequiredTables: []string{"editors"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
 	{ID: "prompts", OwnerPackage: "internal/prompts/store", RequiredTables: []string{"custom_prompts"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
 	{ID: "utility", OwnerPackage: "internal/utility/store", RequiredTables: []string{"utility_agents"}, DependsOn: []string{"agent-settings"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "office", OwnerPackage: "internal/office/repository/sqlite", RequiredTables: []string{"office_projects", "runs"}, DependsOn: []string{"task", "agent-settings"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
+	{ID: runsStoreID, OwnerPackage: "internal/runs/repository/sqlite", RequiredTables: []string{runsStoreID, "run_events"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityConflict, CapabilityTransaction}},
+	{ID: "orchestration", OwnerPackage: "internal/orchestration/repository/sqlite", RequiredTables: []string{"workspace_orchestrators", "orchestration_roles", "orchestration_conversations", "orchestration_memory"}, DependsOn: []string{"task", "agent-settings"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
+	{ID: "office", OwnerPackage: "internal/office/repository/sqlite", RequiredTables: []string{"office_projects"}, DependsOn: []string{"task", "agent-settings", runsStoreID, "orchestration"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "terminal", OwnerPackage: "internal/terminal/repository", RequiredTables: []string{"user_terminals"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
 	{ID: "quick-terminal", OwnerPackage: "internal/quickterminal/repository", RequiredTables: []string{"quick_terminal_tabs"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
 	{ID: "runtime-flags", OwnerPackage: "internal/runtimeflags", RequiredTables: []string{"runtime_flag_overrides"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},

@@ -44,7 +44,7 @@ function RunRow({
   // A run with no conversation has nothing to switch to. It still reports
   // itself — a skipped firing is the whole story — but it does not pretend to
   // be openable.
-  const openable = Boolean(run.session_id);
+  const openable = Boolean(run.session_id || run.conversation_task_id);
   const body = (
     <>
       <span

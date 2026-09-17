@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -115,6 +116,9 @@ func (r *Repository) initSchema() error {
 		return err
 	}
 	if err := r.createExtensionTables(); err != nil {
+		return err
+	}
+	if err := r.createOrchestrationTables(); err != nil {
 		return err
 	}
 	if err := r.runMigrations(); err != nil {
@@ -329,64 +333,10 @@ func (r *Repository) createCostTables() error {
 }
 
 func (r *Repository) createRunTables() error {
+	if err := r.Migrate(); err != nil {
+		return err
+	}
 	_, err := r.db.Exec(`
-	CREATE TABLE IF NOT EXISTS runs (
-		id TEXT PRIMARY KEY,
-		agent_profile_id TEXT NOT NULL,
-		reason TEXT NOT NULL,
-		payload TEXT DEFAULT '{}',
-		status TEXT NOT NULL DEFAULT 'queued',
-		coalesced_count INTEGER DEFAULT 1,
-		idempotency_key TEXT,
-		context_snapshot TEXT DEFAULT '{}',
-		capabilities TEXT NOT NULL DEFAULT '{}',
-		input_snapshot TEXT NOT NULL DEFAULT '{}',
-		output_summary TEXT NOT NULL DEFAULT '',
-		failure_reason TEXT NOT NULL DEFAULT '',
-		session_id TEXT NOT NULL DEFAULT '',
-		retry_count INTEGER DEFAULT 0,
-		scheduled_retry_at TIMESTAMP,
-		error_message TEXT NOT NULL DEFAULT '',
-		cancel_reason TEXT,
-		-- outcome (task-delivery-ledger): nullable, one of the eight
-		-- Office run outcome values on the finished path, NULL on failed
-		-- and on every pre-activation row. See migrateRunOutcome for the
-		-- ADD COLUMN that converges existing databases.
-		outcome TEXT,
-		-- Provider routing (office-provider-routing).
-		logical_provider_order TEXT,
-		requested_tier TEXT,
-		resolved_execution_profile_id TEXT,
-		resolved_provider_id TEXT,
-		resolved_model TEXT,
-		current_route_attempt_seq INTEGER NOT NULL DEFAULT 0,
-		routing_blocked_status TEXT,
-		earliest_retry_at TIMESTAMP,
-		-- route_cycle_baseline_seq marks the floor at which the current
-		-- retry cycle began. excludedFromAttempts filters prior attempt
-		-- rows with seq <= baseline so a parked-then-lifted run gets a
-		-- fresh exclusion list instead of re-inheriting every provider
-		-- that failed in the previous cycle.
-		route_cycle_baseline_seq INTEGER NOT NULL DEFAULT 0,
-		-- Heartbeat-rework run inspection columns: structured adapter
-		-- output, the assembled prompt the agent received, and the
-		-- continuation summary that was prepended (if any).
-		result_json TEXT NOT NULL DEFAULT '{}',
-		assembled_prompt TEXT NOT NULL DEFAULT '',
-		summary_injected TEXT NOT NULL DEFAULT '',
-		-- continuation_scope is the continuation-summary scope key
-		-- (models.ContinuationScopeForRun) decided once at run creation
-		-- and persisted so every later reader/writer of this run's
-		-- continuation summary uses the same value instead of
-		-- re-deriving it against a context_snapshot a coalesced wakeup
-		-- may have since patched.
-		continuation_scope TEXT NOT NULL DEFAULT '',
-		requested_at TIMESTAMP NOT NULL,
-		claimed_at TIMESTAMP,
-		finished_at TIMESTAMP
-	);
-	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,
@@ -510,16 +460,7 @@ func (r *Repository) createActivityTables() error {
 	CREATE INDEX IF NOT EXISTS idx_activity_run_id ON office_activity_log(run_id) WHERE run_id != '';
 	CREATE INDEX IF NOT EXISTS idx_activity_session_id ON office_activity_log(session_id) WHERE session_id != '';
 
-	CREATE TABLE IF NOT EXISTS run_events (
-		run_id TEXT NOT NULL,
-		seq INTEGER NOT NULL,
-		event_type TEXT NOT NULL,
-		level TEXT NOT NULL DEFAULT 'info',
-		payload TEXT NOT NULL DEFAULT '{}',
-		created_at TIMESTAMP NOT NULL,
-		PRIMARY KEY (run_id, seq)
-	);
-	CREATE INDEX IF NOT EXISTS idx_run_events_run_created ON run_events(run_id, created_at);
+
 	`)
 	return err
 }
@@ -616,6 +557,9 @@ func (r *Repository) createLabelTables() error {
 }
 
 func (r *Repository) createTaskExtensionTables() error {
+	if err := tasksqlite.EnsureCommentsSchema(r.db); err != nil {
+		return err
+	}
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_blockers (
 		task_id TEXT NOT NULL,
@@ -625,17 +569,7 @@ func (r *Repository) createTaskExtensionTables() error {
 		CHECK (task_id != blocker_task_id)
 	);
 
-	CREATE TABLE IF NOT EXISTS task_comments (
-		id TEXT PRIMARY KEY,
-		task_id TEXT NOT NULL,
-		author_type TEXT NOT NULL,
-		author_id TEXT NOT NULL,
-		body TEXT NOT NULL,
-		source TEXT NOT NULL DEFAULT 'user',
-		reply_channel_id TEXT DEFAULT '',
-		created_at TIMESTAMP NOT NULL
-	);
-	CREATE INDEX IF NOT EXISTS idx_task_comments_task_created ON task_comments(task_id, created_at);
+
 
 	-- office_task_participants was removed in ADR 0005 Wave C. Reviewer
 	-- and approver rows are now stored in workflow_step_participants
@@ -647,7 +581,11 @@ func (r *Repository) createTaskExtensionTables() error {
 
 func (r *Repository) createWorkspaceGovernanceTable() error {
 	_, err := r.db.Exec(`
-	CREATE TABLE IF NOT EXISTS office_workspace_governance (
+	CREATE TABLE IF NOT EXISTS office_workspace_chief (
+ workspace_id TEXT PRIMARY KEY,
+ agent_profile_id TEXT NOT NULL
+ );
+ CREATE TABLE IF NOT EXISTS office_workspace_governance (
 		workspace_id TEXT NOT NULL,
 		key          TEXT NOT NULL,
 		value        INTEGER NOT NULL DEFAULT 0,

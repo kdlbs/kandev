@@ -1,4 +1,8 @@
 "use client";
+import {
+  TaskOrchestratorLink,
+  TaskOrchestrationContext,
+} from "@/components/task/task-orchestrator-link";
 
 /**
  * KanbanTaskShell — kanban shell wrapper for /t/:taskId.
@@ -91,11 +95,18 @@ export function KanbanTaskShell({
     </div>
   );
 
-  if (mode === "advanced") {
-    return <TaskBody mode={mode} simpleSlot={simpleSlot} advancedSlot={advancedSlot} />;
-  }
-
-  return <TaskBody mode={mode} simpleSlot={simpleSlot} advancedSlot={advancedSlot} />;
+  return (
+    <TaskOrchestrationContext.Provider value={task}>
+      <div className="flex flex-col h-full min-h-0">
+        <div className={mode === "advanced" ? "hidden md:block" : undefined}>
+          <TaskOrchestratorLink task={task} />
+        </div>
+        <div className="flex-1 min-h-0">
+          <TaskBody mode={mode} simpleSlot={simpleSlot} advancedSlot={advancedSlot} />
+        </div>
+      </div>
+    </TaskOrchestrationContext.Provider>
+  );
 }
 
 // Open-task header row for the kanban simple view: a task-level status icon plus

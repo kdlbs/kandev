@@ -12,8 +12,8 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	"github.com/kandev/kandev/internal/runs/models"
 )
 
 // CreateRunTx creates a new run queue entry using a transaction the caller
@@ -557,15 +557,24 @@ func (r *Repository) CleanExpired(ctx context.Context, olderThan time.Time) (int
 
 // RecoverStale resets claimed runs older than the given time back to queued.
 func (r *Repository) RecoverStale(ctx context.Context, claimedOlderThan time.Time) (int64, error) {
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE runs
-		SET status = 'queued', claimed_at = NULL
-		WHERE status = 'claimed' AND claimed_at < ?
-	`), claimedOlderThan)
+	return r.RecoverStaleExcept(ctx, claimedOlderThan, nil)
+}
+
+// RecoverStaleExcept leaves externally owned recovery policies untouched.
+func (r *Repository) RecoverStaleExcept(ctx context.Context, before time.Time, protectedProfiles []string) (int64, error) {
+	query := `UPDATE runs SET status='queued',claimed_at=NULL WHERE status='claimed' AND claimed_at < ?`
+	args := []any{before}
+	if len(protectedProfiles) > 0 {
+		query += " AND agent_profile_id NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(protectedProfiles)), ",") + ")"
+		for _, id := range protectedProfiles {
+			args = append(args, id)
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	return result.RowsAffected()
 }
 
 // ListPendingRunsForTask returns queued runs in retry state for the given task.

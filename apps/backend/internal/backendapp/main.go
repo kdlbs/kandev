@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	rundispatcher "github.com/kandev/kandev/internal/runs/dispatcher"
 	"net"
 	"net/http"
 	"os"
@@ -1012,26 +1013,32 @@ func startGatewayAndServe(
 		return nil
 	}
 
+	// Defer trigger producers until both task and conversation consumers are ready.
+	var startAutomationConsumers, startGitHubConsumer func()
 	if err := startOrchestratorAndAutomationConsumers(
 		bindListeners,
 		func() error { return orchestratorSvc.Start(ctx) },
 		func() {
-			if services.Automation == nil {
-				return
+			startAutomationConsumers = func() {
+				if services.Automation == nil {
+					return
+				}
+				services.Automation.Start(ctx)
+				addCleanup(func() error { services.Automation.Stop(); return nil })
+				log.Info("Automation scheduler and evaluator started")
 			}
-			services.Automation.Start(ctx)
-			addCleanup(func() error { services.Automation.Stop(); return nil })
-			log.Info("Automation scheduler and evaluator started")
 		},
 		func() {
-			if services.GitHub == nil {
-				return
+			startGitHubConsumer = func() {
+				if services.GitHub == nil {
+					return
+				}
+				ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
+				ghPoller.SetTaskBranchProvider(orchestratorSvc)
+				ghPoller.Start(ctx)
+				addCleanup(func() error { ghPoller.Stop(); return nil })
+				log.Info("GitHub poller started")
 			}
-			ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
-			ghPoller.SetTaskBranchProvider(orchestratorSvc)
-			ghPoller.Start(ctx)
-			addCleanup(func() error { ghPoller.Stop(); return nil })
-			log.Info("GitHub poller started")
 		},
 	); err != nil {
 		if !errors.Is(err, errServerBindFailed) {
@@ -1067,6 +1074,23 @@ func startGatewayAndServe(
 		closeBoundListeners(server, listeners, log)
 		return false
 	}
+	if cfg.Features.Orchestration {
+		services.Orchestration = newOrchestrationRuntime(cfg, repos, services, orchestratorSvc, agentctlBinaryPath, log)
+		if services.Automation != nil {
+			services.Automation.Service.SetOrchestratorTarget(services.Orchestration)
+		}
+		if err := services.Orchestration.RecoverInterrupted(ctx); err != nil {
+			log.Error("orchestration recovery failed", zap.Error(err))
+			return false
+		}
+		cleanup, err := services.Orchestration.Subscribe(eventBus)
+		if err != nil {
+			log.Error("orchestration subscriptions failed", zap.Error(err))
+			return false
+		}
+		addCleanup(func() error { cleanup(); return nil })
+	}
+	wireAssistantDispatch(orchestratorSvc, services.Orchestration, services.Task)
 	scheduling := startSchedulingRuntime(
 		ctx, repos, services, eventBus, orchestratorSvc, runProcessorSvc, log,
 		runsscheduler.TickIntervalFromConfig(cfg.Office.SchedulerTickMs),
@@ -1090,6 +1114,8 @@ func startGatewayAndServe(
 		})
 		return restoreQuiesceErr
 	}
+	startAutomationConsumers()
+	startGitHubConsumer()
 
 	// Wire subscription usage provider into the office agents service so the
 	// /agents/:id/utilization endpoint can fetch live utilization data.
@@ -1418,19 +1444,21 @@ func newRunProcessorService(
 		apiPort = ports.Backend
 	}
 	return officeservice.NewService(officeservice.ServiceOptions{
-		Repo:               repos.Office,
-		Logger:             log,
-		CfgLoader:          cfgLoader,
-		CfgWriter:          cfgWriter,
-		WorkspaceCreator:   &taskWorkspaceCreatorAdapter{taskSvc: services.Task},
-		TaskWorkspace:      services.Task,
-		TaskCreator:        &taskCreatorAdapter{taskSvc: services.Task},
-		TaskPRs:            &taskPRListerAdapter{gh: services.GitHub},
-		APIBaseURL:         fmt.Sprintf("http://localhost:%d/api/v1", apiPort),
-		TaskStarter:        newOfficeTaskStarter(orchestratorSvc),
-		TaskCanceller:      orchestratorSvc,
-		AgentctlBinaryPath: agentctlBinaryPath,
-		EventBus:           eventBus,
+		ExternalOrchestration: cfg.Features.Orchestration,
+		RunAllowed:            orchestrationRunGuard(cfg.Features, repos.Office),
+		Repo:                  repos.Office,
+		Logger:                log,
+		CfgLoader:             cfgLoader,
+		CfgWriter:             cfgWriter,
+		WorkspaceCreator:      &taskWorkspaceCreatorAdapter{taskSvc: services.Task},
+		TaskWorkspace:         services.Task,
+		TaskCreator:           &taskCreatorAdapter{taskSvc: services.Task, profiles: repos.AgentSettings, orch: orchestratorSvc, taskRepo: repos.Task},
+		TaskPRs:               &taskPRListerAdapter{gh: services.GitHub},
+		APIBaseURL:            fmt.Sprintf("http://localhost:%d/api/v1", apiPort),
+		TaskStarter:           newOfficeTaskStarter(orchestratorSvc),
+		TaskCanceller:         orchestratorSvc,
+		AgentctlBinaryPath:    agentctlBinaryPath,
+		EventBus:              eventBus,
 	})
 }
 
@@ -1450,6 +1478,12 @@ func wireOfficeSvcsDependencies(
 	// Wire the event bus into the dashboard service for status-change events.
 	services.OfficeSvcs.Dashboard.SetEventBus(eventBus)
 	services.OfficeSvcs.Channels.SetEventBus(eventBus)
+	services.OfficeSvcs.Channels.SetWorkflowEnsurer(&workflowEnsurerAdapter{repo: repos.Task})
+	services.OfficeSvcs.Channels.SetConversationPublisher(func(ctx context.Context, taskID string) {
+		if task, err := services.Task.GetTask(ctx, taskID); err == nil {
+			services.Task.PublishTaskUpdated(ctx, task)
+		}
+	})
 	// Wire the office service as the channel relay's run resolver so
 	// relayed-comment activity rows get tagged with the originating
 	// run id (Tasks Touched on the run detail page).
@@ -1628,9 +1662,12 @@ func startSchedulingRuntime(
 	// Wire the runs queue service so office.QueueRun delegates the
 	// insert + publish + signal to it (Phase 3 of task-model-unification).
 	runsSvc := runsservice.New(
-		repos.Office.RunsRepository(), eventBus, log, nil,
+		repos.Runs, eventBus, log, nil,
 	)
 	runProcessorSvc.SetRunsService(runsSvc)
+	if services.Orchestration != nil {
+		services.Orchestration.Queue = runsSvc
+	}
 	// Phase 4 (ADR-0004): wire the workflow engine's dependencies and a
 	// dispatcher so office event subscribers route through the engine
 	// unconditionally.
@@ -1642,8 +1679,32 @@ func startSchedulingRuntime(
 	}
 	// Start the runs scheduler (tick + signal listener). It drives
 	// orchScheduler.Tick on both periodic ticks and event-driven signals.
+	dispatcher := &rundispatcher.Dispatcher{Queue: repos.Runs, OnError: func(err error) { log.Error("run dispatch failed", zap.Error(err)) }}
+	if services.Orchestration != nil {
+		dispatcher.Handlers = append(dispatcher.Handlers, services.Orchestration.Process)
+	}
+	dispatcher.Handlers = append(dispatcher.Handlers, orchScheduler.ProcessRun)
+	dispatcher.Before = func(ctx context.Context) {
+		orchScheduler.PrepareDispatch(ctx)
+		if services.Orchestration != nil {
+			if err := services.Orchestration.DispatchIntake(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("orchestration intake recovery failed", zap.Error(err))
+			}
+		}
+	}
+	dispatcher.After = func(ctx context.Context) {
+		protected, err := repos.Orchestration.RegisteredProfileIDs(ctx)
+		if err != nil {
+			log.Warn("run recovery ownership lookup failed", zap.Error(err))
+			return
+		}
+		if _, err := repos.Runs.RecoverStaleExcept(ctx, time.Now().UTC().Add(-30*time.Minute), protected); err != nil && ctx.Err() == nil {
+			log.Warn("run recovery failed", zap.Error(err))
+		}
+	}
+
 	runScheduler := runsscheduler.New(
-		orchScheduler, runsSvc.SubscribeSignal(),
+		dispatcher, runsSvc.SubscribeSignal(),
 		tickInterval, log,
 	)
 	runScheduler.Start(ctx)
@@ -1738,6 +1799,7 @@ func wireWorkflowEngineForOffice(
 	// Build the dispatcher. The session resolver is the task repo,
 	// which exposes GetActiveTaskSessionByTaskID.
 	dispatcher := officeenginedispatcher.New(eng, repos.Task, log)
+	dispatcher.SetConversationHandler(officeSvc.QueueNativeConversation)
 	officeSvc.SetWorkflowEngineDispatcher(dispatcher)
 	log.Info("workflow engine dispatcher wired for office")
 
@@ -1788,7 +1850,7 @@ func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context
 	eng := a.engineProvider.WorkflowEngine()
 	if eng == nil {
 		a.log.Warn("step entry dispatch skipped: workflow engine not initialised",
-			zap.String("task_id", taskID),
+			zap.String(taskIDPayloadKey, taskID),
 			zap.String("workflow_id", workflowID),
 			zap.String("step_id", stepID),
 			zap.String("entry_id", entryID))
@@ -1797,7 +1859,7 @@ func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context
 	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
 	for _, result := range results {
 		fields := []zap.Field{
-			zap.String("task_id", taskID),
+			zap.String(taskIDPayloadKey, taskID),
 			zap.String("workflow_id", workflowID),
 			zap.String("step_id", stepID),
 			zap.String("entry_id", entryID),
@@ -2368,6 +2430,7 @@ func buildHTTPServer(
 		taskSvc:                       services.Task,
 		taskRepo:                      repos.Task,
 		officeRepo:                    repos.Office,
+		orchestrationRepo:             repos.Orchestration,
 		analyticsRepo:                 repos.Analytics,
 		orchestratorSvc:               orchestratorSvc,
 		lifecycleMgr:                  lifecycleMgr,

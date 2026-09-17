@@ -66,6 +66,9 @@ func sshRemoteContributionEnv(req *ExecutorCreateRequest, agentctlBin string) ma
 	if req == nil {
 		return env
 	}
+	if req.Env["KANDEV_RUN_TOKEN"] != "" {
+		env["KANDEV_CLI"] = agentctlBin
+	}
 	count := sshRemoteGitConfigCount(env)
 	managedBroker := hasManagedGitHubBrokerEnv(req.Env)
 	foundManagedHelper := rewriteSSHManagedGitCredentialHelpers(env, count, managedBroker, agentctlBin)

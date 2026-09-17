@@ -9,13 +9,17 @@ import (
 
 func runTaskCmd(args []string) int {
 	if len(args) == 0 {
-		cliError("usage: agentctl kandev task <get|update|create> [flags]")
+		cliError("usage: agentctl kandev task <get|inspect|manage|update|create> [flags]")
 		return 1
 	}
 	switch args[0] {
+	case "inspect":
+		return taskInspect(args[1:])
+	case "manage":
+		return taskManage(args[1:])
 	case subcmdGet:
 		return taskGet(args[1:])
-	case "update":
+	case kandevUpdateAction:
 		return taskUpdate(args[1:])
 	case subcmdCreate:
 		return taskCreate(args[1:])
@@ -54,8 +58,9 @@ func taskGet(args []string) int {
 // taskUpdate changes task status through the authenticated Office runtime API.
 func taskUpdate(args []string) int {
 	fs := flag.NewFlagSet("task update", flag.ContinueOnError)
+	operation := registerAssistantMutation(fs)
 	id := fs.String("id", "", "Task ID (defaults to $KANDEV_TASK_ID)")
-	status := fs.String("status", "", "New status")
+	status := fs.String(kandevStatusKey, "", "New status")
 	comment := fs.String("comment", "", "Comment to add")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
@@ -83,7 +88,8 @@ func taskUpdate(args []string) int {
 		return 1
 	}
 
-	payload := map[string]string{"status": *status}
+	payload := map[string]any{kandevStatusKey: *status}
+	operation.add(payload)
 	if *comment != "" {
 		payload["comment"] = *comment
 	}
@@ -96,10 +102,16 @@ func taskUpdate(args []string) int {
 // taskCreate creates a new task through the authenticated Office runtime API.
 func taskCreate(args []string) int {
 	fs := flag.NewFlagSet("task create", flag.ContinueOnError)
-	title := fs.String("title", "", "Task title (required)")
+	operation := registerAssistantMutation(fs)
+	step := fs.String("step", "", "Explicit permitted entry step ID in the selected workflow")
+	mode := fs.String("mode", "", "Delivery mode: execute or design; answer/inspect require no delivery task")
+	title := fs.String(kandevTitleKey, "", "Task title (required)")
+	workflow := fs.String("workflow", "", "Existing workspace workflow ID")
+	repository := fs.String("repository", "", "Existing workspace repository ID")
+	externalID := fs.String("external-id", "", "Stable create idempotency key")
 	description := fs.String("description", "", "Task description")
 	parent := fs.String("parent", "", "Parent task ID")
-	assignee := fs.String("assignee", "", "Assignee agent ID")
+	assignee := fs.String(kandevAssigneeKey, "", "Assignee agent ID")
 	priority := fs.String("priority", "", "Priority value")
 	project := fs.String("project", "", "Project ID")
 	blockedBy := fs.String("blocked-by", "", "Comma-separated task IDs that must complete before this task")
@@ -128,11 +140,8 @@ func taskCreate(args []string) int {
 		{"default-child-workspace", *defaultChildWorkspace},
 		{"default-child-ordering", *defaultChildOrdering},
 	}
-	for _, field := range unsupported {
-		if strings.TrimSpace(field.value) != "" {
-			cliError("--%s is not supported by Office runtime task create", field.name)
-			return 1
-		}
+	if !validCreateFlags(unsupported) {
+		return 1
 	}
 
 	client, err := newKandevClient()
@@ -141,23 +150,28 @@ func taskCreate(args []string) int {
 		return 1
 	}
 	payload := map[string]interface{}{
-		"title": normalizedTitle,
+		kandevTitleKey: normalizedTitle,
+		"workflow_id":  *workflow, "repository_id": *repository, "external_id": *externalID,
 	}
-	if *description != "" {
-		payload["description"] = *description
-	}
-	if *parent != "" {
-		payload["parent_id"] = *parent
-	}
-	if *assignee != "" {
-		payload["assignee"] = *assignee
-	}
-	if *project != "" {
-		payload["project_id"] = *project
+	operation.add(payload)
+	for key, value := range map[string]string{"workflow_step_id": *step, "execution_mode": *mode, "description": *description, "parent_id": *parent, kandevAssigneeKey: *assignee, "project_id": *project} {
+		if value != "" {
+			payload[key] = value
+		}
 	}
 
 	body, status, err := client.do(http.MethodPost, "/api/v1/office/runtime/tasks", payload)
 	return handleResponse(body, status, err)
+}
+
+func validCreateFlags(unsupported []struct{ name, value string }) bool {
+	for _, field := range unsupported {
+		if strings.TrimSpace(field.value) != "" {
+			cliError("--%s is not supported by runtime task create", field.name)
+			return false
+		}
+	}
+	return true
 }
 
 // resolveTaskID returns the explicit ID if provided, otherwise falls back to

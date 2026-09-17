@@ -858,6 +858,26 @@ func TestConfigureAndStartAgentUsesRuntimeSnapshotWhenProfileSecretIsUnavailable
 	}
 }
 
+func TestConfigureAndStartAgentRefreshesRemoteRunEnvironment(t *testing.T) {
+	mgr := newTestManager(t)
+	var configured map[string]string
+	execution := &AgentExecution{
+		ID: "remote", AgentCommand: "mock-agent", WorkspacePath: t.TempDir(),
+		agentctl: newConfigureCaptureAgentctlClient(t, newTestLogger(), &configured),
+		metadata: map[string]interface{}{"runtime_env": map[string]string{"KANDEV_API_URL": "http://localhost:8080/api/v1"}},
+		prepareAgentEnv: func(env map[string]string) error {
+			env["KANDEV_API_URL"] = "http://127.0.0.1:4567/api/v1"
+			return nil
+		},
+	}
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+		t.Fatal(err)
+	}
+	if configured["KANDEV_API_URL"] != "http://127.0.0.1:4567/api/v1" {
+		t.Fatal("local API URL leaked into remote agent configuration")
+	}
+}
+
 func TestConfigureAndStartAgent_SendsStructuredArgv(t *testing.T) {
 	mgr := newTestManager(t)
 	var captured []string

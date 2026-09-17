@@ -37,6 +37,7 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"RepositoryIDs":      {exported: true, yamlKey: "repositories"},
 	"Repositories":       {exported: false},
 	"ContinuationTaskID": {exported: false}, // runtime pointer to the reused task
+	"OrchestratorID":     {exported: false}, // unsupported destination; export rejects it instead of losing the target
 
 	"WebhookSecret":   {exported: false}, // secret
 	"ID":              {exported: false}, // instance identity

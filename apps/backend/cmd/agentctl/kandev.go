@@ -21,12 +21,19 @@ const (
 
 // runKandevCLI dispatches the kandev subcommand to the appropriate handler.
 // Returns an exit code (0 = success, non-zero = error).
+const orchestrationAPIPrefix = "/api/v1/orchestration"
+
 func runKandevCLI(args []string) int {
 	if len(args) == 0 {
 		printUsage()
 		return 1
 	}
+	if os.Getenv("KANDEV_RUNTIME_API_PREFIX") == orchestrationAPIPrefix {
+		return runOrchestrationCLI(args)
+	}
 	switch args[0] {
+	case "workspace":
+		return workspaceCatalog()
 	case "task":
 		// Singular `task` group (get/update/create) stays for back
 		// compat with skills authored before the plural rollout.
@@ -62,6 +69,10 @@ func runKandevCLI(args []string) int {
 }
 
 func printUsage() {
+	if os.Getenv("KANDEV_RUNTIME_API_PREFIX") == orchestrationAPIPrefix {
+		fmt.Fprintln(os.Stderr, "Usage: agentctl kandev <workspace|objective|context|task|comment|memory> [flags]")
+		return
+	}
 	fmt.Fprintln(os.Stderr, "Usage: agentctl kandev <command> [flags]")
 	fmt.Fprintln(os.Stderr,
 		"Commands: task, tasks, comment, agents, memory, checkout, label, doc, routines, approvals, projects, budget")
@@ -124,4 +135,27 @@ func getWithParams(basePath, requiredEnvName, requiredEnvVal string, params map[
 	}
 	body, status, doErr := client.do("GET", basePath+q, nil)
 	return handleResponse(body, status, doErr)
+}
+
+func runOrchestrationCLI(args []string) int {
+	switch args[0] {
+	case "context":
+		return runContextCmd(args[1:])
+	case "objective":
+		return runObjectiveCmd(args[1:])
+	case "workspace":
+		return workspaceCatalog()
+	case "task":
+		return runTaskCmd(args[1:])
+	case "comment":
+		return runCommentCmd(args[1:])
+	case "memory":
+		return runMemoryCmd(args[1:])
+	case "--help", "help", "-h":
+		printUsage()
+		return 0
+	default:
+		cliError("command is unavailable for workspace orchestration; use workspace, objective, context, task, comment or memory")
+		return 1
+	}
 }

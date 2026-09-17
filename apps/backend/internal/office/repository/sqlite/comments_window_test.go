@@ -184,6 +184,9 @@ func newConcurrentCommentWindowRepo(t *testing.T, state *commentWindowTraceState
 	if err != nil {
 		t.Fatalf("open reader: %v", err)
 	}
+	// Preserve SQLite dialect metadata while the underlying driver traces reads.
+	writer = sqlx.NewDb(writer.DB, "sqlite3")
+	reader = sqlx.NewDb(reader.DB, "sqlite3")
 	writer.SetMaxOpenConns(4)
 	reader.SetMaxOpenConns(4)
 	t.Cleanup(func() {

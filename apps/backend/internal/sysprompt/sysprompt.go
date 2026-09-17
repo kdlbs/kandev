@@ -142,6 +142,9 @@ const (
 )
 
 func contextKindForBlock(block string, trustedContents []string) contextKind {
+	if strings.Contains(block, "KANDEV CONVERSATION MCP TOOLS") {
+		return contextOffice
+	}
 	if strings.Contains(block, officeContextMarker) {
 		return contextOffice
 	}
@@ -518,4 +521,10 @@ func InterpolatePlaceholders(template string, taskID string) string {
 	result := template
 	result = strings.ReplaceAll(result, "{task_id}", taskID)
 	return result
+}
+
+// InjectConversationContext advertises the core conversation tool surface.
+func InjectConversationContext(taskID, sessionID, prompt string, trustedContents ...string) string {
+	content := Resolve("conversation-context", map[string]string{"task_id": taskID, "session_id": sessionID})
+	return canonicalizeKandevContext(content, prompt, trustedContextContents(sessionID, trustedContents...))
 }

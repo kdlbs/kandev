@@ -254,5 +254,14 @@
   "scheduleUnparseable": "Não conseguimos ler esse agendamento. Experimente um cron de 5 campos, como 0 9 * * 1-5.",
   "summaryPrMerged": "PR integrado",
   "triggerInfoGithubPrMerged": "Dispara quando o verificador de PRs do Kandev deteta que um PR associado foi integrado. A deteção pode demorar até um minuto.",
-  "triggerLabelGithubPrMerged": "PR do GitHub integrado"
+  "triggerLabelGithubPrMerged": "PR do GitHub integrado",
+  "runTarget": "Executar com",
+  "agentRunTarget": "Perfil de agente",
+  "orchestratorUnavailable": "Orquestrador indisponível",
+  "orchestratorTargetHint": "Envie esta instrução ao orquestrador do espaço de trabalho. Usa o agente, o ambiente e o contexto configurados. Os turnos são processados por ordem na conversa existente.",
+  "manageOrchestrators": "Gerir orquestradores do espaço de trabalho",
+  "runDispatched": "Entregue ao orquestrador",
+  "openOrchestratorChat": "Abrir conversa do orquestrador",
+  "orchestratorDeliveryHint": "A automação entregou a instrução. Consulte a conversa do orquestrador para ver o progresso, os resultados ou erros de execução. A entrega não significa que o trabalho esteja concluído.",
+  "thenOrchestratorDescription": "Enviar a instrução para a conversa existente deste orquestrador sempre que a automação for acionada."
 }

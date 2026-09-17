@@ -9,7 +9,7 @@ import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { AdvancedChatPanel } from "@/app/office/tasks/[id]/advanced-panels/chat-panel";
 import { useActiveSessionRef } from "./active-session-ref-context";
-import type { TaskSession } from "@/app/office/tasks/[id]/types";
+import type { TaskSession } from "@/components/task/simple/types";
 import { useTranslation } from "react-i18next";
 
 const COLLAPSE_KEY_PREFIX = "office.session.collapsed.";

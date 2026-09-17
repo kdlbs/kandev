@@ -31,6 +31,7 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 }
 
 var registrations = []runtimeFlagRegistration{
+	{definition: RuntimeFlagDefinition{Key: "features.orchestration", EnvVar: "KANDEV_FEATURES_ORCHESTRATION", Kind: KindFeature, Label: "Workspace orchestration", Description: "Workspace orchestrators coordinate existing task agents and conversations.", Stability: StabilityExperimental, RiskLevel: RiskMedium, RiskDescription: "Experimental orchestration can create and manage tasks. Review profile assignments and instructions.", RestartRequired: true, Mutable: true}, read: func(cfg *config.Config) bool { return cfg.Features.Orchestration }, apply: func(cfg *config.Config, v bool) { cfg.Features.Orchestration = v }},
 	{
 		definition: RuntimeFlagDefinition{
 			Key:         "features.office",
