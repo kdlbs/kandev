@@ -17,6 +17,7 @@ import (
 	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // sqliteRepository persists queued messages and pending moves.
@@ -27,14 +28,15 @@ type sqliteRepository struct {
 	mu           sync.Mutex
 	sessionLocks map[string]*sync.Mutex
 
-	// tasksTablePresent is whether the owning tasks table exists, resolved at
-	// construction. The queue repository's isolated tests create only queue
-	// tables; production databases always have the task schema. It is checked
-	// OUTSIDE any transaction because a failed statement on PostgreSQL aborts
-	// the whole transaction — the guard must never issue its UPDATE against a
-	// missing table inside a tx.
-	tasksTablePresent        bool
-	taskSessionsTablePresent bool
+	// tasksTablePresent records whether both owning task and session tables
+	// exist. Production always supplies them; queue-only repository tests use
+	// the legacy textual methods, while every identity-bound method fails
+	// closed when session authority is unavailable. Detection happens outside
+	// transactions because a missing-table statement aborts PostgreSQL txs.
+	tasksTablePresent                   bool
+	taskSessionsTablePresent            bool
+	taskSessionIncarnationColumnPresent bool
+	taskStateColumnPresent              bool
 }
 
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
@@ -72,15 +74,19 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 		return nil, fmt.Errorf("messagequeue: resolve task_sessions table presence: %w", err)
 	}
 	r.taskSessionsTablePresent = present
-	if present {
-		// Older isolated queue fixtures can provide a task_sessions table
-		// without the incarnation column. They still use the legacy queue API,
-		// so there is no identity to backfill until the owning schema migrates.
-		incarnationColumn, columnErr := internaldb.ColumnExists(writer, "task_sessions", "queue_incarnation_id")
+	//nolint:nestif // schema presence and optional legacy-column compatibility are coupled.
+	if r.tasksTablePresent {
+		hasIncarnation, columnErr := internaldb.ColumnExists(writer, "task_sessions", "queue_incarnation_id")
 		if columnErr != nil {
 			return nil, fmt.Errorf("messagequeue: resolve task session incarnation column: %w", columnErr)
 		}
-		if incarnationColumn {
+		r.taskSessionIncarnationColumnPresent = hasIncarnation
+		hasState, columnErr := internaldb.ColumnExists(writer, "tasks", "state")
+		if columnErr != nil {
+			return nil, fmt.Errorf("messagequeue: resolve task state column: %w", columnErr)
+		}
+		r.taskStateColumnPresent = hasState
+		if r.taskSessionIncarnationColumnPresent {
 			if err := r.migratePendingMoveIdentities(); err != nil {
 				return nil, fmt.Errorf("messagequeue: migrate pending move identities: %w", err)
 			}
@@ -209,10 +215,13 @@ func (r *sqliteRepository) guardActiveTaskTx(ctx context.Context, tx *sqlx.Tx, t
 	if !r.tasksTablePresent {
 		return nil
 	}
-	res, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET updated_at = updated_at
-		WHERE id = ? AND archived_at IS NULL
-	`), taskID)
+	query := `UPDATE tasks SET updated_at = updated_at WHERE id = ? AND archived_at IS NULL`
+	args := []interface{}{taskID}
+	if r.taskStateColumnPresent {
+		query += ` AND state NOT IN (?, ?, ?)`
+		args = append(args, v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled)
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return fmt.Errorf("guard active task for queue admission: %w", err)
 	}
@@ -351,6 +360,71 @@ func (r *sqliteRepository) guardOptionalActiveTaskTx(
 	return r.guardActiveTaskTx(ctx, tx, identity.TaskID)
 }
 
+// guardPendingMoveTaskTx establishes the task-row -> queue-session lock order
+// for deferred route admission and rejects a producer whose source generation
+// is already stale. Terminal task states are absorbing: once a terminal route
+// commits, no older producer may create a new deferred row behind it. A
+// missing tasks table (isolated queue-only tests) skips the guard.
+func (r *sqliteRepository) guardPendingMoveTaskTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID, expectedWorkflowStepID string,
+) error {
+	if !r.tasksTablePresent {
+		return nil
+	}
+	query := `UPDATE tasks SET updated_at = updated_at WHERE id = ? AND archived_at IS NULL`
+	args := []interface{}{taskID}
+	if r.taskStateColumnPresent {
+		query += ` AND state NOT IN (?, ?, ?)`
+		args = append(args, v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled)
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return fmt.Errorf("guard pending move task generation: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("guard pending move task rows affected: %w", err)
+	}
+	if affected == 0 {
+		// The task row is gone, archived, or terminal. Archived/missing rows
+		// report the inactive sentinel (archive/delete callers); a terminal
+		// state reports the generation conflict when the producer carried an
+		// expected step (it wrote against a generation that no longer
+		// matches) and the inactive sentinel when it did not, so plain
+		// admission checks on a completed task keep their sentinel.
+		var archivedAt sql.NullTime
+		var state string
+		if getErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT archived_at, state FROM tasks WHERE id = ?`), taskID).Scan(&archivedAt, &state); getErr != nil {
+			return ErrTaskInactive
+		}
+		if archivedAt.Valid {
+			return ErrTaskInactive
+		}
+		if expectedWorkflowStepID != "" {
+			return ErrPendingMoveGenerationConflict
+		}
+		return ErrTaskInactive
+	}
+	if expectedWorkflowStepID != "" {
+		var currentWorkflowStepID *string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT workflow_step_id FROM tasks WHERE id = ?
+		`), taskID).Scan(&currentWorkflowStepID); err != nil {
+			// Isolated queue-only tests declare a tasks table without the
+			// workflow columns; a missing column or row here cannot prove a
+			// generation mismatch, so the admission proceeds on the row guard
+			// above alone.
+			return nil
+		}
+		if currentWorkflowStepID != nil && *currentWorkflowStepID != expectedWorkflowStepID {
+			return ErrPendingMoveGenerationConflict
+		}
+	}
+	return nil
+}
+
 func (r *sqliteRepository) validateOptionalSessionIdentityTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -461,7 +535,8 @@ func (r *sqliteRepository) initSchema() error {
 		queued_at        TIMESTAMP NOT NULL,
 		actor            TEXT NOT NULL DEFAULT '',
 		sender_session_id TEXT NOT NULL DEFAULT '',
-		entry_options_json TEXT NOT NULL DEFAULT '{}'
+		expected_workflow_step_id TEXT NOT NULL DEFAULT '',
+		initiating_turn_id TEXT NOT NULL DEFAULT ''
 	);
 
 	-- Per-session cross-process mutex. Every queue mutation takes this row
@@ -506,6 +581,12 @@ func (r *sqliteRepository) initSchema() error {
 		return alterErr
 	}
 	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN session_incarnation_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN expected_workflow_step_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+		return alterErr
+	}
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN initiating_turn_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
 		return alterErr
 	}
 	for _, migration := range []struct {
@@ -5983,14 +6064,15 @@ func (r *sqliteRepository) restorePendingMoveTx(
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO pending_moves (
 			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
-			workflow_step_id, step_position, queued_at, actor, sender_session_id, entry_options_json
+			workflow_step_id, step_position, queued_at, actor, sender_session_id,
+			expected_workflow_step_id, initiating_turn_id, entry_options_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
-		uuid.New().String(), pendingMove.MoveID, pendingMove.SessionIncarnationID, sessionID,
+		pendingMoveRowID(pendingMove), pendingMove.MoveID, pendingMove.SessionIncarnationID, sessionID,
 		pendingMove.TaskID, pendingMove.WorkflowID, pendingMove.WorkflowStepID,
 		pendingMove.Position, queuedAt, pendingMove.Actor, pendingMove.SenderSessionID,
-		marshalEntryOptions(pendingMove.EntryOptions),
+		pendingMove.ExpectedWorkflowStepID, pendingMove.InitiatingTurnID, marshalEntryOptions(pendingMove.EntryOptions),
 	); err != nil {
 		return fmt.Errorf("restore pending move: %w", err)
 	}
@@ -6019,6 +6101,16 @@ func (r *sqliteRepository) replaceSession(ctx context.Context, identity *QueueSe
 	}
 	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
 		return err
+	}
+	// A snapshot may outlive terminal settlement, which removes the current
+	// pending row. Validate the pending move's owning task before the session
+	// lock so an old snapshot cannot recreate deferred routing behind an
+	// absorbing task. This also covers the identity-less ReplaceSession form,
+	// whose only task reference is the restored pending move itself.
+	if pendingMove != nil {
+		if err := r.guardActiveTaskTx(ctx, tx, pendingMove.TaskID); err != nil {
+			return err
+		}
 	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return err
@@ -6084,7 +6176,7 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 		return fmt.Errorf("begin set pending move tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.guardActiveTaskTx(ctx, tx, move.TaskID); err != nil {
+	if err := r.guardPendingMoveTaskTx(ctx, tx, move.TaskID, move.ExpectedWorkflowStepID); err != nil {
 		return err
 	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
@@ -6114,27 +6206,40 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 			return err
 		}
 	}
+	var currentID, currentMoveID string
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT id, move_id FROM pending_moves WHERE session_id = ?`), sessionID).Scan(&currentID, &currentMoveID)
+	if err == nil {
+		switch {
+		case move.MoveID != "" && currentMoveID == move.MoveID:
+			move.ID = currentID
+			return tx.Commit()
+		case move.ID == "" || move.ID == currentID:
+			move.ID = uuid.NewString()
+			_, err = tx.ExecContext(ctx, r.db.Rebind(`
+				UPDATE pending_moves SET id = ?, move_id = ?, session_incarnation_id = ?, task_id = ?, workflow_id = ?, workflow_step_id = ?, step_position = ?, queued_at = ?, actor = ?, sender_session_id = ?, expected_workflow_step_id = ?, initiating_turn_id = ?, entry_options_json = ?
+				WHERE session_id = ?
+			`), move.ID, move.MoveID, move.SessionIncarnationID, move.TaskID, move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor, move.SenderSessionID, move.ExpectedWorkflowStepID, move.InitiatingTurnID, marshalEntryOptions(move.EntryOptions), sessionID)
+			if err != nil {
+				return fmt.Errorf("replace pending move: %w", err)
+			}
+			return tx.Commit()
+		default:
+			return ErrPendingMoveGenerationConflict
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read pending move generation: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO pending_moves (
 			id, move_id, session_incarnation_id, session_id, task_id, workflow_id,
-			workflow_step_id, step_position, queued_at, actor, sender_session_id, entry_options_json
+			workflow_step_id, step_position, queued_at, actor, sender_session_id,
+			expected_workflow_step_id, initiating_turn_id, entry_options_json
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(session_id) DO UPDATE SET
-			task_id = excluded.task_id,
-			session_incarnation_id = excluded.session_incarnation_id,
-			workflow_id = excluded.workflow_id,
-			workflow_step_id = excluded.workflow_step_id,
-			step_position = excluded.step_position,
-			queued_at = excluded.queued_at,
-			actor = excluded.actor,
-			sender_session_id = excluded.sender_session_id,
-			move_id = excluded.move_id,
-			entry_options_json = excluded.entry_options_json
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
-		uuid.New().String(), move.MoveID, move.SessionIncarnationID, sessionID, move.TaskID,
+		pendingMoveRowID(move), move.MoveID, move.SessionIncarnationID, sessionID, move.TaskID,
 		move.WorkflowID, move.WorkflowStepID, move.Position, move.QueuedAt, move.Actor,
-		move.SenderSessionID, marshalEntryOptions(move.EntryOptions),
+		move.SenderSessionID, move.ExpectedWorkflowStepID, move.InitiatingTurnID, marshalEntryOptions(move.EntryOptions),
 	); err != nil {
 		return fmt.Errorf("upsert pending move: %w", err)
 	}
@@ -6144,18 +6249,18 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 // GetPendingMove returns the deferred workflow move for a session, or nil when absent.
 func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
 	var (
-		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
-		position                                                         int
-		queuedAt                                                         time.Time
-		actor, senderSessionID, optionsJSON                              string
+		rowID, moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		position                                                                int
+		queuedAt                                                                time.Time
+		actor, senderSessionID, expectedStepID, initiatingTurnID, optionsJSON   string
 	)
 	if err := r.ro.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
-		       step_position, queued_at, actor, sender_session_id, entry_options_json
+		SELECT id, move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
+		       step_position, queued_at, actor, sender_session_id, expected_workflow_step_id, initiating_turn_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
-		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
-		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
+		&rowID, &moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
+		&position, &queuedAt, &actor, &senderSessionID, &expectedStepID, &initiatingTurnID, &optionsJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -6167,17 +6272,27 @@ func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string)
 		return nil, fmt.Errorf("decode pending move entry options: %w", err)
 	}
 	return &PendingMove{
-		MoveID:               moveID,
-		SessionIncarnationID: sessionIncarnationID,
-		TaskID:               taskID,
-		WorkflowID:           workflowID,
-		WorkflowStepID:       workflowStepID,
-		Position:             position,
-		QueuedAt:             queuedAt,
-		Actor:                actor,
-		SenderSessionID:      senderSessionID,
-		EntryOptions:         entryOptions,
+		ID:                     rowID,
+		MoveID:                 moveID,
+		SessionIncarnationID:   sessionIncarnationID,
+		TaskID:                 taskID,
+		WorkflowID:             workflowID,
+		WorkflowStepID:         workflowStepID,
+		ExpectedWorkflowStepID: expectedStepID,
+		InitiatingTurnID:       initiatingTurnID,
+		Position:               position,
+		QueuedAt:               queuedAt,
+		Actor:                  actor,
+		SenderSessionID:        senderSessionID,
+		EntryOptions:           entryOptions,
 	}, nil
+}
+
+func pendingMoveRowID(move *PendingMove) string {
+	if move.ID == "" {
+		move.ID = uuid.NewString()
+	}
+	return move.ID
 }
 
 // TakePendingMove returns and removes the deferred workflow move for a session.
@@ -6194,18 +6309,18 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 	}
 
 	var (
-		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
-		position                                                         int
-		queuedAt                                                         time.Time
-		actor, senderSessionID, optionsJSON                              string
+		rowID, moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		position                                                                int
+		queuedAt                                                                time.Time
+		actor, senderSessionID, expectedStepID, initiatingTurnID, optionsJSON   string
 	)
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
-		       step_position, queued_at, actor, sender_session_id, entry_options_json
+		SELECT id, move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
+		       step_position, queued_at, actor, sender_session_id, expected_workflow_step_id, initiating_turn_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
-		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
-		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
+		&rowID, &moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
+		&position, &queuedAt, &actor, &senderSessionID, &expectedStepID, &initiatingTurnID, &optionsJSON,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -6216,23 +6331,26 @@ func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string
 	if err != nil {
 		return nil, fmt.Errorf("decode pending move entry options: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE session_id = ?`), sessionID); err != nil {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE session_id = ? AND id = ?`), sessionID, rowID); err != nil {
 		return nil, fmt.Errorf("delete pending move: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return &PendingMove{
-		MoveID:               moveID,
-		SessionIncarnationID: sessionIncarnationID,
-		TaskID:               taskID,
-		WorkflowID:           workflowID,
-		WorkflowStepID:       workflowStepID,
-		Position:             position,
-		QueuedAt:             queuedAt,
-		Actor:                actor,
-		SenderSessionID:      senderSessionID,
-		EntryOptions:         entryOptions,
+		ID:                     rowID,
+		MoveID:                 moveID,
+		SessionIncarnationID:   sessionIncarnationID,
+		TaskID:                 taskID,
+		WorkflowID:             workflowID,
+		WorkflowStepID:         workflowStepID,
+		ExpectedWorkflowStepID: expectedStepID,
+		InitiatingTurnID:       initiatingTurnID,
+		Position:               position,
+		QueuedAt:               queuedAt,
+		Actor:                  actor,
+		SenderSessionID:        senderSessionID,
+		EntryOptions:           entryOptions,
 	}, nil
 }
 

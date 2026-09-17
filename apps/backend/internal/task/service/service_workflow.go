@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +31,9 @@ const (
 	workflowMoveIDKey         = "move_id"
 	workflowMoveOptionsKey    = "options"
 )
+
+var ErrWorkflowStepChanged = repoerrors.ErrWorkflowStepChanged
+var ErrWorkflowStepNotFound = errors.New("workflow step not found")
 
 // ApproveSessionResult contains the result of approving a session
 type ApproveSessionResult struct {
@@ -189,7 +193,6 @@ func (s *Service) UpdateTaskState(ctx context.Context, id string, state v1.TaskS
 	if err != nil {
 		return nil, err
 	}
-
 	oldState := task.State
 
 	// Skip no-op state transitions to avoid duplicate events.
@@ -431,6 +434,7 @@ type MoveTaskResult struct {
 // MoveTaskOptions controls non-default move behavior for trusted callers.
 type MoveTaskOptions struct {
 	AllowActivePrimarySession bool
+	ExpectedWorkflowStepID    string
 	// AllowFailedToCompletedRecovery permits the trusted launch-recovery
 	// action to complete a failed task when it moves into a validated terminal
 	// workflow step. Ordinary task moves preserve failed and cancelled states.
@@ -510,6 +514,14 @@ type workflowMoveAdmissionWithStateRepository interface {
 	) (bool, error)
 }
 
+type workflowMoveAdmissionWithStateCASRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(context.Context, *models.Task, string, string, int, *v1.TaskState, bool, string) (bool, bool, error)
+}
+
+type workflowMoveStepConflictRepository interface {
+	UpdateTaskIfWorkflowStepMatches(context.Context, *models.Task, string, string) error
+}
+
 // workflowMoveConflictRepository is the same-step counterpart of
 // workflowMoveAdmissionWithStateRepository's expectedWorkflowID guard: when a
 // move does not change workflow step, updateMovedTask writes through plain
@@ -566,6 +578,9 @@ func (s *Service) MoveTaskWithOptions(
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if opts.ExpectedWorkflowStepID == "" {
+		opts.ExpectedWorkflowStepID = task.WorkflowStepID
 	}
 	if opts.ExpectedWorkflowID != nil && task.WorkflowID != *opts.ExpectedWorkflowID {
 		// Cheap fast-fail only: this GetTask is not inside a lock, so it
@@ -722,6 +737,13 @@ func (s *Service) MoveTaskWithOptions(
 	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState, opts)
 	if err != nil {
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
+		// An optioned route that lost its source-step CAS cannot have committed
+		// its marker or emitted an entry effect. Expose the established move
+		// conflict to the caller rather than implying that its one-shot
+		// instructions might still be delivered.
+		if moveID != "" && errors.Is(err, ErrWorkflowStepChanged) {
+			return nil, workflowmove.ErrMoveConflict
+		}
 		return nil, err
 	}
 
@@ -778,8 +800,12 @@ func (s *Service) MoveTaskWithOptions(
 			historySessionID = sessionID
 		}
 		s.recordManualStepTransition(ctx, historySessionID, resultFromStepID, workflowStepID, opts.StepHistoryTrigger, opts.StepHistoryActor)
-		s.pullNextTaskOnVacate(ctx, resultFromStepID, task.ID)
-		s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID)
+		if !manualMoveLifecyclePending(task) {
+			s.pullNextTaskOnVacate(ctx, resultFromStepID, task.ID)
+			if err := s.pullTasksFromNewFeederWork(ctx, workflowID, workflowStepID); err != nil {
+				return nil, fmt.Errorf("pull feeder work after move: %w", err)
+			}
+		}
 		refreshed, err := s.tasks.GetTask(ctx, task.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to refresh task after feeder pull: %w", err)
@@ -855,6 +881,9 @@ func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID strin
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
 	if err != nil {
+		if strings.Contains(err.Error(), "workflow step not found") || strings.Contains(err.Error(), "no rows") {
+			return false, fmt.Errorf("%w: %v", ErrWorkflowStepNotFound, err)
+		}
 		return false, fmt.Errorf("failed to get workflow step %s: %w", workflowStepID, err)
 	}
 	if step == nil {
@@ -862,9 +891,16 @@ func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID strin
 	}
 	nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
 	if err != nil {
+		if strings.Contains(err.Error(), "workflow step not found") {
+			return wfmodels.IsTerminalStep(step, nil) || wfmodels.IsTerminalStepName(step.Name), nil
+		}
 		return false, fmt.Errorf("failed to get next workflow step after %s: %w", workflowStepID, err)
 	}
-	return wfmodels.IsTerminalStep(step, nextStep), nil
+	return wfmodels.IsTerminalStep(step, nextStep) || (nextStep == nil && wfmodels.IsTerminalStepName(step.Name)), nil
+}
+
+func (s *Service) IsTerminalWorkflowStep(ctx context.Context, workflowStepID string) (bool, error) {
+	return s.terminalWorkflowStep(ctx, workflowStepID)
 }
 
 func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models.Task, oldStepID, newStepID string, opts MoveTaskOptions) error {
@@ -1308,6 +1344,20 @@ func (s *Service) updateMovedTask(
 // sites, since there is no admission decision to make when the step is
 // unchanged.
 func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task, opts MoveTaskOptions) (bool, error) {
+	if opts.ExpectedWorkflowStepID != "" {
+		repo, ok := s.tasks.(workflowMoveStepConflictRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow step conflict guard repository unavailable for task %s", task.ID)
+		}
+		expectedWorkflowID := ""
+		if opts.ExpectedWorkflowID != nil {
+			expectedWorkflowID = *opts.ExpectedWorkflowID
+		}
+		if err := repo.UpdateTaskIfWorkflowStepMatches(ctx, task, opts.ExpectedWorkflowStepID, expectedWorkflowID); err != nil {
+			return false, err
+		}
+		return task.WIPAdmitted, nil
+	}
 	if opts.ExpectedWorkflowID != nil {
 		// Same-step writes go through plain UpdateTask, which has no
 		// expected-workflow parameter (it is the general-purpose writer
@@ -1334,6 +1384,8 @@ func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task
 // updateMovedTask: it runs the target step's WIP admission decision (queuing
 // the task instead of moving it when the step is at capacity) and persists
 // the result.
+//
+//nolint:nestif // CAS conflict mapping follows the atomic admission result.
 func (s *Service) updateMovedTaskCrossStep(
 	ctx context.Context,
 	task *models.Task,
@@ -1349,6 +1401,23 @@ func (s *Service) updateMovedTaskCrossStep(
 	expectedWorkflowID := ""
 	if opts.ExpectedWorkflowID != nil {
 		expectedWorkflowID = *opts.ExpectedWorkflowID
+	}
+	if opts.ExpectedWorkflowStepID != "" {
+		repo, ok := s.tasks.(workflowMoveAdmissionWithStateCASRepository)
+		if !ok {
+			return false, fmt.Errorf("workflow step conflict guard unavailable for step %s", targetStep.ID)
+		}
+		admitted, applied, err := repo.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(ctx, task, opts.ExpectedWorkflowStepID, targetStep.ID, targetStep.WIPLimit, admittedState, true, expectedWorkflowID)
+		if err != nil {
+			return false, err
+		}
+		if !applied {
+			if opts.ExpectedWorkflowID != nil {
+				return false, ErrWorkflowResolutionConflict
+			}
+			return false, ErrWorkflowStepChanged
+		}
+		return admitted, nil
 	}
 	if admissionWithState, ok := s.tasks.(workflowMoveAdmissionWithStateRepository); ok {
 		return admissionWithState.UpdateTaskWithWorkflowStepAdmissionAndState(

@@ -26,6 +26,18 @@ type ceilingWriteRaceRepo struct {
 	fired       bool
 }
 
+func (r *ceilingWriteRaceRepo) UpdateTaskIfWorkflowStepMatches(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID, expectedWorkflowID string,
+) error {
+	updater, ok := r.TaskRepository.(interface {
+		UpdateTaskIfWorkflowStepMatches(context.Context, *models.Task, string, string) error
+	})
+	require.True(r.t, ok, "race repository must preserve the same-step CAS capability")
+	return updater.UpdateTaskIfWorkflowStepMatches(ctx, task, expectedStepID, expectedWorkflowID)
+}
+
 func (r *ceilingWriteRaceRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	task, err := r.TaskRepository.GetTask(ctx, id)
 	if id == r.watchTaskID && !r.fired {

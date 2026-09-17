@@ -1405,6 +1405,40 @@ func (m *moveTaskConflictRepo) UpdateTaskWithExplicitPosition(ctx context.Contex
 	return m.UpdateTask(ctx, task)
 }
 
+func (m *moveTaskConflictRepo) UpdateTaskIfWorkflowMatches(
+	_ context.Context, task *models.Task, expectedWorkflowID string,
+) error {
+	if m.task.WorkflowID != expectedWorkflowID {
+		return service.ErrWorkflowStepChanged
+	}
+	m.task = task
+	return nil
+}
+
+func (m *moveTaskConflictRepo) UpdateTaskIfWorkflowStepMatches(
+	_ context.Context, task *models.Task, expectedStepID, expectedWorkflowID string,
+) error {
+	m.task = task
+	return nil
+}
+
+func (m *moveTaskConflictRepo) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	_ context.Context,
+	task *models.Task,
+	expectedStepID, targetStepID string,
+	_ int,
+	_ *v1.TaskState,
+	_ bool,
+	_ string,
+) (bool, bool, error) {
+	if m.task.WorkflowStepID != expectedStepID {
+		return false, false, nil
+	}
+	m.task = task
+	m.task.WorkflowStepID = targetStepID
+	return true, true, nil
+}
+
 func (m *moveTaskConflictRepo) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
 	if m.workflows != nil {
 		if workflow, ok := m.workflows[id]; ok {

@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -31,6 +33,7 @@ import (
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+	"github.com/kandev/kandev/internal/workflow/routing"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -125,6 +128,256 @@ type taskMetadataCarryTaker interface {
 
 type lifecycleTaskMetadataLister interface {
 	ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
+}
+
+type routeEffectRepository interface {
+	GetWorkflowRouteEffectByTransition(context.Context, string, int64) (routing.Effect, bool, error)
+	GetCurrentWorkflowRouteEffect(context.Context, string, string) (routing.Effect, bool, error)
+	ClaimWorkflowRouteEffect(context.Context, string, string, time.Time, time.Duration) (bool, error)
+	BeginWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+	RenewWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+	CompleteWorkflowRouteEffect(context.Context, string, string, time.Time) (bool, error)
+}
+
+const routeEffectLease = time.Minute
+
+const routeEffectCompletionRetryDelay = 25 * time.Millisecond
+
+const routeEffectCompletionAttempts = 3
+
+var errRouteEffectClaimLost = errors.New("workflow route effect claim was lost")
+
+var errRouteEffectLeaseHeld = errors.New("workflow route effect lease is still held")
+
+var errRouteEffectExecutionStarted = errors.New("workflow route effect execution already started")
+
+// routeEffectClaim owns one worker's preparation lease on a durable route
+// effect. beginExecution crosses the absorbing boundary after which no
+// successor may reclaim the effect; finish either completes the effect for
+// this token (retrying transient completion failures) or releases the claim.
+type routeEffectClaim struct {
+	effects        routeEffectRepository
+	ctx            context.Context
+	effectID       string
+	token          string
+	stopRenewal    chan struct{}
+	renewalStopped chan struct{}
+	renewalResult  chan error
+}
+
+func (c *routeEffectClaim) beginExecution() error {
+	if c.effects == nil {
+		return nil
+	}
+	begun, err := c.effects.BeginWorkflowRouteEffect(
+		c.ctx, c.effectID, c.token, time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("begin workflow route effect execution: %w", err)
+	}
+	if !begun {
+		return errRouteEffectClaimLost
+	}
+	return nil
+}
+
+func (c *routeEffectClaim) finish(complete bool) error {
+	if c.effects == nil {
+		return nil
+	}
+	close(c.stopRenewal)
+	<-c.renewalStopped
+	if renewalErr, ok := <-c.renewalResult; ok {
+		return renewalErr
+	}
+	if !complete {
+		return nil
+	}
+	var lastErr error
+	for attempt := 0; attempt < routeEffectCompletionAttempts; attempt++ {
+		completed, err := c.effects.CompleteWorkflowRouteEffect(
+			c.ctx, c.effectID, c.token, time.Now().UTC(),
+		)
+		if err == nil {
+			if !completed {
+				return errRouteEffectClaimLost
+			}
+			return nil
+		}
+		lastErr = err
+		if attempt+1 < routeEffectCompletionAttempts {
+			time.Sleep(routeEffectCompletionRetryDelay)
+		}
+	}
+	return fmt.Errorf("complete workflow route effect after retries: %w", lastErr)
+}
+
+func noOpRouteEffectClaim() *routeEffectClaim {
+	return &routeEffectClaim{}
+}
+
+func readRouteEffectForStepEnter(
+	ctx context.Context,
+	effects routeEffectRepository,
+	taskID, targetStepID string,
+	transitionID int64,
+) (routing.Effect, bool, error) {
+	if transitionID != 0 {
+		return effects.GetWorkflowRouteEffectByTransition(ctx, taskID, transitionID)
+	}
+	return effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
+}
+
+func failedRouteEffectClaim(
+	ctx context.Context,
+	effects routeEffectRepository,
+	effect routing.Effect,
+	taskID, targetStepID string,
+	transitionID int64,
+) (*routeEffectClaim, bool, error) {
+	latest, found, err := readRouteEffectForStepEnter(
+		ctx, effects, taskID, targetStepID, transitionID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("re-read route effect after failed claim: %w", err)
+	}
+	if !found || latest.ID != effect.ID {
+		return nil, false, errRouteEffectLeaseHeld
+	}
+	switch latest.Status {
+	case routing.EffectCompleted:
+		return noOpRouteEffectClaim(), false, nil
+	case routing.EffectExecuting:
+		return nil, false, errRouteEffectExecutionStarted
+	default:
+		return nil, false, errRouteEffectLeaseHeld
+	}
+}
+
+func (s *Service) scheduleTaskLifecycleRetry(taskID string) {
+	if taskID == "" {
+		return
+	}
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	if s.taskLifecycleRetryCtx == nil || s.taskLifecycleRetryCtx.Err() != nil {
+		return
+	}
+	if s.taskLifecycleRetryTimers == nil {
+		// A service that had its retry context installed directly (tests,
+		// embedding callers) may never have run startTaskLifecycleRetries;
+		// a missing map must not turn a scheduled retry into a panic.
+		s.taskLifecycleRetryTimers = make(map[string]*time.Timer)
+	}
+	if _, exists := s.taskLifecycleRetryTimers[taskID]; exists {
+		return
+	}
+	s.taskLifecycleRetryWorkers.Add(1)
+	s.taskLifecycleRetryTimers[taskID] = time.AfterFunc(routeEffectLease, func() {
+		defer s.taskLifecycleRetryWorkers.Done()
+		s.taskLifecycleRetryMu.Lock()
+		ctx := s.taskLifecycleRetryCtx
+		delete(s.taskLifecycleRetryTimers, taskID)
+		s.taskLifecycleRetryMu.Unlock()
+		if ctx != nil && ctx.Err() == nil {
+			s.recoverTaskLifecycleToken(ctx, taskID)
+		}
+	})
+}
+
+func (s *Service) renewRouteEffectClaim(ctx context.Context, effects routeEffectRepository, effectID, token string, stop <-chan struct{}, stopped chan<- struct{}, result chan<- error) {
+	defer close(stopped)
+	defer close(result)
+	ticker := time.NewTicker(routeEffectLease / 3)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case now := <-ticker.C:
+			renewed, err := effects.RenewWorkflowRouteEffect(ctx, effectID, token, now.UTC())
+			if err != nil {
+				continue
+			}
+			if !renewed {
+				result <- errRouteEffectClaimLost
+				return
+			}
+		}
+	}
+}
+
+// claimRouteEffectForStepEnter claims the durable destination effect and
+// returns a claim whose token must cross beginExecution before any lifecycle
+// side effect runs. A missing effect (older callers) yields a no-op claim so
+// legacy flows keep working; an unclaimable effect reports the absorbing or
+// lease-held state so the caller can schedule reconciliation.
+func (s *Service) claimRouteEffectForStepEnter(
+	ctx context.Context, taskID, targetStepID string, transitionID int64,
+) (*routeEffectClaim, bool, error) {
+	effects, ok := s.repo.(routeEffectRepository)
+	if !ok {
+		return noOpRouteEffectClaim(), true, nil
+	}
+	effect, found, err := readRouteEffectForStepEnter(ctx, effects, taskID, targetStepID, transitionID)
+	if err != nil {
+		return nil, false, fmt.Errorf("read route effect for step entry: %w", err)
+	}
+	if !found {
+		return noOpRouteEffectClaim(), true, nil
+	}
+	token := uuid.NewString()
+	claimed, err := effects.ClaimWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC(), routeEffectLease)
+	if err != nil {
+		return nil, false, fmt.Errorf("claim route effect for step entry: %w", err)
+	}
+	if !claimed {
+		return failedRouteEffectClaim(ctx, effects, effect, taskID, targetStepID, transitionID)
+	}
+	renewCtx := context.WithoutCancel(ctx)
+	stopRenewal := make(chan struct{})
+	renewalStopped := make(chan struct{})
+	renewalResult := make(chan error, 1)
+	go s.renewRouteEffectClaim(
+		renewCtx, effects, effect.ID, token, stopRenewal, renewalStopped, renewalResult,
+	)
+	return &routeEffectClaim{
+		effects: effects, ctx: renewCtx, effectID: effect.ID, token: token,
+		stopRenewal: stopRenewal, renewalStopped: renewalStopped, renewalResult: renewalResult,
+	}, true, nil
+}
+
+// claimRouteEffect reserves the durable destination effect before lifecycle
+// work begins. A missing effect preserves compatibility with routes written by
+// older callers — no durable fence exists, so the caller owns the lifecycle —
+// while a present effect is the sole owner token for side effects.
+//
+//nolint:unused // retained for compatibility with route-effect recovery callers.
+func (s *Service) claimRouteEffect(ctx context.Context, taskID, targetStepID string, transitionID int64) (routing.Effect, string, bool, error) {
+	effects, ok := s.repo.(routeEffectRepository)
+	if !ok {
+		return routing.Effect{}, "", true, nil
+	}
+	var effect routing.Effect
+	var found bool
+	var err error
+	if transitionID != 0 {
+		effect, found, err = effects.GetWorkflowRouteEffectByTransition(ctx, taskID, transitionID)
+	} else {
+		effect, found, err = effects.GetCurrentWorkflowRouteEffect(ctx, taskID, targetStepID)
+	}
+	if err != nil {
+		return effect, "", false, err
+	}
+	if !found {
+		return routing.Effect{}, "", true, nil
+	}
+	token := uuid.NewString()
+	claimed, err := effects.ClaimWorkflowRouteEffect(ctx, effect.ID, token, time.Now().UTC(), routeEffectLease)
+	if err != nil || !claimed {
+		return effect, "", false, err
+	}
+	return effect, token, true, nil
 }
 
 type taskMovedLifecyclePrerequisites struct {
@@ -479,11 +732,18 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		legacyTrigger = engine.TriggerOnTurnComplete
 	}
 	transitionCtx := engineTransitionAttribution(ctx, sessionID, legacyTrigger)
-	fromStepID := ""
-	if fromStep != nil {
-		fromStepID = fromStep.ID
+	if triggerOnEnter && consumedSignal != nil && consumedSignal.OperationID != "" {
+		// ADR 0015 — the signal recorded a pending route operation at
+		// claim time; the turn-end commit must reuse that exact operation so
+		// the pending row settles as committed instead of being orphaned by
+		// a fresh operation ID.
+		transitionCtx = routing.WithOperation(transitionCtx, routing.Operation{
+			ID: consumedSignal.OperationID, TaskID: taskID, Producer: routing.ProducerStepComplete,
+			ExpectedStepID: fromStep.ID, TargetStepID: toStepID,
+			SessionID: sessionID, ActorKind: string(steptelemetry.ActorAgent), ActorID: sessionID,
+		})
 	}
-	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, fromStepID, targetStep); err != nil {
+	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, fromStep.ID, targetStep); err != nil {
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
@@ -2502,7 +2762,8 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	go func() {
 		if err := s.processStepExitAndEnterWithSteps(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
-			data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion, queuePromotionToken, data.StepTransitionID,
+			data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion,
+			data.StepTransitionID, queuePromotionToken,
 		); err != nil {
 			s.logger.Warn("task.moved: step exit and enter lifecycle failed",
 				zap.String("task_id", data.TaskID),
@@ -2752,14 +3013,17 @@ func (s *Service) clearManualMoveLifecycleMarkersIfCompleted(ctx context.Context
 
 // processManualMoveLifecycleWithFeederBarrier runs the original move lifecycle
 // before waking feeder pulls. The per-task lock and durable pending/completed
-// markers make duplicate deliveries and restart recovery safe.
+// markers make duplicate deliveries and restart recovery safe. The durable
+// route-effect claim is owned by processStepExitAndEnterWithSteps; this
+// barrier interprets its claim taxonomy: an executing effect needs
+// reconciliation, a lease-held effect retries after expiry, and a lost claim
+// leaves the durable markers for the retry owner.
 func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	ctx context.Context,
 	taskID string,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
-	fromStepID, toStepID, taskDescription string,
-	entryIDs ...int64,
+	fromStepID, toStepID, taskDescription string, _ ...int64,
 ) {
 	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
@@ -2779,19 +3043,115 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	if s.onManualMoveLifecycleStart != nil {
 		s.onManualMoveLifecycleStart()
 	}
-	if err := s.processStepExitAndEnterWithSteps(
-		ctx, taskID, session, fromStep, targetStep,
-		fromStepID, toStepID, taskDescription, false, nil, entryIDs...,
+	// Claim and durably begin the route effect before any session blocking:
+	// once execution starts the effect is absorbing, so a successor blocked
+	// behind a crashed worker cannot reclaim it while that worker is mid-ExitOrEnter.
+	effectClaim, claimed, effectErr := s.claimRouteEffectForStepEnter(
+		ctx, taskID, toStepID, task.WorkflowStepTransitionID,
+	)
+	if effectErr != nil {
+		if errors.Is(effectErr, errRouteEffectExecutionStarted) {
+			s.logger.Warn("manual move lifecycle execution requires reconciliation",
+				zap.String("task_id", taskID), zap.Error(effectErr))
+			return
+		}
+		if !errors.Is(effectErr, errRouteEffectLeaseHeld) {
+			s.logger.Warn("manual move lifecycle could not claim route effect",
+				zap.String("task_id", taskID), zap.Error(effectErr))
+		}
+		s.scheduleTaskLifecycleRetry(taskID)
+		return
+	}
+	if !claimed {
+		return
+	}
+	claimFinished := false
+	defer func() {
+		if !claimFinished {
+			_ = effectClaim.finish(false)
+		}
+	}()
+	if err := effectClaim.beginExecution(); err != nil {
+		s.logger.Warn("manual move lifecycle could not begin route effect",
+			zap.String("task_id", taskID), zap.Error(err))
+		s.scheduleTaskLifecycleRetry(taskID)
+		return
+	}
+	if err := s.processExitEnterForClaimedEffect(
+		ctx, effectClaim, taskID, session, fromStep, targetStep,
+		fromStepID, toStepID, taskDescription,
 	); err != nil {
 		s.logger.Warn("manual move lifecycle stopped before completion",
 			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
 			zap.String("to_step_id", toStepID), zap.Error(err))
+		s.scheduleTaskLifecycleRetry(taskID)
+		return
+	}
+	claimFinished = true
+	if err := effectClaim.finish(true); err != nil {
+		s.logger.Warn("manual move lifecycle could not complete route effect",
+			zap.String("task_id", taskID), zap.Error(err))
+		s.scheduleTaskLifecycleRetry(taskID)
 		return
 	}
 	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
 		return
 	}
 	s.continueManualMoveLifecycle(ctx, taskID)
+}
+
+// processExitEnterForClaimedEffect runs the destination lifecycle side effects
+// under an already-begun route-effect claim. Any failure here leaves the
+// effect executing — its owner may have produced external side effects, so
+// the barrier schedules reconciliation instead of reclaiming.
+// processExitEnterForClaimedEffect runs the destination lifecycle side effects
+// under a claimed route effect. The ordering depends on the claim kind:
+//
+//   - A durable effect (claim.effects != nil) crosses beginExecution FIRST,
+//     so the effect is executing before any blocking session work; a
+//     successor cannot reclaim it mid-lifecycle. The source on_exit then
+//     runs before the destination prepare, which matches the durable
+//     absorbing semantics the branch's route-effect tests assert.
+//   - A legacy route with no recorded effect has no absorbing boundary, so
+//     preparation gates the source on_exit: a transient destination-prepare
+//     failure leaves the whole lifecycle retryable with zero side effects.
+func (s *Service) processExitEnterForClaimedEffect(
+	ctx context.Context,
+	effectClaim *routeEffectClaim,
+	taskID string,
+	session *models.TaskSession,
+	fromStep, targetStep *wfmodels.WorkflowStep,
+	fromStepID, toStepID, taskDescription string,
+) error {
+	if targetStep == nil {
+		var err error
+		targetStep, err = s.loadWorkflowStepForLifecycle(ctx, toStepID, "transition target")
+		if err != nil {
+			return err
+		}
+	}
+	if fromStep == nil {
+		var err error
+		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "transition source")
+		if err != nil {
+			return err
+		}
+	}
+	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
+	if effectClaim.effects == nil {
+		preparedSession, err := s.prepareStepEnter(ctx, taskID, session.ID, clearReview)
+		if err != nil {
+			return err
+		}
+		if err := effectClaim.beginExecution(); err != nil {
+			return err
+		}
+		s.processOnExit(ctx, taskID, preparedSession, fromStep)
+		s.processOnEnter(ctx, taskID, preparedSession, targetStep, taskDescription, 0, fromStep)
+		return nil
+	}
+	s.processOnExit(ctx, taskID, session, fromStep)
+	return s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep)
 }
 
 func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacatedStepID string) {
@@ -2809,9 +3169,13 @@ func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacat
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
 // sequence for a step transition. Used by handleTaskMovedWithSession (where MoveTask
 // already persisted the step change in the DB).
-func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) error {
+func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string, transitionIDs ...int64) error {
+	var transitionID int64
+	if len(transitionIDs) > 0 {
+		transitionID = transitionIDs[0]
+	}
 	// Process on_exit for the step we're leaving
-	if err := s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, nil); err != nil {
+	if err := s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, transitionID, nil); err != nil {
 		s.logger.Warn("step exit and enter lifecycle failed",
 			zap.String("task_id", taskID), zap.String("from_step_id", fromStepID),
 			zap.String("to_step_id", toStepID), zap.Error(err))
@@ -2825,21 +3189,8 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	taskID string,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
-	fromStepID, toStepID, taskDescription string, queuePromotion bool, queuePromotionToken interface{},
-	entryIDs ...int64,
+	fromStepID, toStepID, taskDescription string, queuePromotion bool, transitionID int64, queuePromotionToken interface{},
 ) error {
-	if fromStep == nil {
-		var err error
-		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "transition source")
-		if err != nil {
-			if queuePromotion {
-				s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved source lookup")
-			}
-			return err
-		}
-	}
-	s.processOnExit(ctx, taskID, session, fromStep)
-
 	if targetStep == nil {
 		var err error
 		targetStep, err = s.loadWorkflowStepForLifecycle(ctx, toStepID, "transition target")
@@ -2851,36 +3202,89 @@ func (s *Service) processStepExitAndEnterWithSteps(
 		}
 	}
 
+	effectClaim, claimed, effectErr := s.claimRouteEffectForStepEnter(
+		ctx, taskID, targetStep.ID, transitionID,
+	)
+	if effectErr != nil {
+		return effectErr
+	}
+	if !claimed {
+		return nil
+	}
+	claimFinished := false
+	defer func() {
+		if !claimFinished {
+			_ = effectClaim.finish(false)
+		}
+	}()
+
+	if fromStep == nil {
+		var err error
+		fromStep, err = s.loadWorkflowStepForLifecycle(ctx, fromStepID, "transition source")
+		if err != nil {
+			if queuePromotion {
+				s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved source lookup")
+			}
+			return err
+		}
+	}
+
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, fromStep, entryIDs...); err != nil {
+	session, err := s.prepareStepEnter(ctx, taskID, session.ID, clearReview)
+	if err != nil {
 		if queuePromotion {
 			s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.moved")
 		}
 		return err
 	}
-	return nil
+	if err := effectClaim.beginExecution(); err != nil {
+		return err
+	}
+
+	s.processOnExit(ctx, taskID, session, fromStep)
+	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, 0, fromStep)
+	claimFinished = true
+	return effectClaim.finish(true)
+}
+
+// finalizeStepEnter optionally clears review status, reloads the session, and
+// processes on_enter actions for the target step. Shared by executeStepTransition
+// and processStepExitAndEnter.
+// prepareStepEnter clears review status and loads the fresh session snapshot
+// the destination lifecycle needs. Failing preparation must happen before any
+// source on_exit side effect runs, so a transient failure leaves the whole
+// lifecycle retryable.
+func (s *Service) prepareStepEnter(
+	ctx context.Context, taskID, sessionID string, clearReview bool,
+) (*models.TaskSession, error) {
+	if clearReview {
+		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
+			s.logger.Warn("failed to clear session review status",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return nil, fmt.Errorf("clear session review status: %w", err)
+		}
+	}
+
+	// Load the current session snapshot used by the destination lifecycle.
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for on_enter",
+			zap.String("session_id", sessionID), zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return nil, fmt.Errorf("load session for on_enter: %w", err)
+	}
+
+	return session, nil
 }
 
 // finalizeStepEnter optionally clears review status, reloads the session, and
 // processes on_enter actions for the target step. Shared by executeStepTransition
 // and processStepExitAndEnter.
 func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, sourceStep *wfmodels.WorkflowStep, entryIDs ...int64) error {
-	if clearReview {
-		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
-			s.logger.Warn("failed to clear session review status",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return fmt.Errorf("clear session review status: %w", err)
-		}
-	}
-
-	// Reload session after on_exit may have changed metadata
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.prepareStepEnter(ctx, taskID, sessionID, clearReview)
 	if err != nil {
-		s.logger.Warn("failed to load session for on_enter",
-			zap.String("session_id", sessionID), zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return fmt.Errorf("load session for on_enter: %w", err)
+		return err
 	}
 
 	// entryID 0: this path (manual move / legacy on_turn_start/complete) does
@@ -7355,6 +7759,22 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		stepEntry = &stepentry.AllocationResult{}
 		applyCtx = stepentry.WithResultHolder(applyCtx, stepEntry)
 	}
+	var consumedSignal *models.PendingStepCompletionSignal
+	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
+		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
+			consumedSignal = &signal
+			if signal.OperationID != "" {
+				// ADR 0015 — reuse the pending step-completion operation the
+				// signal recorded, so its row settles as committed through the
+				// same operation instead of being orphaned by a new ID.
+				applyCtx = routing.WithOperation(applyCtx, routing.Operation{
+					ID: signal.OperationID, TaskID: taskID, Producer: routing.ProducerStepComplete,
+					ExpectedStepID: result.FromStepID, TargetStepID: result.ToStepID,
+					SessionID: session.ID, ActorKind: string(steptelemetry.ActorAgent), ActorID: session.ID,
+				})
+			}
+		}
+	}
 	applied, err := commit(applyCtx)
 	if err != nil {
 		s.logger.Error("failed to apply engine transition",
@@ -7373,12 +7793,8 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// ADR 0015 — record the audit row before the pending signal (if any) is
 	// cleared. Only an on_turn_complete transition can have consumed a signal;
 	// guarded decision transitions do not mutate the decider's signal bag.
-	var consumedSignal *models.PendingStepCompletionSignal
-	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
-			consumedSignal = &signal
-		}
-	}
+	// consumedSignal was resolved before the commit (its OperationID feeds the
+	// commit context's route operation).
 	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
 	switch trigger {
 	case engine.TriggerOnTurnStart:
@@ -7478,7 +7894,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// The caller may still hold the source session guard, but this work runs
 	// asynchronously after that guard is released. Clear the synchronous
 	// ownership marker so profile-switch parking acquires its own guard.
-	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, stepEntryID, fromStep)
+	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, stepEntryID, 0, fromStep)
 	return true
 }
 
@@ -7489,16 +7905,74 @@ func (s *Service) launchProcessOnEnter(
 	targetStep *wfmodels.WorkflowStep,
 	taskDescription string,
 	entryID int64,
+	transitionID int64,
 	sourceStep *wfmodels.WorkflowStep,
 ) {
+	// The hook is test-only, but it still needs the same invocation identity as
+	// the on_enter launch. Reading the mutable field at goroutine completion can
+	// invoke a later transition's callback and make two independent entries
+	// appear as a duplicate effect.
+	onComplete := s.onProcessOnEnterComplete
 	go func() {
 		defer func() {
-			if s.onProcessOnEnterComplete != nil {
-				s.onProcessOnEnterComplete()
+			if onComplete != nil {
+				onComplete()
 			}
 		}()
+		effectClaim, claimed, err := s.claimRouteEffectForStepEnter(ctx, taskID, targetStep.ID, transitionID)
+		if err != nil || !claimed {
+			if err != nil {
+				s.logger.Warn("failed to claim workflow route effect", zap.String("task_id", taskID), zap.Error(err))
+			}
+			return
+		}
+		claimFinished := false
+		defer func() {
+			if !claimFinished {
+				_ = effectClaim.finish(false)
+			}
+		}()
+		if err := effectClaim.beginExecution(); err != nil {
+			s.logger.Warn("lost workflow route effect before on_enter",
+				zap.String("task_id", taskID), zap.Error(err))
+			return
+		}
 		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID, sourceStep)
+		claimFinished = true
+		if err := effectClaim.finish(true); err != nil {
+			s.logger.Warn("failed to complete workflow route effect",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
 	}()
+}
+
+func (s *Service) startTaskLifecycleRetries() {
+	s.taskLifecycleRetryMu.Lock()
+	defer s.taskLifecycleRetryMu.Unlock()
+	if s.taskLifecycleRetryCtx != nil && s.taskLifecycleRetryCtx.Err() == nil {
+		return
+	}
+	s.taskLifecycleRetryCtx, s.taskLifecycleRetryCancel = context.WithCancel(context.Background())
+	if s.taskLifecycleRetryTimers == nil {
+		s.taskLifecycleRetryTimers = make(map[string]*time.Timer)
+	}
+}
+
+func (s *Service) stopTaskLifecycleRetries() {
+	s.taskLifecycleRetryMu.Lock()
+	if s.taskLifecycleRetryCancel != nil {
+		s.taskLifecycleRetryCancel()
+	}
+	for taskID, timer := range s.taskLifecycleRetryTimers {
+		if timer.Stop() {
+			s.taskLifecycleRetryWorkers.Done()
+		}
+		delete(s.taskLifecycleRetryTimers, taskID)
+	}
+	s.taskLifecycleRetryCtx = nil
+	s.taskLifecycleRetryCancel = nil
+	s.taskLifecycleRetryMu.Unlock()
+	s.taskLifecycleRetryWorkers.Wait()
 }
 
 // processOnTurnStartViaEngine uses the workflow engine to evaluate on_turn_start
