@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 func TestTaskBlocker_CRUD(t *testing.T) {
@@ -348,10 +349,13 @@ func TestListBlockersForTasks_OrdersByCreatedAtThenBlockerID(t *testing.T) {
 	repo, db := newTestRepoWithDB(t)
 	ctx := context.Background()
 
+	// Insertion order deliberately does not match the expected sorted order
+	// (task-z, task-a, task-c) below, so a query missing its ORDER BY clause
+	// would return rows in insertion/rowid order instead and fail this test.
 	for _, b := range []*models.TaskBlocker{
+		{TaskID: "task-1", BlockerTaskID: "task-c"}, // same time as task-a, higher id
 		{TaskID: "task-1", BlockerTaskID: "task-z"}, // earliest, but higher id
 		{TaskID: "task-1", BlockerTaskID: "task-a"}, // same time as task-c, lower id
-		{TaskID: "task-1", BlockerTaskID: "task-c"}, // same time as task-a, higher id
 	} {
 		if err := repo.CreateTaskBlocker(ctx, b); err != nil {
 			t.Fatalf("create blocker: %v", err)
@@ -381,8 +385,11 @@ func TestListBlockersForTasks_OrdersByCreatedAtThenBlockerID(t *testing.T) {
 }
 
 // A batched IN (...) query must stay below the database's bind-parameter
-// ceiling. 501 distinct task ids exceed sqliteMaxHostParams (500), so this
-// fails at the database if either query stopped chunking its input.
+// ceiling by chunking its input. 501 distinct task ids exceed
+// workspaceGroupMaxHostParams (500), so this must split into 2 chunks; that
+// split is asserted directly via sqlite.ChunkTaskIDsCount rather than relying
+// on the database to reject an unchunked query, since SQLite's own compiled
+// host-parameter ceiling sits far above 501 and would not reject it anyway.
 func TestListBlockersAndDependentsForTasks_ChunksPastHostParamCeiling(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -398,6 +405,10 @@ func TestListBlockersAndDependentsForTasks_ChunksPastHostParamCeiling(t *testing
 		}); err != nil {
 			t.Fatalf("create blocker %d: %v", i, err)
 		}
+	}
+
+	if got := sqlite.ChunkTaskIDsCount(taskIDs); got != 2 {
+		t.Fatalf("ChunkTaskIDsCount(%d ids) = %d chunks, want 2", n, got)
 	}
 
 	blockers, err := repo.ListBlockersForTasks(ctx, taskIDs)
