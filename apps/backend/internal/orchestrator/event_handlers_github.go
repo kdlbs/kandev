@@ -669,6 +669,13 @@ func (s *Service) autoStartReviewTask(
 		true,
 		nil,
 	)
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		s.logger.Info("review auto-start deferred by session ceiling; will replay once capacity frees up",
+			zap.String("task_id", task.ID),
+			zap.Int("pr_number", evt.PR.Number))
+		s.completeAutoStartOnCreate(ctx, task.ID, "review.auto_start")
+		return
+	}
 	if err != nil {
 		s.logger.Error("failed to auto-start review task",
 			zap.String("task_id", task.ID),
@@ -1823,6 +1830,12 @@ func (s *Service) autoStartIssueTask(
 		true,
 		nil,
 	)
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		s.logger.Info("issue auto-start deferred by session ceiling; will replay once capacity frees up",
+			zap.String("task_id", task.ID),
+			zap.Int(issueNumberKey, evt.Issue.Number))
+		return
+	}
 	if err != nil {
 		s.logger.Error("failed to auto-start issue task",
 			zap.String("task_id", task.ID),

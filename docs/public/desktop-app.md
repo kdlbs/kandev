@@ -144,6 +144,14 @@ shows **Reconnect** and **Remove** actions. Reconnect selects the folder again
 and starts a fresh scan. Removal forgets that desktop discovery folder; it does
 not remove repositories or files.
 
+If one root fails while another succeeds, repository selectors keep the
+successful results and their normal **Refresh repositories** action. Failed-root
+paths stay in structured backend logs and are not shown in selectors. An
+inaccessible descendant does not make its accessible root require
+reconnection. You can use **Add Local Repository** to validate an absolute path
+when automatic discovery cannot reach its root. Kandev does not create missing
+clone directories during recovery.
+
 macOS privacy access belongs to the application identity. A replacement that
 is unsigned, re-signed, or otherwise has a different identity can require
 access again. Kandev cannot promise that consent survives every unsigned

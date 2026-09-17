@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 /** Focused page object for Files tree and composer context selectors. */
 export class FileTreePage {
@@ -13,6 +13,50 @@ export class FileTreePage {
     return this.page.locator(
       `[data-testid="file-tree-node"][data-path=${JSON.stringify(nodePath)}]:visible`,
     );
+  }
+
+  /**
+   * Wait for a tree row and reveal it when the virtualizer has mounted it
+   * below the current viewport. The initial direct check keeps common rows
+   * instant, while the bounded sweep handles large workspaces deterministically.
+   */
+  async waitForFileTreeNode(nodePath: string, timeout = 30_000): Promise<Locator> {
+    const node = this.fileTreeNode(nodePath);
+    const directTimeout = Math.min(2_000, timeout);
+    if (await node.isVisible({ timeout: directTimeout }).catch(() => false)) return node;
+
+    const viewport = this.fileTreeScrollViewport();
+    await viewport.waitFor({ state: "visible", timeout: Math.max(1, timeout) });
+    await viewport.evaluate((element) => {
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    await expect
+      .poll(
+        async () => {
+          if (await node.isVisible().catch(() => false)) return true;
+          await viewport
+            .evaluate((element) => {
+              const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+              const increment = Math.max(element.clientHeight * 0.8, 160);
+              const nextScrollTop = Math.min(maxScrollTop, element.scrollTop + increment);
+              if (nextScrollTop <= element.scrollTop + 1) return false;
+              element.scrollTop = nextScrollTop;
+              element.dispatchEvent(new Event("scroll", { bubbles: true }));
+              return true;
+            })
+            .catch(() => false);
+          return false;
+        },
+        {
+          timeout: Math.max(1, timeout - directTimeout),
+          intervals: [100, 250, 500],
+          message: `Waiting for file tree node ${nodePath} to mount`,
+        },
+      )
+      .toBe(true);
+    return node;
   }
 
   /** The existing Files viewport that owns tree scrolling. */

@@ -48,11 +48,16 @@ export function createSettingsTargetRegistry(
   const targets = new Map<string, HTMLElement>();
   let pendingTargetId: string | null = null;
 
+  const isHidden = (element: HTMLElement) =>
+    element.hidden ||
+    element.closest("[hidden]") !== null ||
+    element.closest('[aria-hidden="true"]') !== null;
+
   return {
     register(targetId, element) {
       targets.set(targetId, element);
       element.setAttribute(SETTINGS_TARGET_ATTRIBUTE, targetId);
-      if (pendingTargetId === targetId) {
+      if (pendingTargetId === targetId && !isHidden(element)) {
         pendingTargetId = null;
         reveal(element);
       }
@@ -66,6 +71,10 @@ export function createSettingsTargetRegistry(
     request(targetId) {
       const element = targets.get(targetId);
       if (!element) {
+        pendingTargetId = targetId;
+        return false;
+      }
+      if (isHidden(element)) {
         pendingTargetId = targetId;
         return false;
       }

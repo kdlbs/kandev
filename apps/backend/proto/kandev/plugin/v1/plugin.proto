@@ -10,6 +10,9 @@ option go_package = "github.com/kandev/kandev/proto/kandev/plugin/v1;pluginv1";
 service Plugin {
   rpc DeliverEvent(Event) returns (EventAck);
   rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
+  // Optional automation adapter extension. Old plugins return Unimplemented.
+  rpc DescribeAutomationCondition(AutomationConditionRequest) returns (AutomationConditionResponse);
+  rpc VerifyAutomationWebhook(AutomationWebhookRequest) returns (AutomationWebhookResponse);
   // Browser-originated calls reach this method only through Kandev's
   // authenticated declared-action route. Context is host-verified; body is
   // bounded untrusted JSON.
@@ -142,6 +145,15 @@ service Host {
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
   rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
+
+  // Agent conversations — capability agent_conversation. Ensure creates or
+  // repairs one hidden workflowless ephemeral task with a primary session per
+  // (plugin_id, workspace_id, conversation_key). Dispatch sends a prompt to an
+  // ensured conversation with stable occurrence idempotency and busy-session
+  // coalescing. Delete removes only conversations owned by this plugin.
+  rpc EnsureAgentConversation(EnsureAgentConversationRequest) returns (EnsureAgentConversationResponse);
+  rpc DispatchAgentConversation(DispatchAgentConversationRequest) returns (DispatchAgentConversationResponse);
+  rpc DeleteAgentConversation(DeleteAgentConversationRequest) returns (DeleteAgentConversationResponse);
 
   // Interaction responses — capability api_write:interactions. Each routes
   // through the same first-party service the native UI uses, so the agent
@@ -933,4 +945,104 @@ message DeletePluginOwnedTaskTreeResponse {
 // retrying the remaining idempotent cleanup.
 message DeletePluginOwnedTaskTreeProgress {
   repeated string deleted_task_ids = 1;
+}
+
+// ── Agent conversations ─────────────────────────────────────────────────
+
+// AgentConversationDescriptor identifies an existing conversation.
+message AgentConversationDescriptor {
+  string task_id = 1;
+  string session_id = 2;
+  string workspace_id = 3;
+  string conversation_key = 4;
+  // The agent_profile_id the conversation uses; empty when the profile
+  // referenced at ensure time is no longer available.
+  string agent_profile_id = 5;
+}
+
+// AgentConversationSpec controls how Ensure creates a conversation.
+message AgentConversationSpec {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  // Editable base prompt baked into every dispatch to this conversation.
+  // The plugin appends its cycle/report-specific instructions.
+  string base_prompt = 3;
+  // Agent profile id to use. Empty means "use the workspace default".
+  // An explicit profile that is disabled/deleted produces a typed
+  // configuration-required result.
+  string agent_profile_id = 4;
+}
+
+// EnsureAgentConversationRequest carries the Ensure request.
+message EnsureAgentConversationRequest {
+  AgentConversationSpec spec = 1;
+}
+
+// EnsureAgentConversationResponse carries the result.
+message EnsureAgentConversationResponse {
+  AgentConversationDescriptor conv_descriptor = 1;
+  // One of "created", "exists", or "configuration_required".
+  string status = 2;
+}
+
+// DispatchAgentConversationRequest sends a prompt to an ensured conversation.
+message DispatchAgentConversationRequest {
+  string workspace_id = 1;
+  string conversation_key = 2;
+  string text = 3;
+  // Stable idempotency key derived from (trigger, due_timestamp) for
+  // scheduled occurrences, or a unique key for manual invocations.
+  // An already-claimed key returns the prior dispatch result.
+  string occurrence_key = 4;
+}
+
+// DispatchAgentConversationResponse carries the dispatch result.
+message DispatchAgentConversationResponse {
+  string session_id = 1;
+  // One of "started", "sent", "duplicate_occurrence", or "skipped_busy".
+  string status = 2;
+  AgentConversationDescriptor conv_descriptor = 3;
+}
+
+// DeleteAgentConversationRequest deletes all conversations matching the
+// request. Only conversations owned by this plugin are affected.
+message DeleteAgentConversationRequest {
+  string workspace_id = 1;
+  string conversation_key = 2;
+}
+
+// DeleteAgentConversationResponse carries the result.
+message DeleteAgentConversationResponse {
+  int32 deleted_count = 1;
+}
+
+// Configuration and connection eligibility are always resolved within the host's workspace.
+message AutomationConditionRequest {
+  string workspace_id = 1;
+  string condition_key = 2;
+  bytes config = 3;
+}
+message AutomationConditionResponse {
+  bool available = 1;
+  string reason = 2;
+  string connection_id = 3;
+  string connection_revision = 4;
+  // Optional workspace-authorized field suggestions: JSON object of string arrays.
+  bytes config_options = 5;
+}
+message AutomationWebhookRequest {
+  string workspace_id = 1;
+  string condition_key = 2;
+  string connection_id = 3;
+  string connection_revision = 4;
+  bytes config = 5;
+  bytes body = 6;
+  map<string, string> headers = 7;
+  string secret = 8;
+}
+message AutomationWebhookResponse {
+  // accepted, ignored, rejected, or malformed (authenticated invalid JSON). RPC errors are transient failures.
+  string outcome = 1;
+  string event_kind = 2;
+  bytes data = 3;
 }

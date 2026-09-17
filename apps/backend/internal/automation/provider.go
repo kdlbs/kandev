@@ -13,6 +13,8 @@ import (
 
 // Components holds the automation subsystem components for lifecycle management.
 type Components struct {
+	webhookCancel      context.CancelFunc
+	webhookDone        chan struct{}
 	Service            *Service
 	Scheduler          *CronScheduler
 	Evaluator          *GitHubEvaluator
@@ -22,12 +24,19 @@ type Components struct {
 
 // Start begins background processing (scheduler + GitHub polling + webhook subscriber + merged-PR subscriber).
 func (c *Components) Start(ctx context.Context) {
+	if err := c.Service.recoverWebhookClaims(ctx); err != nil {
+		c.Service.logger.Warn("webhook claim recovery failed", zap.Error(err))
+	}
 	if err := c.Service.ReconcileOpenRuns(ctx); err != nil {
 		c.Service.logger.Warn("automation open-run reconciliation failed", zap.Error(err))
 	}
 	if err := c.Service.ReconcileCleanupJobs(ctx); err != nil {
 		c.Service.logger.Warn("automation cleanup-job reconciliation failed", zap.Error(err))
 	}
+	workerCtx, cancel := context.WithCancel(ctx)
+	c.webhookCancel = cancel
+	c.webhookDone = make(chan struct{})
+	go func() { defer close(c.webhookDone); c.Service.runWebhookWorker(workerCtx) }()
 	c.Scheduler.Start(ctx)
 	c.Evaluator.Start(ctx)
 	c.WebhookSubscriber.Start(ctx)
@@ -36,6 +45,10 @@ func (c *Components) Start(ctx context.Context) {
 
 // Stop gracefully shuts down background processing.
 func (c *Components) Stop() {
+	if c.webhookCancel != nil {
+		c.webhookCancel()
+		<-c.webhookDone
+	}
 	c.Scheduler.Stop()
 	c.Evaluator.Stop()
 	c.WebhookSubscriber.Stop()

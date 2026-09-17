@@ -304,6 +304,8 @@ func kubernetesPrepareScript(req *ExecutorCreateRequest) (string, error) {
 	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
 	if script == "" {
 		script = DefaultPrepareScript("k8s")
+	} else {
+		script = upgradeLegacyKubernetesPrepareScript(script)
 	}
 	if script == "" {
 		return ":\n", nil

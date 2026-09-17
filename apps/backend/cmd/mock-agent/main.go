@@ -47,14 +47,15 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn            sessionUpdater
-	model           string
-	sessions        map[acp.SessionId]bool
-	promptCancels   map[acp.SessionId]context.CancelFunc
-	sessionConfig   map[acp.SessionId][]acp.SessionConfigOption
-	commandsEmitted map[acp.SessionId]bool
-	nextSessionID   uint64
-	mu              sync.Mutex
+	conn              sessionUpdater
+	model             string
+	sessions          map[acp.SessionId]bool
+	promptCancels     map[acp.SessionId]context.CancelFunc
+	sessionMCPServers map[acp.SessionId]map[string]mcpServerDef
+	sessionConfig     map[acp.SessionId][]acp.SessionConfigOption
+	commandsEmitted   map[acp.SessionId]bool
+	nextSessionID     uint64
+	mu                sync.Mutex
 }
 
 var _ acp.Agent = (*mockAgent)(nil)
@@ -83,11 +84,12 @@ func main() {
 	defer closeMCPClients()
 
 	ag := &mockAgent{
-		model:           model,
-		sessions:        make(map[acp.SessionId]bool),
-		promptCancels:   make(map[acp.SessionId]context.CancelFunc),
-		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
-		commandsEmitted: make(map[acp.SessionId]bool),
+		model:             model,
+		sessions:          make(map[acp.SessionId]bool),
+		promptCancels:     make(map[acp.SessionId]context.CancelFunc),
+		sessionMCPServers: make(map[acp.SessionId]map[string]mcpServerDef),
+		sessionConfig:     make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted:   make(map[acp.SessionId]bool),
 	}
 	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
 	ag.conn = asc
@@ -133,8 +135,13 @@ func mockPromptQueueingEnabled() bool {
 // them in the cache — this is what makes the utility-agents settings page
 // show model and mode options for mock-agent in E2E, and lets profile-mode
 // tests select a non-default mode.
-func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	configOptions := mockSessionConfigOptions()
+	// Register MCP servers from the ACP session request (SSE servers). Keep the
+	// returned definitions on this session. The process may host multiple ACP
+	// sessions, and the global registry alone would route calls to the last URL.
+	sessionMCPServers := registerACPMcpServers(req.McpServers)
+
 	a.mu.Lock()
 	a.nextSessionID++
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d-%d", os.Getpid(), a.nextSessionID))
@@ -143,12 +150,13 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
 	}
 	a.sessionConfig[sid] = configOptions
+	if a.sessionMCPServers == nil {
+		a.sessionMCPServers = make(map[acp.SessionId]map[string]mcpServerDef)
+	}
+	a.sessionMCPServers[sid] = cloneMCPServerDefs(sessionMCPServers)
 	a.mu.Unlock()
 
-	// Register MCP servers from the ACP session request (SSE servers).
-	// This bridges ACP protocol MCP config to the mock agent's MCP client.
-	registerACPMcpServers(req.McpServers)
-
+	primeKandevMCPToolCatalog(ctx)
 	// Emit available commands asynchronously after the session/new response
 	// flushes. Real ACP agents (OpenCode, Claude) emit available_commands_update
 	// here, which lets clients populate slash menus before the first prompt.
@@ -328,6 +336,7 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
 
 	// Re-emit available commands after the session/load response flushes.
+	primeKandevMCPToolCatalog(ctx)
 	go a.emitAvailableCommandsAfterDelay(req.SessionId)
 
 	return acp.LoadSessionResponse{
@@ -368,7 +377,10 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleTransportLost(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
-	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}
+	a.mu.Lock()
+	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
+	a.mu.Unlock()
+	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers}
 	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil

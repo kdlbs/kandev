@@ -74,6 +74,10 @@ type TaskActivityLoader func(context.Context, string) (*time.Time, error)
 // sibling pull requests across projector restarts and CAS rebases.
 type PullRequestLoader func(context.Context, string) ([]PullRequestInput, error)
 
+// LaunchQueueLoader reads the task-owned automatic launch queue. The loader
+// returns nil when the task has no deferred launch.
+type LaunchQueueLoader func(context.Context, string) (*LaunchQueueSummary, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -97,6 +101,7 @@ type ProjectorConfig struct {
 	LoadTaskLaunchError     TaskLaunchErrorLoader
 	LoadTaskActivity        TaskActivityLoader
 	LoadPullRequests        PullRequestLoader
+	LoadLaunchQueue         LaunchQueueLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -128,6 +133,7 @@ type Projector struct {
 	loadTaskLaunchError     TaskLaunchErrorLoader
 	loadTaskActivity        TaskActivityLoader
 	loadPullRequests        PullRequestLoader
+	loadLaunchQueue         LaunchQueueLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
 	now                     func() time.Time
@@ -163,14 +169,16 @@ type projectionState struct {
 	// clearedErrorStamps records, per session, the stamp of the last error this
 	// projection cleared, so a durable breadcrumb replayed on a later session
 	// event cannot re-arm an error affordance the agent already recovered from.
-	clearedErrorStamps map[string]string
-	errorsObserved     bool
-	git                map[string]GitSummary
-	gitBaseline        *GitSummary
-	gitObserved        bool
-	prs                map[string]pullRequestObservation
-	prBaseline         *PullRequestSummary
-	prObserved         bool
+	clearedErrorStamps  map[string]string
+	errorsObserved      bool
+	git                 map[string]GitSummary
+	gitBaseline         *GitSummary
+	gitObserved         bool
+	prs                 map[string]pullRequestObservation
+	prBaseline          *PullRequestSummary
+	prObserved          bool
+	launchQueue         *LaunchQueueSummary
+	launchQueueObserved bool
 }
 
 type sessionObservation struct {
@@ -226,6 +234,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadTaskLaunchError:     cfg.LoadTaskLaunchError,
 		loadTaskActivity:        cfg.LoadTaskActivity,
 		loadPullRequests:        cfg.LoadPullRequests,
+		loadLaunchQueue:         cfg.LoadLaunchQueue,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                     now,
@@ -421,6 +430,16 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 			return err
 		}
 	}
+	launchQueueChanged := false
+	if p.loadLaunchQueue != nil {
+		nextQueue, loadErr := p.loadLaunchQueue(ctx, taskID)
+		if loadErr != nil {
+			return fmt.Errorf("load launch queue for task status summary %q: %w", taskID, loadErr)
+		}
+		launchQueueChanged = !state.launchQueueObserved || !equalLaunchQueue(state.launchQueue, nextQueue)
+		state.launchQueue = cloneLaunchQueue(nextQueue)
+		state.launchQueueObserved = true
+	}
 
 	if event.Type == events.MessageQueueStatusChanged {
 		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
@@ -432,7 +451,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 				return refreshErr
 			}
 		}
-		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged, event.Type, data)
+		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || launchQueueChanged, event.Type, data)
 	}
 
 	refreshPending := p.loadPendingActions != nil &&
@@ -442,11 +461,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged
 	if !changed {
 		return nil
 	}

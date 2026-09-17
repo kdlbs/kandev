@@ -16,6 +16,7 @@ const TASK_BEHAVIOR_ID = "preferences-task-behavior";
 export const TASK_BEHAVIOR_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/task-behavior`;
 export const GENERAL_SETTINGS_TARGETS = {
   colorTheme: "setting-color-theme",
+  chatMotion: "setting-chat-motion",
   richOutputMotion: "setting-rich-output-motion",
   settingsMenuMode: "setting-settings-menu-mode",
   startupPage: "setting-startup-page",
@@ -98,6 +99,17 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.richOutputMotion,
+    order: 12,
+  },
+  {
+    id: "appearance-chat-motion",
+    kind: "control",
+    labelKey: "settings:chatAnimations",
+    aliasesKey: "settings:discoveryAliasesChatMotion",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.chatMotion,
     order: 12,
   },
   {

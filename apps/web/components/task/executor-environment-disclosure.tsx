@@ -93,10 +93,7 @@ function KubernetesActions({
     touch ? "h-11 w-11" : "h-10 w-10",
   );
   const settingsPath = env.executor_profile_id
-    ? executorProfileSettingsPath(
-        { id: env.executor_id, type: env.executor_type },
-        env.executor_profile_id,
-      )
+    ? executorProfileSettingsPath(env.executor_profile_id)
     : kubernetesExecutorSettingsPath(env.executor_id);
   return (
     <div

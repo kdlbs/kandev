@@ -26,6 +26,10 @@ export { createTaskLinkSelectAction } from "./task-switcher-link-menu";
 
 type ContextMenuProps = TaskLinkHandlers & {
   task: TaskSwitcherItem;
+  nestCandidateTasks?: TaskSwitcherItem[];
+  nestHierarchyTasks?: TaskSwitcherItem[];
+  getNestCandidateTasks?: () => TaskSwitcherItem[];
+  getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined;
   workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   steps?: StepDef[];
@@ -55,19 +59,40 @@ type ContextMenuProps = TaskLinkHandlers & {
   isMixedWorkflowSelection?: boolean;
 };
 
+type OpenedNestSources = {
+  candidates?: TaskSwitcherItem[];
+  hierarchy?: TaskSwitcherItem[];
+};
+
+function useContextMenuOpenState(props: ContextMenuProps) {
+  const [contextOpen, setContextOpen] = useState(false);
+  const [openedNestSources, setOpenedNestSources] = useState<OpenedNestSources>({});
+  const handleContextOpenChange = (open: boolean) => {
+    if (open) {
+      setOpenedNestSources({
+        candidates: props.getNestCandidateTasks?.() ?? props.nestCandidateTasks,
+        hierarchy: props.getNestHierarchyTasks?.() ?? props.nestHierarchyTasks,
+      });
+    }
+    setContextOpen(open);
+  };
+  return { contextOpen, setContextOpen, openedNestSources, handleContextOpenChange };
+}
+
 // This component coordinates the context menu and drag cancellation. Archive
 // state lives in its focused adapter so unavailable actions stay unavailable.
 export function TaskItemWithContextMenu(props: ContextMenuProps) {
   const { children, ...menuProps } = props;
   const { task, stepsByWorkflowId, steps, onRequestMoveOptions, onBeforeMoveOptionsOpen } = props;
-  const [contextOpen, setContextOpen] = useState(false);
+  const { contextOpen, setContextOpen, openedNestSources, handleContextOpenChange } =
+    useContextMenuOpenState(props);
   const [menuKey, setMenuKey] = useState(0);
   const moveTasks = useTaskWorkflowMove();
   const closeMenu = () => {
     setContextOpen(false);
     setMenuKey((k) => k + 1);
   };
-  const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(setContextOpen);
+  const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(handleContextOpenChange);
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const usesTouchDrawer = useTouchDrawer();
   const archive = useTaskSwitcherArchiveConfirmation({
@@ -107,11 +132,17 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
   // owns its own drawer, so the inline path stays off there too.
   const inlineSubmitWithOptions =
     !usesTouchDrawer && !onRequestMoveOptions ? submitMoveOptionsForStep : undefined;
-  const contextMenuProps = buildTaskContextMenuItemsProps(props, closeMenu, moveTasks, {
-    onMoveToStepWithOptions: handleMoveToStepWithOptions,
-    onSubmitWithOptions: inlineSubmitWithOptions,
-    isMoving,
-  });
+  const contextMenuProps = buildTaskContextMenuItemsProps(
+    props,
+    openedNestSources,
+    closeMenu,
+    moveTasks,
+    {
+      onMoveToStepWithOptions: handleMoveToStepWithOptions,
+      onSubmitWithOptions: inlineSubmitWithOptions,
+      isMoving,
+    },
+  );
 
   return (
     <>
@@ -157,7 +188,11 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
 
 export type TaskContextMenuItemsProps = Omit<
   ContextMenuProps,
-  "children" | "onBeforeMoveOptionsOpen" | "onRequestMoveOptions"
+  | "children"
+  | "onBeforeMoveOptionsOpen"
+  | "onRequestMoveOptions"
+  | "getNestCandidateTasks"
+  | "getNestHierarchyTasks"
 > & {
   closeMenu: () => void;
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
@@ -171,6 +206,7 @@ export type TaskContextMenuItemsProps = Omit<
 
 function buildTaskContextMenuItemsProps(
   props: ContextMenuProps,
+  nestSources: OpenedNestSources,
   closeMenu: () => void,
   moveTasks: ReturnType<typeof useTaskWorkflowMove>,
   moveOptions: {
@@ -186,10 +222,14 @@ function buildTaskContextMenuItemsProps(
     children: _children,
     onRequestMoveOptions: _onRequestMoveOptions,
     onBeforeMoveOptionsOpen: _onBeforeMoveOptionsOpen,
+    getNestCandidateTasks: _getNestCandidateTasks,
+    getNestHierarchyTasks: _getNestHierarchyTasks,
     ...rest
   } = props;
   return {
     ...rest,
+    nestCandidateTasks: nestSources.candidates ?? rest.nestCandidateTasks,
+    nestHierarchyTasks: nestSources.hierarchy ?? rest.nestHierarchyTasks,
     onMoveToStepWithOptions: moveOptions.onMoveToStepWithOptions,
     onSubmitWithOptions: moveOptions.onSubmitWithOptions,
     moveOptionsBusy: moveOptions.isMoving,

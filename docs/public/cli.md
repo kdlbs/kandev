@@ -149,6 +149,16 @@ values describe elapsed work and do not estimate completion.
 
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 
+On macOS and Linux, Kandev includes the runtime user's `~/.local/bin` in its
+backend and local agent process PATH when that home resolves to a usable absolute
+path. Otherwise, the inherited PATH remains unchanged. System services use the
+effective service account's home, even if inherited HOME names another user. This applies to regular launches and OS
+services, including agent CLIs installed after Kandev starts. Existing PATH
+entries take precedence. After installing an agent such as Cursor, its
+post-install refresh or a manual rescan can discover it without restarting to
+reload shell configuration. The runtime user's home is separate from Kandev's
+configured data directory.
+
 Use headless mode for SSH sessions, containers, or an external reverse proxy:
 
 ```bash

@@ -12,6 +12,8 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
 const (
@@ -83,6 +85,38 @@ func (h *Health) Check(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
+// MarkUnavailable records a destructive database transition before the
+// maintenance owner releases its admission lease. This keeps stateful
+// requests fail-closed while the process waits for the required restart.
+func (h *Health) MarkUnavailable() {
+	if h == nil || h.tracker == nil {
+		return
+	}
+	_ = h.recordUnavailable(errors.New("database maintenance requires restart"))
+}
+
+// checkRuntime runs a periodic probe when the database can be admitted. SQLite
+// maintenance owns the same writer pool, so a busy maintenance lease defers
+// the probe instead of turning bounded writer contention into an unhealthy
+// state. Startup callers continue to use Check, which remains strict.
+func (h *Health) checkRuntime(ctx context.Context) (deferred bool, err error) {
+	if h.isSQLite() {
+		release, ok := maintenance.ForPool(h.pool).TryAcquire()
+		if !ok {
+			if h.log != nil {
+				h.log.Debug("required persistence probe deferred during database maintenance")
+			}
+			return true, nil
+		}
+		defer release()
+	}
+	return false, h.Check(ctx)
+}
+
+func (h *Health) isSQLite() bool {
+	return h.pool != nil && h.pool.Writer() != nil && h.pool.Writer().DriverName() == dialect.SQLite3
+}
+
 func (h *Health) ping(ctx context.Context) error {
 	if err := h.pool.Writer().PingContext(ctx); err != nil {
 		return fmt.Errorf("writer ping failed: %w", err)
@@ -146,7 +180,8 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 			return
 		case <-ticker.C:
 			checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-			if err := h.Check(checkCtx); err != nil && h.log != nil {
+			_, err := h.checkRuntime(checkCtx)
+			if err != nil && h.log != nil {
 				h.log.Warn("required persistence probe failed", zap.Error(err))
 			}
 			cancel()

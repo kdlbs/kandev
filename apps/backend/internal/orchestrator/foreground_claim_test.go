@@ -207,7 +207,7 @@ func TestPromptTask_SupersededQueuedDispatchReleasesForegroundClaim(t *testing.T
 	svc.markForegroundIdle(sessionID)
 
 	_, err := svc.promptTask(
-		context.Background(), taskID, sessionID, "queued prompt", "", false, nil, false,
+		context.Background(), taskID, sessionID, "queued prompt", "", false, nil, false, launchOriginAutomatic,
 		promptTaskOptions{claimEntryID: "stale-entry"},
 	)
 	if !errors.Is(err, ErrAgentPromptInProgress) {

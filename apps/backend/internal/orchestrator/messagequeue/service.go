@@ -98,6 +98,30 @@ type autoMergeAdmissionRepository interface {
 	) (*QueuedMessage, bool, error)
 }
 
+// workflowEntryAdmissionRepository validates a captured workflow entry inside
+// the same task-row-guarded transaction that inserts or folds a queue entry.
+// Repositories without this optional capability retain the legacy admission
+// path for callers that do not provide a workflow entry.
+type workflowEntryAdmissionRepository interface {
+	InsertForSessionWithWorkflowEntry(
+		context.Context,
+		QueueSessionIdentity,
+		WorkflowEntryIdentity,
+		*QueuedMessage,
+		*QueueAttachmentClaim,
+		int,
+		*AutoMergePolicy,
+	) error
+	AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
+		context.Context,
+		QueueSessionIdentity,
+		WorkflowEntryIdentity,
+		*QueuedMessage,
+		*QueueAttachmentClaim,
+		*AutoMergePolicy,
+	) (*QueuedMessage, bool, error)
+}
+
 // NewService creates a Service backed by the supplied repository. maxPerSession
 // is the per-session cap (entries beyond this return ErrQueueFull on insert);
 // pass 0 to disable the cap.
@@ -1061,6 +1085,28 @@ func (s *Service) QueueMessageWithMetadataForSession(
 	)
 }
 
+// QueueMessageWithMetadataForSessionAtWorkflowEntry admits a workflow prompt
+// only while the task still owns the immutable entry captured at launch. The
+// repository performs that check in the queue insertion transaction, after it
+// has acquired the task-row guard used by workflow moves.
+func (s *Service) QueueMessageWithMetadataForSessionAtWorkflowEntry(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entry WorkflowEntryIdentity,
+	content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+) (*QueuedMessage, error) {
+	if err := s.validateSessionIdentity(ctx, identity); err != nil {
+		return nil, err
+	}
+	return s.queueMessageWithMetadataAdmissionAtWorkflowEntry(
+		ctx, &identity, &entry, identity.SessionID, identity.TaskID, content, model, userID,
+		planMode, attachments, metadata, nil, nil,
+	)
+}
+
 // QueueMessageWithMetadataForSessionWithClientQueueID admits an ordinary
 // browser queue message with a durable caller-owned replay identity. The
 // receipt and any queue insertion, fold, or attachment claim share one
@@ -1184,13 +1230,24 @@ func (s *Service) QueueMessageWithMetadataForSessionAfterInsert(
 //
 //nolint:gocognit // retry boundaries keep policy validation before each mutation.
 func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
+	return s.queueMessageWithMetadataAdmissionAtWorkflowEntry(
+		ctx, identity, nil, sessionID, taskID, content, model, userID, planMode,
+		attachments, metadata, claim, afterInsert,
+	)
+}
+
+// queueMessageWithMetadataAdmissionAtWorkflowEntry is the admission core for
+// both ordinary queue writes and workflow-start recovery writes.
+//
+//nolint:gocognit // retry boundaries keep policy and workflow-entry validation before each mutation.
+func (s *Service) queueMessageWithMetadataAdmissionAtWorkflowEntry(ctx context.Context, identity *QueueSessionIdentity, workflowEntry *WorkflowEntryIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, afterInsert func(context.Context, *QueuedMessage) error) (*QueuedMessage, error) {
 	var queued *QueuedMessage
 	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		for {
 			policy := s.resolveAdmissionAutoMergePolicy(admittedCtx, identity, sessionID)
-			source, insertErr := s.insertQueueMessageWithMetadata(
+			source, insertErr := s.insertQueueMessageWithMetadataAtWorkflowEntry(
 				admittedCtx, identity, sessionID, taskID, content, model, userID, planMode,
-				attachments, metadata, claim, s.MaxPerSession(), policy,
+				attachments, metadata, claim, s.MaxPerSession(), policy, workflowEntry,
 			)
 			if errors.Is(insertErr, ErrAutoMergePolicyChanged) {
 				continue
@@ -1202,9 +1259,9 @@ func (s *Service) queueMessageWithMetadataAdmission(ctx context.Context, identit
 					return insertErr
 				}
 				var merged *QueuedMessage
-				source, merged, insertErr = s.admitQueueFullMessage(
+				source, merged, insertErr = s.admitQueueFullMessageAtWorkflowEntry(
 					admittedCtx, identity, insertErr, sessionID, taskID, content, model, userID, planMode,
-					attachments, metadata, claim, s.MaxPerSession(), policy,
+					attachments, metadata, claim, s.MaxPerSession(), policy, workflowEntry,
 				)
 				if errors.Is(insertErr, ErrAutoMergePolicyChanged) {
 					continue
@@ -1255,8 +1312,31 @@ func (s *Service) autoMergeCandidate(
 	claim *QueueAttachmentClaim,
 	policy *AutoMergePolicy,
 ) (*QueuedMessage, bool, error) {
+	return s.autoMergeCandidateAtWorkflowEntry(ctx, identity, nil, candidate, claim, policy)
+}
+
+func (s *Service) autoMergeCandidateAtWorkflowEntry(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	workflowEntry *WorkflowEntryIdentity,
+	candidate *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	policy *AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	if workflowEntry != nil && identity == nil {
+		return nil, false, ErrQueueAdmissionUnavailable
+	}
 	if identity == nil {
 		return s.repo.AutoMergeCandidateIntoAbove(ctx, candidate)
+	}
+	if workflowEntry != nil {
+		workflowRepo, ok := s.repo.(workflowEntryAdmissionRepository)
+		if !ok {
+			return nil, false, ErrQueueAdmissionUnavailable
+		}
+		return workflowRepo.AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
+			ctx, *identity, *workflowEntry, candidate, claim, policy,
+		)
 	}
 	if policyRepo, ok := s.repo.(autoMergeAdmissionRepository); ok && policy != nil {
 		return policyRepo.AutoMergeCandidateIntoAboveForSessionWithPolicy(ctx, *identity, candidate, claim, *policy)
@@ -1285,6 +1365,25 @@ func (s *Service) admitQueueFullMessage(
 	maxPerSession int,
 	policy *AutoMergePolicy,
 ) (*QueuedMessage, *QueuedMessage, error) {
+	return s.admitQueueFullMessageAtWorkflowEntry(
+		ctx, identity, queueFullErr, sessionID, taskID, content, model, userID, planMode,
+		attachments, metadata, claim, maxPerSession, policy, nil,
+	)
+}
+
+func (s *Service) admitQueueFullMessageAtWorkflowEntry(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	queueFullErr error,
+	sessionID, taskID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	claim *QueueAttachmentClaim,
+	maxPerSession int,
+	policy *AutoMergePolicy,
+	workflowEntry *WorkflowEntryIdentity,
+) (*QueuedMessage, *QueuedMessage, error) {
 	candidate := &QueuedMessage{
 		SessionID:   sessionID,
 		TaskID:      taskID,
@@ -1296,12 +1395,14 @@ func (s *Service) admitQueueFullMessage(
 		QueuedAt:    time.Now().UTC(),
 		QueuedBy:    userID,
 	}
-	merged, didMerge, err := s.autoMergeCandidate(ctx, identity, candidate, claim, policy)
+	merged, didMerge, err := s.autoMergeCandidateAtWorkflowEntry(ctx, identity, workflowEntry, candidate, claim, policy)
 	if errors.Is(err, ErrAutoMergePolicyChanged) {
 		return nil, nil, err
 	}
 	if err != nil {
-		if errors.Is(err, ErrTaskInactive) {
+		if errors.Is(err, ErrTaskInactive) ||
+			errors.Is(err, ErrWorkflowEntryMismatch) ||
+			errors.Is(err, ErrLifecycleCancelled) {
 			return nil, nil, err
 		}
 		s.logger.Error("automatic merge into full queue failed; preserving queue full rejection",
@@ -1315,9 +1416,9 @@ func (s *Service) admitQueueFullMessage(
 			zap.String("surviving_entry_id", merged.ID))
 		return nil, merged, nil
 	}
-	source, err := s.insertQueueMessageWithMetadata(
+	source, err := s.insertQueueMessageWithMetadataAtWorkflowEntry(
 		ctx, identity, sessionID, taskID, content, model, userID, planMode,
-		attachments, metadata, claim, maxPerSession, policy,
+		attachments, metadata, claim, maxPerSession, policy, workflowEntry,
 	)
 	return source, nil, err
 }
@@ -1396,8 +1497,32 @@ func (s *Service) insertQueueMessage(
 	maxPerSession int,
 	policy *AutoMergePolicy,
 ) error {
+	return s.insertQueueMessageAtWorkflowEntry(ctx, identity, nil, msg, claim, maxPerSession, policy)
+}
+
+func (s *Service) insertQueueMessageAtWorkflowEntry(
+	ctx context.Context,
+	identity *QueueSessionIdentity,
+	workflowEntry *WorkflowEntryIdentity,
+	msg *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	maxPerSession int,
+	policy *AutoMergePolicy,
+) error {
+	if workflowEntry != nil && identity == nil {
+		return ErrQueueAdmissionUnavailable
+	}
 	if identity == nil {
 		return s.repo.Insert(ctx, msg, maxPerSession)
+	}
+	if workflowEntry != nil {
+		workflowRepo, ok := s.repo.(workflowEntryAdmissionRepository)
+		if !ok {
+			return ErrQueueAdmissionUnavailable
+		}
+		return workflowRepo.InsertForSessionWithWorkflowEntry(
+			ctx, *identity, *workflowEntry, msg, claim, maxPerSession, policy,
+		)
 	}
 	if policyRepo, ok := s.repo.(autoMergeAdmissionRepository); ok && policy != nil {
 		return policyRepo.InsertForSessionWithPolicy(ctx, *identity, msg, claim, maxPerSession, *policy)
@@ -1414,6 +1539,13 @@ func (s *Service) insertQueueMessage(
 
 // insertQueueMessageWithMetadata inserts a message with metadata under the per-session admission lock.
 func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, maxPerSession int, policy *AutoMergePolicy) (*QueuedMessage, error) {
+	return s.insertQueueMessageWithMetadataAtWorkflowEntry(
+		ctx, identity, sessionID, taskID, content, model, userID, planMode, attachments,
+		metadata, claim, maxPerSession, policy, nil,
+	)
+}
+
+func (s *Service) insertQueueMessageWithMetadataAtWorkflowEntry(ctx context.Context, identity *QueueSessionIdentity, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, claim *QueueAttachmentClaim, maxPerSession int, policy *AutoMergePolicy, workflowEntry *WorkflowEntryIdentity) (*QueuedMessage, error) {
 	metadataCopy := copyMessageMetadata(metadata, 0)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -1425,7 +1557,7 @@ func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, identity *
 		Metadata:    metadataCopy,
 		QueuedBy:    userID,
 	}
-	err := s.insertQueueMessage(ctx, identity, msg, claim, maxPerSession, policy)
+	err := s.insertQueueMessageAtWorkflowEntry(ctx, identity, workflowEntry, msg, claim, maxPerSession, policy)
 	if err != nil {
 		if errors.Is(err, ErrQueueFull) {
 			s.logger.Info("queue full",

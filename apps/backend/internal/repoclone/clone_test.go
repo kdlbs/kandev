@@ -491,6 +491,48 @@ func TestWorkspaceProviderRepositoryPathSeparatesOpaqueScopesAndImmutableIDs(t *
 	}
 }
 
+// TestWorkspaceProviderRepositoryPathAcceptsRepoIDWithoutScope guards the
+// normal shape used by every built-in provider (GitHub, GitLab, Azure
+// DevOps): none of them resolve a provider connection scope, so a bare
+// provider_repo_id must fall through to the legacy origin/owner/name
+// layout instead of erroring, identically to when both fields are empty.
+func TestWorkspaceProviderRepositoryPathAcceptsRepoIDWithoutScope(t *testing.T) {
+	t.Parallel()
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", nil)
+
+	withRepoID, err := cloner.WorkspaceProviderRepositoryPath(
+		"workspace-1", "github", "https://github.com", "", "1131388506", "kdlbs", "kandev",
+	)
+	if err != nil {
+		t.Fatalf("WorkspaceProviderRepositoryPath() error = %v, want nil", err)
+	}
+	withoutRepoID, err := cloner.WorkspaceProviderRepositoryPath(
+		"workspace-1", "github", "https://github.com", "", "", "kdlbs", "kandev",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withRepoID != withoutRepoID {
+		t.Fatalf("bare provider_repo_id changed the legacy clone path: with=%q without=%q", withRepoID, withoutRepoID)
+	}
+}
+
+// TestWorkspaceProviderRepositoryPathRejectsScopeWithoutRepoID guards the
+// direction that actually breaks the scope-isolated layout: a scope alone
+// can't build a unique path segment without a paired repository ID.
+func TestWorkspaceProviderRepositoryPathRejectsScopeWithoutRepoID(t *testing.T) {
+	t.Parallel()
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", nil)
+
+	_, err := cloner.WorkspaceProviderRepositoryPath(
+		"workspace-1", "bitbucket", "https://forge.example.test",
+		"https://forge.example.test/dc-a", "", "TEAM", "widgets",
+	)
+	if err == nil {
+		t.Fatal("WorkspaceProviderRepositoryPath() error = nil, want an error for scope without repository ID")
+	}
+}
+
 func TestEnsureClonedAtPathRejectsExistingCheckoutWithDifferentOrigin(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

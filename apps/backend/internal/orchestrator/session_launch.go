@@ -34,6 +34,16 @@ const (
 	IntentRestoreWorkspace SessionIntent = "restore_workspace" // Restore workspace access for terminal-state session
 )
 
+type LaunchActivationSource string
+
+const (
+	LaunchActivationSourceUserAction  LaunchActivationSource = "user_action"
+	LaunchActivationSourceSessionOpen LaunchActivationSource = "session_open"
+
+	activationDispositionSuppressed = "suppressed"
+	activationDispositionQueued     = "queued"
+)
+
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
 	TaskID         string        `json:"task_id"`
@@ -89,6 +99,9 @@ type LaunchSessionRequest struct {
 	// ordinary launch, ensure, and startup recovery paths must keep completed
 	// sessions terminal.
 	AllowCompletedSessionResume bool `json:"-"`
+	// ActivationSource distinguishes passive task opening from an explicit
+	// launch action. An omitted value preserves the existing behavior.
+	ActivationSource LaunchActivationSource `json:"activation_source,omitempty"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -102,14 +115,16 @@ type SpawnOrigin struct {
 
 // LaunchSessionResponse is the unified response for session.launch.
 type LaunchSessionResponse struct {
-	Success          bool    `json:"success"`
-	TaskID           string  `json:"task_id"`
-	SessionID        string  `json:"session_id,omitempty"`
-	AgentExecutionID string  `json:"agent_execution_id,omitempty"`
-	AgentProfileID   string  `json:"agent_profile_id,omitempty"`
-	State            string  `json:"state"`
-	WorktreePath     *string `json:"worktree_path,omitempty"`
-	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
+	Success               bool    `json:"success"`
+	TaskID                string  `json:"task_id"`
+	SessionID             string  `json:"session_id,omitempty"`
+	AgentExecutionID      string  `json:"agent_execution_id,omitempty"`
+	AgentProfileID        string  `json:"agent_profile_id,omitempty"`
+	State                 string  `json:"state"`
+	WorktreePath          *string `json:"worktree_path,omitempty"`
+	WorktreeBranch        *string `json:"worktree_branch,omitempty"`
+	ActivationDisposition string  `json:"activation_disposition,omitempty"`
+	ActivationReason      string  `json:"activation_reason,omitempty"`
 }
 
 // ResolveIntent infers the session intent from request fields when Intent is empty.
@@ -161,7 +176,16 @@ func IsBenignLaunchTeardownErr(err error) bool {
 
 // LaunchSession is the unified entry point for all session operations.
 func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if req == nil {
+		return nil, errors.New("launch request is required")
+	}
 	req.Prompt = strings.TrimSpace(req.Prompt)
+	if err := validateLaunchActivationSource(req.ActivationSource); err != nil {
+		return nil, err
+	}
+	if req.ActivationSource == LaunchActivationSourceSessionOpen && req.Prompt != "" {
+		return nil, errors.New("session_open activation cannot include a prompt")
+	}
 	intent := ResolveIntent(req)
 	// Every intent funnels through here. SessionID is empty when creating, so
 	// that case is carried by the task check alone.
@@ -179,6 +203,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	// binding when a caller can access more than one task.
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
+	}
+	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
+		return response, nil
 	}
 	if err := s.claimLaunchAttachments(ctx, req); err != nil {
 		return nil, fmt.Errorf("claim launch attachments: %w", err)
@@ -199,6 +226,78 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	default:
 		return nil, fmt.Errorf("unknown intent: %s", intent)
 	}
+}
+
+func validateLaunchActivationSource(source LaunchActivationSource) error {
+	if source != "" && source != LaunchActivationSourceUserAction && source != LaunchActivationSourceSessionOpen {
+		return fmt.Errorf("unknown launch activation source %q", source)
+	}
+	return nil
+}
+
+// passiveLaunchResponse is the server-side guard for browser inspection. The
+// status endpoint is the normal fast path, but a launch request must repeat
+// the ownership check because the status can be stale by the time the browser
+// sends it. It returns a successful no-execution disposition so callers do not
+// fall back to a fresh session or restore attempt.
+func (s *Service) passiveLaunchResponse(
+	ctx context.Context, req *LaunchSessionRequest, intent SessionIntent,
+) *LaunchSessionResponse {
+	if req == nil || req.ActivationSource != LaunchActivationSourceSessionOpen || s.repo == nil {
+		return nil
+	}
+	switch intent {
+	case IntentPrepare, IntentRestoreWorkspace, IntentWorkflowStep:
+		return nil
+	}
+	if req.SessionID == "" {
+		return s.deferredLaunchResponseIfPresent(ctx, req, "")
+	}
+
+	task, taskErr := s.repo.GetTask(ctx, req.TaskID)
+	session, sessionErr := s.repo.GetTaskSession(ctx, req.SessionID)
+	if taskErr != nil || sessionErr != nil || task == nil || session == nil || session.TaskID != req.TaskID {
+		return &LaunchSessionResponse{
+			Success:               true,
+			TaskID:                req.TaskID,
+			SessionID:             req.SessionID,
+			State:                 sessionStateOrEmpty(session),
+			AgentProfileID:        sessionProfileOrEmpty(session),
+			ActivationDisposition: activationDispositionSuppressed,
+			ActivationReason:      "ownership_unavailable",
+		}
+	}
+	allowed, reason := s.autoResumeEligibility(ctx, task, session)
+	if allowed {
+		return nil
+	}
+	disposition := activationDispositionSuppressed
+	if reason == autoResumeBlockedLaunchQueued {
+		disposition = activationDispositionQueued
+	}
+	return &LaunchSessionResponse{
+		Success:               true,
+		TaskID:                req.TaskID,
+		SessionID:             session.ID,
+		State:                 string(session.State),
+		AgentProfileID:        session.AgentProfileID,
+		ActivationDisposition: disposition,
+		ActivationReason:      reason,
+	}
+}
+
+func sessionStateOrEmpty(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	return string(session.State)
+}
+
+func sessionProfileOrEmpty(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	return session.AgentProfileID
 }
 
 func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSessionRequest) error {
@@ -264,7 +363,7 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 // imminent prompt-bearing start) get the eager launch. See launchPrepare for
 // why AutoStart and DeferredStart each suppress it.
 func (s *Service) shouldUpgradePassthroughPrepare(ctx context.Context, req *LaunchSessionRequest) bool {
-	if req.NoAgentLaunch {
+	if req.NoAgentLaunch || req.ActivationSource == LaunchActivationSourceSessionOpen {
 		return false
 	}
 	return !req.AutoStart && !req.DeferredStart && s.isPassthroughProfile(ctx, req.AgentProfileID)
@@ -302,7 +401,8 @@ func (s *Service) blocksAutoStartLaunch(ctx context.Context, req *LaunchSessionR
 // is downgraded to a prepare (workspace-only, no agent) to prevent unwanted
 // auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart && s.blocksAutoStartLaunch(ctx, req) {
+	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
+	if autoStart && s.blocksAutoStartLaunch(ctx, req) {
 		req.LaunchWorkspace = true
 		return s.launchPrepare(ctx, req)
 	}
@@ -310,13 +410,19 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 	execution, err := s.startTask(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
-		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
+		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
 		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
 	)
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		return s.deferredLaunchResponse(ctx, req, "")
+	}
 	if err != nil {
 		return nil, err
 	}
 	if execution == nil {
+		if response := s.deferredLaunchResponseIfPresent(ctx, req, ""); response != nil {
+			return response, nil
+		}
 		// The automatic terminal-PR gate intentionally skips session creation.
 		// Return a successful no-op response so session.ensure and WS callers do
 		// not dereference a nil execution while the task-owned error card remains
@@ -361,26 +467,206 @@ func (s *Service) shouldBlockAutoStart(ctx context.Context, req *LaunchSessionRe
 
 // launchStartCreated starts agent execution on an existing CREATED session.
 func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
+	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
 	execution, err := s.StartCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
-		req.Prompt, req.SkipMessageRecord, req.PlanMode, req.AutoStart, req.Attachments, nil,
+		req.Prompt, req.SkipMessageRecord, req.PlanMode, autoStart, req.Attachments, nil,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if execution == nil {
+		if response := s.deferredLaunchResponseIfPresent(ctx, req, req.SessionID); response != nil {
+			return response, nil
+		}
+	}
+	if execution != nil {
+		s.clearWorkflowParkingForSession(ctx, req.SessionID, parkingStamp)
 	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
 }
 
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
 		AllowBranchReplacement:      req.AllowBranchReplacement,
 		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
+		Origin:                      string(launchOriginForActivation(req)),
 	})
 	if err != nil {
 		return nil, err
 	}
+	if execution == nil {
+		if response := s.deferredLaunchResponseIfPresent(ctx, req, req.SessionID); response != nil {
+			return response, nil
+		}
+	}
+	if execution != nil {
+		s.clearWorkflowParkingForSession(ctx, req.SessionID, parkingStamp)
+	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
+}
+
+func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {
+	if req != nil && req.ActivationSource == LaunchActivationSourceSessionOpen {
+		return launchOriginAutomatic
+	}
+	return originFromAutoStart(req != nil && req.AutoStart)
+}
+
+func (s *Service) deferredLaunchResponse(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	sessionID string,
+) (*LaunchSessionResponse, error) {
+	response := s.deferredLaunchResponseIfPresent(ctx, req, sessionID)
+	if response == nil {
+		return nil, ErrCeilingLaunchDeferred
+	}
+	return response, nil
+}
+
+func (s *Service) deferredLaunchResponseIfPresent(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	sessionID string,
+) *LaunchSessionResponse {
+	if req == nil {
+		return nil
+	}
+	task, err := s.repo.GetTask(ctx, req.TaskID)
+	if err != nil || task == nil {
+		return deferredLaunchSuppressedForInspection(req, sessionID, autoResumeBlockedOwnershipUnavailable)
+	}
+	if !models.HasCeilingDeferredIntent(task) {
+		return nil
+	}
+	record, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	deferral, err := models.ReadCeilingDeferral(record)
+	if err != nil {
+		return deferredLaunchOwnershipUnavailableResponse(req, sessionID)
+	}
+	return s.deferredLaunchResponseForDeferral(req, task, deferral, sessionID)
+}
+
+func (s *Service) deferredLaunchResponseForDeferral(
+	req *LaunchSessionRequest,
+	task *models.Task,
+	deferral models.CeilingDeferral,
+	sessionID string,
+) *LaunchSessionResponse {
+	// Seam-1 workflow starts do not have a session id in their payload. Resolve
+	// that destination from the task-owned route so opening the task reports the
+	// exact queued session instead of falling back to the request's empty id.
+	deferredSessionID := models.CeilingDeferralSessionID(task, deferral)
+	if sessionID != "" && deferredSessionID != "" && sessionID != deferredSessionID {
+		return deferredLaunchSuppressedForInspection(req, sessionID, autoResumeBlockedOwnershipUnavailable)
+	}
+	_, bindingPresent, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
+	workflowOrigin := deferredLaunchIsWorkflowOrigin(task, deferral, bindingPresent)
+	if req.ActivationSource == LaunchActivationSourceSessionOpen &&
+		(bindingErr != nil || (workflowOrigin && (deferredSessionID == "" ||
+			(bindingPresent && !models.CeilingDeferralTargetsSession(task, deferral, deferredSessionID))))) {
+		return deferredLaunchSuppressedForInspection(req, sessionID, autoResumeBlockedOwnershipUnavailable)
+	}
+	if sessionID == "" {
+		sessionID = deferredSessionID
+		if sessionID == "" {
+			sessionID = req.SessionID
+		}
+	}
+	agentProfileID := req.AgentProfileID
+	if agentProfileID == "" {
+		agentProfileID = stringField(deferral.Payload, metaKeyAgentProfileID)
+	}
+	return &LaunchSessionResponse{
+		Success:               true,
+		TaskID:                req.TaskID,
+		SessionID:             sessionID,
+		AgentProfileID:        agentProfileID,
+		State:                 string(models.TaskSessionStateCreated),
+		ActivationDisposition: activationDispositionQueued,
+		ActivationReason:      "session_capacity",
+	}
+}
+
+func deferredLaunchSuppressedForInspection(
+	req *LaunchSessionRequest,
+	sessionID, reason string,
+) *LaunchSessionResponse {
+	if req == nil || req.ActivationSource != LaunchActivationSourceSessionOpen {
+		return nil
+	}
+	return &LaunchSessionResponse{
+		Success:               true,
+		TaskID:                req.TaskID,
+		SessionID:             sessionID,
+		ActivationDisposition: activationDispositionSuppressed,
+		ActivationReason:      reason,
+	}
+}
+
+func deferredLaunchOwnershipUnavailableResponse(
+	req *LaunchSessionRequest,
+	sessionID string,
+) *LaunchSessionResponse {
+	return &LaunchSessionResponse{
+		Success:               true,
+		TaskID:                req.TaskID,
+		SessionID:             sessionID,
+		ActivationDisposition: activationDispositionSuppressed,
+		ActivationReason:      "ownership_unavailable",
+	}
+}
+
+func deferredLaunchIsWorkflowOrigin(
+	task *models.Task,
+	deferral models.CeilingDeferral,
+	bindingPresent bool,
+) bool {
+	workflowOrigin := bindingPresent || stringField(deferral.Payload, metaKeyWorkflowStepID) != "" ||
+		int64Field(deferral.Payload, "workflow_entry_id") > 0
+	if deferral.Kind != models.CeilingLaunchStart {
+		return workflowOrigin
+	}
+	_, routePresent := models.LoadWorkflowSessionRoute(task.Metadata)
+	return workflowOrigin || routePresent
+}
+
+func (s *Service) captureWorkflowParkingStamp(ctx context.Context, sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return ""
+	}
+	parking, ok := models.LoadWorkflowParking(session.Metadata)
+	if !ok {
+		return ""
+	}
+	return parking.Stamp
+}
+
+// clearWorkflowParkingForSession removes only the stamped parking marker that
+// was authorized before the launch. A later park writes a new stamp and is
+// therefore preserved when an older launch completes.
+func (s *Service) clearWorkflowParkingForSession(ctx context.Context, sessionID, authorizedStamp string) {
+	if sessionID == "" || strings.TrimSpace(authorizedStamp) == "" {
+		return
+	}
+	remover, ok := s.repo.(workflowProfileSwitchStopIntentRemover)
+	if !ok {
+		return
+	}
+	if _, err := remover.RemoveSessionMetadataKeyIfStamp(
+		ctx, sessionID, models.SessionMetaKeyWorkflowParking, authorizedStamp,
+	); err != nil {
+		s.logger.Warn("failed to clear workflow parking marker after launch",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
 }
 
 // launchWorkflowStep starts a session with workflow step prompt configuration.

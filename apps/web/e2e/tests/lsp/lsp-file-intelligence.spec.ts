@@ -1094,10 +1094,18 @@ test.describe("LSP file intelligence", () => {
     backend,
   }) => {
     installFakeKotlinLsp(backend);
+    const archiveTarget = "Main-archive-cleanup.kt";
     const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
       title: "Kotlin LSP Archive Cleanup",
+      // Keep the target outside the initial virtualized viewport. This proves
+      // the file-opening helper uses the exact search path when a valid row is
+      // not mounted in the tree.
+      filePaths: [
+        archiveTarget,
+        ...Array.from({ length: 48 }, (_, index) => `A-archive-noise-${index}.kt`),
+      ],
     });
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
+    await openDesktopFile(testPage, task.session, archiveTarget);
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });

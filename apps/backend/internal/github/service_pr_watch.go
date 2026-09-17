@@ -258,10 +258,25 @@ func (s *Service) checkPRWatchWithClient(
 	// Update watch timestamps
 	now := time.Now().UTC()
 	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
-		s.logger.Error("failed to update PR watch timestamps", zap.String("id", watch.ID), zap.Error(err))
+		s.logSyncError("failed to update PR watch timestamps", err, zap.String("id", watch.ID))
 	}
 
 	return status, hasNew, nil
+}
+
+// logSyncError logs a PR-watch synchronization failure at ERROR, except when
+// the error is a context cancellation. That happens when the poll/sync cycle is
+// interrupted by backend shutdown, which is expected teardown rather than a
+// fault, so it is downgraded to DEBUG to keep shutdown logs quiet. Mirrors
+// Poller.logCleanupError, and like it leaves context.DeadlineExceeded at the
+// higher level because a timeout is a real fault.
+func (s *Service) logSyncError(msg string, err error, fields ...zap.Field) {
+	fields = append(fields, zap.Error(err))
+	if errors.Is(err, context.Canceled) {
+		s.logger.Debug(msg+" (context canceled during shutdown)", fields...)
+		return
+	}
+	s.logger.Error(msg, fields...)
 }
 
 func prWatchFeedbackUpdatedSinceWatch(watch *PRWatch, status *PRStatus) bool {
@@ -1723,16 +1738,16 @@ func (s *Service) detectPRForWatchOnce(
 		return nil, rebindErr
 	}
 	if err := s.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
-		s.logger.Error("failed to update PR watch number during sync",
-			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		s.logSyncError("failed to update PR watch number during sync", err,
+			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number))
 		return nil, fmt.Errorf("update PR watch: %w", err)
 	}
 	if _, assocErr := s.associatePRWithTaskForSession(
 		ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, pr,
 		false, false, TaskPRSourceWatch,
 	); assocErr != nil {
-		s.logger.Error("failed to associate PR with task during sync",
-			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
+		s.logSyncError("failed to associate PR with task during sync", assocErr,
+			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number))
 		return nil, fmt.Errorf("associate PR: %w", assocErr)
 	}
 	s.trackPRDiscoveryWatchTarget(

@@ -225,6 +225,9 @@ type AgentExecution struct {
 	// reusing the same source ID cannot merge visible and reasoning content.
 	protocolMessageIDs  map[string]string
 	protocolThinkingIDs map[string]string
+	// responseAttemptMessageIDs preserves allocation order for assistant and
+	// thinking records created since the latest committed response boundary.
+	responseAttemptMessageIDs []string
 	// assistantHistoryBuffer accumulates assistant chunks in wire order for
 	// history-context injection. Tool and completion boundaries persist it as
 	// one segment before recording the boundary event.
@@ -1038,6 +1041,7 @@ type RepoLaunchSpec struct {
 	RepositoryURL      string // Clone URL for remote executors that need to clone
 	RepoName           string // Repository name used as subdirectory inside TaskDirName
 	BaseBranch         string
+	IntegrationRef     string
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
@@ -1084,6 +1088,7 @@ type WorkspaceRepositorySpec struct {
 	RepositoryID           string
 	RepositoryPath         string
 	RepoName               string
+	IntegrationRef         string
 	BaseBranch             string
 	DefaultBranch          string
 	CheckoutBranch         string
@@ -1192,6 +1197,7 @@ type LaunchRequest struct {
 	TaskRepositoryID       string // Exact task_repositories row for worktree recovery
 	RepositoryPath         string // Path to the main repository (for worktree creation)
 	BaseBranch             string // Base branch for the worktree (e.g., "main")
+	IntegrationRef         string // Verified terminal integration target for managed branch compaction
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
@@ -1246,6 +1252,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
@@ -1305,7 +1312,10 @@ type AgentProfileInfo struct {
 	FallbackModel string
 	// AutoFallback opts the profile into the legacy automatic-fallback
 	// behavior (session-start best-effort).
-	AutoFallback        bool
+	AutoFallback bool
+	// RequireExactModel makes the configured model an explicit identity
+	// requirement. False preserves compatible pre-PR behavior.
+	RequireExactModel   bool
 	AllowIndexing       bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
 	CLIPassthrough      bool
 	NativeSessionResume bool // Agent supports ACP session/load for resume
@@ -1318,6 +1328,12 @@ type AgentProfileInfo struct {
 	CommandPrefix string
 	// EnvVars are user-configured environment variables for this profile.
 	EnvVars []settingsmodels.ProfileEnvVar
+
+	// ProviderKind / ProviderBaseURL / ProviderAPIKeySecretID configure an
+	// injected OpenAI-compatible provider (empty ProviderKind = native).
+	ProviderKind           string
+	ProviderBaseURL        string
+	ProviderAPIKeySecretID string
 
 	// Deprecated: legacy permission fields, no longer consulted by the launch
 	// path. Kept so existing call sites compile during the transition.

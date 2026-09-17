@@ -155,6 +155,24 @@ func (s *ExecutionStore) OwnsPromptGeneration(sessionID, executionID string, gen
 	return exists && generation != 0 && execution.promptGeneration == generation
 }
 
+func (s *ExecutionStore) ownsActivePromptGeneration(
+	sessionID, executionID string,
+	generation uint64,
+) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	currentExecutionID, exists := s.bySession[sessionID]
+	if !exists || currentExecutionID != executionID {
+		return false
+	}
+	execution, exists := s.executions[currentExecutionID]
+	return exists && generation != 0 &&
+		execution.promptGeneration == generation &&
+		execution.dispatchedPromptGeneration == generation &&
+		execution.promptCompletionGeneration != generation
+}
+
 // OwnsPromptActivity reports whether the execution still owns the prompt and
 // its activity has not changed since the watchdog captured its snapshot.
 func (s *ExecutionStore) OwnsPromptActivity(

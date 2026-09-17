@@ -18,7 +18,7 @@ test.describe("Mobile cancel progress across reloads", () => {
     await cancel.tap();
     await waitForActiveSessionCancellationPending(testPage, true);
     await expect(cancel).toBeDisabled();
-    await expect(cancel.getByRole("status", { name: "Loading" })).toBeVisible();
+    await expect(cancel.getByRole("status", { name: "Cancelling..." })).toBeVisible();
 
     await testPage.reload();
     await session.waitForLoad();
@@ -26,7 +26,7 @@ test.describe("Mobile cancel progress across reloads", () => {
     const reloadedCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(reloadedCancel).toBeVisible({ timeout: 15_000 });
     await expect(reloadedCancel).toBeDisabled();
-    await expect(reloadedCancel.getByRole("status", { name: "Loading" })).toBeVisible();
+    await expect(reloadedCancel.getByRole("status", { name: "Cancelling..." })).toBeVisible();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await waitForActiveSessionCancellationPending(testPage, false);

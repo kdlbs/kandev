@@ -44,6 +44,8 @@ import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-unread-divider";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
+import type { RenderItem } from "@/hooks/use-processed-messages";
+
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import type { AppState } from "@/lib/state/store";
@@ -56,6 +58,11 @@ import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
+import {
+  hasWorkflowParkingMarker,
+  LaunchQueueStatus,
+  ParkedSessionNote,
+} from "./launch-queue-status";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -77,6 +84,10 @@ export type PendingMessageScrollTarget = {
   token: number;
   hostPanelId: string;
 };
+/** Reports whether a target has a dedicated DOM row in the transcript. */
+export function isMessageRowRendered(items: readonly RenderItem[], messageId: string): boolean {
+  return items.some((item) => item.type === "message" && item.message.id === messageId);
+}
 
 /** Scrolls a non-Dockview host target after the message row becomes rendered. */
 type PendingMessageScrollOptions = {
@@ -565,6 +576,8 @@ type TaskChatPanelProps = {
   onOpenFileAtLine?: (filePath: string) => void;
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
+  /** Mobile layout renders the task queue above its session picker. */
+  hideLaunchQueueStatus?: boolean;
   /**
    * Embedded multi-panel hosts do not own the global workbench or shortcuts.
    * They keep the conversation and composer, but suppress those side effects.
@@ -990,13 +1003,15 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   pendingScrollToMessageId = null,
   pendingScrollTarget,
   onPendingScrollConsumed,
+  hideLaunchQueueStatus = false,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const launchErrorContext = useTaskLaunchErrorContext();
+  const summaryTaskId = statusTaskId ?? taskIdHint ?? launchErrorContext?.taskId ?? null;
   const launchStatusSummary = useTaskStatusSummary(
-    launchErrorContext?.taskId,
-    launchErrorContext?.statusSummary,
+    summaryTaskId,
+    launchErrorContext?.taskId === summaryTaskId ? launchErrorContext.statusSummary : undefined,
   );
   const { t } = useTranslation();
   useSettingsData(true);
@@ -1063,8 +1078,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     messageListRef,
     isInitialMessagesLoading,
     targetRendered: Boolean(
-      dockviewTargetMessageId &&
-      allMessages.some((message) => message.id === dockviewTargetMessageId),
+      dockviewTargetMessageId && isMessageRowRendered(groupedItems, dockviewTargetMessageId),
     ),
     renderedMessageCount: allMessages.length,
   });
@@ -1137,7 +1151,18 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [hasMore, firstMessageId]);
   // Search can target backend rows before the visible transcript boundary.
-  const search = useSessionSearch(resolvedSessionId, loadMoreRaw);
+  const navigateSearchHit = useCallback(
+    (id: string) => {
+      if (!messageListRef.current?.scrollToMessage(id, { align: "center" })) return null;
+      return (
+        panelRef.current?.querySelector<HTMLElement>(
+          `.chat-message-list [id="msg-${CSS.escape(id)}"]`,
+        ) ?? null
+      );
+    },
+    [messageListRef],
+  );
+  const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
@@ -1164,6 +1189,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
     >
+      {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
+      <ParkedSessionNote visible={hasWorkflowParkingMarker(session?.metadata)} />
       <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
         <TaskMarkdownFileLinkProvider
           taskId={taskId}
@@ -1229,6 +1256,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           <ClarificationPanelSection
             pending={Boolean(pendingClarification)}
             messages={pendingClarificationGroup}
+            agentDisconnected={session?.pending_action === null}
             onResolved={handleClarificationResolved}
             shortcutScopeRef={panelRef}
             maxHeightVh={50}

@@ -102,6 +102,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionFailureNotification: m.sessionFailureNotification,
     bottomTerminal: m.bottomTerminal,
     sidebarViews: m.sidebarViews,
+    sidebarViewsByWorkspace: m.sidebarViewsByWorkspace,
     threadViews: m.threadViews,
     sidebarTaskPrefs: m.sidebarTaskPrefs,
   };

@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -89,13 +92,15 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	}
 	if req.WorkspaceReuseRequired {
 		return &EnvPrepareResult{
-			Success:        true,
-			Steps:          steps,
-			WorkspacePath:  wt.Path,
-			Duration:       time.Since(start),
-			WorktreeID:     wt.ID,
-			WorktreeBranch: wt.Branch,
-			MainRepoGitDir: filepath.Join(req.RepositoryPath, ".git"),
+			Success:                true,
+			Steps:                  steps,
+			WorkspacePath:          wt.Path,
+			Duration:               time.Since(start),
+			WorktreeID:             wt.ID,
+			WorktreeBranch:         wt.Branch,
+			WorktreeBranchOwner:    wt.BranchOwner,
+			WorktreeIntegrationRef: wt.IntegrationRef,
+			MainRepoGitDir:         filepath.Join(req.RepositoryPath, ".git"),
 		}, nil
 	}
 
@@ -150,6 +155,8 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		Duration:                  time.Since(start),
 		WorktreeID:                wt.ID,
 		WorktreeBranch:            wt.Branch,
+		WorktreeBranchOwner:       wt.BranchOwner,
+		WorktreeIntegrationRef:    wt.IntegrationRef,
 		MainRepoGitDir:            mainRepoGitDir,
 		RequestedBaseBranch:       req.BaseBranch,
 		BaseBranch:                wt.BaseBranch,
@@ -293,6 +300,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RepositoryID:               req.RepositoryID,
 		RepositoryPath:             req.RepositoryPath,
 		BaseBranch:                 req.BaseBranch,
+		IntegrationRef:             req.IntegrationRef,
 		FallbackBaseBranch:         req.DefaultBranch,
 		CheckoutBranch:             req.CheckoutBranch,
 		PRNumber:                   req.PRNumber,
@@ -313,12 +321,51 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		BranchSlug:                 req.BranchSlug,
 		BranchIdentitySlug:         req.BranchIdentitySlug,
 		ContributionDestination:    req.ContributionDestination,
-		// Export resolved executor-profile env vars into the repository setup
-		// script so tokens (e.g. an npm auth token) are available during
-		// install. Set for both single-repo and multi-repo launches, which both
-		// build their CreateRequest here (multi-repo copies req.Env per spec).
-		ScriptEnv: req.Env,
+		// Repository setup scripts receive profile and repository environment,
+		// but never the managed Git credential broker capabilities used to
+		// prepare the agent runtime.
+		ScriptEnv: setupScriptEnvironment(req.Env),
 	}
+}
+
+func setupScriptEnvironment(env map[string]string) map[string]string {
+	result := cloneStringMap(env)
+	for _, key := range append([]string{
+		githubauth.CredentialHelperPathEnv,
+		githubauth.CredentialCLIShimDirEnv,
+		githubauth.CredentialCLIBashEnvEnv,
+		githubauth.CredentialParentBashEnv,
+	}, managedGitCredentialBrokerEnvKeys...) {
+		delete(result, key)
+	}
+	filtered, err := gitconfigenv.Filter(result, func(index int, entries []gitconfigenv.Entry) bool {
+		return !isManagedSetupScriptGitHelper(index, entries)
+	})
+	if err == nil {
+		return filtered
+	}
+	for key := range result {
+		if gitconfigenv.IsIndexedKey(key) {
+			delete(result, key)
+		}
+	}
+	return result
+}
+
+func isManagedSetupScriptGitHelper(index int, entries []gitconfigenv.Entry) bool {
+	entry := entries[index]
+	key, value := entry.Key, entry.Value
+	normalizedKey := strings.ToLower(strings.TrimSpace(key))
+	if !strings.HasPrefix(normalizedKey, "credential.https://") || !strings.HasSuffix(normalizedKey, ".helper") {
+		return false
+	}
+	if value == "" && index+1 < len(entries) && entries[index+1].Key == key {
+		return isManagedSetupScriptGitHelper(index+1, entries)
+	}
+	return value == githubauth.ManagedGitCredentialHelper ||
+		value == githubauth.LegacyShimGitCredentialHelper ||
+		value == githubauth.LegacyGitCredentialHelper ||
+		githubauth.IsHostGitHubCredentialHelper(value)
 }
 
 // completeCreateWorktreeStep marks the "Create worktree" step successful,
@@ -445,6 +492,8 @@ func (p *WorktreePreparer) prepareMultiRepo(
 			BranchSlug:                repoBranchIdentitySlug(spec),
 			WorktreeID:                wt.ID,
 			WorktreeBranch:            wt.Branch,
+			WorktreeBranchOwner:       wt.BranchOwner,
+			WorktreeIntegrationRef:    wt.IntegrationRef,
 			WorktreePath:              wt.Path,
 			MainRepoGitDir:            filepath.Join(spec.RepositoryPath, ".git"),
 			RequestedBaseBranch:       spec.BaseBranch,
@@ -472,6 +521,8 @@ func (p *WorktreePreparer) prepareMultiRepo(
 	if len(worktrees) > 0 {
 		res.WorktreeID = worktrees[0].WorktreeID
 		res.WorktreeBranch = worktrees[0].WorktreeBranch
+		res.WorktreeBranchOwner = worktrees[0].WorktreeBranchOwner
+		res.WorktreeIntegrationRef = worktrees[0].WorktreeIntegrationRef
 		res.MainRepoGitDir = worktrees[0].MainRepoGitDir
 		res.RequestedBaseBranch = worktrees[0].RequestedBaseBranch
 		res.BaseBranch = worktrees[0].BaseBranch
@@ -526,6 +577,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.RepositoryPath = spec.RepositoryPath
 	subReq.RepoName = spec.RepoName
 	subReq.BaseBranch = spec.BaseBranch
+	subReq.IntegrationRef = spec.IntegrationRef
 	subReq.DefaultBranch = spec.DefaultBranch
 	subReq.CheckoutBranch = spec.CheckoutBranch
 	subReq.PRNumber = spec.PRNumber
