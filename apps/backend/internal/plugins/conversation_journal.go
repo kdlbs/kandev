@@ -14,9 +14,22 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/sysprompt"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
+)
+
+const (
+	// mirrorSweepBatchSize is the durable-commit flush size the cross-session
+	// mirror sweep uses, spanning session boundaries rather than per-session
+	// (production sessions carry too few events each for per-session
+	// batching to matter). See mirror_startup_cost_test.go's
+	// TestMirrorCommitBatchingFloor for the measured floor at this size.
+	mirrorSweepBatchSize = 256
+	// mirrorSweepReportInterval throttles startup.Reporter progress updates
+	// during a long sweep so it doesn't log on every session.
+	mirrorSweepReportInterval = 2 * time.Second
 )
 
 // errConversationCursorGone reports a page cursor whose message was
@@ -97,6 +110,31 @@ func (s *Service) SyncCommittedSessionEvents(ctx context.Context, sessionID stri
 	if s.conversationJournal == nil || s.sessionEvents == nil {
 		return nil, nil
 	}
+	queried, err := s.queryCommittedSessionEvents(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	mirrored := make([]SessionEvent, 0, len(queried))
+	for _, event := range queried {
+		appended, err := s.sessionEvents.AppendCommitted(event)
+		if err != nil {
+			return nil, fmt.Errorf("mirror committed conversation event: %w", err)
+		}
+		if !appended {
+			continue
+		}
+		mirrored = append(mirrored, event)
+	}
+	return mirrored, nil
+}
+
+// queryCommittedSessionEvents reads and sanitizes one session's
+// primary-journal rows past its current mirror watermark, warning once per
+// contiguous gap the primary journal's own retention already pruned. It does
+// not mirror anything: SyncCommittedSessionEvents appends the result one
+// session at a time, and sweepCommittedSessionEvents accumulates it into a
+// mirrorSyncBatch shared across sessions.
+func (s *Service) queryCommittedSessionEvents(ctx context.Context, sessionID string) ([]SessionEvent, error) {
 	watermark := s.sessionEvents.Watermark(sessionID)
 	query := s.conversationJournal.Rebind(`
 		SELECT session_id, event_id, sequence, protocol_version, event_type, task_id, payload, created_at
@@ -109,7 +147,7 @@ func (s *Service) SyncCommittedSessionEvents(ctx context.Context, sessionID stri
 	}
 	defer func() { _ = rows.Close() }()
 
-	mirrored := make([]SessionEvent, 0)
+	events := make([]SessionEvent, 0)
 	expected := watermark
 	for rows.Next() {
 		var event SessionEvent
@@ -122,14 +160,6 @@ func (s *Service) SyncCommittedSessionEvents(ctx context.Context, sessionID stri
 		if taskID.Valid {
 			event.TaskID = &taskID.String
 		}
-		appended, err := s.sessionEvents.AppendCommitted(event)
-		if err != nil {
-			return nil, fmt.Errorf("mirror committed conversation event: %w", err)
-		}
-		if !appended {
-			continue
-		}
-		mirrored = append(mirrored, event)
 		if event.Sequence > expected+1 && s.log != nil {
 			s.log.Warn("journal mirror healed a retention gap",
 				zap.String("session_id", sessionID),
@@ -138,11 +168,12 @@ func (s *Service) SyncCommittedSessionEvents(ctx context.Context, sessionID stri
 			)
 		}
 		expected = event.Sequence
+		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate committed conversation events: %w", err)
 	}
-	return mirrored, nil
+	return events, nil
 }
 
 // emptyConversationPayload is the durable payload persisted for a
@@ -248,7 +279,35 @@ func sanitizeConversationMessagePayload(target, source map[string]any) {
 	}
 }
 
+// syncAllCommittedSessionEvents runs the cross-session mirror sweep and
+// returns every event it mirrored, for maintainSessionEvents to feed to the
+// session event sink.
 func (s *Service) syncAllCommittedSessionEvents(ctx context.Context) ([]SessionEvent, error) {
+	return s.sweepCommittedSessionEvents(ctx, true)
+}
+
+// syncAllCommittedSessionEventsAtBoot runs the same cross-session mirror
+// sweep for the one-shot startup call site (provider.go). That call site has
+// no sink and previously discarded the returned slice anyway, so this passes
+// collect=false and lets the sweep discard mirrored events as it goes
+// instead of holding all of them (up to production scale, hundreds of
+// thousands) in memory for a result nothing reads.
+func (s *Service) syncAllCommittedSessionEventsAtBoot(ctx context.Context) error {
+	_, err := s.sweepCommittedSessionEvents(ctx, false)
+	return err
+}
+
+// sweepCommittedSessionEvents mirrors every session's committed rows past
+// its watermark, batching durable commits by event count across session
+// boundaries (not per session) via mirrorSyncBatch — production sessions
+// carry too few events each for per-session batching to help; see
+// mirror_startup_cost_test.go's TestMirrorCommitBatchingFloor. ctx is
+// checked between sessions so a cancelled/timed-out sweep (e.g. shutdown
+// mid-startup) stops promptly instead of running to completion: nothing
+// buffered past the last flush is lost, since the mirror's watermark only
+// advances for durably committed writes, so the next boot's sweep simply
+// resumes where this one left off.
+func (s *Service) sweepCommittedSessionEvents(ctx context.Context, collect bool) ([]SessionEvent, error) {
 	if s.conversationJournal == nil || s.sessionEvents == nil {
 		return nil, nil
 	}
@@ -268,24 +327,105 @@ func (s *Service) syncAllCommittedSessionEvents(ctx context.Context) ([]SessionE
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate conversation stream partitions: %w", err)
 	}
-	var mirrored []SessionEvent
-	var failures []string
+
+	batch := newMirrorSyncBatch(s.sessionEvents, mirrorSweepBatchSize, collect)
+	reporter := startup.FromContext(ctx)
+	lastReport := time.Now()
+	swept := 0
 	for _, sessionID := range sessionIDs {
-		events, err := s.SyncCommittedSessionEvents(ctx, sessionID)
+		if ctx.Err() != nil {
+			break
+		}
+		queried, err := s.queryCommittedSessionEvents(ctx, sessionID)
 		if err != nil {
 			// Isolate one unhealthy partition: it must not freeze retention
 			// for every other session. The combined error is still returned
 			// so the failure stays loud (it is only reachable through state
 			// tampering, since the maintenance tick prunes both sides).
-			failures = append(failures, sessionID+": "+err.Error())
+			batch.failures = append(batch.failures, sessionID+": "+err.Error())
 			continue
 		}
-		mirrored = append(mirrored, events...)
+		for _, event := range queried {
+			batch.add(event)
+		}
+		swept++
+		if reporter != nil && time.Since(lastReport) >= mirrorSweepReportInterval {
+			reporter.Report()
+			lastReport = time.Now()
+		}
 	}
-	if len(failures) > 0 {
-		return mirrored, fmt.Errorf("mirror %d session partition(s): %s", len(failures), strings.Join(failures, "; "))
+	batch.flush()
+	if s.log != nil {
+		s.log.Info("Plugins conversation journal mirror sweep completed",
+			zap.Int("sessions", swept), zap.Int("events_mirrored", batch.count),
+			zap.Int("session_failures", len(batch.failures)))
 	}
-	return mirrored, nil
+	if len(batch.failures) > 0 {
+		return batch.mirrored, fmt.Errorf("mirror %d session partition(s): %s", len(batch.failures), strings.Join(batch.failures, "; "))
+	}
+	return batch.mirrored, nil
+}
+
+// mirrorSyncBatch accumulates queried committed events across session
+// boundaries and flushes them through AppendCommittedBatch every flushSize
+// events. A batch failure falls back to per-event AppendCommitted so one bad
+// or unlucky event cannot block every other session's otherwise-good writes
+// in the same batch: each AppendCommitted call is its own lock/commit cycle,
+// so a failure there is isolated to that one event instead of unwinding
+// everything queued alongside it.
+type mirrorSyncBatch struct {
+	log       *SessionEventLog
+	flushSize int
+	collect   bool
+	pending   []SessionEvent
+	mirrored  []SessionEvent
+	count     int
+	failures  []string
+}
+
+func newMirrorSyncBatch(log *SessionEventLog, flushSize int, collect bool) *mirrorSyncBatch {
+	return &mirrorSyncBatch{log: log, flushSize: flushSize, collect: collect}
+}
+
+func (b *mirrorSyncBatch) add(event SessionEvent) {
+	b.pending = append(b.pending, event)
+	if len(b.pending) >= b.flushSize {
+		b.flush()
+	}
+}
+
+func (b *mirrorSyncBatch) flush() {
+	if len(b.pending) == 0 {
+		return
+	}
+	pending := b.pending
+	b.pending = nil
+	appended, err := b.log.AppendCommittedBatch(pending)
+	if err == nil {
+		b.recordAppended(appended)
+		return
+	}
+	b.flushEach(pending)
+}
+
+func (b *mirrorSyncBatch) flushEach(pending []SessionEvent) {
+	for _, event := range pending {
+		appended, err := b.log.AppendCommitted(event)
+		if err != nil {
+			b.failures = append(b.failures, event.SessionID+": "+err.Error())
+			continue
+		}
+		if appended {
+			b.recordAppended([]SessionEvent{event})
+		}
+	}
+}
+
+func (b *mirrorSyncBatch) recordAppended(events []SessionEvent) {
+	b.count += len(events)
+	if b.collect {
+		b.mirrored = append(b.mirrored, events...)
+	}
 }
 
 func (s *Service) SetSessionEventSink(sink func(SessionEvent)) {

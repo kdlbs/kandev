@@ -414,7 +414,7 @@ func startServices( //nolint:cyclop
 		return false
 	}
 
-	services, agentSettingsController, err := provideServices(cfg, log, repos, dbPool, eventBus, agentRegistry, Version)
+	services, agentSettingsController, err := provideServices(ctx, cfg, log, repos, dbPool, eventBus, agentRegistry, Version)
 	if err != nil {
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false

@@ -302,32 +302,130 @@ func (l *SessionEventLog) AppendCommitted(event SessionEvent) (bool, error) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	outcome, err := l.applyCommittedEventLocked(event)
+	if err != nil {
+		return false, err
+	}
+	if !outcome.appended {
+		return false, nil
+	}
+	if err := l.persistAppendLocked(event, outcome.poison); err != nil {
+		l.undoCommittedEventLocked(outcome)
+		return false, err
+	}
+	return true, nil
+}
+
+// AppendCommittedBatch mirrors N events allocated in the source mutation's
+// primary-database transaction, sharing a single durable commit across all
+// of them (across session boundaries, not just within one) instead of one
+// commit per event — see mirror_startup_cost_test.go for the measured cost
+// of one-commit-per-event at production scale. On any failure every
+// in-memory mutation this call made is undone (LIFO, mirroring the nested
+// rollback a chain of single AppendCommitted calls would have unwound) and
+// nil plus the error is returned; the caller is expected to fall back to
+// per-event AppendCommitted so one bad or unlucky event cannot block every
+// other session's otherwise-good writes in the same batch.
+func (l *SessionEventLog) AppendCommittedBatch(events []SessionEvent) ([]SessionEvent, error) {
+	for _, event := range events {
+		if !json.Valid(event.Payload) {
+			return nil, fmt.Errorf("%w: malformed payload", ErrPoisonEvent)
+		}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var outcomes []sessionAppendOutcome
+	var writes []sessionAppendWrite
+	var appended []SessionEvent
+	undo := func() {
+		for i := len(outcomes) - 1; i >= 0; i-- {
+			l.undoCommittedEventLocked(outcomes[i])
+		}
+	}
+	for _, event := range events {
+		outcome, err := l.applyCommittedEventLocked(event)
+		if err != nil {
+			undo()
+			return nil, err
+		}
+		if !outcome.appended {
+			continue
+		}
+		outcomes = append(outcomes, outcome)
+		writes = append(writes, sessionAppendWrite{event: event, poison: outcome.poison})
+		appended = append(appended, event)
+	}
+	if len(writes) == 0 {
+		return nil, nil
+	}
+	if err := l.persistAppendBatchLocked(writes); err != nil {
+		undo()
+		return nil, err
+	}
+	return appended, nil
+}
+
+// sessionAppendOutcome captures the in-memory mutation
+// applyCommittedEventLocked made for one event, so a durable-write failure
+// can undo exactly that mutation via undoCommittedEventLocked without
+// cloning the whole log state (state can hold hundreds of thousands of
+// events during a startup sweep, so a full clone per flush would reintroduce
+// the same quadratic cost the batching is meant to remove).
+type sessionAppendOutcome struct {
+	sessionID         string
+	eventID           string
+	appended          bool
+	poison            *SessionPoisonRecord
+	newPartition      bool
+	previousWatermark uint64
+	previousTerminal  bool
+}
+
+// applyCommittedEventLocked performs the in-memory half of AppendCommitted:
+// duplicate/gap/terminal checks, appending the event, and poison detection.
+// It does not persist anything; callers hold l.mu and are responsible for
+// the durable write and for calling undoCommittedEventLocked if that write
+// fails.
+func (l *SessionEventLog) applyCommittedEventLocked(event SessionEvent) (sessionAppendOutcome, error) {
 	partition := l.state.Sessions[event.SessionID]
 	newPartition := partition == nil
 	if newPartition {
 		partition = &sessionEventPartition{}
 		l.state.Sessions[event.SessionID] = partition
 	}
-	previousWatermark := partition.Watermark
+	outcome := sessionAppendOutcome{
+		sessionID: event.SessionID, eventID: event.ID, newPartition: newPartition,
+		previousWatermark: partition.Watermark, previousTerminal: partition.Terminal,
+	}
+	discardEmptyPartition := func() {
+		if newPartition {
+			delete(l.state.Sessions, event.SessionID)
+		}
+	}
 	if event.Sequence <= partition.Watermark {
 		for _, existing := range partition.Events {
 			if existing.Sequence == event.Sequence {
+				discardEmptyPartition()
 				if existing.ID != event.ID || existing.EventType != event.EventType {
-					return false, fmt.Errorf("%w: sequence identity mismatch", ErrPoisonEvent)
+					return outcome, fmt.Errorf("%w: sequence identity mismatch", ErrPoisonEvent)
 				}
-				return false, nil
+				return outcome, nil
 			}
 		}
 		// The local replay row may already have aged out while its monotonic
 		// watermark remains. The primary journal is authoritative.
-		return false, nil
+		discardEmptyPartition()
+		return outcome, nil
 	}
 	if partition.Terminal {
-		return false, ErrSessionRemoved
+		discardEmptyPartition()
+		return outcome, ErrSessionRemoved
 	}
 	if event.Sequence != partition.Watermark+1 {
 		if !mirrorGapHealable(newPartition, partition) {
-			return false, ErrForwardGap
+			discardEmptyPartition()
+			return outcome, ErrForwardGap
 		}
 		// Collection can drop a partition (terminal, after retention) or
 		// truncate its rows (idle, non-terminal) once no cursor or poison
@@ -337,32 +435,44 @@ func (l *SessionEventLog) AppendCommitted(event SessionEvent) (bool, error) {
 		// the replay boundary and accept the row.
 		partition.Watermark = event.Sequence - 1
 	}
-	previousTerminal := partition.Terminal
 	partition.Events = append(partition.Events, event)
 	partition.Watermark = event.Sequence
 	if event.EventType == sessionRemovedEventType {
 		partition.Terminal = true
 	}
-	var poison *SessionPoisonRecord
 	if _, projectionErr := ProjectSessionEvent(event); projectionErr != nil {
-		poison = &SessionPoisonRecord{
+		outcome.poison = &SessionPoisonRecord{
 			SessionID: event.SessionID, EventID: event.ID, Sequence: event.Sequence,
 			ProtocolVersion: event.ProtocolVersion, LastError: projectionErr.Error(),
 			State: SessionPoisonPending, OwnerEpoch: 1, UpdatedAt: event.CreatedAt,
 		}
-		l.state.Poison[poisonKey(event.SessionID, event.ID)] = poison
+		l.state.Poison[poisonKey(event.SessionID, event.ID)] = outcome.poison
 	}
-	if err := l.persistAppendLocked(event, poison); err != nil {
-		partition.Events = partition.Events[:len(partition.Events)-1]
-		partition.Watermark = previousWatermark
-		partition.Terminal = previousTerminal
-		delete(l.state.Poison, poisonKey(event.SessionID, event.ID))
-		if newPartition {
-			delete(l.state.Sessions, event.SessionID)
-		}
-		return false, err
+	outcome.appended = true
+	return outcome, nil
+}
+
+// undoCommittedEventLocked reverts the in-memory mutation
+// applyCommittedEventLocked made for one event. Callers processing a batch
+// must invoke this in reverse (LIFO) order, since each event's append
+// assumed the partition's tail was exactly its own prior state.
+func (l *SessionEventLog) undoCommittedEventLocked(outcome sessionAppendOutcome) {
+	if !outcome.appended {
+		return
 	}
-	return true, nil
+	partition := l.state.Sessions[outcome.sessionID]
+	if partition == nil {
+		return
+	}
+	partition.Events = partition.Events[:len(partition.Events)-1]
+	partition.Watermark = outcome.previousWatermark
+	partition.Terminal = outcome.previousTerminal
+	if outcome.poison != nil {
+		delete(l.state.Poison, poisonKey(outcome.sessionID, outcome.eventID))
+	}
+	if outcome.newPartition {
+		delete(l.state.Sessions, outcome.sessionID)
+	}
 }
 
 // mirrorGapHealable reports whether a mirror row that starts past the local
@@ -974,6 +1084,53 @@ func (l *SessionEventLog) persistAppendLocked(event SessionEvent, poison *Sessio
 		return fmt.Errorf("begin session event append: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := execAppendWrite(tx, event, poison); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit session event append: %w", err)
+	}
+	return nil
+}
+
+// sessionAppendWrite pairs a mirrored event with its optional poison record
+// for persistAppendBatchLocked, which needs both per write but only one
+// transaction for the whole batch.
+type sessionAppendWrite struct {
+	event  SessionEvent
+	poison *SessionPoisonRecord
+}
+
+// persistAppendBatchLocked commits N mirrored events (and any poison
+// records) in a single transaction, amortizing the fsync-dominated commit
+// cost that TestMirrorCommitBatchingFloor measures per-event today.
+func (l *SessionEventLog) persistAppendBatchLocked(writes []sessionAppendWrite) error {
+	if l.path == "" {
+		return nil
+	}
+	if l.db == nil {
+		return errors.New("session event log database is closed")
+	}
+	tx, err := l.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin session event append batch: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, write := range writes {
+		if err := execAppendWrite(tx, write.event, write.poison); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit session event append batch: %w", err)
+	}
+	return nil
+}
+
+// execAppendWrite issues the three statements one mirrored event needs
+// against an already-open transaction; shared by the single-event and
+// batch append paths so they cannot drift apart.
+func execAppendWrite(tx *sql.Tx, event SessionEvent, poison *SessionPoisonRecord) error {
 	if _, err := tx.Exec(sqlx.Rebind(sqlx.QUESTION, `INSERT INTO session_event_partitions(session_id, watermark, terminal) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET watermark = excluded.watermark, terminal = excluded.terminal`),
 		event.SessionID, event.Sequence, event.EventType == sessionRemovedEventType); err != nil {
 		return fmt.Errorf("persist session partition: %w", err)
@@ -986,9 +1143,6 @@ func (l *SessionEventLog) persistAppendLocked(event SessionEvent, poison *Sessio
 		if _, err := tx.Exec(sqlx.Rebind(sqlx.QUESTION, `INSERT INTO session_poison(poison_key, record) VALUES (?, ?)`), poisonKey(event.SessionID, event.ID), mustJSON(poison)); err != nil {
 			return fmt.Errorf("persist poison record: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit session event append: %w", err)
 	}
 	return nil
 }
