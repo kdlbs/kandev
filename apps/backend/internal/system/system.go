@@ -120,9 +120,16 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	dbSvc := database.NewService(pool, databasePath, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	markPersistenceUnavailable := func() {
+		if wiring.PersistenceHealth != nil {
+			wiring.PersistenceHealth.MarkUnavailable()
+		}
+	}
+	dbSvc.PersistenceUnavailable = markPersistenceUnavailable
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	backupsSvc.PersistenceUnavailable = markPersistenceUnavailable
 	retentionSvc := provideToolRetention(pool, backupsSvc, eventBus, log, wiring)
 	dbSvc.DatabaseQuiesce = retentionQuiesce(retentionSvc, wiring.DatabaseQuiesce)
 	restoreQuiesce := wiring.RestoreQuiesce

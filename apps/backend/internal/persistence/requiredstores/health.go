@@ -85,6 +85,16 @@ func (h *Health) Check(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
+// MarkUnavailable records a destructive database transition before the
+// maintenance owner releases its admission lease. This keeps stateful
+// requests fail-closed while the process waits for the required restart.
+func (h *Health) MarkUnavailable() {
+	if h == nil || h.tracker == nil {
+		return
+	}
+	_ = h.recordUnavailable(errors.New("database maintenance requires restart"))
+}
+
 // checkRuntime runs a periodic probe when the database can be admitted. SQLite
 // maintenance owns the same writer pool, so a busy maintenance lease defers
 // the probe instead of turning bounded writer contention into an unhealthy
@@ -104,7 +114,7 @@ func (h *Health) checkRuntime(ctx context.Context) (deferred bool, err error) {
 }
 
 func (h *Health) isSQLite() bool {
-	return h != nil && h.pool != nil && h.pool.Writer() != nil && h.pool.Writer().DriverName() == dialect.SQLite3
+	return h.pool != nil && h.pool.Writer() != nil && h.pool.Writer().DriverName() == dialect.SQLite3
 }
 
 func (h *Health) ping(ctx context.Context) error {

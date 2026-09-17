@@ -68,6 +68,10 @@ type Service struct {
 	jobs         *jobs.Tracker
 	log          *logger.Logger
 
+	// PersistenceUnavailable marks required stores unhealthy before a
+	// destructive maintenance operation leaves the process awaiting restart.
+	PersistenceUnavailable func()
+
 	// OrchestratorShutdown stops the orchestrator and active executions before
 	// the factory-reset job runs. Wired by cmd/kandev. Tests pass a no-op.
 	OrchestratorShutdown func()

@@ -128,7 +128,7 @@ and `.8`, with existing phone parity criterion `.5`.
 | System-page 003.8 | Hook tests for action-error precedence, stale GET rejection, and persisted failure preservation |
 | System-page 003.5/.7/.8 | Desktop and mobile recovery scenarios in the existing retention specs |
 
-The full prefixes are in the work-order frontmatter. New test names are planned,
+At planning time, the full prefixes are in the work-order frontmatter. New test names were planned,
 not existing evidence. Use a held real writer connection and guard for a
 deterministic backend reproduction. Do not depend on a large database making
 vacuum slow. The guard fixture reproduces the proven resource conflict.

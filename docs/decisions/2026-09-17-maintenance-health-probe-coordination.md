@@ -22,6 +22,10 @@ Startup checks remain strict. PostgreSQL probes remain unchanged.
 
 The next scheduled tick resumes full probing after maintenance releases its lease.
 Deferred probes emit a bounded debug event. They never manufacture healthy state.
+Destructive SQLite restore and factory-reset operations use the existing
+unhealthy state to fail closed before quiescing or replacing data. Their
+restart-required result keeps database-backed work disabled until a fresh
+process initializes the database again.
 
 ## Consequences
 

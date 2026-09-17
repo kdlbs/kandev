@@ -119,6 +119,13 @@ It emits a debug event with reason `maintenance_busy`, without database paths.
 An unhealthy store remains unhealthy, including alongside healthy stores.
 Ordinary writer contention without a maintenance lease retains current behavior.
 
+Destructive SQLite restore and factory-reset operations notify required-store
+health before they quiesce workers or replace/drop data. The notifier records
+the existing `unhealthy` state while the maintenance lease is still held, so
+stateful middleware fails closed before the operation releases admission. The
+operation's `restart_required` result then requires a fresh process before
+database-backed work can resume. This does not add a new health state.
+
 Startup calls to `Health.Check` remain strict and never use the deferral path.
 Missing pools remain failures. PostgreSQL uses its current probe path.
 The shared guard also covers backups, restore/reset, and retention batches.

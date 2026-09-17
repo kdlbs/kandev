@@ -115,6 +115,11 @@ timestamps, while startup `Health.Check` remains strict and PostgreSQL keeps
 the existing path. Added real SQLite contention coverage for mixed state
 preservation, recovery, lease release, and middleware availability.
 
+Review follow-up also wires destructive SQLite restore and factory-reset
+operations to mark required persistence unhealthy before quiescence or data
+replacement. Stateful middleware therefore fails closed while the accepted
+operation waits for the required frontend restart.
+
 Verification passed:
 
 - `go test -race ./internal/persistence/requiredstores ./internal/system/maintenance ./internal/system/database`
