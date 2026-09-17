@@ -30,6 +30,7 @@ import (
 
 	githubsvc "github.com/kandev/kandev/internal/github"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -142,6 +143,8 @@ type taskDataSource interface {
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*taskmodels.ExecutorRunning, error)
 	ListAllExecutorProfiles(ctx context.Context) ([]*taskmodels.ExecutorProfile, error)
 	GetExecutor(ctx context.Context, id string) (*taskmodels.Executor, error)
+	BuildDependencyViews(ctx context.Context, tasks []*taskmodels.Task) map[string]taskservice.DependencyView
+	BuildDependencyViewsBounded(ctx context.Context, tasks []*taskmodels.Task) (map[string]taskservice.DependencyView, error)
 }
 
 // workflowLister is the narrow slice of internal/task/service.Service the

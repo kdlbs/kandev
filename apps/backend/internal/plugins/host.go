@@ -133,6 +133,13 @@ func invalidArgument(msg string) error {
 	return status.Error(codes.InvalidArgument, msg)
 }
 
+// resourceExhausted builds the gRPC error a Host data reader returns when a
+// batch read would exceed a hard response-size bound (e.g. the dependency
+// projection's fan-out cap) rather than silently truncate it.
+func resourceExhausted(msg string) error {
+	return status.Error(codes.ResourceExhausted, msg)
+}
+
 func (h *pluginHost) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
 	if !h.capabilities.State {
 		return nil, false, permissionDenied("state")
