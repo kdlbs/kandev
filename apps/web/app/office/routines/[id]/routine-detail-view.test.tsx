@@ -66,6 +66,7 @@ const baseRoutine: Routine = {
 const DEFAULT_CRON_EXPRESSION = "*/5 * * * *";
 const CHANGED_CRON_EXPRESSION = "0 9 * * *";
 const NEXT_FIRE_NONE = "Next fire: -";
+const LAST_FIRED_NEVER = "Last fired: never";
 const AMERICA_NEW_YORK = "America/New_York";
 
 const cronTrigger: RoutineTrigger = {
@@ -227,13 +228,31 @@ describe("RoutineDetailView editable field seeding (AC-003.5, AC-003.7)", () => 
 describe("RoutineDetailView last-fired display (AC-003.5, AC-003.6)", () => {
   it("shows the primary cron trigger's lastFiredAt, not the placeholder, when one is set", () => {
     renderDetailView(baseRoutine, [{ ...cronTrigger, lastFiredAt: "2026-05-01T00:00:00Z" }]);
-    expect(screen.queryByText("Last fired: never")).toBeNull();
+    expect(screen.queryByText(LAST_FIRED_NEVER)).toBeNull();
     expect(screen.getByText(/^Last fired: (?!never)/)).toBeTruthy();
   });
 
   it("shows the never placeholder when there is no cron trigger to report a last-fired time", () => {
     renderDetailView(baseRoutine, NO_TRIGGERS);
-    expect(screen.getByText("Last fired: never")).toBeTruthy();
+    expect(screen.getByText(LAST_FIRED_NEVER)).toBeTruthy();
+  });
+
+  it("shows the not-first-in-array primary trigger's lastFiredAt, not the placeholder array position would surface", () => {
+    const other = { ...cronTrigger, id: "b", nextRunAt: undefined, enabled: false };
+    const primary = { ...cronTrigger, id: "a", lastFiredAt: "2026-05-01T00:00:00Z" };
+    // Primary is listed second: reading by array position would surface
+    // `other`'s unset lastFiredAt (the never placeholder) instead.
+    renderDetailView(baseRoutine, [other, primary]);
+    expect(screen.queryByText(LAST_FIRED_NEVER)).toBeNull();
+    expect(screen.getByText(/^Last fired: (?!never)/)).toBeTruthy();
+  });
+
+  it("shows last-fired even when the routine is not currently firing", () => {
+    renderDetailView({ ...baseRoutine, status: "paused" }, [
+      { ...cronTrigger, lastFiredAt: "2026-05-01T00:00:00Z" },
+    ]);
+    expect(screen.queryByText(LAST_FIRED_NEVER)).toBeNull();
+    expect(screen.getByText(/^Last fired: (?!never)/)).toBeTruthy();
   });
 });
 
@@ -330,6 +349,21 @@ describe("RoutineDetailView trigger sync (REQ-004)", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(createRoutineTriggerMock).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith("delete boom");
+  });
+
+  it("targets the primary trigger for sync, not the first array element, when the primary is listed second (AC-004.8)", async () => {
+    const other: RoutineTrigger = { ...cronTrigger, id: "b", nextRunAt: undefined, enabled: false };
+    const primary: RoutineTrigger = { ...cronTrigger, id: "a" };
+    deleteRoutineTriggerMock.mockResolvedValue(undefined);
+    createRoutineTriggerMock.mockResolvedValue({
+      trigger: { ...cronTrigger, id: "trigger-new", cronExpression: CHANGED_CRON_EXPRESSION },
+    });
+    renderDetailView(baseRoutine, [other, primary]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).toHaveBeenCalledWith("a");
+    expect(deleteRoutineTriggerMock).not.toHaveBeenCalledWith("b");
   });
 });
 
@@ -470,6 +504,24 @@ describe("RoutineDetailView trigger sync: no target, trimming, timezone (AC-004.
     expect(createRoutineTriggerMock).toHaveBeenCalledWith(
       "routine-1",
       expect.objectContaining({ timezone: AMERICA_NEW_YORK }),
+    );
+  });
+
+  it("does not default an empty stored timezone before comparing, even when the drafted timezone also resolves to the default (AC-004.4, AC-004.12)", async () => {
+    createRoutineTriggerMock.mockResolvedValue({
+      trigger: { ...cronTrigger, id: "trigger-2", timezone: "UTC" },
+    });
+    // Stored "" and drafted "" both resolve to the same "UTC" reading once
+    // AC-004.12's draft-side default is applied. If the stored side were
+    // defaulted too, "UTC" === "UTC" would wrongly skip the sync.
+    renderDetailView(baseRoutine, [{ ...cronTrigger, timezone: "" }]);
+    setTimezone("");
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).toHaveBeenCalledWith("trigger-1");
+    expect(createRoutineTriggerMock).toHaveBeenCalledWith(
+      "routine-1",
+      expect.objectContaining({ timezone: "UTC" }),
     );
   });
 });

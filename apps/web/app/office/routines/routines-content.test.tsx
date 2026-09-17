@@ -164,4 +164,26 @@ describe("RoutinesContent create-routine trigger failure (AC-002.8)", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("workspace not found"));
     expect(createRoutineTriggerMock).not.toHaveBeenCalled();
   });
+
+  it("extracts the routine id from the real backend's wrapped { routine: { id } } create response shape", async () => {
+    createRoutineMock.mockResolvedValue({ routine: { id: "routine-1" } });
+    createRoutineTriggerMock.mockRejectedValue(
+      new Error("cron trigger requires a cron_expression"),
+    );
+    renderContent();
+
+    fireEvent.click(screen.getByRole("button", { name: /new routine/i }));
+    goToScheduleStepAndSetCron("0 9 * * *");
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Routine created, but its schedule could not be saved",
+      ),
+    );
+    expect(createRoutineTriggerMock).toHaveBeenCalledWith(
+      "routine-1",
+      expect.objectContaining({ kind: "cron", cronExpression: "0 9 * * *" }),
+    );
+  });
 });
