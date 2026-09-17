@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agent/runtimeauth"
@@ -87,6 +88,7 @@ func TestAssistantCredentialScopedReferenceOnly(t *testing.T) {
 
 type syntheticCredentialHealth string
 
-func (h syntheticCredentialHealth) CredentialHealth(context.Context, string, models.CredentialDescriptor) string {
-	return string(h)
+func (h syntheticCredentialHealth) CredentialHealth(context.Context, string, models.CredentialDescriptor) models.CredentialValidation {
+	now := time.Now().UTC()
+	return models.CredentialValidation{Status: string(h), ValidatedAt: &now, ConfigurationGeneration: "synthetic-generation"}
 }

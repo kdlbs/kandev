@@ -81,7 +81,20 @@ func orchestrationMemoryAction() apiAction {
 			return memory, store(s).UpsertAgentMemory(s.Context, memory)
 		},
 		read: func(s testconformance.ScenarioContext, id string) (any, error) {
-			return store(s).GetAgentMemory(s.Context, conformanceAgentID, "working", id)
+			memory, err := store(s).GetAgentMemory(s.Context, conformanceAgentID, "working", id)
+			if err != nil {
+				return nil, err
+			}
+			rows, err := store(s).AssistantMemoryPage(s.Context, conformanceAgentID, "conformance-owner", "workspace", "", "", 50)
+			if err != nil {
+				return nil, err
+			}
+			for _, row := range rows {
+				if row.ID == id {
+					return memory, nil
+				}
+			}
+			return nil, fmt.Errorf("owner memory page omitted eligible legacy workspace memory")
 		},
 		update: func(s testconformance.ScenarioContext, _ string, record any) error {
 			memory := *record.(*orchestrationmodels.AgentMemory)

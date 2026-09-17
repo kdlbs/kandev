@@ -292,3 +292,21 @@ private migration rehearsal, rollback and contribution export.
 
 - [Runtime ownership](../../../decisions/2026-09-07-workspace-orchestration.md).
 - [Retained private ownership](../../../decisions/2026-09-16-private-conversation-ownership.md).
+
+### Implemented memory continuation and validation details
+
+Owner memory pages use stable ID order, a default of 50 and a cap of 100, with
+continuations bound to owner, binding version and scope filters. Expired and
+forgotten rows are excluded before paging. Native adapters validate repository,
+task and environment references; environment-only memories resolve the native
+environment's task before checking its workspace. Rejected scope edits precede
+the CAS write. Legacy unowned workspace memories remain unconfirmed.
+
+A packet's full-memory continuation is `/runtime/context/:objectiveId/memory`,
+with the same profile/task/project/environment query and a context-digest-bound
+cursor. Metadata-only credential checks return typed validation observations;
+the descriptor record accepts no observation fields or secret values. Each
+lookup uses the recorded assistant owner. The context digest includes status and
+configuration generation but excludes observation time, so rechecking unchanged
+metadata cannot make every queued packet stale. Actual descriptor/profile/scope
+or resolver configuration changes still invalidate dispatch.

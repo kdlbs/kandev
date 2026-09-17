@@ -51,7 +51,13 @@ The runtime CLI exposes `kandev objective list|create|update`. Delivery creation
 
 ## Memory and context
 
-The owner uses `GET /assistant/memory` (optional `scope` and `after`) and `GET/PUT/DELETE /assistant/memory/:id`. PUT accepts key/content, scope/scope ID, an owner-authored source comment, confirmation, priority, expiry and `expected_revision`. DELETE requires the current revision. Legacy memories remain unconfirmed and workspace-scoped.
+The owner uses `GET /assistant/memory` (optional `scope`, `scope_id`, `limit` and
+`after`) and `GET/PUT/DELETE /assistant/memory/:id`. Lists default to 50 entries
+and cap at 100, ordered by stable memory ID. Pass the opaque `next_cursor` as
+`after` with the same filters. A cursor is bound to the owner and current binding;
+malformed or mismatched cursors return 400. Expired, forgotten, foreign-owned
+and unavailable-scope entries are excluded. Explicit invalid scope references
+return 422 without changing stored data. PUT accepts key/content, scope/scope ID, an owner-authored source comment, confirmation, priority, expiry and `expected_revision`. DELETE requires the current revision. Legacy memories remain unconfirmed and workspace-scoped.
 
 Context is fetched with:
 
@@ -61,7 +67,18 @@ kandev context --objective OBJECTIVE_ID --profile PROFILE_ID
 
 This calls `GET /runtime/context/:objectiveId`. Optional `--task`, `--project` and `--environment` select an existing task, workspace repository and that task's environment. New-task handoffs cannot name an existing task or environment.
 
-Packets are deterministic, at most 12 KiB of JSON, and include provenance and the selected profile revision. Memory excerpts are at most 1 KiB UTF-8. Confirmed preferences precede inferred activity; confirmed priority-100 memories are mandatory. Oversized indispensable constraints cause refusal, not silent omission. `omitted_memory`, excerpt truncation flags and stable memory IDs identify incomplete context; `kandev memory get --id MEMORY_ID` retrieves an exact entry.
+Packet identities are deterministic, packets are at most 12 KiB of JSON, and include provenance and the selected profile revision. Memory excerpts are at most 1 KiB UTF-8. Confirmed preferences precede inferred activity; confirmed priority-100 memories are mandatory. Oversized indispensable constraints cause refusal, not silent omission. `omitted_memory`, excerpt truncation flags and stable memory IDs identify incomplete context; the returned `memory_reference` retrieves full scoped entries in bounded pages.
+For a CLI continuation, repeat the packet scope and use:
+
+```sh
+kandev context --objective OBJECTIVE_ID --profile PROFILE_ID --task TASK_ID \
+  --memory --limit 50 --after OPAQUE_CURSOR
+```
+
+Omit `--after` for the first page. The endpoint is
+`GET /runtime/context/:objectiveId/memory`. Its cursor includes the context
+revision, so edits require a fresh packet. Legacy coordinator memory commands
+remain available for ordinary workspace coordinators.
 
 Pass the returned packet ID as `--context`, with `--objective`, when delegating. The server attaches the packet. Edits, forgetting, expiry and account changes invalidate stale packets at dispatch, including queued messages. Idle-task reassignment can attach a fresh packet, but cannot authorize an older queued message under that new context.
 
@@ -71,7 +88,20 @@ Forgetting affects future assembly and delivery. It cannot erase text already se
 
 `GET /assistant/credentials` and `GET/PUT/DELETE /assistant/credentials/:id` manage separately typed references. Writes use `expected_revision`; descriptors specify resolver, stable reference, purpose, execution profile, account/environment, scope, required field names and unlock policy. Unknown fields, including secret-value fields, are rejected.
 
-Only matching profile/scope context receives a descriptor. Kandev resolver health uses scoped metadata lookup without revealing a value. Bitwarden is reported unavailable until a supported resolver is attached; a descriptor alone does not install or unlock it. Locked/unavailable states carry the specified unblock action and never substitute another account or scan the user's vault.
+Only matching profile/scope context receives a descriptor. Reads include a
+server-generated `validation` object: `status`, `descriptor_revision`,
+`profile_id`, `reference`, `configuration_generation`, `reason`, and
+`validated_at` only after an actual metadata check. The supported statuses are
+`ready`, `locked`, `missing`, `unavailable` and `unknown`. Validation fields are
+not accepted in descriptor writes.
+
+Every read checks the selected profile and referenced metadata again. Lookup
+runs under the assistant owner's identity, never an unscoped internal identity.
+`ready` confirms metadata availability; it does not prove external authentication
+or grant permission to use a secret. No value-reveal or vault-list method is used.
+Descriptor, account/profile, reference, resolver-generation and health changes
+invalidate queued context. A fresh check timestamp alone preserves packet
+identity. Validation observations are not stored in the descriptor record. Bitwarden is reported unavailable until a supported resolver is attached; a descriptor alone does not install or unlock it. Locked/unavailable states carry the specified unblock action and never substitute another account or scan the user's vault.
 
 ## Coordinator task observations
 

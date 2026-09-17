@@ -1,7 +1,7 @@
 ---
 id: "03-memory-context"
 title: "Scoped memory and worker handoffs"
-status: in_progress
+status: done
 wave: 2
 depends_on: ["01-durable-intake"]
 plan: "plan.md"
@@ -132,3 +132,28 @@ The exact task filter selected **10 tests**: 8 runtime (7 new plus the named exi
 Those passes preceded the binding-switch privacy regression. The [ownership repair](ownership-checkpoint.md) is now implemented and verified, and this task's exact filter passed again (**10 tests**). The unchanged redactor was moved to a dependency-free common package to remove a task-service test import cycle. This task remains **in_progress**: finish descriptor validation-time metadata, dedicated owner-list pagination/scope-validation coverage and function-complexity checks before marking done. No frontend/live-provider experiment or production deployment was performed. No commits were made.
 
 The docs-maintainer skill added the experimental backend API/CLI reference and corrected the old eight-memory description. Its checks passed: `node --test scripts/validate-public-docs.test.mjs` (**61 tests**) and `node scripts/validate-public-docs.mjs` (**43 pages**). The reference now documents retained ownership while still disclosing the incomplete UI/read-only enforcement; it is not a release/readiness claim.
+
+
+## Completion checkpoint (2026-09-17)
+
+Completed the remaining contract on the private v0.94.0 workbench. Owner lists
+now use stable ID ordering, default 50/max 100 pages and owner/binding/filter
+cursors. Native workspace, project, task and environment checks reject foreign
+or unavailable scopes before mutation and at reads. Full scoped context has a
+bounded continuation endpoint and `kandev context --memory --after --limit`.
+
+Credential observations are typed and generated from metadata-only owner-scoped
+reads. Client-supplied validation is rejected. Descriptor/profile/configuration
+and health changes invalidate packets; advancing only the observation clock does
+not. Unsupported resolvers remain unavailable. No user vault was queried.
+
+The exact work-order filter passed **18 top-level tests** (14 runtime, four native
+adapter tests). Full orchestration, CLI, queue and executor race tests passed;
+the scoped native orchestrator/backendapp race command passed. Scoped Go lint
+reported zero issues. SQL guard passed. SQLite and PostgreSQL 16 orchestration
+fresh/replay/CRUD conformance passed, including the new paginated SQL, and the
+repository's previous-stable **v0.93.0** upgrade fixture passed on both backends.
+Public-doc tests passed (61 tests, 48 pages); specification lint passed. Logs are
+in the local implementation evidence directory under `assistant-context-*`.
+These results supersede the earlier partial checkpoint. Human editing UI and
+provider enforcement remain assigned to tasks 08 and 05 respectively.

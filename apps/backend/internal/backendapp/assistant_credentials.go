@@ -2,6 +2,8 @@ package backendapp
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestration/models"
 	"github.com/kandev/kandev/internal/secrets"
@@ -11,16 +13,23 @@ import (
 // vault, or fall back to a different secret/account.
 type assistantCredentialReader struct{ store secrets.SecretStore }
 
-func (r assistantCredentialReader) CredentialHealth(ctx context.Context, workspace string, d models.CredentialDescriptor) string {
+func (r assistantCredentialReader) CredentialHealth(ctx context.Context, workspace string, d models.CredentialDescriptor) models.CredentialValidation {
+	result := models.CredentialValidation{Status: credentialUnavailable}
 	if d.Resolver != "kandev" {
-		return credentialUnavailable
+		return result
 	}
 	scoped, ok := r.store.(secrets.ScopedSecretStore)
 	if !ok {
-		return credentialUnavailable
+		return result
 	}
-	if _, err := scoped.GetForWorkspace(ctx, d.Reference, workspace); err != nil {
-		return credentialUnavailable
+	metadata, err := scoped.GetForWorkspace(ctx, d.Reference, workspace)
+	checked := time.Now().UTC()
+	result.ValidatedAt = &checked
+	if errors.Is(err, secrets.ErrNotFound) || errors.Is(err, secrets.ErrWorkspaceAccessDenied) {
+		result.Status = "missing"
+	} else if err == nil && metadata != nil {
+		result.Status = "ready"
+		result.ConfigurationGeneration = metadata.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
-	return "ready"
+	return result
 }

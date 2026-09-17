@@ -69,3 +69,27 @@ func TestAssistantContextQueuedPacketInvalidatedAfterForget(t *testing.T) {
 	require.NoError(t, s.ValidateDispatchContext(ctx, p.ID, task, "personal"))
 	require.Error(t, s.ValidateDispatchContext(ctx, p.ID, task, "other-account"))
 }
+
+func TestAssistantContextScopeNarrowingInvalidatesDispatch(t *testing.T) {
+	s, token, run, goal := assistantContextFixture(t)
+	ctx := context.Background()
+	agent, human := assistantRuntimeRouter(s), assistantRouter(s)
+	response := runtimeRequest(t, agent, "PATCH", "/api/v1/orchestration/runtime/objectives/"+goal, token, run, map[string]any{"mode": "execute", "expected_revision": 1, "operation_id": "delivery", "expected_intent_revision": 0})
+	require.Equal(t, 200, response.Code, response.Body.String())
+	path := "/api/v1/orchestration/assistant/memory/preference"
+	edit := map[string]any{"key": "preference", "content": "Example constraint", "scope": "workspace", "source_comment_id": "source", "confirmed": true}
+	require.Equal(t, 200, runtimeRequest(t, human, "PUT", path, "", "", edit).Code)
+	for _, id := range []string{"first", "second"} {
+		s.Tasks.(*testTasks).tasks[id] = &taskmodels.Task{ID: id, WorkspaceID: "ws"}
+	}
+	response = runtimeRequest(t, agent, "GET", "/api/v1/orchestration/runtime/context/"+goal+"?profile_id=personal&task_id=first", token, run, nil)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	var packet models.ContextPacket
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &packet))
+	task := s.Tasks.(*testTasks).tasks["first"]
+	task.Metadata = map[string]interface{}{"orchestration_binding_id": packet.BindingID, "orchestration_objective_id": goal}
+	require.NoError(t, s.ValidateDispatchContext(ctx, packet.ID, task, "personal"))
+	edit["scope"], edit["scope_id"], edit["expected_revision"] = "task", "second", 1
+	require.Equal(t, 200, runtimeRequest(t, human, "PUT", path, "", "", edit).Code)
+	require.ErrorContains(t, s.ValidateDispatchContext(ctx, packet.ID, task, "personal"), "context changed")
+}

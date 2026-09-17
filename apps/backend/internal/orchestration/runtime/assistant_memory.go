@@ -17,24 +17,14 @@ func (h *Handler) assistantMemory(c *gin.Context) {
 	}
 	if c.Param("id") != "" {
 		row, err := h.Service.Repo.AssistantMemory(c.Request.Context(), b.OrchestratorID, c.Param("id"))
-		if err != nil {
+		if err != nil || !h.Service.memoryVisible(c.Request.Context(), b, row) {
 			c.AbortWithStatus(404)
 			return
 		}
 		c.JSON(200, row)
 		return
 	}
-	rows, err := h.Service.Repo.AssistantMemoryPage(c.Request.Context(), b.OrchestratorID, c.Query("scope"), c.Query("after"))
-	if err != nil {
-		c.AbortWithStatus(503)
-		return
-	}
-	next := ""
-	if len(rows) > 50 {
-		rows = rows[:50]
-		next = rows[49].ID
-	}
-	c.JSON(200, gin.H{"memory": rows, nextCursorKey: next, "forget_notice": "Forgetting affects future context, not text already sent to a provider or historical backups."})
+	h.assistantMemoryPage(c, b)
 }
 
 type memoryEdit struct {
@@ -72,7 +62,10 @@ func (h *Handler) editAssistantMemory(c *gin.Context) {
 		return
 	}
 	var req memoryEdit
-	if err := c.ShouldBindJSON(&req); err != nil || !req.valid() {
+	if !strictAssistantJSON(c, &req) {
+		return
+	}
+	if !req.valid() {
 		c.AbortWithStatus(422)
 		return
 	}
@@ -85,12 +78,12 @@ func (h *Handler) editAssistantMemory(c *gin.Context) {
 		c.AbortWithStatus(422)
 		return
 	}
-	if req.Scope == scopeWorkspace {
-		req.ScopeID = b.WorkspaceID
+	scopeID, err := h.Service.validateMemoryScope(c.Request.Context(), b, req.Scope, req.ScopeID)
+	if err != nil {
+		c.AbortWithStatus(422)
+		return
 	}
-	if req.Scope == authorTypeUser {
-		req.ScopeID = b.OwnerUserID
-	}
+	req.ScopeID = scopeID
 	row := &models.AgentMemory{ID: c.Param("id"), AgentProfileID: b.OrchestratorID, OwnerUserID: b.OwnerUserID, Layer: authorTypeUser, Key: req.Key, Content: req.Content, Metadata: "{}", Scope: req.Scope, ScopeID: req.ScopeID, SourceCommentID: req.Source, Confirmed: req.Confirmed, Priority: req.Priority, ExpiresAt: req.ExpiresAt}
 	if err := h.Service.Repo.SaveAssistantMemory(c.Request.Context(), row, req.Expected); err != nil {
 		memoryFailure(c, err)

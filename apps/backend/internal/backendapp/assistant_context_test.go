@@ -41,3 +41,23 @@ func TestAssistantContextDisabledRuntimeDoesNotBypassGuard(t *testing.T) {
 	require.ErrorIs(t, guard(dispatchcontext.WithReference(context.Background(), "new"), task, nil, "personal"), dispatchcontext.ErrStale)
 	require.NoError(t, guard(context.Background(), &models.Task{ID: "ordinary"}, nil, "personal"))
 }
+
+func TestAssistantContextScopeNarrowing(t *testing.T) {
+	a, _ := newOfficeTaskAdapterHarness(t)
+	ctx := context.Background()
+	require.NoError(t, a.taskRepo.CreateTask(ctx, &models.Task{ID: "scoped-task", WorkspaceID: "ws-1", Title: "Example task", State: "CREATED"}))
+	require.NoError(t, a.taskRepo.CreateRepository(ctx, &models.Repository{ID: "attached", WorkspaceID: "ws-1", Name: "Example repository", LocalPath: "/tmp/example"}))
+	require.NoError(t, a.taskRepo.CreateRepository(ctx, &models.Repository{ID: "unattached", WorkspaceID: "ws-1", Name: "Another repository", LocalPath: "/tmp/another"}))
+	require.NoError(t, a.taskRepo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "link", TaskID: "scoped-task", RepositoryID: "attached"}))
+	require.NoError(t, a.taskRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: "environment", TaskID: "scoped-task", Status: models.TaskEnvironmentStatusCreating, ExecutorType: "local"}))
+	valid := shared.ContextScope{TaskID: "scoped-task", ProjectID: "attached", EnvironmentID: "environment"}
+	require.NoError(t, a.ValidateAssistantContextScope(ctx, "ws-1", valid))
+	require.NoError(t, a.ValidateAssistantMemoryEnvironment(ctx, "ws-1", "environment"))
+	require.Error(t, a.ValidateAssistantMemoryEnvironment(ctx, "foreign", "environment"))
+	for _, scope := range []shared.ContextScope{
+		{TaskID: "scoped-task", ProjectID: "unattached"}, {TaskID: "scoped-task", EnvironmentID: "foreign"}, {EnvironmentID: "environment"},
+	} {
+		require.Error(t, a.ValidateAssistantContextScope(ctx, "ws-1", scope))
+	}
+	require.Error(t, a.ValidateAssistantContextScope(ctx, "foreign", valid))
+}

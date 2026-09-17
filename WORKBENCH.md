@@ -29,7 +29,7 @@ generic material; original local snapshot/backup refs are not published.
 | Roles, workspace assignments, persistent chat, task delegation/callbacks | Implemented prototype, rebased and validated against v0.94.0 |
 | Optional Automation delivery to a coordinator | Implemented; portable YAML/ZIP export of this destination explicitly unsupported |
 | Assistant ownership/intake/objectives | Backend implemented; retained privacy guards must remain active |
-| Assistant memory/context | Partial; validation metadata and dedicated pagination/scope coverage remain |
+| Assistant memory/context | Backend complete; scoped pagination, metadata validation and dispatch invalidation verified |
 | Central workspace task view beside chat | Implemented; scoped native observations, desktop/mobile flow and synthetic media verified |
 | Assistant capability enforcement, attention, resolution, UI and workspace grants | Fully planned; implementation pending |
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |

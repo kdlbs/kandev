@@ -12,6 +12,9 @@ type ContextScopeValidator interface {
 
 func (s *Service) validateContextScope(ctx context.Context, workspace string, scope models.ContextScope) error {
 	if scope.TaskID != "" {
+		if s.Tasks == nil {
+			return fmt.Errorf("context task unavailable")
+		}
 		task, err := s.Tasks.GetTask(ctx, scope.TaskID)
 		if err != nil || task == nil || task.WorkspaceID != workspace {
 			return fmt.Errorf("context task unavailable")

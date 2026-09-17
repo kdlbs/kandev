@@ -49,6 +49,7 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	assistant.POST("/runtime/objectives", h.createObjective)
 	assistant.PATCH("/runtime/objectives/:id", h.updateObjective)
 	assistant.GET("/runtime/context/:id", h.contextPacket)
+	assistant.GET("/runtime/context/:id/memory", h.contextMemory)
 	g.GET("/tasks/:id", h.conversation)
 	g.GET("/tasks/:id/comments", h.comments)
 	g.POST("/tasks/:id/comments", h.comment)

@@ -159,3 +159,13 @@ mobile touch tabs. It does not start work by observation. See the
 [synthetic media](media/coordinator-view/README.md). This supersedes earlier
 statements in this historical audit that the central page was only planned;
 it leaves the remaining assistant and live-delivery limits intact.
+
+
+### Memory/context completion after the original audit
+
+Assistant task 03 is now complete on the private workbench. It adds bounded
+owner and full-context pagination, native scope validation, typed metadata-only
+credential observations and clock-stable context identities. Race, SQLite and
+PostgreSQL conformance/upgrade, CLI and contract tests passed; see the updated
+[task 03 evidence](../../plans/personal-assistant/task-03-memory-context.md).
+The original audit above remains a historical record of its stated commit.

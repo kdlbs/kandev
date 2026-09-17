@@ -51,3 +51,19 @@ func (a *taskCreatorAdapter) validateContextRepositoryTask(ctx context.Context, 
 	}
 	return nil
 }
+
+// Environment memories are validated through the native environment's task.
+func (a *taskCreatorAdapter) ValidateAssistantMemoryEnvironment(ctx context.Context, workspace, id string) error {
+	if a.taskRepo == nil {
+		return fmt.Errorf("environment scope unavailable")
+	}
+	env, err := a.taskRepo.GetTaskEnvironment(ctx, id)
+	if err != nil || env == nil {
+		return fmt.Errorf("environment scope unavailable")
+	}
+	task, err := a.taskSvc.GetTask(ctx, env.TaskID)
+	if err != nil || task == nil || task.WorkspaceID != workspace {
+		return fmt.Errorf("environment scope unavailable")
+	}
+	return nil
+}

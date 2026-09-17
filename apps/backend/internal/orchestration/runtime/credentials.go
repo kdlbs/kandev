@@ -14,7 +14,7 @@ import (
 
 // CredentialHealthReader has no reveal or vault-list operation.
 type CredentialHealthReader interface {
-	CredentialHealth(context.Context, string, models.CredentialDescriptor) string
+	CredentialHealth(context.Context, string, models.CredentialDescriptor) models.CredentialValidation
 }
 
 type credentialEdit struct {
@@ -86,14 +86,17 @@ func (h *Handler) editCredential(c *gin.Context) {
 		c.AbortWithStatus(422)
 		return
 	}
-	if d.Scope == scopeWorkspace {
-		d.ScopeID = b.WorkspaceID
+	scopeID, err := h.Service.validateMemoryScope(c.Request.Context(), b, d.Scope, d.ScopeID)
+	if err != nil {
+		c.AbortWithStatus(422)
+		return
 	}
+	d.ScopeID = scopeID
 	if err := h.Service.Repo.SaveCredentialDescriptor(c.Request.Context(), &d, req.Expected); err != nil {
 		memoryFailure(c, err)
 		return
 	}
-	c.JSON(200, d)
+	c.JSON(200, h.Service.credentialObservation(c.Request.Context(), b, d))
 }
 
 func (h *Handler) credential(c *gin.Context) {
@@ -106,17 +109,26 @@ func (h *Handler) credential(c *gin.Context) {
 		c.AbortWithStatus(503)
 		return
 	}
-	if id := c.Param("id"); id != "" {
-		for _, d := range rows {
+	visible := make([]models.ContextCredential, 0, len(rows))
+	for _, d := range rows {
+		if _, err := h.Service.validateMemoryScope(c.Request.Context(), b, d.Scope, d.ScopeID); err != nil {
+			continue
+		}
+		observed := h.Service.credentialObservation(c.Request.Context(), b, d)
+		if id := c.Param("id"); id != "" {
 			if d.ID == id {
-				c.JSON(200, d)
+				c.JSON(200, observed)
 				return
 			}
+		} else {
+			visible = append(visible, observed)
 		}
+	}
+	if c.Param("id") != "" {
 		c.AbortWithStatus(404)
 		return
 	}
-	c.JSON(200, gin.H{"credentials": rows})
+	c.JSON(200, gin.H{"credentials": visible})
 }
 
 func (h *Handler) forgetCredential(c *gin.Context) {
@@ -150,20 +162,10 @@ func (s *Service) contextCredentials(ctx context.Context, b *models.AssistantBin
 		if !d.Matches(b, p.ContextScope) {
 			continue
 		}
-		health := healthUnavailable
-		if s.Credentials != nil {
-			health = s.Credentials.CredentialHealth(ctx, b.WorkspaceID, d)
+		if _, err := s.validateMemoryScope(ctx, b, d.Scope, d.ScopeID); err != nil {
+			continue
 		}
-		switch health {
-		case "ready", "locked", healthUnavailable:
-		default:
-			health = healthUnavailable
-		}
-		entry := models.ContextCredential{CredentialDescriptor: d, Health: health}
-		if health != "ready" {
-			entry.UnblockAction = d.UnlockPolicy
-		}
-		p.Credentials = append(p.Credentials, entry)
+		p.Credentials = append(p.Credentials, s.credentialObservation(ctx, b, d))
 	}
 	return nil
 }

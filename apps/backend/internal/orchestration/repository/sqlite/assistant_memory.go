@@ -14,10 +14,12 @@ func (r *Repository) AssistantMemory(ctx context.Context, agentID, id string) (*
 	return &row, err
 }
 
-func (r *Repository) AssistantMemoryPage(ctx context.Context, agentID, scope, after string) ([]*models.AgentMemory, error) {
+func (r *Repository) AssistantMemoryPage(ctx context.Context, agentID, owner, scope, scopeID, after string, limit int) ([]*models.AgentMemory, error) {
 	rows := []*models.AgentMemory{}
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`SELECT * FROM orchestration_memory WHERE agent_profile_id=?
-	AND forgotten_at IS NULL AND (?='' OR scope=?) AND id>? ORDER BY id LIMIT 51`), agentID, scope, scope, after)
+	AND (owner_user_id=? OR (owner_user_id='' AND scope='workspace'))
+ AND forgotten_at IS NULL AND (expires_at IS NULL OR expires_at>?)
+ AND (?='' OR scope=?) AND (?='' OR scope_id=? OR (scope='workspace' AND scope_id='')) AND id>? ORDER BY id LIMIT ?`), agentID, owner, time.Now().UTC(), scope, scope, scopeID, scopeID, after, min(max(limit, 1), 100)+1)
 	return rows, err
 }
 

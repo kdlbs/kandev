@@ -23,8 +23,9 @@ type CredentialDescriptor struct {
 
 type ContextCredential struct {
 	CredentialDescriptor
-	Health        string `json:"health"`
-	UnblockAction string `json:"unblock_action,omitempty"`
+	Health        string               `json:"health"`
+	Validation    CredentialValidation `json:"validation"`
+	UnblockAction string               `json:"unblock_action,omitempty"`
 }
 
 func (d CredentialDescriptor) Matches(b *AssistantBinding, scope ContextScope) bool {
@@ -36,4 +37,16 @@ func (d CredentialDescriptor) Matches(b *AssistantBinding, scope ContextScope) b
 	}
 	m := AgentMemory{Scope: d.Scope, ScopeID: d.ScopeID, OwnerUserID: b.OwnerUserID}
 	return m.MatchesContext(b, scope)
+}
+
+// CredentialValidation is a metadata observation, never an execution grant or a
+// caller-writable descriptor field. No secret value is requested or cached.
+type CredentialValidation struct {
+	Status                  string     `json:"status"`
+	ValidatedAt             *time.Time `json:"validated_at,omitempty"`
+	DescriptorRevision      int64      `json:"descriptor_revision"`
+	ProfileID               string     `json:"profile_id"`
+	Reference               string     `json:"reference"`
+	ConfigurationGeneration string     `json:"configuration_generation,omitempty"`
+	Reason                  string     `json:"reason"`
 }

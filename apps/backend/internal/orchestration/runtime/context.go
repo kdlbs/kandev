@@ -23,7 +23,7 @@ func (h *Handler) contextPacket(c *gin.Context) {
 	if !ok {
 		return
 	}
-	scope := models.ContextScope{ProfileID: c.Query("profile_id"), ProjectID: c.Query("project_id"), EnvironmentID: c.Query("environment_id"), TaskID: c.Query("task_id")}
+	scope := contextScopeQuery(c)
 	p, err := h.Service.buildContext(c.Request.Context(), b, c.Param("id"), scope)
 	if err != nil {
 		c.JSON(422, gin.H{errorResponseKey: err.Error()})
@@ -70,7 +70,7 @@ func (s *Service) buildContext(ctx context.Context, b *models.AssistantBinding, 
 	p := &models.ContextPacket{BindingID: b.ID, BindingVersion: b.Version, ObjectiveID: o.ID, ObjectiveRevision: o.Revision, AcceptanceRevision: o.AcceptanceRevision, IntentRevision: revision,
 		ProfileRevision: profileRevision,
 		WorkspaceID:     b.WorkspaceID, ContextScope: scope, Mode: o.Mode, Objective: o.Title, Acceptance: o.Acceptance, SourceCommentID: o.SourceCommentID, UserInstruction: source.Body,
-		Policy: contextPolicy, Memory: []models.ContextMemory{}, MemoryReference: "/api/v1/orchestration/agents/" + b.OrchestratorID + "/memory"}
+		Policy: contextPolicy, Memory: []models.ContextMemory{}, MemoryReference: contextMemoryReference(id, scope)}
 	rows, err := s.Repo.ListAgentMemory(ctx, b.OrchestratorID)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (s *Service) buildContext(ctx context.Context, b *models.AssistantBinding, 
 	if err := fillContextMemory(p, b, rows); err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(p)
+	raw, err := contextIdentity(p)
 	if err != nil {
 		return nil, err
 	}
@@ -163,4 +163,16 @@ func (s *Service) contextProfileRevision(ctx context.Context, workspaceID, profi
 		return "", fmt.Errorf("execution profile unavailable in this workspace")
 	}
 	return profile.UpdatedAt.UTC().Format(time.RFC3339Nano), nil
+}
+
+// Observation time cannot change authorization identity. Health, descriptor and
+// configuration revisions remain in the digest and are rechecked at dispatch.
+func contextIdentity(packet *models.ContextPacket) ([]byte, error) {
+	stable := *packet
+	stable.ID = ""
+	stable.Credentials = append([]models.ContextCredential(nil), packet.Credentials...)
+	for i := range stable.Credentials {
+		stable.Credentials[i].Validation.ValidatedAt = nil
+	}
+	return json.Marshal(stable)
 }
