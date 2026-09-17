@@ -23,7 +23,7 @@ export function ChatMotionSettingsCard({
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.chatMotion}
       data-testid="chat-motion-settings-card"
     >
-      <CardContent className="pt-6">
+      <CardContent>
         <div
           className="flex items-center justify-between gap-4"
           data-testid="chat-motion-toggle-row"
