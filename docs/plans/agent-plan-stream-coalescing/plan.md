@@ -1,6 +1,5 @@
 ---
 status: done
-initiative: agent-plan-stream-coalescing
 requirements:
   - docs/specs/agents/requirements/agent-plan-stream-coalescing.md
 system_design:
@@ -33,10 +32,13 @@ projection are all required for one stable live-and-replay outcome.
 ## Technical approach
 
 Use the existing `AgentEvent.ToolCallID` field for
-`EventTypeAgentPlan`. The orchestrator shall derive a namespaced correlation
-identity from session, active turn, and source tool call, then call a dedicated
-task-service upsert path. The first event creates one `agent_plan` row and each
-later event updates that row's content.
+`EventTypeAgentPlan`. The orchestrator shall pass the task, session, active
+turn, source tool call, and snapshot to a dedicated task-service upsert path.
+The task service derives the deterministic message ID and namespaced
+correlation metadata from the session, turn, and source tool call. The
+repository serializes the read/create/update decision for that identity in one
+transaction; the first event creates one `agent_plan` row and each later
+accepted event updates that row's content.
 
 Keep uncorrelated adapter events append-compatible. In
 `use-processed-messages`, normalize visible plans before activity grouping:
@@ -76,8 +78,10 @@ geometry, collapse controls, scroll behavior, and touch targets are unchanged.
 ## Verification strategy
 
 - ACP adapter unit tests cover `ToolCallID` propagation and empty-plan guards.
-- Task-service and orchestrator tests cover create, update, retry, distinct
-  tool calls, and uncorrelated compatibility.
+- Task-service and orchestrator tests cover create, update, identical no-op,
+  retry, distinct tool calls, serialized concurrent updates, and uncorrelated
+  compatibility. A PostgreSQL multi-connection regression proves the identity
+  lock spans the read/update transaction.
 - Frontend unit tests cover correlated duplicates, legacy prefix chains, turn
   and adjacency boundaries, and non-prefix plans.
 - One Chromium Playwright scenario loads persisted duplicate snapshots and
@@ -92,6 +96,8 @@ geometry, collapse controls, scroll behavior, and touch targets are unchanged.
 ## Verification results
 
 - ACP adapter, task-service, and orchestrator plan regressions passed.
+- Agent-plan repository regressions passed, including a real PostgreSQL
+  multi-connection lock-order case and the identical-snapshot no-op assertion.
 - Task-service and orchestrator plan regressions passed under the Go race
   detector.
 - Backend application and integration message adapters compiled.
@@ -106,7 +112,7 @@ geometry, collapse controls, scroll behavior, and touch targets are unchanged.
   call message.
 - Content-length heuristics can merge unrelated plans; the legacy path must use
   strict adjacency, same-turn, and prefix checks.
-- Retried first delivery can race with message creation; the task-service path
-  must be idempotent at the persistence boundary.
+- Retried or concurrent delivery can race with message creation and update;
+  the persistence boundary must serialize the full mutation by plan identity.
 - Do not rewrite historical rows, change task-plan documents, change plan-card
   UI, or broaden transcript deduplication to other message types.

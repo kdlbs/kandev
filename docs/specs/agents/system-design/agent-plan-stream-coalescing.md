@@ -25,11 +25,15 @@ task-plan document storage or the plan-card component.
 - `internal/agentctl/server/adapter/transport/acp` extracts `rawInput.plan` from
   ACP tool updates and attaches the source `ToolCallID` to
   `streams.EventTypeAgentPlan`.
-- `internal/orchestrator` translates the correlated event into an idempotent
-  conversation-message update scoped to the active session and turn.
-- `internal/task/service` owns message creation and updates. Its agent-plan
-  upsert uses the same durable update path for first delivery, retries, and
-  later snapshots.
+- `internal/orchestrator` resolves the active session and turn, then passes
+  those IDs with the task, source tool call, and snapshot to the task service.
+- `internal/task/service` derives the deterministic message ID and namespaced
+  correlation metadata. Its agent-plan upsert uses the same durable mutation
+  path for first delivery, retries, and later snapshots.
+- `internal/task/repository/sqlite` owns the atomic read/create/update decision
+  and conversation receipt. PostgreSQL takes a transaction-scoped advisory
+  lock for the deterministic plan-message identity before its first read;
+  SQLite takes its writer lock before reading.
 - `apps/web/hooks/use-processed-messages.ts` projects correlated rows and
   conservatively folds legacy cumulative snapshots before render grouping.
 - `AgentPlanMessage` remains the presentation component for the resulting
@@ -44,7 +48,7 @@ task-plan document storage or the plan-card component.
 - `ToolCallID` to the source ACP tool call;
 - `PlanContent` to the complete plan snapshot from that update.
 
-The orchestrator derives a namespaced plan-message correlation key from
+The task service derives a namespaced plan-message correlation key from
 `ToolCallID`. The namespace prevents collision with the visible tool-call
 message while preserving the original source identity in message metadata. The
 durable message identity additionally includes the session and active turn, so
@@ -62,9 +66,12 @@ is eligible only for the conservative web compatibility projection.
    snapshot.
 3. The orchestrator resolves the active turn and asks the task service to
    upsert the correlated `agent_plan` message.
-4. The first snapshot creates the message; later snapshots update its content.
-   Delivery order is authoritative because ACP notifications and orchestrator
-   handling preserve their FIFO order.
+4. The task service derives the durable message identity and asks the
+   repository to apply the snapshot. The repository holds one identity-scoped
+   transaction lock across the first read, create or update, and conversation
+   receipt. An identical snapshot is a no-op. Concurrent calls therefore read
+   the prior committed snapshot and cannot overwrite in reverse after reading
+   the same stale value.
 5. WebSocket delivery and conversation replay both expose that same message.
 6. Before grouping render items, the web projection retains the latest message
    for a repeated durable correlation key and applies the legacy prefix rule
@@ -88,7 +95,9 @@ unrelated plans.
 
 No schema migration is required. The existing message content and metadata
 fields store the latest snapshot and its correlation identity. Upsert identity
-is deterministic across retries and process restarts.
+is deterministic across retries and process restarts. The repository's
+transaction-scoped identity lock also spans multiple backend instances that
+share PostgreSQL.
 
 Existing duplicate rows remain unchanged. The web compatibility projection
 selects the final row from qualifying legacy chains, which preserves immutable

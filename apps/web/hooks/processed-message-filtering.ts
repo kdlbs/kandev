@@ -115,9 +115,7 @@ function agentPlanCorrelationKey(message: Message): string | null {
   if (message.type !== "agent_plan") return null;
   const metadata = message.metadata as { tool_call_id?: unknown } | undefined;
   const toolCallId = metadata?.tool_call_id;
-  return typeof toolCallId === "string" && toolCallId.startsWith("agent-plan:")
-    ? toolCallId
-    : null;
+  return typeof toolCallId === "string" && toolCallId.startsWith("agent-plan:") ? toolCallId : null;
 }
 
 function collapseCorrelatedAgentPlans(messages: Message[]): Message[] {

@@ -138,6 +138,9 @@ type Repository struct {
 	// step instead of returning as if there were none. Nil in production
 	// and in every test but the one that sets it.
 	taskRowReconfirmHook func()
+	// agentPlanUpsertAfterRead is a test-only synchronization seam used to
+	// pause a plan upsert while its identity lock and transaction are held.
+	agentPlanUpsertAfterRead func()
 	// stepEntryDispatcher fires a step's session-independent on_enter
 	// sequence after a registered step-transition writer commits. Nil-safe
 	// (see dispatchStepEntry in step_entry_dispatch.go): unset in every

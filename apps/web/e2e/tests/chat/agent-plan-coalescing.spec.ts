@@ -53,7 +53,9 @@ test.describe("agent plan coalescing", () => {
     });
     if (prCapture.capturing) {
       await testPage.setViewportSize({ width: 393, height: 851 });
-      await expect(session.activeChat().getByText("Batch ES reads", { exact: true })).toHaveCount(1);
+      await expect(session.activeChat().getByText("Batch ES reads", { exact: true })).toHaveCount(
+        1,
+      );
       await prCapture.screenshot("phone-agent-plan-coalescing", {
         caption: "Phone transcript uses the same single-card agent plan projection.",
       });

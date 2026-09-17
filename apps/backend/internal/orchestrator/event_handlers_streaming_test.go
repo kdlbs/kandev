@@ -316,7 +316,7 @@ func (m *serviceBackedMessageCreator) UpsertAgentPlanMessage(
 	taskID, sourceToolCallID, agentSessionID, content, turnID string,
 ) error {
 	return m.svc.UpsertAgentPlanMessage(
-		ctx, agentSessionID, sourceToolCallID, content, taskID, turnID,
+		ctx, taskID, sourceToolCallID, agentSessionID, content, turnID,
 	)
 }
 

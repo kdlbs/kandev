@@ -72,6 +72,7 @@ Card controls and the existing single transcript scroll owner are unchanged.
 cd apps/backend
 go test ./internal/agentctl/server/adapter/transport/acp -run 'AgentPlan'
 go test ./internal/task/service ./internal/orchestrator -run 'AgentPlan'
+go test ./internal/task/repository/sqlite -run 'AgentPlan'
 cd ../
 pnpm install --frozen-lockfile
 pnpm --filter @kandev/web test -- hooks/processed-message-filtering.test.ts hooks/use-processed-messages.test.ts
@@ -131,6 +132,9 @@ None.
 - GREEN: ACP plan events now carry the emitted source tool-call ID. The
   orchestrator routes correlated plans to a deterministic task-service upsert,
   while uncorrelated adapter events retain append compatibility.
+- GREEN: the repository serializes each correlated plan's read/create/update
+  and conversation receipt in one identity-locked transaction. Identical
+  snapshots skip both the write and update event.
 - GREEN: transcript filtering keeps the final delivery for each durable
   correlation and folds only adjacent same-turn strict-prefix legacy chains.
 - Focused backend tests passed in the ACP adapter, task service, and

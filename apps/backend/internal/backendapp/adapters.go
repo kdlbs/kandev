@@ -1436,7 +1436,7 @@ func (a *messageCreatorAdapter) UpsertAgentPlanMessage(
 	taskID, sourceToolCallID, agentSessionID, content, turnID string,
 ) error {
 	return a.svc.UpsertAgentPlanMessage(
-		ctx, agentSessionID, sourceToolCallID, content, taskID, turnID,
+		ctx, taskID, sourceToolCallID, agentSessionID, content, turnID,
 	)
 }
 
