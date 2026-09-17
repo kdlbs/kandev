@@ -1,7 +1,7 @@
 ---
 id: "01-assignment-wake-rate-limit"
 title: "Bound agent-initiated assignment wakes per task"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

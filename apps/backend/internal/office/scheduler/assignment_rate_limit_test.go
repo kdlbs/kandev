@@ -50,6 +50,11 @@ func TestClassifyAssignmentWake(t *testing.T) {
 			payload: `not json`,
 		},
 		{
+			name:    "both actor_type and task_id absent is out of scope on the actor step",
+			reason:  RunReasonTaskAssigned,
+			payload: `{}`,
+		},
+		{
 			name:        "task_id absent is in scope, unattributed",
 			reason:      RunReasonTaskAssigned,
 			payload:     `{"actor_type":"agent","actor_id":"a1"}`,

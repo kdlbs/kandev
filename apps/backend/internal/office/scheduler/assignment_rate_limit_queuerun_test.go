@@ -104,9 +104,11 @@ func TestQueueRun_AssignmentRateLimit_UserActorAdmitsAfterExhaustion(t *testing.
 // TestQueueRun_AssignmentRateLimit_NoActorTypeAdmitsAfterExhaustion covers
 // the 4 out-of-scope producers' payload shape ({"task_id":...}, no
 // actor_type): it must admit even after the allowance is exhausted, and
-// must never move the rate-limit counter (proven indirectly: the
-// scheduler-level unit test already asserts out-of-scope never touches
-// the DB at all).
+// must never move any of the three office_assignment_rate_limit_total
+// reason counters — asserted directly here as a before/after delta, since
+// the prior "proven indirectly" comment cited a different test that exits
+// at the *reason* predicate step (a non-task_assigned RunReason) rather
+// than exercising this actor-classification step at all.
 func TestQueueRun_AssignmentRateLimit_NoActorTypeAdmitsAfterExhaustion(t *testing.T) {
 	repo := newReactivityTestRepo(t)
 	ss := newChildrenCompletedTestScheduler(t, repo)
@@ -115,6 +117,10 @@ func TestQueueRun_AssignmentRateLimit_NoActorTypeAdmitsAfterExhaustion(t *testin
 
 	admitNAgentWakes(t, repo, ss, "rl3-agent", taskID)
 
+	beforeExhausted := assignmentRateLimitCounterValue(t, "reason=allowance_exhausted")
+	beforeReadFailed := assignmentRateLimitCounterValue(t, "reason=count_read_failed")
+	beforeUnattributed := assignmentRateLimitCounterValue(t, "reason=task_unattributed")
+
 	createChildrenCompletedAgent(t, repo, "rl3-agent-new")
 	outcome, err := ss.QueueRun(ctx, "rl3-agent-new", RunReasonTaskAssigned, `{"task_id":"`+taskID+`"}`, "")
 	if err != nil {
@@ -122,6 +128,16 @@ func TestQueueRun_AssignmentRateLimit_NoActorTypeAdmitsAfterExhaustion(t *testin
 	}
 	if outcome != runsservice.QueueOutcomeQueued {
 		t.Fatalf("outcome = %q, want queued (no actor_type is out of scope)", outcome)
+	}
+
+	if got := assignmentRateLimitCounterValue(t, "reason=allowance_exhausted"); got != beforeExhausted {
+		t.Fatalf("allowance_exhausted counter = %d, want unchanged at %d (out-of-scope admit must not move it)", got, beforeExhausted)
+	}
+	if got := assignmentRateLimitCounterValue(t, "reason=count_read_failed"); got != beforeReadFailed {
+		t.Fatalf("count_read_failed counter = %d, want unchanged at %d (out-of-scope admit must not move it)", got, beforeReadFailed)
+	}
+	if got := assignmentRateLimitCounterValue(t, "reason=task_unattributed"); got != beforeUnattributed {
+		t.Fatalf("task_unattributed counter = %d, want unchanged at %d (out-of-scope admit must not move it)", got, beforeUnattributed)
 	}
 }
 

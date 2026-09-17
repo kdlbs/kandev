@@ -147,6 +147,60 @@ func TestApplyTaskMutation_DifferentAgentReassignment_RateLimitedStillInterrupts
 	}
 }
 
+// TestApplyTaskMutation_Unassignment_NeitherRefusesNorConsumesAllowance is
+// AC-OFFICE-ASSIGN-RATE-001.9: reactToAssigneeChange returns before ever
+// calling queue() when NewAssigneeID is "", so an unassignment on a task
+// whose allowance is already exhausted must not be refused (there is no
+// wake to refuse) and must not move the rate-limit counter (there is no
+// wake to count). The previous assignee's session interrupt still fires —
+// unassignment is a real handoff away, not a no-op.
+func TestApplyTaskMutation_Unassignment_NeitherRefusesNorConsumesAllowance(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-old")
+
+	taskID := "task-unassign-rate-limit"
+	for i := 0; i < AssignmentWakeAllowanceN; i++ {
+		createAssignmentWakeRun(t, repo, taskID, time.Now().UTC())
+	}
+
+	before := assignmentRateLimitCounterValue(t, "reason=allowance_exhausted")
+
+	task := &TaskSnapshot{
+		ID:                     taskID,
+		WorkspaceID:            "ws-1",
+		AssigneeAgentProfileID: "agent-old",
+	}
+	newAssignee := ""
+	gen := int64(1)
+	change := TaskMutation{
+		NewAssigneeID:        &newAssignee,
+		AssignmentGeneration: &gen,
+		ActorID:              "agent-old",
+		ActorType:            "agent",
+	}
+
+	res, err := ss.ApplyTaskMutation(context.Background(), task, change)
+	if err != nil {
+		t.Fatalf("ApplyTaskMutation: %v", err)
+	}
+
+	if res.InterruptSessionID != task.ID {
+		t.Fatalf("InterruptSessionID = %q, want %q (unassigning the current assignee still interrupts their session)",
+			res.InterruptSessionID, task.ID)
+	}
+	for _, r := range res.Runs {
+		if r.Reason == RunReasonTaskAssigned {
+			t.Fatalf("unassignment must never attempt a task_assigned wake, got %+v", res.Runs)
+		}
+	}
+
+	after := assignmentRateLimitCounterValue(t, "reason=allowance_exhausted")
+	if after != before {
+		t.Fatalf("allowance_exhausted counter = %d, want unchanged at %d (unassignment must not be refused or counted)", after, before)
+	}
+}
+
 // TestApplyTaskMutation_StatusChangeAndCommentDispatch drives
 // ApplyTaskMutation's NewStatus and Comment branches together (an unblock
 // plus an attached comment), covering the dispatcher itself rather than only

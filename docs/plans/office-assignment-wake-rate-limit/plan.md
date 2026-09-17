@@ -1,6 +1,6 @@
 ---
 created: 2026-09-17
-status: planned
+status: done
 requirements:
   - REQ-OFFICE-ASSIGN-RATE-001
   - REQ-OFFICE-ASSIGN-RATE-002
