@@ -2883,18 +2883,18 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 		return fmt.Errorf("load session for on_enter: %w", err)
 	}
 
-	// entryID 0: this path (manual move / legacy on_turn_start/complete) does
+	// transitionID 0: this path (manual move / legacy on_turn_start/complete) does
 	// not attach a step-entry ResultHolder before ApplyTransition, so no
 	// entry was allocated for this step-entry. processOnEnter's engine-owned
-	// action cases treat entryID==0 as "not this Build round's dispatch
+	// action cases treat transitionID==0 as "not this Build round's dispatch
 	// path" and skip with a log rather than executing — see
 	// docs/specs/workflow-on-enter-action-dispatch/spec.md and the task
 	// plan's scope note for why E2-E5 dispatch is deferred.
-	var entryID int64
+	var transitionID int64
 	if len(entryIDs) > 0 {
-		entryID = entryIDs[0]
+		transitionID = entryIDs[0]
 	}
-	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID, sourceStep)
+	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, transitionID, sourceStep)
 	return nil
 }
 
@@ -4136,7 +4136,7 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 }
 
 // processOnEnter processes the on_enter events for a step after transitioning
-// to it. entryID is the workflow_step_entries row allocated for this
+// to it. transitionID is the workflow-step transition ledger row allocated for this
 // step-entry by the write site that persisted the transition (0 when no
 // entry was allocated for this call path — see finalizeStepEnter's call
 // site); it is retained on this signature for callers/tests, but this
@@ -4145,20 +4145,20 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 // engine.DispatchStepEntry (Repository.dispatchStepEntry's call chain),
 // entirely outside processOnEnter. See
 // docs/specs/office/system-design/step-entry-dispatch-convergence.md.
-func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, entryID int64, sourceStep *wfmodels.WorkflowStep) {
+func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep) {
 	// The step transition is already durable before on_enter runs. Its effects
 	// must finish even if the request or agent-event context that triggered the
 	// transition is cancelled.
 	ctx = context.WithoutCancel(ctx)
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
-	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, entryID) {
+	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, transitionID) {
 		return
 	}
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID
-	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step, sourceStep, entryID); !ok {
+	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step, sourceStep, transitionID); !ok {
 		return
 	}
 	sessionSwitched := session.ID != prevSessionID
@@ -4228,7 +4228,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, isPassthrough, hasPlanMode)
 
-	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched, entryID)
+	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched, transitionID)
 }
 
 // launchAfterOnEnterDispatch runs the auto-start decision that follows
@@ -7483,14 +7483,14 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// ResetAgentContext → sendStreamRequest, which blocks G_reader waiting for a response
 	// that can only be delivered by G_reader reading from the same WebSocket — a deadlock.
 	// The DB transition is already persisted above, so it's safe to process on_enter async.
-	var stepEntryID int64
+	var transitionID int64
 	if stepEntry != nil {
-		stepEntryID = stepEntry.EntryID
+		transitionID = stepEntry.TransitionID
 	}
 	// The caller may still hold the source session guard, but this work runs
 	// asynchronously after that guard is released. Clear the synchronous
 	// ownership marker so profile-switch parking acquires its own guard.
-	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, stepEntryID, fromStep)
+	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, transitionID, fromStep)
 	return true
 }
 
@@ -7500,7 +7500,7 @@ func (s *Service) launchProcessOnEnter(
 	session *models.TaskSession,
 	targetStep *wfmodels.WorkflowStep,
 	taskDescription string,
-	entryID int64,
+	transitionID int64,
 	sourceStep *wfmodels.WorkflowStep,
 ) {
 	go func() {
@@ -7509,7 +7509,7 @@ func (s *Service) launchProcessOnEnter(
 				s.onProcessOnEnterComplete()
 			}
 		}()
-		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID, sourceStep)
+		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, transitionID, sourceStep)
 	}()
 }
 

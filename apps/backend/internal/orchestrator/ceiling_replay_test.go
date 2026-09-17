@@ -425,6 +425,61 @@ func TestWorkflowEntryDispatchRejectsStaleCommittedRoute(t *testing.T) {
 	), "a callback for a replaced destination must not dispatch the old session")
 }
 
+func TestValidateCeilingEntryAllowsDirectProfileWorkflowEntryWithoutRoute(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID := "workflow-direct-profile"
+	sessionID := "workflow-direct-profile-session"
+	stepID := "workflow-direct-profile-step"
+	seedTaskAndSessionWithStep(t, repo, taskID, sessionID, stepID)
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID:             stepID,
+		WorkflowID:     "wf1",
+		AgentProfileID: "profile-direct",
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	entryIdentity := svc.workflowEntryIdentity(ctx, taskID)
+	binding := models.CeilingWorkflowEntryBinding{
+		WorkflowID:           "wf1",
+		DestinationStepID:    stepID,
+		RouteOperationID:     workflowSessionRouteID(taskID, stepID, entryIdentity, nil, svc.resolveStepProfileSessionStartPolicy(stepGetter.steps[stepID])),
+		EntryIdentity:        entryIdentity,
+		DestinationSessionID: sessionID,
+	}
+
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID:                    sessionID,
+			metaKeyWorkflowStepID:               stepID,
+			models.CeilingLaunchEntryBindingKey: ceilingEntryBindingValue(binding),
+		},
+		Origin:     string(launchOriginAutomatic),
+		ReasonCode: ceilingReasonRefused,
+		QueuedAt:   time.Now().UTC(),
+	}
+
+	disposition, detail, validationErr := svc.validateCeilingEntry(ctx, task, deferral)
+	require.NoError(t, validationErr)
+	require.Equal(t, ceilingEntryValid, disposition, detail)
+
+	// A successor transition changes the latest ledger identity even when the
+	// old destination has no materialized workflow_session_route. The old
+	// record must become terminal instead of being retargeted by task fields.
+	task.WorkflowStepID = "workflow-direct-profile-successor"
+	task.UpdatedAt = time.Now().UTC()
+	require.NoError(t, repo.UpdateTaskPreservingDeferredLaunch(ctx, task))
+	latest, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	disposition, detail, validationErr = svc.validateCeilingEntry(ctx, latest, deferral)
+	require.NoError(t, validationErr)
+	require.Equal(t, ceilingEntrySuperseded, disposition, detail)
+}
+
 func TestValidateCeilingEntryAllowsPendingWorkflowStepEnsureOnlyForCurrentEntry(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

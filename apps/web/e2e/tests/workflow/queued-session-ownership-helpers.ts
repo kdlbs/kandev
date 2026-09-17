@@ -120,7 +120,10 @@ export async function expectSessionMessagesUnchanged(
         return Date.now() >= deadline;
       },
       {
-        timeout: timeoutMs,
+        // Give the final poll enough time to observe the end of the stability
+        // window. With the same timeout on both clocks, an unchanged list can
+        // be reported as a timeout instead of a successful invariant check.
+        timeout: timeoutMs + 1_000,
         message: `session ${sessionId} received an unexpected message`,
       },
     )

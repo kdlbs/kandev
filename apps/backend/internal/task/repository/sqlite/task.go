@@ -25,6 +25,7 @@ import (
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -1227,6 +1228,9 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	}
 	task.WorkflowStepTransitionID = transitionID
 	entryID = formatEntryID(transitionID)
+	if holder, ok := stepentry.ResultHolderFromContext(ctx); ok {
+		holder.TransitionID = transitionID
+	}
 	if transitionID != 0 {
 		task.FromWorkflowID = fromWorkflowID
 		task.FromStepID = fromStepID

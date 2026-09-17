@@ -57,6 +57,9 @@ func launchQueueSummaryFromTask(
 		Reason:         LaunchQueueReasonSessionCapacity,
 		Retrying:       true,
 	}
+	if binding, present, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload); bindingErr == nil && present && queue.WorkflowStepID == "" {
+		queue.WorkflowStepID = binding.DestinationStepID
+	}
 	// Workflow-origin records are bound to the task's committed route. A
 	// malformed binding or a binding that no longer matches that route is not a
 	// capacity wait: showing it as retryable would advertise work that replay
@@ -100,7 +103,7 @@ func launchQueueOwnershipUnavailable(
 	deferral models.CeilingDeferral,
 	workflowStepID, destinationID string,
 ) bool {
-	_, bindingPresent, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
+	binding, bindingPresent, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
 	workflowOrigin := bindingPresent || workflowStepID != "" ||
 		launchQueueInt64Field(deferral.Payload, "workflow_entry_id") > 0
 	if deferral.Kind == models.CeilingLaunchStart {
@@ -108,8 +111,29 @@ func launchQueueOwnershipUnavailable(
 			workflowOrigin = true
 		}
 	}
-	return bindingErr != nil || (workflowOrigin && (destinationID == "" ||
-		(bindingPresent && !models.CeilingDeferralTargetsSession(task, deferral, destinationID))))
+	if bindingErr != nil {
+		return true
+	}
+	if !workflowOrigin {
+		return false
+	}
+	if destinationID == "" {
+		return false
+	}
+	if !bindingPresent || models.CeilingDeferralTargetsSession(task, deferral, destinationID) {
+		return false
+	}
+	// Direct-profile workflow entries have no workflow_session_route. Their
+	// binding is still useful to the projection because the task's current
+	// workflow and destination step identify the selected lane. Replay applies
+	// the stricter latest-entry-ledger check before dispatch.
+	if _, routePresent := models.LoadWorkflowSessionRoute(task.Metadata); !routePresent &&
+		binding.WorkflowID != "" && task.WorkflowID == binding.WorkflowID &&
+		task.WorkflowStepID == binding.DestinationStepID &&
+		binding.DestinationSessionID == destinationID {
+		return false
+	}
+	return true
 }
 
 func launchQueueCapacity(

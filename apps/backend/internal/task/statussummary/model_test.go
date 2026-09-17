@@ -215,6 +215,39 @@ func TestLaunchQueueSummaryFromTaskUsesDurableCeilingDeferral(t *testing.T) {
 	}
 }
 
+func TestLaunchQueueSummaryFromTaskAllowsDirectProfileWorkflowBindingWithoutRoute(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-implement",
+		Metadata: map[string]interface{}{models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+			Kind: models.CeilingLaunchStartCreated,
+			Payload: map[string]interface{}{
+				"agent_profile_id": "profile-luna",
+				models.CeilingLaunchEntryBindingKey: map[string]interface{}{
+					"workflow_id":            "workflow-1",
+					"destination_step_id":    "step-implement",
+					"route_operation_id":     "direct-route",
+					"entry_identity":         "entry:00000000000000000007",
+					"destination_session_id": "session-luna",
+				},
+			},
+			Origin:     "automatic",
+			ReasonCode: "ceiling",
+			QueuedAt:   queuedAt,
+			Population: 1,
+			Ceiling:    1,
+		})},
+	}
+
+	got := LaunchQueueSummaryFromTask(task)
+	if got == nil || got.SessionID != "session-luna" ||
+		got.AgentProfileID != "profile-luna" || got.WorkflowStepID != "step-implement" ||
+		got.Reason != LaunchQueueReasonSessionCapacity || !got.Retrying {
+		t.Fatalf("direct-profile launch queue = %+v, want a retryable capacity entry", got)
+	}
+}
+
 func TestLaunchQueueSummaryFromTaskWithCapacityUsesLatestObservation(t *testing.T) {
 	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
 	task := &models.Task{Metadata: map[string]interface{}{models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{

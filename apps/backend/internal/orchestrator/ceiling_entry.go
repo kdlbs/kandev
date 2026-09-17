@@ -12,7 +12,11 @@ import (
 type ceilingEntryBindingContextKey struct{}
 type ceilingEntryKindContextKey struct{}
 
-const legacyWorkflowEntryIdentity = "legacy:unknown"
+const (
+	legacyWorkflowEntryIdentity       = "legacy:unknown"
+	ceilingEntryDetailStepChanged     = "workflow destination step changed"
+	ceilingEntryDetailWorkflowChanged = "workflow destination workflow changed"
+)
 
 // withCeilingEntryBinding carries the immutable workflow-entry identity through
 // replay helpers that otherwise use the public launch APIs. The context value
@@ -281,14 +285,23 @@ func (s *Service) workflowEntryDispatchIsCurrentForSession(
 			return false
 		}
 		// Legacy/manual callbacks have no route to compare. The step-entry ledger
-		// already owns the callback's exact entry id, so preserve this compatibility
-		// path when no task-owned route exists.
+		// already owns the callback's exact entry id. Verify both the current task
+		// step and the latest ledger row before preserving this compatibility path.
+		if len(entryIDs) > 0 && entryIDs[0] > 0 &&
+			!s.workflowEntryDispatchMatchesCurrentTaskEntry(ctx, task, step, entryIDs...) {
+			s.logger.Info("workflow entry dispatch skipped after task entry changed",
+				zap.String("task_id", taskID),
+				zap.String("callback_step_id", step.ID),
+			)
+			return false
+		}
 		return true
 	}
-	return s.workflowEntryDispatchRouteIsCurrent(taskID, task, route, sessionID, step, entryIDs...)
+	return s.workflowEntryDispatchRouteIsCurrent(ctx, taskID, task, route, sessionID, step, entryIDs...)
 }
 
 func (s *Service) workflowEntryDispatchRouteIsCurrent(
+	ctx context.Context,
 	taskID string,
 	task *models.Task,
 	route models.WorkflowSessionRoute,
@@ -303,6 +316,13 @@ func (s *Service) workflowEntryDispatchRouteIsCurrent(
 			zap.String("callback_workflow_id", step.WorkflowID),
 		)
 		return false
+	}
+	// A workflow transition commits the task step before the selected session
+	// route is replaced. The callback for that exact transition is therefore
+	// allowed to replace the previous route; a callback for an older transition
+	// still fails the task-step and ledger-identity checks below.
+	if s.workflowEntryDispatchMayReplaceRoute(ctx, task, route, sessionID, step, entryIDs...) {
+		return true
 	}
 	if route.Phase == workflowSessionRouteCommitted && route.DestinationID == "" {
 		s.logger.Info("workflow entry dispatch skipped because the committed route has no destination",
@@ -328,6 +348,50 @@ func (s *Service) workflowEntryDispatchRouteIsCurrent(
 	return s.workflowEntryDispatchIdentityIsCurrent(taskID, route, entryIDs...)
 }
 
+func (s *Service) workflowEntryDispatchMayReplaceRoute(
+	ctx context.Context,
+	task *models.Task,
+	route models.WorkflowSessionRoute,
+	sessionID string,
+	step *wfmodels.WorkflowStep,
+	entryIDs ...int64,
+) bool {
+	if !s.workflowEntryDispatchMatchesCurrentTaskEntry(ctx, task, step, entryIDs...) {
+		return false
+	}
+	return route.DestinationStepID != step.ID ||
+		!workflowEntryDispatchIdentityMatches(route, entryIDs...) ||
+		(sessionID != "" && route.DestinationID != "" && route.DestinationID != sessionID)
+}
+
+func (s *Service) workflowEntryDispatchMatchesCurrentTaskEntry(
+	ctx context.Context,
+	task *models.Task,
+	step *wfmodels.WorkflowStep,
+	entryIDs ...int64,
+) bool {
+	if task == nil || step == nil || task.WorkflowStepID != step.ID || len(entryIDs) == 0 || entryIDs[0] <= 0 {
+		return false
+	}
+	if task.WorkflowStepTransitionID > 0 {
+		return entryIDs[0] == task.WorkflowStepTransitionID
+	}
+	currentIdentity := s.workflowEntryIdentity(ctx, task.ID)
+	return currentIdentity != legacyWorkflowEntryIdentity &&
+		currentIdentity == workflowEntryIdentityForID(entryIDs[0])
+}
+
+func workflowEntryIdentityForID(entryID int64) string {
+	return fmt.Sprintf("entry:%020d", entryID)
+}
+
+func workflowEntryDispatchIdentityMatches(route models.WorkflowSessionRoute, entryIDs ...int64) bool {
+	if len(entryIDs) == 0 || entryIDs[0] <= 0 || route.EntryIdentity == "" {
+		return false
+	}
+	return route.EntryIdentity == workflowEntryIdentityForID(entryIDs[0])
+}
+
 func (s *Service) workflowEntryDispatchIdentityIsCurrent(
 	taskID string,
 	route models.WorkflowSessionRoute,
@@ -341,7 +405,7 @@ func (s *Service) workflowEntryDispatchIdentityIsCurrent(
 			zap.String("task_id", taskID))
 		return false
 	}
-	expectedIdentity := fmt.Sprintf("entry:%020d", entryIDs[0])
+	expectedIdentity := workflowEntryIdentityForID(entryIDs[0])
 	if route.EntryIdentity == expectedIdentity {
 		return true
 	}
@@ -610,7 +674,7 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 			return ceilingEntryUnavailable, "workflow entry route is unavailable", nil
 		}
 		if payloadStepID != "" && route.DestinationStepID != payloadStepID {
-			return ceilingEntrySuperseded, "workflow destination step changed", nil
+			return ceilingEntrySuperseded, ceilingEntryDetailStepChanged, nil
 		}
 		if payloadSessionID := sessionIDFromCeilingPayload(deferral); payloadSessionID != "" &&
 			route.DestinationID != "" && route.DestinationID != payloadSessionID {
@@ -639,16 +703,18 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 		(route.DestinationID != "" && binding.DestinationSessionID != "" && route.DestinationID != binding.DestinationSessionID)):
 		return ceilingEntrySuperseded, "workflow destination route changed", nil
 	case !routePresent && present:
-		// A nested binding is meaningful only with the committed route that it
-		// names. Task.WorkflowStepID alone cannot prove that this is the same
-		// workflow entry after a successor transition.
-		return ceilingEntryUnavailable, "workflow entry route is unavailable", nil
+		// Direct-profile workflow steps do not materialize a
+		// workflow_session_route. Their nested binding is still exact: the task
+		// must remain on the bound step and the latest transition ledger row must
+		// be the entry that created the deferred destination. Explicit session
+		// targets continue to require their committed route.
+		return s.validateUnroutedWorkflowEntry(ctx, task, deferral, binding, checkDestinationState)
 	case !routePresent && task.WorkflowStepID != binding.DestinationStepID &&
 		deferral.Kind != models.CeilingLaunchWorkflowStepEnsure:
-		return ceilingEntrySuperseded, "workflow destination step changed", nil
+		return ceilingEntrySuperseded, ceilingEntryDetailStepChanged, nil
 	}
 	if task.WorkflowID != "" && task.WorkflowID != binding.WorkflowID {
-		return ceilingEntrySuperseded, "workflow destination workflow changed", nil
+		return ceilingEntrySuperseded, ceilingEntryDetailWorkflowChanged, nil
 	}
 	currentEntryIdentity := s.workflowEntryIdentity(ctx, task.ID)
 	if currentEntryIdentity != legacyWorkflowEntryIdentity && binding.EntryIdentity != currentEntryIdentity {
@@ -663,8 +729,54 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 		// parent workflow id. The task/route binding remains authoritative in
 		// that case; only a populated, conflicting provider id supersedes it.
 		if step == nil || (step.WorkflowID != "" && step.WorkflowID != binding.WorkflowID) {
-			return ceilingEntrySuperseded, "workflow destination workflow changed", nil
+			return ceilingEntrySuperseded, ceilingEntryDetailWorkflowChanged, nil
 		}
+	}
+	return s.validateCeilingDestination(ctx, task, deferral, binding, checkDestinationState), "", nil
+}
+
+func (s *Service) validateUnroutedWorkflowEntry(
+	ctx context.Context,
+	task *models.Task,
+	deferral models.CeilingDeferral,
+	binding models.CeilingWorkflowEntryBinding,
+	checkDestinationState bool,
+) (ceilingEntryDisposition, string, error) {
+	if s.workflowStepGetter == nil {
+		return ceilingEntryUnavailable, "workflow destination step cannot be read", nil
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, binding.DestinationStepID)
+	if err != nil {
+		return ceilingEntryUnavailable, "workflow destination step could not be read", err
+	}
+	if step == nil {
+		return ceilingEntrySuperseded, "workflow destination step no longer exists", nil
+	}
+	if step.SessionTarget != nil {
+		return ceilingEntryUnavailable, "workflow entry route is unavailable", nil
+	}
+	if task.WorkflowID != "" && task.WorkflowID != binding.WorkflowID {
+		return ceilingEntrySuperseded, ceilingEntryDetailWorkflowChanged, nil
+	}
+	if task.WorkflowStepID != binding.DestinationStepID {
+		return ceilingEntrySuperseded, ceilingEntryDetailStepChanged, nil
+	}
+	currentEntryIdentity := s.workflowEntryIdentity(ctx, task.ID)
+	if currentEntryIdentity == legacyWorkflowEntryIdentity {
+		return ceilingEntryUnavailable, "workflow entry identity is unavailable", nil
+	}
+	if currentEntryIdentity != binding.EntryIdentity {
+		return ceilingEntrySuperseded, "workflow entry identity changed", nil
+	}
+	expectedOperationID := workflowSessionRouteID(
+		task.ID,
+		binding.DestinationStepID,
+		binding.EntryIdentity,
+		step.SessionTarget,
+		s.resolveStepProfileSessionStartPolicy(step),
+	)
+	if binding.RouteOperationID != expectedOperationID {
+		return ceilingEntrySuperseded, "workflow entry operation changed", nil
 	}
 	return s.validateCeilingDestination(ctx, task, deferral, binding, checkDestinationState), "", nil
 }
@@ -732,10 +844,10 @@ func (s *Service) validateClaimedCeilingBinding(
 				return fmt.Errorf("deferred workflow entry ownership is unavailable")
 			}
 			if task.WorkflowID != "" && task.WorkflowID != binding.WorkflowID {
-				return fmt.Errorf("%w: workflow destination workflow changed", ErrCeilingLaunchSuperseded)
+				return fmt.Errorf("%w: %s", ErrCeilingLaunchSuperseded, ceilingEntryDetailWorkflowChanged)
 			}
 			if task.WorkflowStepID != binding.DestinationStepID {
-				return fmt.Errorf("%w: workflow destination step changed", ErrCeilingLaunchSuperseded)
+				return fmt.Errorf("%w: %s", ErrCeilingLaunchSuperseded, ceilingEntryDetailStepChanged)
 			}
 			if disposition := s.validateCeilingDestination(ctx, task, models.CeilingDeferral{
 				Kind: models.CeilingLaunchStartCreated,
