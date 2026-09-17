@@ -74,11 +74,7 @@ func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*
 
 // ListAllIssueWatches returns every watch the caller may see. For a scoped
 // caller that is only their own workspaces' watches; for an identity-less
-// internal caller (unscoped) it is every watch, as before auth. The unscoped
-// list form is only reachable when workspace_id is omitted, which the
-// query-only integration middleware does not authorize — without this filter
-// it leaked every workspace's watch config (filter, repo/agent/profile IDs,
-// spawn prompt).
+// internal caller (unscoped) it is every watch, as before auth.
 func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
 	watches, err := s.store.ListAllIssueWatches(ctx)
 	if err != nil {
