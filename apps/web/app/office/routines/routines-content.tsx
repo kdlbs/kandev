@@ -30,6 +30,7 @@ import { CreateRoutineDialog } from "./create-routine-dialog";
 import { EmptyState } from "../components/shared/empty-state";
 import { routineNotFiringMessage } from "../lib/routine-not-firing";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type RoutineFormData = {
   name: string;
@@ -44,6 +45,20 @@ type RoutineFormData = {
   cronExpression: string;
   timezone: string;
 };
+
+// A refetch failure after a create/trigger call must not swallow the toast
+// reporting that call's own outcome, and must not become an unhandled
+// rejection; it is reported as its own toast instead.
+async function refreshRoutinesOrReportFailure(
+  fetchRoutines: () => Promise<void>,
+  t: TFunction,
+): Promise<void> {
+  try {
+    await fetchRoutines();
+  } catch {
+    toast.error(t("office:failedToLoad"));
+  }
+}
 
 function buildCreateRoutineInput(data: RoutineFormData): CreateRoutineInput {
   return {
@@ -106,7 +121,7 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
           });
         } catch (err) {
           onDone();
-          await fetchRoutines();
+          await refreshRoutinesOrReportFailure(fetchRoutines, t);
           toast.error(
             t("office:routineCreatedWithoutSchedule", {
               error: err instanceof Error ? err.message : t("office:failedToCreateRoutine"),
@@ -117,7 +132,7 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
       }
 
       onDone();
-      await fetchRoutines();
+      await refreshRoutinesOrReportFailure(fetchRoutines, t);
       toast.success(t("office:routineCreated"));
     },
     [workspaceId, fetchRoutines],
