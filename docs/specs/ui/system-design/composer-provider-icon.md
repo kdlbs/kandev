@@ -17,8 +17,9 @@ without changing its textual summary rules.
 ## Components and data flow
 
 - `apps/web/components/task/model-selector.tsx`: resolve the current session's
-  nonempty string `agent_profile_snapshot.agent_name`, falling back to the
-  matching `agentProfiles.items` entry's `agent_name`. Snapshot identity survives
+  nonempty string `agent_profile_snapshot.agent_name`, then map snapshot
+  `agent_id` through `agentProfiles.items` to its canonical `agent_name` for dynamic
+  routes. Fall back to the logical profile only when neither resolves. Snapshot identity survives
   deleted/edited profiles. Never use a database UUID or infer identity from model text.
 - Add an optional `showAgentIcon` prop to `ModelSelector`, default false. Enable
   it in both `chat-input-toolbar-desktop.tsx` and `chat-input-toolbar-mobile.tsx`

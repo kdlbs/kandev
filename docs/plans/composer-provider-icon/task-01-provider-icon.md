@@ -95,7 +95,7 @@ Sequential.
 Completed 2026-09-16; revalidated against the updated base on 2026-09-17.
 
 - Frozen workspace install passed.
-- Listed focused Vitest command passed: 6 files, 88 tests, including provider identity and model-switch regression coverage.
+- Listed focused Vitest command passed: 6 files, 89 tests, including provider identity and model-switch regression coverage.
 - `pnpm run typecheck` passed. Targeted ESLint and Prettier checks passed.
 - `make -C apps/backend build-dev`, `pnpm build:e2e` from `apps/web`, and fixture plugin build/package passed. Existing Vite chunk warnings remain.
 - Desktop runner command with `--host --no-build`: 2 passed. Covers both icon placements, loaded logo, failed-logo fallback, keyboard opening, model switching and long-label containment.
@@ -106,3 +106,10 @@ Completed 2026-09-16; revalidated against the updated base on 2026-09-17.
 Full remote-platform build was stopped because local browser checks require only
 host helpers. All browser runs used freshly rebuilt frontend assets and an isolated
 runtime. Fresh desktop and phone PR screenshots were captured with temporary specs, inspected, and retained outside the production diff. The temporary capture specs were removed.
+
+PR review remediation: dynamic snapshots carry `agent_id` without `agent_name`.
+Resolve that ID through the existing profile catalog rather than using it as a
+logo name. The new regression failed before the fix and passes afterward.
+Memoized provider JSX preserves the selector's existing memo boundary; heading
+assertions now report missing accessible labels explicitly. The focused suite
+passes 89 tests after these changes. Typecheck and targeted lint pass.

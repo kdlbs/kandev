@@ -530,6 +530,15 @@ export const ModelSelector = memo(function ModelSelector({
         )
       : null,
   );
+  const providerIcon = useMemo(
+    () =>
+      agentName ? (
+        <span aria-hidden="true" className="flex shrink-0" data-testid="model-provider-icon">
+          <AgentLogo agentName={agentName} size={14} className="size-3.5 shrink-0" />
+        </span>
+      ) : undefined,
+    [agentName],
+  );
   const modelConfig = configOptions.find(isModelConfigOption);
   // Explicit "using fallback" signal: annotate the trigger so the user sees
   // the session is not on the configured start model.
@@ -568,13 +577,7 @@ export const ModelSelector = memo(function ModelSelector({
 
   return (
     <ModelConfigSelector
-      providerIcon={
-        agentName ? (
-          <span aria-hidden="true" className="flex shrink-0" data-testid="model-provider-icon">
-            <AgentLogo agentName={agentName} size={14} className="size-3.5 shrink-0" />
-          </span>
-        ) : undefined
-      }
+      providerIcon={providerIcon}
       modelOptions={modelOptions}
       currentModel={currentModel}
       configOptions={configOptions}

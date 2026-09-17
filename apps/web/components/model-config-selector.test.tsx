@@ -41,7 +41,10 @@ describe("ModelConfigSelector", () => {
     expect(within(trigger).getByTestId("provider-glyph")).toBeTruthy();
     fireEvent.click(trigger);
     const group = screen.getByRole("group", { name: "Model" });
-    const heading = document.getElementById(group.getAttribute("aria-labelledby")!);
+    const labelId = group.getAttribute("aria-labelledby");
+    expect(labelId).not.toBeNull();
+    const heading = document.getElementById(labelId!);
+    expect(heading).not.toBeNull();
     expect(within(heading!).getByTestId("provider-glyph")).toBeTruthy();
     expect(screen.getByRole("option", { name: "Sonnet" })).toBeTruthy();
   });

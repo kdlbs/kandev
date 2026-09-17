@@ -212,6 +212,7 @@ export type ModelConfigSelectorContentProps = {
   configOptionsLoading: boolean;
 };
 
+/** Adds provider branding while preserving the model group label. */
 function ModelGroupHeading({ providerIcon }: { providerIcon?: ReactNode }) {
   const { t } = useTranslation();
   return (
