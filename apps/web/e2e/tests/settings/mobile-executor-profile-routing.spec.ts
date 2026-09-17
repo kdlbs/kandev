@@ -1,5 +1,6 @@
 import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 const INITIAL_IMAGE_TAG = "kandev/e2e:mobile-routing-initial";
@@ -53,17 +54,26 @@ test("phone profile navigation reaches the complete Docker editor", async ({
     const buildButton = testPage.getByRole("button", { name: "Build Image" });
     await expect(buildButton).toBeVisible();
     await expectTouchTarget(buildButton, "Mobile Docker build button");
-    await buildButton.tap();
-    await expect(testPage.getByText("Success", { exact: true })).toBeVisible({
-      timeout: 10_000,
+    const buildResponse = waitForHttp(testPage, "POST", /^\/api\/v1\/docker\/build$/, {
+      predicate: (response) => response.ok(),
     });
+    await buildButton.tap();
+    await buildResponse;
+    await expect(testPage.getByText("Success", { exact: true })).toBeVisible();
 
     await testPage.locator("#image-tag").fill(EDITED_IMAGE_TAG);
     const floatingSave = testPage.getByTestId("settings-floating-save");
     const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
     await expectTouchTarget(saveButton, "Mobile profile save button");
+    const saveResponse = waitForHttp(
+      testPage,
+      "PATCH",
+      /^\/api\/v1\/executors\/[^/]+\/profiles\/[^/]+$/,
+      { predicate: (response) => response.ok() },
+    );
     await saveButton.tap();
-    await expect(testPage.getByText("Profile saved")).toBeVisible({ timeout: 10_000 });
+    await saveResponse;
+    await expect(testPage.getByText("Profile saved")).toBeVisible();
     await expect
       .poll(
         async () => (await apiClient.getExecutorProfile(executor.id, profile.id)).config?.image_tag,

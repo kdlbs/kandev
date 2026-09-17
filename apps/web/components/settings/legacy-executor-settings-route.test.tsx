@@ -22,6 +22,7 @@ vi.mock("@/app/settings/executor/[id]/page", () => ({
 const TIMESTAMP = "2026-08-24T00:00:00Z";
 const PROFILE_ID = "profile/primary";
 const CANONICAL_PROFILE_PATH = "/settings/executors/profile%2Fprimary";
+const PROFILE_UNAVAILABLE_TESTID = "executor-profile-unavailable";
 
 afterEach(() => {
   cleanup();
@@ -56,11 +57,17 @@ function executor(type: Executor["type"]): Executor {
   };
 }
 
-function renderRoute(record: Executor | null, profileId?: string, executorId?: string) {
+function renderRoute(
+  record: Executor | null,
+  profileId?: string,
+  executorId?: string,
+  options: { executorsLoaded?: boolean } = {},
+) {
   render(
     <StateProvider
       initialState={{
         executors: { items: record ? [record] : [] },
+        settingsData: { executorsLoaded: options.executorsLoaded ?? true, agentsLoaded: true },
         auth: {
           mode: "enabled",
           authenticated: true,
@@ -86,9 +93,17 @@ function HydrateExecutors({ record }: { record: Executor }) {
   const store = useAppStoreApi();
   useEffect(() => {
     store.getState().setExecutors([record]);
+    store.getState().setSettingsData({ executorsLoaded: true });
   }, [record, store]);
   return null;
 }
+
+it("waits for executor hydration before rendering an unavailable profile state", () => {
+  renderRoute(null, PROFILE_ID, "executor/missing", { executorsLoaded: false });
+
+  expect(screen.queryByTestId(PROFILE_UNAVAILABLE_TESTID)).toBeNull();
+  expect(replace).not.toHaveBeenCalled();
+});
 
 describe("LegacyExecutorSettingsRoute", () => {
   it("redirects a member's bookmarked Kubernetes executor before mounting legacy controls", async () => {
@@ -118,7 +133,7 @@ describe("LegacyExecutorSettingsRoute", () => {
   it("does not redirect a Kubernetes executor to a profile owned by another executor", () => {
     renderRoute(executor("k8s"), "profile/from-another-executor");
 
-    expect(screen.getByTestId("executor-profile-unavailable")).toBeTruthy();
+    expect(screen.getByTestId(PROFILE_UNAVAILABLE_TESTID)).toBeTruthy();
     expect(replace).not.toHaveBeenCalled();
   });
 
@@ -155,14 +170,14 @@ describe("LegacyExecutorSettingsRoute", () => {
 
     renderRoute(record, PROFILE_ID);
 
-    expect(screen.getByTestId("executor-profile-unavailable")).toBeTruthy();
+    expect(screen.getByTestId(PROFILE_UNAVAILABLE_TESTID)).toBeTruthy();
     expect(replace).not.toHaveBeenCalled();
   });
 
   it("renders an unavailable state for a missing executor", () => {
     renderRoute(null, PROFILE_ID, "executor/missing");
 
-    expect(screen.getByTestId("executor-profile-unavailable")).toBeTruthy();
+    expect(screen.getByTestId(PROFILE_UNAVAILABLE_TESTID)).toBeTruthy();
     expect(replace).not.toHaveBeenCalled();
   });
 

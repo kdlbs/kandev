@@ -42,8 +42,10 @@ export function LegacyExecutorSettingsRoute({
   const executor = useAppStore(
     (state) => state.executors.items.find((item) => item.id === executorId) ?? null,
   );
+  const executorsLoaded = useAppStore((state) => state.settingsData.executorsLoaded);
 
   if (profileId !== undefined) {
+    if (!executorsLoaded) return null;
     const profile = executor?.profiles?.find(
       (candidate) => candidate.id === profileId && candidate.executor_id === executorId,
     );

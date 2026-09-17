@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { setSettingsMenuMode } from "../../helpers/settings-menu";
 
 const INITIAL_IMAGE_TAG = "kandev/e2e:routing-initial";
@@ -46,15 +47,24 @@ test.describe("executor profile routing", () => {
       await testPage.getByText(profile.name, { exact: true }).click();
       await expectDockerProfileEditor(testPage, profile.id);
 
-      await testPage.getByRole("button", { name: "Build Image" }).click();
-      await expect(testPage.getByText("Success", { exact: true })).toBeVisible({
-        timeout: 10_000,
+      const buildResponse = waitForHttp(testPage, "POST", /^\/api\/v1\/docker\/build$/, {
+        predicate: (response) => response.ok(),
       });
+      await testPage.getByRole("button", { name: "Build Image" }).click();
+      await buildResponse;
+      await expect(testPage.getByText("Success", { exact: true })).toBeVisible();
 
       await testPage.locator("#image-tag").fill(EDITED_IMAGE_TAG);
       const floatingSave = testPage.getByTestId("settings-floating-save");
+      const saveResponse = waitForHttp(
+        testPage,
+        "PATCH",
+        /^\/api\/v1\/executors\/[^/]+\/profiles\/[^/]+$/,
+        { predicate: (response) => response.ok() },
+      );
       await floatingSave.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByText("Profile saved")).toBeVisible({ timeout: 10_000 });
+      await saveResponse;
+      await expect(testPage.getByText("Profile saved")).toBeVisible();
       await expect
         .poll(
           async () =>
