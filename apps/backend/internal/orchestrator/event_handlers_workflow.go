@@ -5319,7 +5319,20 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 		}
 	}
 	s.publishQueueStatusEventForIdentity(ctx, identity)
-	if !s.queuedMessageHasDispatchInput(ctx, queuedMsg) {
+	hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+	if inputErr != nil {
+		s.logger.Warn("failed to inspect queued message input; retaining reservation",
+			zap.String("session_id", identity.SessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(inputErr))
+		if identity.SessionIncarnationID != "" {
+			s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: identity}, queuedMsg, queuedMsg.QueuedBy)
+		} else {
+			s.requeueMessage(ctx, queuedMsg, queuedMsg.QueuedBy)
+		}
+		return false
+	}
+	if !hasInput {
 		s.logger.Warn("skipping empty queued message after transition",
 			zap.String("session_id", identity.SessionID),
 			zap.String("queue_id", queuedMsg.ID))
@@ -5363,7 +5376,16 @@ func (s *Service) dispatchTakenQueuedMessage(
 		}
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	if !s.queuedMessageHasDispatchInput(ctx, queuedMsg) {
+	hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+	if inputErr != nil {
+		s.logger.Warn("failed to inspect queued message input; retaining reservation",
+			zap.String("session_id", sessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(inputErr))
+		s.requeueMessage(ctx, queuedMsg, queuedMsg.QueuedBy)
+		return false
+	}
+	if !hasInput {
 		s.logger.Warn("discarding empty queued message after transition",
 			zap.String("session_id", sessionID),
 			zap.String("queue_id", queuedMsg.ID))
@@ -5467,6 +5489,17 @@ func (s *Service) autoStartPassthroughPrompt(
 // its own CreateUserMessage and avoid the duplicate observed when PromptTask
 // failed transiently and the queue was later drained via boot_ready.
 const metaKeyUserMessageRecorded = "user_message_recorded"
+
+// metaKeyWorkflowDispatchInputPresent records that the original workflow
+// dispatch had effective input, including mode-generated instructions. It is
+// written with the raw queue form so a recovery drain does not need to infer
+// actionability from mutable session metadata.
+const metaKeyWorkflowDispatchInputPresent = "workflow_dispatch_input_present"
+
+// metaKeyWorkflowConfigMode preserves the mode that contributed effective
+// input to a deferred workflow launch. The queue keeps the prompt raw and the
+// mode as metadata so recovery can apply the transform exactly once.
+const metaKeyWorkflowConfigMode = "workflow_config_mode"
 
 // MetaKeyTurnStartAlreadyProcessed marks a queued prompt whose on_turn_start
 // hook already ran synchronously before queuing (see
@@ -5740,8 +5773,12 @@ func (s *Service) autoStartStepPrompt(
 			}, referenceContext, pullRequestTargetContext)
 		}
 	}
-	dispatchInputPresent := strings.TrimSpace(effectiveAgentPrompt) != "" ||
-		strings.TrimSpace(dispatchPrompt) != "" || len(attachments) > 0 || handoffForQueue != ""
+	// Use the fully composed forms after references, handoff, and first-turn
+	// context have been applied. This captures mode-generated input for an
+	// empty raw prompt while the queue still receives the raw prompt plus mode
+	// metadata, avoiding a second system block during recovery.
+	dispatchInputPresent := strings.TrimSpace(recordedPrompt) != "" ||
+		strings.TrimSpace(dispatchPrompt) != "" || len(attachments) > 0
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references, attachments)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
@@ -5778,17 +5815,24 @@ func (s *Service) autoStartStepPrompt(
 				release()
 			})
 		}
+		defer heldRelease()
 
 		s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		queueIdentity, workflowEntry, workflowEntryCaptured := s.captureWorkflowStartPromptAdmission(ctx, taskID, fresh)
+		queueIdentity, workflowEntry, workflowEntryRequired, captureErr := s.captureWorkflowStartPromptAdmission(ctx, taskID, fresh)
+		if captureErr != nil {
+			requeueTaken()
+			return captureErr
+		}
 		workflowAttempt := newWorkflowStartPromptAttemptWithAdmission(
 			taskID, sessionID, origin, prompt, planMode, attachments, references,
 			handoffForQueue, userMsgRecorded, dispatchInputPresent,
-			queueIdentity, workflowEntry, workflowEntryCaptured,
+			queueIdentity, workflowEntry, workflowEntryRequired,
 		)
+		workflowAttempt.workflowEntryRequired = workflowEntryRequired
+		workflowAttempt.configMode, _ = fresh.Metadata["config_mode"].(bool)
 		launchCtx := withWorkflowStartPromptAttempt(ctx, workflowAttempt)
 		execution, err := s.startCreatedSessionWithComposedPrompt(
 			launchCtx, taskID, sessionID, session.AgentProfileID,
@@ -5800,7 +5844,6 @@ func (s *Service) autoStartStepPrompt(
 		// Release the guard as soon as StartCreatedSession has admitted the
 		// launch (succeeded or failed definitively). The deferred release
 		// via heldRelease ensures the guard is always released even on panic.
-		defer heldRelease()
 		if err != nil {
 			workflowAttempt.retire()
 			s.handleCreatedAutoStartLaunchFailure(
@@ -6209,9 +6252,13 @@ func (s *Service) persistAutoStartPrompt(
 	references []v1.EntityReference,
 	handoffText string,
 ) (*messagequeue.QueuedMessage, error) {
+	snapshot := s.workflowStartPromptInputSnapshot(
+		ctx, sessionID, prompt, planMode, attachments, references, handoffText,
+	)
 	return s.persistAutoStartPromptWithAdmission(
 		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
-		userMessageRecorded, references, handoffText, nil, nil,
+		userMessageRecorded, references, handoffText,
+		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), nil, nil,
 	)
 }
 
@@ -6224,12 +6271,17 @@ func (s *Service) persistAutoStartPromptAtWorkflowEntry(
 	userMessageRecorded bool,
 	references []v1.EntityReference,
 	handoffText string,
+	dispatchInputPresent bool,
+	configMode bool,
 	identity messagequeue.QueueSessionIdentity,
 	entry messagequeue.WorkflowEntryIdentity,
 ) (*messagequeue.QueuedMessage, error) {
+	inputPresent := dispatchInputPresent
+	launchConfigMode := configMode
 	return s.persistAutoStartPromptWithAdmission(
 		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
-		userMessageRecorded, references, handoffText, &identity, &entry,
+		userMessageRecorded, references, handoffText,
+		&inputPresent, &launchConfigMode, &identity, &entry,
 	)
 }
 
@@ -6242,6 +6294,8 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 	userMessageRecorded bool,
 	references []v1.EntityReference,
 	handoffText string,
+	dispatchInputPresent *bool,
+	configMode *bool,
 	identity *messagequeue.QueueSessionIdentity,
 	entry *messagequeue.WorkflowEntryIdentity,
 ) (*messagequeue.QueuedMessage, error) {
@@ -6254,6 +6308,12 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 	}
 	if handoffText != "" {
 		meta[messagequeue.MetadataStepHandoff] = handoffText
+	}
+	if dispatchInputPresent != nil {
+		meta[metaKeyWorkflowDispatchInputPresent] = *dispatchInputPresent
+	}
+	if configMode != nil {
+		meta[metaKeyWorkflowConfigMode] = *configMode
 	}
 	var queued *messagequeue.QueuedMessage
 	var err error

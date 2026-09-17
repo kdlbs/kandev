@@ -3,7 +3,6 @@ id: "02-queue-prompt-on-failed-launch"
 title: "Queue the auto-start prompt when a CREATED launch fails"
 status: done
 wave: 2
-parallelism: sequential
 depends_on: ["01-reset-skips-created"]
 plan: "plan.md"
 spec: "../../specs/tasks/requirements/workflow-step-agent-start-ownership.md"

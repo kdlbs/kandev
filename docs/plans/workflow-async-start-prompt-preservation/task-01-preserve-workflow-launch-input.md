@@ -15,8 +15,6 @@ acceptance_criteria:
   - AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4
   - AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5
   - AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.6
-  - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.11
-  - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.12
 system_design:
   - ../../specs/tasks/system-design/workflow-step-agent-start-ownership.md
   - ../../specs/tasks/system-design/task-launch-failure-recovery.md
@@ -138,11 +136,18 @@ The effective-input regressions preserve empty raw queue content with mode
 metadata, deliver one provider prompt, and assert one matching transcript
 row/system block after recovery. A launch with no raw content, attachments,
 references, handoff, plan mode, or session configuration remains excluded.
+Admission capture failures now abort a prepared launch before the provider is
+started, while legacy tasks without a transition row receive a durable current
+entry before capture. Queue drains retain reserved entries when session
+metadata reads fail, and recovery uses launch-time effective-input and
+config-mode metadata rather than reclassifying a mode-only prompt from the
+mutable session projection.
 
 Verification passed:
 
 ```text
 (cd apps/backend && go test -tags fts5 ./internal/orchestrator -race -run 'TestWorkflowAsyncStartFailure|TestAutoStartCreatedLaunch|TestAutoStartTransientError_BootReadyDrainsOrphanedQueue|TestProcessOnEnterResetAgentContext' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/orchestrator -race -run 'TestCaptureWorkflowStartPromptAdmission|TestDispatchTakenQueuedMessage_RetainsEntryWhenInputReadFails' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/orchestrator/executor -race -run 'TestStartAgentProcessAsync|TestBootstrapFailure|TestBuildBootstrapLastAgentError' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/orchestrator/messagequeue -race -count=1)
 make -C apps/backend build

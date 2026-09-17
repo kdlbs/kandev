@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync/atomic"
 
@@ -41,6 +42,7 @@ type workflowStartPromptAttempt struct {
 	workflowEntry         messagequeue.WorkflowEntryIdentity
 	workflowEntryRequired bool
 	workflowEntryCaptured bool
+	configMode            bool
 
 	prompt               string
 	planMode             bool
@@ -161,6 +163,68 @@ type workflowStartPromptTransitionReader interface {
 	GetLatestTaskStepTransitionID(context.Context, string) (int64, error)
 }
 
+type workflowStartPromptTransitionEnsurer interface {
+	EnsureCurrentTaskStepTransition(context.Context, string) (int64, error)
+}
+
+type workflowStartPromptInputSnapshot struct {
+	dispatchInputPresent      bool
+	dispatchInputPresentKnown bool
+	configMode                bool
+	configModeKnown           bool
+}
+
+func (s workflowStartPromptInputSnapshot) dispatchInputPresentPtr() *bool {
+	if !s.dispatchInputPresentKnown {
+		return nil
+	}
+	present := s.dispatchInputPresent
+	return &present
+}
+
+func (s workflowStartPromptInputSnapshot) configModePtr() *bool {
+	if !s.configModeKnown {
+		return nil
+	}
+	configMode := s.configMode
+	return &configMode
+}
+
+// workflowStartPromptInputSnapshot records actionability at queue admission.
+// A raw prompt can be empty while plan mode, config mode, references, or a
+// handoff still produces a real dispatch. When session metadata cannot be
+// read, only independently known raw input is stamped; the queue drain then
+// retains its retryable read-error behavior instead of guessing empty input.
+func (s *Service) workflowStartPromptInputSnapshot(
+	ctx context.Context,
+	sessionID, prompt string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	handoffText string,
+) workflowStartPromptInputSnapshot {
+	snapshot := workflowStartPromptInputSnapshot{
+		dispatchInputPresent: strings.TrimSpace(prompt) != "" || planMode ||
+			len(attachments) > 0 || len(references) > 0 || strings.TrimSpace(handoffText) != "",
+		dispatchInputPresentKnown: false,
+	}
+	if snapshot.dispatchInputPresent {
+		snapshot.dispatchInputPresentKnown = true
+	}
+	if s.repo == nil {
+		return snapshot
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return snapshot
+	}
+	snapshot.configMode, _ = session.Metadata["config_mode"].(bool)
+	snapshot.configModeKnown = true
+	snapshot.dispatchInputPresent = snapshot.dispatchInputPresent || snapshot.configMode
+	snapshot.dispatchInputPresentKnown = true
+	return snapshot
+}
+
 // captureWorkflowStartPromptAdmission records the task-step transition,
 // session incarnation, and purge generation observed before the launch. The
 // queue repository rechecks all three inside its insertion transaction.
@@ -168,30 +232,31 @@ func (s *Service) captureWorkflowStartPromptAdmission(
 	ctx context.Context,
 	taskID string,
 	session *models.TaskSession,
-) (messagequeue.QueueSessionIdentity, messagequeue.WorkflowEntryIdentity, bool) {
-	if session == nil || taskID == "" || session.ID == "" || session.QueueIncarnationID == "" {
-		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, false
-	}
+) (messagequeue.QueueSessionIdentity, messagequeue.WorkflowEntryIdentity, bool, error) {
 	if s.messageQueue == nil || !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, false
+		// Focused and legacy backends without the shared SQL queue/task
+		// transaction intentionally use the existing non-fenced recovery path.
+		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, false, nil
+	}
+	if session == nil || taskID == "" || session.ID == "" || session.QueueIncarnationID == "" {
+		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, true,
+			fmt.Errorf("workflow launch admission identity is incomplete")
 	}
 	reader, ok := s.repo.(workflowStartPromptTransitionReader)
 	if !ok {
-		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, false
+		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, true,
+			fmt.Errorf("workflow launch admission transition reader is unavailable")
 	}
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil {
-		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, false
-	}
-	transitionID, err := reader.GetLatestTaskStepTransitionID(ctx, taskID)
-	if err != nil || transitionID <= 0 {
-		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, false
+	task, transitionID, err := s.captureWorkflowStartPromptTaskAndEntry(ctx, taskID, reader)
+	if err != nil {
+		return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, true, err
 	}
 	generation := int64(0)
 	if s.messageQueue != nil {
 		generation, err = s.messageQueue.LifecycleGeneration(ctx, taskID)
 		if err != nil {
-			return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, false
+			return messagequeue.QueueSessionIdentity{}, messagequeue.WorkflowEntryIdentity{}, true,
+				fmt.Errorf("read lifecycle generation for workflow launch admission: %w", err)
 		}
 	}
 	return messagequeue.QueueSessionIdentity{
@@ -199,7 +264,56 @@ func (s *Service) captureWorkflowStartPromptAdmission(
 		}, messagequeue.WorkflowEntryIdentity{
 			WorkflowID: task.WorkflowID, WorkflowStepID: task.WorkflowStepID,
 			TransitionID: transitionID, LifecycleGeneration: generation,
-		}, true
+		}, true, nil
+}
+
+func (s *Service) captureWorkflowStartPromptTaskAndEntry(
+	ctx context.Context,
+	taskID string,
+	reader workflowStartPromptTransitionReader,
+) (*models.Task, int64, error) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read task for workflow launch admission: %w", err)
+	}
+	if task == nil {
+		return nil, 0, fmt.Errorf("task %q is missing for workflow launch admission", taskID)
+	}
+	transitionID, err := reader.GetLatestTaskStepTransitionID(ctx, taskID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read workflow launch entry for task %q: %w", taskID, err)
+	}
+	if transitionID <= 0 {
+		ensurer, ok := s.repo.(workflowStartPromptTransitionEnsurer)
+		if !ok {
+			return nil, 0, fmt.Errorf("workflow launch admission cannot establish a durable entry for task %q", taskID)
+		}
+		transitionID, err = ensurer.EnsureCurrentTaskStepTransition(ctx, taskID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("establish workflow launch entry for task %q: %w", taskID, err)
+		}
+		if transitionID <= 0 {
+			return nil, 0, fmt.Errorf("task %q has no current workflow entry", taskID)
+		}
+	}
+	// The entry read and task projection must describe one durable state. A
+	// move may have committed between the first task read and the transition
+	// read, so reload after either the normal read or a legacy backfill.
+	task, err = s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("reload task after reading workflow launch entry: %w", err)
+	}
+	if task == nil {
+		return nil, 0, fmt.Errorf("task %q disappeared after reading workflow launch entry", taskID)
+	}
+	latestTransitionID, err := reader.GetLatestTaskStepTransitionID(ctx, taskID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("re-read workflow launch entry for task %q: %w", taskID, err)
+	}
+	if latestTransitionID <= 0 {
+		return nil, 0, fmt.Errorf("task %q lost its current workflow entry", taskID)
+	}
+	return task, latestTransitionID, nil
 }
 
 func (s *Service) retireWorkflowStartPromptAttempt(ctx context.Context, taskID, sessionID, executionID string) {
@@ -250,6 +364,8 @@ func (s *Service) preserveWorkflowStartPromptAfterFailure(
 			attempt.userMessageRecorded,
 			attempt.references,
 			attempt.handoffText,
+			attempt.dispatchInputPresent,
+			attempt.configMode,
 			attempt.queueIdentity,
 			attempt.workflowEntry,
 		)

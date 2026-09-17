@@ -92,13 +92,18 @@ func TestWorkflowAsyncStartFailure_PreservesPromptThroughRecovery(t *testing.T) 
 			return &executor.LaunchAgentResponse{AgentExecutionID: executionID, WorktreePath: req.RepositoryPath}, nil
 		},
 		startAgentProcessFunc: func(_ context.Context, _ string) error {
-			if startCalls.Add(1) == 1 {
+			call := startCalls.Add(1)
+			if call == 1 {
 				close(startEntered)
 				<-releaseStart
 				close(startReturned)
 				return startupErr
 			}
-			close(secondStartEntered)
+			if call == 2 {
+				close(secondStartEntered)
+				return nil
+			}
+			t.Errorf("unexpected startAgentProcess call %d", call)
 			return nil
 		},
 	}
@@ -640,13 +645,18 @@ func newWorkflowAsyncStartFailureFixture(
 			return &executor.LaunchAgentResponse{AgentExecutionID: executionID, WorktreePath: req.RepositoryPath}, nil
 		},
 		startAgentProcessFunc: func(_ context.Context, _ string) error {
-			if startCalls.Add(1) == 1 {
+			call := startCalls.Add(1)
+			if call == 1 {
 				close(startEntered)
 				<-releaseStart
 				close(startReturned)
 				return startupErr
 			}
-			close(secondStartEntered)
+			if call == 2 {
+				close(secondStartEntered)
+				return nil
+			}
+			t.Errorf("unexpected startAgentProcess call %d", call)
 			return nil
 		},
 	}
@@ -731,7 +741,10 @@ func newWorkflowStartPromptAttemptFixture(
 	if err != nil {
 		t.Fatalf("get preservation session: %v", err)
 	}
-	queueIdentity, workflowEntry, workflowEntryCaptured := svc.captureWorkflowStartPromptAdmission(ctx, taskID, session)
+	queueIdentity, workflowEntry, workflowEntryCaptured, err := svc.captureWorkflowStartPromptAdmission(ctx, taskID, session)
+	if err != nil {
+		t.Fatalf("capture workflow launch admission: %v", err)
+	}
 	attempt := newWorkflowStartPromptAttemptWithAdmission(
 		taskID, sessionID,
 		workflowMessageOrigin{StepID: stepID, StepName: "Fence step"},

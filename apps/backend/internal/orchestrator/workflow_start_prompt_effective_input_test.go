@@ -52,6 +52,9 @@ func TestWorkflowAsyncStartFailure_PreservesPlanOnlyInputThroughRecovery(t *test
 	if !status.Entries[0].PlanMode {
 		t.Fatal("queued plan mode = false, want true")
 	}
+	if present, _ := status.Entries[0].Metadata[metaKeyWorkflowDispatchInputPresent].(bool); !present {
+		t.Fatal("queued dispatch input marker = false, want true")
+	}
 
 	recoveryDone := make(chan error, 1)
 	go func() {
@@ -160,6 +163,18 @@ func TestWorkflowAsyncStartFailure_PreservesConfigOnlyInputThroughRecovery(t *te
 	}
 	if status.Entries[0].PlanMode {
 		t.Fatal("queued plan mode = true, want false")
+	}
+	if present, _ := status.Entries[0].Metadata[metaKeyWorkflowDispatchInputPresent].(bool); !present {
+		t.Fatal("queued config-only dispatch input marker = false, want true")
+	}
+	if configMode, _ := status.Entries[0].Metadata[metaKeyWorkflowConfigMode].(bool); !configMode {
+		t.Fatal("queued launch config-mode marker = false, want true")
+	}
+	// The queue entry owns the mode that made the empty raw prompt actionable.
+	// Recovery must not discard or turn it into an empty provider call if the
+	// mutable session projection changes before the drain.
+	if err := fixture.repo.UpdateSessionMetadata(ctx, fixture.sessionID, map[string]interface{}{"config_mode": false}); err != nil {
+		t.Fatalf("disable current config mode: %v", err)
 	}
 
 	recoveryDone := make(chan error, 1)

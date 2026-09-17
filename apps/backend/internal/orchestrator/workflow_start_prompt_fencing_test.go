@@ -135,11 +135,11 @@ func TestWorkflowAsyncStartFailure_RejectsStaleAndDuplicateCallbacks(t *testing.
 
 	for _, tc := range []struct {
 		name   string
-		mutate func(*Service, *sqliterepo.Repository, context.Context, *workflowStartPromptAttempt, string)
+		mutate func(*testing.T, *Service, *sqliterepo.Repository, context.Context, *workflowStartPromptAttempt, string)
 	}{
 		{
 			name: "terminal session",
-			mutate: func(_ *Service, repo *sqliterepo.Repository, ctx context.Context, _ *workflowStartPromptAttempt, _ string) {
+			mutate: func(t *testing.T, _ *Service, repo *sqliterepo.Repository, ctx context.Context, _ *workflowStartPromptAttempt, _ string) {
 				if err := repo.UpdateTaskSessionState(ctx, "workflow-fence-session", models.TaskSessionStateCancelled, "cancelled"); err != nil {
 					t.Fatalf("cancel session: %v", err)
 				}
@@ -147,7 +147,7 @@ func TestWorkflowAsyncStartFailure_RejectsStaleAndDuplicateCallbacks(t *testing.
 		},
 		{
 			name: "archived task",
-			mutate: func(_ *Service, repo *sqliterepo.Repository, ctx context.Context, _ *workflowStartPromptAttempt, _ string) {
+			mutate: func(t *testing.T, _ *Service, repo *sqliterepo.Repository, ctx context.Context, _ *workflowStartPromptAttempt, _ string) {
 				if err := repo.ArchiveTask(ctx, "workflow-fence-task"); err != nil {
 					t.Fatalf("archive task: %v", err)
 				}
@@ -155,7 +155,7 @@ func TestWorkflowAsyncStartFailure_RejectsStaleAndDuplicateCallbacks(t *testing.
 		},
 		{
 			name: "superseded workflow entry",
-			mutate: func(_ *Service, repo *sqliterepo.Repository, ctx context.Context, _ *workflowStartPromptAttempt, _ string) {
+			mutate: func(t *testing.T, _ *Service, repo *sqliterepo.Repository, ctx context.Context, _ *workflowStartPromptAttempt, _ string) {
 				task, err := repo.GetTask(ctx, "workflow-fence-task")
 				if err != nil {
 					t.Fatalf("get task: %v", err)
@@ -171,7 +171,7 @@ func TestWorkflowAsyncStartFailure_RejectsStaleAndDuplicateCallbacks(t *testing.
 			svc, repo, ctx, attemptCtx, _ := newWorkflowStartPromptAttemptFixture(
 				t, models.TaskSessionStateStarting, "workflow-fence-execution",
 			)
-			tc.mutate(svc, repo, ctx, workflowStartPromptAttemptFromContext(attemptCtx), "workflow-fence-execution")
+			tc.mutate(t, svc, repo, ctx, workflowStartPromptAttemptFromContext(attemptCtx), "workflow-fence-execution")
 			svc.handleAgentStartFailed(
 				attemptCtx, "workflow-fence-task", "workflow-fence-session", "workflow-fence-execution",
 				errors.New("stale startup failed"), false,

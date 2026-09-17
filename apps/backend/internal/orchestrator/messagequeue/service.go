@@ -1397,7 +1397,9 @@ func (s *Service) admitQueueFullMessageAtWorkflowEntry(
 		return nil, nil, err
 	}
 	if err != nil {
-		if errors.Is(err, ErrTaskInactive) {
+		if errors.Is(err, ErrTaskInactive) ||
+			errors.Is(err, ErrWorkflowEntryMismatch) ||
+			errors.Is(err, ErrLifecycleCancelled) {
 			return nil, nil, err
 		}
 		s.logger.Error("automatic merge into full queue failed; preserving queue full rejection",
