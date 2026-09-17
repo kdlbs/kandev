@@ -40,6 +40,7 @@ const appStoreState = {
   },
   agentProfiles: { items: [] },
   messages: { bySession: { [SESSION_ID]: [priorTranscriptMessage] } },
+  launchWarning: { bySessionId: {} },
 };
 
 const panelState = {

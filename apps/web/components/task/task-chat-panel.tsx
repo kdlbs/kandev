@@ -54,7 +54,6 @@ import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
 
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
-import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
 import { LaunchWarning } from "./launch-warning";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
@@ -1172,14 +1171,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       className="outline-none"
     >
       <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
-        {launchErrorContext && (
-          <TaskChatLaunchError
-            taskId={launchErrorContext.taskId}
-            workspaceId={launchErrorContext.workspaceId}
-            statusSummary={launchStatusSummary}
-            repositories={launchErrorContext.repositories}
-          />
-        )}
         {resolvedSessionId && <LaunchWarning sessionId={resolvedSessionId} />}
         <TaskMarkdownFileLinkProvider
           taskId={taskId}
