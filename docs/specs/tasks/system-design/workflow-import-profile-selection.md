@@ -142,6 +142,12 @@ Loading uses a localized status region. Success uses the existing toast and work
 
 The entry point remains workspace workflow settings, through upload or paste.
 Desktop uses a bounded Dialog with grouped rows, searchable profile popovers, and fixed footer actions.
+The YAML and profile dialogs share a desktop maximum width of 48 rem.
+The file chooser uses a compact secondary button, with a 28 px desktop height and 44 px touch height.
+The YAML editor has a useful initial height and bounded scrolling.
+Profile popovers start closed and open only after an explicit user action.
+Selected profile triggers use one truncated line with the full label available through their title.
+The candidate list retains separate profile-name and descriptor lines in content-sized rows.
 Phone uses an inset, nearly full-height Drawer because a batch can contain many profiles and long descriptors.
 The same drawer switches between the missing-step list and a focused searchable profile list with Back navigation.
 This avoids stacked drawers. A selection returns to the missing-step list without losing earlier selections.

@@ -277,7 +277,7 @@ function useWorkflowImportSubmission({
       const missing = workflowImportMissingSteps(targetPreview, targetSelections);
       if (missing.length > 0) {
         setPhase("resolving");
-        setActiveStepKey(workflowImportStepKey(missing[0]));
+        setActiveStepKey(null);
         return;
       }
       submissionRef.current = true;
@@ -365,7 +365,7 @@ function useWorkflowImportPreview({
       const missing = workflowImportMissingSteps(nextPreview, nextSelections);
       if (missing.length > 0) {
         setPhase("resolving");
-        setActiveStepKey(workflowImportStepKey(missing[0]));
+        setActiveStepKey(null);
         return;
       }
       await submit(nextPreview, nextSelections, generation);

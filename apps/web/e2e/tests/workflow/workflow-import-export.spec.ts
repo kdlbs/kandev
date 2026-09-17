@@ -199,17 +199,42 @@ workflows:
       await page.goto(seedData.workspaceId);
       await testPage.getByRole("button", { name: "Import", exact: true }).click();
       const dialog = testPage.getByRole("dialog");
+      const inputGeometry = await dialog.evaluate((surface) => {
+        const upload = surface.querySelector('input[type="file"]')!;
+        return {
+          width: surface.getBoundingClientRect().width,
+          fileButtonHeight: parseFloat(getComputedStyle(upload, "::file-selector-button").height),
+        };
+      });
+      expect(inputGeometry.width).toBeGreaterThanOrEqual(720);
+      expect(inputGeometry.fileButtonHeight).toBeCloseTo(28, 0);
       await dialog.locator("textarea").fill(yamlContent);
       await dialog.getByRole("button", { name: "Import", exact: true }).click();
 
       const selection = testPage.getByTestId("workflow-import-profile-selection");
       await expect(selection).toBeVisible();
       await expect(selection.getByText("Implement", { exact: true })).toBeVisible();
+      await expect(testPage.getByPlaceholder("Search profiles")).not.toBeVisible();
 
       await selection.getByTestId("workflow-import-profile-select-0:1").click();
-      await testPage
-        .getByTestId(`workflow-import-profile-option-${replacement.id}`)
-        .click({ force: true });
+      await testPage.getByTestId(`workflow-import-profile-option-${replacement.id}`).click();
+      const selectedTrigger = selection.getByTestId("workflow-import-profile-select-0:1");
+      await expect(selectedTrigger).toContainText(replacement.name);
+      const geometry = await selectedTrigger.evaluate((button) => {
+        const label = button.querySelector("span");
+        const bounds = button.getBoundingClientRect();
+        const text = label?.getBoundingClientRect();
+        return {
+          height: bounds.height,
+          top: bounds.top,
+          bottom: bounds.bottom,
+          textTop: text?.top ?? 0,
+          textBottom: text?.bottom ?? 0,
+        };
+      });
+      expect(geometry.height).toBeCloseTo(28, 0);
+      expect(geometry.textTop).toBeGreaterThanOrEqual(geometry.top);
+      expect(geometry.textBottom).toBeLessThanOrEqual(geometry.bottom);
       await selection.getByTestId("workflow-import-profile-submit").click();
       await expect(selection).not.toBeVisible();
 

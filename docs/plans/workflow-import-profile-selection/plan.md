@@ -109,6 +109,9 @@ Proposed behavior: the same input opens UI-01 with one unresolved step.
 
 UI-01 and UI-02 keep header/footer fixed. UI-03 replaces the body within the same phone surface.
 Selecting a profile returns to UI-02. The Import button becomes enabled after every required selection.
+The initial YAML dialog and UI-01 share a 48 rem desktop maximum width.
+The file chooser is a compact secondary action. The YAML editor starts at 14 rem high.
+Every picker starts closed. A selected trigger shows one line without vertical clipping.
 An empty list shows “No available profiles”, a profile-settings link, and Retry.
 A stale profile shows an inline error on its step. YAML and valid selections remain available.
 Loading has a status region. Final submission disables repeated actions and dismissal.
@@ -144,6 +147,11 @@ All identifiers have prefix `AC-TASKS-IMPORT-PROFILES-`.
 - [x] [Task 01: Implement import profile selection](task-01-import-profile-selection.md)
 
 ## Verification results
+
+UX correction on 2026-09-17 passed 15 focused frontend tests, 8 desktop E2E tests, and 1 mobile E2E test.
+Browser assertions cover the closed picker, selected-label containment, wider dialog, and desktop/phone file-button heights.
+Typecheck, targeted ESLint, specification lint, catalog validation, and diff checks also passed.
+See Task 01 for the correction and build provenance.
 
 Design validation on 2026-09-17:
 

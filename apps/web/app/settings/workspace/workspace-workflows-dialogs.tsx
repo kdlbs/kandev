@@ -81,36 +81,38 @@ export function ImportWorkflowsDialog({
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="flex max-h-[90dvh] flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("workflows:importWorkflowsTitle")}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="min-h-0 space-y-5 overflow-y-auto">
           <div className="space-y-2">
-            <Label>{t("workflows:uploadYamlFile")}</Label>
+            <Label htmlFor="workflow-import-file">{t("workflows:uploadYamlFile")}</Label>
             <input
+              id="workflow-import-file"
               ref={fileInputRef}
               type="file"
               accept=".yml,.yaml"
               onChange={onFileUpload}
               disabled={importLoading}
-              className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground file:cursor-pointer cursor-pointer"
+              className="block w-full min-w-0 cursor-pointer text-sm text-muted-foreground file:mr-3 file:h-7 file:cursor-pointer file:rounded-md file:border file:border-input file:bg-muted file:px-3 file:py-0 file:text-xs file:font-medium file:text-foreground max-md:file:h-11 [@media(pointer:coarse)]:file:h-11"
             />
           </div>
           <div className="space-y-2">
-            <Label>{t("workflows:orPasteYaml")}</Label>
+            <Label htmlFor="workflow-import-yaml">{t("workflows:orPasteYaml")}</Label>
             <Textarea
+              id="workflow-import-yaml"
               // The placeholder is a sample of the kandev_workflow export
               // payload — a wire format, so its keys stay untranslated.
               placeholder={YAML_PLACEHOLDER}
               value={importYaml}
               onChange={(e) => onImportYamlChange(e.target.value)}
               disabled={importLoading}
-              className="font-mono text-xs max-h-96 overflow-y-auto"
+              className="min-h-56 max-h-[50dvh] resize-y overflow-auto font-mono text-xs leading-relaxed"
             />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           {importLoading && (
             <span className="sr-only" role="status" aria-live="polite">
               {t("workflows:importing")}

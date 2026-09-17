@@ -59,6 +59,10 @@ workflows:
       await testPage.getByRole("button", { name: "Import", exact: true }).tap();
 
       const importDialog = testPage.getByRole("dialog");
+      const fileButtonHeight = await importDialog
+        .locator('input[type="file"]')
+        .evaluate((input) => parseFloat(getComputedStyle(input, "::file-selector-button").height));
+      expect(fileButtonHeight).toBeGreaterThanOrEqual(44);
       await importDialog.locator("textarea").fill(yamlContent);
       await importDialog.getByRole("button", { name: "Import", exact: true }).tap();
 

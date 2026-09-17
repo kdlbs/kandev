@@ -75,6 +75,7 @@ it("previews first, keeps exact matches, and submits independent selections", as
 
   expect(previewWorkflowImportAction).toHaveBeenCalledWith(workspace.id, importYaml);
   expect(result.current.importPhase).toBe("resolving");
+  expect(result.current.activeStepKey).toBeNull();
   expect(result.current.selections).toEqual({ "0:0": profileA.id });
   expect(importWorkflowsAction).not.toHaveBeenCalled();
 

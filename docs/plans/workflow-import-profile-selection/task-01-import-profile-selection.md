@@ -72,6 +72,8 @@ Requested agent/model/mode       [Profile / agent / model / mode]
 
 UI-03 replaces UI-02 within one drawer. Back preserves selections.
 Headers and primary actions stay fixed. Each active view has one vertical scroll region.
+The YAML dialog and UI-01 use the same wider desktop size, with a compact secondary file chooser.
+Pickers start closed. Selected triggers use one line, while candidate rows retain their detailed labels.
 Import stays disabled while a required selection is empty or submission is pending.
 An empty catalog provides settings access and Retry. A profile conflict identifies the affected step inline.
 Compare rendered desktop and phone views with these structural requirements during E2E verification.
@@ -149,6 +151,20 @@ Do not claim transaction atomicity for storage failures beyond the existing impo
 - `/tdd`, `/e2e`, `/mobile-parity`, and `/docs-maintainer`
 
 ## Results
+
+UX correction on 2026-09-17: pickers now start closed, selected profile labels use one line, and both desktop dialogs use a 48 rem maximum width.
+The file button uses a secondary style with a 28 px desktop height and a 44 px phone height.
+The YAML editor starts taller and has bounded scrolling.
+
+The closed-picker assertion failed before the hook change and passed afterward.
+Final checks for this correction passed:
+
+- Focused Vitest command above: 15 tests.
+- Desktop E2E command above: 8 tests, including width, file-button size, normal profile click, and selected-label containment.
+- Mobile E2E command above: 1 test, including the file-button touch target.
+- Typecheck, targeted ESLint, specification lint, catalog validation, and `git diff --check`.
+
+The first desktop E2E run rebuilt the application. Final desktop and mobile runs reused that build with `--no-build` after test-only additions.
 
 Implemented the browser workflow import profile-resolution flow end to end.
 The backend now previews eligible global profiles, validates explicit profile

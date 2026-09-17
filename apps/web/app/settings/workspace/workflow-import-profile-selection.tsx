@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconAlertTriangle, IconCheck, IconExternalLink } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCheck, IconExternalLink, IconSelector } from "@tabler/icons-react";
 import {
   Command,
   CommandEmpty,
@@ -193,10 +193,16 @@ function SelectionRow({
       data-testid={`workflow-import-profile-select-${key}`}
     >
       {selectedProfile ? (
-        <ProfileDetails profile={selectedProfile} compact />
+        <span
+          className="min-w-0 flex-1 truncate"
+          title={workflowImportProfileLabel(selectedProfile)}
+        >
+          {workflowImportProfileLabel(selectedProfile)}
+        </span>
       ) : (
-        t("workflows:importSelectProfile")
+        <span className="min-w-0 flex-1 truncate">{t("workflows:importSelectProfile")}</span>
       )}
+      <IconSelector className="ml-auto h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
     </Button>
   );
   let profileContent = profileButton;
@@ -553,7 +559,7 @@ function DesktopProfileSelection({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex max-h-[min(88vh,48rem)] flex-col overflow-hidden sm:max-w-2xl"
+        className="flex max-h-[min(90dvh,48rem)] flex-col overflow-hidden sm:max-w-3xl"
         data-testid="workflow-import-profile-selection"
       >
         <DialogHeader>
