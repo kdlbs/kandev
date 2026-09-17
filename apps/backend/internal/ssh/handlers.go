@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -100,6 +101,9 @@ func RegisterRoutes(
 func (h *Handler) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1/ssh")
 	api.POST("/test", h.httpTest)
+	// Discovery lists files under the backend user's home, a strictly larger
+	// disclosure than the other routes in this group make.
+	api.GET("/identities", authn.RequireAdmin(), h.httpListIdentities)
 	api.GET("/executors/:id/sessions", h.httpListSessions)
 	api.POST("/executors/:id/probe-agents", h.httpProbeAgents)
 	api.POST("/executors/:id/probe-shells", h.httpProbeShells)

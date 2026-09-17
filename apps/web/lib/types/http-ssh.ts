@@ -70,3 +70,17 @@ export interface SSHProbeShellsResponse {
   duration_ms: number;
   available: string[];
 }
+
+/** One private key file the backend host could use as a `file` identity. */
+export interface SSHIdentity {
+  path: string;
+  display_path: string;
+  key_type?: string;
+  encrypted: boolean;
+  source: "ssh_dir" | "ssh_config";
+}
+
+export interface SSHIdentitiesResponse {
+  home_dir: string;
+  identities: SSHIdentity[];
+}
