@@ -12,6 +12,47 @@ export function cancelChatScrollMotion(element: HTMLElement): void {
   activeMotions.get(element)?.cancel();
 }
 
+function listenForScrollIntent(element: HTMLElement, interrupt: () => void): () => void {
+  const onKey = (event: KeyboardEvent) => {
+    if (SCROLL_KEYS.has(event.key)) interrupt();
+  };
+  const onPointer = (event: PointerEvent) => {
+    if (event.target !== element || element.offsetWidth <= element.clientWidth) return;
+    const bounds = element.getBoundingClientRect();
+    const left = bounds.left + element.clientLeft;
+    if (event.clientX < left || event.clientX >= left + element.clientWidth) interrupt();
+  };
+  let touchY: number | undefined;
+  const onTouchStart = (event: TouchEvent) => {
+    touchY = event.touches[0]?.clientY;
+  };
+  const onTouchEnd = () => {
+    touchY = undefined;
+  };
+  const onTouchMove = (event: TouchEvent) => {
+    const y = event.touches[0]?.clientY;
+    if (touchY === undefined || y === undefined || Math.abs(y - touchY) < 6) return;
+    touchY = undefined;
+    interrupt();
+  };
+  element.addEventListener("wheel", interrupt, { passive: true });
+  element.addEventListener("pointerdown", onPointer, { passive: true });
+  element.addEventListener("touchstart", onTouchStart, { passive: true });
+  element.addEventListener("touchmove", onTouchMove, { passive: true });
+  element.addEventListener("touchend", onTouchEnd);
+  element.addEventListener("touchcancel", onTouchEnd);
+  element.addEventListener("keydown", onKey);
+  return () => {
+    element.removeEventListener("wheel", interrupt);
+    element.removeEventListener("pointerdown", onPointer);
+    element.removeEventListener("touchstart", onTouchStart);
+    element.removeEventListener("touchmove", onTouchMove);
+    element.removeEventListener("touchend", onTouchEnd);
+    element.removeEventListener("touchcancel", onTouchEnd);
+    element.removeEventListener("keydown", onKey);
+  };
+}
+
 /** Geometry is read in frames, never in the message commit that requests follow. */
 export function createChatScrollMotion(
   element: HTMLElement,
@@ -22,6 +63,7 @@ export function createChatScrollMotion(
   let target = -1;
   let start = 0;
   let startedAt = 0;
+  let previousFrameAt = 0;
   let disposed = false;
   const cancel = () => {
     if (frame !== null) cancelAnimationFrame(frame);
@@ -36,10 +78,12 @@ export function createChatScrollMotion(
     }
     const nextTarget = Math.max(0, element.scrollHeight - element.clientHeight);
     if (nextTarget !== target) {
+      // Retarget from the previous frame so uninterrupted growth still advances.
+      startedAt = target === -1 ? time : previousFrameAt;
       target = nextTarget;
       start = element.scrollTop;
-      startedAt = time;
     }
+    previousFrameAt = time;
     const progress = Math.min(1, (time - startedAt) / 180);
     const next = start + (target - start) * (1 - (1 - progress) ** 3);
     element.scrollTop = Math.abs(target - next) < 0.5 ? target : next;
@@ -50,12 +94,7 @@ export function createChatScrollMotion(
     cancel();
     onInterrupt();
   };
-  const onKey = (event: KeyboardEvent) => {
-    if (SCROLL_KEYS.has(event.key)) interrupt();
-  };
-  const events = ["wheel", "touchstart", "pointerdown"] as const;
-  for (const event of events) element.addEventListener(event, interrupt, { passive: true });
-  element.addEventListener("keydown", onKey);
+  const removeListeners = listenForScrollIntent(element, interrupt);
   const motion: ScrollMotion = {
     request: () => {
       if (!disposed && frame === null && canFollow()) frame = requestAnimationFrame(tick);
@@ -65,8 +104,7 @@ export function createChatScrollMotion(
     dispose: () => {
       disposed = true;
       cancel();
-      for (const event of events) element.removeEventListener(event, interrupt);
-      element.removeEventListener("keydown", onKey);
+      removeListeners();
       if (activeMotions.get(element) === motion) activeMotions.delete(element);
     },
   };

@@ -62,6 +62,7 @@ function focusMessageElement(id: string, navigate?: (id: string) => boolean): bo
   if (navigate) {
     if (!navigate(id)) return false;
   } else {
+    // Without a navigation callback there is no guard against competing chat scrolling.
     el.scrollIntoView({ block: "center", behavior: "auto" });
   }
   el.classList.remove("search-flash");

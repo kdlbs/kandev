@@ -146,3 +146,18 @@ Both work orders are complete.
   build used `GOCACHE=/tmp/kandev-chat-motion-go-cache`; later runs reused those
   backend artifacts with `--no-build` after rebuilding the changed web bundle.
 - No commit, push, or PR was performed.
+
+## PR review remediation
+
+Continuous content growth now advances on every frame rather than restarting at
+zero progress. Ordinary clicks and phone taps retain follow intent; a touch drag
+beyond 6 px or a native scrollbar press yields control. Wheel and keyboard
+interruption remain unchanged. The shared desktop/phone browser case now clicks
+or taps transcript prose before asserting continued smooth following.
+
+Validation: the new continuous-growth and click unit tests failed before the fix;
+the phone-tap browser regression also failed against the earlier build. The
+focused scroll, lifecycle, and search unit run passed all 77 tests.
+
+Final rebuilt browser suites: desktop chat-motion 2/2 and phone chat-motion 2/2
+passed with click/tap follow preservation and wheel/touch interruption.

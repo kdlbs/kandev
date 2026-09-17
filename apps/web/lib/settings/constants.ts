@@ -7,8 +7,9 @@ export const STORAGE_KEYS = {
   SETTINGS_MENU_MODE: "kandev.settings.menuMode",
   /** Branch keys left open in the persistent tree on this device. */
   SETTINGS_MENU_EXPANDED: "kandev.settings.menuExpanded",
-  /** Whether agent rich-output line and bar charts animate on this device. */
+  /** Whether chat text, new items, and scrolling animate on this device. */
   CHAT_ANIMATIONS: "kandev.settings.chatAnimations",
+  /** Whether agent rich-output line and bar charts animate on this device. */
   RICH_OUTPUT_ANIMATIONS: "kandev.settings.richOutputAnimations",
 } as const;
 

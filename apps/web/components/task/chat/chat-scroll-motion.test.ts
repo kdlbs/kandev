@@ -56,28 +56,76 @@ describe("interruptible chat following", () => {
     expect(motion.isRunning()).toBe(false);
     motion.dispose();
   });
-  it.each(["wheel", "touchstart", "pointerdown", "keydown"])(
-    "yields to %s and removes listeners on disposal",
-    (type) => {
-      const { el } = fixture();
-      const interrupt = vi.fn();
-      const motion = createChatScrollMotion(el, () => true, interrupt);
+});
+describe("continuous growth and content interactions", () => {
+  it("keeps moving when content grows on every frame", () => {
+    const { el, grow } = fixture();
+    const motion = createChatScrollMotion(el, () => true, vi.fn());
+    motion.request();
+    advance();
+    for (let i = 1; i <= 30; i++) {
+      const previous = el.scrollTop;
+      grow(1000 + i * 10);
       motion.request();
       advance();
-      advance();
-      const top = el.scrollTop;
-      el.dispatchEvent(
-        type === "keydown" ? new KeyboardEvent(type, { key: "PageUp" }) : new Event(type),
-      );
-      advance();
-      expect(el.scrollTop).toBe(top);
-      expect(frames.size).toBe(0);
-      expect(interrupt).toHaveBeenCalledTimes(1);
-      motion.dispose();
-      el.dispatchEvent(new Event("wheel"));
-      expect(interrupt).toHaveBeenCalledTimes(1);
-    },
-  );
+      expect(el.scrollTop).toBeGreaterThan(previous);
+      expect(frames.size).toBe(1);
+    }
+    advance(180);
+    expect(el.scrollTop).toBe(1100);
+    expect(frames.size).toBe(0);
+    motion.dispose();
+  });
+  it("keeps following after ordinary content clicks", () => {
+    const { el } = fixture();
+    const button = document.createElement("button");
+    el.append(button);
+    const interrupt = vi.fn();
+    const motion = createChatScrollMotion(el, () => true, interrupt);
+    motion.request();
+    button.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    el.dispatchEvent(new MouseEvent("pointerdown"));
+    expect(interrupt).not.toHaveBeenCalled();
+    advance();
+    advance();
+    expect(el.scrollTop).toBeGreaterThan(0);
+    motion.dispose();
+  });
+  it("yields to a scrollbar press and removes its listener", () => {
+    const { el } = fixture();
+    Object.defineProperties(el, { clientWidth: { value: 200 }, offsetWidth: { value: 216 } });
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue({ left: 10, right: 226 } as DOMRect);
+    const interrupt = vi.fn();
+    const motion = createChatScrollMotion(el, () => true, interrupt);
+    motion.request();
+    el.dispatchEvent(new MouseEvent("pointerdown", { clientX: 215 }));
+    expect(interrupt).toHaveBeenCalledOnce();
+    expect(frames.size).toBe(0);
+    motion.dispose();
+    el.dispatchEvent(new MouseEvent("pointerdown", { clientX: 215 }));
+    expect(interrupt).toHaveBeenCalledOnce();
+  });
+});
+describe("scroll ownership", () => {
+  it.each(["wheel", "keydown"])("yields to %s and removes listeners on disposal", (type) => {
+    const { el } = fixture();
+    const interrupt = vi.fn();
+    const motion = createChatScrollMotion(el, () => true, interrupt);
+    motion.request();
+    advance();
+    advance();
+    const top = el.scrollTop;
+    el.dispatchEvent(
+      type === "keydown" ? new KeyboardEvent(type, { key: "PageUp" }) : new Event(type),
+    );
+    advance();
+    expect(el.scrollTop).toBe(top);
+    expect(frames.size).toBe(0);
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    motion.dispose();
+    el.dispatchEvent(new Event("wheel"));
+    expect(interrupt).toHaveBeenCalledTimes(1);
+  });
   it("does not treat typing as a scroll gesture", () => {
     const { el } = fixture();
     const interrupt = vi.fn();
@@ -100,5 +148,31 @@ describe("interruptible chat following", () => {
     expect(el.scrollTop).toBe(top);
     expect(frames.size).toBe(0);
     motion.dispose();
+  });
+});
+
+describe("touch scroll intent", () => {
+  it("ignores taps and small finger jitter but yields to a drag", () => {
+    const { el } = fixture();
+    const interrupt = vi.fn();
+    const motion = createChatScrollMotion(el, () => true, interrupt);
+    const touch = (type: string, y: number) =>
+      el.dispatchEvent(new TouchEvent(type, { touches: [{ clientY: y } as Touch] }));
+    motion.request();
+    touch("touchstart", 100);
+    touch("touchmove", 102);
+    el.dispatchEvent(new TouchEvent("touchend"));
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(frames.size).toBe(1);
+    touch("touchstart", 100);
+    touch("touchmove", 112);
+    expect(interrupt).toHaveBeenCalledOnce();
+    expect(frames.size).toBe(0);
+    touch("touchmove", 130);
+    expect(interrupt).toHaveBeenCalledOnce();
+    motion.dispose();
+    touch("touchstart", 100);
+    touch("touchmove", 130);
+    expect(interrupt).toHaveBeenCalledOnce();
   });
 });

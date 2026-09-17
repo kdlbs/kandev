@@ -183,6 +183,9 @@ export function chatMotionScenarios(mobile: boolean) {
     await expect
       .poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
       .toBeLessThan(3);
+    const lastParagraph = session.activeChat().getByText("SCROLL-HISTORY 25", { exact: true });
+    if (mobile) await lastParagraph.tap();
+    else await lastParagraph.click();
     const movement = await testPage.evaluate(async (sessionId) => {
       const state = (window as MotionWindow).__KANDEV_E2E_STORE__!.getState();
       const message = state.messages.bySession[sessionId].find(

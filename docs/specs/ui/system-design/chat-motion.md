@@ -96,14 +96,16 @@ scroll container. Existing allowed live-follow calls request a target instead
 of synchronously writing the bottom when motion is effective. Frame callbacks
 read current geometry, then perform one scroll write, easing toward a moving
 bottom target and landing exactly within 300 ms of the last growth. New content
-updates the target of the active driver, never queues another animation.
+updates the target of the active driver, never queues another animation. Retargeting
+preserves elapsed frame time so continuous growth cannot stall scroll progress.
 Use existing resize notifications for late content growth. Keep synchronous
 content-size reads out of message commits (the existing stability invariant).
 
 Follow intent is distinct from instantaneous distance to bottom while the driver
 runs: its own intermediate scroll events must not incorrectly clear intent.
 Actual wheel/touch/keyboard/scrollbar input cancels it and returns control to
-existing near-bottom logic. Explicit scroll-to-message navigation cancels the
+existing near-bottom logic. Ordinary content clicks do not clear follow intent;
+pointer presses interrupt only in the native scrollbar gutter. Explicit scroll-to-message navigation cancels the
 follow driver and retains `useProgrammaticScrollGuard`. Thread effective motion
 through `handleScrollToMessage`, transcript search, and chat controls in
 `simple/task-chat.tsx`, avoiding application-wide `scroll-behavior: smooth`.
