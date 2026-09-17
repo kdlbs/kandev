@@ -2,7 +2,7 @@
 status: active
 system: workspaces
 created: 2026-07-20
-updated: 2026-08-30
+updated: 2026-09-17
 owners:
   - kandev
 ---
@@ -111,6 +111,22 @@ can display a permission dialog after the user leaves the application.
   last successful result and shall expose the failed root and recovery action.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-003.8:** An empty or filtered discovery
   result shall show a visible manual Refresh action.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.9:** When a descendant is inaccessible,
+  discovery shall continue through accessible siblings and retain repositories
+  already found. An accessible root shall not require reconnection solely
+  because a descendant is inaccessible.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.10:** When at least one root succeeds
+  and another fails, discovery shall show fresh results from every successful
+  root. It shall retain previous results only for failed roots. Successful
+  empty scans shall remove obsolete results from those roots.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.11:** When roots fail, browser and phone
+  repository selectors shall identify failed paths and offer manual Refresh.
+  Available repositories shall remain selectable. The failure message shall
+  remain visible when the result list is empty. Saved desktop roots shall
+  retain their Reconnect and Remove actions.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.12:** A missing clone directory shall
+  not prevent results from other roots from appearing on initial or later scans.
+  Discovery shall not create the directory to recover from this condition.
 
 ### REQ-WORKSPACES-LOCAL-REPOSITORIES-004: Filesystem access diagnostics
 
@@ -280,6 +296,8 @@ the repository record removes that exact durable grant from the workspace.
 - Making Pull, Push, or change-request creation work without a configured remote.
 
 ## Implementation Plans
+
+- [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 - [Explicit Local Repository Trust](../../../plans/explicit-local-repository-trust/plan.md)
 - [Local-only Merge and Rebase](../../../plans/local-only-merge-rebase/plan.md)

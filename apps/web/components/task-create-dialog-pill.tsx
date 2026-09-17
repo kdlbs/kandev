@@ -1,20 +1,12 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { IconCheck } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@kandev/ui/command";
+import { Command, CommandInput } from "@kandev/ui/command";
 import { BranchRefreshButton } from "@/components/branch-refresh-button";
+import { PillCommandList } from "@/components/task-create-dialog-pill-command-list";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 import { usePillTooltipSuppression } from "@/hooks/use-pill-tooltip-suppression";
@@ -93,90 +85,6 @@ function pillActiveClass(flat: boolean): string {
   return "hover:bg-muted hover:border-border cursor-pointer";
 }
 
-function PillCommandList({
-  options,
-  value,
-  onSelect,
-  onPointerSelect,
-  setOpen,
-  emptyMessage,
-}: {
-  options: PillOption[];
-  value: string;
-  onSelect: (value: string) => void;
-  onPointerSelect: (pointerType: string) => void;
-  setOpen: (open: boolean) => void;
-  emptyMessage: string;
-}) {
-  const groups = new Map<string, { label?: string; options: PillOption[] }>();
-  for (const option of options) {
-    const key = option.group ?? "";
-    const group = groups.get(key) ?? { label: option.groupLabel, options: [] };
-    group.options.push(option);
-    groups.set(key, group);
-  }
-  const groupOrder = new Map([
-    ["policies", 0],
-    ["branches", 1],
-  ]);
-  const orderedGroups = Array.from(groups.entries()).sort(
-    ([firstKey], [secondKey]) =>
-      (groupOrder.get(firstKey) ?? Number.MAX_SAFE_INTEGER) -
-      (groupOrder.get(secondKey) ?? Number.MAX_SAFE_INTEGER),
-  );
-
-  return (
-    <CommandList>
-      <CommandEmpty>{emptyMessage}</CommandEmpty>
-      {orderedGroups.map(([key, group]) => (
-        <CommandGroup key={key || "ungrouped"} heading={group.label}>
-          {prioritizeSelectedOption(group.options, value, (option) => option.value).map(
-            (option) => {
-              const selected = option.value === value;
-              const item = (
-                <CommandItem
-                  key={option.renderAccessory ? undefined : option.value}
-                  value={option.value}
-                  keywords={[option.label, ...(option.keywords ?? [])]}
-                  disabled={option.disabled}
-                  onPointerDown={(event) => onPointerSelect(event.pointerType)}
-                  onSelect={() => {
-                    onSelect(option.value);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    selectorOptionClassName(selected),
-                    option.renderAccessory && "pr-14",
-                  )}
-                >
-                  <div className="min-w-0 flex-1">
-                    {option.renderLabel ? option.renderLabel() : option.label}
-                  </div>
-                  <IconCheck
-                    className={cn(
-                      "absolute right-2 h-4 w-4",
-                      selected ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                </CommandItem>
-              );
-              if (!option.renderAccessory) return item;
-              return (
-                <div key={option.value} className="relative">
-                  {item}
-                  <div className="absolute inset-y-0 right-7 z-10 flex items-center">
-                    {option.renderAccessory()}
-                  </div>
-                </div>
-              );
-            },
-          )}
-        </CommandGroup>
-      ))}
-    </CommandList>
-  );
-}
-
 /**
  * Builds the className for the pill trigger button. Extracted so the inline
  * trigger JSX stays compact (the Pill function is right at the complexity cap).
@@ -248,15 +156,19 @@ function PillPopoverContent({
   popoverHeader?: React.ReactNode;
   dropdownTestId?: string;
 }) {
+  const hasPopoverHeader = Boolean(popoverHeader);
   return (
     <PopoverContent
-      className="w-[min(480px,calc(100vw-2rem))] p-0"
+      className={cn(
+        "w-[min(480px,calc(100vw-2rem))] p-0",
+        hasPopoverHeader && "max-h-[var(--radix-popover-content-available-height)] overflow-hidden",
+      )}
       align="start"
       portalContainer={portalContainer}
       data-testid={dropdownTestId}
     >
       {popoverHeader}
-      <Command filter={filter}>
+      <Command filter={filter} className={hasPopoverHeader ? "!h-auto min-h-0 flex-1" : undefined}>
         <div className="flex min-h-11 items-center gap-1 px-2 pt-1">
           <div className="min-w-0 flex-1">
             <CommandInput placeholder={searchPlaceholder} className="h-9 w-full" />
@@ -297,6 +209,7 @@ function PillPopoverContent({
           onPointerSelect={onPointerSelect}
           setOpen={setOpen}
           emptyMessage={emptyMessage}
+          className={hasPopoverHeader ? "!max-h-none min-h-0 flex-1" : undefined}
         />
       </Command>
     </PopoverContent>

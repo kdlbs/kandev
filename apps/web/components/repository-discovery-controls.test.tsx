@@ -10,6 +10,7 @@ const discovery = vi.hoisted(() => ({
     { id: "", path: "/configured", display_path: "/configured", state: "connected" },
   ],
   homeConfirmationRequired: true,
+  failedRoots: [] as string[],
 }));
 const actions = vi.hoisted(() => ({
   refreshDiscovery: vi.fn(),
@@ -33,10 +34,14 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/components/repository-discovery-root-controls", () => ({
   RepositoryDiscoveryRootControls: (props: {
     discoveryRoots: Array<{ id: string }>;
+    failedRoots: string[];
+    showRootActions: boolean;
     onChooseDiscoveryRoot: (path: string) => void;
   }) => (
     <div data-testid="root-controls">
       <span data-testid="root-count">{props.discoveryRoots.length}</span>
+      <span data-testid="failed-root-count">{props.failedRoots.length}</span>
+      <span data-testid="root-actions-visible">{String(props.showRootActions)}</span>
       <button type="button" onClick={() => props.onChooseDiscoveryRoot("/picked")}>
         Choose
       </button>
@@ -49,6 +54,8 @@ import { RepositoryDiscoveryControls } from "./repository-discovery-controls";
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  discovery.desktopRuntime = true;
+  discovery.failedRoots = [];
 });
 
 describe("RepositoryDiscoveryControls", () => {
@@ -65,5 +72,16 @@ describe("RepositoryDiscoveryControls", () => {
     render(<RepositoryDiscoveryControls workspaceId="workspace-1" enabled={false} />);
 
     expect(screen.queryByTestId("root-controls")).toBeNull();
+  });
+
+  it("renders failed roots for a server picker while keeping root actions hidden", () => {
+    discovery.desktopRuntime = false;
+    discovery.failedRoots = ["/missing-repositories"];
+
+    render(<RepositoryDiscoveryControls workspaceId="workspace-1" presentation="picker" />);
+
+    expect(screen.getByTestId("root-controls")).toBeTruthy();
+    expect(screen.getByTestId("failed-root-count").textContent).toBe("1");
+    expect(screen.getByTestId("root-actions-visible").textContent).toBe("false");
   });
 });

@@ -42,11 +42,11 @@ func NormalizeRepositoryDiscoveryTrigger(trigger string) string {
 }
 
 type discoveryCacheEntry struct {
-	roots        []string
-	repositories []LocalRepository
-	rootStates   []models.DesktopDiscoveryRoot
-	scanTime     *time.Time
-	failedRoots  []string
+	roots              []string
+	repositoriesByRoot map[string][]LocalRepository
+	rootStates         []models.DesktopDiscoveryRoot
+	scanTime           *time.Time
+	failedRoots        []string
 }
 
 type discoveryFlight struct {
@@ -125,7 +125,7 @@ func (s *Service) getLocalRepositoryDiscovery(
 	}
 	return RepositoryDiscoveryResult{
 		Roots:                    roots,
-		Repositories:             cloneRepositories(entry.repositories),
+		Repositories:             repositoriesForRoots(roots, entry.repositoriesByRoot),
 		DesktopRuntime:           s.discoveryConfig.DesktopRuntime,
 		RootStates:               states,
 		ScanTime:                 cloneTime(entry.scanTime),
@@ -239,14 +239,14 @@ func (s *Service) scanDiscoveryRoots(
 	trigger string,
 ) (RepositoryDiscoveryResult, error) {
 	trigger = NormalizeRepositoryDiscoveryTrigger(trigger)
-	found := make([]LocalRepository, 0)
+	repositoriesByRoot := cloneRepositoriesByRoot(previous.repositoriesByRoot)
 	failed := make([]string, 0)
 	for _, root := range roots {
 		if err := ctx.Err(); err != nil {
 			return RepositoryDiscoveryResult{}, err
 		}
 		s.logFilesystemInfo("repository discovery scan started", "repository.discovery.scan", root, trigger)
-		repositories, err := s.discoveryScanRoot(ctx, root, s.discoveryMaxDepth())
+		scan, err := s.discoveryScanRoot(ctx, root, s.discoveryMaxDepth())
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return RepositoryDiscoveryResult{}, err
@@ -254,9 +254,16 @@ func (s *Service) scanDiscoveryRoots(
 			failed = append(failed, root)
 			s.logFilesystemFailure("repository.discovery.scan", root, trigger, err)
 			s.recordDesktopRootFailure(ctx, root, err)
+			if _, ok := repositoriesByRoot[root]; !ok {
+				repositoriesByRoot[root] = nil
+			}
 			continue
 		}
-		found = appendUniqueRepositories(found, repositories)
+		for _, warning := range scan.warnings {
+			s.logFilesystemFailure("repository.discovery.scan", warning.path, trigger, warning.err)
+		}
+		repositories := scan.repositories
+		repositoriesByRoot[root] = cloneRepositories(repositories)
 		s.recordDesktopRootSuccess(ctx, root)
 	}
 
@@ -265,19 +272,18 @@ func (s *Service) scanDiscoveryRoots(
 		return RepositoryDiscoveryResult{}, err
 	}
 	if len(failed) > 0 {
-		repositories := found
+		repositories := repositoriesForRoots(roots, repositoriesByRoot)
 		scanTime := (*time.Time)(nil)
 		cached := hasPrevious
 		if hasPrevious {
-			repositories = cloneRepositories(previous.repositories)
 			scanTime = cloneTime(previous.scanTime)
 		}
 		entry := discoveryCacheEntry{
-			roots:        append([]string(nil), roots...),
-			repositories: cloneRepositories(repositories),
-			rootStates:   cloneRootStates(states),
-			scanTime:     cloneTime(scanTime),
-			failedRoots:  append([]string(nil), failed...),
+			roots:              append([]string(nil), roots...),
+			repositoriesByRoot: cloneRepositoriesByRoot(repositoriesByRoot),
+			rootStates:         cloneRootStates(states),
+			scanTime:           cloneTime(scanTime),
+			failedRoots:        append([]string(nil), failed...),
 		}
 		s.storeDiscoveryCache(roots, entry)
 		return RepositoryDiscoveryResult{
@@ -294,15 +300,15 @@ func (s *Service) scanDiscoveryRoots(
 
 	now := s.discoveryClockNow()
 	entry := discoveryCacheEntry{
-		roots:        append([]string(nil), roots...),
-		repositories: cloneRepositories(found),
-		rootStates:   cloneRootStates(states),
-		scanTime:     &now,
+		roots:              append([]string(nil), roots...),
+		repositoriesByRoot: cloneRepositoriesByRoot(repositoriesByRoot),
+		rootStates:         cloneRootStates(states),
+		scanTime:           &now,
 	}
 	s.storeDiscoveryCache(roots, entry)
 	return RepositoryDiscoveryResult{
 		Roots:                    roots,
-		Repositories:             found,
+		Repositories:             repositoriesForRoots(roots, repositoriesByRoot),
 		DesktopRuntime:           s.discoveryConfig.DesktopRuntime,
 		RootStates:               states,
 		ScanTime:                 &now,
@@ -312,6 +318,11 @@ func (s *Service) scanDiscoveryRoots(
 
 func (s *Service) storeDiscoveryCache(roots []string, entry discoveryCacheEntry) {
 	key := discoveryCacheKey(roots, s.discoveryMaxDepth())
+	entry.roots = append([]string(nil), entry.roots...)
+	entry.repositoriesByRoot = cloneRepositoriesByRoot(entry.repositoriesByRoot)
+	entry.rootStates = cloneRootStates(entry.rootStates)
+	entry.scanTime = cloneTime(entry.scanTime)
+	entry.failedRoots = append([]string(nil), entry.failedRoots...)
 	s.discoveryCacheMu.Lock()
 	s.discoveryCache[key] = entry
 	s.discoveryCacheMu.Unlock()
@@ -678,6 +689,25 @@ func discoveryCacheKey(roots []string, maxDepth int) string {
 
 func cloneRepositories(repositories []LocalRepository) []LocalRepository {
 	return append([]LocalRepository(nil), repositories...)
+}
+
+func cloneRepositoriesByRoot(repositoriesByRoot map[string][]LocalRepository) map[string][]LocalRepository {
+	if repositoriesByRoot == nil {
+		return make(map[string][]LocalRepository)
+	}
+	result := make(map[string][]LocalRepository, len(repositoriesByRoot))
+	for root, repositories := range repositoriesByRoot {
+		result[root] = cloneRepositories(repositories)
+	}
+	return result
+}
+
+func repositoriesForRoots(roots []string, repositoriesByRoot map[string][]LocalRepository) []LocalRepository {
+	found := make([]LocalRepository, 0)
+	for _, root := range roots {
+		found = appendUniqueRepositories(found, repositoriesByRoot[root])
+	}
+	return found
 }
 
 func cloneRootStates(states []models.DesktopDiscoveryRoot) []models.DesktopDiscoveryRoot {

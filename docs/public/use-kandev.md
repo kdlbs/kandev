@@ -127,6 +127,13 @@ workspace there from the menu sheet instead.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
 
+If the picker reports folders that could not be scanned, it keeps repositories
+from successful roots available. Select **Refresh repositories** to retry. A
+missing or inaccessible root does not prevent you from validating an absolute
+repository path. On Desktop, a saved root that fails also offers **Reconnect**
+and **Remove**. Kandev does not retry failed roots in the background or create
+missing clone directories.
+
 New local repository records default to:
 
 - source type `local`;

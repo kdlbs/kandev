@@ -12,6 +12,7 @@ type RepositoryDiscoveryControlsProps = {
   enabled?: boolean;
   className?: string;
   presentation?: "card" | "picker";
+  showRefresh?: boolean;
 };
 
 /**
@@ -25,13 +26,15 @@ export function RepositoryDiscoveryControls({
   enabled = true,
   className,
   presentation = "card",
+  showRefresh = true,
 }: RepositoryDiscoveryControlsProps) {
   const discovery = useRepositoryDiscovery(workspaceId, enabled);
   const { toast } = useToast();
   const { t } = useTranslation();
   const actions = useDiscoveryRootActions(discovery, toast, t);
 
-  if (!enabled || !workspaceId || !discovery.desktopRuntime) return null;
+  if (!enabled || !workspaceId || (!discovery.desktopRuntime && discovery.failedRoots.length === 0))
+    return null;
 
   return (
     <RepositoryDiscoveryRootControls
@@ -39,6 +42,9 @@ export function RepositoryDiscoveryControls({
       presentation={presentation}
       isLoading={discovery.isLoading || discovery.isRefreshing}
       discoveryRoots={discovery.rootStates.filter((root) => Boolean(root.id))}
+      failedRoots={discovery.failedRoots}
+      showRootActions={discovery.desktopRuntime}
+      showRefresh={showRefresh}
       homeConfirmationRequired={discovery.homeConfirmationRequired}
       onChooseDiscoveryRoot={actions.handleChooseDiscoveryRoot}
       onRefreshDiscovery={actions.refreshDiscovery}

@@ -424,7 +424,7 @@ type Service struct {
 	discoveryCache                  map[string]discoveryCacheEntry
 	discoveryFlights                map[string]*discoveryFlight
 	discoveryNow                    func() time.Time
-	discoveryScanRoot               func(context.Context, string, int) ([]LocalRepository, error)
+	discoveryScanRoot               func(context.Context, string, int) (repositoryDiscoveryScanResult, error)
 	filesystemWarnings              *fsdiagnostics.WarningLimiter
 	worktreeCleanup                 WorktreeCleanup
 	canvasCleanup                   CanvasCleanup

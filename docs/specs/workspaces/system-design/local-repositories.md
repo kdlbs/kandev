@@ -160,8 +160,41 @@ migration.
 3. The frontend renders saved and cached repositories immediately.
 4. If the surface is active and the snapshot is 30 minutes old, it requests a refresh.
 5. The backend shares an existing scan or starts one scan for the root set.
-6. Success replaces the cache and broadcasts the new snapshot.
-7. Failure preserves the cache and marks only the failed root for recovery.
+6. Each successful root replaces its cached results, including an empty result.
+7. Each failed root retains only its previous results and reports recovery state.
+
+### Partial scan recovery
+
+This section defines AC-WORKSPACES-LOCAL-REPOSITORIES-003.9 through 003.12.
+`repoWalker.visit` distinguishes root errors from descendant errors.
+An inaccessible root fails its scan. An inaccessible descendant produces a
+structured warning and does not terminate traversal of accessible siblings.
+Cancellation and deadline expiry abort the operation without a cache write.
+The existing Home exclusions and explicit-path validation remain unchanged.
+
+`scanRootForRepos` retains repositories found before a descendant error.
+The scan carries the existing runtime and trigger context into descendant
+diagnostics. Warnings identify the denied descendant, not just its root.
+The walker emits at most one warning per denied path during one scan.
+It does not retry denied paths within that scan.
+
+`discoveryCacheEntry` retains results by exact normalized scan root internally.
+`scanDiscoveryRoots` replaces successful root entries and retains failed root
+entries. A root without previous results contributes an empty list on failure.
+The response deduplicates the union by repository path. Root membership comes
+from scan provenance, not a path-prefix guess, because effective roots can overlap.
+Cache snapshots and responses copy their slices to prevent concurrent mutation.
+
+The public response keeps its existing fields. `failed_roots` lists current
+root failures. Descendant denials do not mark accessible roots as failed.
+An absent clone root remains a reported root failure, but never replaces fresh
+results from another root. Discovery does not create directories.
+
+The aggregate `scan_time` advances only after all roots succeed. During partial
+failure, it retains the previous complete-scan time, or remains absent.
+The coordinator retains automatic-retry suppression for failed snapshots.
+Manual Refresh retries the effective roots through the existing single-flight
+operation. This repair does not introduce background retries.
 
 The shared discovery coordinator owns one activation count in each browser tab.
 An open consumer acquires one activation lease. It releases the lease when the
@@ -201,6 +234,28 @@ browser on a desktop backend uses desktop policy and the HTTP folder browser.
 
 Temporary repository choices use the current phone-native picker or drawer
 composition. No native Tauri control appears in a browser or mobile viewport.
+
+`RepositoryDiscoveryControls` also shows root failures for server backends.
+The failure region consumes `failedRoots` from `useRepositoryDiscovery` and
+remains visible beside available repository choices. It identifies failed
+paths and provides manual Refresh through the same coordinator.
+It does not convert partial success into a rejected request or a toast-only error.
+Saved desktop roots retain existing recovery controls without duplicate warnings.
+Configured roots without saved identifiers receive the same failure region as
+server roots. They do not receive unsupported Reconnect or Remove actions.
+
+The region appears inside existing picker surfaces, including Create Task,
+Add Workspace Sources, Automations, Office, and Workspace Repositories.
+It uses localized copy, wrapping paths, and an accessible status region.
+During refresh, available choices stay visible and the action shows progress.
+After successful recovery, the warning disappears.
+Phone presentation reuses each existing selector and its scroll owner. The
+failure details list is bounded and scrolls inside the warning while its title
+and Refresh action remain fixed; the remaining command list keeps its own
+available-height scroll area. The Add Workspace Sources drawer supplies the
+reference for inline errors, safe-area clearance, and internal scrolling. No
+additional overlay is necessary. Desktop actions remain 28 pixels high. Phone
+and coarse-pointer actions have at least 44-pixel hit targets.
 
 ## Workspace polling
 
@@ -268,7 +323,8 @@ Suggested event names are:
 
 - Picker cancellation changes no grant and starts no scan.
 - An invalid selected path is rejected without persistence.
-- A partial scan returns the last successful cache and identifies failed roots.
+- A partial scan combines fresh successful roots with cached failed roots.
+- An inaccessible descendant does not discard accessible sibling results.
 - A denied root moves to `reconnect_required` and receives no automatic retry.
 - An unsigned update can change macOS code identity. The UI offers Reconnect and
   does not claim that one consent will survive every update.
@@ -332,6 +388,10 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 - Manual macOS QA covers `NSOpenPanel` and real privacy dialogs.
 - Lifecycle tests cover final refresh, paused delivery, startup fallback, focus,
   and new operation activity.
+
+## Implementation plans
+
+- [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 ## Decisions
 

@@ -158,9 +158,11 @@ export function DiscoverRepoDialog({
           <DialogDescription>{t("workspaces:discoverRepositoryDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          {desktopRuntime && (
-            <RepositoryDiscoveryControls workspaceId={workspaceId} enabled={open} />
-          )}
+          <RepositoryDiscoveryControls
+            workspaceId={workspaceId}
+            enabled={open}
+            showRefresh={desktopRuntime}
+          />
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <Label>{t("workspaces:discoveredRepositories")}</Label>
@@ -170,8 +172,11 @@ export function DiscoverRepoDialog({
                   variant="outline"
                   className="[@media(pointer:coarse)]:h-11"
                   onClick={onRefreshDiscovery}
+                  disabled={isLoading}
                 >
-                  {t("workspaces:refreshRepositories")}
+                  {isLoading
+                    ? t("workspaces:scanningRepositories")
+                    : t("workspaces:refreshRepositories")}
                 </Button>
               )}
             </div>
