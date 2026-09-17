@@ -40,7 +40,7 @@ type DraftState = {
   assigneeAgentProfileId: string;
   concurrencyPolicy: string;
   catchUpPolicy: string;
-  catchUpMax: number;
+  catchUpMax: string;
   triggerKind: "cron" | "webhook";
   cronExpression: string;
   timezone: string;
@@ -70,7 +70,7 @@ function buildDraft(routine: Routine, triggers: RoutineTrigger[]): DraftState {
     assigneeAgentProfileId: routine.assigneeAgentProfileId ?? "",
     concurrencyPolicy: routine.concurrencyPolicy ?? "coalesce_if_active",
     catchUpPolicy: routine.catchUpPolicy ?? "summarize_missed",
-    catchUpMax: coerceCatchUpMax(routine.catchUpMax),
+    catchUpMax: String(coerceCatchUpMax(routine.catchUpMax)),
     triggerKind,
     cronExpression: cron?.cronExpression ?? "",
     timezone: cron?.timezone ?? "UTC",
@@ -85,7 +85,7 @@ function buildUpdatePatch(draft: DraftState): UpdateRoutinePatch {
     assigneeAgentProfileId: draft.assigneeAgentProfileId,
     concurrencyPolicy: draft.concurrencyPolicy,
     catchUpPolicy: draft.catchUpPolicy,
-    catchUpMax: draft.catchUpMax,
+    catchUpMax: coerceCatchUpMax(draft.catchUpMax),
   };
 }
 
@@ -133,7 +133,7 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
   const router = useRouter();
   const agents = useAppStore(selectOfficeAgentProfiles);
   const [routine] = useState(initialRoutine);
-  const [triggers, setTriggers] = useState(initialTriggers);
+  const [triggers, setTriggers] = useState<RoutineTrigger[] | null>(initialTriggers);
   const [draft, setDraft] = useState<DraftState>(buildDraft(initialRoutine, initialTriggers));
   const [saving, setSaving] = useState(false);
   const update = useCallback(
@@ -141,10 +141,14 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
     [],
   );
 
-  const cronTrigger = triggers.find((t) => t.kind === "cron");
+  const cronTrigger = triggers?.find((t) => t.kind === "cron");
   const lastFired = cronTrigger?.lastFiredAt ?? null;
 
   const handleSave = useCallback(async () => {
+    if (triggers === null) {
+      toast.error(t("office:routineScheduleFateUnknown"));
+      return;
+    }
     setSaving(true);
     try {
       await updateRoutine(routine.id, buildUpdatePatch(draft));
@@ -156,9 +160,7 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
 
     try {
       const outcome = await reconcileCronTrigger(routine.id, draft, triggers);
-      if (outcome.kind !== "unchanged" && outcome.triggers !== null) {
-        setTriggers(outcome.triggers);
-      }
+      if (outcome.kind !== "unchanged") setTriggers(outcome.triggers);
       const result = describeCronOutcome(outcome, t);
       if (result.toastKind === "success") {
         toast.success(result.message);
@@ -244,7 +246,8 @@ function DetailGeneralCard({
               type="number"
               min={1}
               value={draft.catchUpMax}
-              onChange={(e) => update({ catchUpMax: coerceCatchUpMax(e.target.value) })}
+              onChange={(e) => update({ catchUpMax: e.target.value })}
+              onBlur={(e) => update({ catchUpMax: String(coerceCatchUpMax(e.target.value)) })}
             />
           </Field>
         )}

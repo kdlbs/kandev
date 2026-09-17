@@ -39,7 +39,7 @@ type RoutineFormState = {
   assignee: string;
   concurrency: string;
   catchUpPolicy: string;
-  catchUpMax: number;
+  catchUpMax: string;
   triggerKind: string;
   cronExpr: string;
   timezone: string;
@@ -53,7 +53,7 @@ const INITIAL_ROUTINE_STATE: RoutineFormState = {
   assignee: "",
   concurrency: "coalesce_if_active",
   catchUpPolicy: "summarize_missed",
-  catchUpMax: 25,
+  catchUpMax: "25",
   triggerKind: "cron",
   cronExpr: "",
   timezone: "UTC",
@@ -307,7 +307,8 @@ function PolicyFields({
             type="number"
             min={1}
             value={state.catchUpMax}
-            onChange={(e) => onUpdate({ catchUpMax: coerceCatchUpMax(e.target.value) })}
+            onChange={(e) => onUpdate({ catchUpMax: e.target.value })}
+            onBlur={(e) => onUpdate({ catchUpMax: String(coerceCatchUpMax(e.target.value)) })}
             className="mt-1.5"
           />
           <p className="text-xs text-muted-foreground mt-1.5">
@@ -349,7 +350,7 @@ function buildSubmitPayload(state: RoutineFormState) {
     assigneeAgentProfileId: state.assignee,
     concurrencyPolicy: state.concurrency,
     catchUpPolicy: state.catchUpPolicy,
-    catchUpMax: state.catchUpMax,
+    catchUpMax: coerceCatchUpMax(state.catchUpMax),
     triggerKind: state.triggerKind,
     cronExpression: state.cronExpr,
     timezone: state.timezone,

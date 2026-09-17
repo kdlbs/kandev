@@ -1,5 +1,5 @@
 /**
- * Coerces a routine catch-up max to a valid value for display or form state.
+ * Coerces a routine catch-up max to a valid value for display or form submission.
  * Any value below 1 (including NaN from an unparsable string) becomes the
  * default of 25, mirroring the backend's own normalization
  * (apps/backend/internal/office/models: NormaliseCatchUpMax).

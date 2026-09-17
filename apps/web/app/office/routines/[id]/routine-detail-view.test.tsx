@@ -195,6 +195,32 @@ describe("RoutineDetailView catch-up policy labeling (AC-003.6)", () => {
   });
 });
 
+describe("RoutineDetailView catch-up max editing", () => {
+  it("keeps the raw value while editing and coerces it at save time", async () => {
+    const { updateRoutine } = await import("@/lib/api/domains/office-api");
+    reconcileCronTriggerMock.mockResolvedValue({ kind: "unchanged" });
+    renderDetailView(
+      { ...baseRoutine, catchUpPolicy: "summarize_missed", catchUpMax: 25 },
+      NO_TRIGGERS,
+    );
+
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input.value).toBe("");
+    fireEvent.change(input, { target: { value: "7" } });
+    expect(input.value).toBe("7");
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(updateRoutine).toHaveBeenCalledWith(
+        "routine-1",
+        expect.objectContaining({ catchUpMax: 7 }),
+      ),
+    );
+  });
+});
+
 // AC-003.17: a stored status outside the three selectable options renders no
 // selection (the control does not invent a value) and a save omits the field
 // rather than sending an invented one.
@@ -271,6 +297,32 @@ describe("RoutineDetailView save failure (TS-005)", () => {
 // refresh decision — including the SRF-34 uncovered cell (a failed trigger
 // mutation whose re-list also fails), which must show the fate-unknown
 // message rather than AC-002.9's "saved but schedule was not" text.
+describe("RoutineDetailView stale schedule state", () => {
+  it("blocks another save after a successful schedule mutation has an unknown trigger state", async () => {
+    const { updateRoutine } = await import("@/lib/api/domains/office-api");
+    reconcileCronTriggerMock.mockResolvedValueOnce({ kind: "success", triggers: null });
+    renderDetailView(baseRoutine, [cronTrigger]);
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "The routine was saved. The displayed schedule may be stale until you reload the page.",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "The routine was saved, but the schedule's fate is unknown. Reload the page to see the current state.",
+      ),
+    );
+    expect(reconcileCronTriggerMock).toHaveBeenCalledTimes(1);
+    expect(updateRoutine).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("RoutineDetailView save outcome mapping (AC-002.9, SRF-34)", () => {
   function clickSave() {
     fireEvent.click(screen.getByRole("button", { name: /save/i }));

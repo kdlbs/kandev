@@ -83,6 +83,28 @@ describe("CreateRoutineDialog catch-up max control (AC-003.8)", () => {
       expect.objectContaining({ catchUpPolicy: "summarize_missed" }),
     );
   });
+
+  it("keeps the raw value while editing so a cleared field can be retyped", () => {
+    const onSubmit = vi.fn();
+    render(
+      <CreateRoutineDialog open onOpenChange={vi.fn()} agents={[AGENT]} onSubmit={onSubmit} />,
+    );
+    goToScheduleStep();
+
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input.value).toBe("");
+
+    fireEvent.change(input, { target: { value: "7" } });
+    expect(input.value).toBe("7");
+
+    fireEvent.change(screen.getByPlaceholderText("0 9 * * *"), {
+      target: { value: "0 9 * * *" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ catchUpMax: 7 }));
+  });
 });
 
 // AC-OFFICE-ROUTINE-CATCHUP-003.6: the summarizing policy's own label must
