@@ -933,15 +933,20 @@ entries; the matching `*Truncated` flag reports whether more edges exist than
 were returned. A gRPC plugin sees no redaction: every edge end's `Title` and
 `State` are populated regardless of which workspace it belongs to, unlike the
 canvas surface described in [`canvases.md`](canvases.md), which blanks both
-fields for an edge end outside the caller's scoped workspace.
+fields for an edge end the caller's canvas scope does not directly admit: a
+workspace-scoped canvas admits an end sharing its workspace, a repository- or
+session-scoped canvas admits an end only when it is also returned as a
+directly readable task in the same response, and a task-scoped canvas admits
+none.
 
-If dependency derivation cannot produce a verdict for a task (most often
-because deriving it would need to read more distinct task IDs than the host
-will resolve for one response), the host returns the withheld verdict instead
-of failing the surrounding read: `Blocked: true`, `BlockedReason: "unknown"`,
-empty `DependsOn`/`Blocks`, both truncation flags `false`, and
-`StartWhenUnblocked: false`. Treat this shape as "no answer," not as "task is
-actually blocked."
+If dependency derivation cannot produce a verdict for a task (an internal
+read failure, or a caller that lacks `api_read:tasks`), the host returns the
+withheld verdict instead of failing the surrounding read: `Blocked: true`,
+`BlockedReason: "unknown"`, empty `DependsOn`/`Blocks`, both truncation flags
+`false`, and `StartWhenUnblocked: false`. Treat this shape as "no answer," not
+as "task is actually blocked." This is distinct from the fan-out limit below:
+that refuses the whole call with `ResourceExhausted` rather than substituting
+a withheld verdict onto any task.
 
 Reading dependencies adds no extra query per task; the host derives them for
 the whole page in one batched pass. That batch is bounded by a fixed limit on

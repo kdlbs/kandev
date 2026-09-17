@@ -85,17 +85,22 @@ contains `id`, `title`, `state`, and, on a `depends_on` entry only, `status`
 "resolved" against a task it blocks). Each list is capped at 512 entries;
 `depends_on_truncated` and `blocks_truncated` report whether more edges exist
 than were returned. `title` and `state` are blanked (empty string) on any
-edge end that falls outside the caller's scoped workspace — a repository- or
-task-scoped canvas sees the edge's `id` and, for a `depends_on` entry, its
-`status`, but not the name or column of a task it cannot otherwise read.
+edge end the caller's canvas scope does not directly admit: a
+workspace-scoped canvas admits an edge end sharing its workspace; a
+repository- or session-scoped canvas admits an edge end only when it is also
+returned as a directly readable task in the same response, never by
+workspace equality alone; a task-scoped canvas admits none, seeing only the
+edge's `id` and, for a `depends_on` entry, its `status`.
 `blocked`, `blocked_reason`, and `start_when_unblocked` summarize the same
 projection at the task level. When the host cannot derive a verdict for a
-task — most often because doing so would need to read more distinct task IDs
-than one response is allowed to read — it returns a withheld verdict instead
-of failing the read: `blocked: true`, `blocked_reason: "unknown"`, empty
-`depends_on`/`blocks`, both truncation flags `false`, and
-`start_when_unblocked: false`. Treat that shape as "no answer," not as "task
-is actually blocked."
+task — an internal read failure, or a caller that lacks the read capability —
+it returns a withheld verdict instead of failing the read: `blocked: true`,
+`blocked_reason: "unknown"`, empty `depends_on`/`blocks`, both truncation
+flags `false`, and `start_when_unblocked: false`. Treat that shape as "no
+answer," not as "task is actually blocked." This is distinct from the
+fan-out limit described below, which fails the whole page with
+`response_too_large` rather than substituting a withheld verdict onto any
+task.
 
 These seven fields exist on a task object only once the host's manifest
 `min_kandev_version` floor is met; declare that floor for the release your
