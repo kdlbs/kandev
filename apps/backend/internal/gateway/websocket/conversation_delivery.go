@@ -83,7 +83,9 @@ func (c *Client) handleConversationSubscribe(msg *ws.Message) {
 	if !c.maySubscribeSession(msg, req.SessionID) {
 		return
 	}
+	c.hub.mu.RLock()
 	service := c.hub.pluginConversationService
+	c.hub.mu.RUnlock()
 	userID := c.ownUserTopic()
 	if !c.authorizeConversationIdentity(msg, req, service, userID) {
 		return
@@ -344,7 +346,7 @@ func projectConversationOperation(subscription conversationSubscription, operati
 		if subscription.ConsumerKind == conversationConsumerPlugin {
 			result.Message = safePluginConversationMessage(operation.Message)
 		} else {
-			result.Message = operation.Message
+			result.Message = operation.Message.ToAPI()
 		}
 	case models.ConversationEntityTurn:
 		if operation.Turn == nil {
@@ -353,7 +355,7 @@ func projectConversationOperation(subscription conversationSubscription, operati
 		if subscription.ConsumerKind == conversationConsumerPlugin {
 			result.Turn = safePluginConversationTurn(operation.Turn)
 		} else {
-			result.Turn = operation.Turn
+			result.Turn = safeCoreConversationTurn(operation.Turn)
 		}
 	default:
 		return result, false
@@ -397,6 +399,23 @@ func safePluginConversationTurn(turn *models.Turn) map[string]any {
 	return payload
 }
 
+func safeCoreConversationTurn(turn *models.Turn) map[string]any {
+	payload := map[string]any{
+		"id": turn.ID, "session_id": turn.TaskSessionID, "task_id": turn.TaskID,
+		"started_at": turn.StartedAt, "updated_at": turn.UpdatedAt,
+	}
+	if turn.ExecutionProfileID != "" {
+		payload["execution_profile_id"] = turn.ExecutionProfileID
+	}
+	if turn.RouteGeneration != 0 {
+		payload["route_generation"] = turn.RouteGeneration
+	}
+	if turn.CompletedAt != nil {
+		payload["completed_at"] = turn.CompletedAt
+	}
+	return payload
+}
+
 func conversationReceiptFromData(data any) (*models.ConversationMutationReceipt, bool) {
 	if receipt, ok := data.(*models.ConversationMutationReceipt); ok {
 		return receipt, true
@@ -415,8 +434,15 @@ func conversationReceiptFromData(data any) (*models.ConversationMutationReceipt,
 	if err != nil {
 		return nil, false
 	}
+	var envelope struct {
+		ConversationReceipt json.RawMessage `json:"conversation_receipt"`
+	}
+	if err := json.Unmarshal(encoded, &envelope); err == nil && len(envelope.ConversationReceipt) > 0 {
+		return conversationReceiptFromData(envelope.ConversationReceipt)
+	}
 	var receipt models.ConversationMutationReceipt
-	if err := json.Unmarshal(encoded, &receipt); err != nil || receipt.SessionID == "" {
+	if err := json.Unmarshal(encoded, &receipt); err != nil || receipt.SessionID == "" ||
+		(receipt.BaseRevision == 0 && receipt.Revision == 0 && receipt.Operations == nil && !receipt.Complete) {
 		return nil, false
 	}
 	return &receipt, true

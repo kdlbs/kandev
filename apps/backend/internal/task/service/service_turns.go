@@ -455,26 +455,8 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil // No active turn to complete
 	}
 
-	// Complete tool calls before taking the turn receipt. Both the tool row
-	// updates and the turn completion then belong to the same published
-	// revision coverage boundary.
-	if affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, turnID); err != nil {
-		s.logger.Warn("failed to complete pending tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
-	} else if affected > 0 {
-		s.logger.Info("completed stale pending tool calls on turn end",
-			zap.String("turn_id", turnID),
-			zap.Int64("affected", affected))
-	}
-
-	var receipt *models.ConversationMutationReceipt
-	if writer, ok := s.turns.(taskrepo.ConversationMutationWriter); ok {
-		var err error
-		receipt, err = writer.CompleteTurnWithConversationReceipt(ctx, turnID)
-		if err != nil {
-			s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
-			return err
-		}
-	} else if err := s.turns.CompleteTurn(ctx, turnID); err != nil {
+	receipt, err := s.completeTurnMutation(ctx, turnID)
+	if err != nil {
 		s.logger.Error("failed to complete turn", zap.String("turn_id", turnID), zap.Error(err))
 		return err
 	}
@@ -496,6 +478,20 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		zap.String("task_id", turn.TaskID))
 
 	return nil
+}
+
+func (s *Service) completeTurnMutation(ctx context.Context, turnID string) (*models.ConversationMutationReceipt, error) {
+	if writer, ok := s.turns.(taskrepo.ConversationMutationWriter); ok {
+		return writer.CompleteTurnWithConversationReceipt(ctx, turnID)
+	}
+	if affected, err := s.turns.CompletePendingToolCallsForTurn(ctx, turnID); err != nil {
+		s.logger.Warn("failed to complete pending tool calls for turn", zap.String("turn_id", turnID), zap.Error(err))
+	} else if affected > 0 {
+		s.logger.Info("completed stale pending tool calls on turn end",
+			zap.String("turn_id", turnID),
+			zap.Int64("affected", affected))
+	}
+	return nil, s.turns.CompleteTurn(ctx, turnID)
 }
 
 // GetActiveTurn returns the currently active (non-completed) turn for a session.
@@ -673,7 +669,7 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 		payload["had_output"] = *hadOutput
 	}
 	if len(receipts) > 0 && receipts[0] != nil {
-		payload["conversation_receipt"] = receipts[0]
+		payload["conversation_receipt"] = projectConversationReceipt(receipts[0])
 	}
 	if err := s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload)); err != nil {
 		s.logger.Error("failed to publish turn event",

@@ -1030,7 +1030,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 	event := newMessageEvent(eventType, message)
 	if len(receipts) > 0 && receipts[0] != nil {
 		if data, ok := event.Data.(map[string]interface{}); ok {
-			data["conversation_receipt"] = receipts[0]
+			data["conversation_receipt"] = projectConversationReceipt(receipts[0])
 		}
 	}
 	pendingProjection := s.addMessagePendingAction(ctx, eventType, message, event)
@@ -1045,6 +1045,38 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		s.publishSessionPendingActionChanged(ctx, message, *pendingProjection)
 	}
 	return nil
+}
+
+// projectConversationReceipt keeps the transient source receipt useful to the
+// live conversation transport without exposing repository-owned metadata or
+// system-injected message content through the event bus.
+func projectConversationReceipt(receipt *models.ConversationMutationReceipt) *models.ConversationMutationReceipt {
+	if receipt == nil {
+		return nil
+	}
+	projected := &models.ConversationMutationReceipt{
+		SessionID:    receipt.SessionID,
+		BaseRevision: receipt.BaseRevision,
+		Revision:     receipt.Revision,
+		Complete:     receipt.Complete,
+		Operations:   make([]models.ConversationMutationOperation, 0, len(receipt.Operations)),
+	}
+	for _, operation := range receipt.Operations {
+		copyOperation := operation
+		if operation.Message != nil {
+			message := *operation.Message
+			message.Content = sysprompt.StripSystemContent(message.Content)
+			message.Metadata = models.ProjectMessageMetadata(message.Metadata)
+			copyOperation.Message = &message
+		}
+		if operation.Turn != nil {
+			turn := *operation.Turn
+			turn.Metadata = nil
+			copyOperation.Turn = &turn
+		}
+		projected.Operations = append(projected.Operations, copyOperation)
+	}
+	return projected
 }
 
 type pendingActionProjection struct {

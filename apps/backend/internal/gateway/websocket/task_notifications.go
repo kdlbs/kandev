@@ -288,7 +288,9 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		}
 	case ws.ActionSessionRemoved:
 		if sessionID != "" {
-			b.hub.BroadcastConversationMutation(data)
+			if _, hasReceipt := conversationReceiptFromData(data); hasReceipt {
+				b.hub.BroadcastConversationMutation(data)
+			}
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}

@@ -349,10 +349,13 @@ func readConversationMessageCursor(ctx context.Context, tx *sqlx.Tx, driver, ses
 	var cursorCreated time.Time
 	query := `SELECT task_session_id, created_at FROM task_session_messages WHERE id = ?`
 	if err := tx.QueryRowxContext(ctx, tx.Rebind(query), cursorID).Scan(&cursorSession, &cursorCreated); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", fmt.Errorf("%w: message cursor %s", models.ErrConversationCursorStale, cursorID)
+		}
 		return "", "", err
 	}
 	if cursorSession != sessionID {
-		return "", "", fmt.Errorf("message cursor not found: %s", cursorID)
+		return "", "", fmt.Errorf("%w: message cursor %s", models.ErrConversationCursorStale, cursorID)
 	}
 	if dialect.IsPostgres(driver) {
 		return formatPromptKey(cursorCreated), cursorID, nil
@@ -362,6 +365,9 @@ func readConversationMessageCursor(ctx context.Context, tx *sqlx.Tx, driver, ses
 		`SELECT %s FROM task_session_messages WHERE id = ?`,
 		dialect.NormalizedMicrosecond(driver, "created_at"),
 	)), cursorID).Scan(&key); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", fmt.Errorf("%w: message cursor %s", models.ErrConversationCursorStale, cursorID)
+		}
 		return "", "", err
 	}
 	return key, cursorID, nil
@@ -376,10 +382,13 @@ func readConversationTurnCursor(ctx context.Context, tx *sqlx.Tx, sessionID, cur
 	if err := tx.QueryRowxContext(ctx, tx.Rebind(
 		`SELECT task_session_id, started_at FROM task_session_turns WHERE id = ?`,
 	), cursorID).Scan(&cursorSession, &cursorStarted); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, "", fmt.Errorf("%w: turn cursor %s", models.ErrConversationCursorStale, cursorID)
+		}
 		return time.Time{}, "", err
 	}
 	if cursorSession != sessionID {
-		return time.Time{}, "", fmt.Errorf("turn cursor not found: %s", cursorID)
+		return time.Time{}, "", fmt.Errorf("%w: turn cursor %s", models.ErrConversationCursorStale, cursorID)
 	}
 	return cursorStarted, cursorID, nil
 }

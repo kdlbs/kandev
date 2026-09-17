@@ -115,6 +115,11 @@ describe("source conversation scope", () => {
       CONVERSATION_SUBSCRIBE_ACTION,
       expect.objectContaining({ consumer_kind: "plugin", session_id: SESSION_ID }),
     );
+    expect(
+      transport.request.mock.calls.find(
+        ([action]) => action === CONVERSATION_SUBSCRIBE_ACTION,
+      )?.[1],
+    ).not.toHaveProperty("task_id");
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining(`/conversation/v2/task-sessions/${SESSION_ID}/messages`),
       expect.anything(),
@@ -154,6 +159,63 @@ describe("source conversation scope", () => {
     });
     await waitFor(() => expect(screen.getByTestId("messages").textContent).toBe("from source"));
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("delivers live updates from every task to a complete-session query", async () => {
+    function CompleteSessionHarness() {
+      const state = pluginConversationApi.useSessionMessages({
+        sessionId: SESSION_ID,
+        taskId: null,
+        sort: "asc",
+      });
+      return (
+        <span data-testid="complete-session-messages">
+          {state.messages.map((item) => item.content).join("|")}
+        </span>
+      );
+    }
+
+    render(
+      <PluginConversationScopeProvider pluginId={PLUGIN_ID} taskId="task-1" sessionId={SESSION_ID}>
+        <CompleteSessionHarness />
+      </PluginConversationScopeProvider>,
+    );
+    await waitFor(() => expect(transport.changeListener).not.toBeNull());
+    const scopeID = transport.request.mock.calls.find(
+      ([action]) => action === CONVERSATION_SUBSCRIBE_ACTION,
+    )?.[1].scope_id as string;
+    act(() => {
+      transport.changeListener?.({
+        payload: {
+          protocol_version: 2,
+          scope_id: scopeID,
+          session_id: SESSION_ID,
+          epoch: "epoch-1",
+          base_revision: "0",
+          revision: "1",
+          operations: [
+            {
+              kind: "upsert",
+              entity: "message",
+              id: "message-other-task",
+              message: {
+                id: "message-other-task",
+                taskId: "task-2",
+                sessionId: SESSION_ID,
+                authorType: "agent",
+                type: "message",
+                content: "other task",
+                createdAt: CREATED_AT,
+                updatedAt: CREATED_AT,
+              },
+            },
+          ],
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("complete-session-messages").textContent).toBe("other task"),
+    );
   });
 
   it("repairs a revision gap through a fresh source page", async () => {
@@ -313,6 +375,110 @@ describe("source conversation scope", () => {
     } finally {
       scope.close();
       vi.useRealTimers();
+    }
+  });
+
+  it("retries a failed revision recovery instead of wedging the scope", async () => {
+    vi.useFakeTimers();
+    const scope = new SourceConversationScope(
+      PLUGIN_ID,
+      "task-1",
+      SESSION_ID,
+      new AbortController(),
+    );
+    try {
+      await scope.ready();
+      const scopeID = transport.request.mock.calls[0][1].scope_id;
+      const recover = vi.fn();
+      scope.subscribeRebind(recover);
+      transport.request.mockRejectedValueOnce(new Error("temporary outage"));
+      scope.acceptChange({
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: SESSION_ID,
+        epoch: "epoch-1",
+        base_revision: "1",
+        revision: "2",
+        operations: [],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(recover).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(recover).toHaveBeenCalledOnce();
+    } finally {
+      scope.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("collapses an oversized pending buffer into one recovery", async () => {
+    const scope = new SourceConversationScope(
+      PLUGIN_ID,
+      "task-1",
+      SESSION_ID,
+      new AbortController(),
+    );
+    const applied: string[] = [];
+    try {
+      await scope.ready();
+      const scopeID = transport.request.mock.calls[0][1].scope_id;
+      scope.subscribe(
+        (event) => {
+          if (event.event_type === "message.added") {
+            const payload = event.payload as { content?: unknown };
+            applied.push(String(payload.content));
+          }
+          return true;
+        },
+        "messages",
+        "all",
+      );
+      const recover = vi.fn(() => {
+        scope.setSourceSnapshot("epoch-1", "257");
+        scope.commitSnapshot("messages", "all");
+      });
+      scope.subscribeRebind(recover);
+      for (let revision = 1; revision <= 257; revision += 1) {
+        scope.acceptChange({
+          protocol_version: 2,
+          scope_id: scopeID,
+          session_id: SESSION_ID,
+          epoch: "epoch-1",
+          base_revision: String(revision - 1),
+          revision: String(revision),
+          operations: [
+            {
+              kind: "upsert",
+              entity: "message",
+              id: `message-${revision}`,
+              message: { content: `message-${revision}`, taskId: "task-1" },
+            },
+          ],
+        });
+      }
+      await waitFor(() => expect(recover).toHaveBeenCalledOnce());
+      expect(applied).toEqual([]);
+      scope.acceptChange({
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: SESSION_ID,
+        epoch: "epoch-1",
+        base_revision: "257",
+        revision: "258",
+        operations: [
+          {
+            kind: "upsert",
+            entity: "message",
+            id: "message-current",
+            message: { content: "current", taskId: "task-1" },
+          },
+        ],
+      });
+      expect(applied).toEqual(["current"]);
+    } finally {
+      scope.close();
     }
   });
 

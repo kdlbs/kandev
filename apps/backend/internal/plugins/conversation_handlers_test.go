@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"testing"
@@ -134,6 +135,7 @@ func TestConversationReadsRejectJournalFallbackForUnauthorizedLiveSession(t *tes
 
 type fakeConversationReader struct {
 	session              *taskmodels.TaskSession
+	sessionErr           error
 	messages             []*taskmodels.Message
 	turns                []*taskmodels.Turn
 	hasMore              bool
@@ -149,7 +151,30 @@ func (f *fakeConversationReader) GetTaskSession(
 	_ context.Context,
 	_ string,
 ) (*taskmodels.TaskSession, error) {
-	return f.session, nil
+	return f.session, f.sessionErr
+}
+
+func TestConversationReadsClassifySessionLookupFailuresAsRetryable(t *testing.T) {
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", time.Now().UTC()))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		&fakeConversationReader{sessionErr: errors.New("database unavailable")},
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-1")
+	paths := []string{
+		"/api/plugins/kandev-plugin-history/conversation/task-sessions/session-1/messages",
+		"/api/plugins/kandev-plugin-history/conversation/task-sessions/session-1/turns",
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-1/messages?task_id=task-1",
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-1/turns?task_id=task-1",
+	}
+	for _, path := range paths {
+		response := doAuthedRequest(router, http.MethodGet, path, "", headers)
+		require.Equal(t, http.StatusInternalServerError, response.Code, path)
+		require.JSONEq(t, `{"error":{"code":"upstream_failure","message":"conversation service unavailable","retryable":true}}`, response.Body.String(), path)
+	}
 }
 
 func (f *fakeConversationReader) ListMessagesPaginated(

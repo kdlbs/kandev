@@ -15,9 +15,6 @@ acceptance_criteria:
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.8
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.10
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.13
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.15
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.16
 system_design:
   - "../../specs/plugins/system-design/prompt-history-extraction-host.md"
 ---

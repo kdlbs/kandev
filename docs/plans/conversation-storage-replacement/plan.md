@@ -1,6 +1,6 @@
 ---
 created: 2026-09-16
-status: in_progress
+status: complete
 requirements:
   - REQ-PLUGINS-PROMPT-HISTORY-HOST-002
   - REQ-PLUGINS-PROMPT-HISTORY-HOST-005
@@ -200,7 +200,7 @@ Focused remediation verification is recorded below. The existing PostgreSQL and 
 - `pnpm run typecheck` passed. Focused ESLint checks passed without errors; the reported duplicate-string warning was removed and the affected file passed again.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 - These fixes change state and transport behavior only. No layout, navigation, scrolling, or touch behavior changed. Targeted tests cover both viewport-independent clients. Browser E2E and PostgreSQL checks were not rerun for this remediation.
-- All edits remain uncommitted, as requested.
+- At this stage, all edits remained uncommitted, as requested.
 
 
 ## Large legacy SQLite verification
@@ -215,7 +215,8 @@ passed; no automatic startup VACUUM was added.
 See [the verification report](verification/large-sqlite-upgrade.md) for workload,
 commands, measurements, evidence, and limits. The public operations guide now
 includes explicit post-upgrade compaction. PostgreSQL and other existing plan
-gates remain open. All changes remain uncommitted.
+gates remained open at this historical checkpoint. The changes were later
+committed through the follow-up delivery work.
 
 
 ## Commit preparation
@@ -240,3 +241,27 @@ remediation. All package work orders now have recorded results. The broad
 backend audit has unrelated failures in this workspace and is not presented as
 conversation-storage evidence.
 No automatic startup VACUUM was added. Physical compaction remains explicit.
+
+## Final review-fixup verification
+
+The delivery review follow-up closed the remaining implementation findings:
+
+- Source reads now report stale cursors as reconciliation conflicts, classify
+  session lookup failures as retryable upstream errors, and route turn reads
+  through the message repository source.
+- Live source delivery rechecks the service under the hub lock, projects core
+  entities at the API boundary, and does not reset a conversation for a
+  receiptless session removal.
+- Receipt publication projects transient entities, pending tool completion is
+  transaction-bound to turn completion, and PostgreSQL cleanup removes the
+  retired helper functions. Legacy cleanup runs before token-key loading.
+- Plugin reconciliation preserves complete-session updates, retries transient
+  recovery failures, recognizes deleted pagination boundaries, and collapses
+  bounded pending changes into one recovery when the buffer limits are reached.
+- The generated E2E fixture bundle and historical work-order references were
+  synchronized with their source files.
+
+The focused changed-package Go suite, Go lint, frontend reconciliation tests,
+TypeScript, focused ESLint, Prettier, specification validators, and whitespace
+checks passed after these changes. Browser E2E and PostgreSQL checks remain
+CI-controlled gates for the delivery branch.

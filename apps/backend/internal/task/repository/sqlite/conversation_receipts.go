@@ -23,14 +23,41 @@ func (r *Repository) beginConversationMutation(ctx context.Context, sessionID st
 		_ = tx.Rollback()
 		return nil, 0, err
 	}
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
-		return rollback(err)
-	}
-	base, err := r.ensureConversationRevisionTx(ctx, tx, sessionID)
+	base, err := r.prepareConversationMutation(ctx, tx, sessionID)
 	if err != nil {
 		return rollback(err)
 	}
 	return tx, base, nil
+}
+
+func (r *Repository) prepareConversationMutation(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, error) {
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return 0, err
+	}
+	return r.ensureConversationRevisionTx(ctx, tx, sessionID)
+}
+
+func (r *Repository) completePendingToolCallsForTurnTx(ctx context.Context, tx *sqlx.Tx, turnID string) (int64, error) {
+	drv := r.db.DriverName()
+	query := fmt.Sprintf(`
+		UPDATE task_session_messages
+		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
+		WHERE turn_id = ?
+		  AND type != 'permission_request'
+		  AND %s NOT IN ('complete', 'error')
+		  AND %s
+	`, dialect.JSONSet(drv, "metadata", "status", "complete"),
+		dialect.JSONExtract(drv, "metadata", "status"),
+		dialect.JSONExtractIsNotNull(drv, "metadata", "tool_call_id"))
+	result, err := tx.ExecContext(ctx, tx.Rebind(query), turnID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to complete pending tool calls for turn %s: %w", turnID, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return rows, nil
 }
 
 func (r *Repository) ensureConversationRevisionTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, error) {
@@ -263,22 +290,7 @@ func (r *Repository) UpdateMessageWithConversationReceipt(ctx context.Context, m
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if dialect.IsPostgres(r.db.DriverName()) {
-		result, err := tx.ExecContext(ctx, tx.Rebind(`
-			UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, updated_at = ?
-			WHERE id = ?
-		`), message.Content, requestsInput, string(message.Type), string(metadataJSON), message.UpdatedAt, message.ID)
-		if err != nil {
-			return nil, err
-		}
-		affected, err := result.RowsAffected()
-		if err != nil {
-			return nil, err
-		}
-		if affected == 0 {
-			return nil, fmt.Errorf("message not found: %s", message.ID)
-		}
-	} else if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput); err != nil {
+	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput); err != nil {
 		return nil, err
 	}
 	receipt := &models.ConversationMutationReceipt{}
@@ -301,10 +313,7 @@ func (r *Repository) DeleteMessageWithConversationReceipt(ctx context.Context, m
 	if err != nil {
 		return nil, err
 	}
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), message.TaskSessionID); err != nil {
-		return nil, err
-	}
-	base, err := r.ensureConversationRevisionTx(ctx, tx, message.TaskSessionID)
+	base, err := r.prepareConversationMutation(ctx, tx, message.TaskSessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -427,11 +436,11 @@ func (r *Repository) CompleteTurnWithConversationReceipt(ctx context.Context, tu
 	if err != nil {
 		return nil, err
 	}
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
+	base, err := r.prepareConversationMutation(ctx, tx, turn.TaskSessionID)
+	if err != nil {
 		return nil, err
 	}
-	base, err := r.ensureConversationRevisionTx(ctx, tx, turn.TaskSessionID)
-	if err != nil {
+	if _, err := r.completePendingToolCallsForTurnTx(ctx, tx, turnID); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()

@@ -716,13 +716,13 @@ func (s *Service) SetPluginsDir(dir string) error {
 	s.pluginsDir = dir
 	s.approvals = newApprovalLedger(dir)
 	hostDir := filepath.Join(dir, ".host")
+	if err := removeLegacyConversationFiles(hostDir); err != nil {
+		return err
+	}
 	conversationTokens, err := loadOrCreateConversationTokenManager(
 		filepath.Join(hostDir, "conversation-token.key"),
 	)
 	if err != nil {
-		return err
-	}
-	if err := removeLegacyConversationFiles(hostDir); err != nil {
 		return err
 	}
 	s.pluginsDir = dir

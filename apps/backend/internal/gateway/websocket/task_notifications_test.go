@@ -266,6 +266,36 @@ func TestTaskEventBroadcaster_ProjectsConversationReceiptFromEventData(t *testin
 	}
 }
 
+func TestTaskEventBroadcasterDoesNotResetConversationOnReceiptlessSessionRemoval(t *testing.T) {
+	hub := newTestHub(t)
+	client := newTestClient("conversation-client")
+	client.hub = hub
+	registerTestClient(hub, client)
+	client.conversationSubscriptions = map[string]conversationSubscription{
+		"core-scope": {
+			ScopeID: "core-scope", SessionID: "session-1", ConsumerKind: conversationConsumerCore,
+			Epoch: "epoch-1",
+		},
+	}
+	hub.SubscribeToSession(client, "session-1")
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	msg, err := ws.NewNotification(ws.ActionSessionRemoved, map[string]any{"session_id": "session-1"})
+	require.NoError(t, err)
+	require.NoError(t, broadcaster.routeBroadcast(ws.ActionSessionRemoved, msg.Payload, "session-1", "", msg))
+
+	frame := <-client.send
+	var received ws.Message
+	require.NoError(t, json.Unmarshal(frame, &received))
+	if received.Action != ws.ActionSessionRemoved {
+		t.Fatalf("first action = %q, want session removal", received.Action)
+	}
+	select {
+	case extra := <-client.send:
+		t.Fatalf("receiptless removal emitted an extra conversation frame: %s", extra)
+	default:
+	}
+}
+
 func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 	h := newTestHub(t)
 	first := newTestClient("first")

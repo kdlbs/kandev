@@ -578,6 +578,9 @@ func assertPostgresLegacyConversationObjects(t *testing.T, repo *Repository, wan
 	} {
 		assertPostgresCleanupObject(t, repo, "function", function, wantPresent)
 	}
+	assertPostgresCleanupFunction(t, repo, "conversation_next_sequence", 2, wantPresent)
+	assertPostgresCleanupFunction(t, repo, "conversation_safe_jsonb", 1, wantPresent)
+	assertPostgresCleanupFunction(t, repo, "conversation_visible_content", 1, wantPresent)
 	for _, trigger := range []string{
 		"conversation_message_journal_trigger",
 		"conversation_turn_journal_trigger",
@@ -609,11 +612,11 @@ func assertPostgresCleanupObject(t *testing.T, repo *Repository, kind, name stri
 			)`, name)
 	case "function":
 		err = repo.db.Get(&present, `
-			SELECT EXISTS (
-				SELECT 1 FROM pg_proc p
-				JOIN pg_namespace n ON n.oid = p.pronamespace
-				WHERE n.nspname = current_schema() AND p.proname = $1 AND p.pronargs = 0
-			)`, name)
+				SELECT EXISTS (
+					SELECT 1 FROM pg_proc p
+					JOIN pg_namespace n ON n.oid = p.pronamespace
+					WHERE n.nspname = current_schema() AND p.proname = $1 AND p.pronargs = 0
+				)`, name)
 	case "trigger":
 		err = repo.db.Get(&present, `
 			SELECT EXISTS (
@@ -631,6 +634,22 @@ func assertPostgresCleanupObject(t *testing.T, repo *Repository, kind, name stri
 	}
 	if present != wantPresent {
 		t.Fatalf("postgres %s %q present = %v, want %v", kind, name, present, wantPresent)
+	}
+}
+
+func assertPostgresCleanupFunction(t *testing.T, repo *Repository, name string, argumentCount int, wantPresent bool) {
+	t.Helper()
+	var present bool
+	if err := repo.db.Get(&present, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_proc p
+			JOIN pg_namespace n ON n.oid = p.pronamespace
+			WHERE n.nspname = current_schema() AND p.proname = $1 AND p.pronargs = $2
+		)`, name, argumentCount); err != nil {
+		t.Fatalf("inspect postgres function %q: %v", name, err)
+	}
+	if present != wantPresent {
+		t.Fatalf("postgres function %q(%d args) present = %v, want %v", name, argumentCount, present, wantPresent)
 	}
 }
 
@@ -700,6 +719,24 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION conversation_session_delete_journal() RETURNS TRIGGER AS $$
 BEGIN
 	RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION conversation_next_sequence(p_session_id TEXT, p_terminal BOOLEAN DEFAULT FALSE)
+RETURNS BIGINT AS $$
+BEGIN
+	RETURN 1;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION conversation_safe_jsonb(value TEXT)
+RETURNS JSONB AS $$
+BEGIN
+	RETURN '{}'::jsonb;
+END;
+$$ LANGUAGE plpgsql;
+CREATE OR REPLACE FUNCTION conversation_visible_content(value TEXT)
+RETURNS TEXT AS $$
+BEGIN
+	RETURN value;
 END;
 $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS conversation_message_journal_trigger ON task_session_messages;

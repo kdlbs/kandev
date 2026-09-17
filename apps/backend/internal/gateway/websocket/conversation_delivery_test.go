@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -79,6 +80,52 @@ func TestConversationDeliveryProjectsSelectedUpsertAndCoverage(t *testing.T) {
 	}
 	if payload.BaseRevision != "4" || payload.Revision != "5" || len(payload.Operations) != 1 || payload.Operations[0].ID != message.ID {
 		t.Fatalf("changed payload = %+v", payload)
+	}
+}
+
+func TestConversationDeliveryProjectsCoreEntitiesAtTheAPIBoundary(t *testing.T) {
+	hub := NewHub(ws.NewDispatcher(), testLogger())
+	client := NewClient("conversation-client", authn.Identity{UserID: "user-1"}, nil, hub, testLogger())
+	hub.clients[client] = true
+	client.conversationSubscriptions["scope-1"] = conversationSubscription{
+		ScopeID: "scope-1", SessionID: "session-1", ConsumerKind: conversationConsumerCore,
+		UserID: "user-1", Epoch: "epoch-1",
+	}
+	message := &models.Message{
+		ID: "message-core", TaskSessionID: "session-1", TaskID: "task-1",
+		AuthorType: models.MessageAuthorAgent,
+		Content:    "<kandev-system>private prompt</kandev-system>visible",
+		Metadata:   map[string]any{"normalized": map[string]any{"shell_exec": map[string]any{"output": map[string]any{"stdout": "secret shell body"}}}},
+		CreatedAt:  time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:  time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC),
+	}
+	hub.BroadcastConversationMutation(&models.ConversationMutationReceipt{
+		SessionID: "session-1", BaseRevision: 1, Revision: 2, Complete: true,
+		Operations: []models.ConversationMutationOperation{{
+			Kind: models.ConversationMutationUpsert, Entity: models.ConversationEntityMessage,
+			ID: message.ID, SessionID: message.TaskSessionID, TaskID: message.TaskID, Message: message,
+		}},
+	})
+
+	var frame ws.Message
+	if err := json.Unmarshal(<-client.send, &frame); err != nil {
+		t.Fatalf("decode changed frame: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(frame.Payload, &payload); err != nil {
+		t.Fatalf("decode changed payload: %v", err)
+	}
+	operation := payload["operations"].([]any)[0].(map[string]any)
+	projected := operation["message"].(map[string]any)
+	if projected["content"] != "visible" {
+		t.Fatalf("core content = %#v, want visible content", projected["content"])
+	}
+	encoded, _ := json.Marshal(projected)
+	if strings.Contains(string(encoded), "secret shell body") {
+		t.Fatal("core message leaked shell metadata at the transport boundary")
+	}
+	if message.Content == "visible" {
+		t.Fatal("core projection mutated the source message")
 	}
 }
 

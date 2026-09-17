@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- this class owns one ordered source lifecycle */
 import { generateUUID } from "@/lib/uuid";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { RawSessionEvent } from "@/lib/ws/client";
@@ -32,6 +33,11 @@ type SourceFailure = {
   success: false;
   error?: { code?: string; message?: string; retryable?: boolean };
 };
+
+const MAX_PENDING_CONVERSATION_OPERATIONS = 256;
+const MAX_PENDING_CONVERSATION_BYTES = 1 << 20;
+const MAX_PENDING_CONVERSATION_AGE_MS = 1000;
+const RECOVERY_RETRY_DELAY_MS = 1000;
 
 function sourceError(response: SourceFailure): Error {
   // i18n-exempt: transport/API diagnostic. The caller renders the structured
@@ -70,6 +76,20 @@ function operationEventType(operation: ConversationChangeOperation): string {
     return operation.kind === "remove" ? "message.deleted" : "message.added";
   }
   return operation.kind === "remove" ? "session.turn.removed" : "session.turn.started";
+}
+
+function pendingChangeMetrics(value: unknown): { operations: number; bytes: number } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const operations = (value as Partial<ConversationChange>).operations;
+  if (!Array.isArray(operations) || operations.length === 0) return null;
+  let encoded: string | undefined;
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    return null;
+  }
+  if (encoded === undefined) return null;
+  return { operations: operations.length, bytes: new TextEncoder().encode(encoded).byteLength };
 }
 
 function sourceOperationEvent(
@@ -128,11 +148,18 @@ export class SourceConversationScope implements ConversationScope {
   private readonly listeners = new Map<Listener, { kind: SnapshotKind; key: string }>();
   private readonly rebindListeners = new Set<RebindListener>();
   private readonly committedSnapshots = new Set<string>();
-  private readonly pendingChanges: ConversationChange[] = [];
+  private readonly pendingChanges: unknown[] = [];
   private bindingPromise: Promise<Binding> | null = null;
   private readyPromise: Promise<OrderedReady> | null = null;
   private recoveryPromise: Promise<void> | null = null;
   private recovering = false;
+  private recoveryNeeded = false;
+  private recoveryRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  private pendingOperationCount = 0;
+  private pendingPayloadBytes = 0;
+  private pendingSince: number | undefined;
+  private pendingBufferTimer: ReturnType<typeof setTimeout> | undefined;
+  private pendingRecoveryMarker = false;
   private terminal = false;
   private revisionCheckTimer: ReturnType<typeof setTimeout> | undefined;
   private closed = false;
@@ -203,13 +230,16 @@ export class SourceConversationScope implements ConversationScope {
     const nextEpoch = epoch ?? this.state.epoch;
     if (nextEpoch === "") return;
     if (nextEpoch !== this.state.epoch) {
-      this.pendingChanges.length = 0;
+      this.clearPendingBuffer();
       this.recovering = false;
       this.state = { epoch: nextEpoch, appliedRevision: revision };
     } else if (compareRevision(revision, this.state.appliedRevision) > 0) {
       this.state = { ...this.state, appliedRevision: revision };
       this.recovering = false;
     }
+    this.pendingRecoveryMarker = false;
+    this.recoveryNeeded = false;
+    this.clearRecoveryRetry();
     this.discardCoveredChanges(this.state.appliedRevision);
     this.updateReadyState();
     this.drainPending();
@@ -228,7 +258,7 @@ export class SourceConversationScope implements ConversationScope {
       return;
     }
     if (this.recovering || this.shouldBuffer(change)) {
-      this.pendingChanges.push(value as ConversationChange);
+      this.bufferPendingChange(value);
       return;
     }
     this.applyChange(value);
@@ -242,7 +272,8 @@ export class SourceConversationScope implements ConversationScope {
     if (this.closed || this.terminal || !this.sessionId) return;
     this.terminal = true;
     clearTimeout(this.revisionCheckTimer);
-    this.pendingChanges.length = 0;
+    this.clearPendingBuffer();
+    this.clearRecoveryRetry();
     const event: RawSessionEvent = {
       type: "session.event",
       protocol_version: 1,
@@ -267,13 +298,14 @@ export class SourceConversationScope implements ConversationScope {
 
   reconnect() {
     if (this.closed || this.terminal || !this.sessionId || !this.readyPromise) return;
-    void this.resubscribe().catch(() => undefined);
+    this.beginRecovery();
   }
 
   close() {
     this.closed = true;
     clearTimeout(this.revisionCheckTimer);
-    this.pendingChanges.length = 0;
+    this.clearPendingBuffer();
+    this.clearRecoveryRetry();
     this.listeners.clear();
     this.rebindListeners.clear();
     const ready = this.readyPromise;
@@ -361,7 +393,6 @@ export class SourceConversationScope implements ConversationScope {
         plugin_id: this.pluginId,
         generation: binding.generation,
         binding_token: binding.bindingToken,
-        task_id: this.taskId,
       },
     );
     if (!response.success) throw sourceError(response);
@@ -431,7 +462,7 @@ export class SourceConversationScope implements ConversationScope {
     const result = reconcileConversationChange(this.state, value);
     if (result.kind !== "applied") {
       if (result.kind === "recover") {
-        this.pendingChanges.push(value as ConversationChange);
+        this.bufferPendingChange(value);
         this.beginRecovery();
       }
       return;
@@ -465,36 +496,160 @@ export class SourceConversationScope implements ConversationScope {
     this.pendingChanges.splice(
       0,
       this.pendingChanges.length,
-      ...this.pendingChanges.filter(
-        (change) =>
-          validRevision(change.revision) && compareRevision(change.revision, revision) > 0,
-      ),
+      ...this.pendingChanges.filter((value) => {
+        const change = value as Partial<ConversationChange>;
+        return validRevision(change.revision) && compareRevision(change.revision, revision) > 0;
+      }),
     );
+    this.recalculatePendingMetrics();
   }
 
   private drainPending() {
-    if (this.closed || this.recovering || this.pendingChanges.length === 0) return;
+    if (this.closed || this.recovering) return;
+    if (this.pendingRecoveryMarker) {
+      this.beginRecovery();
+      return;
+    }
+    if (this.pendingChanges.length === 0) return;
     const pending = this.pendingChanges.splice(0);
+    this.resetPendingMetrics();
     for (const change of pending) {
-      if (this.shouldBuffer(change)) {
-        this.pendingChanges.push(change);
+      if (this.shouldBuffer(change as Partial<ConversationChange>)) {
+        this.bufferPendingChange(change);
         continue;
       }
       this.applyChange(change);
-      if (this.recovering) return;
+      if (this.recovering || this.pendingRecoveryMarker) return;
     }
   }
 
   private beginRecovery() {
-    if (this.recovering || this.closed) return;
+    if (this.closed || this.terminal) return;
+    this.recoveryNeeded = true;
+    if (this.recovering || this.recoveryPromise) return;
+    this.clearRecoveryRetry();
     this.recovering = true;
-    this.recoveryPromise ??= this.resubscribe(false)
-      .catch(() => undefined)
+    const recovery = this.resubscribe(false)
       .then(() => this.notifyRebindListeners())
-      .catch(() => undefined)
+      .then(() => {
+        this.recovering = false;
+        this.recoveryNeeded = false;
+      })
+      .catch((error: unknown) => {
+        this.recovering = false;
+        if (this.isRetryableRecoveryError(error)) this.scheduleRecoveryRetry();
+        else this.recoveryNeeded = false;
+      })
       .finally(() => {
-        this.recoveryPromise = null;
+        if (this.recoveryPromise === recovery) this.recoveryPromise = null;
       });
+    this.recoveryPromise = recovery;
+  }
+
+  private isRetryableRecoveryError(error: unknown): boolean {
+    return !(
+      error &&
+      typeof error === "object" &&
+      "retryable" in error &&
+      (error as { retryable?: unknown }).retryable === false
+    );
+  }
+
+  private scheduleRecoveryRetry() {
+    if (
+      this.recoveryRetryTimer !== undefined ||
+      this.closed ||
+      this.terminal ||
+      !this.recoveryNeeded
+    ) {
+      return;
+    }
+    this.recoveryRetryTimer = setTimeout(() => {
+      this.recoveryRetryTimer = undefined;
+      if (this.recoveryNeeded) this.beginRecovery();
+    }, RECOVERY_RETRY_DELAY_MS);
+  }
+
+  private clearRecoveryRetry() {
+    clearTimeout(this.recoveryRetryTimer);
+    this.recoveryRetryTimer = undefined;
+  }
+
+  private bufferPendingChange(value: unknown) {
+    if (this.closed || this.pendingRecoveryMarker) {
+      if (!this.closed) this.beginRecovery();
+      return;
+    }
+    const metrics = pendingChangeMetrics(value);
+    if (
+      !metrics ||
+      metrics.operations > MAX_PENDING_CONVERSATION_OPERATIONS ||
+      metrics.bytes > MAX_PENDING_CONVERSATION_BYTES ||
+      this.pendingOperationCount + metrics.operations > MAX_PENDING_CONVERSATION_OPERATIONS ||
+      this.pendingPayloadBytes + metrics.bytes > MAX_PENDING_CONVERSATION_BYTES ||
+      (this.pendingSince !== undefined &&
+        Date.now() - this.pendingSince >= MAX_PENDING_CONVERSATION_AGE_MS)
+    ) {
+      this.pendingChanges.length = 0;
+      this.resetPendingMetrics();
+      this.pendingRecoveryMarker = true;
+      this.beginRecovery();
+      return;
+    }
+    if (this.pendingSince === undefined) {
+      this.pendingSince = Date.now();
+      this.pendingBufferTimer = setTimeout(() => {
+        this.pendingBufferTimer = undefined;
+        this.pendingChanges.length = 0;
+        this.resetPendingMetrics();
+        this.pendingRecoveryMarker = true;
+        this.beginRecovery();
+      }, MAX_PENDING_CONVERSATION_AGE_MS);
+    }
+    this.pendingChanges.push(value);
+    this.pendingOperationCount += metrics.operations;
+    this.pendingPayloadBytes += metrics.bytes;
+  }
+
+  private resetPendingMetrics() {
+    this.pendingOperationCount = 0;
+    this.pendingPayloadBytes = 0;
+    this.pendingSince = undefined;
+    clearTimeout(this.pendingBufferTimer);
+    this.pendingBufferTimer = undefined;
+  }
+
+  private clearPendingBuffer() {
+    this.pendingChanges.length = 0;
+    this.resetPendingMetrics();
+    this.pendingRecoveryMarker = false;
+  }
+
+  private recalculatePendingMetrics() {
+    this.resetPendingMetrics();
+    if (this.pendingChanges.length === 0) return;
+    let operations = 0;
+    let bytes = 0;
+    for (const change of this.pendingChanges) {
+      const metrics = pendingChangeMetrics(change);
+      if (!metrics) {
+        this.pendingChanges.length = 0;
+        this.pendingRecoveryMarker = true;
+        return;
+      }
+      operations += metrics.operations;
+      bytes += metrics.bytes;
+    }
+    this.pendingOperationCount = operations;
+    this.pendingPayloadBytes = bytes;
+    this.pendingSince = Date.now();
+    this.pendingBufferTimer = setTimeout(() => {
+      this.pendingBufferTimer = undefined;
+      this.pendingChanges.length = 0;
+      this.resetPendingMetrics();
+      this.pendingRecoveryMarker = true;
+      this.beginRecovery();
+    }, MAX_PENDING_CONVERSATION_AGE_MS);
   }
 
   private async notifyRebindListeners() {

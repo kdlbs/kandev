@@ -306,22 +306,30 @@ func (c *Controller) parseSourceRequest(ctx *gin.Context, record *store.Record, 
 		expected = &revision
 	}
 	sessionID := ctx.Param("sessionId")
-	if query.taskID != nil && c.conversationReader != nil {
-		session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
-		if err != nil || session == nil || session.ID != sessionID {
-			writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
-			return conversationMessageQuery{}, nil, "", false
-		}
-		if *query.taskID != session.TaskID {
-			writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the task session", false)
-			return conversationMessageQuery{}, nil, "", false
-		}
+	if query.taskID != nil && c.conversationReader != nil && !c.validateSourceTaskQuery(ctx, sessionID, *query.taskID) {
+		return conversationMessageQuery{}, nil, "", false
 	}
 	if query.cursor == "" {
 		return query, expected, "", true
 	}
 	lastID, ok := c.parseSourceCursor(ctx, record, userID, query)
 	return query, expected, lastID, ok
+}
+
+func (c *Controller) validateSourceTaskQuery(ctx *gin.Context, sessionID, taskID string) bool {
+	session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
+	if err != nil {
+		return c.writeConversationSourceReadError(ctx, err)
+	}
+	if session == nil || session.ID != sessionID {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return false
+	}
+	if taskID != session.TaskID {
+		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the task session", false)
+		return false
+	}
+	return true
 }
 
 func (c *Controller) parseSourceCursor(ctx *gin.Context, record *store.Record, userID string, query conversationMessageQuery) (string, bool) {
@@ -344,6 +352,10 @@ func (c *Controller) writeConversationSourceReadError(ctx *gin.Context, err erro
 	}
 	if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
 		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return false
+	}
+	if errors.Is(err, taskmodels.ErrConversationCursorStale) {
+		writeConversationError(ctx, http.StatusConflict, "reconciliation_required", "conversation cursor is stale", true)
 		return false
 	}
 	writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
@@ -405,7 +417,12 @@ func (c *Controller) conversationMessages(ctx *gin.Context) {
 		return
 	}
 	session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
-	if err != nil || session == nil || session.ID != sessionID {
+	if err != nil {
+		if !c.writeConversationSourceReadError(ctx, err) {
+			return
+		}
+	}
+	if session == nil || session.ID != sessionID {
 		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
 		return
 	} else if query.taskID != nil && *query.taskID != session.TaskID {
@@ -560,7 +577,12 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 		taskID = &rawTaskID
 	}
 	session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
-	sessionFound := err == nil && session != nil && session.ID == sessionID
+	if err != nil {
+		if !c.writeConversationSourceReadError(ctx, err) {
+			return
+		}
+	}
+	sessionFound := session != nil && session.ID == sessionID
 	if !sessionFound {
 		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
 		return

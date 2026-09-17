@@ -1,5 +1,11 @@
 package models
 
+import "errors"
+
+// ErrConversationCursorStale indicates that a page boundary no longer exists
+// in the current source state and the caller must restart reconciliation.
+var ErrConversationCursorStale = errors.New("conversation cursor is stale")
+
 // ConversationMutationKind identifies the source operation represented by a
 // transient mutation receipt.
 type ConversationMutationKind string

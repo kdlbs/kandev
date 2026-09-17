@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -156,6 +157,62 @@ func TestConversationSourceReadsRejectCursorFromAnotherSession(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("turn cursor from another session was accepted")
+	}
+}
+
+func TestConversationSourceReadsReturnStaleCursorAfterBoundaryDeletion(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID    = "task-source-stale-cursor"
+		sessionID = "session-source-stale-cursor"
+		turnID    = "turn-source-stale-cursor"
+	)
+	seedForMsgTest(t, repo, taskID, sessionID, turnID)
+	insertAgentMsg(t, repo, "message-source-stale-a", sessionID, turnID, "agent", "a", time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC))
+	insertAgentMsg(t, repo, "message-source-stale-b", sessionID, turnID, "agent", "b", time.Date(2026, 9, 16, 12, 0, 1, 0, time.UTC))
+	messagePage, err := repo.ReadConversationMessagesPage(ctx, models.ConversationMessagePageRequest{
+		SessionID: sessionID, Sort: "asc", Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("read message cursor page: %v", err)
+	}
+	if err := repo.DeleteMessage(ctx, messagePage.CursorID); err != nil {
+		t.Fatalf("delete message cursor boundary: %v", err)
+	}
+	_, err = repo.ReadConversationMessagesPage(ctx, models.ConversationMessagePageRequest{
+		SessionID: sessionID, Sort: "asc", CursorID: messagePage.CursorID, Limit: 1,
+	})
+	if !errors.Is(err, models.ErrConversationCursorStale) {
+		t.Fatalf("deleted message cursor error = %v, want ErrConversationCursorStale", err)
+	}
+
+	const (
+		turnTaskID    = "task-source-stale-turn-cursor"
+		turnSessionID = "session-source-stale-turn-cursor"
+	)
+	seedForMsgTest(t, repo, turnTaskID, turnSessionID, "turn-source-stale-turn-a")
+	secondTurnAt := time.Date(2026, 9, 16, 12, 1, 0, 0, time.UTC)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-source-stale-turn-b", TaskSessionID: turnSessionID, TaskID: turnTaskID,
+		StartedAt: secondTurnAt, CreatedAt: secondTurnAt,
+	}); err != nil {
+		t.Fatalf("create second turn: %v", err)
+	}
+	turnPage, err := repo.ReadConversationTurnsPage(ctx, models.ConversationTurnPageRequest{
+		SessionID: turnSessionID, Sort: "asc", Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("read turn cursor page: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`DELETE FROM task_session_turns WHERE id = ?`), turnPage.CursorID); err != nil {
+		t.Fatalf("delete turn cursor boundary: %v", err)
+	}
+	_, err = repo.ReadConversationTurnsPage(ctx, models.ConversationTurnPageRequest{
+		SessionID: turnSessionID, Sort: "asc", CursorID: turnPage.CursorID, Limit: 1,
+	})
+	if !errors.Is(err, models.ErrConversationCursorStale) {
+		t.Fatalf("deleted turn cursor error = %v, want ErrConversationCursorStale", err)
 	}
 }
 

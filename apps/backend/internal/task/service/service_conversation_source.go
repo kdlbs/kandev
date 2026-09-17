@@ -42,7 +42,7 @@ func (s *Service) ReadConversationTurnsPage(ctx context.Context, req models.Conv
 	if err := s.AuthorizeSessionAccess(ctx, req.SessionID); err != nil {
 		return models.ConversationTurnPage{}, err
 	}
-	reader, ok := s.turns.(taskrepo.ConversationSourceRepository)
+	reader, ok := s.messages.(taskrepo.ConversationSourceRepository)
 	if !ok {
 		return models.ConversationTurnPage{}, errConversationSourceUnavailable
 	}
