@@ -28,7 +28,6 @@ describe("file-tree row measurements", () => {
     const virtualizer = createVirtualizer(28);
     virtualizer.itemSizeCache.set("row-a", 32);
 
-    // @covers AC-UI-FILE-TREE-CHAT-CONTEXT-001.10
     expect(measureFileTreeElement(element, resizeEntry(element, 0), virtualizer)).toBe(32);
   });
 
