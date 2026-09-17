@@ -708,6 +708,12 @@ type Service struct {
 	// parallel while an old entry cannot race a successor route.
 	ceilingEntryAdmissionLocksMu sync.Mutex
 	ceilingEntryAdmissionLocks   map[string]*ceilingEntryAdmissionLock
+	// ceilingEntryDispatchCommits retain immutable workflow-entry ownership
+	// after the admission lock is released and while provider I/O is in flight.
+	// Route writers consult this map so a successor cannot replace the route in
+	// the validation-to-dispatch window.
+	ceilingEntryDispatchCommitsMu sync.Mutex
+	ceilingEntryDispatchCommits   map[string]*ceilingEntryDispatchCommit
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator

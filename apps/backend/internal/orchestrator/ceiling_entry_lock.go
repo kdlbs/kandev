@@ -1,6 +1,12 @@
 package orchestrator
 
-import "context"
+import (
+	"context"
+	"errors"
+	"sync"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 type ceilingEntryAdmissionLock struct {
 	mu   chan struct{}
@@ -8,6 +14,19 @@ type ceilingEntryAdmissionLock struct {
 }
 
 type ceilingEntryAdmissionContextKey struct{}
+type ceilingEntryDispatchCommitContextKey struct{}
+
+// ErrCeilingEntryDispatchCommitted reports that a workflow route is already
+// owned by an admitted provider dispatch. A competing transition must leave
+// that route unchanged and retry after the dispatch settles.
+var ErrCeilingEntryDispatchCommitted = errors.New("workflow route dispatch is already committed")
+
+// ceilingEntryDispatchCommit is a process-local ownership fence. The durable
+// deferred-launch claim survives a restart, while this marker closes the
+// smaller gap between the final route read and provider I/O in this process.
+type ceilingEntryDispatchCommit struct {
+	binding models.CeilingWorkflowEntryBinding
+}
 
 // acquireCeilingEntryAdmissionLock serializes operations that read or write a
 // task's committed workflow route and its ceiling deferred-launch record. A
@@ -60,4 +79,88 @@ func (s *Service) lockCeilingEntryAdmission(ctx context.Context, taskID string) 
 	}
 	release := s.acquireCeilingEntryAdmissionLock(taskID)
 	return context.WithValue(ctx, ceilingEntryAdmissionContextKey{}, taskID), release
+}
+
+func ceilingEntryDispatchCommitFromContext(ctx context.Context) *ceilingEntryDispatchCommit {
+	if ctx == nil {
+		return nil
+	}
+	commit, _ := ctx.Value(ceilingEntryDispatchCommitContextKey{}).(*ceilingEntryDispatchCommit)
+	return commit
+}
+
+// commitCeilingEntryDispatch validates and records immutable workflow-entry
+// ownership while the task admission lock is held. Provider and readiness I/O
+// run after the lock is released, carrying the process-local commit marker in
+// context so route writers can reject a successor during that I/O.
+func (s *Service) commitCeilingEntryDispatch(
+	ctx context.Context,
+	taskID string,
+	binding *models.CeilingWorkflowEntryBinding,
+) (context.Context, func(), error) {
+	if s == nil || taskID == "" || binding == nil {
+		return ctx, func() {}, nil
+	}
+	if !binding.Valid() {
+		return ctx, func() {}, errors.New("workflow entry dispatch binding is incomplete")
+	}
+	if existing := ceilingEntryDispatchCommitFromContext(ctx); existing != nil {
+		return ctx, func() {}, nil
+	}
+
+	admissionCtx, releaseAdmission := s.lockCeilingEntryAdmission(ctx, taskID)
+	validationCtx := withCeilingEntryBinding(admissionCtx, binding)
+	if err := s.validateClaimedCeilingBinding(validationCtx, taskID, binding); err != nil {
+		releaseAdmission()
+		return ctx, func() {}, err
+	}
+
+	commit := &ceilingEntryDispatchCommit{binding: *binding}
+	s.ceilingEntryDispatchCommitsMu.Lock()
+	if s.ceilingEntryDispatchCommits == nil {
+		s.ceilingEntryDispatchCommits = make(map[string]*ceilingEntryDispatchCommit)
+	}
+	if existing := s.ceilingEntryDispatchCommits[taskID]; existing != nil {
+		s.ceilingEntryDispatchCommitsMu.Unlock()
+		releaseAdmission()
+		return ctx, func() {}, ErrCeilingEntryDispatchCommitted
+	}
+	s.ceilingEntryDispatchCommits[taskID] = commit
+	s.ceilingEntryDispatchCommitsMu.Unlock()
+	// The marker, not the admission lock, spans provider I/O. Releasing here
+	// lets lifecycle and route readers acquire the task lock without allowing a
+	// successor route to replace this committed binding.
+	releaseAdmission()
+
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			s.ceilingEntryDispatchCommitsMu.Lock()
+			if s.ceilingEntryDispatchCommits[taskID] == commit {
+				delete(s.ceilingEntryDispatchCommits, taskID)
+			}
+			s.ceilingEntryDispatchCommitsMu.Unlock()
+		})
+	}
+	// Do not return validationCtx itself: it carries the admission-lock marker,
+	// but that lock was released before provider I/O. Rebuild the dispatch
+	// context from the caller's context so nested route writers cannot mistake
+	// the released lock for a held one.
+	dispatchCtx := withCeilingEntryBinding(ctx, binding)
+	return context.WithValue(dispatchCtx, ceilingEntryDispatchCommitContextKey{}, commit), release, nil
+}
+
+// workflowRouteMutationAllowed lets the route owner proceed while rejecting
+// unrelated transitions after an admitted dispatch has committed its binding.
+func (s *Service) workflowRouteMutationAllowed(ctx context.Context, taskID string) error {
+	if s == nil || taskID == "" {
+		return nil
+	}
+	s.ceilingEntryDispatchCommitsMu.Lock()
+	commit := s.ceilingEntryDispatchCommits[taskID]
+	s.ceilingEntryDispatchCommitsMu.Unlock()
+	if commit == nil || ceilingEntryDispatchCommitFromContext(ctx) == commit {
+		return nil
+	}
+	return ErrCeilingEntryDispatchCommitted
 }

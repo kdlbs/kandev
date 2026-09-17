@@ -3546,6 +3546,11 @@ func (s *Service) prepareWorkflowReplacementSession(
 	newAgentProfileID string,
 	workflowRoute *models.WorkflowSessionRoute,
 ) (*models.TaskSession, error) {
+	if workflowRoute != nil {
+		if err := s.workflowRouteMutationAllowed(ctx, taskID); err != nil {
+			return nil, err
+		}
+	}
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task for session switch: %w", err)

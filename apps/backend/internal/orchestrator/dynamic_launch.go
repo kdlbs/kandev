@@ -53,7 +53,18 @@ func (d *dynamicTaskDownstream) Launch(
 	options.Prompt = launch.Prompt
 	options.PriorACPSession = launch.PriorACPSession
 	d.service.beginDynamicAttempt(d.sessionID)
-	execution, err := d.service.executor.LaunchPreparedSession(ctx, d.task, d.sessionID, options)
+	taskID := ""
+	if d.task != nil {
+		taskID = d.task.ID
+	}
+	dispatchCtx, releaseDispatchCommit, err := d.service.commitCeilingEntryDispatch(
+		ctx, taskID, ceilingEntryBindingFromContext(ctx),
+	)
+	if err != nil {
+		return dynamicruntime.DownstreamExecution{}, err
+	}
+	defer releaseDispatchCommit()
+	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
 		var classified *routingerr.Error
 		if errors.As(err, &classified) {
@@ -72,7 +83,7 @@ func (d *dynamicTaskDownstream) Launch(
 		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
-	d.service.bindPromptAttemptToExecution(ctx, d.sessionID, execution.AgentExecutionID)
+	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
 	d.execution = execution
 	acpSessionID := ""
 	if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
@@ -471,12 +482,23 @@ func (s *Service) launchConcretePreparedSession(
 			return nil, err
 		}
 	}
+	taskID := ""
+	if task != nil {
+		taskID = task.ID
+	}
+	dispatchCtx, releaseDispatchCommit, err := s.commitCeilingEntryDispatch(
+		ctx, taskID, ceilingEntryBindingFromContext(ctx),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseDispatchCommit()
 	if options.StartAgent && (options.Prompt != "" || len(options.Attachments) > 0) {
 		s.beginInitialPromptAttempt(sessionID, false)
 	}
-	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, options)
+	execution, err := s.executor.LaunchPreparedSession(dispatchCtx, task, sessionID, options)
 	if execution != nil {
-		s.bindPromptAttemptToExecution(ctx, sessionID, execution.AgentExecutionID)
+		s.bindPromptAttemptToExecution(dispatchCtx, sessionID, execution.AgentExecutionID)
 	}
 	return execution, err
 }
