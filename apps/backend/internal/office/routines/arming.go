@@ -57,9 +57,10 @@ const (
 func ClassifyRoutine(triggers []*RoutineTrigger, now time.Time) (ScheduleState, []UnarmedCronTrigger) {
 	ordered := sortTriggers(triggers)
 	cronTriggers, hasEnabledWebhook, hasNonCronTrigger := partitionTriggers(ordered)
-	unarmed := unarmedCronTriggers(cronTriggers, now)
+	states := cronTriggerStates(cronTriggers)
+	unarmed := unarmedCronTriggers(states, now)
 
-	if state, ok := classifyCronTriggers(cronTriggers, now); ok {
+	if state, ok := classifyCronTriggers(states, now); ok {
 		return state, unarmed
 	}
 	if hasEnabledWebhook {
@@ -90,25 +91,41 @@ func partitionTriggers(triggers []*RoutineTrigger) (cron []*RoutineTrigger, hasE
 	return cron, hasEnabledWebhook, hasNonCronTrigger
 }
 
+// cronTriggerState pairs a cron trigger with its schedulability, computed
+// once per trigger and shared across classification and unarmed-list
+// membership rather than re-parsed by each.
+type cronTriggerState struct {
+	trigger     *RoutineTrigger
+	schedulable bool
+}
+
+func cronTriggerStates(cronTriggers []*RoutineTrigger) []cronTriggerState {
+	states := make([]cronTriggerState, len(cronTriggers))
+	for i, t := range cronTriggers {
+		states[i] = cronTriggerState{trigger: t, schedulable: isSchedulable(t)}
+	}
+	return states
+}
+
 // classifyCronTriggers evaluates rules 1 through 5 (the ones decided by
 // cron trigger state alone) and reports whether one of them matched.
-func classifyCronTriggers(cronTriggers []*RoutineTrigger, now time.Time) (ScheduleState, bool) {
-	for _, t := range cronTriggers {
-		if isArmed(t, now) {
+func classifyCronTriggers(states []cronTriggerState, now time.Time) (ScheduleState, bool) {
+	for _, s := range states {
+		if isArmed(s.trigger, now) {
 			return ScheduleStateArmed, true
 		}
 	}
-	for _, t := range cronTriggers {
-		if t.Enabled && !isSchedulable(t) {
+	for _, s := range states {
+		if s.trigger.Enabled && !s.schedulable {
 			return ScheduleStateTriggerInvalid, true
 		}
 	}
-	for _, t := range cronTriggers {
-		if t.Enabled && isSchedulable(t) && t.NextRunAt == nil {
+	for _, s := range states {
+		if s.trigger.Enabled && s.schedulable && s.trigger.NextRunAt == nil {
 			return ScheduleStateTriggerUnscheduled, true
 		}
 	}
-	if len(cronTriggers) > 0 {
+	if len(states) > 0 {
 		return ScheduleStateTriggerDisabled, true
 	}
 	return "", false
@@ -117,8 +134,11 @@ func classifyCronTriggers(cronTriggers []*RoutineTrigger, now time.Time) (Schedu
 // isArmed reports whether this single cron trigger can currently fire:
 // either it has a next occurrence on the calendar (past-due or future), or
 // it just fired and hasn't been recomputed yet (within dispatchGrace).
+// Schedulability does not gate this: a trigger that already claimed a next
+// occurrence still fires on it even if its expression or timezone can no
+// longer be parsed (unarmedCronTriggers reports that separately).
 func isArmed(t *RoutineTrigger, now time.Time) bool {
-	if !t.Enabled || !isSchedulable(t) {
+	if !t.Enabled {
 		return false
 	}
 	if t.NextRunAt != nil {
@@ -141,27 +161,42 @@ func withinDispatchGrace(t *RoutineTrigger, now time.Time) bool {
 }
 
 // unarmedCronTriggers reports every cron trigger, in trigger order, that
-// cannot currently fire, along with every applicable reason in fixed order.
-func unarmedCronTriggers(cronTriggers []*RoutineTrigger, now time.Time) []UnarmedCronTrigger {
+// matches AC-OFFICE-ROUTINE-ARMING-001.8's unarmed predicate — independent
+// of whether the same trigger is also armed, so an armed-but-broken trigger
+// appears here too.
+func unarmedCronTriggers(states []cronTriggerState, now time.Time) []UnarmedCronTrigger {
 	var out []UnarmedCronTrigger
-	for _, t := range cronTriggers {
-		if isArmed(t, now) {
+	for _, s := range states {
+		if !isUnarmedCron(s, now) {
 			continue
 		}
-		out = append(out, UnarmedCronTrigger{TriggerID: t.ID, Reasons: unarmedReasons(t)})
+		out = append(out, UnarmedCronTrigger{TriggerID: s.trigger.ID, Reasons: unarmedReasons(s, now)})
 	}
 	return out
 }
 
-func unarmedReasons(t *RoutineTrigger) []UnarmedReason {
+// isUnarmedCron implements AC-OFFICE-ROUTINE-ARMING-001.8's three-way OR:
+// disabled, or not schedulable, or (enabled, schedulable, no next
+// occurrence, and past the dispatch grace).
+func isUnarmedCron(s cronTriggerState, now time.Time) bool {
+	if !s.trigger.Enabled {
+		return true
+	}
+	if !s.schedulable {
+		return true
+	}
+	return s.trigger.NextRunAt == nil && !withinDispatchGrace(s.trigger, now)
+}
+
+func unarmedReasons(s cronTriggerState, now time.Time) []UnarmedReason {
 	var reasons []UnarmedReason
-	if !t.Enabled {
+	if !s.trigger.Enabled {
 		reasons = append(reasons, UnarmedReasonDisabled)
 	}
-	if !isSchedulable(t) {
+	if !s.schedulable {
 		reasons = append(reasons, UnarmedReasonNotSchedulable)
 	}
-	if len(reasons) == 0 {
+	if s.trigger.Enabled && s.schedulable && s.trigger.NextRunAt == nil && !withinDispatchGrace(s.trigger, now) {
 		reasons = append(reasons, UnarmedReasonStalled)
 	}
 	return reasons

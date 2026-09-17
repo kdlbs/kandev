@@ -289,6 +289,29 @@ func TestClassifyRoutine_ArmedTriggerNotInUnarmedList(t *testing.T) {
 	}
 }
 
+// TestClassifyRoutine_ArmedButNotSchedulableTriggerStillReported covers the
+// AC-OFFICE-ROUTINE-ARMING-001.8/001.9 pairing: a trigger that already has a
+// next occurrence stays armed even if its expression or timezone can no
+// longer be parsed, but unarmed-list membership is independent of armed
+// state, so the same trigger is still reported as needing a fix.
+func TestClassifyRoutine_ArmedButNotSchedulableTriggerStillReported(t *testing.T) {
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	broken := trig(withCron("garbage", "UTC"), withNextRunAt(timePtr(now.Add(time.Hour))))
+
+	state, unarmed := routines.ClassifyRoutine([]*models.RoutineTrigger{broken}, now)
+
+	if state != routines.ScheduleStateArmed {
+		t.Fatalf("state = %q, want armed (a claimed next occurrence still fires)", state)
+	}
+	if len(unarmed) != 1 || unarmed[0].TriggerID != broken.ID {
+		t.Fatalf("unarmed = %+v, want exactly %q", unarmed, broken.ID)
+	}
+	want := []routines.UnarmedReason{routines.UnarmedReasonNotSchedulable}
+	if len(unarmed[0].Reasons) != len(want) || unarmed[0].Reasons[0] != want[0] {
+		t.Errorf("reasons = %v, want %v", unarmed[0].Reasons, want)
+	}
+}
+
 // TestClassifyRoutine_TriggerOrder covers the "trigger order" terminology
 // definition (created_at ascending, ties by id ascending) applied to the
 // unarmed cron trigger list.
