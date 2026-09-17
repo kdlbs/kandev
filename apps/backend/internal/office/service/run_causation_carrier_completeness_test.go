@@ -57,13 +57,13 @@ func TestCarrierSetCompleteness_CarrierKeysHaveNoDuplicates(t *testing.T) {
 
 func TestCarrierSetCompleteness_WriteSideKeySetMatchesCarrierKeys(t *testing.T) {
 	run := &models.Run{
-		ID:             "run-completeness-1",
-		CausationID:    "causation-completeness-1",
-		CausationDepth: 3,
-		HumanRooted:    true,
-		RoutineID:      "routine-completeness-1",
-		ActorKind:      models.ActorKindAgent,
-		ActorID:        "agent-completeness-1",
+		ID:               "run-completeness-1",
+		ChainCausationID: "causation-completeness-1",
+		CausationDepth:   3,
+		HumanRooted:      true,
+		RoutineID:        "routine-completeness-1",
+		ActorKind:        models.ActorKindAgent,
+		ActorID:          "agent-completeness-1",
 	}
 	written := carrierMetadataFromRun(run)
 
@@ -101,7 +101,7 @@ type runCausationNamedValue struct {
 }
 
 var runCausationNamedValues = []runCausationNamedValue{
-	{acRef: "AC-OFFICE-RUN-CAUSATION-001.1", dbColumn: "causation_id", carrierKey: taskmodels.MetaKeyOfficeCarrierCausationID},
+	{acRef: "AC-OFFICE-RUN-CAUSATION-001.1", dbColumn: "chain_causation_id", carrierKey: taskmodels.MetaKeyOfficeCarrierCausationID},
 	// The carrier does not carry parent_run_id directly: the causing
 	// run's own identifier (creating_run_id) becomes the new run's
 	// parent_run_id (AC-OFFICE-RUN-CAUSATION-001.5), so creating_run_id
@@ -183,13 +183,13 @@ func TestCarrierSetCompleteness_EveryACNamedValueIsCarriedOrDocumentedRederivabl
 
 func TestCarrierSetCompleteness_ReadSideDecodesEveryWrittenKey(t *testing.T) {
 	run := &models.Run{
-		ID:             "run-completeness-2",
-		CausationID:    "causation-completeness-2",
-		CausationDepth: 5,
-		HumanRooted:    true,
-		RoutineID:      "routine-completeness-2",
-		ActorKind:      models.ActorKindAgent,
-		ActorID:        "agent-completeness-2",
+		ID:               "run-completeness-2",
+		ChainCausationID: "causation-completeness-2",
+		CausationDepth:   5,
+		HumanRooted:      true,
+		RoutineID:        "routine-completeness-2",
+		ActorKind:        models.ActorKindAgent,
+		ActorID:          "agent-completeness-2",
 	}
 	written := carrierMetadataFromRun(run)
 
@@ -200,7 +200,7 @@ func TestCarrierSetCompleteness_ReadSideDecodesEveryWrittenKey(t *testing.T) {
 
 	decoded := carrierFromTaskMetadata(written)
 	want := TaskBoundaryCarrier{
-		CausationID:    run.CausationID,
+		CausationID:    run.ChainCausationID,
 		CausationDepth: run.CausationDepth,
 		CreatingRunID:  run.ID,
 		HumanRooted:    run.HumanRooted,

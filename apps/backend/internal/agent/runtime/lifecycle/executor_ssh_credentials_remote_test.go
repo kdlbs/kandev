@@ -178,7 +178,7 @@ func TestSSHExecutorRunAuthSetupScripts(t *testing.T) {
 			t.Fatalf("setup script runs = %d, want 1", len(calls))
 		}
 		script := unwrapLoginShell(t, "bash", calls[0].Command)
-		if !strings.HasPrefix(script, "set -a; . /dev/stdin; set +a\n") {
+		if !strings.HasPrefix(script, "set -a; eval \"$(cat)\"; set +a\n") {
 			t.Fatalf("setup script must source stdin under set -a:\n%s", script)
 		}
 		if !strings.Contains(script, `printf %s "$CREDENTIAL_AGENT_TOKEN"`) {

@@ -13,13 +13,15 @@ import {
 import { ClarificationPanelSection } from "@/components/task/chat/clarification-panel-section";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
+import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
+import { QuickChatCancelCommands } from "./quick-chat-cancel-commands";
 
 type QuickChatContentProps = {
   sessionId: string;
   minimalToolbar?: boolean;
   placeholderOverride?: string;
   initialPrompt?: string;
-  onInitialPromptSent?: () => void;
+  onInitialPromptAttempted?: () => void;
 };
 
 function useQuickChatState(sessionId: string) {
@@ -48,10 +50,9 @@ export const QuickChatContent = memo(function QuickChatContent({
   minimalToolbar,
   placeholderOverride,
   initialPrompt,
-  onInitialPromptSent,
+  onInitialPromptAttempted,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
-  const initialPromptSentFor = useRef<string | null>(null);
   const shortcutScopeRef = useRef<HTMLDivElement>(null);
   const state = useQuickChatState(sessionId);
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
@@ -62,12 +63,24 @@ export const QuickChatContent = memo(function QuickChatContent({
     return () => clearTimeout(timer);
   }, [chatInputRef]);
 
-  useEffect(() => {
-    if (!initialPrompt || !taskId || initialPromptSentFor.current === sessionId) return;
-    initialPromptSentFor.current = sessionId;
-    handleSubmit({ message: initialPrompt });
-    onInitialPromptSent?.();
-  }, [initialPrompt, taskId, handleSubmit, onInitialPromptSent, sessionId]);
+  const restoreRejectedPrompt = useCallback(
+    (rejectedSessionId: string, prompt: string) => {
+      const input = chatInputRef.current;
+      if (rejectedSessionId === sessionId && input && !input.getValue())
+        input.insertText(prompt, 0, 0);
+    },
+    [chatInputRef, sessionId],
+  );
+
+  useQuickChatInitialPrompt({
+    sessionId,
+    taskId,
+    prompt: initialPrompt,
+    blocked: panelState.planCommentMigration?.isBlocking ?? false,
+    submit: handleSubmit,
+    onAttempted: onInitialPromptAttempted,
+    onRejected: restoreRejectedPrompt,
+  });
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
   const handleShortcutScopeMouseDown = useCallback(
@@ -83,6 +96,12 @@ export const QuickChatContent = memo(function QuickChatContent({
       onMouseDown={handleShortcutScopeMouseDown}
       className="flex flex-col flex-1 min-h-0 outline-none"
     >
+      <QuickChatCancelCommands
+        sessionId={sessionId}
+        isWorking={panelState.isWorking}
+        pendingClarification={pendingClarification}
+        onCancel={handleCancelTurn}
+      />
       <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
         <MessageList
           items={panelState.groupedItems}
@@ -102,6 +121,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         key={sessionId}
         pending={Boolean(pendingClarification)}
         messages={pendingClarificationGroup}
+        agentDisconnected={panelState.session?.pending_action === null}
         onResolved={handleClarificationResolved}
         shortcutScopeRef={shortcutScopeRef}
         maxHeightVh={35}

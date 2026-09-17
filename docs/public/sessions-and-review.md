@@ -34,13 +34,13 @@ The profile picker shows only profiles compatible with the task executor. If non
 
 ### Choose starting context
 
-| Option | What the new session receives | When to use it |
-|---|---|---|
-| **Blank** | Only the prompt you enter | Independent work that needs no earlier discussion |
+| Option                  | What the new session receives                                                                  | When to use it                                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Blank**               | Only the prompt you enter                                                                      | Independent work that needs no earlier discussion                                                                     |
 | **Copy initial prompt** | Copies the first user message from the currently active session into the editable prompt field | A parallel approach; it is not guaranteed to be the task's original description, so inspect and edit it before launch |
-| **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field | Continue or branch from work already discussed |
+| **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field    | Continue or branch from work already discussed                                                                        |
 
-**Handoff** from an existing session opens the same dialog and selects a summary of that session. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
+**Handoff** from an existing session opens the same dialog with Blank context and an empty prompt. Select a session summary when you need earlier discussion. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
 
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
@@ -48,26 +48,40 @@ Prompts support pasted, dropped, or selected attachments. A prompt can contain a
 
 Right-click an agent tab on desktop to manage it. Available actions depend on its current state.
 
-| Action | Effect |
-|---|---|
-| **Rename** | Changes the session's display name |
-| **Set as Primary** | Makes a stoppable session the task's primary target |
-| **Stop** | Cancels the active agent turn for this session |
-| **Resume** | Attempts to continue a completed, failed, or cancelled session |
-| **Delete** | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
-| **Share** | Opens the publishing preview for an eligible session |
-| **Handoff** | Starts another session with a generated summary of this conversation |
-| **Close Others** | Closes other visible agent panels without deleting their sessions |
+| Action             | Effect                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rename**         | Changes the session's display name                                                                                                                                         |
+| **Set as Primary** | Makes a stoppable session the task's primary target                                                                                                                        |
+| **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
+| **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
+| **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
+| **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
+| **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
+| **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
-Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
+Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev adds one recovery entry to the selected session's chat. The entry stays in chronological history after recovery and later agent output. Only the current unresolved failure shows recovery controls. Older entries keep their message and technical details, and repeated delivery of the same failure does not create another entry. History loading and new messages use the normal chat scroll behavior.
+
+**Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
+
+Failures during task or workspace preparation appear as one task error strip below the task header and above the session and Plan tabs. The strip remains visible when you switch sessions or tabs and disappears only after task recovery succeeds. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
-The expanded queue also lets you pause or discard stale work. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
+The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
-Use **Auto-run** for normal queue motion. ON runs one eligible row per turn in FIFO order; OFF lets the current response finish and holds later rows. The setting belongs to the session and survives an empty queue, reload, and backend restart. A pending clarification or another lifecycle guard can leave the queue waiting while the switch remains ON.
+Use **Auto-run** for normal queue motion. ON runs one eligible row per turn in FIFO order; OFF lets the current response finish and holds later rows. The setting belongs to the session and survives an empty queue, reload, and backend restart. A pending clarification or another lifecycle guard can leave the queue waiting while the switch remains ON. **Auto-merge** controls automatic folding of later compatible admissions. It initially follows the install-wide value and follows later global changes until you change the pill. That first change creates a session override that remains independent for the session's lifetime.
 
-Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog with Auto-run OFF, and may complete an eligible workflow step or move the task to review.
+### Send while a session resumes
+
+You can write and send the next prompt while an existing session is starting or resuming when its queue identity is ready. Kandev stores the prompt in the session queue, clears the composer after admission, and shows the normal queued-message indicator. The prompt runs when the session becomes ready and Auto-run is ON.
+
+If Auto-run is OFF, the prompt remains pending until you turn Auto-run ON in the queue controls. If resume fails, the accepted prompt stays in the queue with the session and is available after a later successful recovery. Environment preparation without a usable session queue does not enable Send.
+
+When you queue a prompt, Kandev records a submission identity before it reports success. The browser waits up to 10 seconds for a prompt without attachments and 30 seconds when attachments are included. If the connection result is uncertain, it checks the queue and recent conversation, then retries the same submission once. The server uses the identity to prevent duplicate entries.
+
+A full queue, invalid content or attachment, identity conflict, or unavailable session shows a **Message not sent** error and keeps the draft and attachments. If delivery remains uncertain, Kandev shows **Message send status unknown** and keeps them for inspection. A confirmed admission clears only the submitted draft; a failed queue refresh does not turn an accepted admission into a failure.
+
+Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. This includes a turn that Auto-run delivered from the FIFO queue after its prompt handoff completes. The handoff remains protected while it is completing, so a concurrent Send Now conflict keeps the rows pending for retry. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
@@ -75,11 +89,85 @@ A CLI-passthrough profile displays the agent's native terminal interface in a PT
 
 Use **Threads** to read active task conversations side by side without opening each task. Open it from the workspace view control or navigation, or go to **`/threads`**.
 
-Threads shows one column for each task with an active primary agent session. The column header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
+Threads shows one conversation tile for each task with an active primary agent session. The tile header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
 
-On desktop, use the session tabs in a column to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. The selected conversation keeps its normal reply controls, so you can answer the agent without leaving Threads.
+On desktop, use the session tabs in a tile to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. You can reply in the selected conversation without leaving Threads.
 
-Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+### Choose a layout and composer visibility
+
+1. Open **View settings** beside the saved view name. On a phone or touch
+   tablet, tap the view name first, then **View settings**.
+2. Under **Display**, choose **Columns** for full-height chats or **Grid** for
+   two rows. Layout choices are kept inside View settings.
+3. Optionally enable **Auto-hide composer** and adjust **Maximum chats**.
+4. Changes preview immediately. Use **Save** to update the view, **Save as**
+   to create another view, or **Discard** to restore its saved settings.
+
+Save or discard changes in **View settings** before switching saved views.
+The view picker keeps your draft intact until you choose one of those actions.
+
+Defaults are Columns, auto-hide off, and five total chats. Grid uses that same
+chat limit across both rows; increase Maximum chats if you want more chats.
+Each conversation scrolls independently, and the deck scrolls sideways when
+needed. Short windows temporarily show Columns with an explanation in Display; Grid
+returns when there is enough height, without changing the saved choice.
+
+With auto-hide enabled on a mouse or trackpad, the whole composer and its
+controls hide when idle. Only the existing CI popover remains, when available.
+Hover over a chat or focus its tile with the keyboard to reveal the composer.
+The composer slides and fades in or out; reduced-motion settings make the
+change immediate. CI stays available throughout.
+The normal **Cancel** control remains available in the composer while an agent runs.
+
+Typing, attachments, focused menus, and pending send/upload/cancellation
+operations keep the composer open. Questions, permissions, and recovery
+actions remain visible without hovering. **Hide composer** preserves an
+unsent draft and returns focus to the tile; press **Enter** or move the pointer
+out and back in to reopen it. Hiding does not cancel plugin operations.
+
+### Navigate on a phone
+
+Phones show one conversation at a time, even when Grid is saved. On phones
+and touch tablets, the composer stays visible; the saved auto-hide preference
+still applies when you return to a mouse or trackpad layout.
+
+On a phone, each conversation fills the screen width. The topbar shows your
+position beside the view name; small decks also show page dots. Position follows
+your swipe, even while the next conversation is loading. Swipe sideways,
+or tap the task title to choose a thread
+from a bottom sheet. The picker also shows task status, workflow, and step.
+Tap the view name below **Threads** at the top to change views. Use the separate
+topbar menu button for Quick Chat, Quick Terminal, and system status.
+
+If a warning appears beside the view name on a phone, open the view picker to
+retry the failed saved-view update or dismiss the warning.
+
+### Open or manage a task
+
+Select **Open task** in a tile when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+
+To manage the task without leaving Threads, select **Task actions** (the three
+dots beside **Open task**). On desktop, you can also right-click the task
+header; conversation text and editors keep their normal context menus.
+The menu offers **Priority**, **Move to**, **Send to workflow**, supported
+**Link** choices, **Archive**, and **Delete**, according to availability.
+
+On a phone, the choices open in an inset bottom sheet. Choose a workflow and
+then a step in the same sheet; **Back** returns to the previous choices.
+Actions apply to the task whose menu you opened, even if its selected session
+changes. Canceling a confirmation leaves the task unchanged. See
+[archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
+for confirmation preferences and cleanup consequences.
+
+Once you confirm **Archive**, its conversation disappears immediately while
+cleanup continues. With archive confirmation disabled, choosing **Archive** is
+enough. If the request fails, the task returns when your current filters and
+chat limit allow, without taking focus from the thread you are using.
+
+If an action or view filter removes your current thread, Threads selects the
+next remaining thread, otherwise the previous one. If neither survives from
+the previous view, it selects the first thread in the new view. The empty view
+appears only when no threads remain. Your workspace and view settings stay in place.
 
 <details>
 <summary>Let agents coordinate sessions</summary>
@@ -101,9 +189,9 @@ Delivery follows the target state:
 
 Without an explicit session ID the message goes to the primary session, and falls back to the newest session that can still take a message when the primary is cancelled or failed. A session named explicitly is never redirected. When every session is terminal the call fails and names `spawn_session_kandev`.
 
-The default pending-message limit is 10 per session. An admin can change it live under **Settings > Task Behavior > Message Queue**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes only the capacity field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting.
+The default pending-message limit is 10 per session. An admin can change it live under **Settings > Task Behavior > Message Queue**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes only the capacity field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting. An eligible direct automatic fold may still succeed at or above capacity because it does not add a row; other admissions are rejected, and staged attachments are rejected before any fold or claim.
 
-The same card enables **Automatically merge consecutive messages** by default. Once capacity admission succeeds, compatible consecutive messages from the same strict source fold into the earlier pending entry; incompatible messages remain separate. The earlier entry's ID survives, and only admissions after the setting is read are eligible. This behavior is independent from the manual **Enable queued message merging** switch. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
+The same card enables **Automatically merge consecutive messages** by default. Untouched sessions inherit this value and later changes to it. Changing a session's **Auto-merge** pill creates an explicit override for that session's lifetime. Compatible consecutive messages from the same strict source fold into the earlier pending entry; incompatible messages remain separate when capacity permits. The earlier entry's ID survives, and only admissions after the effective setting is read are eligible. This behavior is independent from the manual **Enable queued message merging** switch. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders always queue, and only user-origin rows may be edited or manually merged.
 
 For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 
@@ -170,6 +258,13 @@ impossible data when reported use exceeds the reported window.
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.
+
+Symbolic links have a link icon beside their filename in workspace **Staged**
+and **Unstaged** rows, including untracked links. Opening a readable link shows
+**Symlink** beside its path in the file editor. These indicators are also visible
+on phones. In **Files**, symbolic links use a link icon in place of the usual
+file or folder icon. Each Changes row identifies the entry in that change layer; a deleted
+link keeps its marker. Opening and saving files follows the existing behavior.
 
 Changes are grouped by repository and then by state:
 
@@ -278,6 +373,10 @@ The PR panel has two action controls:
 
 - **Auto-fix CI and address comments** waits for a check run to finish, then sends newly failed checks or review comments to the agent. It refreshes about once a minute, coalesces queued updates, and stops after 10 repair rounds for that PR. Disable and re-enable it after manual review to reset the limit.
 - **Auto-merge when ready** merges only after CI, required reviews, and mergeability are all ready.
+
+Auto-fix also sends one repair round for an ordinary merge conflict or an actionable merge-queue removal after the PR checks settle. It snapshots each feedback state, so the same conflict, check, comment, or removal does not create duplicate rounds. A resolved conflict clears its checkpoint without using a round, while an unknown mergeability state keeps the prior checkpoint. A retained queue removal starts repair only when durable evidence from an attempted or adopted queue entry matches the current pull-request head. If that provenance is unavailable, Kandev fails closed without using a round. Updating an already queued message does not use another round, and the 10-round limit still applies.
+
+Kandev keeps a queued or running auto-fix attempt separate from its feedback checkpoint. If a turn ends without a recorded outcome, Kandev can send the same settled snapshot again, and that retry uses another round. After an `action_taken` outcome, Kandev waits for provider progress before retrying. A `non_actionable` or `blocked` outcome acknowledges unchanged feedback and does not retry it.
 
 Open **PR events** for three notification controls:
 

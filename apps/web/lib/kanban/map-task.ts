@@ -7,6 +7,7 @@ import type { KanbanState, TaskDependencyRef } from "@/lib/state/slices/kanban/t
 import type {
   ForegroundActivity,
   TaskPendingAction,
+  TaskOrigin,
   TaskPriority,
   TaskState,
   TaskSessionState,
@@ -36,6 +37,7 @@ export type TaskLike = {
   position?: number;
   state?: TaskState;
   priority?: TaskPriority;
+  origin?: TaskOrigin | string | null;
   repositories?: Array<{
     id?: string;
     repository_id: string;
@@ -64,18 +66,25 @@ export type TaskLike = {
   /** True when a workflow step's auto_start_agent on_enter action failed to
    *  launch a run for this task. */
   auto_start_failed?: boolean;
+  /** True when this task inherits an archived parent's workspace and can no
+   *  longer materialize or start. */
+  workspace_orphaned?: boolean;
   foreground_activity?: ForegroundActivity | null;
+  parked_on_background_work?: boolean;
+  parked_revision?: number;
+  parked_epoch?: number;
   active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
+  primary_executor_profile_id?: string | null;
   primary_executor_type?: string | null;
   primary_executor_name?: string | null;
   primary_agent_name?: string | null;
   primary_agent_profile_id?: string | null;
   labels?: string | string[] | null;
-  origin?: string | null;
   is_remote_executor?: boolean;
+  is_from_office?: boolean;
   parent_id?: string | null;
   assignee_user_id?: string;
   updated_at?: string;
@@ -92,6 +101,8 @@ export type TaskLike = {
   archived_at?: string | null;
   status_summary?: TaskStatusSummary | null;
   status_summary_invalidated?: boolean;
+  runner_editable?: boolean;
+  runner_ineligible_reason?: string;
 };
 
 export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
@@ -166,6 +177,29 @@ function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] 
   return source.workspace_folders?.map((folder) => ({ ...folder }));
 }
 
+function primaryExecutorProjection(source: TaskLike) {
+  return {
+    primaryExecutorId: source.primary_executor_id ?? undefined,
+    primaryExecutorProfileId: source.primary_executor_profile_id ?? undefined,
+    primaryExecutorType: source.primary_executor_type ?? undefined,
+    primaryExecutorName: source.primary_executor_name ?? undefined,
+    isRemoteExecutor: source.is_remote_executor ?? false,
+  };
+}
+
+/**
+ * Unlike {@link primaryExecutorProjection}, an omitted value here maps to the
+ * fail-closed default rather than `undefined` — this projection must never be
+ * gap-filled from a cached task on merge (a permission-shaped flag going
+ * stale-open is worse than it going stale-closed).
+ */
+function runnerMutabilityProjection(source: TaskLike) {
+  return {
+    runnerEditable: source.runner_editable ?? false,
+    runnerIneligibleReason: source.runner_ineligible_reason ?? "evaluation_unavailable",
+  };
+}
+
 /**
  * Build a canonical {@link KanbanTask} from either an HTTP DTO or a WebSocket
  * payload. Both paths share this helper so a single publisher change can never
@@ -218,6 +252,7 @@ export function preserveOmittedExecutorFields(merged: KanbanTask, existing: Kanb
 
 export function copyPrimaryExecutorFields(merged: KanbanTask, existing: KanbanTask): void {
   merged.primaryExecutorId = existing.primaryExecutorId;
+  merged.primaryExecutorProfileId = existing.primaryExecutorProfileId;
   merged.primaryExecutorType = existing.primaryExecutorType;
   merged.primaryExecutorName = existing.primaryExecutorName;
   merged.isRemoteExecutor = existing.isRemoteExecutor;
@@ -245,6 +280,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     description: source.description ?? undefined,
     autopilot: source.autopilot,
     priority: source.priority,
+    origin: source.origin,
     position: source.position ?? 0,
     state: source.state,
     repositoryId: pickRepositoryId(source),
@@ -256,19 +292,21 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     taskPendingAction: pickPendingAction(source.task_pending_action),
     interrupted: source.interrupted,
     autoStartFailed: source.auto_start_failed,
+    workspaceOrphaned: source.workspace_orphaned,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),
+    parkedOnBackgroundWork: source.parked_on_background_work,
+    parkedRevision: source.parked_revision,
+    parkedEpoch: source.parked_epoch,
     activeSubagentCount: source.active_subagent_count ?? undefined,
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
-    primaryExecutorId: source.primary_executor_id ?? undefined,
-    primaryExecutorType: source.primary_executor_type ?? undefined,
-    primaryExecutorName: source.primary_executor_name ?? undefined,
+    ...primaryExecutorProjection(source),
+    ...runnerMutabilityProjection(source),
     primaryAgentProfileId: source.primary_agent_profile_id ?? undefined,
     primaryAgentName: source.primary_agent_name ?? undefined,
     labels: pickLabels(source),
-    origin: source.origin ?? undefined,
-    isRemoteExecutor: source.is_remote_executor ?? false,
     assigneeUserId: pickAssignee(source.assignee_user_id),
+    isFromOffice: source.is_from_office,
     parentTaskId: source.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,

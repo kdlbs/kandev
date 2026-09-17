@@ -96,15 +96,16 @@ func (s *Service) createLocked(ctx context.Context, request CreateCanvasRequest)
 		scopeKind = ScopeTask
 	}
 	metadata := CanvasMetadata{
-		ID:                 canvasID,
-		PluginInstanceID:   instanceID,
-		WorkspaceID:        request.WorkspaceID,
-		TaskID:             request.TaskID,
-		OriginTaskID:       request.OriginTaskID,
-		Title:              request.Title,
-		CreatedBySessionID: request.CreatedBySessionID,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  canvasID,
+		PluginInstanceID:    instanceID,
+		WorkspaceID:         request.WorkspaceID,
+		TaskID:              request.TaskID,
+		OriginTaskID:        request.OriginTaskID,
+		Title:               request.Title,
+		CreatedBySessionID:  request.CreatedBySessionID,
+		CreationOwnerUserID: request.OwnerUserID,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	instance := plugininstances.Instance{
 		ID:          instanceID,
@@ -378,6 +379,9 @@ func (s *Service) removeLocked(ctx context.Context, id string) (LifecycleEvent, 
 
 func (s *Service) removeAuthority(ctx context.Context, metadata CanvasMetadata, instance plugininstances.Instance) error {
 	if instance.Status == StatusRemoved {
+		if err := s.repo.DeleteInstallReceipt(ctx, metadata.ID); err != nil {
+			return err
+		}
 		err := s.repo.Delete(ctx, metadata.ID)
 		if errors.Is(err, ErrCanvasNotFound) {
 			return nil
@@ -390,10 +394,16 @@ func (s *Service) removeAuthority(ctx context.Context, metadata CanvasMetadata, 
 			if err := transactional.RemoveInstanceTx(ctx, tx, instance.ID); err != nil {
 				return err
 			}
+			if err := s.repo.DeleteInstallReceiptTx(ctx, tx, metadata.ID); err != nil {
+				return err
+			}
 			return s.repo.DeleteTx(ctx, tx, metadata.ID)
 		})
 	}
 	if err := s.instances.RemoveInstance(ctx, instance.ID); err != nil {
+		return err
+	}
+	if err := s.repo.DeleteInstallReceipt(ctx, metadata.ID); err != nil {
 		return err
 	}
 	return s.repo.Delete(ctx, metadata.ID)
@@ -576,6 +586,9 @@ func (s *Service) removeMetadataLocked(ctx context.Context, metadata CanvasMetad
 			if err := s.stateCleanup(ctx, metadata.PluginInstanceID); err != nil {
 				return LifecycleEvent{}, err
 			}
+		}
+		if err := s.repo.DeleteInstallReceipt(ctx, metadata.ID); err != nil {
+			return LifecycleEvent{}, err
 		}
 		if err := s.repo.Delete(ctx, metadata.ID); err != nil && !errors.Is(err, ErrCanvasNotFound) {
 			return LifecycleEvent{}, err
@@ -772,6 +785,7 @@ func normalizeCreateRequest(request CreateCanvasRequest) (CreateCanvasRequest, e
 	request.TaskID = strings.TrimSpace(request.TaskID)
 	request.OriginTaskID = strings.TrimSpace(request.OriginTaskID)
 	request.CreatedBySessionID = strings.TrimSpace(request.CreatedBySessionID)
+	request.OwnerUserID = strings.TrimSpace(request.OwnerUserID)
 	request.PluginID = strings.TrimSpace(request.PluginID)
 	request.Title = strings.TrimSpace(request.Title)
 	if request.PluginID == "" {

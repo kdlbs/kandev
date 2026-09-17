@@ -415,16 +415,16 @@ func TestClaimNextEligibleRun_AppendsLedgerRowOnClaim(t *testing.T) {
 	seedAgentInWorkspace(t, repo, "a1", ws, 5)
 
 	run := mustCreateRun(t, repo, &models.Run{
-		ID:             "ledger-run",
-		AgentProfileID: "a1",
-		WorkspaceID:    ws,
-		RoutineID:      routineID,
-		CausationID:    "cause-1",
-		Reason:         "task_assigned",
-		Payload:        `{}`,
-		Status:         "queued",
-		CoalescedCount: 1,
-		HumanRooted:    true,
+		ID:               "ledger-run",
+		AgentProfileID:   "a1",
+		WorkspaceID:      ws,
+		RoutineID:        routineID,
+		ChainCausationID: "cause-1",
+		Reason:           "task_assigned",
+		Payload:          `{}`,
+		Status:           "queued",
+		CoalescedCount:   1,
+		HumanRooted:      true,
 	})
 
 	if _, err := repo.ClaimNextEligibleRun(ctx); err != nil {

@@ -4,6 +4,7 @@ import { IconStar } from "@tabler/icons-react";
 import { DropdownMenuCheckboxItem } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type SavedQueryDefaultControlProps = {
   label: string;
@@ -95,8 +96,8 @@ export function SavedQueryDefaultButton({
       data-testid={testId}
       onClick={onToggle}
       className={cn(
+        controlSizingClassName("icon"),
         "flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-50",
-        "h-11 w-11",
       )}
     >
       <IconStar className={iconClassName} />

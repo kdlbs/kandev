@@ -16,7 +16,7 @@ core bundle again during the same authoring task.
 
 1. Call `create_canvas_kandev` with a short title and an application summary.
    It creates an inactive task canvas and returns its source directory,
-   manifest scaffold, permission ceiling, and exact scaffold inventory.
+   manifest scaffold, initial permission policy, and exact scaffold inventory.
 2. Use native file tools in that returned directory. The initial files are
    `manifest.yaml`, `index.html`, `appearance.js`, `script.js`, and
    `styles.css`. Replace or extend them in the same directory.
@@ -26,6 +26,13 @@ core bundle again during the same authoring task.
 4. Run local checks, then call `publish_canvas_kandev` with the returned canvas
    ID and source path. Read validation diagnostics and correct rejected source
    before publishing again.
+
+The first valid release of a new owner-created task canvas uses the returned
+initial permission policy. It can activate without a second approval for its
+declared supported task-scoped data, event, state, and exact HTTPS-origin
+permissions. A later permission increase, imported package, or workspace
+promotion still requires human review. Do not add a trust flag to the
+manifest, and do not request permissions outside the policy.
 
 ## Core application contract
 
@@ -42,14 +49,22 @@ core bundle again during the same authoring task.
   explicit and explain their result.
 - Use accessible labels, keyboard operation, visible focus, and touch targets.
 
+Kandev injects a reserved startup bootstrap into the entry document before
+authored scripts. It reports early document errors and checks the relative
+context route after document load. The host reveals the frame only after a
+versioned acknowledgement for the current attempt. A missing acknowledgement
+or context failure becomes recoverable after 15 seconds. Keep the entry valid
+HTML and render loading, empty, error, and retry states in the app.
+
 ## Minimal manifest
 
 Use the returned `manifest_scaffold` as the starting point. New manifests use
 `api_version: 2`, one lowercase web-app key, a package-relative `entry`, and at
 least one `task-canvas` or `workspace-canvas` placement. Declare only the
 `api_read`, `api_write`, `events`, `state`, and `network_origins` permissions
-that the application needs. The entry and all relative assets must be in the
-published package.
+that the application needs. The owner-authorized first release can receive
+only these supported task-scoped grants. The entry and all relative assets
+must be in the published package.
 
 ## Browser protocol summary
 
@@ -84,3 +99,25 @@ Read a supporting reference only when its topic is needed:
 - `references/events-and-recovery.md` for events, reconnect, and retries.
 - `references/security.md` for opaque-origin and source safety rules.
 - `references/ui-patterns.md` for responsive and accessible UI patterns.
+
+## Distribution checklist
+
+When the user asks for a portable canvas, keep the distribution boundary
+separate from authoring and runtime state:
+
+1. Add `distribution.schema_version: 1`, `distribution.kind: canvas`, a
+   license, and `source_mode: static` or `source_mode: project`.
+2. Keep `README.md`, the manifest, the application entry, and every local asset
+   in the package. Use project mode only when the retained project is complete
+   and bounded below `distribution/source/`.
+3. Publish a valid release before offering a bundle or source download. The
+   host prepares both archives from that immutable release and does not include
+   screenshots.
+4. Add screenshots later as ordered `previews` objects in a registry entry.
+   The first preview is the cover, canvas entries require one to eight images,
+   and plugin entries may omit images.
+
+The authoring tools do not create repositories, releases, registry entries, or
+pull requests. Report those manual follow-up steps to the user. Do not claim
+that a local archive or build is published until the Kandev release flow
+confirms it.

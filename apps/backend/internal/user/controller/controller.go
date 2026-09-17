@@ -102,6 +102,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		PreventAutoStartAgentOnOpen:       req.PreventAutoStartAgentOnOpen,
 		UnreadDivider:                     req.UnreadDivider,
 		AgentGeneratedTaskTitles:          req.AgentGeneratedTaskTitles,
+		AutoFocusNewTasks:                 req.AutoFocusNewTasks,
 		MCPTaskAgentProfileDefault:        req.MCPTaskAgentProfileDefault,
 		ShowAnchoredPromptBar:             req.ShowAnchoredPromptBar,
 		ShowScrollToLastPrompt:            req.ShowScrollToLastPrompt,
@@ -123,6 +124,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ThreadActiveViewID:                req.ThreadActiveViewID,
 		ThreadViewDraft:                   req.ThreadViewDraft.ServiceValue(),
 		SidebarTaskPrefs:                  req.SidebarTaskPrefs,
+		SidebarTaskColorAutomation:        req.SidebarTaskColorAutomation,
+		SidebarTaskColorPatch:             req.SidebarTaskColorPatch,
 		TaskCreateLastUsed:                req.TaskCreateLastUsed,
 		JiraSavedViews:                    req.JiraSavedViews.ServiceValue(),
 		JiraTaskPresets:                   req.JiraTaskPresets.ServiceValue(),
@@ -141,11 +144,15 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		LastSeenDisplay:                   req.LastSeenDisplay,
 		SystemMetricsDisplay:              systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 		AppStatusBarEnabled:               req.AppStatusBarEnabled,
+		SidebarHoverEnabled:               req.SidebarHoverEnabled,
+		SidebarHoverDelayMs:               req.SidebarHoverDelayMs,
 		ResolveSessionHostnames:           req.ResolveSessionHostnames,
 		AppStatusBarOrder:                 req.AppStatusBarOrder,
 		QuickChatTabOrderByWorkspace:      req.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               req.KanbanHiddenStepIDs,
 		WorkflowIDsWithAutoHideEmptySteps: req.WorkflowIDsWithAutoHideEmptySteps,
+		KanbanSort:                        req.KanbanSort,
+		KanbanPriorityFilterTokens:        req.KanbanPriorityFilterTokens,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

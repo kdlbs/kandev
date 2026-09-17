@@ -1,6 +1,7 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { buildStoppedBannerProps } from "./chat-input-container";
+import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 import { useComposerProps } from "./use-composer-props";
 
 function composerArgs(errorMessage: string) {
@@ -17,6 +18,7 @@ function composerArgs(errorMessage: string) {
       mcpAttachmentHistory: [],
       handlePlanModeChange: vi.fn(),
       isAgentBusy: false,
+      isWorking: false,
       supportsSteering: false,
       isStarting: false,
       isPreparingEnvironment: false,
@@ -51,6 +53,20 @@ function composerArgs(errorMessage: string) {
 }
 
 describe("stopped-session error propagation", () => {
+  it("gives the task launch card ownership of a failed session", () => {
+    expect(
+      shouldRenderStoppedSessionBanner({
+        isFailed: true,
+        isCompleted: false,
+        executorUnavailable: false,
+        launchErrorOwned: true,
+      }),
+    ).toBe(false);
+    expect(shouldHideChatInputForLaunchError({ isFailed: true, launchErrorOwned: true })).toBe(
+      true,
+    );
+  });
+
   it("threads the sanitized session error from panel state into composer props", () => {
     const errorMessage = "pods is forbidden: RBAC denied the request";
     const { result } = renderHook(() => useComposerProps(composerArgs(errorMessage)));

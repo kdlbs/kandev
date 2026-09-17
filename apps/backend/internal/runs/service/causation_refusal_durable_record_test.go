@@ -66,8 +66,8 @@ func TestQueueRun_DepthRefusalPersistsDurableCausationRefusal(t *testing.T) {
 	if entry.AgentProfileID != "agent-primary" {
 		t.Errorf("agent_profile_id = %q, want %q", entry.AgentProfileID, "agent-primary")
 	}
-	if entry.CausationID != root.CausationID {
-		t.Errorf("causation_id = %q, want %q", entry.CausationID, root.CausationID)
+	if entry.CausationID != root.ChainCausationID {
+		t.Errorf("causation_id = %q, want %q", entry.CausationID, root.ChainCausationID)
 	}
 	if entry.CausationDepth != 2 {
 		t.Errorf("causation_depth = %d, want 2 (the refusing depth)", entry.CausationDepth)

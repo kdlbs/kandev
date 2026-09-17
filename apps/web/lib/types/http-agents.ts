@@ -58,6 +58,8 @@ export type Agent = {
    */
   capability_status?: CapabilityStatus;
   capability_error?: string;
+  /** Whether this agent supports sessionless host-utility inference. */
+  inference_capable?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -328,11 +330,34 @@ export type TaskPlan = {
   implementation_started_at?: string | null;
   implementation_started_session_id?: string | null;
   implementation_started_by?: string | null;
+  comments_revision?: number;
 };
 
 export type TaskPlanResponse = {
   plan: TaskPlan | null;
 };
+
+export type TaskPlanComment = {
+  id: string;
+  task_id: string;
+  plan_id: string;
+  body: string;
+  selected_text: string;
+  anchor_from: number;
+  anchor_to: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPlanCommentSnapshot = {
+  task_id: string;
+  plan_id: string;
+  revision: number;
+  comments: TaskPlanComment[];
+};
+
+export type TaskPlanCommentRef = Pick<TaskPlanComment, "id" | "version">;
 
 /** A single anchored stop in a code walkthrough. */
 export type WalkthroughStep = {

@@ -486,22 +486,36 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 	}
 }
 
-func TestBuildEnvForExecution_FailsClosedWhenProfileSecretIsUnavailable(t *testing.T) {
+// A broken secret reference on one profile env var must not blank the agent's
+// whole launch environment: the bad var is dropped, the rest are delivered
+// (AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-004.1).
+func TestBuildEnvForExecution_DropsOnlyTheUnresolvableProfileSecretVar(t *testing.T) {
 	mgr := newTestManager(t)
-	mgr.secretStore = newInMemorySecretStore()
+	store := newInMemorySecretStore()
+	_ = store.Create(context.Background(), &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "sec-ok", Name: "ok"},
+		Value:  "revealed",
+	})
+	mgr.secretStore = store
 
-	_, err := mgr.buildEnvForExecution(
+	env, err := mgr.buildEnvForExecution(
 		context.Background(),
 		"exec-1",
 		&LaunchRequest{AgentProfileID: "profile-1"},
 		nil,
-		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{{
-			Key:      "PROFILE_TOKEN",
-			SecretID: "missing-secret",
-		}}},
+		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{
+			{Key: "GOOD_TOKEN", SecretID: "sec-ok"},
+			{Key: "BROKEN_TOKEN", SecretID: "missing-secret"},
+		}},
 	)
-	if err == nil {
-		t.Fatal("buildEnvForExecution succeeded with an unavailable profile secret")
+	if err != nil {
+		t.Fatalf("buildEnvForExecution: %v", err)
+	}
+	if env["GOOD_TOKEN"] != "revealed" {
+		t.Errorf("GOOD_TOKEN = %q, want revealed", env["GOOD_TOKEN"])
+	}
+	if _, present := env["BROKEN_TOKEN"]; present {
+		t.Errorf("BROKEN_TOKEN should have been dropped, got %q", env["BROKEN_TOKEN"])
 	}
 }
 
@@ -538,6 +552,88 @@ func TestBuildEnvForExecution_SeparatesOfficeAndExecutionProfiles(t *testing.T) 
 	}
 	if env["KANDEV_EXECUTION_PROFILE_ID"] != "claude-profile" {
 		t.Fatalf("KANDEV_EXECUTION_PROFILE_ID = %q, want claude-profile", env["KANDEV_EXECUTION_PROFILE_ID"])
+	}
+}
+
+func TestBuildEnvForExecutionHostGHBridge(t *testing.T) {
+	mgr := newTestManager(t)
+	profileInfo := &AgentProfileInfo{
+		EnvVars: []settingsmodels.ProfileEnvVar{{Key: "GH_TOKEN", Value: "late-profile-token"}},
+	}
+	req := &LaunchRequest{
+		TaskID:    "task-1",
+		SessionID: "session-1",
+		Env: map[string]string{
+			"GIT_CONFIG_COUNT":   "2",
+			"GIT_CONFIG_KEY_0":   "notes.augment.mergeStrategy",
+			"GIT_CONFIG_VALUE_0": "union",
+			"GIT_CONFIG_KEY_1":   "credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_1": "!'host tools/gh' auth git-credential",
+		},
+	}
+
+	env, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, nil, profileInfo)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution() error = %v", err)
+	}
+	if got := env["GH_TOKEN"]; got != "late-profile-token" {
+		t.Fatalf("GH_TOKEN = %q, want late profile token", got)
+	}
+	if got := env["GIT_CONFIG_COUNT"]; got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
+	}
+	if got := env["GIT_CONFIG_KEY_0"]; got != "notes.augment.mergeStrategy" || env["GIT_CONFIG_VALUE_0"] != "union" {
+		t.Fatalf("inherited Git config entry 0 = (%q, %q)", got, env["GIT_CONFIG_VALUE_0"])
+	}
+	if got := env["GIT_CONFIG_KEY_1"]; got != "credential.https://github.com.helper" || env["GIT_CONFIG_VALUE_1"] == "" {
+		t.Fatalf("host Git config entry 1 = (%q, %q)", got, env["GIT_CONFIG_VALUE_1"])
+	}
+}
+
+func TestBuildEnvForExecutionHostGHBridge_ComposesStrictProfileBlocks(t *testing.T) {
+	mgr := newTestManager(t)
+	req := &LaunchRequest{
+		TaskID:                        "task-1",
+		SessionID:                     "session-1",
+		EnvironmentResolutionRequired: true,
+		Env: map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_0": "!f() { : kandev-host-gh-bridge; gh auth git-credential \"$@\"; }; f",
+		},
+		EnvironmentDefinitions: []runtimeenv.Definition{
+			{Key: "GIT_CONFIG_COUNT", Literal: "2", Origin: runtimeenv.OriginExecutorProfile},
+			{Key: "GIT_CONFIG_KEY_0", Literal: "notes.augment.mergeStrategy", Origin: runtimeenv.OriginExecutorProfile},
+			{Key: "GIT_CONFIG_VALUE_0", Literal: "union", Origin: runtimeenv.OriginExecutorProfile},
+			{Key: "GIT_CONFIG_KEY_1", Literal: "core.hooksPath", Origin: runtimeenv.OriginExecutorProfile},
+			{Key: "GIT_CONFIG_VALUE_1", Literal: "/profile/hooks", Origin: runtimeenv.OriginExecutorProfile},
+		},
+	}
+	profileInfo := &AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{
+		{Key: "GIT_CONFIG_COUNT", Value: "1"},
+		{Key: "GIT_CONFIG_KEY_0", Value: "core.autocrlf"},
+		{Key: "GIT_CONFIG_VALUE_0", Value: "input"},
+	}}
+
+	env, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, nil, profileInfo)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution() error = %v", err)
+	}
+	if got := env["GIT_CONFIG_COUNT"]; got != "4" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 4", got)
+	}
+	wantEntries := []struct{ key, value string }{
+		{"core.autocrlf", "input"},
+		{"notes.augment.mergeStrategy", "union"},
+		{"core.hooksPath", "/profile/hooks"},
+		{"credential.https://github.com.helper", "!f() { : kandev-host-gh-bridge; gh auth git-credential \"$@\"; }; f"},
+	}
+	for index, want := range wantEntries {
+		key := env["GIT_CONFIG_KEY_"+strconv.Itoa(index)]
+		value := env["GIT_CONFIG_VALUE_"+strconv.Itoa(index)]
+		if key != want.key || value != want.value {
+			t.Errorf("Git config entry %d = (%q, %q), want (%q, %q)", index, key, value, want.key, want.value)
+		}
 	}
 }
 
@@ -858,6 +954,51 @@ func TestConfigureAndStartAgentUsesRuntimeSnapshotWhenProfileSecretIsUnavailable
 	}
 }
 
+func TestConfigureAndStartAgentSendsComposedRuntimeEnvironmentAsOverlay(t *testing.T) {
+	mgr := newTestManager(t)
+	var configuredEnv map[string]string
+	var replaced bool
+	client := newConfigureCaptureAgentctlClient(t, newTestLogger(), &configuredEnv, &replaced)
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		AgentCommand:  "npx -y @agentclientprotocol/codex-acp",
+		WorkspacePath: t.TempDir(),
+		metadata: map[string]interface{}{
+			"runtime_env": map[string]string{
+				"GIT_CONFIG_COUNT":   "1",
+				"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+				"GIT_CONFIG_VALUE_0": "!f() { : kandev-host-gh-bridge; '/new/gh' auth git-credential \"$@\"; }; f",
+			},
+		},
+		agentctl: client,
+	}
+	execution.setRuntimeEnvironment(map[string]string{
+		"GIT_CONFIG_COUNT":   "3",
+		"GIT_CONFIG_KEY_0":   "notes.augment.mergeStrategy",
+		"GIT_CONFIG_VALUE_0": "union",
+		"GIT_CONFIG_KEY_1":   "core.hooksPath",
+		"GIT_CONFIG_VALUE_1": "/user/hooks",
+		"GIT_CONFIG_KEY_2":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_2": "!f() { : kandev-host-gh-bridge; '/old/gh' auth git-credential \"$@\"; }; f",
+	})
+
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+		t.Fatalf("configureAndStartAgent() error = %v", err)
+	}
+	if replaced {
+		t.Fatal("runtime snapshot was sent through complete replacement mode, want overlay mode")
+	}
+	if configuredEnv["GIT_CONFIG_COUNT"] != "3" ||
+		configuredEnv["GIT_CONFIG_KEY_0"] != "notes.augment.mergeStrategy" ||
+		configuredEnv["GIT_CONFIG_KEY_1"] != "core.hooksPath" ||
+		configuredEnv["GIT_CONFIG_KEY_2"] != "credential.https://github.com.helper" ||
+		!strings.Contains(configuredEnv["GIT_CONFIG_VALUE_2"], "'/new/gh'") {
+		t.Fatalf("configured runtime environment = %#v, want one composed replacement block", configuredEnv)
+	}
+}
+
 func TestConfigureAndStartAgent_SendsStructuredArgv(t *testing.T) {
 	mgr := newTestManager(t)
 	var captured []string
@@ -955,13 +1096,14 @@ func TestSetExecutionEnv_DoesNotSnapshotProfileEnvVars(t *testing.T) {
 	}
 }
 
-func newConfigureCaptureAgentctlClient(t *testing.T, log *logger.Logger, captured *map[string]string) *agentctl.Client {
+func newConfigureCaptureAgentctlClient(t *testing.T, log *logger.Logger, captured *map[string]string, replaced ...*bool) *agentctl.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/agent/configure":
 			var req struct {
-				Env map[string]string `json:"env"`
+				Env        map[string]string `json:"env"`
+				ReplaceEnv bool              `json:"replace_env"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Errorf("decode configure request: %v", err)
@@ -969,6 +1111,9 @@ func newConfigureCaptureAgentctlClient(t *testing.T, log *logger.Logger, capture
 				return
 			}
 			*captured = req.Env
+			if len(replaced) > 0 && replaced[0] != nil {
+				*replaced[0] = req.ReplaceEnv
+			}
 			_, _ = w.Write([]byte(`{"success":true}`))
 		case "/api/v1/start":
 			_, _ = w.Write([]byte(`{"success":true,"command":"npx -y @agentclientprotocol/codex-acp"}`))
@@ -1532,6 +1677,31 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
 }
 
+func TestLaunch_DoesNotPromoteWorkspaceExecutionAfterSessionTerminalizes(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-terminal",
+		AgentName: "auggie",
+	}}
+	mgr.SetExecutorProfileReader(&staleLaunchAdmissionReader{})
+
+	existing := &AgentExecution{
+		ID:             "exec-terminal",
+		SessionID:      "session-terminalization-race",
+		TaskID:         "task-terminalization-race",
+		AgentProfileID: "profile-terminal",
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         existing.TaskID,
+		SessionID:      existing.SessionID,
+		AgentProfileID: existing.AgentProfileID,
+	})
+	require.ErrorIs(t, err, ErrSessionTerminal)
+	require.Empty(t, existing.AgentCommand, "terminal session must not be promoted")
+}
+
 func TestLaunch_PromotesWorkspaceOnlyExecutionAppliesMCPProviders(t *testing.T) {
 	var gotProviders []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1908,6 +2078,10 @@ type launchRegistrationGateReader struct {
 	release          chan struct{}
 }
 
+func (r *launchRegistrationGateReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	return &models.Task{ID: id}, nil
+}
+
 type launchRegistrationWriter struct {
 	upserted  chan struct{}
 	deleted   atomic.Int32
@@ -2158,6 +2332,10 @@ type staleLaunchAdmissionReader struct {
 	reads atomic.Int32
 }
 
+func (*staleLaunchAdmissionReader) GetTask(_ context.Context, id string) (*models.Task, error) {
+	return &models.Task{ID: id}, nil
+}
+
 func (r *staleLaunchAdmissionReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
 	state := models.TaskSessionStateStarting
 	if r.reads.Add(1) > 1 {
@@ -2183,7 +2361,7 @@ func TestEnsureLaunchSessionStillActiveRereadsAfterCleanupAdmission(t *testing.T
 	reader := &staleLaunchAdmissionReader{}
 	mgr.SetExecutorProfileReader(reader)
 
-	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race")
+	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race", executionAdmissionAgent)
 	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
 		t.Fatalf("ensureLaunchSessionStillActive error = %v, want terminal-session validation", err)
 	}

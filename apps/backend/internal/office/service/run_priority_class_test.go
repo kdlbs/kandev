@@ -26,7 +26,7 @@ func TestQueueRun_InlineFallbackStampsEventPriorityClass(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 

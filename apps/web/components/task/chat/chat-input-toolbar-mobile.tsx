@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { IconAt } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { ModelSelector } from "@/components/task/model-selector";
@@ -195,7 +196,9 @@ function MobileLeftActions(props: MobileLeftActionsProps) {
 }
 
 export function MobileChatInputToolbar(props: MobileToolbarProps) {
-  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
+  const [resetRequested, setResetConfirmationOpen] = useState(false);
+  const { isMobile } = useResponsiveBreakpoint();
+  const resetConfirmationOpen = resetRequested && !isMobile;
   const presentation = props.presentation ?? "mobile";
 
   return (
@@ -234,6 +237,8 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
             isAgentBusy={props.isAgentBusy}
             canCancelAgent={props.canCancelAgent}
             sessionId={props.sessionId}
+            taskId={props.taskId}
+            taskTitle={props.taskTitle}
             hasContent={props.hasContent}
             isDisabled={props.isDisabled}
             submitDisabledReason={props.submitDisabledReason}

@@ -66,6 +66,30 @@ func TestCanonicalInventoryMatches_AcceptsLegacyUnscopedRowWhenNoScopedRowsExist
 	}
 }
 
+func TestCanonicalInventoryMatches_ScopedLocalBranchSuppressesLegacyFallback(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main"}
+	rows := []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "main", WorktreeID: ""},
+		{RepositoryID: "repo-1", BranchSlug: "", WorktreeID: "worktree-legacy"},
+	}
+
+	if got := canonicalInventoryMatches(spec, rows, false); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want 1 (scoped row must suppress legacy fallback)", got)
+	}
+}
+
+func TestCanonicalInventoryMatches_ScopedRowOnOtherRepoDoesNotSuppressFallbackForThisRepo(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main"}
+	rows := []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "", WorktreeID: "worktree-legacy"},
+		{RepositoryID: "repo-2", BranchSlug: "main", WorktreeID: "worktree-scoped"},
+	}
+
+	if got := canonicalInventoryMatches(spec, rows, true); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want 1 (other repo's scoped row must not suppress repo-1 fallback)", got)
+	}
+}
+
 func TestReuseExistingEnvironment_WorktreeReuseKeepsTaskDirName(t *testing.T) {
 	repo := newMockRepository()
 	e := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -1004,7 +1028,7 @@ func TestReuseExistingEnvironment_FreshRepoRecoveryDropsContainerHandle(t *testi
 // TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys pins the guard
 // that prevents a SECOND session on the same task from inheriting the FIRST
 // session's session-scoped runtime resources — agentctl PID/port, remote
-// session dir, local forward port. Without this filter, the SSH executor's
+// session dir, local forward port, and Office agent identity. Without this filter, the SSH executor's
 // ResumeRemoteInstance would interpret those keys as a resume hint and
 // reattach to session-1's agentctl process, so session 2 would end up
 // sharing session 1's ACP session and instance port and never finish its
@@ -1032,6 +1056,7 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 			lifecycle.MetadataKeySSHRemoteAgentctlPID:  "12345",
 			lifecycle.MetadataKeySSHLocalForwardPort:   "59123",
 			lifecycle.MetadataKeySSHRemoteAgentctlURL:  "http://127.0.0.1:59123",
+			lifecycle.MetadataKeyOfficeAgentProfileID:  "reviewer",
 			// Non-persistent key — must NOT propagate (not in persistentMetadataKeys).
 			"task_description": "session 1 prompt",
 		},
@@ -1067,6 +1092,9 @@ func TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys(t *testing.T) {
 		lifecycle.MetadataKeySSHRemoteAgentctlPID,
 		lifecycle.MetadataKeySSHLocalForwardPort,
 		lifecycle.MetadataKeySSHRemoteAgentctlURL,
+		lifecycle.MetadataKeySSHRuntimeAPILocalURL,
+		lifecycle.MetadataKeySSHRuntimeAPIRemotePort,
+		lifecycle.MetadataKeyOfficeAgentProfileID,
 	}
 	for _, k := range sessionScoped {
 		if v, ok := req.Metadata[k]; ok {

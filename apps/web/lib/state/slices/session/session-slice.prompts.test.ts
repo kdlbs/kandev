@@ -174,3 +174,39 @@ it("orders prompts by microsecond creation time before using the id tie-break", 
     "later",
   ]);
 });
+
+it("advances the refresh revision for live prompt mutations", () => {
+  const store = makeStore();
+  const initialRevision = store.getState().messagePrompts.refreshGenerationBySession[SESSION] ?? 0;
+
+  store.getState().addMessage(message("live", "user"));
+  expect(store.getState().messagePrompts.refreshGenerationBySession[SESSION]).toBe(
+    initialRevision + 1,
+  );
+
+  store.getState().removeMessage(SESSION, "live");
+  expect(store.getState().messagePrompts.refreshGenerationBySession[SESSION]).toBe(
+    initialRevision + 2,
+  );
+});
+
+it("advances the refresh revision when an initial prompt load starts", () => {
+  const store = makeStore();
+  store.getState().setPromptMessagesLoading(SESSION, true);
+  const revision = store.getState().messagePrompts.refreshGenerationBySession[SESSION];
+
+  store.getState().setPromptMessagesLoading(SESSION, true);
+  expect(store.getState().messagePrompts.refreshGenerationBySession[SESSION]).toBe(revision);
+});
+
+it("invalidates refreshes for live updates outside the prompt projection", () => {
+  const store = makeStore();
+  const initialRevision = store.getState().messagePrompts.refreshGenerationBySession[SESSION] ?? 0;
+
+  store.getState().updateMessage(message("uncached", "user"));
+  store.getState().removeMessage(SESSION, "deleted-before-hydration");
+
+  expect(store.getState().messagePrompts.refreshGenerationBySession[SESSION]).toBe(
+    initialRevision + 2,
+  );
+});

@@ -34,9 +34,17 @@ type ProfileConfig struct {
 	ProfileName string               `json:"profile_name,omitempty"`
 	AgentID     string               `json:"agent_id,omitempty"`
 	AgentName   string               `json:"agent_name,omitempty"`
+	WorkspaceID string               `json:"-"`
 	Enabled     bool                 `json:"enabled"`
 	Servers     map[string]ServerDef `json:"servers"`
 	Meta        map[string]any       `json:"meta,omitempty"`
+}
+
+// ConfigPatch contains only the MCP document fields that can be changed by a
+// partial settings update. A nil pointer means that the field is preserved.
+type ConfigPatch struct {
+	Enabled *bool
+	Servers *map[string]ServerDef
 }
 
 type ResolvedServer struct {

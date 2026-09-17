@@ -1213,13 +1213,17 @@ func (s *Store) ApproveRelease(ctx context.Context, instanceID, releaseID, appro
 	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(releaseID) == "" || strings.TrimSpace(approvedBy) == "" {
 		return ErrInvalidRelease
 	}
-	s.admission.Lock()
-	defer s.admission.Unlock()
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
+	return s.WithTransaction(ctx, func(tx *sqlx.Tx) error {
+		return s.ApproveReleaseTx(ctx, tx, instanceID, releaseID, approvedBy, grants)
+	})
+}
+
+// ApproveReleaseTx applies explicit permission grants and activates a pending
+// release inside a caller-owned lifecycle transaction.
+func (s *Store) ApproveReleaseTx(ctx context.Context, tx *sqlx.Tx, instanceID, releaseID, approvedBy string, grants []Grant) error {
+	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(releaseID) == "" || strings.TrimSpace(approvedBy) == "" {
+		return ErrInvalidRelease
 	}
-	defer func() { _ = tx.Rollback() }()
 	release, err := loadPendingReleaseTx(ctx, tx, instanceID, releaseID)
 	if err != nil {
 		return err
@@ -1251,7 +1255,7 @@ func (s *Store) ApproveRelease(ctx context.Context, instanceID, releaseID, appro
 	if err := activateReleaseTx(ctx, tx, instanceID, releaseID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 type pendingReleaseRow struct {
@@ -1649,6 +1653,35 @@ func (s *Store) AddGrant(ctx context.Context, grant Grant) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// AddInitialGrantsTx inserts the exact grants delegated by a trusted local
+// canvas creation. It does not advance grant_generation because SetPluginIDTx
+// increments it before the public ActivateReleaseTx call in the same
+// activation transaction. The empty-grant case is valid.
+func (s *Store) AddInitialGrantsTx(ctx context.Context, tx *sqlx.Tx, instanceID, approvedBy string, grants []Grant) error {
+	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(approvedBy) == "" {
+		return ErrInvalidScope
+	}
+	var exists int
+	if err := tx.GetContext(ctx, &exists, tx.Rebind(
+		`SELECT COUNT(*) FROM plugin_instances WHERE id = ? AND status <> ?`,
+	), instanceID, StatusRemoved); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return ErrNotFound
+	}
+	var existing int
+	if err := tx.GetContext(ctx, &existing, tx.Rebind(
+		`SELECT COUNT(*) FROM plugin_instance_grants WHERE plugin_instance_id = ?`,
+	), instanceID); err != nil {
+		return err
+	}
+	if existing != 0 {
+		return ErrStaleCanvasPublish
+	}
+	return insertInstanceGrantsTx(ctx, tx, instanceID, approvedBy, grants)
 }
 
 func (s *Store) ListGrants(ctx context.Context, instanceID string) ([]Grant, error) {

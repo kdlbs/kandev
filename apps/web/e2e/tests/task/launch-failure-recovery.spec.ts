@@ -7,15 +7,19 @@ import {
 } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
+import { readTranscriptScrollState, setTranscriptScrollTop } from "../../helpers/transcript-scroll";
 import { SessionPage } from "../../pages/session-page";
 
 type LaunchError = {
+  scope?: "session" | "task";
   session_id?: string;
   task_repository_id?: string;
   stamp?: string;
   category?: string;
   recovery_actions?: string[];
   preview?: string;
+  details?: string;
 };
 
 async function taskLaunchError(
@@ -25,7 +29,20 @@ async function taskLaunchError(
 ): Promise<LaunchError | null> {
   const { tasks } = await apiClient.listTasks(workspaceId);
   const task = tasks.find((candidate: { id: string }) => candidate.id === taskId);
-  return (task?.status_summary?.active_error as LaunchError | null | undefined) ?? null;
+  const summary = task?.status_summary as
+    | {
+        task_error?: LaunchError | null;
+        active_error?: LaunchError | null;
+      }
+    | null
+    | undefined;
+  const legacyTaskError = summary?.active_error;
+  return (
+    summary?.task_error ??
+    (legacyTaskError && !legacyTaskError.session_id && legacyTaskError.scope !== "session"
+      ? legacyTaskError
+      : null)
+  );
 }
 
 async function waitForTaskLaunchError(
@@ -65,7 +82,9 @@ async function recoveryWorkflow(apiClient: ApiClient, workspaceId: string, name:
   const workflow = await apiClient.createWorkflow(workspaceId, name);
   const waiting = await apiClient.createWorkflowStep(workflow.id, "Waiting", 0);
   const review = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
-  const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+  const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2, {
+    complete_task_on_enter: true,
+  });
   await apiClient.updateWorkflowStep(review.id, {
     events: { on_enter: [{ type: "auto_start_agent" }] },
   });
@@ -143,12 +162,17 @@ test.describe("task launch failure recovery", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    const sharedError = testPage.getByTestId("task-shared-error");
+    await expect(sharedError).toBeVisible({ timeout: 30_000 });
+    await expect(sharedError).toContainText("The linked pull request is already closed or merged.");
+    await testPage.getByTestId("task-shared-error-details").click();
     const card = testPage.getByTestId("task-launch-error-entry");
-    await expect(card).toHaveCount(1, { timeout: 30_000 });
-    await expect(card).toContainText("The task is linked to a closed pull request.");
+    await expect(card).toHaveCount(1);
 
     await testPage.reload();
     await session.waitForLoad();
+    await expect(testPage.getByTestId("task-shared-error")).toBeVisible();
+    await testPage.getByTestId("task-shared-error-details").click();
     await expect(testPage.getByTestId("task-launch-error-entry")).toHaveCount(1);
     await testPage.getByTestId("task-launch-mark_review_done-button").click();
 
@@ -174,7 +198,6 @@ test.describe("task launch failure recovery", () => {
     backend,
   }, testInfo) => {
     test.setTimeout(150_000);
-
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
       `Missing base recovery ${Date.now()}`,
@@ -221,20 +244,29 @@ test.describe("task launch failure recovery", () => {
       expect(launchError.task_repository_id).toBe(taskRepository.id);
       expect(launchError.recovery_actions).toEqual(["retry_default", "pick_base_branch"]);
 
-      const pointerToast = testPage
-        .getByTestId("toast-message")
-        .filter({ hasText: "The task launch failed. Open the task details for recovery actions." });
-      await expect(pointerToast).toBeVisible({ timeout: 30_000 });
-      await expect(pointerToast).not.toContainText("branch-that-no-longer-exists");
+      await expect(
+        testPage.getByTestId("toast-message").filter({
+          hasText: "The task launch failed. Open the task details for recovery actions.",
+        }),
+      ).toHaveCount(0);
 
+      const sharedError = testPage.getByTestId("task-shared-error");
+      await expect(sharedError).toBeVisible({ timeout: 30_000 });
+      await testPage.getByTestId("task-shared-error-details").click();
       const card = testPage.getByTestId("task-launch-error-entry");
-      await expect(card).toHaveCount(1, { timeout: 30_000 });
+      await expect(card).toHaveCount(1);
       await expect(card).toContainText("The selected base branch is not available.");
       await expect(card).not.toContainText("branch-that-no-longer-exists");
+      await expect(testPage.getByTestId("last-agent-error-notice")).toHaveCount(0);
+      await expect(testPage.getByTestId("prepare-progress-panel")).toHaveCount(0);
+      await expect(testPage.getByTestId("missing-branch-recovery")).toHaveCount(0);
+      await expect(testPage.getByTestId("recovery-resume-button")).toHaveCount(0);
 
       restoreSeedRepositoryOrigin(seedData);
       await testPage.reload();
       await session.waitForLoad();
+      await expect(testPage.getByTestId("task-shared-error")).toBeVisible();
+      await testPage.getByTestId("task-shared-error-details").click();
       await expect(testPage.getByTestId("task-launch-error-entry")).toHaveCount(1);
 
       await testPage.getByTestId("task-launch-pick_base_branch-button").click();
@@ -343,5 +375,244 @@ test.describe("task launch failure recovery", () => {
     } finally {
       restoreSeedRepositoryOrigin(seedData);
     }
+  });
+
+  test("retains session failure after automatic recovery and output", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      `Bootstrap recovery presentation ${Date.now()}`,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("bootstrap recovery fixture has no session");
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "Waiting for bootstrap recovery fixture to settle",
+    );
+    await apiClient.seedAgentMessages(task.session_id, 40, "bootstrap history");
+
+    const failureStamp = "bootstrap-presentation-e2e";
+    const failureCreatedAt = new Date().toISOString();
+    const longDetails = Array.from(
+      { length: 12 },
+      (_, index) => `agent_bootstrap; diagnostic_line=${index + 1}; cause=permission_denied`,
+    ).join("\n");
+    await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: task.session_id,
+      agentProfileId: seedData.agentProfileId,
+      metadata: {
+        last_agent_error: {
+          message: "The agent could not start.",
+          occurred_at: failureCreatedAt,
+          agent_execution_id: "bootstrap-execution-e2e",
+          execution_id: "bootstrap-execution-e2e",
+          phase: "bootstrap",
+          attempt_id: "bootstrap-execution-e2e",
+          code: "generic_launch_failure",
+          details: longDetails,
+          scope: "session",
+          stamp: failureStamp,
+          causes: [
+            {
+              operation: "resume",
+              code: "permission_denied",
+              detail: "The required contribution access was denied.",
+            },
+          ],
+        },
+      },
+    });
+    await apiClient.seedSessionMessage(task.session_id, {
+      type: "status",
+      content: "Agent startup failed: The agent could not start.",
+      createdAt: failureCreatedAt,
+      metadata: {
+        recovery_actions: true,
+        scope: "session",
+        error_stamp: failureStamp,
+        error_output: longDetails,
+        actions: [
+          {
+            type: "ws_request",
+            label: "Resume session",
+            icon: "refresh",
+            test_id: "recovery-resume-button",
+            params: {
+              method: "session.recover",
+              payload: { task_id: task.id, session_id: task.session_id, action: "resume" },
+            },
+          },
+          {
+            type: "ws_request",
+            label: "Start fresh session",
+            icon: "player-play",
+            test_id: "recovery-fresh-button",
+            params: {
+              method: "session.recover",
+              payload: { task_id: task.id, session_id: task.session_id, action: "fresh_start" },
+            },
+          },
+        ],
+      },
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const failureText = "Agent startup failed: The agent could not start.";
+    const failureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
+    await expect(failureRows).toHaveCount(1, { timeout: 30_000 });
+    const failureRow = failureRows.first();
+    await expect(failureRow).toContainText(failureText);
+    await expect(testPage.getByTestId("task-shared-error")).toHaveCount(0);
+    const transcript = session.activeChat().locator(".chat-message-list").first();
+    await expect
+      .poll(async () => (await readTranscriptScrollState(transcript)).scrollOwnerCount)
+      .toBe(1);
+    const initialScroll = await readTranscriptScrollState(transcript);
+    expect(initialScroll.scrollHeight).toBeGreaterThan(initialScroll.clientHeight);
+    expect(initialScroll.scrollTop).toBeGreaterThan(0);
+    await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
+
+    const details = failureRow.getByText("Technical details", { exact: true });
+    await details.click();
+    const detailsPanel = failureRow.locator("details");
+    await expect(detailsPanel).toHaveAttribute("open", "");
+    await expect(detailsPanel).toContainText(
+      "agent_bootstrap; diagnostic_line=1; cause=permission_denied",
+    );
+    await expect(failureRow.getByTestId("recovery-resume-button")).toBeVisible();
+    await expect(failureRow.getByTestId("recovery-fresh-button")).toBeVisible();
+    const expandedScroll = await readTranscriptScrollState(transcript);
+    expect(expandedScroll.scrollOwnerCount).toBe(1);
+    expect(expandedScroll.scrollHeight).toBeGreaterThan(expandedScroll.clientHeight);
+    const middleScrollTop = await setTranscriptScrollTop(
+      transcript,
+      Math.floor((expandedScroll.scrollHeight - expandedScroll.clientHeight) / 2),
+    );
+    expect(middleScrollTop).toBeGreaterThan(0);
+
+    await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: task.session_id,
+      agentProfileId: seedData.agentProfileId,
+      metadata: {
+        last_agent_error: {
+          message: "The agent could not start.",
+          occurred_at: failureCreatedAt,
+          agent_execution_id: "bootstrap-execution-e2e",
+          execution_id: "bootstrap-execution-e2e",
+          phase: "bootstrap",
+          attempt_id: "bootstrap-execution-e2e",
+          code: "generic_launch_failure",
+          details: longDetails,
+          scope: "session",
+          stamp: failureStamp,
+          dismissed_at: new Date(Date.now() + 1_000).toISOString(),
+        },
+      },
+    });
+    await apiClient.seedSessionMessage(task.session_id, {
+      type: "script_execution",
+      content: "Agent resumed",
+      createdAt: new Date(Date.now() + 2_000).toISOString(),
+      metadata: {
+        script_type: "agent_boot",
+        is_resuming: true,
+        status: "exited",
+        exit_code: 0,
+      },
+    });
+    await apiClient.seedSessionMessage(task.session_id, {
+      type: "message",
+      content: "Recovered agent output",
+      createdAt: new Date(Date.now() + 3_000).toISOString(),
+    });
+    await expect(failureRow).toContainText(failureText);
+    await expect(failureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect
+      .poll(async () => (await readTranscriptScrollState(transcript)).scrollTop)
+      .toBeGreaterThanOrEqual(Math.max(0, middleScrollTop - 2));
+
+    const nextFailureStamp = "bootstrap-presentation-e2e-new";
+    const nextFailureCreatedAt = new Date(Date.now() + 4_000).toISOString();
+    await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: task.session_id,
+      agentProfileId: seedData.agentProfileId,
+      metadata: {
+        last_agent_error: {
+          message: "The agent could not start.",
+          occurred_at: nextFailureCreatedAt,
+          agent_execution_id: "bootstrap-execution-e2e-new",
+          execution_id: "bootstrap-execution-e2e-new",
+          phase: "bootstrap",
+          attempt_id: "bootstrap-execution-e2e-new",
+          code: "generic_launch_failure",
+          details: longDetails,
+          scope: "session",
+          stamp: nextFailureStamp,
+        },
+      },
+    });
+    await apiClient.seedSessionMessage(task.session_id, {
+      type: "status",
+      content: failureText,
+      createdAt: nextFailureCreatedAt,
+      metadata: {
+        recovery_actions: true,
+        scope: "session",
+        error_stamp: nextFailureStamp,
+        error_output: longDetails,
+        actions: [
+          {
+            type: "ws_request",
+            label: "Resume session",
+            icon: "refresh",
+            test_id: "recovery-resume-button",
+            params: {
+              method: "session.recover",
+              payload: { task_id: task.id, session_id: task.session_id, action: "resume" },
+            },
+          },
+        ],
+      },
+    });
+    await expect(failureRows).toHaveCount(2);
+    const currentFailureRow = failureRows.last();
+    await expect(currentFailureRow.getByTestId("recovery-resume-button")).toBeVisible();
+    await expect(failureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    const reloadedFailureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
+    await expect(reloadedFailureRows).toHaveCount(2);
+    await expect(reloadedFailureRows.first().getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(reloadedFailureRows.last().getByTestId("recovery-resume-button")).toBeVisible();
+    await assertNoDocumentHorizontalOverflow(testPage, "bootstrap recovery presentation");
+
+    await testPage.screenshot({
+      path: testInfo.outputPath("bootstrap-recovery-presentation-desktop.png"),
+      fullPage: true,
+    });
+    await prCapture.screenshot("bootstrap-recovery-card-desktop", {
+      caption: "Desktop transcript keeps recovered session failure history and current actions.",
+      fullPage: true,
+    });
   });
 });

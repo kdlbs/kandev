@@ -224,6 +224,28 @@ func TestToolArgumentValidationDoesNotExposeRejectedValues(t *testing.T) {
 	assert.NotContains(t, content.Text, secret)
 }
 
+func TestCompileToolArgumentSchemaRejectsRootCombinator(t *testing.T) {
+	for _, combinator := range []string{"oneOf", "allOf", "anyOf"} {
+		t.Run(combinator, func(t *testing.T) {
+			raw := `{"type":"object","properties":{"name":{"type":"string"}},"` +
+				combinator + `":[{"required":["name"]}]}`
+			tool := mcp.Tool{RawInputSchema: json.RawMessage(raw)}
+			schema, err := compileToolArgumentSchema("root_combinator_tool", tool)
+			assert.Error(t, err, "compileToolArgumentSchema must reject root %q", combinator)
+			assert.Nil(t, schema)
+		})
+	}
+}
+
+func TestCompileToolArgumentSchemaAcceptsNestedCombinator(t *testing.T) {
+	raw := `{"type":"object","properties":{"blocks":{"type":"object",` +
+		`"oneOf":[{"required":["a"]},{"required":["b"]}]}}}`
+	tool := mcp.Tool{RawInputSchema: json.RawMessage(raw)}
+	schema, err := compileToolArgumentSchema("nested_combinator_tool", tool)
+	require.NoError(t, err)
+	assert.NotNil(t, schema)
+}
+
 func TestAllRegisteredToolSchemasCompile(t *testing.T) {
 	for _, mode := range []string{ModeTask, ModeConfig, ModeExternal, ModeOffice} {
 		t.Run(mode, func(t *testing.T) {
@@ -239,6 +261,17 @@ func TestAllRegisteredToolSchemasCompile(t *testing.T) {
 				require.True(t, ok, "missing validator for %s", name)
 				assert.NoError(t, validator.err, "schema for %s must compile", name)
 				assert.NotNil(t, validator.schema, "schema for %s must compile", name)
+
+				raw := tools[name].Tool.RawInputSchema
+				if len(raw) == 0 {
+					continue
+				}
+				var doc map[string]any
+				require.NoError(t, json.Unmarshal(raw, &doc))
+				for _, combinator := range []string{"oneOf", "allOf", "anyOf"} {
+					assert.NotContains(t, doc, combinator,
+						"tool %s must not declare a root %q", name, combinator)
+				}
 			}
 		})
 	}

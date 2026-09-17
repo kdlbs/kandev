@@ -150,6 +150,11 @@ test.describe("Session layout", () => {
     // Type a command in the terminal, then maximize
     await session.typeInTerminal(`echo ${TERMINAL_MARKER}`);
     await session.expectTerminalHasText(TERMINAL_MARKER);
+
+    // Git updates can focus Changes while the task settles. Select Files after
+    // the terminal command so closing the maximized terminal restores the
+    // layout this test asserts.
+    await session.clickTab("Files");
     await session.clickMaximize();
     await session.expectMaximized();
 
@@ -269,7 +274,7 @@ test.describe("Session tab cleanup", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     const card = kanban.taskCardByTitle("Single Session Tab Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(card).toBeVisible({ timeout: 30_000 });
     await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 

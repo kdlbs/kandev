@@ -123,6 +123,11 @@ var startupCatalog = []CatalogEntry{
 	{Key: "agentctl.idleTimeout", EnvVars: []string{"KANDEV_ACP_IDLE_TIMEOUT"}, Owner: "agentctl", Default: "1h"},
 	{Key: "agentctl.idleReaperInterval", EnvVars: []string{"KANDEV_ACP_IDLE_REAPER_INTERVAL"}, Owner: "agentctl", Default: "1m"},
 	{Key: "agentctl.notificationQueueCapacity", EnvVars: []string{"KANDEV_ACP_NOTIF_QUEUE"}, Owner: "agentctl", Default: "131072"},
+	{Key: "agentctl.recoveryDeadline", EnvVars: []string{"KANDEV_ACP_RECOVERY_DEADLINE"}, Owner: "backend", Default: "30s"},
+	{Key: "agentctl.recoveryReadTimeout", EnvVars: []string{"KANDEV_ACP_RECOVERY_READ_TIMEOUT"}, Owner: "backend", Default: "2s"},
+	{Key: "agentctl.recoveryReadRetries", EnvVars: []string{"KANDEV_ACP_RECOVERY_READ_RETRIES"}, Owner: "backend", Default: "2"},
+	{Key: "agentctl.unownedPeriod", EnvVars: []string{"KANDEV_ACP_UNOWNED_PERIOD"}, Owner: "agentctl", Default: "10m"},
+	{Key: "agentctl.detachedEventLimit", EnvVars: []string{"KANDEV_ACP_DETACHED_EVENT_LIMIT"}, Owner: "agentctl", Default: "100"},
 	{Key: "planning.coalesceWindowMs", EnvVars: []string{"KANDEV_PLAN_COALESCE_WINDOW_MS"}, Owner: "planning", Default: "300000"},
 	{Key: "observability.otlpEndpoint", EnvVars: []string{"OTEL_EXPORTER_OTLP_ENDPOINT"}, Owner: "observability", Default: "", Sensitive: true},
 	{Key: "launcher.webPort", EnvVars: []string{"KANDEV_WEB_PORT"}, Owner: "launcher", Default: "automatic"},
@@ -138,6 +143,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_BACKEND_PID_FILE", Class: "internal wiring", Reason: "supervisor-owned process state"},
 	{EnvVar: "KANDEV_DESKTOP_HEALTH_TOKEN", Class: "generated", Reason: "per-launch health authentication token"},
 	{EnvVar: "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", Class: "internal wiring", Reason: "desktop shell capability handoff"},
+	{EnvVar: "KANDEV_DESKTOP_RUNTIME", Class: "internal wiring", Reason: "desktop shell launch-policy handoff"},
 	{EnvVar: "KANDEV_BUNDLE_DIR", Class: "packaging", Reason: "runtime bundle discovery"},
 	{EnvVar: "KANDEV_WEB_DIST_DIR", Class: "packaging", Reason: "embedded web asset override"},
 	{EnvVar: "KANDEV_TASK_ID", Class: "workspace injection", Reason: "task-owned child process context"},
@@ -155,6 +161,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", Class: "debug", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", Class: "debug", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY", Class: "debug", Reason: "runtime feature flag registry"},
+	{EnvVar: "KANDEV_FEATURES_AGENT_SURVIVAL", Class: "profile", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_DEBUG_AGENT_MESSAGES", Class: "debug", Reason: "ACP frame diagnostics"},
 	{EnvVar: "KANDEV_DEBUG_ACP_MAX_FILES", Class: "debug", Reason: "ACP debug retention"},
 	{EnvVar: "KANDEV_DEBUG_ACP_RETENTION_HOURS", Class: "debug", Reason: "ACP debug retention"},
@@ -162,6 +169,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_MCP_LOG_FILE", Class: "debug", Reason: "agentctl MCP debug logging"},
 	{EnvVar: "KANDEV_DEBUG_LOG_DIR", Class: "debug", Reason: "ACP debug logging directory"},
 	{EnvVar: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", Class: "test", Reason: "profile-selected E2E behavior"},
+	{EnvVar: "KANDEV_MAX_CONCURRENT_SESSIONS", Class: "startup only", Reason: "instance session ceiling, environment-only, resolved once at startup with no YAML setting by contract"},
 }
 
 // ConfigurationCatalog returns a defensive copy of the stable startup

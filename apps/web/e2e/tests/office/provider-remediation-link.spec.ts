@@ -11,9 +11,6 @@ test.describe("Office run-error remediation link", () => {
     const task = await apiClient.createTask(officeSeed.workspaceId, "Office remediation link", {
       workflow_id: officeSeed.workflowId,
     });
-    await apiClient.rawRequest("PATCH", `/api/v1/office/tasks/${task.id}`, {
-      assignee_agent_profile_id: officeSeed.agentId,
-    });
     await apiClient.seedTaskSession(task.id, {
       state: "FAILED",
       agentProfileId: officeSeed.agentId,
@@ -70,9 +67,6 @@ test.describe("Office run-error remediation link", () => {
     ] as const) {
       const task = await apiClient.createTask(officeSeed.workspaceId, title, {
         workflow_id: officeSeed.workflowId,
-      });
-      await apiClient.rawRequest("PATCH", `/api/v1/office/tasks/${task.id}`, {
-        assignee_agent_profile_id: officeSeed.agentId,
       });
       await apiClient.seedTaskSession(task.id, {
         state: "FAILED",

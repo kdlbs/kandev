@@ -91,6 +91,19 @@ const overview = {
       managed_container_bytes: 0,
     },
   },
+  analysis: {
+    generation: 1,
+    state: "ready",
+    started_at: "2026-07-23T11:59:00Z",
+    completed_at: "2026-07-23T12:00:00Z",
+    duration_ms: 60000,
+    cache_ttl_seconds: 900,
+    refresh_due_at: "2099-07-23T12:15:00Z",
+    stale: false,
+    error: null,
+    progress: { completed_sources: 8, total_sources: 8, sources: {} },
+    partial_summary: null,
+  },
   analyzed_at: "2026-07-23T12:00:00Z",
   last_run: null,
 } satisfies StorageOverviewResponse;
@@ -435,7 +448,7 @@ describe("StorageMaintenanceSettings pending policy", () => {
 
     fireEvent.click(screen.getByTestId("storage-resource-temporary-artifacts-trigger"));
     fireEvent.click(screen.getByTestId("storage-temporary-artifacts-clean"));
-    expect(screen.getByText("Clean stale Kandev artifacts?")).toBeTruthy();
+    expect(screen.getByText("Clean inactive Kandev temporary files?")).toBeTruthy();
     fireEvent.click(screen.getByTestId("storage-temporary-artifacts-confirm"));
     await waitFor(() =>
       expect(currentController.runNow).toHaveBeenCalledWith(["temporary_artifacts"]),

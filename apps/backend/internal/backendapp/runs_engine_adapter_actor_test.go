@@ -201,9 +201,9 @@ func TestRunsServiceEngineAdapter_QueueRunInheritsTaskCarrier(t *testing.T) {
 	if run.RoutineID != "routine-engine-1" {
 		t.Errorf("routine_id = %q, want carried routine-engine-1", run.RoutineID)
 	}
-	if run.ParentRunID != "run-engine-1" || run.CausationID != "causation-engine-1" || run.CausationDepth != 2 {
+	if run.ParentRunID != "run-engine-1" || run.ChainCausationID != "causation-engine-1" || run.CausationDepth != 2 {
 		t.Errorf("lineage = {parent=%q causation=%q depth=%d}, want carried run-engine-1/causation-engine-1/2",
-			run.ParentRunID, run.CausationID, run.CausationDepth)
+			run.ParentRunID, run.ChainCausationID, run.CausationDepth)
 	}
 	if !run.HumanRooted {
 		t.Error("human_rooted = false, want true (carried)")
@@ -241,9 +241,9 @@ func TestRunsServiceEngineAdapter_QueueRunNoCarrierRootsAsSystemActor(t *testing
 		t.Fatalf("list runs: %v (got %d)", err, len(runs))
 	}
 	run := runs[0]
-	if run.CausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
+	if run.ChainCausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
 		t.Errorf("lineage = {causation=%q parent=%q depth=%d}, want a fresh root",
-			run.CausationID, run.ParentRunID, run.CausationDepth)
+			run.ChainCausationID, run.ParentRunID, run.CausationDepth)
 	}
 }
 
@@ -291,7 +291,7 @@ func TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarr
 	})
 
 	// A run is now actually executing the task's turn.
-	if err := officeSvc.QueueRunWithActor(ctx, turnAgent.ID, "task_assigned",
+	if _, err := officeSvc.QueueRunWithActor(ctx, turnAgent.ID, "task_assigned",
 		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "turn-agent-actor", ""); err != nil {
 		t.Fatalf("queue live run: %v", err)
 	}
@@ -331,8 +331,8 @@ func TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarr
 		t.Errorf("causation_depth = %d, want %d (live run's depth + 1, not the stale forwarded 6)",
 			queued.CausationDepth, liveRun.CausationDepth+1)
 	}
-	if queued.CausationID != liveRun.CausationID {
-		t.Errorf("causation_id = %q, want the live run's %q", queued.CausationID, liveRun.CausationID)
+	if queued.ChainCausationID != liveRun.ChainCausationID {
+		t.Errorf("causation_id = %q, want the live run's %q", queued.ChainCausationID, liveRun.ChainCausationID)
 	}
 }
 
@@ -369,7 +369,7 @@ func TestRunsServiceEngineAdapter_QueueRunScopesToCausingAgentWhenTwoAgentsHoldC
 	// turnAgentA claims first, then turnAgentB claims second — an
 	// unscoped most-recently-claimed lookup would pick turnAgentB's run
 	// regardless of which agent is actually causing this queue_run.
-	if err := officeSvc.QueueRunWithActor(ctx, turnAgentA.ID, "task_assigned",
+	if _, err := officeSvc.QueueRunWithActor(ctx, turnAgentA.ID, "task_assigned",
 		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "agent-a-actor", ""); err != nil {
 		t.Fatalf("queue turnAgentA's run: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestRunsServiceEngineAdapter_QueueRunScopesToCausingAgentWhenTwoAgentsHoldC
 	if err != nil || runA == nil {
 		t.Fatalf("claim turnAgentA's run: %v (run=%v)", err, runA)
 	}
-	if err := officeSvc.QueueRunWithActor(ctx, turnAgentB.ID, "task_assigned",
+	if _, err := officeSvc.QueueRunWithActor(ctx, turnAgentB.ID, "task_assigned",
 		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "agent-b-actor", ""); err != nil {
 		t.Fatalf("queue turnAgentB's run: %v", err)
 	}

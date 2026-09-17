@@ -294,12 +294,15 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		McpProfile:                     req.McpProfile,
 		PrepareScript:                  prepareScript,
 		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
+		AllowUserNamespaces:            getMetadataString(req.Metadata, MetadataKeyAllowUserNamespaces) == boolStringTrue,
 		LocalClonePath:                 localCloneMountPath(req.Metadata),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:            req.RemoteContributions,
 		ContributionDestinations:       req.ContributionDestinations,
 		ComparisonTargets:              req.ComparisonTargets,
 		AgentctlStartupConfig:          req.AgentctlStartupConfig,
+		ProviderGatewayAuth:            req.ProviderGatewayAuth,
+		Metadata:                       req.Metadata,
 	}, nil
 }
 
@@ -371,9 +374,9 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		ContainerIP:   containerIP,
 		WorkspacePath: dockerWorkspacePath,
 		Metadata: map[string]interface{}{
-			MetadataKeyIsRemote:      true,
-			MetadataKeyContainerID:   info.ID,
-			"reuse_existing_process": conn.reusingProcess,
+			MetadataKeyIsRemote:             true,
+			MetadataKeyContainerID:          info.ID,
+			MetadataKeyReuseExistingProcess: conn.reusingProcess,
 		},
 		AuthToken: refreshedAuthToken,
 	}, nil
@@ -581,7 +584,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		ID:            instanceID,
 		WorkspacePath: dockerWorkspacePath,
 		AgentType:     agentType,
-		Env:           cloneStringMap(req.Env),
+		Env:           selectedCheckoutAgentEnv(req.Env, req.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,
@@ -599,6 +602,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		McpMode:                    req.McpMode,
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
@@ -769,7 +773,7 @@ func dockerCleanupContext(ctx context.Context, agentStopFailed bool) (context.Co
 	return ctx, func() {}
 }
 
-func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
+func (r *DockerExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	// No-op: Docker client is initialized lazily on first use.
 	// If no session has used Docker yet, there's nothing to recover.
 	// Running containers from a previous backend process will be detected
@@ -818,7 +822,7 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 	if script == "" {
 		return "", nil
 	}
-	script += KandevBranchCheckoutPostlude()
+	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
 		if err != nil {

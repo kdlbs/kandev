@@ -236,6 +236,56 @@ func TestReconcileOrphanedDynamicStartingRoutes_SweepsInFlightLaunchStates(t *te
 	}
 }
 
+// TestReconcileOrphanedDynamicStartingRoutes_SkipsWhenRoutingDisabled is the
+// regression test for the PR #3362 review follow-up (thread r3931855722):
+// profileExecutionResolver is always constructed and wired regardless of the
+// feature flag (backendapp/services.go, main.go), so the old nil-only guard
+// let this sweep run - and write action_required - even with dynamic routing
+// disabled, which is the flag's value in every shipped profile. A disabled
+// resolver's recovery action always fails
+// (LaunchDynamicRouteAction/ErrDynamicRoutingDisabled), so the resulting
+// banner could never be cleared except by a manual DB fix.
+func TestReconcileOrphanedDynamicStartingRoutes_SkipsWhenRoutingDisabled(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-orphan-sweep-disabled"
+		sessionID   = "session-dynamic-orphan-sweep-disabled"
+		executionID = "execution-dynamic-orphan-sweep-disabled"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateIdle)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+
+	seedEngine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, seedEngine, true))
+	seedClaimedDynamicRoute(t, ctx, repo, seedEngine, sessionID, executionID)
+
+	recoveryEngine := dynamicruntime.NewEngine(
+		dynamicruntime.WithPersistence(repo),
+		dynamicruntime.WithStateLoader(repo),
+	)
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, recoveryEngine, false))
+
+	svc.reconcileOrphanedDynamicStartingRoutes(ctx)
+
+	routeState, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if routeState == nil || routeState.Status != "starting" {
+		t.Fatalf("durable route state = %#v, want untouched 'starting' with routing disabled", routeState)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.RouteState != "starting" {
+		t.Fatalf("task session route_state = %q, want untouched 'starting' with routing disabled", session.RouteState)
+	}
+}
+
 // TestReconcileOrphanedDynamicStartingRoutes_PrecedesGeneralStartupReconciliation
 // is the regression test for the CodeRabbit finding on Create PR review
 // (service.go#L2580): Service.Start runs reconcileExecutorSessionsOnStartup
@@ -596,6 +646,41 @@ func TestHandleAgentProcessStartedSkipsCancelledSession(t *testing.T) {
 	}
 	if state == nil || state.Generation != decision.Generation || state.Status != "starting" {
 		t.Fatalf("route state after cancelled process start = %#v, want unchanged starting generation %d", state, decision.Generation)
+	}
+}
+
+func TestHandleAgentProcessStartedRejectsUntaggedCallbackDuringResume(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-untagged-start"
+		sessionID   = "session-dynamic-untagged-start"
+		executionID = "execution-dynamic-untagged-start"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+	attempt, owner, err := svc.beginResumeAttempt(ctx, taskID, sessionID)
+	if err != nil || !owner {
+		t.Fatalf("begin resume attempt: attempt=%v owner=%v err=%v", attempt, owner, err)
+	}
+	t.Cleanup(func() { attempt.finish(svc.resumeAttemptStore()) })
+
+	// finalizeLaunch's ordinary callback has no recovery value in its context.
+	// It must not borrow the active resume identity and settle the replacement
+	// route as if the callback belonged to that recovery attempt.
+	svc.handleAgentProcessStarted(ctx, taskID, sessionID, executionID)
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != decision.Generation || state.Status != "starting" {
+		t.Fatalf("route state after untagged callback = %#v, want unchanged starting generation %d", state, decision.Generation)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCallback } from "react";
 import type { ResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -23,6 +23,7 @@ const TASK_C = "c";
 const TASK_D = "d";
 const DETAIL_IDS = "detail-ids";
 const PRELOAD_IDS = "preload-ids";
+const MOBILE_TASK_ID = "mobile-task";
 
 class MockIntersectionObserver implements IntersectionObserver {
   readonly root: Element | Document | null = null;
@@ -85,12 +86,21 @@ function ActivationColumn({
   return <div ref={ref} data-testid={`column-${id}`} />;
 }
 
-function ActivationFixture({ ids, focusedTaskId }: { ids: string[]; focusedTaskId?: string }) {
-  const activation = useThreadColumnActivation(ids, focusedTaskId);
+function ActivationFixture({
+  ids,
+  focusedTaskId,
+  layout = "columns",
+}: {
+  ids: string[];
+  focusedTaskId?: string;
+  layout?: string;
+}) {
+  const activation = useThreadColumnActivation(ids, focusedTaskId, layout);
   return (
     <div ref={activation.boardRef} data-testid="activation-board">
       <output data-testid="preload-ids">{[...activation.preloadTaskIds].join(",")}</output>
       <output data-testid="detail-ids">{[...activation.detailTaskIds].join(",")}</output>
+      <output data-testid={MOBILE_TASK_ID}>{activation.mobileTaskId}</output>
       {ids.map((id) => (
         <ActivationColumn key={id} id={id} registerColumn={activation.registerColumn} />
       ))}
@@ -105,15 +115,200 @@ function ids(testId: string): string[] {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   observers.length = 0;
 });
 
-describe("useThreadColumnActivation", () => {
+function mobileGeometry() {
+  const board = screen.getByTestId("activation-board");
+  const a = screen.getByTestId(`column-${TASK_A}`);
+  const b = screen.getByTestId(`column-${TASK_B}`);
+  vi.spyOn(board, "getBoundingClientRect").mockReturnValue({ left: 0, right: 300 } as DOMRect);
+  const rectA = vi.spyOn(a, "getBoundingClientRect");
+  const rectB = vi.spyOn(b, "getBoundingClientRect");
+  function move(offset: number) {
+    rectA.mockReturnValue({ left: -offset, right: 300 - offset } as DOMRect);
+    rectB.mockReturnValue({ left: 300 - offset, right: 600 - offset } as DOMRect);
+    fireEvent.scroll(board);
+  }
+  return { board, a, b, move };
+}
+
+describe("phone position feedback", () => {
+  let resize: ResizeObserverCallback;
+  const disconnectResize = vi.fn();
+
   beforeEach(() => {
-    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktopBreakpoint());
+    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(mobileBreakpoint());
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
     vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect = disconnectResize;
+      },
+    );
+    disconnectResize.mockClear();
   });
+
+  function frame() {
+    act(() => vi.advanceTimersToNextFrame());
+  }
+
+  // @covers AC-UI-THREADS-DECK-003.13
+  it("updates mobile position across the midpoint without changing intersecting membership", () => {
+    render(<ActivationFixture ids={[TASK_A, TASK_B]} />);
+    const { a, b, move } = mobileGeometry();
+    move(30);
+    observers[0].instance.emit(
+      { target: a, isIntersecting: true, intersectionRatio: 0.9 },
+      { target: b, isIntersecting: true, intersectionRatio: 0.1 },
+    );
+    frame();
+    expect(ids(DETAIL_IDS)).toEqual([TASK_A]);
+
+    move(180);
+    observers[0].instance.emit(
+      { target: a, isIntersecting: true, intersectionRatio: 0.4 },
+      { target: b, isIntersecting: true, intersectionRatio: 0.6 },
+    );
+    frame();
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_B);
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B]);
+
+    move(90);
+    frame();
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_A);
+  });
+
+  it("reconciles resize, removal, and an empty deck without waiting for visibility", () => {
+    const view = render(<ActivationFixture ids={[TASK_A, TASK_B]} />);
+    const { board, move } = mobileGeometry();
+    move(180);
+    frame();
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_B);
+
+    vi.mocked(board.getBoundingClientRect).mockReturnValue({ left: 0, right: 50 } as DOMRect);
+    act(() => resize([], {} as ResizeObserver));
+    frame();
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_A);
+
+    view.rerender(<ActivationFixture ids={[TASK_B]} />);
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_B);
+    view.rerender(<ActivationFixture ids={[]} />);
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe("");
+  });
+
+  it("uses deep-link fallback before geometry is available and clears on desktop", () => {
+    const view = render(<ActivationFixture ids={[TASK_A, TASK_B]} focusedTaskId={TASK_B} />);
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe(TASK_B);
+    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktopBreakpoint());
+    view.rerender(<ActivationFixture ids={[TASK_A, TASK_B]} focusedTaskId={TASK_B} />);
+    expect(screen.getByTestId(MOBILE_TASK_ID).textContent).toBe("");
+    expect(disconnectResize).toHaveBeenCalled();
+  });
+
+  it("coalesces scroll work and cancels pending frames on unmount", () => {
+    const view = render(<ActivationFixture ids={[TASK_A, TASK_B]} />);
+    const { board, move } = mobileGeometry();
+    move(180);
+    move(190);
+    expect(vi.getTimerCount()).toBe(1);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(disconnectResize).toHaveBeenCalledTimes(1);
+    fireEvent.scroll(board);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+function observeDesktopColumns() {
+  responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktopBreakpoint());
+  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+}
+
+describe("column activation during reflow", () => {
+  beforeEach(observeDesktopColumns);
+
+  it("publishes current geometry before a replacement observer reports after reflow", () => {
+    const taskIds = [TASK_A, TASK_B, TASK_C, TASK_D];
+    const view = render(<ActivationFixture ids={taskIds} />);
+    const board = screen.getByTestId("activation-board");
+    const [a, b, c, d] = taskIds.map((id) => screen.getByTestId(`column-${id}`));
+    const oldObserver = observers.at(-1)!.instance;
+    oldObserver.emit({ target: a, isIntersecting: true }, { target: b, isIntersecting: true });
+
+    vi.spyOn(board, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 360, 612));
+    vi.spyOn(a, "getBoundingClientRect").mockReturnValue(new DOMRect(-372, 0, 360, 300));
+    vi.spyOn(b, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 360, 300));
+    vi.spyOn(c, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 312, 360, 300));
+    vi.spyOn(d, "getBoundingClientRect").mockReturnValue(new DOMRect(372, 0, 360, 300));
+    view.rerender(<ActivationFixture ids={taskIds} layout="grid:360" />);
+
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B, TASK_C]);
+    expect(ids(PRELOAD_IDS)).toEqual(taskIds);
+    oldObserver.emit({ target: a, isIntersecting: true }, { target: d, isIntersecting: true });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B, TASK_C]);
+
+    observers.at(-1)!.instance.emit({ target: b, isIntersecting: false });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_C]);
+  });
+});
+
+describe("useThreadColumnActivation", () => {
+  beforeEach(observeDesktopColumns);
+
+  // @covers AC-UI-THREADS-DECK-004.5, AC-UI-THREADS-DECK-004.6
+  it("refreshes a same-membership layout and ignores stale observer callbacks", () => {
+    const taskIds = [TASK_A, TASK_B, TASK_C, TASK_D, "e", "f"];
+    const view = render(<ActivationFixture ids={taskIds} />);
+    const oldObserver = observers.at(-1)!.instance;
+    const a = screen.getByTestId(`column-${TASK_A}`);
+    const b = screen.getByTestId(`column-${TASK_B}`);
+    oldObserver.emit({ target: a, isIntersecting: true });
+    view.rerender(<ActivationFixture ids={taskIds} layout="grid" />);
+    const gridObserver = observers.at(-1)!.instance;
+    gridObserver.emit({ target: a, isIntersecting: true }, { target: b, isIntersecting: true });
+    oldObserver.emit({ target: b, isIntersecting: false });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_A, TASK_B]);
+    expect(ids(PRELOAD_IDS)).toEqual([TASK_A, TASK_B, TASK_C]);
+    expect(gridObserver).not.toBe(oldObserver);
+  });
+
+  // @covers AC-UI-THREADS-DECK-004.5
+  it("bounds thirty grid shells to visible rows plus one adjacent task on each side", () => {
+    const taskIds = Array.from({ length: 30 }, (_, index) => `task-${index}`);
+    render(<ActivationFixture ids={taskIds} layout="grid" />);
+    const observer = observers.at(-1)!.instance;
+    const visibleIds = taskIds.slice(2, 6);
+    observer.emit(
+      ...visibleIds.map((id) => ({
+        target: screen.getByTestId(`column-${id}`),
+        isIntersecting: true,
+      })),
+    );
+    expect(ids(DETAIL_IDS)).toEqual(visibleIds);
+    expect(ids(PRELOAD_IDS)).toEqual(taskIds.slice(1, 7));
+    observer.emit(
+      ...visibleIds.map((id) => ({
+        target: screen.getByTestId(`column-${id}`),
+        isIntersecting: false,
+      })),
+      { target: screen.getByTestId("column-task-29"), isIntersecting: true },
+    );
+    expect(ids(DETAIL_IDS)).toEqual(["task-29"]);
+    expect(ids(PRELOAD_IDS)).toEqual(["task-28", "task-29"]);
+  });
+});
+
+describe("column activation windows", () => {
+  beforeEach(observeDesktopColumns);
 
   it("preloads visible columns and one neighbor while detailing every visible desktop column", () => {
     render(<ActivationFixture ids={[TASK_A, TASK_B, TASK_C, TASK_D]} />);
@@ -146,6 +341,26 @@ describe("useThreadColumnActivation", () => {
 
     expect(ids(DETAIL_IDS)).toEqual([TASK_C]);
     expect(ids(PRELOAD_IDS)).toEqual([TASK_B, TASK_C, TASK_D]);
+  });
+
+  // @covers AC-TASKS-THREADS-ACTIONS-003.5, AC-TASKS-THREADS-ACTIONS-003.6
+  it.each([
+    { change: "removal", nextIds: [TASK_A, TASK_B] },
+    { change: "readmission", nextIds: [TASK_A, TASK_B, TASK_C, TASK_D] },
+  ])("retains the surviving visible chat through $change", ({ nextIds }) => {
+    const view = render(<ActivationFixture ids={[TASK_A, TASK_B, TASK_C]} />);
+    observers[0].instance.emit({
+      target: screen.getByTestId(`column-${TASK_B}`),
+      isIntersecting: true,
+    });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B]);
+
+    view.rerender(<ActivationFixture ids={nextIds} />);
+
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B]);
+    expect(observers[0].instance.observed).toEqual(
+      new Set(nextIds.map((id) => screen.getByTestId(`column-${id}`))),
+    );
   });
 
   it("gives phone only the nearest visible snap column as detail owner", () => {

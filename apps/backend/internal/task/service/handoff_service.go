@@ -38,6 +38,8 @@ type WorkspaceGroupRepo interface {
 	AddWorkspaceGroupMember(ctx context.Context, groupID, taskID, role string) error
 	// Phase 6 surface — cascade release / restore + cleanup status updates.
 	ReleaseWorkspaceGroupMember(ctx context.Context, groupID, taskID, reason, cascadeID string) error
+	// Restore is idempotent and CAS-guarded by cascadeID; repeated restores
+	// for the same task and cascade must not create duplicate active members.
 	RestoreWorkspaceGroupMemberByCascade(ctx context.Context, taskID, cascadeID string) error
 	ListActiveWorkspaceGroupMembers(ctx context.Context, groupID string) ([]orchmodels.WorkspaceGroupMember, error)
 	// ListWorkspaceGroupMembers returns ALL members (including
@@ -102,11 +104,9 @@ type SessionWorktreeReader interface {
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	// HasExecutorRunningRow tells cleanup whether a session still has
-	// an executors_running row — i.e. an agent is (or recently was)
-	// bound to the workspace. Cleanup MUST refuse to delete a
-	// materialized workspace while any of the group's member sessions
-	// is still active, otherwise the agent's writes get destroyed
-	// out from under it (post-review #5).
+	// an executors_running row. Cleanup must refuse to delete a
+	// materialized workspace while any member session remains active,
+	// otherwise the agent's writes could be destroyed.
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 }
 
@@ -118,12 +118,30 @@ type RunCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// SynchronousRunCanceller is an optional archive/delete cascade extension.
+// Unlike the interactive cancellation contract, it waits for runtime teardown
+// before the lifecycle mutation can be undone by an unarchive.
+type SynchronousRunCanceller interface {
+	CancelTaskExecutionSynchronously(ctx context.Context, taskID, reason string, force bool) error
+}
+
 // activeTaskSessionCanceller finalizes active task sessions independently of
 // runtime teardown. The sqlite task repository implements this surface; it is
 // intentionally optional so handoff tests and legacy wiring do not need the
 // full session repository.
 type activeTaskSessionCanceller interface {
 	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
+}
+
+// activeTaskSessionReader lists sessions that still own live runtime state.
+// The concrete task repository implements this optional surface.
+type activeTaskSessionReader interface {
+	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+}
+
+// SetGitArchiveCapture wires the repository snapshotter used by ArchiveTaskTree.
+func (s *HandoffService) SetGitArchiveCapture(capture GitArchiveCapture) {
+	s.gitArchiveCapture = capture
 }
 
 // SetRunCanceller wires the run-canceller used by ArchiveTaskTree /
@@ -213,16 +231,17 @@ func (p WorkspacePolicy) NeedsAttachment() bool {
 // graph itself is the bound: only parent/children/siblings/blockers are ever
 // projected, so descriptions never leak from unrelated tasks.
 type RelatedTask struct {
-	ID            string             `json:"id"`
-	Identifier    string             `json:"identifier,omitempty"`
-	Title         string             `json:"title"`
-	Description   string             `json:"description,omitempty"`
-	State         string             `json:"state"`
-	WorkspaceID   string             `json:"workspace_id"`
-	ParentID      string             `json:"parent_id,omitempty"`
-	AssigneeLabel string             `json:"assignee_label,omitempty"`
-	DocumentKeys  []string           `json:"document_keys,omitempty"`
-	PRs           []v1.TaskPRSummary `json:"prs,omitempty"`
+	ID             string                        `json:"id"`
+	Identifier     string                        `json:"identifier,omitempty"`
+	Title          string                        `json:"title"`
+	Description    string                        `json:"description,omitempty"`
+	State          string                        `json:"state"`
+	WorkspaceID    string                        `json:"workspace_id"`
+	ParentID       string                        `json:"parent_id,omitempty"`
+	AssigneeLabel  string                        `json:"assignee_label,omitempty"`
+	DocumentKeys   []string                      `json:"document_keys,omitempty"`
+	PRs            []v1.TaskPRSummary            `json:"prs,omitempty"`
+	ChangeRequests []v1.TaskChangeRequestSummary `json:"change_requests,omitempty"`
 }
 
 // RelatedTasks bundles every relation surface for a single task.
@@ -241,22 +260,27 @@ type RelatedTasks struct {
 // than reaching into the repos directly so document writes still go
 // through DocumentService and emit the same revision/event side effects.
 type HandoffService struct {
-	tasks              repository.TaskRepository
-	docs               *DocumentService
-	docsRepo           repository.DocumentRepository
-	blockers           BlockerRepository
-	wsGroups           WorkspaceGroupRepo
-	sessions           SessionWorktreeReader
-	cleaner            WorkspaceCleaner
-	runCanceller       RunCanceller
-	eventPublisher     TaskEventPublisher
-	vacancyReconciler  VacatedStepReconciler
-	resourceCleaner    TaskResourceCleaner
-	taskAccessCheck    func(ctx context.Context, taskID string) error
-	comments           CommentReader
-	logger             *logger.Logger
-	parentLock         parentMutex
-	workspaceGroupLock parentMutex
+	tasks                  repository.TaskRepository
+	docs                   *DocumentService
+	docsRepo               repository.DocumentRepository
+	blockers               BlockerRepository
+	wsGroups               WorkspaceGroupRepo
+	sessions               SessionWorktreeReader
+	cleaner                WorkspaceCleaner
+	runCanceller           RunCanceller
+	gitArchiveCapture      GitArchiveCapture
+	eventPublisher         TaskEventPublisher
+	vacancyReconciler      VacatedStepReconciler
+	resourceCleaner        TaskResourceCleaner
+	taskAccessCheck        func(ctx context.Context, taskID string) error
+	comments               CommentReader
+	sessionCeilingReleaser SessionCeilingReleaser
+	logger                 *logger.Logger
+	parentLock             parentMutex
+	archiveCascadeLock     parentMutex
+	partialArchiveMu       sync.Mutex
+	partialArchiveIDs      map[string]string
+	workspaceGroupLock     parentMutex
 }
 
 // TaskEventPublisher abstracts the side-effect of broadcasting task
@@ -273,6 +297,13 @@ type HandoffService struct {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskDeleted(ctx context.Context, task *models.Task)
+}
+type dependencyChangePublisher interface {
+	PublishDependencyChange(context.Context, ...string)
+}
+
+type TaskDeletedEventPublisherWithExtra interface {
+	PublishTaskDeletedWithExtra(ctx context.Context, task *models.Task, extra map[string]interface{})
 }
 
 // VacatedStepReconciler backfills capacity in a workflow step after admitted
@@ -326,6 +357,13 @@ func (s *HandoffService) SetVacatedStepReconciler(r VacatedStepReconciler) {
 	s.vacancyReconciler = r
 }
 
+// SetSessionCeilingReleaser wires session-ceiling release (orchestrator) for
+// finalizeActiveSessions' bulk cancellation, which never passes through the
+// orchestrator's own persistence funnels.
+func (s *HandoffService) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
+	s.sessionCeilingReleaser = releaser
+}
+
 // TaskResourceCleaner tears down a task's runtime resources (container,
 // sandbox, worktree, executor_running rows, quick-chat dir, task_environment
 // row) AFTER the cascade has stamped the task's DB row. The cascade paths
@@ -351,6 +389,25 @@ type taskResourceCleanupCoordinator interface {
 	PrepareTaskResourceCleanup(ctx context.Context, taskID string, trigger models.TaskResourceCleanupTrigger, operationID string, deleteEnvironmentRow bool) error
 	StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
 	CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+}
+
+type taskResourceCleanupRestorer interface {
+	RestoreCancelledTaskResourceCleanup(ctx context.Context, operationID string) error
+}
+
+type taskResourceCleanupCoordinatorWithOptions interface {
+	PrepareTaskResourceCleanupWithOptions(
+		ctx context.Context,
+		taskID string,
+		trigger models.TaskResourceCleanupTrigger,
+		operationID string,
+		deleteEnvironmentRow bool,
+		discardWorktreeChanges bool,
+	) error
+}
+
+type taskDeleteWorktreeAdmissionChecker interface {
+	ValidateTaskDeleteWorktrees(ctx context.Context, taskIDs []string, discardWorktreeChanges bool) error
 }
 
 // SetTaskResourceCleaner wires the resource teardown surface invoked by
@@ -408,10 +465,11 @@ func NewHandoffService(
 		docsRepo: docsRepo,
 		blockers: blockers,
 		wsGroups: wsGroups,
-		logger:   log,
 		parentLock: parentMutex{
 			locks: make(map[string]*sync.Mutex),
 		},
+		archiveCascadeLock: parentMutex{locks: make(map[string]*sync.Mutex)},
+		partialArchiveIDs:  make(map[string]string),
 		workspaceGroupLock: parentMutex{locks: make(map[string]*sync.Mutex)},
 	}
 }

@@ -42,7 +42,7 @@ func TestTaskBoundaryCarrierMetadata_PrefersLiveClaimedRunOverStaleTaskCarrier(t
 	})
 
 	// A run is now actually executing parent-task's turn.
-	if err := svc.QueueRunWithActor(ctx, agent.ID, "task_assigned", `{"task_id":"parent-task"}`, "",
+	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "task_assigned", `{"task_id":"parent-task"}`, "",
 		models.ActorKindAgent, "agent-9", ""); err != nil {
 		t.Fatalf("queue live run: %v", err)
 	}
@@ -61,8 +61,8 @@ func TestTaskBoundaryCarrierMetadata_PrefersLiveClaimedRunOverStaleTaskCarrier(t
 		t.Errorf("causation_depth = %v, want the live run's own depth %d (not the stale forwarded 5)",
 			got["office_carrier_causation_depth"], liveRun.CausationDepth)
 	}
-	if got["office_carrier_causation_id"] != liveRun.CausationID {
-		t.Errorf("causation_id = %v, want the live run's %q", got["office_carrier_causation_id"], liveRun.CausationID)
+	if got["office_carrier_causation_id"] != liveRun.ChainCausationID {
+		t.Errorf("causation_id = %v, want the live run's %q", got["office_carrier_causation_id"], liveRun.ChainCausationID)
 	}
 }
 
@@ -91,7 +91,7 @@ func TestTaskBoundaryCarrierMetadata_ScopesToCausingAgentWhenTwoAgentsHoldClaims
 	// agentA claims first, then agentB claims second — an unscoped
 	// most-recently-claimed lookup would pick agentB's run regardless of
 	// which agent is actually causing this resolution.
-	if err := svc.QueueRunWithActor(ctx, agentA.ID, "task_assigned", `{"task_id":"shared-task"}`, "",
+	if _, err := svc.QueueRunWithActor(ctx, agentA.ID, "task_assigned", `{"task_id":"shared-task"}`, "",
 		models.ActorKindAgent, "agent-a-actor", ""); err != nil {
 		t.Fatalf("queue agentA's run: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestTaskBoundaryCarrierMetadata_ScopesToCausingAgentWhenTwoAgentsHoldClaims
 	if err != nil || runA == nil {
 		t.Fatalf("claim agentA's run: %v (run=%v)", err, runA)
 	}
-	if err := svc.QueueRunWithActor(ctx, agentB.ID, "task_assigned", `{"task_id":"shared-task"}`, "",
+	if _, err := svc.QueueRunWithActor(ctx, agentB.ID, "task_assigned", `{"task_id":"shared-task"}`, "",
 		models.ActorKindAgent, "agent-b-actor", ""); err != nil {
 		t.Fatalf("queue agentB's run: %v", err)
 	}

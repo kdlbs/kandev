@@ -21,13 +21,13 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
-	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/plugins"
 	promptmodels "github.com/kandev/kandev/internal/prompts/models"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/settingscatalog"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -81,6 +81,14 @@ type SessionCanceller interface {
 // number of clarification bundles detached while pausing.
 type ClarificationInputPauser interface {
 	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
+}
+
+// SessionCeilingReleaser releases the orchestrator's session-ceiling
+// reservation for a session that this package just moved out of the counted
+// population (STARTING/RUNNING) directly against the repository, bypassing
+// the orchestrator's own persistence funnels.
+type SessionCeilingReleaser interface {
+	ReleaseCeilingReservation(sessionID string)
 }
 
 type clarificationInputPauserWithOptions interface {
@@ -181,6 +189,9 @@ type SessionLauncher interface {
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
 	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
 	GetMessageQueue() *messagequeue.Service
+	// CheckQueueAdmissionReadiness rechecks automatic dispatch for the exact
+	// session incarnation admitted by a queue operation.
+	CheckQueueAdmissionReadiness(context.Context, messagequeue.QueueSessionIdentity)
 	// QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
 	// then interrupts the session's in-flight turn to dispatch it right
 	// away, bypassing FIFO order. Used only by queueThenInterruptTaskMessage
@@ -191,7 +202,7 @@ type SessionLauncher interface {
 	// this call actually dispatched the message immediately; callers must
 	// not report "sent" when it's false — the message is still only
 	// queued, to be delivered later by whichever drain gets to it.
-	QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error)
+	QueueAndInterruptForPeerMessage(ctx context.Context, identity messagequeue.QueueSessionIdentity, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error)
 	// RenameSession sets the user-visible session tab label and broadcasts
 	// the change. Used by spawn_session_kandev's optional name parameter.
 	RenameSession(ctx context.Context, sessionID, name string) error
@@ -218,14 +229,11 @@ type TaskTitleBranchRenamer interface {
 	RenameGeneratedBranchesForTaskTitle(ctx context.Context, taskID, sessionID, title string) (orchestrator.TitleBranchRenameResult, error)
 }
 
-// MessageQueuer queues a prompt message for delivery to a session on its next turn.
-// TakeQueued is exposed so move_task can roll back the hand-off prompt when the
-// underlying MoveTask call fails — without it, a queued "you were moved..."
-// message would survive a failed move and be delivered on the next agent turn.
+// MessageQueuer owns session-incarnation-bound move handoffs and pending moves.
 type MessageQueuer interface {
 	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
-	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove)
-	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
+	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove) error
+	RemoveEntryForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, entryID string) (*messagequeue.QueueRemovalResult, error)
 }
 
 // messageMetadataQueuer is an optional extension implemented by the
@@ -257,44 +265,47 @@ type UserSettingsProvider interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	taskSvc              *service.Service
-	workflowCtrl         *workflowctrl.Controller
-	clarificationSvc     ClarificationService
-	sessionCanceller     SessionCanceller
-	inputPauser          ClarificationInputPauser
-	messageCreator       MessageCreator
-	sessionRepo          SessionRepository
-	taskRepo             TaskRepository
-	eventBus             EventBus
-	planService          *service.PlanService
-	walkthroughService   *service.WalkthroughService
-	sessionLauncher      SessionLauncher
-	taskStopper          TaskStopper
-	titleBranchRenamer   TaskTitleBranchRenamer
-	stopTaskGetter       func(context.Context, string) (*models.Task, error)
-	messageQueue         MessageQueuer
-	promptResolver       PromptReferenceResolver
-	promptReader         PromptReader
-	userSettingsProvider UserSettingsProvider
-	logger               *logger.Logger
+	taskSvc                *service.Service
+	workflowCtrl           *workflowctrl.Controller
+	clarificationSvc       ClarificationService
+	sessionCanceller       SessionCanceller
+	inputPauser            ClarificationInputPauser
+	sessionCeilingReleaser SessionCeilingReleaser
+	messageCreator         MessageCreator
+	sessionRepo            SessionRepository
+	taskRepo               TaskRepository
+	eventBus               EventBus
+	planService            *service.PlanService
+	walkthroughService     *service.WalkthroughService
+	sessionLauncher        SessionLauncher
+	taskStopper            TaskStopper
+	titleBranchRenamer     TaskTitleBranchRenamer
+	stopTaskGetter         func(context.Context, string) (*models.Task, error)
+	messageQueue           MessageQueuer
+	promptResolver         PromptReferenceResolver
+	promptReader           PromptReader
+	userSettingsProvider   UserSettingsProvider
+	settingsRegistry       *settingscatalog.Registry
+	settingsOperations     SettingsOperations
+	logger                 *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
-	workflowSvc       *workflowsvc.Service
-	agentSettingsCtrl *agentsettingscontroller.Controller
-	mcpConfigSvc      *mcpconfig.Service
+	workflowSvc         *workflowsvc.Service
+	agentSettingsCtrl   *agentsettingscontroller.Controller
+	mcpConfigSvc        *mcpconfig.Service
+	settingsBroadcaster interface {
+		Broadcast(*ws.Message)
+	}
 
 	// Cross-task handoff service (optional, set via SetHandoffService).
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
 
-	// Office dashboard service (optional, set via SetDashboardService).
-	// Wires the record_step_decision_kandev MCP tool.
-	dashboardSvc *dashboard.DashboardService
-
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
 	taskPRLister TaskPRLister
+	taskMRLister TaskMRLister
 	// Native code review (optional, set via SetReviewService /
 	// SetReviewRunner). Without them the review actions are simply not
 	// registered — see registerReviewHandlers.
@@ -304,10 +315,14 @@ type Handlers struct {
 	canvasAuthoringSvc CanvasAuthoringService
 
 	// Optional task-bound GitHub PR automation controls.
-	taskPRAutomation       TaskPRAutomationService
-	remoteContributionSvc  RemoteContributionService
-	diagnosticBundles      DiagnosticBundleProvider
-	diagnosticMaterializer DiagnosticBundleMaterializer
+	taskPRAutomation            TaskPRAutomationService
+	taskChangeLinks             TaskChangeLinkService
+	taskChangeRequestReader     TaskChangeRequestReadService
+	taskChangeRequestAutomation TaskChangeRequestAutomationService
+	taskPRAutoFixOutcome        TaskPRAutoFixOutcomeService
+	remoteContributionSvc       RemoteContributionService
+	diagnosticBundles           DiagnosticBundleProvider
+	diagnosticMaterializer      DiagnosticBundleMaterializer
 	// Optional task-bound GitLab MR automation controls.
 	taskMRAutomation TaskMRAutomationService
 
@@ -330,6 +345,11 @@ func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context
 		h.logger.Warn("rollback workspace membership cleanup failed",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
+}
+
+// SetTaskChangeLinkService wires provider-neutral PR/MR association changes.
+func (h *Handlers) SetTaskChangeLinkService(links TaskChangeLinkService) {
+	h.taskChangeLinks = links
 }
 
 // NewHandlers creates new MCP handlers.
@@ -376,6 +396,13 @@ func NewHandlers(
 // a clarification tool call ends without delivering an answer to the agent.
 func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) {
 	h.inputPauser = pauser
+}
+
+// SetSessionCeilingReleaser wires the orchestrator-owned session-ceiling
+// release used when this package's own clarification write moves a session
+// out of the counted population.
+func (h *Handlers) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
+	h.sessionCeilingReleaser = releaser
 }
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
@@ -426,6 +453,12 @@ func (h *Handlers) SetConfigDeps(
 	h.mcpConfigSvc = mcpConfigSvc
 }
 
+// SetSettingsBroadcaster wires the notification path used by settings writes
+// that originate in legacy MCP configuration tools.
+func (h *Handlers) SetSettingsBroadcaster(broadcaster interface{ Broadcast(*ws.Message) }) {
+	h.settingsBroadcaster = broadcaster
+}
+
 // SetPluginService wires the plugin agent-tool catalog and invocation bridge.
 func (h *Handlers) SetPluginService(svc *plugins.Service) {
 	h.pluginSvc = svc
@@ -468,8 +501,12 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListWorkflowSteps, h.handleListWorkflowSteps)
 	d.RegisterFunc(ws.ActionMCPListRepositories, h.handleListRepositories)
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
+	d.RegisterFunc(ws.ActionMCPGetTaskChangeRequests, h.handleGetTaskChangeRequests)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskChangeRequestAutomation, h.handleUpdateTaskChangeRequestAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPReportPRAutoFixOutcome, h.handleReportTaskPRAutoFixOutcome)
+	d.RegisterFunc(ws.ActionMCPReportTaskChangeRequestAutoFixOutcome, h.handleReportTaskChangeRequestAutoFixOutcome)
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
@@ -482,6 +519,15 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
+	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPLinkTaskPR, h.handleLinkTaskPR)
+	d.RegisterFunc(ws.ActionMCPUnlinkTaskPR, h.handleUnlinkTaskPR)
+	d.RegisterFunc(ws.ActionMCPReplaceTaskPR, h.handleReplaceTaskPR)
+	d.RegisterFunc(ws.ActionMCPManageTaskChangeRequest, h.handleManageTaskChangeRequest)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskChangeRequestAutomation, h.handleUpdateTaskChangeRequestAutomation)
 	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)
 	d.RegisterFunc(ws.ActionMCPRemoveTaskDependency, h.handleRemoveTaskDependency)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
@@ -521,6 +567,9 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 }
 
 func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
+	if h.settingsRegistry != nil {
+		h.registerSettingsHandlers(d)
+	}
 	if h.promptReader != nil {
 		h.registerPromptHandlers(d)
 	}
@@ -545,9 +594,6 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-	}
-	if h.dashboardSvc != nil {
-		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
 	}
 	if h.taskSvc != nil {
 		h.registerTaskConfigMutationHandlers(d)
@@ -732,27 +778,7 @@ type mcpRepositoryInput struct {
 // handleCreateTask creates a new task and optionally auto-starts an agent session.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
-	var req struct {
-		ParentID               string               `json:"parent_id"`
-		SourceTaskID           string               `json:"source_task_id"`
-		SourceSessionID        string               `json:"source_session_id"`
-		WorkspaceID            string               `json:"workspace_id"`
-		WorkflowID             string               `json:"workflow_id"`
-		WorkflowStepID         string               `json:"workflow_step_id"`
-		WorkspaceMode          string               `json:"workspace_mode"`
-		Title                  string               `json:"title"`
-		Description            string               `json:"description"`
-		Autopilot              bool                 `json:"autopilot"`
-		AgentProfileID         string               `json:"agent_profile_id"`
-		ExecutorProfileID      string               `json:"executor_profile_id"`
-		StartAgent             *bool                `json:"start_agent"`               // nil means default to true for backward compatibility
-		Repositories           []mcpRepositoryInput `json:"repositories"`              // explicit repositories for top-level tasks
-		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
-		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
-		StartWhenUnblocked     *bool                `json:"start_when_unblocked"`      // nil = derive from start_agent when BlockedBy is set
-		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
-		ExternalID             string               `json:"external_id"`               // caller-supplied create-idempotency key
-	}
+	var req mcpCreateTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
@@ -765,18 +791,28 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	// Default start_agent to true for backward compatibility
 	startAgent := req.StartAgent == nil || *req.StartAgent
+	explicitWorkspaceID := req.WorkspaceID != ""
+	explicitWorkflowID := req.WorkflowID != ""
 
 	// Only require description for subtasks if we're starting an agent
 	if req.ParentID != "" && req.Description == "" && startAgent {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the task agent's initial prompt and the only context it receives to start working", nil)
 	}
+	admission, err := h.admitMCPCreateTask(ctx, &req)
+	if err != nil {
+		code := mcpCreateTaskAdmissionErrorCode(err)
+		message := mcpCreateTaskAdmissionErrorMessage(err)
+		h.logMCPCreateAdmissionRejection(ctx, code, message)
+		return ws.NewError(msg.ID, msg.Action, code, message, nil)
+	}
 
 	// Resolve repositories and default workspace/workflow from parent if needed.
-	explicitWorkspaceID := req.WorkspaceID != ""
-	explicitWorkflowID := req.WorkflowID != ""
 	resolved, err := h.resolveTaskRepositories(ctx, req.ParentID, req.SourceTaskID, req.Repositories)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	if admission.discardInheritedSourceRepositories {
+		resolved.Repos = nil
 	}
 	repos := resolved.Repos
 	// Top-level base_branch override: when the caller passes base_branch
@@ -882,8 +918,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// row — resolveMCPLaunchMetadataWithSource already validated it belongs
 	// to req.SourceTaskID above (resolveMCPCreatorSession errors out
 	// otherwise, so CreateTask is never reached with an unverified session
-	// here). Conditional: SourceSessionID is optional, so a caller that
-	// omits it falls back to the existing auth/user seam default.
+	// here). Session-bound Kanban admission fills this field from the verified
+	// principal; external callers remain source-free and use the existing
+	// auth/user attribution fallback.
 	createCtx := ctx
 	if req.SourceSessionID != "" {
 		createCtx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
@@ -923,13 +960,20 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// The MCP skip is a data-loss guard, not just an optimization: the steps
 	// below resolve remote contributions from the REQUEST (resolveMCPRemote
 	// Contributions above) but index them against the RETURNED task's
-	// repositories, and every rollback path on a mismatch calls DeleteTask.
+	// repositories, and every rollback path on a mismatch uses the lifecycle
+	// coordinator when one is wired.
 	// A retry landing on a Found outcome — the existing task, whose
 	// repository list need not match this retry's payload — would then
 	// misindex, roll back, and delete the task the caller was trying to
 	// recover. Both Found outcomes have no side effects, so skip everything
 	// below and return the existing task as-is.
 	if result.Outcome != service.CreateTaskOutcomeCreated {
+		if err := h.validateMCPFoundCreateTask(ctx, &req, result.Task); err != nil {
+			code := mcpCreateTaskAdmissionErrorCode(err)
+			message := mcpCreateTaskAdmissionErrorMessage(err)
+			h.logMCPCreateAdmissionRejection(ctx, code, message)
+			return ws.NewError(msg.ID, msg.Action, code, message, nil)
+		}
 		return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
 			TaskDTO:          dto.FromTask(result.Task),
 			Deduplicated:     true,
@@ -943,7 +987,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			continue
 		}
 		if index >= len(task.Repositories) || task.Repositories[index] == nil {
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+			if delErr := h.taskSvc.DeleteTaskWithLifecycle(ctx, task.ID); delErr != nil {
 				h.logger.Error("rollback delete failed after missing task repository",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
@@ -953,7 +997,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].RepositoryID, resolution); err != nil {
 			h.logger.Error("associate remote contribution; rolling back task creation",
 				zap.String("task_id", task.ID), zap.Error(err))
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+			if delErr := h.taskSvc.DeleteTaskWithLifecycle(ctx, task.ID); delErr != nil {
 				h.logger.Error("rollback delete failed after contribution association error",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
@@ -2314,12 +2358,14 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
 	}
 
+	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
+	boundedBlockers, blockersTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Blockers))
 	signal := models.PendingStepCompletionSignal{
 		StepID:     launchStepID,
 		Source:     models.StepCompletionSourceAgent,
 		Summary:    strings.TrimSpace(req.Summary),
-		Handoff:    strings.TrimSpace(req.Handoff),
-		Blockers:   strings.TrimSpace(req.Blockers),
+		Handoff:    boundedHandoff,
+		Blockers:   boundedBlockers,
 		SignaledAt: time.Now().UTC(),
 	}
 	stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
@@ -2351,11 +2397,23 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	response := map[string]interface{}{
 		"accepted":    true,
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
-	})
+	}
+	var truncatedFields []string
+	if handoffTruncated {
+		truncatedFields = append(truncatedFields, "handoff")
+	}
+	if blockersTruncated {
+		truncatedFields = append(truncatedFields, "blockers")
+	}
+	if len(truncatedFields) > 0 {
+		response["truncated"] = truncatedFields
+		response["truncation_limit_bytes"] = stepCompletionSignalFieldLimitBytes
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
@@ -2924,6 +2982,9 @@ const (
 	keyBaseBranch       = "base_branch"
 	keyCheckoutBranch   = "checkout_branch"
 	keyPosition         = "position"
+	keyAutoMergeEnabled = "auto_merge_enabled"
+	keySuccess          = "success"
+	keyPending          = "pending"
 )
 
 // taskMessageStatusSent is the taskMessageDispatchResult.status value used
@@ -2967,6 +3028,7 @@ type taskMessageDispatchResult struct {
 }
 
 type taskMessageReviewRollback struct {
+	taskID         string
 	changed        bool
 	restoreTask    bool
 	taskState      v1.TaskState
@@ -2979,6 +3041,8 @@ type taskMessageReviewRollback struct {
 
 type taskMessageSessionRollback struct {
 	sessionID            string
+	taskID               string
+	sessionIncarnationID string
 	state                models.TaskSessionState
 	error                string
 	completedAt          *time.Time
@@ -2990,6 +3054,7 @@ type taskMessageSessionRollback struct {
 }
 
 type taskMessageQueueRollback struct {
+	identity       messagequeue.QueueSessionIdentity
 	entries        []messagequeue.QueuedMessage
 	hadPendingMove bool
 	pendingMove    *messagequeue.PendingMove
@@ -3004,8 +3069,12 @@ type taskMessageSessionRollbackRepository interface {
 		expected models.TaskSessionState,
 	) (bool, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
-	DeleteTaskSession(ctx context.Context, id string) error
+	DeleteTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
+}
+
+type taskMessageSessionAttachmentDeleter interface {
+	DeleteTaskSessionWithAttachments(ctx context.Context, session *models.TaskSession) ([]*models.TaskMessageAttachment, error)
 }
 
 var errTaskMessageRollbackSuperseded = errors.New("task message rollback superseded by coordinator cancellation")
@@ -3046,12 +3115,21 @@ func (r *taskMessageReviewRollback) captureQueues(ctx context.Context, queue *me
 	}
 	queues := make(map[string]taskMessageQueueRollback, len(r.sessions))
 	for _, session := range r.sessions {
-		entries, move, err := queue.SnapshotSession(ctx, session.sessionID)
+		identity, err := queue.ResolveSessionIdentity(ctx, session.taskID, session.sessionID)
+		if err != nil {
+			return fmt.Errorf("resolve session queue identity: %w", err)
+		}
+		if session.sessionIncarnationID != "" &&
+			identity.SessionIncarnationID != session.sessionIncarnationID {
+			return messagequeue.ErrSessionIdentityMismatch
+		}
+		entries, move, err := queue.SnapshotSessionForIdentity(ctx, identity)
 		if err != nil {
 			return err
 		}
 		snapshot := taskMessageQueueRollback{
-			entries: cloneTaskMessageQueuedMessages(entries),
+			identity: identity,
+			entries:  cloneTaskMessageQueuedMessages(entries),
 		}
 		if move != nil {
 			snapshot.hadPendingMove = true
@@ -3078,6 +3156,8 @@ func captureTaskMessageSession(session *models.TaskSession) taskMessageSessionRo
 	}
 	snapshot := taskMessageSessionRollback{
 		sessionID:            session.ID,
+		taskID:               session.TaskID,
+		sessionIncarnationID: session.QueueIncarnationID,
 		state:                session.State,
 		error:                session.ErrorMessage,
 		completedAt:          completedAt,
@@ -3158,6 +3238,15 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 	switch session.State {
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
 		return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
+	case models.TaskSessionStateCompleted:
+		if !pinnedTarget {
+			return taskMessageDispatchResult{}, terminalSessionDispatchError(session)
+		}
+		resumed, err := h.resumeCompletedTaskMessageSession(ctx, taskID, session.ID)
+		if err != nil {
+			return taskMessageDispatchResult{}, err
+		}
+		return h.dispatchPreparedTaskMessage(ctx, taskID, resumed, prompt, metadata)
 
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		if interruptIfBusy {
@@ -3207,6 +3296,33 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		}
 		return result, err
 	}
+}
+
+// resumeCompletedTaskMessageSession admits a pinned completed target through
+// the same guarded resume path as the user-facing recovery action. The session
+// is reloaded before the message is recorded so the prompt cannot be attached
+// to a different session or to the pre-resume terminal snapshot.
+func (h *Handlers) resumeCompletedTaskMessageSession(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	_, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
+		TaskID:                      taskID,
+		SessionID:                   sessionID,
+		Intent:                      orchestrator.IntentResume,
+		AllowCompletedSessionResume: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to resume completed session: %w", err)
+	}
+	resumed, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload completed session after resume: %w", err)
+	}
+	if resumed == nil || resumed.TaskID != taskID {
+		return nil, errors.New("completed session was not available after resume")
+	}
+	if resumed.State == models.TaskSessionStateCompleted {
+		return nil, errors.New("completed session did not become ready for a follow-up message")
+	}
+	return resumed, nil
 }
 
 func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
@@ -3272,10 +3388,23 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 	if queue == nil {
 		return taskMessageDispatchResult{}, errors.New("message queue not available")
 	}
-	queued, err := queue.QueueMessageWithMetadata(ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
+	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
+	if err != nil {
+		return taskMessageDispatchResult{}, fmt.Errorf("resolve queue session identity: %w", err)
+	}
+	if session.QueueIncarnationID != "" &&
+		identity.SessionIncarnationID != session.QueueIncarnationID {
+		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
+	}
+	queued, err := queue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
+	)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
-			status := queue.GetStatus(ctx, session.ID)
+			status, statusErr := queue.Snapshot(ctx, identity)
+			if statusErr != nil {
+				return taskMessageDispatchResult{}, fmt.Errorf("read full queue status: %w", statusErr)
+			}
 			return taskMessageDispatchResult{}, &queueFullDispatchError{
 				sessionID: session.ID,
 				queueSize: status.Count,
@@ -3285,7 +3414,8 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 		}
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
-	h.publishQueueStatusEvent(ctx, session.ID, queue)
+	h.sessionLauncher.CheckQueueAdmissionReadiness(ctx, identity)
+	h.publishQueueStatusEvent(ctx, identity, queue)
 	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }
 
@@ -3324,11 +3454,25 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 // "queued" status avoids inviting that duplicate. The failure is still
 // logged server-side for operators.
 func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
-	queued, dispatched, err := h.sessionLauncher.QueueAndInterruptForPeerMessage(ctx, taskID, session.ID, prompt, metadata)
+	queue := h.sessionLauncher.GetMessageQueue()
+	if queue == nil {
+		return taskMessageDispatchResult{}, errors.New("message queue not available")
+	}
+	identity, err := queue.ResolveSessionIdentity(ctx, taskID, session.ID)
+	if err != nil {
+		return taskMessageDispatchResult{}, fmt.Errorf("resolve queue session identity: %w", err)
+	}
+	if session.QueueIncarnationID != "" &&
+		identity.SessionIncarnationID != session.QueueIncarnationID {
+		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
+	}
+	queued, dispatched, err := h.sessionLauncher.QueueAndInterruptForPeerMessage(ctx, identity, prompt, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
-			queue := h.sessionLauncher.GetMessageQueue()
-			status := queue.GetStatus(ctx, session.ID)
+			status, statusErr := queue.Snapshot(ctx, identity)
+			if statusErr != nil {
+				return taskMessageDispatchResult{}, fmt.Errorf("read full queue status: %w", statusErr)
+			}
 			return taskMessageDispatchResult{}, &queueFullDispatchError{
 				sessionID: session.ID,
 				queueSize: status.Count,
@@ -3386,6 +3530,7 @@ func (h *Handlers) ensureTaskInProgressForTaskMessage(ctx context.Context, taskI
 		return taskMessageReviewRollback{}, err
 	}
 	rollback := taskMessageReviewRollback{
+		taskID:         taskID,
 		changed:        true,
 		restoreTask:    true,
 		taskState:      task.State,
@@ -3495,18 +3640,60 @@ func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo t
 		return nil
 	}
 	selected, err := repo.GetTaskSession(ctx, rollback.selectedID)
-	if err != nil {
+	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
 		return err
 	}
 	if selected != nil && selected.State == models.TaskSessionStateCancelled {
 		return errTaskMessageRollbackSuperseded
 	}
+	taskID := rollback.taskID
+	if selected != nil && selected.TaskID != "" {
+		taskID = selected.TaskID
+	}
+	if taskID == "" {
+		if snapshot, ok := rollback.queues[rollback.selectedID]; ok {
+			for _, entry := range snapshot.entries {
+				if entry.TaskID != "" {
+					taskID = entry.TaskID
+					break
+				}
+			}
+		}
+	}
 	if primaryID != "" && rollback.selectedID != primaryID {
-		if err := h.restoreTaskMessageQueueOwner(ctx, rollback.selectedID, primaryID); err != nil {
+		if err := h.restoreTaskMessageQueueOwner(ctx, taskID, rollback.selectedID, primaryID); err != nil {
 			return err
 		}
 	}
-	return repo.DeleteTaskSession(ctx, rollback.selectedID)
+	return h.deleteTaskMessageRollbackSession(ctx, repo, selected)
+}
+
+func (h *Handlers) deleteTaskMessageRollbackSession(
+	ctx context.Context,
+	repo taskMessageSessionRollbackRepository,
+	session *models.TaskSession,
+) error {
+	if deleter, ok := repo.(taskMessageSessionAttachmentDeleter); ok {
+		attachments, err := deleter.DeleteTaskSessionWithAttachments(ctx, session)
+		if err != nil {
+			return err
+		}
+		if h.taskSvc != nil {
+			if attachmentSvc := h.taskSvc.AttachmentService(); attachmentSvc != nil {
+				attachmentSvc.RemoveBytes(attachments)
+			}
+		}
+	} else if err := repo.DeleteTaskSession(ctx, session); err != nil {
+		return err
+	}
+	if h.eventBus == nil {
+		return nil
+	}
+	return h.eventBus.Publish(ctx, events.SessionRemoved, bus.NewEvent(
+		events.SessionRemoved,
+		"mcp-handlers",
+		map[string]interface{}{"session_id": session.ID, "task_id": session.TaskID},
+	))
 }
 
 func (r taskMessageReviewRollback) primarySessionID() string {
@@ -3526,10 +3713,12 @@ func (h *Handlers) restoreTaskMessageQueues(ctx context.Context, rollback taskMe
 	if queue == nil {
 		return nil
 	}
+	restoreCtx := context.WithoutCancel(ctx)
 	for sessionID, snapshot := range rollback.queues {
-		if err := h.restoreTaskMessageQueue(ctx, queue, sessionID, snapshot); err != nil {
+		if err := h.restoreTaskMessageQueue(restoreCtx, queue, sessionID, snapshot); err != nil {
 			return err
 		}
+		h.publishQueueStatusEvent(restoreCtx, snapshot.identity, queue)
 	}
 	return nil
 }
@@ -3539,17 +3728,78 @@ func (h *Handlers) restoreTaskMessageQueue(ctx context.Context, queue *messagequ
 	if snapshot.hadPendingMove {
 		pendingMove = cloneTaskMessagePendingMove(snapshot.pendingMove)
 	}
-	return queue.RestoreSession(ctx, sessionID, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
+	return queue.RestoreSessionForIdentity(ctx, snapshot.identity, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
 }
 
-func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, selectedID, primaryID string) error {
+//nolint:cyclop // Queue-owner restoration validates two identities and rolls back attachment transfer on failure.
+func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, taskID, selectedID, primaryID string) error {
 	queue := h.sessionLauncher.GetMessageQueue()
 	if queue == nil {
 		return nil
 	}
-	return queue.TransferSession(ctx, selectedID, primaryID)
+	selected, err := h.sessionRepo.GetTaskSession(ctx, selectedID)
+	if err != nil {
+		return fmt.Errorf("load selected queue owner: %w", err)
+	}
+	if selected == nil {
+		return fmt.Errorf("load selected queue owner %q: not found", selectedID)
+	}
+	primary, err := h.sessionRepo.GetTaskSession(ctx, primaryID)
+	if err != nil {
+		return fmt.Errorf("load primary queue owner: %w", err)
+	}
+	if primary == nil {
+		return fmt.Errorf("load primary queue owner %q: not found", primaryID)
+	}
+	selectedIdentity, err := queue.ResolveSessionIdentity(ctx, selected.TaskID, selected.ID)
+	if err != nil {
+		return fmt.Errorf("resolve selected queue owner: %w", err)
+	}
+	if selected.QueueIncarnationID != "" &&
+		selectedIdentity.SessionIncarnationID != selected.QueueIncarnationID {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	primaryIdentity, err := queue.ResolveSessionIdentity(ctx, primary.TaskID, primary.ID)
+	if err != nil {
+		return fmt.Errorf("resolve primary queue owner: %w", err)
+	}
+	if primary.QueueIncarnationID != "" &&
+		primaryIdentity.SessionIncarnationID != primary.QueueIncarnationID {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	transferCtx := context.WithoutCancel(ctx)
+	transferErr := queue.TransferSessionWithDurableAttachmentPreparation(
+		transferCtx,
+		taskID,
+		selectedID,
+		primaryID,
+		func(admittedCtx context.Context, attachmentIDs []string) error {
+			if h.taskSvc == nil {
+				return errors.New("session attachment transfer service is unavailable")
+			}
+			if err := h.taskSvc.TransferSessionMessageAttachments(
+				admittedCtx, taskID, selectedID, primaryID, attachmentIDs,
+			); err != nil {
+				return fmt.Errorf("transfer session attachments: %w", err)
+			}
+			return nil
+		},
+		func(rollbackCtx context.Context, attachmentIDs []string) error {
+			if h.taskSvc == nil {
+				return errors.New("session attachment transfer service is unavailable")
+			}
+			return h.taskSvc.TransferSessionMessageAttachments(
+				rollbackCtx, taskID, primaryID, selectedID, attachmentIDs,
+			)
+		},
+	)
+	if transferErr != nil {
+		return transferErr
+	}
+	h.publishQueueStatusEvent(transferCtx, selectedIdentity, queue)
+	h.publishQueueStatusEvent(transferCtx, primaryIdentity, queue)
+	return nil
 }
-
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {
 	session, err := repo.GetTaskSession(ctx, rollback.sessionID)
 	if err != nil {
@@ -3697,22 +3947,44 @@ func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, 
 
 // publishQueueStatusEvent fires a queue.status_changed event so the frontend
 // can update the queue indicator.
-func (h *Handlers) publishQueueStatusEvent(ctx context.Context, sessionID string, queue *messagequeue.Service) {
+func (h *Handlers) publishQueueStatusEvent(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	queue *messagequeue.Service,
+) {
 	if h.eventBus == nil {
 		return
 	}
-	status := queue.GetStatus(ctx, sessionID)
+	status, err := queue.Snapshot(ctx, identity)
+	if err != nil {
+		return
+	}
+	eventData := map[string]interface{}{
+		keyTaskID:                status.TaskID,
+		keySessionID:             status.SessionID,
+		"session_incarnation_id": status.SessionIncarnationID,
+		"status_epoch":           status.StatusEpoch,
+		"status_generation":      status.StatusGeneration,
+		"entries":                status.Entries,
+		"count":                  status.Count,
+		"max":                    status.Max,
+		"auto_run":               status.AutoRun,
+		"merge_enabled":          status.MergeEnabled,
+		"auto_merge_available":   status.AutoMergeAvailable,
+	}
+	if status.AutoMergeEnabled != nil {
+		eventData[keyAutoMergeEnabled] = *status.AutoMergeEnabled
+	}
+	if status.AutoMergeSource != "" {
+		eventData["auto_merge_source"] = status.AutoMergeSource
+	}
+	if status.AutoMergeRevision != nil {
+		eventData["auto_merge_revision"] = *status.AutoMergeRevision
+	}
 	_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
 		events.MessageQueueStatusChanged,
 		"mcp-handlers",
-		map[string]interface{}{
-			"session_id":    sessionID,
-			"entries":       status.Entries,
-			"count":         status.Count,
-			"max":           status.Max,
-			"auto_run":      status.AutoRun,
-			"merge_enabled": status.MergeEnabled,
-		},
+		eventData,
 	))
 }
 
@@ -3788,10 +4060,10 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		zap.String("session_id", req.SessionID),
 		zap.String("task_id", taskID))
 
-	// Block until user responds or context is cancelled (agent MCP timeout).
-	// With MCP_TOOL_TIMEOUT set to 2h for Claude Code, this will wait long enough.
-	// If the agent times out, the entry is cleaned up and the event-based
-	// fallback in the orchestrator handles resuming with a new turn.
+	// WaitForResponse can outlast the agent client's idle watchdog because the
+	// MCP server emits progress while this call is blocked. If the agent
+	// cancels, cleanup and the event fallback resume the interaction on a new
+	// turn.
 	resp, err := h.clarificationSvc.WaitForResponse(ctx, pendingID)
 	if err != nil {
 		if h.inputPauser != nil {
@@ -4013,12 +4285,32 @@ func (h *Handlers) updateClarificationSessionState(
 	expected, state models.TaskSessionState,
 ) (bool, time.Time, error) {
 	if updater, ok := h.sessionRepo.(conditionalSessionStateUpdater); ok {
-		return updater.UpdateTaskSessionStateIfCurrent(ctx, sessionID, expected, state, "")
+		changed, updatedAt, err := updater.UpdateTaskSessionStateIfCurrent(ctx, sessionID, expected, state, "")
+		if err == nil && changed {
+			h.releaseSessionCeilingIfLeftPopulation(sessionID, expected, state)
+		}
+		return changed, updatedAt, err
 	}
 	if err := h.sessionRepo.UpdateTaskSessionState(ctx, sessionID, state, ""); err != nil {
 		return false, time.Time{}, err
 	}
+	h.releaseSessionCeilingIfLeftPopulation(sessionID, expected, state)
 	return true, time.Time{}, nil
+}
+
+// releaseSessionCeilingIfLeftPopulation is this package's half of AC-51a's
+// "mcp/handlers/handlers.go, various, SHALL release when leaving an AC-1
+// state" row: both the CAS-preferred branch and the raw fallback above count.
+func (h *Handlers) releaseSessionCeilingIfLeftPopulation(sessionID string, priorState, nextState models.TaskSessionState) {
+	if h.sessionCeilingReleaser == nil {
+		return
+	}
+	leftPopulation := priorState == models.TaskSessionStateStarting || priorState == models.TaskSessionStateRunning
+	enteredPopulation := nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning
+	if !leftPopulation || enteredPopulation {
+		return
+	}
+	h.sessionCeilingReleaser.ReleaseCeilingReservation(sessionID)
 }
 
 func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID string) (string, bool) {
@@ -4086,18 +4378,29 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 // handleUpdateTaskPlan updates an existing task plan.
+//
+// Mode validity is checked before anything else, ahead of PlanService's own
+// task-reach authorization: the tool's schema
+// already publishes the two accepted values, so rejecting an unrecognized
+// one discloses nothing about the target task. Both modes' content checks —
+// replace's "empty content" rejection and append's fragment validation — run
+// inside PlanService.UpdatePlan, after authorization, so a caller the
+// authorizer denies never learns anything about content validity for a task
+// it cannot reach.
 func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID    string `json:"task_id"`
 		Title     string `json:"title"`
 		Content   string `json:"content"`
 		CreatedBy string `json:"created_by"`
+		Mode      string `json:"mode"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.Content == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
+	mode, err := service.ParsePlanWriteMode(req.Mode)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
 	createdBy := req.CreatedBy
@@ -4110,7 +4413,8 @@ func (h *Handlers) handleUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 		Title:              req.Title,
 		Content:            req.Content,
 		CreatedBy:          createdBy,
-		EvaluateTruncation: true,
+		EvaluateTruncation: mode == service.PlanWriteModeReplace,
+		Mode:               mode,
 	})
 	if err != nil {
 		return planws.UpdateError(msg, err)

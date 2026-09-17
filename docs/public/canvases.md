@@ -17,6 +17,27 @@ An administrator can enable `features.canvases` in **Settings > System > Feature
 
 With the flag off, Kandev does not expose canvas tools, routes, events, background work, or navigation. Database migrations can still exist, but Kandev does not read or change canvas data.
 
+## Start a canvas task
+
+When canvases are enabled, open the workspace sidebar and expand **Canvases**.
+If the workspace has no active canvases, select **Set up a canvas**. Kandev
+opens the normal task form on the current page. It starts with an editable
+coordinator-view goal followed by the `@create-canvas` saved-prompt reference.
+
+Choose the agent, executor, workflow, and other task options, then select
+**Start task**. The task uses no repository by default and prefers a local
+executor. The saved-prompt reference appears as an editable chip. Select it to
+preview the current instructions, or remove only that occurrence before you
+submit.
+
+On a phone, open **Settings > Workspace > Canvases** and select **Create
+canvas**. The same full-screen task form and task options are available.
+
+The `@create-canvas` reference keeps the detailed authoring instructions out
+of the visible task description. Customize those instructions in **Settings >
+Prompts**. The task description keeps the text you submitted, while the
+reference is expanded when Kandev launches the task.
+
 ## Create a task canvas
 
 1. Open the task that owns the canvas.
@@ -48,8 +69,11 @@ The host shows canvas controls outside the app frame. The app runs in a sandboxe
 The **Releases and permissions** control is available on task and workspace
 canvas hosts. It shows each release's declared reads, writes, events, shared
 state, exact external origins, missing grants, protocol version, and safe
-source provenance. Use it to approve or reject the first task release. A task
-canvas cannot run until its pending permissions are approved.
+source provenance. A valid first release from a new owner-created task canvas
+uses its recorded initial permission policy and can activate without a second
+approval. Use the control to review legacy drafts, imported packages, and later
+permission increases. A pending release cannot run until its permissions are
+approved.
 
 The host receives canvas lifecycle notifications through WebSocket. It
 refreshes visible task, workspace, release, and direct-host projections after
@@ -57,6 +81,23 @@ creation, release activation, promotion, archive, restore, or removal. It
 tears down the old iframe before it loads a replacement runtime after an
 authority change. This also limits the lifetime of direct browser requests to
 approved external origins.
+
+The runtime response allows framing from the same Kandev origin. This supports
+custom DNS names, IP addresses, ports, and HTTPS deployments when the parent
+and runtime use the same origin. An unrelated parent, including a nested
+foreign parent, remains blocked. Local launcher and Tauri origins remain exact
+development exceptions. Kandev does not use forwarded host headers to expand
+the policy.
+
+The host mounts the runtime while it is loading and waits for a bounded startup
+acknowledgement before it reveals the app. Kandev injects a host-owned bootstrap
+before the packaged entry scripts. The bootstrap reports a document error or
+checks the relative context route after document load. The host accepts only the
+current frame, current attempt nonce, and protocol version. A frame that does
+not acknowledge within 15 seconds becomes unavailable and shows **Try again**
+and **Releases and permissions** outside the failed frame. Retry creates a new
+runtime binding and startup attempt. This check confirms document and context
+startup; it does not certify application business health.
 
 Kandev calculates effective access from the package declaration, instance grant, trusted task or workspace scope, and current caller authorization. A release receives only the intersection of those permissions. See [Security and trust](security.md#isolated-web-applications) for the security boundary.
 
@@ -82,6 +123,19 @@ If promotion adds a permission, Kandev keeps the current active release until a 
 Every published release is immutable. Kandev retains the active release, one prior valid release, and a pending release when one exists.
 
 Use the release review to inspect the manifest, source actor, declared Kandev access, and exact network origins. A release that requests no new access can replace the active release after validation. A release that requests more access stays pending and does not change the active app.
+
+The review selects the pending release first, otherwise the active release, and
+keeps that selection while retained history is available. It shows the created
+date, Active or Previous status, and readable task or session source labels
+when the current user can still access them. Deleted or inaccessible sources
+show a safe unavailable label. Permission groups appear once in plain language;
+new access is marked, unknown permission kinds cannot be approved, and exact
+HTTPS origins remain visible.
+
+On desktop the review uses a wider viewport-bounded dialog with a single
+scrolling middle region and fixed actions. On phones it becomes a full-height
+surface with a scrolling review region and fixed, touch-sized actions. Closing
+the review returns focus to its opener.
 
 Reject a pending release to keep the current app. Use rollback to select the retained prior release. Rollback does not restore grants that a user already revoked. Kandev starts a new permission review if the selected release needs access that is not currently granted.
 
@@ -121,6 +175,45 @@ Kandev records artifact cleanup before it removes release ownership. A worker co
 Kandev allows up to 100 workspace canvas instances across scopes. Archived canvases count toward instance and storage limits. A workspace can retain up to 2 GiB of canvas artifacts. One Kandev installation can retain up to 10 GiB.
 
 On desktop, workspace canvases use the workspace Canvases area. On phones, Kandev opens a full-height canvas route and keeps canvas controls in an inset bottom drawer.
+
+## Share and install a canvas
+
+Canvas sharing is manual and release-bound. It does not capture screenshots or
+publish a repository. Screenshots belong to a marketplace registry entry, not
+to the canvas package.
+
+1. Open the canvas host or the workspace canvas list.
+2. Choose **Share canvas**.
+3. Review the active release, package identity, file inventory, and archive
+   sizes.
+4. Choose **Prepare downloads**, then download the bundle or source archive.
+5. Check the downloaded files for private content before sharing them.
+
+The bundle is an installable `.tar.gz`. The source download is a ZIP of the
+retained project when the release uses project source mode. The preparation is
+temporary and expires after 15 minutes. A release change, lost authorization,
+expiry, or cancellation requires a new preparation. Kandev does not change the
+running canvas while it prepares these files.
+
+Recipients can install a bundle from **Settings > Plugins > Canvases** by
+uploading the file or entering an HTTPS direct link. A registry entry provides
+an additional catalog path. Kandev fetches and inspects the exact package,
+shows its manifest and permissions, and requires an explicit confirmation
+before it creates an independent workspace canvas. A registry preview is only
+listing metadata. It does not grant permissions and it is not executed during
+review.
+
+Canvas registry entries use the same ordered `previews` field as plugin
+entries. A canvas entry must contain one to eight objects with an HTTPS `url`
+and non-empty `alt` text. The first object is the cover image. Plugin entries
+may omit `previews` or include up to eight images. Use **Preview images** in the
+catalog to move between images and retry a failed image.
+
+The official registry uses a manually reviewed pull request. Authors publish a
+versioned bundle as a release asset, add the repository and preview URLs to
+`plugin-registry/plugins.yaml`, and wait for the registry workflow to inspect
+the exact asset. Team registries can host an `index.json` with the same shape.
+Direct file and direct-link sharing does not require registry admission.
 
 ## Related guides
 

@@ -215,7 +215,25 @@ Kandev owns generated resource names, namespace, `restartPolicy: Always`, Linux 
 | `kandev-auth` | `/run/kandev` | Memory-backed auth environment and runtime home |
 | `kandev-workspace` | `/workspace` | Selected `emptyDir`, managed PVC, or existing claim |
 
-The template cannot set the main container's command, args, or working directory; use reserved volume names or mount paths; use container port 8765 or the `kandev-agentctl` port name; or define `HOME`, `AGENTCTL_*`, or `KANDEV_*` environment keys. It also cannot set Pod name/namespace/UID, owner references, finalizers, restart policy, node name, OS, or Linux OS/architecture selectors. Kandev defaults `automountServiceAccountToken: false` only when the template leaves it unset.
+The template cannot set the main container's command, args, or working directory; use reserved volume names or mount paths except the explicit companion workspace grant below; use container port 8765 or the `kandev-agentctl` port name; or define `HOME`, `AGENTCTL_*`, or `KANDEV_*` environment keys. It also cannot set Pod name/namespace/UID, owner references, finalizers, restart policy, node name, OS, or Linux OS/architecture selectors. Kandev defaults `automountServiceAccountToken: false` only when the template leaves it unset.
+
+An ordinary non-main container may explicitly mount `kandev-workspace` once at
+exactly `/workspace`, with `readOnly: true` or `false`. Kandev still defines the
+volume from the profile's storage policy. Do not define that volume in the
+template. Subpaths, subpath expressions, propagation, recursive mount options,
+redirected paths, devices and overlapping mounts are rejected. Init and ephemeral
+containers cannot receive this grant. Runtime and auth mounts remain private to
+the main container.
+
+In PVC modes, a second volume cannot reference the workspace claim under another
+name. This is checked during composition and admission, including aliases mounted
+outside `/workspace`. Unrelated PVC mounts remain allowed.
+
+Admission must preserve each grant on the same named container exactly once;
+added, removed, transferred or changed grants fail before bootstrap. Replacement
+Pods use the recorded launch template and claim identity, even after profile edits.
+A writable companion can change repository contents. This grant does not provide
+a security boundary against a privileged container.
 
 Every Kandev-created Pod and managed PVC has this complete custom identity:
 
@@ -259,6 +277,62 @@ A custom image does not need `agentctl`; Kandev injects the platform-matched hel
 
 The effective runtime user must be able to write `/opt/kandev`, `/run/kandev/home`, and `/workspace`. Configure a compatible image user and volume ownership, or set an appropriate Pod `fsGroup` and verify the CSI driver's behavior. If an agent install uses npm globals, point its prefix and `PATH` at a writable location rather than assuming `/usr/local` or an image-specific home is writable. A read-only root filesystem can work only if the template and image leave every non-volume path used by installed tooling writable elsewhere. Test agent installation, Git clone, npm global installation, a terminal, and the repository's real build before promoting the image.
 
+### Use prepared worker image recipes
+
+The repository includes copyable worker image recipes in
+[`k8s/worker-images`](../../k8s/worker-images/README.md) and strict PodTemplate
+examples in [`k8s/presets`](../../k8s/presets/). They are inputs to the existing
+Kubernetes executor. They do not create Pods or start sessions by themselves.
+Kandev still injects `agentctl`, the launch command, credentials, runtime files,
+and the selected workspace mount.
+
+The recipes provide these starting targets:
+
+| Target | Extra runtime |
+|---|---|
+| `minimal` | Published Kandev base tools, Node, npm, Python, venv, and Git |
+| `node-pnpm` | The pinned pnpm version in `k8s/worker-images/pins.env` |
+| `python` | The published base Python and venv support |
+
+Build and smoke-test them with the pinned base image:
+
+~~~bash
+bash scripts/test-kubernetes-worker-images.sh --check
+bash scripts/test-kubernetes-worker-images.sh --smoke --platform linux/amd64
+~~~
+
+The current recipe and Kind lifecycle evidence covers Linux `amd64` and the
+Kubernetes version named in the experimental matrix. It does not establish
+support for another architecture or cluster version. Build and push a selected
+target to an operator-controlled registry, then replace the preset image marker
+with that image's immutable digest. Keep `imagePullPolicy` appropriate for the
+registry. The local `imagePullPolicy: Never` and image tags used by Kind tests
+are fixture-only values.
+
+The examples use UID 1000, writable `/workspace` paths for npm and Python
+artifacts, no service-account token automount, dropped capabilities, and no
+privilege escalation. Review resource requests, Pod Security admission, storage
+ownership, registry access, and repository tool requirements before use.
+
+### Opt in to a full worker with Docker
+
+The [full worker recipe](../../k8s/worker-images/full/README.md) adds pinned
+source/browser tooling and an explicit per-Pod privileged Docker daemon. It
+requires the companion workspace-grant implementation. Existing presets do not
+change. The main agent remains non-root and connects over a Pod-local Unix
+socket; Docker data is disposable. Use the supplied complete prepare script
+so daemon readiness precedes clone/setup/agent installation and caches are
+created only after clone.
+
+The agent controls a privileged root daemon through the socket; its non-root
+container security context does not contain Docker commands. Schedule these
+Pods only on a worker node pool isolated from trusted workloads.
+
+Ordinary Stop retains companion compute. Only `/workspace` is shared for nested
+bind mounts; agent-only HOME/temp paths and full Docker-executor parity are not
+covered. Review the recipe's recorded test evidence and runtime limitations
+before use. No production deployment or universal cgroup compatibility is implied.
+
 ### Choose workspace storage
 
 | Mode | Profile fields | Lifecycle |
@@ -285,6 +359,53 @@ Archive/delete terminal cleanup and explicit force cleanup are destructive. Befo
 Kandev blocks deleting an executor, or changing an executor into or out of Kubernetes, while runtime inventory still refers to it. Finish normal session cleanup first. Profile deletion does not rewrite or destroy a retained workload because recovery owns the recorded profile ID and snapshot.
 
 Do not manually delete by name or label alone. If manual incident cleanup is unavoidable, compare the Kandev runtime inventory with namespace, name, UID, and all ownership labels first, preserve required workspace data, and record the out-of-band action.
+
+### Read retained resource status
+
+The **Active sessions** card shows the sanitized session inventory for the
+selected executor. It includes sessions that Kandev can resume after ordinary
+Stop, not only sessions whose agent process is currently running. The card
+shows separate session state, Pod state, retention state, workspace mode, and
+main-container CPU and memory requests.
+
+Desktop rows use two status lines. The first line shows session and retention
+badges. The second line shows Pod phase and main-container state. Use the row
+disclosure to see the full labeled details. Phone cards show the same facts in
+a compact group and keep the full card as the task link.
+
+`active` means the recorded session is in an active lifecycle state.
+`retained` means the verified Pending or Running Pod remains after a stopped,
+completed, failed, or idle session. `terminating`, `terminal`, `missing`, and
+`unknown` describe other verified or incomplete observations. These labels do
+not prove agent connectivity, process activity, actual CPU or memory use, or
+cost. Requests describe only the main container. They exclude sidecars and
+Pod-wide resources.
+
+Use **Stop** when the session must remain resumable. Archive or Delete can
+remove a Kandev-managed Pod and workspace during terminal cleanup. An
+operator-owned `existing_claim` is never deleted by Kandev. Refresh the card
+after a lifecycle change because session and Pod observations can change
+independently.
+
+### Inspect Kubernetes launch timings
+
+Kandev writes bounded Info-level records for fresh Kubernetes environment
+creation. Set `KANDEV_LOG_LEVEL=info` when starting the backend, then inspect
+the active backend log under `KANDEV_HOME_DIR/logs/backend-logs.log` or the
+configured container log sink.
+
+The `kubernetes.launch.stage` record reports one of `storage`, `pod_ready`,
+`bootstrap`, or `agentctl_connect`. The `kubernetes.launch.completed` record
+reports the total environment-call duration. Both records include an opaque
+attempt ID, task/session/instance IDs, `mode: fresh`, `duration_ms`, and an
+outcome of `success`, `error`, `canceled`, or `timeout`. A failed stage or
+finalization site is included when known.
+
+The total covers fresh environment creation and its rollback. It does not
+measure queue wait, instance-lock wait, client construction, credential
+persistence, or agent-process startup. Reconnect and replacement paths do not
+emit fresh-start records. Logs never include raw requests, scripts, errors,
+tokens, nonces, or credentials.
 
 ## Persistence and filesystem permissions
 
@@ -405,7 +526,7 @@ The universal image already runs as `kandev`; use `kubectl exec -it deployment/k
 
 The example requests 250 millicores and 512 MiB, with limits of 2 CPU and 2 GiB. Those are placeholders, not capacity recommendations. Local/Worktree agents share the pod limit with the control plane and can exceed it during builds. Measure workload memory, CPU, ephemeral storage, PVC growth, and process counts; then set requests/limits accordingly.
 
-The example liveness probe calls `/health`; the example readiness probe calls `/ready`. `/health` returns 200 as soon as the TCP listener accepts connections, before startup finishes: it confirms the process is alive, not that it can serve real traffic, so gating liveness on it never restarts a pod that is merely still starting up. `/ready` returns 503 until routes are wired, the agent registry is seeded, and (in e2e builds) the mock-harness routes are mounted, then 200. Neither is a deep check of database, repository, Docker, provider, or agent health.
+The example liveness probe calls `/health`; the example readiness probe calls `/ready`. `/health` returns 200 as soon as the TCP listener accepts connections, before startup finishes: it confirms the process is alive, not that it can serve real traffic, so gating liveness on it never restarts a pod that is merely still starting up. `/ready` returns 503 until routes are wired, the agent registry is seeded, and (in e2e builds) the mock-harness routes are mounted, then 200. While it returns 503, its `startup` object identifies the current database, migration, service, or recovery phase and reports elapsed time without estimating completion. Neither is a deep check of database, repository, Docker, provider, or agent health.
 
 Long migrations or slow storage may need a startup probe to prevent premature liveness restarts:
 

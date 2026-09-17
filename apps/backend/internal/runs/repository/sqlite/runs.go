@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -42,17 +43,20 @@ func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *models.R
 			idempotency_key, context_snapshot, capabilities, input_snapshot,
 			output_summary, failure_reason, session_id, retry_count, scheduled_retry_at,
 			requested_at, error_message, cancel_reason, continuation_scope,
-			causation_id, parent_run_id, causation_depth, priority_class,
-			human_rooted, routine_id, actor_kind, actor_id, workspace_id
+			chain_causation_id, parent_run_id, causation_depth, priority_class,
+			human_rooted, routine_id, actor_kind, actor_id, workspace_id,
+			wake_wave_key, wake_wave_string, causation_id
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?, ?, ?)
+			?, ?, ?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?)
 	`), req.ID, req.AgentProfileID, req.Reason, req.Payload, req.Status,
 		req.CoalescedCount, req.IdempotencyKey, req.ContextSnapshot,
 		req.Capabilities, req.InputSnapshot, req.OutputSummary, req.FailureReason,
 		req.SessionID, req.RetryCount, req.ScheduledRetryAt, req.RequestedAt,
 		req.ErrorMessage, req.CancelReason, req.ContinuationScope,
-		req.CausationID, req.ParentRunID, req.CausationDepth, req.PriorityClass,
-		dialect.BoolToInt(req.HumanRooted), req.RoutineID, string(req.ActorKind), req.ActorID, req.WorkspaceID)
+		req.ChainCausationID, req.ParentRunID, req.CausationDepth, req.PriorityClass,
+		dialect.BoolToInt(req.HumanRooted), req.RoutineID, string(req.ActorKind), req.ActorID, req.WorkspaceID,
+		req.WakeWaveKey, req.WakeWaveString, req.CausationID)
 	return err
 }
 
@@ -106,6 +110,35 @@ func (r *Repository) UpdateRunRuntimeSnapshot(
 		WHERE id = ?
 	`), capabilities, inputSnapshot, sessionID, id)
 	return err
+}
+
+// SetRunSessionID persists the session id a launch produced. A no-op
+// when sessionID is empty — the caller counts that as a without-session
+// launch rather than clobbering whatever the column already held.
+// Guarded to status = 'claimed' so a launch that loses a race against a
+// concurrent cancel or terminal write cannot mutate an already-terminal
+// row's session id after the fact: without the guard, a terminal-shape
+// classification already recorded off the empty session id would drift
+// from what the row shows on a later read. Returns whether the row was
+// still claimed so the caller can distinguish a real write from a
+// stale run id or a lost race.
+func (r *Repository) SetRunSessionID(
+	ctx context.Context, runID, sessionID string,
+) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs SET session_id = ? WHERE id = ? AND status = 'claimed'
+	`), sessionID, runID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // UpdateRunPromptArtifacts persists the assembled prompt the agent
@@ -194,12 +227,32 @@ func (r *Repository) ClaimRun(ctx context.Context, agentInstanceID string) (*mod
 // outcome from a different transition. outcome is nil for the failed path
 // and for callers with no established semantic label (docs/specs/
 // task-delivery-ledger/spec.md, "Office run outcome").
-func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) error {
+// FinishRun writes the terminal status/outcome and returns the row as it
+// stands immediately after that write, via the same statement (RETURNING),
+// so a caller classifying the transition (office_loop_terminal_total) never
+// depends on a separate read succeeding independently of the write that
+// persisted it. Guarded to status = 'claimed', the same status every caller
+// reaches this from (ClaimNextEligibleRun then processRun/an event
+// subscriber): without the guard, a cancel that commits between the
+// caller's read and this write would have its 'cancelled' status and
+// finished_at overwritten by this transition. Returns (nil, nil) for an
+// unknown id or a run no longer claimed (already terminal by another
+// writer): zero rows changed, so there is nothing to classify.
+func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *string) (*models.Run, error) {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE runs SET status = ?, outcome = ?, finished_at = ? WHERE id = ?
-	`), status, outcome, now, id)
-	return err
+	var run models.Run
+	err := r.db.QueryRowxContext(ctx, r.db.Rebind(`
+		UPDATE runs SET status = ?, outcome = ?, finished_at = ?
+		WHERE id = ? AND status = 'claimed'
+		RETURNING *
+	`), status, outcome, now, id).StructScan(&run)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
 }
 
 // GetRunByID returns the run row for a given ID. Returns sql.ErrNoRows when unknown.
@@ -526,16 +579,34 @@ func coalesceRun(
 	}, driverName, agentInstanceID, reason string, windowSecs int, payload string,
 ) (bool, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(windowSecs) * time.Second)
-	taskID := taskIDFromPayload(payload)
-	taskPredicate := ""
+	taskID, invalidTaskID := taskIDFromPayload(payload)
 	args := []interface{}{payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix + "%"}
-	// Assignment wakes are task-specific: merging two tasks for the same
-	// agent would replace the first task's payload and silently drop its
-	// launch. Other reasons, such as task comments, intentionally retain
-	// their existing cross-task coalescing behaviour.
-	if taskID != "" && reason == "task_assigned" {
-		taskPredicate = fmt.Sprintf(" AND %s = ?", dialect.JSONExtract(driverName, "payload", "task_id"))
+	// A payload's task_id identifies which launch it belongs to: merging
+	// across two different task_ids (present or absent) would replace one
+	// launch's payload with an unrelated one and silently drop it. The
+	// check is symmetric so both directions are covered. json_extract (and
+	// its Postgres ->> equivalent) yields NULL for both an absent key and
+	// an explicit JSON null, and '' for a present-but-empty string, so the
+	// taskless branch coalesces all three shapes together via COALESCE.
+	jsonExtract := dialect.JSONExtract(driverName, "payload", "task_id")
+	var taskPredicate string
+	switch {
+	case invalidTaskID:
+		// task_id is present but not a string (e.g. a number): it names a
+		// task we can't compare textually, so it must not be treated as
+		// taskless and must not match any queued row at all.
+		taskPredicate = " AND 1 = 0"
+	case taskID != "":
+		// The stored value must itself be a JSON string, not merely equal
+		// as text: Postgres's ->> converts a stored JSON number (or
+		// object) to text before the comparison, so an untyped payload
+		// with e.g. {"task_id":42} could otherwise textually match an
+		// incoming {"task_id":"42"} and get overwritten.
+		taskPredicate = fmt.Sprintf(" AND %s AND %s = ?",
+			dialect.JSONTypeIsString(driverName, "payload", "task_id"), jsonExtract)
 		args = append(args, taskID)
+	default:
+		taskPredicate = fmt.Sprintf(" AND COALESCE(%s, '') = ''", jsonExtract)
 	}
 	query := fmt.Sprintf(`
 		UPDATE runs
@@ -545,6 +616,7 @@ func coalesceRun(
 			WHERE agent_profile_id = ? AND reason = ? AND status = 'queued'
 			  AND requested_at > ?
 			  AND (idempotency_key IS NULL OR idempotency_key NOT LIKE ?)
+			  AND wake_wave_key = ''
 			%s
 			ORDER BY requested_at DESC
 			LIMIT 1
@@ -561,13 +633,25 @@ func coalesceRun(
 	return rows > 0, nil
 }
 
-func taskIDFromPayload(payload string) string {
+// taskIDFromPayload extracts payload.task_id for CoalesceRun's task-scoping
+// predicate. invalidTaskID is true only when the key is present with a
+// non-string value: that shape names some task_id, just not one comparable
+// as a string, so it must be kept out of the taskless bucket (an absent key,
+// a JSON null, or a present empty string all return "", invalidTaskID=false).
+func taskIDFromPayload(payload string) (taskID string, invalidTaskID bool) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
-		return ""
+		return "", false
 	}
-	taskID, _ := raw["task_id"].(string)
-	return taskID
+	v, present := raw["task_id"]
+	if !present || v == nil {
+		return "", false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", true
+	}
+	return s, false
 }
 
 // ClaimNextEligibleRun is implemented in claim.go, which also holds

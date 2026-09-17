@@ -192,7 +192,8 @@ test.describe("Sidebar filter — view ordering", () => {
 
     await filters.selectViewByName("Beta View");
     await filters.open();
-    await filters.deleteActiveView();
+    await filters.beginDeleteActiveView("Beta View");
+    await filters.confirmDeleteActiveView("Beta View");
     await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View"]);
     // Deleting the active view falls back to the first remaining view.
     await filters.expectActiveViewChip("All tasks");
@@ -302,6 +303,7 @@ test.describe("Sidebar filter — group + sort", () => {
   test("Group by none hides group headers", async ({ testPage, apiClient, seedData }) => {
     const { session, filters } = await openWithSeed(testPage, apiClient, seedData, ["One", "Two"]);
     await filters.open();
+    await filters.openGroupSettings();
     await filters.popover.getByTestId("group-key-select").click();
     for (const { label, description } of [
       { label: "None", description: "Keep all tasks in one list." },
@@ -333,6 +335,7 @@ test.describe("Sidebar filter — group + sort", () => {
   test("Sort direction toggle flips icon direction", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Sort A"]);
     await filters.open();
+    await filters.openSortSettings();
     const toggle = filters.popover.getByTestId("sort-direction-toggle");
     const initial = await toggle.getAttribute("data-direction");
     await toggle.click();
@@ -364,6 +367,7 @@ test.describe("Sidebar filter — group + sort", () => {
     await session.waitForLoad();
     const filters = new SidebarFilterPopoverPage(testPage);
     await filters.open();
+    await filters.openSortSettings();
     await filters.popover.getByTestId("sort-key-select").click();
     await expect(testPage.getByRole("option", { name: "Updated", exact: true })).toContainText(
       "Last task summary refresh. Background events can change it.",
@@ -500,11 +504,15 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     const renameInput = await filters.beginNewView();
     await expect(renameInput).toHaveValue("New view");
     await expect(filters.popover.getByTestId("filter-clause-row")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("sort-key-select")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("group-key-select")).toHaveCount(0);
+    await filters.openSortSettings();
     await expect(filters.popover.getByTestId("sort-key-select")).toContainText("Status");
     await expect(filters.popover.getByTestId("sort-direction-toggle")).toHaveAttribute(
       "data-direction",
       "asc",
     );
+    await filters.openGroupSettings();
     await expect(filters.popover.getByTestId("group-key-select")).toContainText("Repository");
 
     await renameInput.fill("Planning view");
@@ -622,6 +630,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Delete View Task"]);
     await filters.addFilterRow();
@@ -631,7 +640,31 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await filters.expectActiveViewChip("Ephemeral");
 
     await filters.open();
-    await filters.deleteActiveView();
+    await filters.beginDeleteActiveView("Ephemeral");
+    await expect(filters.popover).toBeVisible();
+    if (prCapture.capturing) {
+      await filters.deleteConfirmation.evaluate(async (element) => {
+        await Promise.all(
+          element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+        );
+      });
+    }
+    await prCapture.screenshot("saved-task-view-delete-desktop", {
+      caption: "Desktop saved task view deletion names the target before removing filters.",
+    });
+    await filters.cancelDeleteActiveView();
+    await expect(filters.popover.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "Ephemeral",
+    );
+    const settingsAfterCancel = await apiClient.getUserSettings();
+    expect(
+      (settingsAfterCancel.settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
+        (view) => view.name === "Ephemeral",
+      ),
+    ).toBe(true);
+
+    await filters.beginDeleteActiveView("Ephemeral");
+    await filters.confirmDeleteActiveView("Ephemeral");
     await filters.close();
     await filters.openViewPicker();
     await expect(

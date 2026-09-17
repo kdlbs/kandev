@@ -25,4 +25,10 @@ var (
 	// included (AC-OFFICE-LAUNCH-SAFETY-004.3). Caller-correctable: the
 	// caller should retry with a registry member.
 	ErrInvalidWakeReason = fmt.Errorf("reason must be a member of the declared wake-reason registry")
+	// ErrReasonTooLong is returned when SpawnAgentRunInput.Reason exceeds
+	// maxSpawnAgentRunReasonLength. Reason is agent-supplied and becomes a
+	// label on the process-global office_run_dedup_total /
+	// office_run_dedup_keyless_total expvar maps, which never evict entries;
+	// an unbounded value lets a caller grow those maps without limit.
+	ErrReasonTooLong = fmt.Errorf("reason exceeds max length of %d characters", maxSpawnAgentRunReasonLength)
 )

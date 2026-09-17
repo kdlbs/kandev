@@ -1,9 +1,13 @@
 package service
 
 import (
+	"time"
+
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 )
 
 // Request types
@@ -260,6 +264,7 @@ type UpdateRepositoryRequest struct {
 	ProviderScope          *string `json:"provider_scope,omitempty"`
 	ProviderOwner          *string `json:"provider_owner,omitempty"`
 	ProviderName           *string `json:"provider_name,omitempty"`
+	RemoteURL              *string `json:"remote_url,omitempty"`
 	DefaultBranch          *string `json:"default_branch,omitempty"`
 	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix,omitempty"`
 	WorktreeBranchTemplate *string `json:"worktree_branch_template,omitempty"`
@@ -305,12 +310,13 @@ type CreateExecutorProfileRequest struct {
 
 // UpdateExecutorProfileRequest contains the data for updating an executor profile
 type UpdateExecutorProfileRequest struct {
-	Name          *string                `json:"name,omitempty"`
-	McpPolicy     *string                `json:"mcp_policy,omitempty"`
-	Config        map[string]string      `json:"config,omitempty"`
-	PrepareScript *string                `json:"prepare_script,omitempty"`
-	CleanupScript *string                `json:"cleanup_script,omitempty"`
-	EnvVars       []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	Name              *string                `json:"name,omitempty"`
+	McpPolicy         *string                `json:"mcp_policy,omitempty"`
+	Config            map[string]string      `json:"config,omitempty"`
+	PrepareScript     *string                `json:"prepare_script,omitempty"`
+	CleanupScript     *string                `json:"cleanup_script,omitempty"`
+	EnvVars           []models.ProfileEnvVar `json:"env_vars,omitempty"`
+	ExpectedUpdatedAt *time.Time             `json:"-"`
 }
 
 // CreateEnvironmentRequest contains the data for creating an environment
@@ -341,7 +347,11 @@ type ListMessagesRequest struct {
 	After         string
 	Sort          string
 	AuthorType    string
-	Around        string
+	// AuthorTypes narrows by any listed author; when non-empty it takes
+	// precedence over AuthorType. TaskID narrows the page to one task.
+	AuthorTypes []string
+	TaskID      string
+	Around      string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script
@@ -361,14 +371,19 @@ type UpdateRepositoryScriptRequest struct {
 
 // CreateMessageRequest contains the data for creating a new message
 type CreateMessageRequest struct {
-	TaskSessionID string                 `json:"session_id"`
-	TaskID        string                 `json:"task_id,omitempty"`
-	TurnID        string                 `json:"turn_id"`
-	CompletedTurn bool                   `json:"-"`
-	Content       string                 `json:"content"`
-	AuthorType    string                 `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
-	AuthorID      string                 `json:"author_id,omitempty"`
-	RequestsInput bool                   `json:"requests_input,omitempty"`
-	Type          string                 `json:"type,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	TaskSessionID         string                               `json:"session_id"`
+	TaskID                string                               `json:"task_id,omitempty"`
+	TurnID                string                               `json:"turn_id"`
+	CompletedTurn         bool                                 `json:"-"`
+	Content               string                               `json:"content"`
+	AuthorType            string                               `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
+	AuthorID              string                               `json:"author_id,omitempty"`
+	RequestsInput         bool                                 `json:"requests_input,omitempty"`
+	Type                  string                               `json:"type,omitempty"`
+	Metadata              map[string]interface{}               `json:"metadata,omitempty"`
+	PlanCommentRefs       []models.TaskPlanCommentRef          `json:"plan_comment_refs,omitempty"`
+	RequirePrimarySession bool                                 `json:"require_primary_session,omitempty"`
+	ExpectedSessionState  models.TaskSessionState              `json:"-"`
+	AttachmentClaim       *messagequeue.QueueAttachmentClaim   `json:"-"`
+	InitialTaskBrief      *admission.InitialTaskBriefCandidate `json:"-"`
 }

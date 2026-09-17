@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/kandev/kandev/internal/task/repository"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -27,7 +29,9 @@ type mockAgentManager struct {
 	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	setExecutionEnvFunc              func(ctx context.Context, agentExecutionID string, env map[string]string) error
+	executorProfileEnvFunc           func(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error)
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
+	listExecutionsForTaskFunc        func(taskID string) []lifecycle.ExecutionReference
 	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
 	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
 	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
@@ -73,6 +77,13 @@ func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID stri
 		return m.setExecutionEnvFunc(ctx, executionID, env)
 	}
 	return nil
+}
+
+func (m *mockAgentManager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {
+	if m.executorProfileEnvFunc != nil {
+		return m.executorProfileEnvFunc(ctx, sessionID, taskEnvironmentID)
+	}
+	return nil, nil
 }
 
 func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
@@ -133,6 +144,10 @@ func (m *mockAgentManager) ResolvePermissionBySessionID(context.Context, string,
 
 func (m *mockAgentManager) CancelPermissionBySessionID(context.Context, string, string, string) (*streams.PermissionCancelResponse, error) {
 	return nil, nil
+}
+
+func (m *mockAgentManager) ProbeBackgroundWorkloads(ctx context.Context, sessionID string) (client.ProbeResult, error) {
+	return client.ProbeResultUnknown, nil
 }
 
 func (m *mockAgentManager) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
@@ -222,6 +237,12 @@ func (m *mockAgentManager) GetExecutionIDForSession(ctx context.Context, session
 	}
 	return "", fmt.Errorf("no execution found for session %s", sessionID)
 }
+func (m *mockAgentManager) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
+	if m.listExecutionsForTaskFunc != nil {
+		return m.listExecutionsForTaskFunc(taskID)
+	}
+	return nil
+}
 
 func (m *mockAgentManager) ResolveAgentProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
 	if m.resolveAgentProfileFunc != nil {
@@ -290,6 +311,9 @@ type mockRepository struct {
 	createTaskEnvironmentRepoErr   error
 	finalizeTaskEnvironmentErr     error
 	createTaskSessionFunc          func(ctx context.Context, session *models.TaskSession) error
+	// listTaskRepositoriesFunc, when non-nil, overrides ListTaskRepositories
+	// entirely — used to simulate a transient attachment-set read failure.
+	listTaskRepositoriesFunc func(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	// getTaskSessionByTaskAndAgentFunc, when non-nil, overrides
 	// GetTaskSessionByTaskAndAgent entirely — used to simulate a transient
 	// lookup failure (e.g. the AC-003.7 re-read-after-conflict arm in
@@ -387,13 +411,18 @@ func newMockRepository() *mockRepository {
 // Implement required repository methods
 
 func (m *mockRepository) GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error) {
-	// Return first matching repository for the task (matches sqlite implementation)
-	for _, tr := range m.taskRepositories {
-		if tr.TaskID == taskID {
-			return tr, nil
-		}
+	// Delegate to ListTaskRepositories, mirroring the sqlite implementation
+	// (GetPrimaryTaskRepository there is a thin wrapper over
+	// ListTaskRepositories()[0]) so the mock's primary selection agrees with
+	// its own ordering instead of raw map iteration order.
+	repos, err := m.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, err
 	}
-	return nil, nil
+	if len(repos) == 0 {
+		return nil, nil
+	}
+	return repos[0], nil
 }
 
 func (m *mockRepository) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
@@ -512,6 +541,45 @@ func (m *mockRepository) UpdateTaskSessionStateIfCurrent(
 	} else {
 		current.CompletedAt = nil
 	}
+	return true, now, nil
+}
+
+// CommitBootstrapFailureIfCurrentExecution mirrors the production admission
+// boundary for executor tests. The fake has no separate executor table, so the
+// session's execution identity is the equivalent ownership fence.
+func (m *mockRepository) CommitBootstrapFailureIfCurrentExecution(
+	_ context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (bool, time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[sessionID]
+	if !ok || session == nil || (session.TaskID != "" && session.TaskID != taskID) || session.State != expectedState {
+		return false, time.Time{}, nil
+	}
+	if agentExecutionID != "" && session.AgentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return false, time.Time{}, nil
+	}
+	current, hasCurrent := models.LoadLastAgentError(session.Metadata)
+	if expectedStamp == "" {
+		if hasCurrent {
+			return false, time.Time{}, nil
+		}
+	} else if !hasCurrent || current.Stamp() != expectedStamp {
+		return false, time.Time{}, nil
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyLastAgentError] = errorValue
+	now := time.Now().UTC()
+	session.State = models.TaskSessionStateFailed
+	session.ErrorMessage = errorValue.Message
+	session.CompletedAt = &now
+	session.UpdatedAt = now
 	return true, now, nil
 }
 
@@ -780,7 +848,13 @@ func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*mo
 	return out, nil
 }
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error { return nil }
-func (m *mockRepository) DeleteTask(ctx context.Context, id string) error         { return nil }
+func (m *mockRepository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return nil
+}
+func (m *mockRepository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
+	return nil
+}
+func (m *mockRepository) DeleteTask(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	return nil, nil
 }
@@ -805,18 +879,28 @@ func (m *mockRepository) GetTaskRepository(ctx context.Context, id string) (*mod
 	return nil, nil
 }
 func (m *mockRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
+	if m.listTaskRepositoriesFunc != nil {
+		return m.listTaskRepositoriesFunc(ctx, taskID)
+	}
 	var out []*models.TaskRepository
 	for _, tr := range m.taskRepositories {
 		if tr.TaskID == taskID {
 			out = append(out, tr)
 		}
 	}
-	// Stable order by Position so callers (and tests) see deterministic results.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].Position < out[j-1].Position; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
+	// Order by Position, then CreatedAt, then ID, mirroring the production
+	// ORDER BY position ASC, created_at ASC, id ASC: map iteration order is
+	// random, so ties left unbroken would make tests flaky rather than
+	// deterministic.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Position != out[j].Position {
+			return out[i].Position < out[j].Position
 		}
-	}
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 func (m *mockRepository) ListTaskWorkspaceFolders(context.Context, string) ([]*models.TaskWorkspaceFolder, error) {
@@ -987,7 +1071,9 @@ func (m *mockRepository) CountActiveTaskSessionsByRepository(ctx context.Context
 func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	return 0, nil
 }
-func (m *mockRepository) DeleteTaskSession(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) DeleteTaskSession(ctx context.Context, session *models.TaskSession) error {
+	return nil
+}
 
 // Workflow-related session operations
 func (m *mockRepository) GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
@@ -1236,6 +1322,20 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	m.taskEnvironments[env.ID] = env
 	return nil
 }
+func (m *mockRepository) SetTaskEnvironmentTaskDirNameIfEmpty(_ context.Context, environmentID, taskDirName string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	env := m.taskEnvironments[environmentID]
+	if env == nil {
+		return false, fmt.Errorf("task environment not found: %s", environmentID)
+	}
+	if env.TaskDirName != "" {
+		return false, nil
+	}
+	env.TaskDirName = taskDirName
+	m.writeCallLog = append(m.writeCallLog, "stamp_task_dir")
+	return true, nil
+}
 func (m *mockRepository) FinalizeTaskEnvironmentMaterialization(_ context.Context, env *models.TaskEnvironment, repos []*models.TaskEnvironmentRepo, _ string) error {
 	if m.finalizeTaskEnvironmentErr != nil {
 		return m.finalizeTaskEnvironmentErr
@@ -1328,6 +1428,9 @@ func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*mo
 	return nil, nil
 }
 func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error {
 	return nil
 }
 func (m *mockRepository) DeleteExecutorProfile(ctx context.Context, id string) error { return nil }

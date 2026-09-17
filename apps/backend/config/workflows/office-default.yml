@@ -144,6 +144,7 @@ steps:
     position: 4
     color: bg-green-500
     stage_type: custom
+    complete_task_on_enter: true
     allow_manual_move: true
     show_in_command_panel: true
     events:

@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // approvalHandlerFixture wires the minimal stack needed to exercise the
@@ -84,8 +85,8 @@ type silentRunQueuer struct{}
 
 func (s *silentRunQueuer) QueueRunWithActor(
 	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string, _ string,
-) error {
-	return nil
+) (runsservice.QueueOutcome, error) {
+	return runsservice.QueueOutcomeQueued, nil
 }
 
 // seedApprovalAgent creates an agent_profiles row with the given role

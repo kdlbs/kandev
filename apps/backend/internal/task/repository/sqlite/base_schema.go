@@ -2,6 +2,7 @@
 package sqlite
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -14,7 +15,15 @@ import (
 // table so the call list stays readable as new schema/migration steps are
 // added without growing the function's cyclomatic complexity.
 func (r *Repository) initSchema() error {
+	return r.initSchemaContext(context.Background())
+}
+
+func (r *Repository) initSchemaContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	steps := []func() error{
+		r.initDesktopDiscoverySchema,
 		r.initCoreSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,
@@ -28,9 +37,11 @@ func (r *Repository) initSchema() error {
 		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
+		r.initControlServerRecordSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
+		r.initClarificationInboxSidecarSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
@@ -41,6 +52,8 @@ func (r *Repository) initSchema() error {
 		r.healBuiltinWorkflowStepParticipantSeats,
 		r.healBuiltinWorkflowStepOnAgentError,
 		r.normalizeTaskWorktreeOwnership,
+		r.ensureTaskEnvironmentRecoveryClaimsSchema,
+		r.ensureArchivedBranchCandidatesIndex,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
@@ -48,17 +61,76 @@ func (r *Repository) initSchema() error {
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
+		r.initConversationJournalSchema,
 	}
-	for _, step := range steps {
+	// Every boundary is checked before and after its step. The task repository
+	// passes the same context to startup SQL through migrationContext, so a
+	// cancellation stops later statements and later repository admission. A
+	// statement already executing is bounded by the database driver's
+	// cancellation behavior; the constructor never closes the shared pool
+	// until this function returns, so that in-flight work cannot race cleanup.
+	for index, step := range steps {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("startup schema canceled before step %d: %w", index, err)
+		}
 		if err := step(); err != nil {
 			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("startup schema canceled after step %d: %w", index, err)
 		}
 	}
 	return nil
 }
 
+// ensureTaskEnvironmentRecoveryClaimsSchema creates the durable authority used
+// by automatic worktree recovery. It runs after the legacy worktree ownership
+// cutover because that cutover replaces task_environments on PostgreSQL.
+func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
+	if err := r.migrate.Apply("task_environment_recovery_claims.table", `
+		CREATE TABLE IF NOT EXISTS task_environment_recovery_claims (
+			task_environment_id TEXT PRIMARY KEY,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			executor_type TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`); err != nil {
+		return fmt.Errorf("create task environment recovery claim table: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_claims.operation_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_claims_operation
+			ON task_environment_recovery_claims(operation_id)`); err != nil {
+		return fmt.Errorf("create task environment recovery claim index: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task recovery claim migration: %w", err)
+	}
+	return nil
+}
+
+// ensureArchivedBranchCandidatesIndex runs after ownership normalization so
+// every supported schema shape has the lifecycle columns the index requires.
+func (r *Repository) ensureArchivedBranchCandidatesIndex() error {
+	_, err := r.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_task_environment_repos_archived_branch_candidates
+		ON task_environment_repos(
+			worktree_branch_owner,
+			worktree_branch_compacted_at,
+			status,
+			deleted_at,
+			updated_at,
+			worktree_id,
+			task_environment_id
+		)`)
+	return err
+}
+
 func (r *Repository) initDynamicRoutingSchema() error {
-	_, err := r.db.Exec(fmt.Sprintf(`
+	_, err := r.db.ExecContext(r.migrationContext(), fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS dynamic_route_states (
 			session_id TEXT PRIMARY KEY,
 			logical_profile_id TEXT NOT NULL,
@@ -68,6 +140,7 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			state TEXT NOT NULL DEFAULT 'selecting',
 			continuation_json TEXT NOT NULL DEFAULT '',
 			policy_state_json TEXT NOT NULL DEFAULT '',
+			legacy_active_backfill_applied INTEGER NOT NULL DEFAULT 1,
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
 		);
@@ -129,19 +202,41 @@ const taskResourceCleanupSchemaDDL = `
 `
 
 func (r *Repository) initTaskResourceCleanupSchema() error {
-	_, err := r.db.Exec(taskResourceCleanupSchemaDDL)
+	_, err := r.db.ExecContext(r.migrationContext(), taskResourceCleanupSchemaDDL)
+	return err
+}
+
+// control_server_records is the single installation-scoped durable record of
+// the standalone agentctl control server (see models.ControlServerRecord).
+// The id CHECK enforces exactly one row, the same singleton pattern used by
+// dynamic_installation_keys above.
+const controlServerRecordSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS control_server_records (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		endpoint TEXT NOT NULL,
+		server_identity TEXT NOT NULL,
+		credential_secret_id TEXT NOT NULL,
+		capabilities TEXT NOT NULL DEFAULT '[]',
+		diagnostic_log_path TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);
+`
+
+func (r *Repository) initControlServerRecordSchema() error {
+	_, err := r.db.Exec(controlServerRecordSchemaDDL)
 	return err
 }
 
 // ensureWorkspaceIndexes creates workspace-related indexes
 func (r *Repository) ensureWorkspaceIndexes() error {
-	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), `CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id)`); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_workflows_workspace_id ON workflows(workspace_id)`); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), `CREATE INDEX IF NOT EXISTS idx_workflows_workspace_id ON workflows(workspace_id)`); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), `CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`); err != nil {
 		return err
 	}
 	return nil
@@ -154,14 +249,14 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 		`CREATE INDEX IF NOT EXISTS idx_messages_metadata_tool_call_id ON task_session_messages(task_session_id, (%s))`,
 		dialect.JSONExtract(driver, "metadata", "tool_call_id"),
 	)
-	if _, err := r.db.Exec(toolCallIndex); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), toolCallIndex); err != nil {
 		return err
 	}
 	pendingIndex := fmt.Sprintf(
 		`CREATE INDEX IF NOT EXISTS idx_messages_metadata_pending_id ON task_session_messages(task_session_id, (%s))`,
 		dialect.JSONExtract(driver, "metadata", "pending_id"),
 	)
-	if _, err := r.db.Exec(pendingIndex); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), pendingIndex); err != nil {
 		return err
 	}
 	// idx_messages_metadata_pending_id leads with task_session_id, so it
@@ -172,7 +267,15 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 		`CREATE INDEX IF NOT EXISTS idx_messages_metadata_pending_id_lookup ON task_session_messages((%s))`,
 		dialect.JSONExtract(driver, "metadata", "pending_id"),
 	)
-	if _, err := r.db.Exec(pendingIndexLookup); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), pendingIndexLookup); err != nil {
+		return err
+	}
+	lookupIndex := dialect.PendingIDLookupIndexDDL(
+		driver,
+		"idx_messages_metadata_pending_id_lookup_ordered",
+		"task_session_messages",
+	)
+	if _, err := r.db.ExecContext(r.migrationContext(), lookupIndex); err != nil {
 		return err
 	}
 	return nil
@@ -183,13 +286,13 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 // filtered prompt pages skip interleaved agent and tool rows.
 func (r *Repository) ensurePromptOrderIndex() error {
 	ddl := dialect.PromptOrderIndexDDL(r.db.DriverName(), "idx_messages_prompt_order", "task_session_messages")
-	if _, err := r.db.Exec(ddl); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), ddl); err != nil {
 		return fmt.Errorf("create prompt-order index: %w", err)
 	}
 	userDDL := dialect.PromptUserOrderIndexDDL(
 		r.db.DriverName(), "idx_messages_prompt_user_order", "task_session_messages",
 	)
-	if _, err := r.db.Exec(userDDL); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), userDDL); err != nil {
 		return fmt.Errorf("create prompt-user-order index: %w", err)
 	}
 	return nil
@@ -204,12 +307,12 @@ func (r *Repository) ensurePromptOrderIndex() error {
 // would error with "no such table". Stubs created here are minimal —
 // the workflow repo's init still runs and adds the rest of its columns
 // via idempotent ALTER and CREATE statements.
-func (r *Repository) ensureRunnerProjectionTables() {
+func (r *Repository) ensureRunnerProjectionTables() error {
 	// workflow_steps: matches the full schema declared in the workflow
 	// repo so workflow.NewWithDB's later ALTER ADD COLUMNs become no-ops
-	// (column-already-exists errors are swallowed). Mirrors
+	// (only column-already-exists errors are tolerated). Mirrors
 	// internal/workflow/repository/sqlite.go (the canonical owner).
-	_, _ = r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS workflow_steps (
 			id TEXT PRIMARY KEY,
 			workflow_id TEXT NOT NULL DEFAULT '',
@@ -223,15 +326,20 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			show_in_command_panel INTEGER DEFAULT 1,
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
-			profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
-			profile_session_end_policy TEXT NOT NULL DEFAULT 'complete',
-			stage_type TEXT NOT NULL DEFAULT 'custom',
-			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
+		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		stage_type TEXT NOT NULL DEFAULT 'custom',
+		session_target TEXT,
+		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
+			complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
+			order_revision INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`)
-	_, _ = r.db.Exec(`
+		)`); err != nil {
+		return fmt.Errorf("create workflow_steps projection table: %w", err)
+	}
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS workflow_step_participants (
 			id TEXT PRIMARY KEY,
 			step_id TEXT NOT NULL DEFAULT '',
@@ -239,8 +347,12 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			role TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
-			position INTEGER NOT NULL DEFAULT 0
-		)`)
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+		)`); err != nil {
+		return fmt.Errorf("create workflow_step_participants projection table: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) initCoreSchema() error {
@@ -271,7 +383,7 @@ const taskStatusSummarySchemaDDL = `
 `
 
 func (r *Repository) initTaskStatusSummarySchema() error {
-	_, err := r.db.Exec(taskStatusSummarySchemaDDL)
+	_, err := r.db.ExecContext(r.migrationContext(), taskStatusSummarySchemaDDL)
 	return err
 }
 
@@ -393,12 +505,12 @@ const infraSchemaDDL = `
 `
 
 func (r *Repository) initInfraSchema() error {
-	_, err := r.db.Exec(infraSchemaDDL)
+	_, err := r.db.ExecContext(r.migrationContext(), infraSchemaDDL)
 	return err
 }
 
 func (r *Repository) initTaskSchema() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
@@ -509,9 +621,9 @@ func (r *Repository) initTaskSchema() error {
 // repositorySetsSchemaDDL declares the repository-set tables. It runs after
 // initCoreSchema so `workspaces` and `repositories` exist for the foreign keys.
 //
-// Membership positions are contiguous from zero and carry no branch: branch
-// choice belongs to a task (task_repositories), which is exactly what the user
-// still decides after applying a set.
+// Membership positions are contiguous from zero. A saved base branch is an
+// optional task-form default; checkout and task branch choices remain task
+// state.
 const repositorySetsSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS repository_sets (
 		id TEXT PRIMARY KEY,
@@ -529,6 +641,7 @@ const repositorySetsSchemaDDL = `
 		repository_set_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL,
 		position INTEGER NOT NULL DEFAULT 0,
+		base_branch TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (repository_set_id) REFERENCES repository_sets(id) ON DELETE CASCADE,
@@ -552,7 +665,7 @@ const repositorySetsSchemaDDL = `
 	`
 
 func (r *Repository) initRepositorySetsSchema() error {
-	_, err := r.db.Exec(repositorySetsSchemaDDL)
+	_, err := r.db.ExecContext(r.migrationContext(), repositorySetsSchemaDDL)
 	return err
 }
 
@@ -576,12 +689,12 @@ const repositoryBranchPoliciesSchemaDDL = `
 `
 
 func (r *Repository) initRepositoryBranchPoliciesSchema() error {
-	_, err := r.db.Exec(repositoryBranchPoliciesSchemaDDL)
+	_, err := r.db.ExecContext(r.migrationContext(), repositoryBranchPoliciesSchemaDDL)
 	return err
 }
 
 func (r *Repository) initCoreIndexes() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_workflow_step_id ON tasks(workflow_step_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_archived_at ON tasks(archived_at);
@@ -596,7 +709,7 @@ func (r *Repository) initCoreIndexes() error {
 }
 
 func (r *Repository) initPlansSchema() error {
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_plans (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL UNIQUE,
@@ -605,16 +718,45 @@ func (r *Repository) initPlansSchema() error {
 		created_by TEXT NOT NULL DEFAULT 'agent',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		comments_revision INTEGER NOT NULL DEFAULT 0,
 		implementation_started_at TIMESTAMP,
 		implementation_started_session_id TEXT,
 		implementation_started_by TEXT,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_task_plans_id_task_id ON task_plans(id, task_id);
+	CREATE TABLE IF NOT EXISTS task_plan_comments (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		body TEXT NOT NULL,
+		selected_text TEXT NOT NULL,
+		anchor_from INTEGER NOT NULL,
+		anchor_to INTEGER NOT NULL,
+		version INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (plan_id, task_id) REFERENCES task_plans(id, task_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_comments_task_order
+		ON task_plan_comments(task_id, created_at, id);
+	CREATE TABLE IF NOT EXISTS task_plan_comment_admissions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (plan_id, task_id) REFERENCES task_plans(id, task_id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_plan_comment_admissions_task
+		ON task_plan_comment_admissions(task_id, plan_id);
 	`); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_plan_revisions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -651,7 +793,7 @@ func (r *Repository) initPlansSchema() error {
 // as a JSON array in a single column (read/written whole — there is no
 // per-step query path), keeping the artifact one row per task like task_plans.
 func (r *Repository) initWalkthroughsSchema() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_walkthroughs (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL UNIQUE,
@@ -670,7 +812,7 @@ func (r *Repository) initWalkthroughsSchema() error {
 // backfillInitialPlanRevisions ensures every existing task_plans row has at least
 // one corresponding revision. Runs once at startup and is idempotent.
 func (r *Repository) backfillInitialPlanRevisions() error {
-	rows, err := r.db.Query(`
+	rows, err := r.db.QueryContext(r.migrationContext(), `
 	SELECT p.id, p.task_id, p.title, p.content, p.created_by, p.created_at, p.updated_at
 	FROM task_plans p
 	WHERE NOT EXISTS (
@@ -703,7 +845,7 @@ func (r *Repository) backfillInitialPlanRevisions() error {
 		if authorKind != "user" && authorKind != authorKindAgent {
 			authorKind = authorKindAgent
 		}
-		_, err := r.db.Exec(r.db.Rebind(`
+		_, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`
 			INSERT INTO task_plan_revisions
 			  (id, task_id, revision_number, title, content, author_kind, author_name, revert_of_revision_id, created_at, updated_at)
 			VALUES (?, ?, 1, ?, ?, ?, 'legacy', NULL, ?, ?)
@@ -718,7 +860,7 @@ func (r *Repository) backfillInitialPlanRevisions() error {
 // initDocumentsSchema creates the task_documents and task_document_revisions tables.
 // These tables generalize task_plans: documents have a key (e.g., "plan", "spec") and type.
 func (r *Repository) initDocumentsSchema() error {
-	if _, err := r.db.Exec(`
+	if _, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_documents (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -766,7 +908,7 @@ func (r *Repository) initDocumentsSchema() error {
 // attachments. The storage key is intentionally opaque and never exposed in
 // API responses; bytes are owned by the attachment service.
 func (r *Repository) initAttachmentsSchema() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_message_attachments (
 		id TEXT PRIMARY KEY,
 		owner_id TEXT NOT NULL DEFAULT '',
@@ -823,7 +965,7 @@ func (r *Repository) initSessionSchema() error {
 // row instead of clobbering a later execution's (AC-32). Historical message
 // rows are handled separately by the one-time backfill migration.
 func (r *Repository) initSubagentContextSchema() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_session_subagents (
 		id                  TEXT PRIMARY KEY,
 		task_session_id     TEXT NOT NULL,
@@ -869,9 +1011,9 @@ func (r *Repository) initSubagentContextSchema() error {
 // now-deleted step must survive that deletion.
 func (r *Repository) initStepTransitionsSchema() error {
 	idCol := dialect.AutoIncrementIDColumn(r.db.DriverName())
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_step_transitions (
-		` + idCol + `,
+		`+idCol+`,
 		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
 		session_id TEXT REFERENCES task_sessions(id) ON DELETE SET NULL,
 		from_workflow_id TEXT,
@@ -896,7 +1038,7 @@ func (r *Repository) initStepTransitionsSchema() error {
 }
 
 func (r *Repository) initMessageTurnSchema() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_session_turns (
 		id TEXT PRIMARY KEY,
 		task_session_id TEXT NOT NULL,
@@ -960,6 +1102,7 @@ const sessionWorktreeSchemaDDL = `
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
+		queue_incarnation_id TEXT NOT NULL DEFAULT '',
 		agent_execution_id TEXT NOT NULL DEFAULT '',
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
@@ -1031,6 +1174,10 @@ const sessionWorktreeSchemaDDL = `
 		worktree_id TEXT DEFAULT '',
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
+		worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown',
+		worktree_integration_ref TEXT NOT NULL DEFAULT '',
+		worktree_recovery_head_sha TEXT NOT NULL DEFAULT '',
+		worktree_branch_compacted_at TIMESTAMP,
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'active',
@@ -1047,12 +1194,12 @@ const sessionWorktreeSchemaDDL = `
 `
 
 func (r *Repository) initSessionWorktreeSchema() error {
-	_, err := r.db.Exec(sessionWorktreeSchemaDDL)
+	_, err := r.db.ExecContext(r.migrationContext(), sessionWorktreeSchemaDDL)
 	return err
 }
 
 func (r *Repository) initGitSchema() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
 		task_environment_id TEXT NOT NULL,
@@ -1100,7 +1247,7 @@ func (r *Repository) initGitSchema() error {
 }
 
 func (r *Repository) initReviewSchema() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS session_file_reviews (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
@@ -1174,6 +1321,6 @@ const taskReviewSchemaDDL = `
 `
 
 func (r *Repository) initTaskReviewSchema() error {
-	_, err := r.db.Exec(taskReviewSchemaDDL)
+	_, err := r.db.ExecContext(r.migrationContext(), taskReviewSchemaDDL)
 	return err
 }

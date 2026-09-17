@@ -42,15 +42,15 @@ func TestQueueRun_CarrierCreatingRunIDInheritsLineage(t *testing.T) {
 		ActorKind:             models.ActorKindAgent,
 		ActorID:               "some-agent",
 		CarrierCreatingRunID:  creating.ID,
-		CarrierCausationID:    creating.CausationID,
+		CarrierCausationID:    creating.ChainCausationID,
 		CarrierCausationDepth: creating.CausationDepth,
 		CarrierHumanRooted:    boolPtr(creating.HumanRooted),
 	}); err != nil {
 		t.Fatalf("queue carrier follow-up: %v", err)
 	}
 	followUp := getRun(t, repo, "agent-primary", "carrier_followup")
-	if followUp.CausationID != creating.CausationID {
-		t.Errorf("causation_id = %q, want %q (carried)", followUp.CausationID, creating.CausationID)
+	if followUp.ChainCausationID != creating.ChainCausationID {
+		t.Errorf("causation_id = %q, want %q (carried)", followUp.ChainCausationID, creating.ChainCausationID)
 	}
 	if followUp.ParentRunID != creating.ID {
 		t.Errorf("parent_run_id = %q, want %q (carrier's creating run)", followUp.ParentRunID, creating.ID)
@@ -79,8 +79,8 @@ func TestQueueRun_EmptyCarrierCreatingRunIDRoots(t *testing.T) {
 		t.Fatalf("queue: %v", err)
 	}
 	run := getRun(t, repo, "agent-primary", "routine_fire_reason")
-	if run.CausationID != run.ID {
-		t.Errorf("causation_id = %q, want own id %q (root)", run.CausationID, run.ID)
+	if run.ChainCausationID != run.ID {
+		t.Errorf("causation_id = %q, want own id %q (root)", run.ChainCausationID, run.ID)
 	}
 	if run.CausationDepth != 0 {
 		t.Errorf("causation_depth = %d, want 0 (root)", run.CausationDepth)
@@ -113,14 +113,14 @@ func TestQueueRun_HumanActorDiscardsCarrierLineage(t *testing.T) {
 		ActorKind:             models.ActorKindUser,
 		ActorID:               "user-1",
 		CarrierCreatingRunID:  source.ID,
-		CarrierCausationID:    source.CausationID,
+		CarrierCausationID:    source.ChainCausationID,
 		CarrierCausationDepth: source.CausationDepth,
 		CarrierHumanRooted:    boolPtr(false),
 	}); err != nil {
 		t.Fatalf("queue human via carrier: %v", err)
 	}
 	run := getRun(t, repo, "agent-primary", "human_via_carrier")
-	if run.CausationID == source.CausationID {
+	if run.ChainCausationID == source.ChainCausationID {
 		t.Errorf("human actor adopted carrier's chain, want a new root")
 	}
 	if run.CausationDepth != 0 {

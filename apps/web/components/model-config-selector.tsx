@@ -72,6 +72,13 @@ export function usableConfigOptions(
   );
 }
 
+// Providers such as Copilot send description === name; showing it would
+// duplicate the label, so fall back to the id (when it differs) instead.
+function optionDescription(item: { value: string; name: string; description?: string }) {
+  if (item.description && item.description !== item.name) return item.description;
+  return item.value !== item.name ? item.value : undefined;
+}
+
 export function configOptionToModelOptions(
   option: SelectConfigOption | undefined,
 ): ModelSelectorOption[] {
@@ -84,7 +91,7 @@ export function configOptionToModelOptions(
       {
         id: item.value,
         name: item.name,
-        description: item.description ?? (item.value !== item.name ? item.value : undefined),
+        description: optionDescription(item),
       },
     ];
   });
@@ -221,7 +228,7 @@ function ModelConfigSelectorTrigger({
 }: ModelConfigSelectorTriggerProps) {
   const compact = variant === "compact";
   const baseClassName = compact
-    ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40"
+    ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
     : settingsControlClassName("w-full justify-between font-normal cursor-pointer");
   const trigger = (
     <PopoverTrigger asChild>

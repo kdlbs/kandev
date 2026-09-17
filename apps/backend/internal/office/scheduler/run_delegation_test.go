@@ -84,7 +84,7 @@ func TestQueueRun_DelegatesToRunsServiceWhenWired(t *testing.T) {
 	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
 	ss.SetRunsService(runsSvc)
 
-	if err := ss.QueueRun(ctx, testAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
+	if _, err := ss.QueueRun(ctx, testAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 
@@ -92,8 +92,8 @@ func TestQueueRun_DelegatesToRunsServiceWhenWired(t *testing.T) {
 	if got.WorkspaceID != testWorkspaceID {
 		t.Errorf("workspace_id = %q, want %q (only the delegated causation path sets this)", got.WorkspaceID, testWorkspaceID)
 	}
-	if got.CausationID != got.ID {
-		t.Errorf("causation_id = %q, want self-rooted %q (only the delegated causation path sets this)", got.CausationID, got.ID)
+	if got.ChainCausationID != got.ID {
+		t.Errorf("causation_id = %q, want self-rooted %q (only the delegated causation path sets this)", got.ChainCausationID, got.ID)
 	}
 	if got.PriorityClass != models.PriorityClassEvent {
 		t.Errorf("priority_class = %d, want %d (PriorityClassEvent)", got.PriorityClass, models.PriorityClassEvent)
@@ -117,7 +117,7 @@ func TestQueueRun_UsesLegacyInlinePathWhenNoRunsServiceWired(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := ss.QueueRun(ctx, testAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
+	if _, err := ss.QueueRun(ctx, testAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 
@@ -127,8 +127,8 @@ func TestQueueRun_UsesLegacyInlinePathWhenNoRunsServiceWired(t *testing.T) {
 	if got.WorkspaceID != "" {
 		t.Errorf("workspace_id = %q, want empty (legacy path does not resolve causation)", got.WorkspaceID)
 	}
-	if got.CausationID != "" {
-		t.Errorf("causation_id = %q, want empty (legacy path does not resolve causation)", got.CausationID)
+	if got.ChainCausationID != "" {
+		t.Errorf("causation_id = %q, want empty (legacy path does not resolve causation)", got.ChainCausationID)
 	}
 	if got.PriorityClass != models.PriorityClassEvent {
 		t.Errorf("priority_class = %d, want %d (PriorityClassEvent, via the PriorityClass fix)", got.PriorityClass, models.PriorityClassEvent)
@@ -167,7 +167,7 @@ func TestQueueRunCtx_DelegatesRealActorFromRunContext(t *testing.T) {
 	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
 	ss.SetRunsService(runsSvc)
 
-	err = ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
+	_, err = ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
 		Reason:    scheduler.RunReasonTaskComment,
 		TaskID:    "task-1",
 		ActorID:   "user-42",
@@ -220,12 +220,13 @@ func TestQueueRunCtx_AgentSelfTriggerAllowanceEnforced(t *testing.T) {
 	ss.SetRunsService(runsSvc)
 
 	queueSelfTriggered := func(taskID string) error {
-		return ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
+		_, err := ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
 			Reason:    scheduler.RunReasonTaskComment,
 			TaskID:    taskID,
 			ActorID:   testAgentID,
 			ActorType: "agent",
 		})
+		return err
 	}
 
 	// runsservice.DefaultSelfTriggerAllowance is 3 (this scheduler wires a

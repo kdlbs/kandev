@@ -13,6 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / ".github" / "docker" / "ci-base" / "Dockerfile"
 IMAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-base-image.yml"
 E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "e2e-tests.yml"
+BACKEND_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "backend-tests.yml"
+FRONTEND_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "frontend-tests.yml"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 IMAGE_DIGEST_RESOLVER = REPO_ROOT / ".github" / "scripts" / "resolve-image-digest.sh"
 VALID_IMAGE_INDEX = (
@@ -154,6 +156,18 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("type=gha,scope=runtime", workflow)
         self.assertIn("desktop-latest", workflow)
 
+    def test_container_jobs_use_the_baked_corepack_cache(self) -> None:
+        dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+        self.assertIn("COREPACK_HOME=/root/.cache/node/corepack", dockerfile)
+        for workflow_path in (E2E_WORKFLOW, BACKEND_WORKFLOW, FRONTEND_WORKFLOW):
+            workflow = workflow_path.read_text(encoding="utf-8")
+            self.assertIn(
+                "COREPACK_HOME: /root/.cache/node/corepack",
+                workflow,
+                workflow_path.name,
+            )
+
     def test_desktop_job_uses_image_without_live_bootstrap_downloads(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
         desktop_job = job_block(workflow, "desktop-e2e", "e2e-report")
@@ -192,6 +206,58 @@ cat "${FAKE_DOCKER_MANIFEST}"
         )
         self.assertIn("timeout-minutes: 35", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
+
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.2
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.3
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.4
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.5
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.6
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-002.1
+    # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-002.2
+    def test_external_runner_tiers_are_toggleable_for_eligible_jobs(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+
+        light_jobs = {
+            "changes": ("build", "changes_runner"),
+            "e2e-gate": (None, "e2e_gate_runner"),
+        }
+
+        for job, (next_job, output_name) in light_jobs.items():
+            if next_job is None:
+                job_text = workflow.partition("  e2e-gate:\n")[2]
+            else:
+                job_text = job_block(workflow, job, next_job)
+            expected = (
+                "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan)."
+                f"{output_name} }}}}"
+            )
+            self.assertIn(
+                expected,
+                job_text,
+                f"{job} must select its configured tier",
+            )
+        e2e_job = job_block(workflow, "e2e", "playwright_image")
+        self.assertIn("runs-on: ${{ matrix.runner }}", e2e_job)
+        self.assertIn(
+            "matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}",
+            e2e_job,
+        )
+
+        protected_jobs = {
+            "build": "e2e",
+            "e2e-report": "e2e-gate",
+            "playwright_image": "e2e-containers",
+            "e2e-containers": "e2e-kubernetes-compatibility",
+            "e2e-kubernetes-compatibility": "desktop-e2e",
+            "desktop-e2e": "e2e-report",
+        }
+        for job, next_job in protected_jobs.items():
+            protected_text = job_block(workflow, job, next_job)
+            self.assertIn("runs-on: ubuntu-latest", protected_text)
+            self.assertNotIn("runner_plan", protected_text)
+            self.assertNotIn("KANDEV_CI_EXTERNAL", protected_text)
+            self.assertNotIn("KANDEV_CI_RUNNER_", protected_text)
 
     def test_contract_runs_in_the_unfiltered_required_workflow(self) -> None:
         workflow = LINT_WORKFLOW.read_text(encoding="utf-8")

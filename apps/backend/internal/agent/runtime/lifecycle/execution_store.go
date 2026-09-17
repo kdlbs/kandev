@@ -153,6 +153,24 @@ func (s *ExecutionStore) OwnsPromptGeneration(sessionID, executionID string, gen
 	return exists && generation != 0 && execution.promptGeneration == generation
 }
 
+func (s *ExecutionStore) ownsActivePromptGeneration(
+	sessionID, executionID string,
+	generation uint64,
+) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	currentExecutionID, exists := s.bySession[sessionID]
+	if !exists || currentExecutionID != executionID {
+		return false
+	}
+	execution, exists := s.executions[currentExecutionID]
+	return exists && generation != 0 &&
+		execution.promptGeneration == generation &&
+		execution.dispatchedPromptGeneration == generation &&
+		execution.promptCompletionGeneration != generation
+}
+
 // OwnsPromptActivity reports whether the execution still owns the prompt and
 // its activity has not changed since the watchdog captured its snapshot.
 func (s *ExecutionStore) OwnsPromptActivity(
@@ -219,6 +237,39 @@ func (s *ExecutionStore) ActivePromptGeneration(executionID string) uint64 {
 		return 0
 	}
 	return gen
+}
+
+// ExecutionReference identifies one registered execution without requiring a
+// later lookup through the session index. Both IDs are captured from the same
+// execution-store snapshot so a caller can keep targeting the original
+// execution if a session later acquires a replacement.
+type ExecutionReference struct {
+	SessionID   string
+	ExecutionID string
+}
+
+// ListExecutionsForTask returns the session and execution IDs of executions
+// registered in-memory under taskID. It is a read-only snapshot, independent
+// of any session's persisted database state. Task-scoped stop uses it to
+// recover an execution whose session row is already terminal (for example,
+// FAILED) but whose prior teardown attempt failed.
+func (s *ExecutionStore) ListExecutionsForTask(taskID string) []ExecutionReference {
+	if taskID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var references []ExecutionReference
+	for _, execution := range s.executions {
+		if execution.TaskID == taskID && execution.SessionID != "" && execution.ID != "" {
+			references = append(references, ExecutionReference{
+				SessionID:   execution.SessionID,
+				ExecutionID: execution.ID,
+			})
+		}
+	}
+	return references
 }
 
 // GetByTaskEnvironmentID returns any execution associated with a task environment ID.
@@ -290,6 +341,10 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 }
 
 func beginExecutionPrompt(execution *AgentExecution) uint64 {
+	// A prompt is about to be dispatched through this object, so a
+	// recovered-but-not-yet-adopted generation must not later clobber it with
+	// a stale pre-restart completion (see recoveredPromptGenerationPending).
+	execution.recoveredPromptGenerationPending.Store(false)
 	execution.promptGeneration++
 	execution.promptCompletionGeneration = 0
 	// The new generation is not dispatched until its triggerPrompt succeeds; a

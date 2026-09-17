@@ -13,6 +13,7 @@ import {
   type ClarificationEscapeGuardRegistry,
 } from "@/hooks/use-clarification-escape-guard";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
+import type { ClarificationOutcome } from "@/hooks/domains/session/use-clarification-group";
 
 vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "https://api.test" }),
@@ -70,7 +71,11 @@ function clarMessage(opts: {
 
 function renderOverlay(
   messages: Message[],
-  overrides: Partial<{ onResolved: () => void; onDismiss: () => void }> = {},
+  overrides: Partial<{
+    onResolved: () => void;
+    onDismiss: () => void;
+    onOutcome: (outcome: ClarificationOutcome) => void;
+  }> = {},
 ) {
   const scopeRef = createRef<HTMLDivElement>();
   const onResolved = overrides.onResolved ?? vi.fn();
@@ -81,6 +86,7 @@ function renderOverlay(
         messages={messages}
         onResolved={onResolved}
         onDismiss={onDismiss}
+        onOutcome={overrides.onOutcome}
         shortcutScopeRef={scopeRef}
       />
     </div>,
@@ -91,7 +97,7 @@ function renderOverlay(
 beforeEach(() => {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
-  fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 });
 
@@ -366,7 +372,9 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     expect(onResolved).not.toHaveBeenCalled();
     expect(screen.getByTestId(TESTID_OPTION).getAttribute("data-selected")).toBe("true");
 
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
     fireEvent.click(screen.getByTestId("clarification-retry"));
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -378,6 +386,29 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     });
     await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId(TESTID_SUBMIT_ERROR)).toBeNull();
+  });
+
+  it("restores Retry, Skip, and local Escape dismissal after a retryable 503", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: "clarification response is temporarily unavailable",
+          code: "temporarily_unavailable",
+        }),
+        { status: 503, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const { onDismiss, scopeRef } = renderOverlay([
+      clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await vi.waitFor(() => expect(screen.getByTestId(TESTID_SUBMIT_ERROR)).toBeTruthy());
+
+    expect(screen.getByTestId("clarification-retry")).toBeTruthy();
+    expect((screen.getByTestId("clarification-skip") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
   it("uses response-neutral copy when a Skip request fails", async () => {
@@ -450,6 +481,47 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
   });
 });
 
+describe("ClarificationInputOverlay — outcome lifetime", () => {
+  it("delivers a delayed losing outcome after the overlay unmounts", async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+    const onOutcome = vi.fn();
+    const { unmount } = renderOverlay(
+      [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })],
+      { onOutcome },
+    );
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    unmount();
+
+    resolveResponse?.(
+      new Response(
+        JSON.stringify({
+          success: true,
+          claimed: false,
+          status: "answered",
+          response: { answers: [{ question_id: "q1", selected_options: ["o1"] }] },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await vi.waitFor(() =>
+      expect(onOutcome).toHaveBeenCalledWith({
+        kind: "resolved",
+        claimedByThisCaller: false,
+        status: "answered",
+      }),
+    );
+  });
+});
+
 describe("ClarificationInputOverlay — bundle-local state", () => {
   it("resets custom drafts and the active question when the bundle changes", async () => {
     const bundleA = [
@@ -489,7 +561,10 @@ describe("ClarificationInputOverlay — bundle-local state", () => {
 describe("ClarificationInputOverlay — lightweight Markdown", () => {
   it("renders question fields without changing the selected option payload", async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
     const message = clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 });
     const metadata = message.metadata as ClarificationRequestMetadata;
@@ -532,5 +607,103 @@ describe("ClarificationInputOverlay — lightweight Markdown", () => {
       answers: [{ question_id: "q1", selected_options: ["fast-mode"] }],
       rejected: false,
     });
+  });
+});
+
+// AC .39: onOutcome is an additive, optional prop. Omitting it (as the task
+// session and Quick Chat hosts both do) must leave every existing behavior
+// -- including onResolved -- byte-identical to before this prop existed.
+describe("ClarificationInputOverlay — onOutcome (AC .39)", () => {
+  it("does not change onResolved or submit behavior when onOutcome is omitted", async () => {
+    const { onResolved } = renderOverlay([
+      clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 }),
+    ]);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports kind: resolved, claimedByThisCaller: true when this caller's own submit wins", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true, claimed: true, status: "answered" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const onOutcome = vi.fn();
+    renderOverlay([clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })], {
+      onOutcome,
+    });
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() =>
+      expect(onOutcome).toHaveBeenCalledWith({
+        kind: "resolved",
+        claimedByThisCaller: true,
+        status: "answered",
+      }),
+    );
+  });
+
+  it("reports kind: resolved, claimedByThisCaller: false when another caller already answered", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          claimed: false,
+          status: "answered",
+          response: {
+            answers: [{ question_id: "q1", selected_options: ["other-caller-option"] }],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const onOutcome = vi.fn();
+    renderOverlay([clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })], {
+      onOutcome,
+    });
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() =>
+      expect(onOutcome).toHaveBeenCalledWith({
+        kind: "resolved",
+        claimedByThisCaller: false,
+        status: "answered",
+      }),
+    );
+  });
+
+  it("reports kind: no_longer_active on a 409 not_active conflict", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ code: "not_active", error: "clarification request is no longer active" }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const onOutcome = vi.fn();
+    renderOverlay([clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })], {
+      onOutcome,
+    });
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => expect(onOutcome).toHaveBeenCalledWith({ kind: "no_longer_active" }));
+  });
+
+  it("reports kind: submission_failed on a network/server failure", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    const onOutcome = vi.fn();
+    renderOverlay([clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })], {
+      onOutcome,
+    });
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+
+    await vi.waitFor(() => expect(onOutcome).toHaveBeenCalledWith({ kind: "submission_failed" }));
   });
 });

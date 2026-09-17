@@ -5,15 +5,18 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/httpcookie"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	"github.com/kandev/kandev/internal/webapp"
 )
 
 // tasksPageBootData builds the tasks page boot payload: workspaces, repositories, workflows, steps, tasks, and the user's settings.
@@ -616,6 +619,52 @@ func (b bootStateBuilder) officeDashboard(ctx context.Context, activeID string) 
 	return officedashboard.NewDashboardResponse(data, summaries)
 }
 
+// addNeedsYouInboxState adds the Needs-you Inbox boot-hydration producer: the
+// second of the count's two allowed producers (needs-you-inbox
+// design-01#Data-and-contracts), run at the same default limit and
+// workspace/sidecar scope as the list endpoint, for the same active workspace
+// quick chat already resolves for this route. Absent when the flag is off or
+// no active workspace resolves, so the client can tell "not seeded" from "zero".
+func (b bootStateBuilder) addNeedsYouInboxState(
+	ctx context.Context,
+	req *http.Request,
+	state map[string]any,
+	route webapp.RouteClassification,
+) {
+	if !b.p.features.NeedsYouInbox || b.p.taskRepo == nil {
+		return
+	}
+	workspaceID := b.resolveQuickChatWorkspaceID(ctx, req, state, route)
+	if workspaceID == "" {
+		return
+	}
+	count, hasMore, nextSnoozeExpiry, err := clarification.InboxBootSummary(
+		ctx, b.p.taskRepo, workspaceID, clarification.InboxUserID(ctx), time.Now().UTC(),
+	)
+	if err != nil {
+		b.logBootError("get needs-you inbox boot summary", err)
+		return
+	}
+	state["needsYouInboxBoot"] = map[string]any{
+		bootStateKeyWorkspaceID: workspaceID,
+		"count":                 count,
+		"hasMore":               hasMore,
+		"nextSnoozeExpiry":      formatOptionalBootTime(nextSnoozeExpiry),
+	}
+}
+
+// formatOptionalBootTime renders a *time.Time as an RFC3339 string, or nil
+// (JSON null) when absent -- mirrors the list endpoint's own
+// next_snooze_expiry encoding so the boot value and every later read agree on
+// format (needs-you-inbox design-01#Data-and-contracts).
+func formatOptionalBootTime(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
+}
+
 // mapUserSettingsState converts a user settings response to the SPA boot shape, preferring the given workspace id.
 func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID string) map[string]any {
 	settings := response.Settings
@@ -643,6 +692,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"preventAutoStartAgentOnOpen":     settings.PreventAutoStartAgentOnOpen,
 		"unreadDivider":                   settings.UnreadDivider,
 		"agentGeneratedTaskTitles":        settings.AgentGeneratedTaskTitles,
+		"autoFocusNewTasks":               settings.AutoFocusNewTasks,
 		"mcpTaskAgentProfileDefault":      usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"showAnchoredPromptBar":           settings.ShowAnchoredPromptBar,
 		"showScrollToLastPrompt":          settings.ShowScrollToLastPrompt,
@@ -666,6 +716,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"threadActiveViewId":                nullString(settings.ThreadActiveViewID),
 		"threadViewDraft":                   mapThreadViewDraft(settings.ThreadViewDraft),
 		"sidebarTaskPrefs":                  mapSidebarTaskPrefs(settings.SidebarTaskPrefs),
+		"sidebarTaskColorAutomation":        settings.SidebarTaskColorAutomation,
+		"sidebarTaskColors":                 settings.SidebarTaskColors,
 		"taskCreateLastUsed":                mapTaskCreateLastUsed(settings.TaskCreateLastUsed),
 		"defaultUtilityAgentId":             nullString(settings.DefaultUtilityAgentID),
 		"defaultUtilityAgentProfileId":      nullString(settings.DefaultUtilityAgentProfileID),
@@ -681,11 +733,15 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
 		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"sidebarHoverEnabled":               settings.SidebarHoverEnabled,
+		"sidebarHoverDelayMs":               settings.SidebarHoverDelayMs,
 		"resolveSessionHostnames":           settings.ResolveSessionHostnames,
 		"appStatusBarOrder":                 mapAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quickChatTabOrderByWorkspace":      settings.QuickChatTabOrderByWorkspace,
 		"hiddenWorkflowStepIds":             stringSliceMap(settings.KanbanHiddenStepIDs),
 		"workflowIdsWithAutoHideEmptySteps": stringSlice(settings.WorkflowIDsWithAutoHideEmptySteps),
+		"kanbanSort":                        usermodels.NormalizeKanbanSort(settings.KanbanSort),
+		"kanbanPriorityFilterTokens":        stringSlice(settings.KanbanPriorityFilterTokens),
 		"loaded":                            true,
 	}
 }
@@ -741,15 +797,18 @@ func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 		"position":                     step.Position,
 		"events":                       step.Events,
 		"allow_manual_move":            step.AllowManualMove,
+		"auto_advance_requires_signal": step.AutoAdvanceRequiresSignal,
 		"prompt":                       step.Prompt,
 		"is_start_step":                step.IsStartStep,
 		"show_in_command_panel":        step.ShowInCommandPanel,
 		"agent_profile_id":             nullString(step.AgentProfileID),
 		"profile_session_start_policy": string(step.ProfileSessionStartPolicy),
 		"profile_session_end_policy":   string(step.ProfileSessionEndPolicy),
+		"session_target":               step.SessionTarget,
 		"stage_type":                   nullString(step.StageType),
 		"wip_limit":                    step.WIPLimit,
 		"pull_from_step_id":            nullString(step.PullFromStepID),
+		"order_revision":               step.OrderRevision,
 	}
 }
 
@@ -787,6 +846,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"queuedAt":                    task.QueuedAt,
 		"interrupted":                 task.Interrupted,
 		"autoStartFailed":             task.AutoStartFailed,
+		"workspaceOrphaned":           task.WorkspaceOrphaned,
 		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
@@ -803,6 +863,17 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"dependsOn":          dependencyRefStates(task.DependsOn),
 		"blocks":             dependencyRefStates(task.Blocks),
 		"startWhenUnblocked": task.StartWhenUnblocked,
+		// Parked-on-background-work projection, stamped by
+		// EnrichTaskParkedProjection before this mapper runs — omitting it here
+		// leaves a task that is already parked at page-load time with no
+		// affordance until the next live task.updated WS event.
+		"parkedOnBackgroundWork": task.ParkedOnBackgroundWork,
+		"parkedRevision":         task.ParkedRevision,
+		"parkedEpoch":            task.ParkedEpoch,
+		// Runner-mutability projection: this is a camelCase whitelist, so an
+		// evaluated verdict is invisible on first paint until it is listed here.
+		"runnerEditable":         task.RunnerEditable,
+		"runnerIneligibleReason": task.RunnerIneligibleReason,
 	}
 }
 

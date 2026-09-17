@@ -227,7 +227,7 @@ test.describe("Repository secrets", () => {
       await apiClient.updateRepository(seedData.repositoryId, {
         secret_bindings: [{ key: "E2E_DELETED_TOKEN", secret_id: first.id }],
       });
-      await apiClient.deleteSecret(first.id);
+      await apiClient.deleteSecret(first.id, undefined, { force: true });
       const deletedTask = await apiClient.createTask(
         seedData.workspaceId,
         "Deleted repository secret",

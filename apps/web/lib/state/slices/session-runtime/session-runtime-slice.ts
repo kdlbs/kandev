@@ -2,6 +2,12 @@ import type { StateCreator } from "zustand";
 import type { SessionRuntimeSlice, SessionRuntimeSliceState, SessionPollMode } from "./types";
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
+import {
+  beginWorkspaceRestoration,
+  clearWorkspaceRestoration,
+  completeWorkspaceRestoration,
+  failWorkspaceRestoration,
+} from "./workspace-restoration";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 // Shell + terminal streams are unbounded over a session's lifetime; cap them at
@@ -72,10 +78,12 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
+  delete state.gitCheckoutGeneration.byEnvironmentId[envKey];
   delete state.userShells.byEnvironmentId[envKey];
   delete state.userShells.dismissedByEnvironmentId[envKey];
   delete state.userShells.loading[envKey];
   delete state.userShells.loaded[envKey];
+  delete state.workspaceRestoration.byEnvironmentId[envKey];
 }
 
 /** Drop all runtime state tied to a removed session so closed/replaced sessions
@@ -101,6 +109,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   gitStatus: { byEnvironmentId: {}, byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
   sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
+  gitCheckoutGeneration: { byEnvironmentId: {} },
   contextWindow: { bySessionId: {} },
   agents: { agents: [] },
   availableCommands: { bySessionId: {} },
@@ -115,6 +124,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionPollMode: { bySessionId: {} },
   embeddedVscodeSupport: { bySessionId: {} },
   workspaceFilesRefresh: { bySessionId: {} },
+  workspaceRestoration: { byEnvironmentId: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
@@ -236,6 +246,13 @@ function buildSessionCommitActions(set: ImmerSet) {
         const prev = draft.sessionCommits.refetchTrigger[envKey] ?? 0;
         draft.sessionCommits.refetchTrigger[envKey] = prev + 1;
       }),
+    bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        const byRepository = (draft.gitCheckoutGeneration.byEnvironmentId[envKey] ??= {});
+        const scope = repositoryName ?? "";
+        byRepository[scope] = (byRepository[scope] ?? 0) + 1;
+      }),
   };
 }
 
@@ -325,6 +342,7 @@ export function migrateEnvKeyedData(
   migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.sessionCommits.loading);
   migrate(draft.sessionCommits.refetchTrigger);
+  migrate(draft.gitCheckoutGeneration.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentId);
   migrate(draft.shell.outputs);
   migrate(draft.shell.statuses);
@@ -332,6 +350,16 @@ export function migrateEnvKeyedData(
   migrate(draft.userShells.dismissedByEnvironmentId);
   migrate(draft.userShells.loading);
   migrate(draft.userShells.loaded);
+  const workspaceAttempt = draft.workspaceRestoration.byEnvironmentId[sessionId];
+  if (workspaceAttempt) {
+    if (!(environmentId in draft.workspaceRestoration.byEnvironmentId)) {
+      draft.workspaceRestoration.byEnvironmentId[environmentId] = {
+        ...workspaceAttempt,
+        environmentId,
+      };
+    }
+    delete draft.workspaceRestoration.byEnvironmentId[sessionId];
+  }
 }
 
 function buildContextWindowActions(set: ImmerSet) {
@@ -347,6 +375,50 @@ function buildContextWindowActions(set: ImmerSet) {
       set((draft) => {
         delete draft.contextWindow.bySessionId[sessionId];
       }),
+  };
+}
+
+function buildWorkspaceRestorationActions(set: ImmerSet) {
+  return {
+    beginWorkspaceRestoration: (taskId: string, sessionId: string, environmentId: string) => {
+      let attempt: ReturnType<typeof beginWorkspaceRestoration> = null;
+      set((draft) => {
+        attempt = beginWorkspaceRestoration(draft.workspaceRestoration, {
+          taskId,
+          sessionId,
+          environmentId,
+        });
+      });
+      return attempt;
+    },
+    completeWorkspaceRestoration: (
+      attempt: Parameters<SessionRuntimeSlice["completeWorkspaceRestoration"]>[0],
+    ) => {
+      let completed = false;
+      set((draft) => {
+        completed = completeWorkspaceRestoration(draft.workspaceRestoration, attempt);
+      });
+      return completed;
+    },
+    failWorkspaceRestoration: (
+      attempt: Parameters<SessionRuntimeSlice["failWorkspaceRestoration"]>[0],
+      details: string,
+    ) => {
+      let failed = false;
+      set((draft) => {
+        failed = failWorkspaceRestoration(draft.workspaceRestoration, attempt, details);
+      });
+      return failed;
+    },
+    clearWorkspaceRestoration: (
+      attempt: Parameters<SessionRuntimeSlice["clearWorkspaceRestoration"]>[0],
+    ) => {
+      let cleared = false;
+      set((draft) => {
+        cleared = clearWorkspaceRestoration(draft.workspaceRestoration, attempt);
+      });
+      return cleared;
+    },
   };
 }
 
@@ -402,6 +474,7 @@ export const createSessionRuntimeSlice: StateCreator<
       draft.environmentIdBySessionId[sessionId] = environmentId;
       migrateEnvKeyedData(draft, sessionId, environmentId);
     }),
+  ...buildWorkspaceRestorationActions(set),
   ...buildContextWindowActions(set),
   ...buildSessionCommitActions(set),
   setAvailableCommands: (sessionId, commands) =>

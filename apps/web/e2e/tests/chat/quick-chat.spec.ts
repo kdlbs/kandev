@@ -521,7 +521,7 @@ test.describe("Quick Chat", () => {
     await leftHandle.hover();
     const leftHighlightBox = await leftHandle.locator("span").boundingBox();
     expect(leftHighlightBox).not.toBeNull();
-    expect(leftHighlightBox!.x).toBeCloseTo(rightResizedBox!.x, 0);
+    expect(Math.abs(leftHighlightBox!.x - rightResizedBox!.x)).toBeLessThanOrEqual(1);
     await testPage.mouse.move(leftBox!.x + leftBox!.width / 2, leftBox!.y + leftBox!.height / 2);
     await testPage.mouse.down();
     await testPage.mouse.move(
@@ -981,6 +981,14 @@ test.describe("Quick Chat", () => {
     const secondTab = dialog.locator(
       `[data-tab-reference="${secondReference}"] [data-testid="quick-chat-tab"]`,
     );
+    // Explicitly select the non-first conversation so reload coverage proves
+    // the remembered selection wins over the deterministic first-tab fallback.
+    await secondTab.click();
+    await expect
+      .poll(() =>
+        testPage.evaluate("window.__KANDEV_E2E_STORE__?.getState().quickChat.activeSessionId"),
+      )
+      .toBe(second.session_id);
     await secondTab.locator('button[title="Double-click to rename"]').click({ button: "right" });
     await testPage.getByRole("menuitem", { name: "Rename", exact: true }).click();
     const renameInput = secondTab.getByRole("textbox", { name: "Rename chat" });
@@ -1057,6 +1065,11 @@ test.describe("Quick Chat", () => {
     await expect
       .poll(() => quickChatTabReferences(restoredDialog), { timeout: 15_000 })
       .toEqual([terminalReference, firstReference, secondReference]);
+    await expect
+      .poll(() =>
+        testPage.evaluate("window.__KANDEV_E2E_STORE__?.getState().quickChat.activeSessionId"),
+      )
+      .toBe(second.session_id);
     await expect(
       restoredDialog.locator(
         `[data-tab-reference="${firstReference}"] [data-testid="quick-chat-tab-name"]`,

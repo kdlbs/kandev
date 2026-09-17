@@ -20,7 +20,9 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { WorkspaceScopeProvider } from "@/components/workspace-scope-provider";
 import { WebSocketConnector } from "@/components/ws-connector";
+import { NeedsYouInboxBridge } from "@/components/needs-you-inbox/needs-you-inbox-bridge";
 import { useWindowControlsOverlay } from "@/hooks/use-window-controls-overlay";
+import { useTaskColorMigration } from "@/hooks/use-task-color-migration";
 import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 import { I18nProvider } from "@/lib/i18n/provider";
 import { Toaster as SonnerToaster } from "@kandev/ui/sonner";
@@ -51,6 +53,8 @@ function AppToaster() {
 }
 
 export function AppShell({ children }: AppShellProps) {
+  useTaskColorMigration();
+
   const titlebar = useWindowControlsOverlay();
   const shellStyle = {
     "--titlebar-area-x": `${titlebar.x}px`,
@@ -75,6 +79,7 @@ export function AppShell({ children }: AppShellProps) {
               <CommandRegistryProvider>
                 <DesktopCommandHost />
                 <WebSocketConnector />
+                <NeedsYouInboxBridge />
                 <GlobalCommands />
                 <CommandPanel />
                 <RecentTaskSwitcher />

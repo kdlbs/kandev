@@ -295,8 +295,8 @@ func normalizeActor(req QueueRunRequest) (models.ActorKind, string) {
 // (AC-OFFICE-RUN-CAUSATION-001.10's most-restrictive-reading idiom
 // applied to a legacy empty value).
 func causingCausationID(causing *models.Run) string {
-	if causing.CausationID != "" {
-		return causing.CausationID
+	if causing.ChainCausationID != "" {
+		return causing.ChainCausationID
 	}
 	return causing.ID
 }

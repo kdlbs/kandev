@@ -15,26 +15,119 @@ type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
 // A 409 this client does not recognize is treated as an error rather than
 // risked as a silent success.
 const CLARIFICATION_CONFLICT_NOT_ACTIVE = "not_active";
+const CLARIFICATION_RESPONSE_TIMEOUT_MS = 40_000;
 
 // The bundle status the backend can report on a resolved response (R10).
 // Upstream's claim cannot produce a cancelled winner, so a loss only ever
 // resolves to one of these two (W3a is retired: no "cancelled" union member).
-type ResolvedStatus = "answered" | "rejected";
+export type ResolvedStatus = "answered" | "rejected";
 
 // Parsed shape of the clarification respond/cancel envelope
 // (internal/clarification/handlers.go's writeResolutionResult). Both the
 // answer batch and the skip/reject call hit the same endpoint and get the
 // same envelope back.
-type ClarificationRespondResult = {
+export type ClarificationRespondResult = {
   state: SubmitState;
   // Present only when the server returned a parseable 200 body. Absent on a
-  // 409 (legacy backend, no body) or a network/non-2xx failure — callers
-  // treat an absent `claimed` the same as an older backend that never sent
-  // one (W3: keep applying this client's own answers).
+  // 409 (legacy backend, no body), malformed 200 body, or a network/non-2xx
+  // failure — callers treat an absent `claimed` the same as an older backend
+  // that never sent one (W3: keep applying this client's own answers).
   claimed?: boolean;
   status?: ResolvedStatus;
   answers?: ClarificationAnswer[];
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isResolvedStatus(value: unknown): value is ResolvedStatus {
+  return value === "answered" || value === "rejected";
+}
+
+function isClarificationAnswer(value: unknown): value is ClarificationAnswer {
+  if (!isRecord(value) || typeof value.question_id !== "string") return false;
+  const selectedOptions = value.selected_options;
+  if (
+    selectedOptions !== undefined &&
+    (!Array.isArray(selectedOptions) ||
+      !selectedOptions.every((option) => typeof option === "string"))
+  ) {
+    return false;
+  }
+  const customText = value.custom_text;
+  return customText === undefined || typeof customText === "string";
+}
+
+function parseClarificationAnswers(value: unknown): ClarificationAnswer[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(isClarificationAnswer)) return null;
+  return value;
+}
+
+function parseOptionalClaimed(value: unknown): boolean | null | undefined {
+  if (value === undefined) return undefined;
+  return typeof value === "boolean" ? value : null;
+}
+
+function parseOptionalStatus(value: unknown): ResolvedStatus | null | undefined {
+  if (value === undefined) return undefined;
+  return isResolvedStatus(value) ? value : null;
+}
+
+type ParsedResponseFields = {
+  response?: Record<string, unknown>;
+  answers?: ClarificationAnswer[];
+};
+
+function parseResponseFields(value: unknown): ParsedResponseFields | null {
+  if (value === undefined || value === null) return {};
+  if (!isRecord(value)) return null;
+  const answers = parseClarificationAnswers(value.answers);
+  if (answers === null) return null;
+  return { response: value, answers };
+}
+
+// A 200 is authoritative only when it has the response envelope introduced by
+// the clarification resolver. Older backends may omit claimed, but they must
+// still identify a successful response explicitly.
+function parseClarificationResponseBody(value: unknown): ClarificationRespondResult | null {
+  if (!isRecord(value) || value.success !== true) return null;
+  const claimed = parseOptionalClaimed(value.claimed);
+  const status = parseOptionalStatus(value.status);
+  const responseFields = parseResponseFields(value.response);
+  if (claimed === null || status === null || responseFields === null) return null;
+  if (
+    claimed === false &&
+    (status === undefined ||
+      responseFields.response === undefined ||
+      responseFields.answers === undefined)
+  ) {
+    return null;
+  }
+  return { state: "ok", claimed, status, ...responseFields };
+}
+
+// ClarificationOutcome is the settled-submission report every outcome
+// consumer needs: built directly from the same ClarificationRespondResult
+// this hook already parses (design-01#Components /
+// design-02#Failure-and-recovery), so no host (including the Needs-you
+// Inbox) ever derives a second representation of "what happened" from raw
+// wire fields.
+export type ClarificationOutcome =
+  | { kind: "resolved"; claimedByThisCaller: boolean; status?: ResolvedStatus }
+  | { kind: "no_longer_active" }
+  | { kind: "submission_failed" };
+
+function clarificationOutcome(result: ClarificationRespondResult): ClarificationOutcome {
+  if (result.state === "expired") return { kind: "no_longer_active" };
+  if (result.state === "error") return { kind: "submission_failed" };
+  return {
+    kind: "resolved",
+    claimedByThisCaller: result.claimed !== false,
+    status: result.status,
+  };
+}
 
 export type ClarificationGroupApi = {
   pendingId: string | null;
@@ -55,6 +148,13 @@ export type ClarificationGroupApi = {
   // retries use the current live answers; skip retries keep the original
   // reason. A no-op before either has been called.
   retry: () => Promise<void>;
+  // The most recent settled ClarificationRespondResult this submission still
+  // owned (see runClarificationRequest's ownsRequest fence), or null before
+  // any submission has settled. Callers that need to distinguish "this
+  // caller won" from "another caller won" read this alongside submitState;
+  // see ClarificationOutcome / the outcome callback threaded through
+  // ClarificationInputOverlay -> ClarificationPanelSection.
+  lastResult: ClarificationRespondResult | null;
 };
 
 function questionIdsFromMessages(messages: readonly Message[]): string[] {
@@ -109,38 +209,37 @@ async function postClarification(
   body: Record<string, unknown>,
 ): Promise<ClarificationRespondResult> {
   const { apiBaseUrl } = getBackendConfig();
-  let res: Response;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CLARIFICATION_RESPONSE_TIMEOUT_MS);
   try {
-    res = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
+    const res = await fetch(`${apiBaseUrl}/api/v1/clarification/${pendingId}/respond`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
+    if (res.status === 409) return await classifyConflictResult(res);
+    if (!res.ok) {
+      console.error("Clarification request failed:", res.status, res.statusText);
+      return { state: "error" };
+    }
+    try {
+      const parsed = parseClarificationResponseBody(await res.json());
+      if (!parsed) {
+        console.error("Clarification response body failed envelope validation");
+        return { state: "error" };
+      }
+      return parsed;
+    } catch (err) {
+      console.error("Clarification response body parse failed:", err);
+      return { state: "error" };
+    }
   } catch (err) {
     console.error("Clarification request failed:", err);
     return { state: "error" };
-  }
-  if (res.status === 409) return await classifyConflictResult(res);
-  if (!res.ok) {
-    console.error("Clarification request failed:", res.status, res.statusText);
-    return { state: "error" };
-  }
-  try {
-    const parsed = (await res.json()) as {
-      claimed?: boolean;
-      status?: ResolvedStatus;
-      response?: { answers?: ClarificationAnswer[] } | null;
-    };
-    return {
-      state: "ok",
-      claimed: parsed.claimed,
-      status: parsed.status,
-      answers: parsed.response?.answers,
-    };
-  } catch (err) {
-    console.error("Clarification response body parse failed:", err);
-    return { state: "ok" };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -194,6 +293,8 @@ type RunClarificationRequestArgs = {
   requestGenerationRef: { current: number };
   inflightRef: { current: boolean };
   setSubmitState: (state: SubmitState) => void;
+  setLastResult: (result: ClarificationRespondResult) => void;
+  onOutcome?: (outcome: ClarificationOutcome) => void;
   updateMessage: (message: Message) => void;
 };
 
@@ -211,6 +312,8 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     requestGenerationRef,
     inflightRef,
     setSubmitState,
+    setLastResult,
+    onOutcome,
     updateMessage,
   } = args;
   const requestGeneration = ++requestGenerationRef.current;
@@ -221,7 +324,11 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
   setSubmitState("submitting");
   try {
     const result = await post();
-    if (ownsRequest()) setSubmitState(result.state);
+    if (ownsRequest()) {
+      setSubmitState(result.state);
+      setLastResult(result);
+      onOutcome?.(clarificationOutcome(result));
+    }
     if (result.state === "ok") {
       // Applies against the submit-time bundle snapshot regardless of which
       // bundle is now on screen -- this client's own messages really were
@@ -235,7 +342,11 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     }
   } catch (err) {
     console.error("Clarification request threw:", err);
-    if (ownsRequest()) setSubmitState("error");
+    if (ownsRequest()) {
+      setSubmitState("error");
+      setLastResult({ state: "error" });
+      onOutcome?.({ kind: "submission_failed" });
+    }
   } finally {
     // Only release the mutex if this exact request still owns it. A bundle
     // swap can return to the same pending ID before this request settles, so
@@ -292,9 +403,31 @@ type UseClarificationSubmissionArgs = {
   inflightRef: { current: boolean };
   setAnswers: (answers: Record<string, ClarificationAnswer>) => void;
   setSubmitState: (state: SubmitState) => void;
+  setLastResult: (result: ClarificationRespondResult) => void;
+  onOutcome?: (outcome: ClarificationOutcome) => void;
   updateMessage: (message: Message) => void;
   defaultSkipReason: string;
 };
+
+// Factors out the request-plumbing fields shared by submitCollected and
+// skipAll's runClarificationRequest calls, keeping useClarificationSubmission
+// itself under the file's max-lines-per-function limit.
+function baseClarificationRequestArgs(
+  requestPendingId: string,
+  common: UseClarificationSubmissionArgs,
+) {
+  return {
+    bundle: common.submitBundleRef.current.slice(),
+    requestPendingId,
+    activePendingIdRef: common.activePendingIdRef,
+    requestGenerationRef: common.requestGenerationRef,
+    inflightRef: common.inflightRef,
+    setSubmitState: common.setSubmitState,
+    setLastResult: common.setLastResult,
+    onOutcome: common.onOutcome,
+    updateMessage: common.updateMessage,
+  };
+}
 
 // Submission plumbing shared by useClarificationGroup: submitCollected/skipAll
 // each POST through runClarificationRequest, and retry() replays whichever of
@@ -311,6 +444,8 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
     inflightRef,
     setAnswers,
     setSubmitState,
+    setLastResult,
+    onOutcome,
     updateMessage,
     defaultSkipReason,
   } = args;
@@ -336,13 +471,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
         post: () => postClarificationBatch(pendingId, ordered),
         ownStatus: "answered",
         ownAnswers: current,
-        bundle: submitBundleRef.current.slice(),
-        requestPendingId: pendingId,
-        activePendingIdRef,
-        requestGenerationRef,
-        inflightRef,
-        setSubmitState,
-        updateMessage,
+        ...baseClarificationRequestArgs(pendingId, args),
       });
     },
     [
@@ -355,6 +484,8 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       inflightRef,
       setAnswers,
       setSubmitState,
+      setLastResult,
+      onOutcome,
       updateMessage,
     ],
   );
@@ -369,13 +500,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
         post: () => postClarificationSkip(pendingId, effectiveReason),
         ownStatus: "rejected",
         ownAnswers: {},
-        bundle: submitBundleRef.current.slice(),
-        requestPendingId: pendingId,
-        activePendingIdRef,
-        requestGenerationRef,
-        inflightRef,
-        setSubmitState,
-        updateMessage,
+        ...baseClarificationRequestArgs(pendingId, args),
       });
     },
     [
@@ -385,6 +510,8 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       requestGenerationRef,
       inflightRef,
       setSubmitState,
+      setLastResult,
+      onOutcome,
       updateMessage,
       defaultSkipReason,
     ],
@@ -419,6 +546,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
 // presses ArrowRight on the last step.
 export function useClarificationGroup(
   messages: readonly Message[] | null | undefined,
+  onOutcome?: (outcome: ClarificationOutcome) => void,
 ): ClarificationGroupApi {
   const { t } = useTranslation();
   const storeApi = useAppStoreApi();
@@ -428,6 +556,7 @@ export function useClarificationGroup(
     answersRef.current = answers;
   }, [answers]);
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  const [lastResult, setLastResult] = useState<ClarificationRespondResult | null>(null);
   // Re-entry guard: multiple submit paths can race (Cmd+Enter inside the
   // custom input fires both the input's onSubmit and onRequestFinalSubmit;
   // a double-click on the Submit button can also race). The hook owns the
@@ -486,6 +615,8 @@ export function useClarificationGroup(
     inflightRef,
     setAnswers,
     setSubmitState,
+    setLastResult,
+    onOutcome,
     updateMessage: storeApi.getState().updateMessage,
     defaultSkipReason: t("task:userSkippedClarification"),
   });
@@ -508,6 +639,7 @@ export function useClarificationGroup(
       answersRef.current = {};
       setAnswers({});
       setSubmitState("idle");
+      setLastResult(null);
       resetLastAction();
       inflightRef.current = false;
     }
@@ -524,5 +656,6 @@ export function useClarificationGroup(
     submitCollected,
     skipAll,
     retry,
+    lastResult,
   };
 }

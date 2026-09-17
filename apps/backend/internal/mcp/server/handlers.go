@@ -3,24 +3,22 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.uber.org/zap"
 )
 
-// askQuestionKeepAliveInterval is how often ask_user_question streams a progress
-// notification to the agent while waiting for the user's answer. The agent's MCP
-// client (auggie runs on Node, whose fetch/undici applies a 300s idle timeout to
-// the in-flight tool-call request) aborts the call with "fetch failed" if no bytes
-// arrive for that long. Emitting a progress notification well inside that window
-// keeps the streamed POST/SSE response alive so the call survives until the user
-// responds. Declared as a var so tests can shorten it.
+// askQuestionKeepAliveInterval controls progress notifications during the
+// blocking ask_user_question call. Managed defaults keep it below client idle
+// deadlines. Tests can shorten it for fast transport tests.
 var askQuestionKeepAliveInterval = 20 * time.Second
 
 // Argument-name constants used across the ask_user_question_kandev handler.
@@ -29,6 +27,7 @@ const (
 	promptArg            = "prompt"
 	questionsArg         = "questions"
 	optionsArg           = "options"
+	instructionsArg      = "instructions"
 	idArg                = "id"
 	titleArg             = "title"
 	labelArg             = "label"
@@ -46,7 +45,28 @@ const (
 	reqKey               = "required"
 	typeKey              = "type"
 	stringType           = "string"
+	agentProfileIDArg    = "agent_profile_id"
 )
+
+func moveTaskEntryOptionsToolOption() mcp.ToolOption {
+	return mcp.WithObject("entry_options",
+		mcp.Description("One-shot overrides applied only when the task enters the target step; they never change durable step configuration and require an actual workflow step change."),
+		mcp.Properties(map[string]any{
+			"reset_context": map[string]any{
+				typeKey:        "boolean",
+				descriptionArg: "Reset the target session's agent context before the step's on_enter actions run.",
+			},
+			instructionsArg: map[string]any{
+				typeKey:        stringType,
+				descriptionArg: "One-time instructions appended to the target step's prompt (never replacing it) for this entry only.",
+			},
+			"skip_step_prompt": map[string]any{
+				typeKey:        "boolean",
+				descriptionArg: "Suppress the destination step's configured prompt (and its task-description fallback) for this one entry. With instructions the agent auto-starts a turn carrying only those instructions; without instructions no turn starts and the task lands idle.",
+			},
+		}),
+	)
+}
 
 func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -183,7 +203,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"title":               title,
 			"description":         req.GetString("prompt", ""),
 			autopilotArg:          req.GetBool(autopilotArg, false),
-			"agent_profile_id":    req.GetString("agent_profile_id", ""),
+			agentProfileIDArg:     req.GetString(agentProfileIDArg, ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
@@ -301,6 +321,153 @@ func (s *Server) getTaskPRAutomationHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) manageTaskChangeRequestHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		operation, err := req.RequireString("operation")
+		if err != nil || (operation != "link" && operation != "unlink" && operation != "replace") {
+			return mcp.NewToolResultError("operation must be link, unlink, or replace"), nil
+		}
+		taskID, err := req.RequireString(mcpKeyTaskID)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		if errMsg := validateChangeRequestOldIdentity(operation, req.GetArguments()); errMsg != "" {
+			return mcp.NewToolResultError(errMsg), nil
+		}
+		payload := map[string]interface{}{
+			"operation":      operation,
+			mcpKeyTaskID:     taskID,
+			"caller_task_id": s.taskID,
+		}
+		for _, key := range []string{
+			"provider", "repository_id", "number", "old_provider", "old_repository_id", "old_number",
+		} {
+			if value, ok := req.GetArguments()[key]; ok {
+				payload[key] = value
+			}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPManageTaskChangeRequest, payload, &result); err != nil {
+			return backendToolError(err), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) getTaskChangeRequestsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(
+			ctx, ws.ActionMCPGetTaskChangeRequests, map[string]interface{}{"task_id": s.taskID}, &result,
+		); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) updateTaskChangeRequestAutomationHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+		if errMsg := validateChangeRequestAutomationTarget(args); errMsg != "" {
+			return mcp.NewToolResultError(errMsg), nil
+		}
+		payload := make(map[string]interface{}, 2)
+		for _, key := range []string{"target", "patch"} {
+			if value, ok := args[key]; ok {
+				payload[key] = value
+			}
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskChangeRequestAutomation, payload, &result); err != nil {
+			return taskChangeRequestAutomationToolError(err), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func backendToolError(err error) *mcp.CallToolResult {
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) || backendErr.Details == nil {
+		return mcp.NewToolResultError(err.Error())
+	}
+	data, marshalErr := json.MarshalIndent(backendErr.Details, "", "  ")
+	if marshalErr != nil {
+		return mcp.NewToolResultError(err.Error())
+	}
+	result := mcp.NewToolResultStructured(backendErr.Details, string(data))
+	result.IsError = true
+	return result
+}
+
+func taskChangeRequestAutomationToolError(err error) *mcp.CallToolResult {
+	return backendToolError(err)
+}
+
+// validateChangeRequestOldIdentity enforces the operation/old-identity
+// exclusivity the portable schema can no longer express: link and unlink reject
+// any old identity field, replace requires all three. It names the violated
+// constraint without echoing argument values.
+func validateChangeRequestOldIdentity(operation string, args map[string]interface{}) string {
+	oldFields := []string{"old_provider", "old_repository_id", "old_number"}
+	if operation == "replace" {
+		for _, key := range oldFields {
+			if _, ok := args[key]; !ok {
+				return "replace requires old_provider, old_repository_id, and old_number"
+			}
+		}
+		return ""
+	}
+	for _, key := range oldFields {
+		if _, ok := args[key]; ok {
+			return "old_provider, old_repository_id, and old_number are only valid for replace"
+		}
+	}
+	return ""
+}
+
+// validateChangeRequestAutomationTarget enforces the target scope exclusivity
+// and the association prompt exclusion the portable schema can no longer
+// express. An association target requires the change-request identity and
+// rejects providers; a task target requires providers and rejects that
+// identity; an association target cannot carry auto_fix_prompt_override.
+func validateChangeRequestAutomationTarget(args map[string]interface{}) string {
+	target, ok := args["target"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	identityFields := []string{"provider", "repository_id", "number"}
+	switch target["scope"] {
+	case "association":
+		for _, key := range identityFields {
+			if _, present := target[key]; !present {
+				return "an association target requires provider, repository_id, and number"
+			}
+		}
+		if _, present := target["providers"]; present {
+			return "providers is only valid for a task target"
+		}
+		if patch, ok := args["patch"].(map[string]interface{}); ok {
+			if _, present := patch["auto_fix_prompt_override"]; present {
+				return "auto_fix_prompt_override is only valid for a task target"
+			}
+		}
+	case "task":
+		if _, present := target["providers"]; !present {
+			return "a task target requires a providers array"
+		}
+		for _, key := range identityFields {
+			if _, present := target[key]; present {
+				return "provider, repository_id, and number are only valid for an association target"
+			}
+		}
+	}
+	return ""
+}
+
 func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		payload := map[string]interface{}{"task_id": s.taskID}
@@ -326,6 +493,39 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPRAutomation, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) reportTaskPRAutoFixOutcomeHandler() server.ToolHandlerFunc {
+	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportPRAutoFixOutcome)
+}
+
+func (s *Server) reportTaskChangeRequestAutoFixOutcomeHandler() server.ToolHandlerFunc {
+	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportTaskChangeRequestAutoFixOutcome)
+}
+
+func (s *Server) reportTaskAutoFixOutcomeHandler(action string) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		outcome := strings.TrimSpace(req.GetString("outcome", ""))
+		summary := strings.TrimSpace(req.GetString("summary", ""))
+		if outcome != "action_taken" && outcome != "non_actionable" && outcome != "blocked" {
+			return mcp.NewToolResultError("outcome must be action_taken, non_actionable, or blocked"), nil
+		}
+		if summary == "" {
+			return mcp.NewToolResultError("summary is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":    s.taskID,
+			"session_id": s.sessionID,
+			"outcome":    outcome,
+			"summary":    summary,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -506,7 +706,7 @@ func (s *Server) spawnSessionHandler() server.ToolHandlerFunc {
 			"sender_task_id":    s.taskID,
 			"sender_session_id": s.sessionID,
 		}
-		copyOptionalStringArg(payload, req, "agent_profile_id")
+		copyOptionalStringArg(payload, req, agentProfileIDArg)
 		copyOptionalStringArg(payload, req, "name")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSpawnSession, payload, &result); err != nil {
@@ -1041,6 +1241,26 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
+		// Checked before RequireString ("content"), so a non-empty mode argument is
+		// rejected even when content is also present but empty. content is
+		// schema-required, so a
+		// call missing content entirely never reaches this handler at all -
+		// the server's generic MCP argument-schema validator rejects it
+		// first; that generic message is acceptable here because create has
+		// no ordering requirement between mode and content the way
+		// update. This tool has no
+		// mode of its own — wrongType is folded into the reject rather than
+		// silently treated as absent, since a non-empty-but-wrongly-typed
+		// mode is not "absent or empty" either; in practice the schema's own
+		// type constraint on "mode" already rejects a non-string value
+		// before this runs, so wrongType here is defense-in-depth against a
+		// future schema change, not the primary guard.
+		if mode, present, wrongType := planModeArg(req); present && (wrongType || mode != "") {
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"mode is not supported by create_task_plan_kandev; use update_task_plan_kandev with mode=%q to add a section to an existing plan without resending it",
+				service.PlanWriteModeAppend,
+			)), nil
+		}
 		content, err := req.RequireString("content")
 		if err != nil {
 			return mcp.NewToolResultError("content is required"), nil
@@ -1095,10 +1315,33 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
-		content, err := req.RequireString("content")
-		if err != nil {
-			return mcp.NewToolResultError("content is required"), nil
+
+		// Mode is checked before content, mirroring
+		// precedence: mode validity is decided
+		// entirely from the request itself, so it is resolved before a
+		// round trip. GetString would silently read a non-string mode as
+		// absent and default to the destructive replace behavior
+		// so the type is checked explicitly -
+		// though in practice the schema's own type constraint on "mode"
+		// already rejects a non-string value before this handler runs, so
+		// this is defense-in-depth against a future schema change, not the
+		// primary guard. content is deliberately NOT schema-required (see
+		// its registration in registerPlanTools) and read permissively
+		// here rather than with RequireString: "content is required" is
+		// PlanService.UpdatePlan's call to make, after authorization, so
+		// that a denied caller never learns content validity for a task it
+		// cannot reach.
+		mode, _, wrongType := planModeArg(req)
+		if wrongType {
+			return mcp.NewToolResultError(fmt.Sprintf("mode must be a string; accepted values are %q and %q", service.PlanWriteModeReplace, service.PlanWriteModeAppend)), nil
 		}
+		if mode != "" {
+			if _, err := service.ParsePlanWriteMode(mode); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+		}
+
+		content := req.GetString("content", "")
 		title := req.GetString("title", "")
 
 		payload := map[string]interface{}{
@@ -1109,6 +1352,9 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		if title != "" {
 			payload["title"] = title
 		}
+		if mode != "" {
+			payload["mode"] = mode
+		}
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPlan, payload, &result); err != nil {
@@ -1116,6 +1362,23 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		}
 		return planWriteAck("updated", result, content), nil
 	}
+}
+
+// planModeArg reads the optional "mode" tool argument. It distinguishes a
+// value present but not a string from one genuinely absent: silently
+// treating the former as absent (as GetString would) defaults a malformed
+// request to destructive replace behavior. value is "" whenever wrongType is
+// true.
+func planModeArg(req mcp.CallToolRequest) (value string, present, wrongType bool) {
+	raw, ok := req.GetArguments()["mode"]
+	if !ok {
+		return "", false, false
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", true, true
+	}
+	return s, true, false
 }
 
 func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {

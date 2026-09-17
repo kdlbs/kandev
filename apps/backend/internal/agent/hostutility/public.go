@@ -10,7 +10,9 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 )
 
 // ExecuteProfilePrompt resolves a complete profile snapshot at call start
@@ -44,6 +46,20 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			env[value.Key] = value.Value
 		}
 	}
+	var gatewayAuth *acpprovider.GatewayAuth
+	var providerKeyEnvVar, providerKey string
+	if profile.ProviderKind == settingsmodels.ProviderKindOpenAICompatible {
+		if m.providerGatewayAuthResolver == nil {
+			return nil, errors.New("utility provider gateway resolver is not configured")
+		}
+		gatewayAuth, providerKeyEnvVar, providerKey, err = m.providerGatewayAuthResolver(ctx, profileID, profile.AgentID)
+		if err != nil {
+			return nil, err
+		}
+		if providerKey != "" && providerKeyEnvVar != "" {
+			env[providerKeyEnvVar] = providerKey
+		}
+	}
 	inst, ia, err := m.getInstance(ctx, profile.AgentID)
 	if err != nil {
 		return nil, err
@@ -64,9 +80,15 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
 			Command: command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
+			ProviderGatewayAuth: gatewayAuth,
 		},
 	}
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
+	release()
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +208,7 @@ func (m *Manager) resolveModelConfigFlight(
 	probeReq.Model = req.Model
 	probeReq.Mode = req.Mode
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
-	resp, err := inst.client.Probe(probeCtx, probeReq)
+	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, command, probeReq)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +363,12 @@ func (m *Manager) ExecutePromptWithMCP(
 		},
 		MCPServers: mcpServers,
 	}
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := inst.client.InferencePrompt(ctx, req)
+	release()
 	if err != nil {
 		return nil, err
 	}

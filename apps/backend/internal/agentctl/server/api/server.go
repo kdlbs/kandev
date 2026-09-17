@@ -40,7 +40,24 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	lspInstaller     lspInstallerRegistry
 
+	// credentialSource, when set via SetCredentialSource, authenticates this
+	// instance's requests and streams against the control server's single
+	// rotating credential instead of the static cfg.AuthToken captured at
+	// construction (design 01 "Single driver",
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). Nil preserves the legacy
+	// static-token behavior every test constructing a Server without a
+	// running control server alongside it relies on.
+	credentialSource InstanceCredentialSource
+
 	upgrader websocket.Upgrader
+}
+
+// SetCredentialSource wires this instance server's authentication and
+// stream lifetime to the control server's single rotating credential,
+// replacing the static per-instance token captured at construction. Call
+// once, before the server starts accepting requests.
+func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
+	s.credentialSource = src
 }
 
 // NewServer creates a new API server for an agent instance.
@@ -71,7 +88,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
 	//   runs in the same trust boundary but does not possess the auth token.
-	s.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
@@ -116,6 +133,7 @@ func (s *Server) setupRoutes() {
 
 		// Workspace state (poll mode driven by gateway focus signal)
 		api.POST("/workspace/poll-mode", s.handleSetPollMode)
+		api.POST("/workspace/refresh", s.handleRefreshWorkspace)
 
 		// Workspace rescan: triggered by the kandev backend after a new
 		// sibling worktree appears on disk (multi-branch add_branch flow).
@@ -140,6 +158,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
+		api.POST("/workspace/html-previews", s.handleWorkspacePreviewPublish)
 		api.POST("/workspace/file/create", s.handleFileCreate)
 		api.POST("/workspace/file/upload", s.handleFileUpload)
 		api.POST("/workspace/file/upload-preflight", s.handleUploadPreflight)
@@ -196,6 +215,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/push-preflight", s.handleGitPushPreflight)
 		api.POST("/git/contribution/replace", s.handleGitReplaceContribution)
 		api.POST("/git/contribution/use", s.handleGitUseContribution)
+		api.POST("/git/contribution/history-explanation", s.handleGitContributionHistoryExplanation)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
 		api.POST("/git/abort", s.handleGitAbort)
@@ -438,6 +458,7 @@ type AgentConfigureRequest struct {
 	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
 	ContinueArgs    optionalArgs      `json:"continue_args"`
 	Env             map[string]string `json:"env,omitempty"`
+	ReplaceEnv      bool              `json:"replace_env,omitempty"`
 	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // "untrusted", "on-failure", "on-request", or "never"
 }
 
@@ -475,11 +496,17 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	if err := s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present); err != nil {
-		s.logger.Error("failed to configure agent", zap.Error(err), zap.String("command", req.Command))
+	var configureErr error
+	if req.ReplaceEnv {
+		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+	} else {
+		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+	}
+	if configureErr != nil {
+		s.logger.Error("failed to configure agent", zap.Error(configureErr), zap.String("command", req.Command))
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,
-			Error:   err.Error(),
+			Error:   configureErr.Error(),
 		})
 		return
 	}

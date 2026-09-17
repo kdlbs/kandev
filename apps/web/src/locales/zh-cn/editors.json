@@ -47,6 +47,7 @@
   "pasteLink": "粘贴链接…",
   "planFormattingToolbar": "计划格式工具栏",
   "pleaseTryAgain": "请重试。",
+  "previewHtml": "预览 HTML",
   "previewMarkdown": "预览 Markdown",
   "queuedForTheAgent": "已排队等待智能体。",
   "reload": "重新加载",
@@ -88,5 +89,6 @@
   "toggleWordWrap": "切换自动换行",
   "underlineCmdU": "下划线（Cmd+U）",
   "failedToOpenEditor": "打开编辑器失败",
-  "downloadFile": "下载文件"
+  "downloadFile": "下载文件",
+  "symlink": "符号链接"
 }

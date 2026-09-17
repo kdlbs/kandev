@@ -5,6 +5,7 @@ import type {
   TaskSession,
   Turn,
   TaskPlan,
+  TaskPlanCommentSnapshot,
   TaskPlanRevision,
   TaskWalkthrough,
 } from "@/lib/types/http";
@@ -31,6 +32,8 @@ export type MessagesState = {
 export type PromptsState = MessagesState & {
   /** Incremented when a session is removed to reject stale prompt requests. */
   generationBySession: Record<string, number>;
+  /** Incremented whenever an authoritative prompt refresh begins. */
+  refreshGenerationBySession: Record<string, number>;
 };
 
 export type TurnsState = {
@@ -123,11 +126,30 @@ export type ActiveModelState = {
  * null. Reducers enforce a 2-slot cap and reject duplicates. */
 export type ComparePair = [string | null, string | null];
 
+export type PlanCommentMigrationStatus =
+  | "idle"
+  | "running"
+  | "retrying"
+  | "complete"
+  | "waiting_for_plan"
+  | "failed";
+
+export type PlanCommentMigrationState = {
+  status: PlanCommentMigrationStatus;
+  pendingCount: number;
+  failure: "transient" | "conflict" | "rejected" | null;
+};
+
 export type TaskPlansState = {
   byTaskId: Record<string, TaskPlan | null>;
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
   savingByTaskId: Record<string, boolean>;
+  commentsByTaskId: Record<string, TaskPlanCommentSnapshot | undefined>;
+  commentsLoadingByTaskId: Record<string, boolean>;
+  commentsLoadedByTaskId: Record<string, boolean>;
+  commentsErrorByTaskId: Record<string, string | undefined>;
+  commentsMigrationByTaskId: Record<string, PlanCommentMigrationState | undefined>;
   revisionsByTaskId: Record<string, TaskPlanRevision[]>;
   revisionsLoadingByTaskId: Record<string, boolean>;
   revisionsLoadedByTaskId: Record<string, boolean>;
@@ -151,6 +173,7 @@ export type WalkthroughsState = {
 
 export type QueuedMessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  queue_admission_ids?: string[];
   workflow_message?: boolean;
   workflow_auto_start?: boolean;
   workflow_step_id?: string;
@@ -190,17 +213,42 @@ export type QueueMeta = {
   max: number;
   /** Backend-owned queue motion policy. Missing server state defaults to on. */
   autoRun: boolean;
-  /** Mirrors the server's message queue merge_enabled setting; hides the
-   * "Merge with above" affordance without a separate settings fetch. */
+  /** Mirrors the server's manual merge setting. */
   mergeEnabled: boolean;
+  taskId?: string;
+  sessionIncarnationId?: string;
+  statusEpoch?: string;
+  statusGeneration?: number;
+  retiredStatusEpochs?: string[];
+  autoMergeAvailable?: boolean;
+  autoMergeEnabled?: boolean;
+  autoMergeSource?: "global" | "session";
+  autoMergeRevision?: number;
+};
+
+export type QueueMetaUpdateOptions = {
+  establishStatusEpoch?: boolean;
 };
 
 export type QueueStatus = {
   entries: QueuedMessage[];
   count: number;
   max: number;
+  task_id?: string;
+  session_id?: string;
+  session_incarnation_id?: string;
+  status_epoch?: string;
+  status_generation?: number;
   merge_enabled: boolean;
   auto_run?: boolean;
+  auto_merge_available?: boolean;
+  auto_merge_enabled?: boolean;
+  auto_merge_source?: "global" | "session";
+  auto_merge_revision?: number;
+};
+export type QueueOperationToken = {
+  sessionIncarnationId: string;
+  generation: number;
 };
 
 export type QueueState = {
@@ -208,7 +256,8 @@ export type QueueState = {
   bySessionId: Record<string, QueuedMessage[]>;
   /** Per-session capacity snapshot from the latest server response. */
   metaBySessionId: Record<string, QueueMeta>;
-  isLoading: Record<string, boolean>;
+  activeOperationBySessionId: Record<string, QueueOperationToken>;
+  nextOperationGeneration: number;
 };
 
 export type SessionSliceState = {
@@ -293,7 +342,12 @@ export type SessionSliceActions = {
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
-  mergeTurnsSnapshot: (sessionId: string, turns: Turn[], hydrationEpoch: number) => void;
+  mergeTurnsSnapshot: (
+    sessionId: string,
+    turns: Turn[],
+    hydrationEpoch: number,
+    options?: { replace?: boolean },
+  ) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,
@@ -358,6 +412,10 @@ export type SessionSliceActions = {
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
+  setTaskPlanComments: (taskId: string, snapshot: TaskPlanCommentSnapshot) => void;
+  setTaskPlanCommentsLoading: (taskId: string, loading: boolean) => void;
+  setTaskPlanCommentsError: (taskId: string, error?: string) => void;
+  setTaskPlanCommentMigrationState: (taskId: string, state: PlanCommentMigrationState) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
   // Revision actions
@@ -374,9 +432,18 @@ export type SessionSliceActions = {
   setWalkthroughActiveStep: (taskId: string, stepIndex: number) => void;
   markWalkthroughSeen: (taskId: string) => void;
   // Queue actions
-  setQueueEntries: (sessionId: string, entries: QueuedMessage[], meta: QueueMeta) => void;
+  setQueueEntries: (
+    sessionId: string,
+    entries: QueuedMessage[],
+    meta: QueueMeta,
+    options?: QueueMetaUpdateOptions,
+  ) => void;
   removeQueueEntry: (sessionId: string, entryId: string) => void;
-  setQueueLoading: (sessionId: string, loading: boolean) => void;
+  beginQueueOperation: (
+    sessionId: string,
+    sessionIncarnationId: string,
+  ) => QueueOperationToken | null;
+  finishQueueOperation: (sessionId: string, token: QueueOperationToken) => void;
   clearQueueStatus: (sessionId: string) => void;
 };
 

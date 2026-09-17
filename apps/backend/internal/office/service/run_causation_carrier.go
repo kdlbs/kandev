@@ -13,7 +13,7 @@ import (
 // creating-agent input.
 func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
 	return map[string]interface{}{
-		taskmodels.MetaKeyOfficeCarrierCausationID:    run.CausationID,
+		taskmodels.MetaKeyOfficeCarrierCausationID:    run.ChainCausationID,
 		taskmodels.MetaKeyOfficeCarrierCausationDepth: run.CausationDepth,
 		taskmodels.MetaKeyOfficeCarrierCreatingRunID:  run.ID,
 		taskmodels.MetaKeyOfficeCarrierHumanRooted:    run.HumanRooted,
@@ -29,7 +29,7 @@ func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
 // rather than writing it onto a child task.
 func carrierFromRun(run *models.Run) TaskBoundaryCarrier {
 	return TaskBoundaryCarrier{
-		CausationID:    run.CausationID,
+		CausationID:    run.ChainCausationID,
 		CausationDepth: run.CausationDepth,
 		CreatingRunID:  run.ID,
 		HumanRooted:    run.HumanRooted,

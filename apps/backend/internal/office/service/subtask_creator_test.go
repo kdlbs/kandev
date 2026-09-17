@@ -91,7 +91,7 @@ func TestCreateOfficeSubtaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
+	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
 		models.ActorKindAgent, agent.ID, ""); err != nil {
 		t.Fatalf("queue causing run: %v", err)
 	}
@@ -124,9 +124,9 @@ func TestCreateOfficeSubtaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.
 	if metadata == nil {
 		t.Fatal("expected non-nil carrier metadata")
 	}
-	if metadata[taskmodels.MetaKeyOfficeCarrierCausationID] != causingRun.CausationID {
+	if metadata[taskmodels.MetaKeyOfficeCarrierCausationID] != causingRun.ChainCausationID {
 		t.Errorf("carrier causation_id = %v, want %q",
-			metadata[taskmodels.MetaKeyOfficeCarrierCausationID], causingRun.CausationID)
+			metadata[taskmodels.MetaKeyOfficeCarrierCausationID], causingRun.ChainCausationID)
 	}
 	if metadata[taskmodels.MetaKeyOfficeCarrierCausationDepth] != causingRun.CausationDepth {
 		t.Errorf("carrier causation_depth = %v, want %v",

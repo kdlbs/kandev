@@ -38,6 +38,14 @@ func (failingTransactionalWorkspaceSecretDeleter) DeleteWorkspaceSecretsTx(conte
 	return errors.New("injected transactional secret cleanup failure")
 }
 
+type failingWorkspaceSecretDeleter struct {
+	err error
+}
+
+func (f failingWorkspaceSecretDeleter) DeleteWorkspaceSecrets(context.Context, string) error {
+	return f.err
+}
+
 func (b *failingWorkspaceBootstrapper) CreateWorkspaceWithKanban(
 	context.Context,
 	*models.Workspace,
@@ -1002,6 +1010,52 @@ func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testin
 	}
 }
 
+func TestService_DeleteWorkspaceRemovesStagedAndClaimedAttachmentBytes(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-delete", WorkspaceID: "ws-delete", Title: "Delete attachments"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	attachmentRoot := t.TempDir()
+	attachmentSvc, err := NewAttachmentService(repo, attachmentRoot, nil, commonlogger.Default())
+	if err != nil {
+		t.Fatalf("NewAttachmentService: %v", err)
+	}
+	svc.SetAttachmentService(attachmentSvc)
+
+	stage := func(name string) *models.TaskMessageAttachment {
+		t.Helper()
+		attachment, stageErr := attachmentSvc.Stage(
+			ctx, "owner", "ws-delete", name, "text/plain", "resource", "path", strings.NewReader(name),
+		)
+		if stageErr != nil {
+			t.Fatalf("Stage %s: %v", name, stageErr)
+		}
+		return attachment
+	}
+	staged := stage("staged.txt")
+	claimed := stage("claimed.txt")
+	if err := attachmentSvc.Claim(ctx, "owner", "ws-delete", "task-delete", "session-delete", []string{claimed.ID}); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+
+	for _, attachment := range []*models.TaskMessageAttachment{staged, claimed} {
+		if _, err := os.Stat(filepath.Join(attachmentRoot, "attachments", attachment.StorageKey)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("attachment %s bytes still exist: %v", attachment.ID, err)
+		}
+		if _, err := repo.GetMessageAttachment(ctx, attachment.ID); !errors.Is(err, models.ErrAttachmentNotFound) {
+			t.Fatalf("attachment %s registry row still exists: %v", attachment.ID, err)
+		}
+	}
+}
+
 func TestService_DeleteWorkspaceRollsBackCascadeWhenSecretCleanupFails(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
@@ -1030,6 +1084,39 @@ func TestService_DeleteWorkspaceRollsBackCascadeWhenSecretCleanupFails(t *testin
 	}
 	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
 		t.Fatalf("events after rolled-back delete = %#v, want none", events)
+	}
+}
+
+func TestService_DeleteWorkspaceKeepsCleanupRunnableWhenSecretDeletionFails(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	secretErr := errors.New("secret deletion unavailable")
+	svc.SetWorkspaceSecretDeleter(failingWorkspaceSecretDeleter{err: secretErr})
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-delete", WorkspaceID: "ws-delete", Title: "Delete task"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); !errors.Is(err, secretErr) {
+		t.Fatalf("DeleteWorkspace error = %v, want secret deletion error", err)
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatal("workspace deletion did not commit")
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err == nil {
+		t.Fatal("task deletion did not commit")
+	}
+	var state string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT state FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = ?
+	`, "task-delete", models.TaskResourceCleanupTriggerWorkspaceDelete).Scan(&state); err != nil {
+		t.Fatalf("load workspace cleanup job: %v", err)
+	}
+	if state == string(models.TaskResourceCleanupStateCancelled) {
+		t.Fatalf("workspace cleanup state = %q, want runnable state", state)
 	}
 }
 
@@ -1497,6 +1584,41 @@ func (l leakyListTaskRepo) ListTasks(ctx context.Context, workflowID string) ([]
 		return nil, err
 	}
 	return append(real, l.extra...), nil
+}
+
+func (l leakyListTaskRepo) ListTasksByWorkspace(
+	ctx context.Context,
+	workspaceID, workflowID, repositoryID, query string,
+	page, pageSize int,
+	sort string,
+	includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool,
+) ([]*models.Task, int, error) {
+	real, total, err := l.TaskRepository.ListTasksByWorkspace(
+		ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort,
+		includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	return append(real, l.extra...), total + len(l.extra), nil
+}
+func (l leakyListTaskRepo) ListTasksForDeletion(
+	ctx context.Context,
+	workspaceID, workflowID string,
+	page, pageSize int,
+) ([]*models.Task, int, error) {
+	lister, ok := l.TaskRepository.(workflowDeleteTaskLister)
+	if !ok {
+		return l.ListTasksByWorkspace(
+			ctx, workspaceID, workflowID, "", "", page, pageSize, "",
+			true, true, false, false,
+		)
+	}
+	real, total, err := lister.ListTasksForDeletion(ctx, workspaceID, workflowID, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	return append(real, l.extra...), total + len(l.extra), nil
 }
 
 // TestService_DeleteWorkflow_SkipsConcurrentlyArchivedTask covers the

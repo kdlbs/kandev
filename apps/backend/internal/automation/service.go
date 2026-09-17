@@ -156,12 +156,13 @@ type AgentProfileLookup interface {
 
 // Service coordinates automation operations.
 type Service struct {
-	store       *Store
-	eventBus    bus.EventBus
-	logger      *logger.Logger
-	taskDeleter TaskDeleter // optional; nil-safe
-	runStopper  RunStopper  // optional; wired by the orchestrator composition
-	runLiveness RunLivenessChecker
+	pluginAutomation PluginAutomationProvider
+	store            *Store
+	eventBus         bus.EventBus
+	logger           *logger.Logger
+	taskDeleter      TaskDeleter // optional; nil-safe
+	runStopper       RunStopper  // optional; wired by the orchestrator composition
+	runLiveness      RunLivenessChecker
 	// workflowLocator gates workflow ownership. Optional: when nil (isolated
 	// tests) ownership is not enforced.
 	workflowLocator WorkflowLocator
@@ -510,6 +511,18 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	if err := s.validateAgentProfileID(ctx, req.AgentProfileID); err != nil {
 		return nil, err
 	}
+	kinds := make([]TriggerType, 0, len(req.Triggers))
+	for _, trigger := range req.Triggers {
+		kinds = append(kinds, trigger.Type)
+	}
+	if err := validateTriggerCombination(kinds); err != nil {
+		return nil, err
+	}
+	for _, trigger := range req.Triggers {
+		if err := s.validatePluginTrigger(ctx, req.WorkspaceID, trigger.Type, trigger.Config, trigger.Enabled); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.store.CreateAutomation(ctx, a); err != nil {
 		return nil, fmt.Errorf("create automation: %w", err)
 	}
@@ -574,6 +587,8 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if err := s.authorizeUpdatedReferences(ctx, id, req); err != nil {
 		return nil, err
 	}
+	unlock := s.automationRunLock(id)
+	defer unlock()
 	existing, err := s.store.GetAutomation(ctx, id)
 	if err != nil {
 		return nil, err
@@ -648,6 +663,11 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 		clone.RepositoryIDs = nil
 		clone.RepositoryMode = &repositoryMode
 		storeReq = &clone
+	}
+	if req.Enabled != nil && !*req.Enabled {
+		if err := s.cancelAutomationWebhookReceipts(ctx, id); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.store.UpdateAutomation(ctx, id, storeReq); err != nil {
 		return nil, err
@@ -745,6 +765,9 @@ func (s *Service) DeleteAutomation(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.store.enqueueWebhookSecrets(ctx, "automation_id", id); err != nil {
+		return err
+	}
 	if _, err := s.store.DeleteAutomationWithCleanup(ctx, id, cleanupTaskIDs); err != nil {
 		return err
 	}
@@ -836,6 +859,15 @@ func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
 	for _, run := range runs {
 		if run == nil {
 			continue
+		}
+		if run.TriggerType == TriggerTypePluginEvent {
+			pending, err := s.hasPendingWebhookDispatch(ctx, run.ID)
+			if err != nil {
+				return err
+			}
+			if pending {
+				continue
+			}
 		}
 		if run.TaskID == "" || run.SessionID == "" || run.TurnID == "" {
 			if err := s.store.MarkRunTerminal(ctx, run.ID, "", "", RunStatusFailed, "backend stopped before the automation turn was bound"); err != nil {
@@ -936,6 +968,8 @@ func (s *Service) EnableAutomation(ctx context.Context, id string) error {
 	if err := s.authorizeAutomation(ctx, id); err != nil {
 		return err
 	}
+	unlock := s.automationRunLock(id)
+	defer unlock()
 	enabled := true
 	return s.store.UpdateAutomation(ctx, id, &UpdateAutomationRequest{Enabled: &enabled})
 }
@@ -945,7 +979,12 @@ func (s *Service) DisableAutomation(ctx context.Context, id string) error {
 	if err := s.authorizeAutomation(ctx, id); err != nil {
 		return err
 	}
+	unlock := s.automationRunLock(id)
+	defer unlock()
 	enabled := false
+	if err := s.cancelAutomationWebhookReceipts(ctx, id); err != nil {
+		return err
+	}
 	return s.store.UpdateAutomation(ctx, id, &UpdateAutomationRequest{Enabled: &enabled})
 }
 
@@ -988,6 +1027,26 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 	if err := validateScheduledConfig(req.Type, req.Config); err != nil {
 		return nil, err
 	}
+	a, err := s.store.GetAutomation(ctx, req.AutomationID)
+	if err != nil || a == nil {
+		return nil, ErrAutomationNotFound
+	}
+	if err = s.validatePluginTrigger(ctx, a.WorkspaceID, req.Type, req.Config, req.Enabled); err != nil {
+		return nil, err
+	}
+	unlock := s.automationRunLock(req.AutomationID)
+	defer unlock()
+	a, err = s.store.GetAutomation(ctx, req.AutomationID)
+	if err != nil || a == nil {
+		return nil, ErrAutomationNotFound
+	}
+	kinds := []TriggerType{req.Type}
+	for _, trigger := range a.Triggers {
+		kinds = append(kinds, trigger.Type)
+	}
+	if err := validateTriggerCombination(kinds); err != nil {
+		return nil, err
+	}
 	t := &AutomationTrigger{
 		AutomationID: req.AutomationID,
 		Type:         req.Type,
@@ -1001,6 +1060,13 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 }
 
 // UpdateTrigger updates a trigger.
+func (s *Service) GetTrigger(ctx context.Context, id string) (*AutomationTrigger, error) {
+	if err := s.authorizeTrigger(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.store.GetTrigger(ctx, id)
+}
+
 func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTriggerRequest) error {
 	if err := s.authorizeTrigger(ctx, id); err != nil {
 		return err
@@ -1017,12 +1083,44 @@ func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigg
 			return err
 		}
 	}
+	a, err := s.store.GetAutomation(ctx, existing.AutomationID)
+	if err != nil || a == nil {
+		return ErrAutomationNotFound
+	}
+	config := existing.Config
+	enabled := existing.Enabled
+	if req.Config != nil {
+		config = *req.Config
+	}
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	if err = s.validatePluginTrigger(ctx, a.WorkspaceID, existing.Type, config, enabled); err != nil {
+		return err
+	}
+	unlock := s.automationRunLock(existing.AutomationID)
+	defer unlock()
 	return s.store.UpdateTrigger(ctx, id, req)
 }
 
 // DeleteTrigger removes a trigger.
 func (s *Service) DeleteTrigger(ctx context.Context, id string) error {
 	if err := s.authorizeTrigger(ctx, id); err != nil {
+		return err
+	}
+	t, err := s.store.GetTrigger(ctx, id)
+	if err != nil {
+		return err
+	}
+	if t == nil {
+		return nil
+	}
+	unlock := s.automationRunLock(t.AutomationID)
+	defer unlock()
+	if err := s.store.enqueueWebhookSecrets(ctx, "trigger_id", id); err != nil {
+		return err
+	}
+	if err := s.cancelTriggerWebhookReceipts(ctx, id, "condition deleted"); err != nil {
 		return err
 	}
 	return s.store.DeleteTrigger(ctx, id)

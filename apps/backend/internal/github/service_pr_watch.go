@@ -135,12 +135,24 @@ func (s *Service) DeletePRWatch(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	return s.store.DeletePRWatch(ctx, id)
+	if err := s.store.DeletePRWatch(ctx, id); err != nil {
+		return err
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0.
 func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
-	return s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch)
+	watch, err := s.store.GetPRWatch(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch); err != nil {
+		return err
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
@@ -173,7 +185,15 @@ func (s *Service) rebindPRWatchRepository(ctx context.Context, watch *PRWatch, p
 // ResetPRWatch atomically resets a watch's branch and clears its pr_number so
 // the poller re-searches for a PR on the new branch. See Store.ResetPRWatch.
 func (s *Service) ResetPRWatch(ctx context.Context, id, branch string) error {
-	return s.store.ResetPRWatch(ctx, id, branch)
+	watch, err := s.store.GetPRWatch(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := s.store.ResetPRWatch(ctx, id, branch); err != nil {
+		return err
+	}
+	s.removePRDiscoveryWatchConsumer(watch)
+	return nil
 }
 
 // CheckPRWatch fetches lightweight PR status for a watch and determines if there are changes.
@@ -211,10 +231,25 @@ func (s *Service) checkPRWatchWithClient(
 	// Update watch timestamps
 	now := time.Now().UTC()
 	if err := s.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, commentAt, status.ChecksState, status.ReviewState); err != nil {
-		s.logger.Error("failed to update PR watch timestamps", zap.String("id", watch.ID), zap.Error(err))
+		s.logSyncError("failed to update PR watch timestamps", err, zap.String("id", watch.ID))
 	}
 
 	return status, hasNew, nil
+}
+
+// logSyncError logs a PR-watch synchronization failure at ERROR, except when
+// the error is a context cancellation. That happens when the poll/sync cycle is
+// interrupted by backend shutdown, which is expected teardown rather than a
+// fault, so it is downgraded to DEBUG to keep shutdown logs quiet. Mirrors
+// Poller.logCleanupError, and like it leaves context.DeadlineExceeded at the
+// higher level because a timeout is a real fault.
+func (s *Service) logSyncError(msg string, err error, fields ...zap.Field) {
+	fields = append(fields, zap.Error(err))
+	if errors.Is(err, context.Canceled) {
+		s.logger.Debug(msg+" (context canceled during shutdown)", fields...)
+		return
+	}
+	s.logger.Error(msg, fields...)
 }
 
 func prWatchFeedbackUpdatedSinceWatch(watch *PRWatch, status *PRStatus) bool {
@@ -934,6 +969,7 @@ type taskPRSyncState struct {
 	changedFiles                                         *int
 	mergedByLogin, closedByLogin                         *string
 	autoMergeObservedAt                                  *time.Time
+	workflowAttention                                    *WorkflowAttention
 }
 
 type taskPRMergeQueueState struct {
@@ -1125,12 +1161,13 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 	}
 	queue := resolveTaskPRMergeQueueState(tp, status)
 	nextState, nextMergedAt, nextClosedAt := resolveTerminalMergeState(tp, status.PR)
-	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
-		resolveTaskPROutcomeFields(tp, status)
 	nextHeadSHA := tp.HeadSHA
 	if status.PR.HeadSHA != "" {
 		nextHeadSHA = status.PR.HeadSHA
 	}
+	nextWorkflowAttention := resolveTaskPRWorkflowAttention(tp, status, nextHeadSHA)
+	nextIsDraft, nextChangedFiles, nextMergedByLogin, nextClosedByLogin, nextAutoMergeObservedAt :=
+		resolveTaskPROutcomeFields(tp, status)
 	return taskPRSyncState{
 		checksTotal: nextChecksTotal, checksPassing: nextChecksPassing,
 		unresolved: nextUnresolved, reviewCount: nextReviewCount, pendingReviewCount: nextPendingReviewCount,
@@ -1144,6 +1181,7 @@ func (s *Service) prepareTaskPRSyncState(ctx context.Context, tp *TaskPR, status
 		isDraft: nextIsDraft, changedFiles: nextChangedFiles,
 		mergedByLogin: nextMergedByLogin, closedByLogin: nextClosedByLogin,
 		autoMergeObservedAt: nextAutoMergeObservedAt,
+		workflowAttention:   nextWorkflowAttention,
 	}
 }
 
@@ -1198,6 +1236,11 @@ func taskPRChangedFields(tp *TaskPR, status *PRStatus, next taskPRSyncState) []s
 		changed,
 		"auto_merge_observed_at",
 		!timeEqual(tp.AutoMergeObservedAt, next.autoMergeObservedAt),
+	)
+	changed = appendChangedField(
+		changed,
+		"workflow_attention",
+		!workflowAttentionSemanticEqual(tp.WorkflowAttention, next.workflowAttention),
 	)
 	return changed
 }
@@ -1262,6 +1305,8 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.MergedByLogin = next.mergedByLogin
 	tp.ClosedByLogin = next.closedByLogin
 	tp.AutoMergeObservedAt = next.autoMergeObservedAt
+	tp.WorkflowAttention = next.workflowAttention
+	tp.WorkflowAttentionJSON = marshalWorkflowAttention(next.workflowAttention)
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
@@ -1584,15 +1629,52 @@ func (s *Service) detectPRForWatchOnce(
 	// fires WHILE FindPRByBranch is running wins over our post-fetch
 	// classification — see Service.markRepoAsMissing for the rationale.
 	repoErrGen := s.repoErrorGenSnapshot()
-	pr, err := s.findPRByBranchInForkNetwork(
-		ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
+	credentialGeneration := int64(0)
+	if resolved.credential != nil {
+		credentialGeneration = resolved.credential.CredentialGeneration
+	}
+	attempt, admitted := s.beginPRDiscoveryWatch(
+		watch.WorkspaceID, resolved.CacheScope, credentialGeneration, watch,
 	)
-	if err != nil && isRepoNotResolvableErr(err) {
-		s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
-		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
-		// to flag the WS response as permanent without re-running the
-		// classifier on the raw upstream error string.
-		err = fmt.Errorf("%w: %w", ErrRepoNotResolvable, err)
+	if !admitted {
+		effectiveTaskID := s.reconcileTaskPROwnership(ctx, watch.SessionID, watch.TaskID, watch.RepositoryID, watch.PRNumber)
+		return s.store.GetTaskPRByRepository(ctx, effectiveTaskID, watch.RepositoryID)
+	}
+	var pr *PR
+	var err error
+	if attempt.joined {
+		pr, err = sharedPRDiscoveryResult(ctx, attempt)
+	} else {
+		pr, err = s.findPRByBranchInForkNetwork(
+			ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
+		)
+		if err != nil && isRepoNotResolvableErr(err) {
+			s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
+			// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
+			// to flag the WS response as permanent without re-running the
+			// classifier on the raw upstream error string.
+			err = fmt.Errorf("%w: %w", ErrRepoNotResolvable, err)
+		}
+		if err != nil {
+			category := classifyPRDiscoveryError(err)
+			s.completePRDiscoveryWatchAttempt(
+				attempt, nil, false, true, err,
+				category == PRDiscoveryHealthInvalidQuery || category == PRDiscoveryHealthRateLimited,
+			)
+			s.finishPRDiscoveryWatchFailure(
+				watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt, err,
+			)
+		} else {
+			s.completePRDiscoveryWatchAttempt(
+				attempt, &PRStatus{PR: pr}, true, false, nil, false,
+			)
+			s.finishPRDiscoveryWatchSuccess(
+				watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt,
+			)
+		}
+		s.forgetPRDiscoveryWatchAttempt(
+			watch.WorkspaceID, resolved.CacheScope, credentialGeneration, attempt,
+		)
 	}
 	// Stamp last_checked_at regardless of outcome — including on error. The
 	// flood this fixes IS the error path (an unresolvable repo makes `gh` exit
@@ -1618,18 +1700,24 @@ func (s *Service) detectPRForWatchOnce(
 		return nil, rebindErr
 	}
 	if err := s.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
-		s.logger.Error("failed to update PR watch number during sync",
-			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
+		s.logSyncError("failed to update PR watch number during sync", err,
+			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number))
 		return nil, fmt.Errorf("update PR watch: %w", err)
 	}
 	if _, assocErr := s.associatePRWithTaskForSession(
 		ctx, watch.WorkspaceID, watch.SessionID, watch.TaskID, watch.RepositoryID, pr,
 		false, false, TaskPRSourceWatch,
 	); assocErr != nil {
-		s.logger.Error("failed to associate PR with task during sync",
-			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number), zap.Error(assocErr))
+		s.logSyncError("failed to associate PR with task during sync", assocErr,
+			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number))
 		return nil, fmt.Errorf("associate PR: %w", assocErr)
 	}
+	s.trackPRDiscoveryWatchTarget(
+		watch.WorkspaceID, resolved.CacheScope, credentialGeneration, watch,
+		prDiscoveryHealthTarget{
+			Owner: watch.Owner, Repo: watch.Repo, Branch: watch.Branch, PRNumber: pr.Number,
+		},
+	)
 	// Also fetch status so the first response includes review/check state
 	watch.PRNumber = pr.Number
 	return s.triggerPRStatusSync(ctx, watch, taskID)

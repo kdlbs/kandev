@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
@@ -30,6 +32,7 @@ import {
 import { registerCodeMirrorCursorRevealer } from "@/hooks/file-editor-cursor";
 import { useCodeMirrorEditorState } from "./use-codemirror-editor-state";
 import { useCodeMirrorWalkthroughRange } from "./use-codemirror-walkthrough-range";
+import type { FilePreviewKind } from "@/lib/utils/file-types";
 import {
   clearCodeMirrorCursorFlash,
   codeMirrorCursorFlashExtension,
@@ -53,9 +56,13 @@ type FileEditorContentProps = {
   taskId?: string | null;
   repositoryId?: string | null;
   worktreePath?: string;
+  isSymlink?: boolean;
   repo?: string;
   enableComments?: boolean;
-  onToggleMarkdownPreview?: () => void;
+  previewKind?: FilePreviewKind;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -219,23 +226,78 @@ function CodeMirrorSaveButton({
   );
 }
 
-function CodeMirrorMarkdownPreviewButton({ onToggle }: { onToggle: () => void }) {
+function CodeMirrorPreviewButton({
+  previewKind,
+  onToggle,
+  onPreviewHtml,
+  isPublishingHtmlPreview,
+}: {
+  previewKind: FilePreviewKind;
+  onToggle?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
+}) {
   const { t } = useTranslation();
+  if (previewKind === "none") return null;
+  const isHtml = previewKind === "html";
+  const action = isHtml ? onPreviewHtml : onToggle;
+  if (!action) return null;
+  const label = isHtml ? t("editors:previewHtml") : t("editors:previewMarkdown");
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           size="sm"
           variant="ghost"
-          onClick={onToggle}
+          onClick={action}
+          disabled={isHtml && isPublishingHtmlPreview}
+          aria-label={label}
+          title={isHtml ? t("task:htmlPreviewTrustedCode") : undefined}
           className="h-8 w-8 p-0 cursor-pointer"
-          data-testid="markdown-preview-toggle"
+          data-testid={isHtml ? "html-preview-toggle" : "markdown-preview-toggle"}
         >
-          <IconEye className="h-4 w-4" />
+          {isHtml && isPublishingHtmlPreview ? (
+            <IconLoader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <IconEye className="h-4 w-4" />
+          )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{t("editors:previewMarkdown")}</TooltipContent>
+      <TooltipContent>
+        <p>{label}</p>
+        {isHtml && (
+          <p className="mt-1 max-w-xs text-muted-foreground">{t("task:htmlPreviewTrustedCode")}</p>
+        )}
+      </TooltipContent>
     </Tooltip>
+  );
+}
+
+function CodeMirrorFileLabel({
+  path,
+  worktreePath,
+  isSymlink,
+  isDirty,
+  diffStats,
+}: {
+  path: string;
+  worktreePath?: string;
+  isSymlink?: boolean;
+  isDirty: boolean;
+  diffStats: { additions: number; deletions: number } | null;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <ScrollOnOverflow className="min-w-0 font-mono">
+        {toRelativePath(path, worktreePath)}
+      </ScrollOnOverflow>
+      <SymlinkIndicator isSymlink={isSymlink} showLabel />
+      {isDirty && diffStats && (
+        <span className="shrink-0 text-xs text-yellow-500">
+          {formatDiffStats(diffStats.additions, diffStats.deletions)}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -243,6 +305,7 @@ function CodeMirrorMarkdownPreviewButton({ onToggle }: { onToggle: () => void })
 function CodeMirrorToolbar({
   path,
   worktreePath,
+  isSymlink,
   isDirty,
   isSaving,
   diffStats,
@@ -259,10 +322,14 @@ function CodeMirrorToolbar({
   onReloadFromAgent,
   onDelete,
   onDownload,
-  onToggleMarkdownPreview,
+  previewKind = "none",
+  onTogglePreview,
+  onPreviewHtml,
+  isPublishingHtmlPreview,
 }: {
   path: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   isDirty: boolean;
   isSaving: boolean;
   diffStats: { additions: number; deletions: number } | null;
@@ -279,22 +346,22 @@ function CodeMirrorToolbar({
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
   onDownload?: () => void;
-  onToggleMarkdownPreview?: () => void;
+  previewKind?: FilePreviewKind;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
 }) {
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
     <PanelHeaderBarSplit
       left={
-        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <ScrollOnOverflow className="min-w-0 font-mono">
-            {toRelativePath(path, worktreePath)}
-          </ScrollOnOverflow>
-          {isDirty && diffStats && (
-            <span className="shrink-0 text-xs text-yellow-500">
-              {formatDiffStats(diffStats.additions, diffStats.deletions)}
-            </span>
-          )}
-        </div>
+        <CodeMirrorFileLabel
+          path={path}
+          worktreePath={worktreePath}
+          isSymlink={isSymlink}
+          isDirty={isDirty}
+          diffStats={diffStats}
+        />
       }
       right={
         <div className="flex items-center gap-1">
@@ -303,8 +370,13 @@ function CodeMirrorToolbar({
             sessionId={sessionId}
             commentCount={commentCount}
           />
-          {onToggleMarkdownPreview && (
-            <CodeMirrorMarkdownPreviewButton onToggle={onToggleMarkdownPreview} />
+          {(onTogglePreview || onPreviewHtml) && (
+            <CodeMirrorPreviewButton
+              previewKind={previewKind}
+              onToggle={onTogglePreview}
+              onPreviewHtml={onPreviewHtml}
+              isPublishingHtmlPreview={isPublishingHtmlPreview}
+            />
           )}
           <CodeMirrorWrapButton wrapEnabled={wrapEnabled} onToggleWrap={onToggleWrap} />
           <CodeMirrorReloadButton
@@ -429,9 +501,13 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
     taskId,
     repositoryId,
     worktreePath,
+    isSymlink,
     repo,
     enableComments = false,
-    onToggleMarkdownPreview,
+    previewKind,
+    onTogglePreview,
+    onPreviewHtml,
+    isPublishingHtmlPreview,
     onSave,
     onReloadFromAgent,
     onDelete,
@@ -445,6 +521,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
       <CodeMirrorToolbar
         path={path}
         worktreePath={worktreePath}
+        isSymlink={isSymlink}
         isDirty={isDirty}
         isSaving={isSaving}
         diffStats={state.diffStats}
@@ -461,7 +538,10 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
         onReloadFromAgent={onReloadFromAgent}
         onDelete={onDelete}
         onDownload={onDownload}
-        onToggleMarkdownPreview={onToggleMarkdownPreview}
+        previewKind={previewKind}
+        onTogglePreview={onTogglePreview}
+        onPreviewHtml={onPreviewHtml}
+        isPublishingHtmlPreview={isPublishingHtmlPreview}
       />
       <div ref={editorAreaRef} className="flex-1 overflow-hidden relative">
         <CodeMirror

@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/events"
@@ -269,6 +270,9 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 	if m.profileResolver != nil && execution.AgentProfileID != "" {
 		profileInfo, _ = m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 	}
+	if err := validatePassthroughProvider(profileInfo); err != nil {
+		return nil, err
+	}
 
 	return &resolvedPassthrough{
 		agentID:     agentConfig.ID(),
@@ -278,6 +282,13 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 		rt:          agentConfig.Runtime(),
 		profile:     profileInfo,
 	}, nil
+}
+
+func validatePassthroughProvider(profile *AgentProfileInfo) error {
+	if profile == nil || profile.ProviderKind != settingsmodels.ProviderKindOpenAICompatible {
+		return nil
+	}
+	return errors.New("CLI passthrough cannot use an OpenAI-compatible provider")
 }
 
 // promptForPassthroughCommand returns the prompt that should be passed to
@@ -803,6 +814,11 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 		return err
 	}
 
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
 	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd, rt.StripEnv)
 	if err != nil {
 		return err
@@ -1021,11 +1037,16 @@ func (m *Manager) passthroughProcessMatches(execution *AgentExecution, processID
 // delayed exit recovery. expectedProcessID is set by exit recovery so an old
 // callback cannot replace a process installed by a workflow reset.
 func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expectedProcessID string) error {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
 
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
 	execution.passthroughLifecycleMu.Lock()
 	defer execution.passthroughLifecycleMu.Unlock()
 	if expectedProcessID != "" && execution.PassthroughProcessID != expectedProcessID {
@@ -1071,6 +1092,9 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 	// to a process it doesn't know about yet.
 	startReq := buildInteractiveStartRequest(sessionID, execution, resolved.pt, env, cmd, resolved.rt.StripEnv, true)
 
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
 	processInfo, err := interactiveRunner.Start(ctx, startReq)
 	if err != nil {
 		return fmt.Errorf("failed to start passthrough session: %w", err)

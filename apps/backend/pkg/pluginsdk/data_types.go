@@ -93,12 +93,13 @@ func taskRepositoryFromProto(p *pluginv1.TaskRepository) TaskRepository {
 
 // Task is the Go-native mirror of kandev.plugin.v1.Task.
 type Task struct {
-	ID           string
-	WorkspaceID  string
-	WorkflowID   string
-	Title        string
-	Description  string
-	State        string
+	ID          string
+	WorkspaceID string
+	WorkflowID  string
+	Title       string
+	Description string
+	State       string
+	// Priority is one of critical, high, medium, or low.
 	Priority     string
 	CreatedBy    string
 	CreatedAt    string
@@ -122,13 +123,15 @@ type Task struct {
 	WorkflowStepID         string
 	Position               int32
 	AssigneeAgentProfileID string
-	Labels                 []string
-	Autopilot              bool
-	WIPAdmitted            bool
-	QueuedForStepID        string
-	QueuedAt               *string
-	ProjectID              string
-	ExternalID             string
+	// Deprecated: provider-specific labels belong in plugin-owned task state
+	// and UI slot data. Retained for API v1 source and wire compatibility.
+	Labels          []string
+	Autopilot       bool
+	WIPAdmitted     bool
+	QueuedForStepID string
+	QueuedAt        *string
+	ProjectID       string
+	ExternalID      string
 }
 
 // TaskPullRequest is one change opened for a task. Provider-neutral by design:
@@ -1041,7 +1044,9 @@ type CreateTaskInput struct {
 	// StartAgent asks the host to auto-launch an agent on the created task,
 	// mirroring the REST/MCP create_task start_agent flag. Best-effort: a
 	// launch failure does not fail task creation.
-	StartAgent   bool
+	StartAgent bool
+	// Priority accepts critical, high, medium, or low. Empty defaults to medium.
+	Priority     string
 	Repositories []PluginTaskRepository
 	Launch       *PluginTaskLaunchOptions
 	Metadata     map[string]any
@@ -1063,6 +1068,7 @@ func (in CreateTaskInput) toProto() (*pluginv1.CreateTaskRequest, error) {
 		Repositories:   pluginTaskRepositoriesToProto(in.Repositories),
 		Launch:         in.Launch.toProto(),
 		Metadata:       metadata,
+		Priority:       in.Priority,
 	}, nil
 }
 
@@ -1085,6 +1091,7 @@ func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) (CreateTaskInput, e
 		Repositories:   pluginTaskRepositoriesFromProto(p.GetRepositories()),
 		Launch:         pluginTaskLaunchOptionsFromProto(p.GetLaunch()),
 		Metadata:       metadata,
+		Priority:       p.GetPriority(),
 	}, nil
 }
 
@@ -1195,7 +1202,7 @@ func pluginTaskLaunchOptionsFromProto(p *pluginv1.PluginTaskLaunchOptions) *Plug
 // UpdateTaskInput is the Go-native mirror of
 // kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
 // pointer leaves that field untouched, a non-nil pointer overwrites it. The
-// conservative field surface (title/description/state) is the documented
+// conservative field surface (title/description/state/priority) is the documented
 // plugin-writable mask. WorkflowStepID is rejected when non-nil — it exists
 // on this struct only for wire-shape symmetry with UpdateTaskRequest; use
 // TaskReader.Move (see host.go) to transition a task between workflow steps,
@@ -1208,6 +1215,8 @@ type UpdateTaskInput struct {
 	Description    *string
 	State          *string
 	WorkflowStepID *string
+	// Priority, when set, must be critical, high, medium, or low.
+	Priority *string
 }
 
 func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
@@ -1217,6 +1226,7 @@ func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
 		Description:    in.Description,
 		State:          in.State,
 		WorkflowStepId: in.WorkflowStepID,
+		Priority:       in.Priority,
 	}
 }
 
@@ -1230,6 +1240,7 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 		Description:    p.Description,
 		State:          p.State,
 		WorkflowStepID: p.WorkflowStepId,
+		Priority:       p.Priority,
 	}
 }
 
@@ -1237,9 +1248,12 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 // Unlike Update, Move transitions the task through the same path the board's
 // own move uses, so on_enter actions (auto-start included) actually fire.
 // WorkflowID is optional: nil inherits the task's current workflow; a
-// pointer to "" is rejected rather than treated as inherit. Position is not
-// optional: an omitted position and a position of zero are the same
-// request, both placing the task at the top of the target step.
+// pointer to "" is rejected rather than treated as inherit. Position stays
+// on the struct for wire compatibility but is ignored: the server computes
+// an arriving task's position from the target step's current highest
+// position, so it always sorts last there rather than displacing work a
+// user has already ordered. Naming the task's current step is not an
+// arrival and leaves its existing position untouched.
 type MoveTaskInput struct {
 	TaskID         string
 	WorkflowStepID string
@@ -1334,4 +1348,93 @@ func messageDispatchFromProto(p *pluginv1.SendMessageResponse) *MessageDispatch 
 		return nil
 	}
 	return &MessageDispatch{SessionID: p.GetSessionId(), Status: p.GetStatus()}
+}
+
+// ── Agent conversations ─────────────────────────────────────────────────
+
+// AgentConversationSpec controls how Ensure creates a conversation.
+type AgentConversationSpec struct {
+	WorkspaceID     string
+	ConversationKey string
+	BasePrompt      string
+	AgentProfileID  string
+}
+
+func (s AgentConversationSpec) toProto() *pluginv1.AgentConversationSpec {
+	return &pluginv1.AgentConversationSpec{
+		WorkspaceId:     s.WorkspaceID,
+		ConversationKey: s.ConversationKey,
+		BasePrompt:      s.BasePrompt,
+		AgentProfileId:  s.AgentProfileID,
+	}
+}
+
+func agentConversationSpecFromProto(p *pluginv1.AgentConversationSpec) AgentConversationSpec {
+	if p == nil {
+		return AgentConversationSpec{}
+	}
+	return AgentConversationSpec{
+		WorkspaceID:     p.GetWorkspaceId(),
+		ConversationKey: p.GetConversationKey(),
+		BasePrompt:      p.GetBasePrompt(),
+		AgentProfileID:  p.GetAgentProfileId(),
+	}
+}
+
+// AgentConversationDescriptor identifies an existing conversation.
+type AgentConversationDescriptor struct {
+	TaskID          string
+	SessionID       string
+	WorkspaceID     string
+	ConversationKey string
+	AgentProfileID  string
+}
+
+func (d AgentConversationDescriptor) toProto() *pluginv1.AgentConversationDescriptor {
+	return &pluginv1.AgentConversationDescriptor{
+		TaskId:          d.TaskID,
+		SessionId:       d.SessionID,
+		WorkspaceId:     d.WorkspaceID,
+		ConversationKey: d.ConversationKey,
+		AgentProfileId:  d.AgentProfileID,
+	}
+}
+
+func agentConversationDescriptorFromProto(p *pluginv1.AgentConversationDescriptor) AgentConversationDescriptor {
+	if p == nil {
+		return AgentConversationDescriptor{}
+	}
+	return AgentConversationDescriptor{
+		TaskID:          p.GetTaskId(),
+		SessionID:       p.GetSessionId(),
+		WorkspaceID:     p.GetWorkspaceId(),
+		ConversationKey: p.GetConversationKey(),
+		AgentProfileID:  p.GetAgentProfileId(),
+	}
+}
+
+// AgentConversationDispatch is the outcome of DispatchAgentConversation.
+type AgentConversationDispatch struct {
+	SessionID  string
+	Status     string
+	Descriptor AgentConversationDescriptor
+}
+
+func (d AgentConversationDispatch) toProto() *pluginv1.DispatchAgentConversationResponse {
+	return &pluginv1.DispatchAgentConversationResponse{
+		SessionId:      d.SessionID,
+		Status:         d.Status,
+		ConvDescriptor: d.Descriptor.toProto(),
+	}
+}
+
+func agentConversationDispatchFromProto(p *pluginv1.DispatchAgentConversationResponse) AgentConversationDispatch {
+	if p == nil {
+		return AgentConversationDispatch{}
+	}
+	return AgentConversationDispatch{
+		SessionID:  p.GetSessionId(),
+		Status:     p.GetStatus(),
+		Descriptor: agentConversationDescriptorFromProto(p.GetConvDescriptor()),
+	}
 }

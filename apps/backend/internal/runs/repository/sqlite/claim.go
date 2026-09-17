@@ -269,7 +269,7 @@ func (r *Repository) commitClaim(ctx context.Context, tx *sqlx.Tx, candidate *mo
 		INSERT INTO office_launch_ledger (
 			id, run_id, workspace_id, causation_id, routine_id, human_rooted, claimed_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`), ledgerID, candidate.ID, candidate.WorkspaceID, candidate.CausationID,
+	`), ledgerID, candidate.ID, candidate.WorkspaceID, candidate.ChainCausationID,
 		candidate.RoutineID, dialect.BoolToInt(candidate.HumanRooted), claimedAt); err != nil {
 		return nil, fmt.Errorf("append launch ledger: %w", err)
 	}

@@ -134,6 +134,14 @@ func (r *idempotentCreateTaskRepo) UpdateTask(_ context.Context, task *models.Ta
 	return nil
 }
 
+func (r *idempotentCreateTaskRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
+func (r *idempotentCreateTaskRepo) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
 func (r *idempotentCreateTaskRepo) GetTaskByExternalID(_ context.Context, workspaceID, externalID string) (*models.Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -180,6 +188,10 @@ func (r *idempotentCreateTaskRepo) ReleaseTaskExternalID(_ context.Context, work
 			return &copied, nil
 		}
 	}
+	return nil, nil
+}
+
+func (r *idempotentCreateTaskRepo) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
 	return nil, nil
 }
 

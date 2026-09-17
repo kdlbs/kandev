@@ -48,12 +48,14 @@ function TypedRunLaunchErrorEntry({
       taskId={taskId}
       workspaceId={workspaceId ?? ""}
       repositories={repositories}
+      isActive={error.isActive !== false}
       error={{
         session_id: error.sessionId,
         task_repository_id: error.taskRepositoryId,
         stamp: error.errorStamp ?? "",
         occurred_at: error.failedAt,
         preview,
+        details: error.failureDetails,
         category: error.failureCode,
         recovery_actions: error.recoveryActions,
       }}
@@ -124,9 +126,55 @@ function RunErrorRecoveryFeedback({
   );
 }
 
+function LegacyRunErrorActions({
+  error,
+  isActive,
+  busyAction,
+  onRecover,
+}: {
+  error: RunError;
+  isActive: boolean;
+  busyAction: SessionRecoveryAction | "restore" | null;
+  onRecover: (action: SessionRecoveryAction) => Promise<boolean>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
+      <RemediationLink url={error.remediationUrl} />
+      {isActive && (
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-auto min-h-11 cursor-pointer gap-1.5 text-xs sm:min-h-8"
+            onClick={() => onRecover("resume")}
+            disabled={busyAction !== null}
+            data-testid="run-error-resume-button"
+          >
+            <IconRefresh className="h-3 w-3" />
+            {t("task:resumeSession")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-auto min-h-11 cursor-pointer gap-1.5 text-xs sm:min-h-8"
+            onClick={() => onRecover("fresh_start")}
+            disabled={busyAction !== null}
+            data-testid="run-error-fresh-button"
+          >
+            <IconPlayerPlay className="h-3 w-3" />
+            {t("task:startFreshSession")}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function LegacyRunErrorEntry({
   agentName,
   error,
+  isActive,
   onRecover,
   onRetry,
   onRestore,
@@ -139,6 +187,7 @@ function LegacyRunErrorEntry({
 }: {
   agentName: string;
   error: RunError;
+  isActive: boolean;
   onRecover: (action: SessionRecoveryAction) => Promise<boolean>;
   onRetry: () => void;
   onRestore: () => void;
@@ -167,16 +216,18 @@ function LegacyRunErrorEntry({
           </span>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">{t("task:theAgentStoppedWithAnError")}</p>
-        <RunErrorRecoveryFeedback
-          workspaceId={workspaceId}
-          recoveryError={recoveryError}
-          recoveryNotice={recoveryNotice}
-          branchDetails={branchDetails}
-          busyAction={busyAction}
-          onRetry={onRetry}
-          onRestore={onRestore}
-          onNewBranch={onNewBranch}
-        />
+        {isActive && (
+          <RunErrorRecoveryFeedback
+            workspaceId={workspaceId}
+            recoveryError={recoveryError}
+            recoveryNotice={recoveryNotice}
+            branchDetails={branchDetails}
+            busyAction={busyAction}
+            onRetry={onRetry}
+            onRestore={onRestore}
+            onNewBranch={onNewBranch}
+          />
+        )}
         {error.rawPayload && (
           <Collapsible open={showDetails} onOpenChange={setShowDetails} className="mt-2">
             <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
@@ -195,31 +246,12 @@ function LegacyRunErrorEntry({
             </CollapsibleContent>
           </Collapsible>
         )}
-        <div className="mt-2 flex items-center gap-2 flex-wrap">
-          <RemediationLink url={error.remediationUrl} />
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-auto min-h-11 cursor-pointer gap-1.5 text-xs sm:min-h-8"
-            onClick={() => onRecover("resume")}
-            disabled={busyAction !== null}
-            data-testid="run-error-resume-button"
-          >
-            <IconRefresh className="h-3 w-3" />
-            {t("task:resumeSession")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-auto min-h-11 cursor-pointer gap-1.5 text-xs sm:min-h-8"
-            onClick={() => onRecover("fresh_start")}
-            disabled={busyAction !== null}
-            data-testid="run-error-fresh-button"
-          >
-            <IconPlayerPlay className="h-3 w-3" />
-            {t("task:startFreshSession")}
-          </Button>
-        </div>
+        <LegacyRunErrorActions
+          error={error}
+          isActive={isActive}
+          busyAction={busyAction}
+          onRecover={onRecover}
+        />
       </div>
     </div>
   );
@@ -273,7 +305,7 @@ export function RunErrorEntry({
       <ManagedRuntimeNpmRunError
         error={error}
         agentName={agentName}
-        onRetry={() => void handleRecover("runtime_retry")}
+        onRetry={error.isActive === false ? undefined : () => void handleRecover("runtime_retry")}
       />
     );
   }
@@ -282,6 +314,7 @@ export function RunErrorEntry({
     <LegacyRunErrorEntry
       agentName={agentName}
       error={error}
+      isActive={error.isActive !== false}
       onRecover={handleRecover}
       onRetry={handleRetry}
       onRestore={() => void handleRestore()}

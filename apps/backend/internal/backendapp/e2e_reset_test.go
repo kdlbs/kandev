@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -10,11 +11,75 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+type e2eResetTaskDeleterStub struct {
+	taskID  string
+	options taskservice.DeleteTaskOptions
+}
+
+type e2eAttachTaskAuthorizerStub struct {
+	err    error
+	taskID string
+}
+
+func (s *e2eAttachTaskAuthorizerStub) AuthorizeTaskAccess(_ context.Context, taskID string) error {
+	s.taskID = taskID
+	return s.err
+}
+
+func (s *e2eResetTaskDeleterStub) DeleteTaskWithOptions(
+	_ context.Context,
+	taskID string,
+	options taskservice.DeleteTaskOptions,
+) error {
+	s.taskID = taskID
+	s.options = options
+	return nil
+}
+
+func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
+	deleter := &e2eResetTaskDeleterStub{}
+
+	if err := deleteTaskForE2EReset(context.Background(), deleter, "task-1"); err != nil {
+		t.Fatalf("deleteTaskForE2EReset: %v", err)
+	}
+	if deleter.taskID != "task-1" {
+		t.Fatalf("deleted task ID = %q, want task-1", deleter.taskID)
+	}
+	if !deleter.options.DiscardWorktreeChanges {
+		t.Fatal("E2E reset must discard disposable worktree changes")
+	}
+}
+
+func TestE2EAttachGitHubContributionRejectsUnauthorizedTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	authorizer := &e2eAttachTaskAuthorizerStub{err: errors.New("task is not visible")}
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Params = gin.Params{{Key: "id", Value: "other-task"}}
+	context.Request = httptest.NewRequest(
+		"POST",
+		"/api/v1/e2e/tasks/other-task/remote-contribution",
+		strings.NewReader(`{"pr_url":"https://github.com/testorg/testrepo/pull/1"}`),
+	)
+	context.Request.Header.Set("Content-Type", "application/json")
+
+	handleE2EAttachGitHubContribution(nil, authorizer, nil, nil)(context)
+
+	if response.Code != 404 {
+		t.Fatalf("status = %d, want 404", response.Code)
+	}
+	if authorizer.taskID != "other-task" {
+		t.Fatalf("authorized task ID = %q, want other-task", authorizer.taskID)
+	}
+}
 
 func TestE2EResetDeletesWorkspaceGitHubAuthentication(t *testing.T) {
 	raw, err := db.OpenSQLite(filepath.Join(t.TempDir(), "e2e-reset.db"))

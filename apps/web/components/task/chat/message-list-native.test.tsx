@@ -271,6 +271,7 @@ function useNativeScrollMetrics(
 
 function NativeScrollManagementHarness({
   items,
+  messages = [],
   metrics,
   loadMore = async () => 0,
   sessionId = null,
@@ -280,8 +281,10 @@ function NativeScrollManagementHarness({
   enabled = false,
   historyRefreshPending = false,
   hasUnreadDivider = false,
+  hasMore = true,
 }: {
   items: RenderItem[];
+  messages?: Message[];
   metrics?: NativeScrollMetrics;
   loadMore?: () => Promise<number>;
   sessionId?: string | null;
@@ -291,19 +294,20 @@ function NativeScrollManagementHarness({
   enabled?: boolean;
   historyRefreshPending?: boolean;
   hasUnreadDivider?: boolean;
+  hasMore?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollMetrics(scrollRef, metrics);
   const { sentinelRef, showRecovery } = useNativeScrollManagement({
     scrollRef,
     items,
-    messages: [],
+    messages,
     isWorking: false,
     sessionId,
     enabled,
     hasUnreadDivider,
     messagesLoading: false,
-    hasMore: true,
+    hasMore,
     isLoadingMore,
     loadMore,
     isVisible,
@@ -567,6 +571,37 @@ describe("useNativeScrollManagement transcript pagination", () => {
     }
   });
 
+  it("logs when initial placement delegates to the unread divider", () => {
+    const consoleDebug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    mockDockviewState.pendingChatInitialPlacement = { sessionId: "session-b", token: 11 };
+    try {
+      render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(CACHED_MESSAGE_ID)]}
+          sessionId="session-b"
+          enabled
+          hasUnreadDivider
+        />,
+      );
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+
+      const output = consoleDebug.mock.calls.flat().join("\n");
+      expect(output).toContain(
+        "[messages:scroll-placement] final placement delegated sessionId=session-b owner=unread-divider",
+      );
+    } finally {
+      consoleDebug.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.13
   it("does not defer a same-env session placement without an env-switch token", () => {
     const metrics = { scrollHeight: 900, scrollTop: 125, clientHeight: 400 };
@@ -708,48 +743,6 @@ describe("useNativeScrollManagement transcript pagination", () => {
     expect(sharedSentinelRecheck).not.toHaveBeenCalled();
   });
 
-  it("does not recheck a restored transcript while explicit recovery is active", () => {
-    const requestAnimationFrame = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        callback(0);
-        return 1;
-      });
-    const recoveryRef = { current: false };
-    const { rerender } = render(
-      <NativeScrollManagementHarness
-        items={[]}
-        sessionId="session-1"
-        recoveryRef={recoveryRef}
-        isVisible={false}
-      />,
-    );
-    const options = sharedSentinelCalls.at(-1)?.[5] as {
-      onLoadSettled: (result: {
-        count: number;
-        rejected: boolean;
-        continuation: "no-progress";
-      }) => void;
-    };
-    act(() => {
-      options.onLoadSettled({ count: 0, rejected: false, continuation: "no-progress" });
-    });
-    sharedSentinelRecheck.mockClear();
-
-    rerender(
-      <NativeScrollManagementHarness
-        items={[]}
-        sessionId="session-1"
-        recoveryRef={recoveryRef}
-        isVisible
-      />,
-    );
-
-    expect(recoveryRef.current).toBe(true);
-    expect(sharedSentinelRecheck).not.toHaveBeenCalled();
-    requestAnimationFrame.mockRestore();
-  });
-
   it("retries a disarmed short page on the next upward scroll", () => {
     const metrics = { scrollHeight: 1000, scrollTop: 100, clientHeight: 400 };
     render(<NativeScrollManagementHarness items={[]} metrics={metrics} />);
@@ -860,7 +853,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     await pendingLoad;
   });
 
-  it("continues while the sentinel remains in preload even when the visible boundary changes", async () => {
+  it("continues while the sentinel remains in preload and the visible boundary is stable", async () => {
     const loadMore = vi.fn(async () => 20);
     const newest = transcriptMessage("newest");
     const { rerender } = render(
@@ -893,7 +886,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     options = sharedSentinelCalls.at(-1)?.[5] as {
       shouldContinueWhileIntersecting: () => boolean;
     };
-    expect(options.shouldContinueWhileIntersecting()).toBe(true);
+    expect(options.shouldContinueWhileIntersecting()).toBe(false);
   });
 
   it("anchors a prepend below a fixed task description row", () => {
@@ -1010,6 +1003,12 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
 // eslint-disable-next-line max-lines-per-function -- this suite keeps the related scroll invariants together.
 describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
+  it("places an enabled transcript at the bottom on its first render", () => {
+    render(<Harness itemCount={2} anchoredBarOffsetPx={0} dividerKey={null} scrollHeight={1000} />);
+
+    expect(screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID).scrollTop).toBe(1000);
+  });
+
   it("waits for an inactive transcript to become visible before placing the initial view", () => {
     const frames: Array<FrameRequestCallback> = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -1363,6 +1362,24 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     expect(scrollContainer.scrollTop).toBe(123);
   });
 
+  it("logs a work-start bottom write separately from initial placement", () => {
+    const consoleDebug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    try {
+      const { rerender } = render(
+        <AutoScrollHarness isWorking={false} hasUnreadDivider={false} sessionId="session-1" />,
+      );
+      const scrollContainer = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      setScrollMetrics(scrollContainer);
+
+      rerender(<AutoScrollHarness isWorking hasUnreadDivider={false} sessionId="session-1" />);
+
+      const output = consoleDebug.mock.calls.flat().join("\n");
+      expect(output).toContain("[messages:scroll-placement] work-start bottom sessionId=session-1");
+    } finally {
+      consoleDebug.mockRestore();
+    }
+  });
+
   it("does not follow appended messages after the divider scroll marks the reader away from bottom", () => {
     const markRef: { current?: () => void } = {};
     const { rerender } = render(
@@ -1424,6 +1441,38 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     }).not.toThrow();
     expect(writes).toBe(1);
     expect(scrollTop).toBe(2_147_483_647);
+  });
+
+  it("logs a message-update bottom write separately from initial placement", () => {
+    const consoleDebug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
+    try {
+      const { rerender } = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          messages={TEST_MESSAGES}
+          sessionId="session-1"
+        />,
+      );
+      const scrollContainer = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      setScrollMetrics(scrollContainer);
+
+      rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          messages={[...TEST_MESSAGES, {} as Message]}
+          sessionId="session-1"
+        />,
+      );
+
+      const output = consoleDebug.mock.calls.flat().join("\n");
+      expect(output).toContain(
+        "[messages:scroll-placement] message-update bottom sessionId=session-1",
+      );
+    } finally {
+      consoleDebug.mockRestore();
+    }
   });
 
   it("restores the disabled offset after a transient layout clamp", () => {

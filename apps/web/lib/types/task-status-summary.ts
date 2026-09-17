@@ -1,13 +1,25 @@
 import type { ForegroundActivity, TaskPendingAction, TaskSessionState } from "./http";
 import type { TaskLaunchRecoveryAction } from "./task-launch-error";
 
+export type AgentErrorCause = {
+  operation?: string;
+  code?: string;
+  detail?: string;
+};
+
 export type TaskStatusSummaryActiveError = {
+  scope?: "session" | "task";
   session_id?: string;
   task_repository_id?: string;
   stamp: string;
   occurred_at: string;
   preview: string;
+  details?: string;
   category?: string;
+  execution_id?: string;
+  phase?: string;
+  attempt_id?: string;
+  causes?: AgentErrorCause[];
   recovery_actions?: TaskLaunchRecoveryAction[];
 };
 
@@ -26,6 +38,8 @@ export type TaskStatusSummary = {
   /** Number of prompts currently en-queued for the task (all sessions). */
   queued_prompt_count?: number;
   active_error?: TaskStatusSummaryActiveError | null;
+  /** Current task-owned failure, independent of the selected session. */
+  task_error?: TaskStatusSummaryActiveError | null;
   git?: {
     additions?: number;
     deletions?: number;

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { Page } from "@playwright/test";
 import {
   kubernetesExecutorConfig,
@@ -48,13 +49,31 @@ function launchTask(
   });
 }
 
+function logFieldEquals(line: string, field: string, value: string): boolean {
+  return (
+    line.includes(`${field}=${value}`) ||
+    line.includes(`${field}: ${value}`) ||
+    line.includes(`${field}:${value}`) ||
+    line.includes(`"${field}":"${value}"`) ||
+    line.includes(`"${field}": "${value}"`)
+  );
+}
+
 async function assertUserVisibleFailure(page: Page, taskId: string, expected: RegExp) {
   await page.goto(`/t/${taskId}`);
   const session = new SessionPage(page);
   await session.waitForLoad(30_000);
-  const banner = session.activeChat().getByTestId("failed-session-banner");
-  await expect(banner).toBeVisible({ timeout: 30_000 });
-  await expect(banner).toContainText(expected);
+  const chat = session.activeChat();
+  const recoveryRows = chat.locator(
+    "[data-testid='session-recovery-action-message']:has([data-testid='recovery-resume-button'], [data-testid='recovery-fresh-button'], [data-testid='recovery-restart-button'])",
+  );
+  await expect(recoveryRows).toHaveCount(1, { timeout: 30_000 });
+  const recovery = recoveryRows.first();
+  await expect(recovery).toBeVisible();
+  const details = recovery.locator("details");
+  await expect(details).toHaveCount(1);
+  await details.locator("summary").click();
+  await expect(details).toContainText(expected);
 }
 
 async function createProfile(
@@ -135,6 +154,27 @@ test("launches through kubeconfig with Pod exec and a loopback-only agentctl for
   const task = await launchTask(apiClient, seedData, "Kubernetes kubeconfig launch");
   expect(task.session_id).toBeTruthy();
   await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for Kubernetes kubeconfig launch");
+  await expect
+    .poll(() => fs.readFileSync(backend.logPath, "utf8"), {
+      timeout: 30_000,
+      message: "Waiting for Kubernetes launch timing records",
+    })
+    .toContain("kubernetes.launch.completed");
+  const launchLog = fs.readFileSync(backend.logPath, "utf8");
+  const correlatedLaunchLines = launchLog
+    .split("\n")
+    .filter((line) => line.includes(task.id) && line.includes(task.session_id!));
+  expect(
+    correlatedLaunchLines.filter((line) => line.includes("kubernetes.launch.completed")),
+  ).toHaveLength(1);
+  for (const stage of ["storage", "pod_ready", "bootstrap", "agentctl_connect"]) {
+    expect(
+      correlatedLaunchLines.filter(
+        (line) => line.includes("kubernetes.launch.stage") && logFieldEquals(line, "stage", stage),
+      ),
+      `expected one ${stage} timing record for ${task.id}`,
+    ).toHaveLength(1);
+  }
   const pod = await waitForKubernetesPod(cluster, task.id, task.session_id!);
   const labels = pod.metadata.labels ?? {};
   expect(labels["app.kubernetes.io/managed-by"]).toBe("kandev");
@@ -224,6 +264,10 @@ test("launches through kubeconfig with Pod exec and a loopback-only agentctl for
 test("launches from a real in-cluster service account", async ({ cluster }) => {
   test.setTimeout(300_000);
   const backend = await cluster.startInClusterBackend();
+  expect(
+    (await fetch(`${backend.baseUrl}/ready`)).status,
+    "the in-cluster fixture must provide an application-ready backend",
+  ).toBe(200);
   const apiClient = new ApiClient(backend.baseUrl);
   const seed = await seedKubernetesBackend(apiClient, cluster, {
     label: "in-cluster",
@@ -366,13 +410,39 @@ test("preserves a managed PVC across ordinary stop/resume and deletes it termina
       "printf retained > /workspace/kandev-retained",
     ]);
     await waitForAgentMessage(apiClient, task.session_id!, "started");
+    expect(
+      (await apiClient.listKubernetesSessions(seedData.executorId)).find(
+        (row) => row.task_id === task.id,
+      ),
+    ).toMatchObject({
+      session_id: task.session_id,
+      retention_state: "active",
+    });
 
     await apiClient.stopSession({ session_id: task.session_id! });
     await waitForTaskSessionState(apiClient, task.id, task.session_id!, "CANCELLED");
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listKubernetesSessions(seedData.executorId)).find(
+            (row) => row.task_id === task.id,
+          ),
+        { timeout: 60_000, message: "Waiting for retained Kubernetes session status" },
+      )
+      .toMatchObject({ session_state: "CANCELLED", retention_state: "retained" });
     const resumed = await apiClient.launchSession(
       { task_id: task.id, intent: "resume", session_id: task.session_id! },
       90_000,
     );
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listKubernetesSessions(seedData.executorId)).find(
+            (row) => row.task_id === task.id,
+          ),
+        { timeout: 90_000, message: "Waiting for active resumed Kubernetes session status" },
+      )
+      .toMatchObject({ session_state: "WAITING_FOR_INPUT", retention_state: "active" });
     expect(resumed.session_id).toBe(task.session_id);
     await waitForTaskSessionState(
       apiClient,

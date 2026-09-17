@@ -55,10 +55,15 @@ type EngineHandle interface {
 	RecordParticipantDecision(ctx context.Context, sessionID string, in engine.DecisionInfo) (engine.RecordDecisionResult, error)
 	EvaluateStepQuorum(ctx context.Context, taskID, sessionID string) (engine.QuorumSnapshot, error)
 	// ResolveParticipantRole is the AC-2/3/4/4a role-and-seat resolution
-	// entry point the agent decision tool needs. Reached the same way as
+	// entry point the runtime decision path needs. Reached the same way as
 	// the two methods above: via Dispatcher.ResolveParticipantRole plus a
 	// narrow caller-side type assertion.
 	ResolveParticipantRole(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
+	// ResolveParticipantRoleReadOnly is ResolveParticipantRole's
+	// side-effect-free counterpart, for callers that only observe seat
+	// occupancy (e.g. a runtime capability grant) rather than evaluate a
+	// guard or record a decision. Reached via Dispatcher.ResolveParticipantRoleReadOnly.
+	ResolveParticipantRoleReadOnly(ctx context.Context, taskID, stepID, agentProfileID string) (role, participantID string, err error)
 }
 
 // RecordDecisionInput is what a transport must resolve before calling
@@ -365,6 +370,15 @@ func (d *Dispatcher) ResolveParticipantRole(
 	ctx context.Context, taskID, stepID, agentProfileID string,
 ) (role, participantID string, err error) {
 	return d.engine.ResolveParticipantRole(ctx, taskID, stepID, agentProfileID)
+}
+
+// ResolveParticipantRoleReadOnly is ResolveParticipantRole's side-effect-free
+// counterpart (see EngineHandle.ResolveParticipantRoleReadOnly): no session
+// resolution is needed here either.
+func (d *Dispatcher) ResolveParticipantRoleReadOnly(
+	ctx context.Context, taskID, stepID, agentProfileID string,
+) (role, participantID string, err error) {
+	return d.engine.ResolveParticipantRoleReadOnly(ctx, taskID, stepID, agentProfileID)
 }
 
 // resolveActiveSessionID returns AC-16's active-session id, or "" when no

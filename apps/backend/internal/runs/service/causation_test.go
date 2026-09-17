@@ -43,8 +43,8 @@ func TestQueueRun_RootRunStampsOwnIDAsCausationID(t *testing.T) {
 	}
 
 	run := getRun(t, repo, "agent-primary", "root_reason")
-	if run.CausationID != run.ID {
-		t.Fatalf("causation_id = %q, want own id %q", run.CausationID, run.ID)
+	if run.ChainCausationID != run.ID {
+		t.Fatalf("causation_id = %q, want own id %q", run.ChainCausationID, run.ID)
 	}
 	if run.CausationDepth != 0 {
 		t.Fatalf("causation_depth = %d, want 0", run.CausationDepth)
@@ -85,8 +85,8 @@ func TestQueueRun_InheritsCausationFromCausingRun(t *testing.T) {
 		t.Fatalf("queue child: %v", err)
 	}
 	child := getRun(t, repo, "agent-primary", "child_reason")
-	if child.CausationID != parent.CausationID {
-		t.Fatalf("child causation_id = %q, want parent's %q", child.CausationID, parent.CausationID)
+	if child.ChainCausationID != parent.ChainCausationID {
+		t.Fatalf("child causation_id = %q, want parent's %q", child.ChainCausationID, parent.ChainCausationID)
 	}
 	if child.ParentRunID != parent.ID {
 		t.Fatalf("child parent_run_id = %q, want %q", child.ParentRunID, parent.ID)
@@ -126,7 +126,7 @@ func TestQueueRun_HumanActorAlwaysRootsNewChain(t *testing.T) {
 		t.Fatalf("queue human follow-up: %v", err)
 	}
 	followUp := getRun(t, repo, "agent-primary", "human_followup")
-	if followUp.CausationID == causing.CausationID {
+	if followUp.ChainCausationID == causing.ChainCausationID {
 		t.Fatalf("human-actor follow-up adopted causing run's chain, want a new root")
 	}
 	if followUp.CausationDepth != 0 {

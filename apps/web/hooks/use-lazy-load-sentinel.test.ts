@@ -74,6 +74,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// eslint-disable-next-line max-lines-per-function -- observer lifecycle cases share one deterministic harness.
 describe("useLazyLoadSentinel", () => {
   it("rechecks current geometry when a restored viewport becomes eligible", async () => {
     const scrollRef = makeScrollRef();
@@ -129,6 +130,70 @@ describe("useLazyLoadSentinel", () => {
     expect(record.unobserved).toContain(first);
     expect(record.targets).toContain(second);
     expect(record.disconnected).toBe(false);
+  });
+
+  it("recreates the observer when the owning lifecycle generation changes", () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn(async () => 20);
+    const { result, rerender } = renderHook(
+      ({ lifecycleKey }: { lifecycleKey: number }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, loadMore, { lifecycleKey }),
+      { initialProps: { lifecycleKey: 0 } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+    const first = records[0];
+
+    rerender({ lifecycleKey: 1 });
+
+    expect(first.disconnected).toBe(true);
+    expect(records).toHaveLength(2);
+    expect(records[1].targets).toContain(node);
+  });
+  it("ignores queued callbacks from a replaced observer with the same lifecycle key", () => {
+    const scrollRef = makeScrollRef();
+    const firstLoadMore = vi.fn(async () => 20);
+    const secondLoadMore = vi.fn(async () => 20);
+    const { result, rerender } = renderHook(
+      ({ loadMore }: { loadMore: () => Promise<number> }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+          lifecycleKey: 0,
+        }),
+      { initialProps: { loadMore: firstLoadMore } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+    const firstObserver = records[0];
+
+    rerender({ loadMore: secondLoadMore });
+    expect(records).toHaveLength(2);
+
+    fire(firstObserver, true, node);
+    expect(firstLoadMore).not.toHaveBeenCalled();
+    expect(secondLoadMore).not.toHaveBeenCalled();
+
+    fire(records[1], true, node);
+    expect(secondLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("arms a replacement observer after the old one disarmed", async () => {
+    const scrollRef = makeScrollRef();
+    const loadMore = vi.fn(async () => 0);
+    const { result, rerender } = renderHook(
+      ({ lifecycleKey }: { lifecycleKey: number }) =>
+        useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+          lifecycleKey,
+          rearmWhileIntersecting: true,
+        }),
+      { initialProps: { lifecycleKey: 0 } },
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+    await act(async () => fire(records[0], true, node));
+    rerender({ lifecycleKey: 1 });
+    await act(async () => fire(records[1], true, node));
+
+    expect(loadMore).toHaveBeenCalledTimes(2);
   });
 
   it("fires loadMore on intersection when eligible", async () => {

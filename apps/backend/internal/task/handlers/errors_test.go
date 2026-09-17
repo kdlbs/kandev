@@ -16,6 +16,7 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -94,6 +95,33 @@ func TestErrorsAreClassifiable(t *testing.T) {
 		handleNotFound(ctx, newTestLogger(t), fmt.Errorf("create task: %w", wfmodels.NewWIPLimitError("review", 2, 2)), "task not created")
 		if rec.Code != http.StatusConflict {
 			t.Fatalf("status=%d, want %d", rec.Code, http.StatusConflict)
+		}
+	})
+
+	t.Run("dirty worktree delete returns a typed conflict", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		err := &service.TaskDeleteDirtyWorktreeError{DirtyWorktrees: []worktree.DirtyWorktree{{
+			WorktreeID: "wt-1", RepositoryID: "repo-1", Path: "/tasks/task-1/repo",
+			DirtyFiles: []string{"notes.txt"},
+		}}}
+		handleNotFound(ctx, newTestLogger(t), fmt.Errorf("delete task: %w", err), "task not deleted")
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status=%d, want %d", rec.Code, http.StatusConflict)
+		}
+		var payload struct {
+			ErrorCode      string                   `json:"error_code"`
+			DirtyWorktrees []worktree.DirtyWorktree `json:"dirty_worktrees"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if payload.ErrorCode != service.TaskDeleteDirtyWorktreeErrorCode {
+			t.Fatalf("error_code=%q, want %q", payload.ErrorCode, service.TaskDeleteDirtyWorktreeErrorCode)
+		}
+		if len(payload.DirtyWorktrees) != 1 || payload.DirtyWorktrees[0].DirtyFiles[0] != "notes.txt" {
+			t.Fatalf("dirty_worktrees=%+v, want the inspected file", payload.DirtyWorktrees)
 		}
 	})
 

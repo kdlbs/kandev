@@ -112,6 +112,17 @@ afterEach(() => {
 });
 
 describe("useTaskPRTooltipHydration request coordination", () => {
+  it("keeps its aggregate result stable when inputs are unchanged", () => {
+    const { result, rerender } = renderHook(() => useTaskPRTooltipHydration("task-1"), {
+      wrapper: createStateWrapper(),
+    });
+    const firstResult = result.current;
+
+    rerender();
+
+    expect(result.current).toBe(firstResult);
+  });
+
   it("deduplicates concurrent requests for the same task and store", async () => {
     const response = deferred<{ task_prs: Record<string, TaskPR[]> }>();
     listTaskPRsMock.mockReturnValue(response.promise);

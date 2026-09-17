@@ -160,13 +160,19 @@ describe("git-status WS handler — commit events", () => {
         type: "commits_reset",
         session_id: SESSION,
         timestamp: "2026-05-28T00:00:01Z",
-        reset: { previous_head: "old-head", current_head: "new-head", deleted_count: 1 },
+        reset: {
+          previous_head: "old-head",
+          current_head: "new-head",
+          deleted_count: 1,
+          repository_name: "repo-a",
+        },
       }),
     );
 
     const state = store.getState();
     // Trigger bumped — useSessionCommits will refetch.
     expect(state.sessionCommits.refetchTrigger[SESSION]).toBe(1);
+    expect(state.gitCheckoutGeneration.byEnvironmentId[SESSION]?.["repo-a"]).toBe(1);
     // Existing commits remain — this is the whole point. Clearing would make
     // the Changes panel briefly render its empty state until the refetch
     // resolved.
@@ -188,12 +194,14 @@ describe("git-status WS handler — commit events", () => {
           current_branch: "new",
           current_head: "head",
           base_commit: "base",
+          repository_name: "repo-b",
         },
       }),
     );
 
     const state = store.getState();
     expect(state.sessionCommits.refetchTrigger[SESSION]).toBe(1);
+    expect(state.gitCheckoutGeneration.byEnvironmentId[SESSION]?.["repo-b"]).toBe(1);
     expect(state.sessionCommits.byEnvironmentId[SESSION]).toHaveLength(1);
   });
 

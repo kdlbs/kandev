@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconBrandGitlab, IconMenu2 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { PageShell } from "@/components/page-shell";
 import { fetchGitLabStatus } from "@/lib/api/domains/gitlab-api";
 import type { GitLabStatus, Issue, MR } from "@/lib/types/gitlab";
@@ -31,6 +30,7 @@ import {
 import { toGitLabTaskPreset } from "@/components/gitlab/my-gitlab/task-presets";
 import { useAppStore } from "@/components/state-provider";
 import { Trans, useTranslation } from "react-i18next";
+import { IntegrationFiltersSheet } from "@/components/integrations/integration-filters-sheet";
 
 type GitLabPageClientProps = {
   workspaceId?: string;
@@ -298,25 +298,22 @@ function GitLabPageOverlays({
   };
   return (
     <>
-      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-        <SheetContent
-          side="right"
-          className="w-full sm:max-w-sm overflow-y-auto p-0"
-          data-testid="gitlab-mobile-sidebar"
-        >
-          <SheetHeader className="px-4 pt-4 pb-2">
-            <SheetTitle>{t("gitlab:filters")}</SheetTitle>
-          </SheetHeader>
-          <PresetsSidebar
-            selected={state.selection}
-            onSelect={onMobileSidebarSelect}
-            savedPresets={state.savedPresets}
-            onDeleteSaved={state.onDeleteSaved}
-            canSaveCurrent={state.canSaveCurrent}
-            onSaveCurrent={onMobileSaveCurrent}
-          />
-        </SheetContent>
-      </Sheet>
+      <IntegrationFiltersSheet
+        key={workspaceId}
+        open={mobileSidebarOpen}
+        onOpenChange={setMobileSidebarOpen}
+        title={t("gitlab:filters")}
+        testId="gitlab-mobile-sidebar"
+      >
+        <PresetsSidebar
+          selected={state.selection}
+          onSelect={onMobileSidebarSelect}
+          savedPresets={state.savedPresets}
+          onDeleteSaved={state.onDeleteSaved}
+          canSaveCurrent={state.canSaveCurrent}
+          onSaveCurrent={onMobileSaveCurrent}
+        />
+      </IntegrationFiltersSheet>
       <SavePresetDialog
         open={state.saveDialogOpen}
         onOpenChange={state.setSaveDialogOpen}

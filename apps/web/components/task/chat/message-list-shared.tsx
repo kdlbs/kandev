@@ -17,8 +17,11 @@ import {
   lastAgentErrorStamp,
   readLastAgentError,
 } from "@/lib/session-last-agent-error";
+import { isLaunchErrorSurfaceMessage } from "./types";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { MessageHistoryStatus } from "@/hooks/domains/session/use-message-fetch-state";
+import { SessionHistoryFeedback } from "./session-entry-feedback";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -32,6 +35,9 @@ export type MessageListProps = {
   messagesLoading: boolean;
   /** Latest-session history is still reconciling while cached rows remain visible. */
   historyRefreshPending?: boolean;
+  historyStatus?: MessageHistoryStatus;
+  historyError?: unknown;
+  onRetryHistory?: () => void;
   isWorking: boolean;
   sessionState?: TaskSessionState;
   worktreePath?: string;
@@ -67,6 +73,12 @@ export type MessageListProps = {
    * remain mounted while inactive and use this transition to recover missed
    * oldest-page sentinel observations. */
   isVisible?: boolean;
+  /** The task-owned launch card renders the matching failure. */
+  launchErrorOwned?: boolean;
+  /** Stamp used to distinguish a matching last-agent-error notice. */
+  launchErrorStamp?: string;
+  /** Timestamp used to identify unstamped synthetic rows from the active failure. */
+  launchErrorOccurredAt?: string;
 };
 
 /** Imperative handle exposed by `MessageList`, letting the chat panel scroll
@@ -89,6 +101,86 @@ export function getItemKey(item: RenderItem): string {
   )
     return item.id;
   return item.message.id;
+}
+
+const LAUNCH_ERROR_STAMP_KEYS = ["launch_error_stamp", "error_stamp"] as const;
+
+function launchErrorSurfaceStamp(message: Message): string | undefined {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  for (const key of LAUNCH_ERROR_STAMP_KEYS) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function launchErrorSurfaceMessageIds(
+  messages: Message[],
+  launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
+): Set<string> {
+  const launchMessages = messages.filter(isLaunchErrorSurfaceMessage);
+  if (launchMessages.length === 0) return new Set();
+
+  const unstampedMessages = launchMessages.filter(
+    (message) => launchErrorSurfaceStamp(message) === undefined,
+  );
+  const hiddenIds = new Set<string>();
+  if (launchErrorStamp) {
+    const stampedMatches = launchMessages.filter(
+      (message) => launchErrorSurfaceStamp(message) === launchErrorStamp,
+    );
+    stampedMatches.forEach((message) => hiddenIds.add(message.id));
+  }
+
+  const occurredAt = launchErrorOccurredAt ? Date.parse(launchErrorOccurredAt) : Number.NaN;
+  if (!Number.isNaN(occurredAt)) {
+    unstampedMessages.forEach((message) => {
+      const createdAt = Date.parse(message.created_at);
+      if (!Number.isNaN(createdAt) && createdAt >= occurredAt) hiddenIds.add(message.id);
+    });
+  }
+
+  if (hiddenIds.size > 0 || launchErrorStamp || launchErrorOccurredAt) return hiddenIds;
+
+  // Older synthetic rows do not carry the launch stamp. Keep historical rows
+  // intact and hide only the most recent row when no identity is available.
+  const fallbackMessage = launchMessages[launchMessages.length - 1];
+  return fallbackMessage ? new Set([fallbackMessage.id]) : new Set();
+}
+
+/** Remove the launch-only transcript decorations once the task card owns them. */
+export function filterLaunchErrorMessages(
+  messages: Message[],
+  launchErrorOwned: boolean,
+  launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
+): Message[] {
+  if (!launchErrorOwned) return messages;
+  const hiddenIds = launchErrorSurfaceMessageIds(messages, launchErrorStamp, launchErrorOccurredAt);
+  return messages.filter((message) => !hiddenIds.has(message.id));
+}
+
+/** Remove synthetic launch rows while preserving ordinary transcript activity. */
+export function filterLaunchErrorItems(
+  items: RenderItem[],
+  launchErrorOwned: boolean,
+  launchErrorStamp?: string,
+  launchErrorOccurredAt?: string,
+): RenderItem[] {
+  if (!launchErrorOwned) return items;
+  const hiddenMessageIds = launchErrorSurfaceMessageIds(
+    items.flatMap((item) => (item.type === "message" ? [item.message] : [])),
+    launchErrorStamp,
+    launchErrorOccurredAt,
+  );
+  return items.filter((item) => {
+    if (item.type === "prepare_progress") return false;
+    if (item.type === "agent_error_notice") {
+      return !launchErrorStamp || lastAgentErrorStamp(item.error) !== launchErrorStamp;
+    }
+    return item.type !== "message" || !hiddenMessageIds.has(item.message.id);
+  });
 }
 
 /** The active turn id, but only while the agent is working — turns no longer
@@ -342,6 +434,14 @@ export function LastAgentErrorNotice({
           <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-destructive/85">
             {error.message}
           </pre>
+          {error.details && (
+            <details className="mt-2 min-w-0 text-[11px]" data-testid="last-agent-error-details">
+              <summary className="cursor-pointer font-medium">{t("task:technicalDetails")}</summary>
+              <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed text-destructive/85">
+                {error.details}
+              </pre>
+            </details>
+          )}
           {error.remediationUrl && (
             <div className="mt-1">
               <RemediationLink url={error.remediationUrl} className="text-destructive/85" />
@@ -350,7 +450,7 @@ export function LastAgentErrorNotice({
         </div>
         <button
           type="button"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-destructive/10 cursor-pointer"
+          className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-destructive/10 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           aria-label={t("task:hidePreviousAgentError")}
           onClick={dismiss}
         >
@@ -383,9 +483,31 @@ export function UnreadDivider() {
   );
 }
 
+function SessionHistoryStatus({
+  sessionId,
+  sessionState,
+  historyStatus,
+  historyError,
+  onRetryHistory,
+}: {
+  sessionId: string | null;
+  sessionState?: TaskSessionState;
+  historyStatus: MessageHistoryStatus;
+  historyError: unknown;
+  onRetryHistory?: () => void;
+}) {
+  if (!sessionId || sessionState === "CREATED" || historyStatus === "ready" || !onRetryHistory) {
+    return null;
+  }
+  return (
+    <SessionHistoryFeedback status={historyStatus} error={historyError} onRetry={onRetryHistory} />
+  );
+}
+
 /** Transcript status footer: the loading-older indicator, an explicit
  * load-older button, the conversation loading spinner, and the empty-state
  * message when there are no messages. */
+// eslint-disable-next-line complexity -- transcript status owns independent loading, pagination, and recovery states.
 export function MessageListStatus({
   isLoadingMore,
   hasMore,
@@ -395,6 +517,11 @@ export function MessageListStatus({
   messagesCount,
   onLoadMore,
   showRecovery = false,
+  sessionId = null,
+  sessionState,
+  historyStatus = "ready",
+  historyError = null,
+  onRetryHistory,
 }: {
   isLoadingMore: boolean;
   hasMore: boolean;
@@ -410,6 +537,11 @@ export function MessageListStatus({
   onLoadMore?: () => void;
   /** Shows the explicit control only after a recoverable pagination failure. */
   showRecovery?: boolean;
+  sessionId?: string | null;
+  sessionState?: TaskSessionState;
+  historyStatus?: MessageHistoryStatus;
+  historyError?: unknown;
+  onRetryHistory?: () => void;
 }) {
   const { t } = useTranslation();
   const { isFinePointer } = useResponsiveBreakpoint();
@@ -434,7 +566,14 @@ export function MessageListStatus({
           </Button>
         </div>
       )}
-      {showLoadingState && (
+      <SessionHistoryStatus
+        sessionId={sessionId}
+        sessionState={sessionState}
+        historyStatus={historyStatus}
+        historyError={historyError}
+        onRetryHistory={onRetryHistory}
+      />
+      {showLoadingState && historyStatus === "ready" && (
         <div
           className="flex items-center justify-center py-8 text-muted-foreground"
           data-testid="conversation-loading-state"
@@ -443,11 +582,14 @@ export function MessageListStatus({
           <span>{t("task:loadingConversation")}</span>
         </div>
       )}
-      {!messagesLoading && !isInitialLoading && messagesCount === 0 && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <span>{t("task:noMessagesYetStartTheConversation")}</span>
-        </div>
-      )}
+      {!messagesLoading &&
+        !isInitialLoading &&
+        messagesCount === 0 &&
+        historyStatus === "ready" && (
+          <div className="flex items-center justify-center py-8 text-muted-foreground">
+            <span>{t("task:noMessagesYetStartTheConversation")}</span>
+          </div>
+        )}
     </>
   );
 }

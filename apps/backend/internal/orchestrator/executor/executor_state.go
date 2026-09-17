@@ -86,6 +86,13 @@ func (e *Executor) MarkCompletedBySession(ctx context.Context, sessionID string,
 		e.logger.Error("failed to update agent session status in database",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return
+	}
+	// This write reaches the repository directly rather than through
+	// onSessionStateChange, so it releases the session-ceiling reservation
+	// itself (AC-51a).
+	if e.onCeilingReservationRelease != nil {
+		e.onCeilingReservationRelease(sessionID)
 	}
 }
 
@@ -126,6 +133,15 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	if metadata == nil {
 		metadata = make(map[string]interface{})
 	}
+
+	// Authoritative keys belong to the profile, so clear any task-supplied
+	// value up front; applyProfile re-applies the profile's own value below.
+	// Doing it here rather than only inside applyProfile is what makes the
+	// guarantee hold for launches that attach no profile, carry a stale
+	// profile ID, or hit a profile lookup error — task metadata is
+	// caller-writable through POST/PATCH /api/v1/tasks and task.create /
+	// task.update, none of which filter keys.
+	clearAuthoritativeMetadataKeys(metadata)
 
 	// When no executor ID is resolved, check if the metadata carries an
 	// executor profile. The profile references a specific executor, so we
@@ -263,6 +279,16 @@ var profileConfigAuthoritativeKeys = []string{
 	// the profile value wins unconditionally — including when it is empty,
 	// which the reader treats as disabled.
 	lifecycle.MetadataKeySSHReclaimTaskDir,
+	lifecycle.MetadataKeyAllowUserNamespaces,
+}
+
+// clearAuthoritativeMetadataKeys blanks every profile-owned key in the
+// launch metadata. The reader-side helpers treat an empty value exactly
+// as an absent one, so this is the "no profile said otherwise" state.
+func clearAuthoritativeMetadataKeys(metadata map[string]interface{}) {
+	for _, k := range profileConfigAuthoritativeKeys {
+		metadata[k] = ""
+	}
 }
 
 var kubernetesProfileConfigAuthoritativeKeys = []string{

@@ -100,6 +100,10 @@ func sessionScopeCases() []deniedCase {
 				clarification.DetachedClarificationResume{TaskID: taskID, SessionID: sessionID},
 			)
 		}},
+		{"ProbeBackgroundWorkloads", func(s *Service) error {
+			_, err := s.ProbeBackgroundWorkloads(context.Background(), sessionID)
+			return err
+		}},
 	}
 }
 

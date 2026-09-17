@@ -21,7 +21,6 @@ import { formatRelativeTime } from "@/lib/utils";
 import { MarkdownComment } from "./markdown-comment";
 import { AgentTurnPanel } from "./components/agent-turn-panel";
 import { RunErrorEntry } from "./components/run-error-entry";
-import { TaskChatLaunchError } from "./components/task-chat-launch-error";
 import { UserCommentRunBadge } from "./components/user-comment-run-badge";
 import { buildCommentTurnContext, type CommentTurnContext } from "./turn-context";
 import { groupSessionsForTimeline, groupSortKey, type SessionGroup } from "./session-groups";
@@ -590,7 +589,6 @@ export function TaskChat({
   onCommentsChanged,
   taskTitle,
   taskDescription,
-  statusSummary,
   repositories,
 }: TaskChatProps) {
   const { t } = useTranslation();
@@ -648,13 +646,6 @@ export function TaskChat({
           {t("task:showOlderSessions", { count: olderGroups.length })}
         </button>
       )}
-      <TaskChatLaunchError
-        taskId={taskId}
-        workspaceId={workspaceId}
-        statusSummary={statusSummary}
-        runErrors={runErrors}
-        repositories={repositories}
-      />
       {isEmpty ? (
         <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
       ) : (

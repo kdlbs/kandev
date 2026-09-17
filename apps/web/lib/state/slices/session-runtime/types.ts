@@ -1,3 +1,8 @@
+import type {
+  WorkspaceRestorationAttempt,
+  WorkspaceRestorationState,
+} from "./workspace-restoration";
+
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
 };
@@ -43,6 +48,7 @@ export type ProcessState = {
 export type GitChangeLayer = "staged" | "unstaged";
 
 export type FileChangeFacet = {
+  is_symlink?: boolean;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   additions?: number;
   deletions?: number;
@@ -52,6 +58,7 @@ export type FileChangeFacet = {
 };
 
 export type FileInfo = {
+  is_symlink?: boolean;
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   staged: boolean;
@@ -176,6 +183,11 @@ export type SessionCommitsState = {
   // visible list, so the Changes panel doesn't flicker through its empty
   // state while the refetch is in flight.
   refetchTrigger: Record<string, number>;
+};
+
+/** Checkout generations keyed by environment and repository scope. */
+export type GitCheckoutGenerationState = {
+  byEnvironmentId: Record<string, Record<string, number>>;
 };
 
 export type ContextWindowEntry = {
@@ -441,6 +453,7 @@ export type SessionRuntimeSliceState = {
   /** Maps sessionId → environmentId for workspace state sharing. */
   environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;
+  gitCheckoutGeneration: GitCheckoutGenerationState;
   contextWindow: ContextWindowState;
   agents: AgentState;
   availableCommands: AvailableCommandsState;
@@ -455,6 +468,7 @@ export type SessionRuntimeSliceState = {
   sessionPollMode: SessionPollModeState;
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
+  workspaceRestoration: WorkspaceRestorationState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -493,6 +507,8 @@ export type SessionRuntimeSliceActions = {
   // Signal a refetch without clearing the visible list — see
   // SessionCommitsState.refetchTrigger.
   bumpSessionCommitsRefetch: (sessionId: string) => void;
+  /** Bump only the affected repository's checkout generation. */
+  bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) => void;
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
@@ -534,6 +550,14 @@ export type SessionRuntimeSliceActions = {
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
+  beginWorkspaceRestoration: (
+    taskId: string,
+    sessionId: string,
+    environmentId: string,
+  ) => WorkspaceRestorationAttempt | null;
+  completeWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
+  failWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt, details: string) => boolean;
+  clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

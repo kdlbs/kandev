@@ -32,10 +32,8 @@ const (
 
 	clarificationPersistenceTimeout = 30 * time.Second
 
-	// clarificationClaimTimeout bounds only the interactive claim call
-	// (see clarificationClaimContext) -- short enough that a user hitting
-	// writer-pool contention gets fail-fast feedback instead of a 60-75s
-	// dead wait, matching the SQLite busy_timeout order of magnitude.
+	// clarificationClaimTimeout remains the fallback budget for direct
+	// claimAndDeliver callers that do not carry the shared pre-claim context.
 	clarificationClaimTimeout = 5 * time.Second
 
 	errClarificationRequestNotFound = "clarification request not found"
@@ -47,7 +45,16 @@ const (
 	// frontend fails closed on any 409 body it doesn't recognize rather than
 	// assuming a future code is safe to treat as success.
 	clarificationConflictNotActive = "not_active"
+
+	clarificationResponseTemporarilyUnavailableCode    = "temporarily_unavailable"
+	clarificationResponseTemporarilyUnavailableMessage = "clarification response is temporarily unavailable"
 )
+
+// clarificationPreClaimTimeout bounds the complete pre-claim response phase:
+// identity, authorization, validation, and the atomic claim. It is a
+// variable so channel-controlled tests can exercise expiry without waiting
+// five seconds; production uses the five-second default.
+var clarificationPreClaimTimeout = 5 * time.Second
 
 // handlerMessageStore is the task repository surface used by HTTP handlers
 // and the Resolver.
@@ -162,6 +169,19 @@ type Handlers struct {
 	eventBus       EventBus
 	resolver       *Resolver
 	logger         *logger.Logger
+
+	// inboxTasks/inboxBundles back the Needs-you Inbox endpoints
+	// (inbox_handlers.go) only; the original clarification endpoints above
+	// never read them.
+	inboxTasks   inboxTaskService
+	inboxBundles inboxBundleStore
+	// now always returns a UTC instant. The sidecar's snooze_until is
+	// persisted and compared as SQLite TEXT (mattn/go-sqlite3 formats a
+	// time.Time with whatever offset it carries), so a non-UTC value here
+	// would make snooze expiry a lexical string comparison across mismatched
+	// offsets rather than a true instant comparison — wrong exactly at a DST
+	// transition (AC .24/.32, "evaluated against server time").
+	now func() time.Time
 }
 
 // NewHandlers creates new clarification handlers.
@@ -173,6 +193,8 @@ func NewHandlers(
 	eventBus EventBus,
 	resolver *Resolver,
 	log *logger.Logger,
+	inboxTasks inboxTaskService,
+	inboxBundles inboxBundleStore,
 ) *Handlers {
 	return &Handlers{
 		store:          store,
@@ -182,10 +204,16 @@ func NewHandlers(
 		eventBus:       eventBus,
 		resolver:       resolver,
 		logger:         log.WithFields(zap.String("component", "clarification-handlers")),
+		inboxTasks:     inboxTasks,
+		inboxBundles:   inboxBundles,
+		now:            func() time.Time { return time.Now().UTC() },
 	}
 }
 
-// RegisterRoutes registers clarification HTTP routes.
+// RegisterRoutes registers clarification HTTP routes. needsYouInboxEnabled
+// gates only the /api/v1/clarification-inbox group: the original
+// /api/v1/clarification routes stay unconditional, matching every agent's
+// existing clarification-request/respond flow regardless of the flag.
 func RegisterRoutes(
 	router *gin.Engine,
 	store *Store,
@@ -195,14 +223,25 @@ func RegisterRoutes(
 	eventBus EventBus,
 	resolver *Resolver,
 	log *logger.Logger,
+	inboxTasks inboxTaskService,
+	inboxBundles inboxBundleStore,
+	needsYouInboxEnabled bool,
 ) {
-	h := NewHandlers(store, hub, messageCreator, repo, eventBus, resolver, log)
+	h := NewHandlers(store, hub, messageCreator, repo, eventBus, resolver, log, inboxTasks, inboxBundles)
 	api := router.Group("/api/v1/clarification")
 	api.POST("/request", h.httpCreateRequest)
 	api.GET("/:id", h.httpGetRequest)
 	api.GET("/:id/wait", h.httpWaitForResponse)
 	api.POST("/:id/respond", h.httpRespond)
 	api.POST("/:id/cancel", h.httpCancelRequest)
+
+	if needsYouInboxEnabled {
+		inbox := router.Group("/api/v1/clarification-inbox")
+		inbox.GET("", h.httpListInbox)
+		inbox.GET("/hidden", h.httpListInboxHidden)
+		inbox.PUT("/sidecar/:pendingID", h.httpUpsertInboxSidecar)
+		inbox.DELETE("/sidecar/:pendingID", h.httpDeleteInboxSidecar)
+	}
 }
 
 // CreateRequestBody is the request body for creating a clarification request.
@@ -437,6 +476,11 @@ func (h *Handlers) writeResolutionResult(c *gin.Context, pendingID string, res *
 		c.JSON(http.StatusNotFound, gin.H{"error": errClarificationRequestNotFound})
 	case IsValidationError(err):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case IsPreClaimTimeoutError(err):
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": clarificationResponseTemporarilyUnavailableMessage,
+			"code":  clarificationResponseTemporarilyUnavailableCode,
+		})
 	case IsNotActiveError(err):
 		c.JSON(http.StatusConflict, gin.H{
 			"error": "clarification request is no longer active",
@@ -538,16 +582,39 @@ func clarificationPersistenceContext(ctx context.Context) (context.Context, cont
 	return context.WithTimeout(context.WithoutCancel(ctx), clarificationPersistenceTimeout)
 }
 
-// clarificationClaimContext bounds only the interactive claim
-// (CompleteActiveClarificationBundle) that /respond waits on synchronously.
-// SQLite's single writer connection (SetMaxOpenConns(1)) can queue this call
-// behind other writers for far longer than a user should be left staring at
-// a spinner; clarificationClaimTimeout fails it fast so the caller sees an
-// error (and Defect 1's retry affordance) in single-digit seconds instead of
-// waiting out the full clarificationPersistenceTimeout. Every other
-// persistence phase (resume, restore, the loser re-read) keeps the longer
-// budget -- only this call site changed.
+type clarificationPreClaimContextKey struct{}
+
+type clarificationPreClaimState struct {
+	caller context.Context
+}
+
+// clarificationPreClaimContext creates the one bounded context shared by all
+// response work before durable ownership is claimed. Caller cancellation is
+// preserved here so a request disconnect is not reported as an internal
+// pre-claim timeout; post-claim work continues to use detached persistence
+// contexts.
+func clarificationPreClaimContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	bounded, cancel := context.WithTimeout(ctx, clarificationPreClaimTimeout)
+	return context.WithValue(bounded, clarificationPreClaimContextKey{}, clarificationPreClaimState{caller: ctx}), cancel
+}
+
+func clarificationPreClaimCaller(ctx context.Context) context.Context {
+	state, _ := ctx.Value(clarificationPreClaimContextKey{}).(clarificationPreClaimState)
+	return state.caller
+}
+
+func isClarificationPreClaimContext(ctx context.Context) bool {
+	_, ok := ctx.Value(clarificationPreClaimContextKey{}).(clarificationPreClaimState)
+	return ok
+}
+
+// clarificationClaimContext reuses the shared pre-claim deadline when the
+// resolver owns one. Direct callers retain the historical detached five-second
+// claim budget for compatibility with the delivery recovery tests and seams.
 func clarificationClaimContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if isClarificationPreClaimContext(ctx) {
+		return ctx, func() {}
+	}
 	return context.WithTimeout(context.WithoutCancel(ctx), clarificationClaimTimeout)
 }
 

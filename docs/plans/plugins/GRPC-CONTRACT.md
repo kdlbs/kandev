@@ -62,6 +62,11 @@ service Host {
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
+  // Empty profile_id delegates to the platform default. A non-empty value
+  // selects that exact eligible profile. This separate method prevents an
+  // older host from silently ignoring an explicit selection.
+  rpc InvokeUtilityAgentWithOptions(InvokeUtilityAgentWithOptionsRequest) returns (InvokeUtilityAgentResponse);
+
   // The plugin's own operator-editable config (Settings > Plugins > <plugin>,
   // driven by the manifest's config_schema). Ungated; secret values arrive
   // in cleartext — this RPC is how an operator-configured credential (e.g. a
@@ -184,11 +189,28 @@ message RevealSecretResponse { string value = 1; }
 
 message EmitEventRequest { string event_name = 1; google.protobuf.Struct payload = 2; }
 message EmitEventResponse {}
+message InvokeUtilityAgentRequest { string prompt = 1; }
+message InvokeUtilityAgentWithOptionsRequest {
+  string prompt = 1;
+  string profile_id = 2;
+}
+message InvokeUtilityAgentResponse { string text = 1; }
 ```
 
 Notes: scope ∈ instance|workspace|task|agent (empty scope_id for instance —
 matches the state store). The plugin never passes its own id; the Host service
 instance is bound to the plugin's record at spawn time.
+
+`InvokeUtilityAgent` remains the prompt-only compatibility method. On a revised
+host it uses the platform default profile from Settings > Utility Agents.
+`InvokeUtilityAgentWithOptions` accepts the same prompt plus an optional
+`profile_id`; a non-empty ID selects that exact eligible profile and an invalid
+explicit ID returns `FailedPrecondition` without fallback. The revised SDK
+uses the options RPC for every call, including calls without an override. An
+older host returns `Unimplemented` for that method, and the SDK does not retry
+through the prompt-only RPC. Plugins own saved preferences and pass them in
+the request. The host does not read plugin configuration, utility-agent
+records, or transition metadata for invocation selection.
 
 `DeletePluginOwnedTaskTree` is partial-progress aware. A successful response
 carries every deleted task ID. If deletion stops after removing descendants,
@@ -212,6 +234,11 @@ the real proto — `apps/backend/proto/kandev/plugin/v1/plugin.proto` — and ar
 duplicated here; this section covers the RPC list (added to `service Host` above),
 capability gating, and cross-cutting conventions. See ADR 0043
 (`docs/decisions/0043-plugin-host-data-api.md`) for the design rationale.
+
+API v1 DTO fields are additive-only. `Task.labels` field 23, shipped in v0.93.0,
+remains generated and readable as a deprecated compatibility field. New plugins
+store provider-specific annotations in plugin-owned task state and render them
+through plugin UI slots; CreateTask and UpdateTask do not expose label writes.
 
 **Readable resources.** Each read RPC requires `api_read:<resource>` in the
 plugin's manifest:
@@ -245,8 +272,10 @@ created task's metadata — a plugin cannot set it itself. `CreateTask` resolves
 sane placement defaults when the plugin omits them: an empty `workspace_id`
 resolves to the single workspace (ambiguous otherwise → `InvalidArgument`), an
 empty `workflow_id` to that workspace's first workflow. `UpdateTask` accepts a
-conservative field mask — `title`, `description`, `state`, `workflow_step_id`
-(each optional/leave-unset). `start_agent` best-effort auto-launches an agent
+conservative field mask — `title`, `description`, `state`, and `priority` (each
+optional/leave-unset). `workflow_step_id` remains present for
+wire compatibility but is rejected; plugins use `MoveTask` for transitions.
+`start_agent` best-effort auto-launches an agent
 through the orchestrator; a launch failure does not fail the create.
 
 Write validation/error contract (so plugin authors can predict outcomes):

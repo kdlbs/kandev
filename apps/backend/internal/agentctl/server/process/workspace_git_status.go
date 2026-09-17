@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -45,7 +46,11 @@ func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subp
 		if wt.isGitStatusCancellation(err) {
 			wt.logger.Debug("updateGitStatus: getGitStatus canceled", zap.Error(err))
 		} else {
-			wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+			if fsdiagnostics.IsAccessDenied(err) {
+				wt.recordFilesystemFailure("workspace.git_status", workspaceTrigger(ctx, "poll"), err)
+			} else {
+				wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+			}
 		}
 		return false
 	}
@@ -96,6 +101,35 @@ func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
 	wt.updateMu.Lock()
 	defer wt.updateMu.Unlock()
 	wt.updateGitStatusClass(ctx, subproc.GitInteractive)
+}
+
+// RefreshWorkspace performs one file and Git scan for a lifecycle boundary or
+// an explicit user retry. The update lock keeps the two snapshots coherent
+// with the normal polling loops.
+func (wt *WorkspaceTracker) RefreshWorkspace(ctx context.Context, trigger string) {
+	if err := ctx.Err(); err != nil {
+		return
+	}
+	wt.clearAccessDeniedForUserOperation(trigger)
+	if trigger == workspaceManualRefreshTrigger || trigger == workspaceUserSelectTrigger {
+		wt.SetPollMode(PollModeFast)
+	}
+	ctx = withWorkspaceTrigger(ctx, trigger)
+	wt.updateMu.Lock()
+	defer wt.updateMu.Unlock()
+	wt.updateGitStatusClass(ctx, subproc.GitInteractive)
+	if err := ctx.Err(); err != nil {
+		return
+	}
+	wt.updateFilesClass(ctx, subproc.GitInteractive)
+	if err := ctx.Err(); err != nil {
+		return
+	}
+	wt.notifyWorkspaceStreamFileChange(types.FileChangeNotification{
+		Timestamp:      time.Now(),
+		RepositoryName: wt.repositoryName,
+		Operation:      types.FileOpRefresh,
+	})
 }
 
 // GetCurrentGitStatus returns the current cached git status. If no status has
@@ -282,6 +316,8 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	if err := ctx.Err(); err != nil {
 		return update, err
 	}
+
+	wt.enrichSymlinkMetadata(ctx, &update)
 
 	// Enrich file info with diff data (additions, deletions, and actual diff content)
 	if err := wt.enrichWithDiffData(ctx, &update, prior); err != nil {
@@ -896,12 +932,12 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 		fileInfo.Status = fileStatusDeleted
 		fileInfo.Staged = true
 		update.Deleted = append(update.Deleted, filePath)
-	case workTreeStatus == 'M':
+	case workTreeStatus == 'M' || workTreeStatus == 'T':
 		// Modified in worktree - unstaged modification
 		fileInfo.Status = fileStatusModified
 		fileInfo.Staged = false
 		update.Modified = append(update.Modified, filePath)
-	case indexStatus == 'M':
+	case indexStatus == 'M' || indexStatus == 'T':
 		// Modified and staged (no worktree changes)
 		fileInfo.Status = fileStatusModified
 		fileInfo.Staged = true
@@ -933,7 +969,7 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 func porcelainChangeFacet(status byte, oldPath string) *types.FileChangeFacet {
 	change := &types.FileChangeFacet{OldPath: oldPath}
 	switch status {
-	case 'M':
+	case 'M', 'T':
 		change.Status = fileStatusModified
 	case 'A':
 		change.Status = "added"

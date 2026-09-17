@@ -33,8 +33,11 @@ type handlerRepo interface {
 type TaskHandlers struct {
 	service                       *service.Service
 	orchestrator                  OrchestratorStarter
+	movePreviewer                 WorkflowMovePreviewer
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
+	parkedProjection              dto.ParkedProvider
+	taskParkedProjection          dto.TaskParkedProvider
 	repo                          handlerRepo
 	planService                   *service.PlanService
 	handoffSvc                    *service.HandoffService
@@ -137,6 +140,13 @@ type OrchestratorStarter interface {
 	EnsureSession(ctx context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error)
 }
 
+// WorkflowMovePreviewer is deliberately separate from OrchestratorStarter so
+// existing launch/ensure fakes and plugin adapters do not need to implement a
+// read-only advisory surface.
+type WorkflowMovePreviewer interface {
+	PreviewWorkflowMove(context.Context, orchestrator.WorkflowMovePreviewRequest) (*orchestrator.WorkflowMovePreview, error)
+}
+
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
 	h := &TaskHandlers{
 		service:      svc,
@@ -144,6 +154,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 		repo:         repo,
 		planService:  planService,
 		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
+	}
+	if previewer, ok := orchestrator.(WorkflowMovePreviewer); ok {
+		h.movePreviewer = previewer
 	}
 	// The orchestrator also surfaces the in-memory fine-grained busy substate
 	// (ADR-0049). Derive the narrow provider from it so the
@@ -156,6 +169,12 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	}
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		h.cancellationPending = cancellation
+	}
+	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
+		h.parkedProjection = parked
+	}
+	if taskParked, ok := orchestrator.(dto.TaskParkedProvider); ok {
+		h.taskParkedProjection = taskParked
 	}
 	return h
 }
@@ -188,12 +207,14 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/environment/reset", h.httpResetTaskEnvironment)
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
+	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
+	api.POST("/tasks/:id/move-preview", h.httpMoveTaskPreview)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
@@ -214,6 +235,11 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
 	api.GET("/workflow/steps/:id/task-count", h.httpGetStepTaskCount)
+
+	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.17): the
+	// only request surface for a reorder, mirroring the hyphenated
+	// collection-reorder precedent PUT /api/v1/workspaces/:id/workflows/reorder.
+	api.PUT("/workflow-steps/:id/tasks/reorder", h.httpReorderStepTasks)
 
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
@@ -237,6 +263,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
+	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
 	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
@@ -253,6 +280,10 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevisionGet, h.wsGetTaskPlanRevision)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevert, h.wsRevertTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanImplement, h.wsMarkTaskPlanImplementationStarted)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentsList, h.wsListTaskPlanComments)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.

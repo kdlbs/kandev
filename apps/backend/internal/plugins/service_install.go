@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
@@ -96,6 +97,9 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	// package versions declare the same provider, so revoke before stopping the
 	// old runtime and exposing the new record.
 	if hadOldRec && oldRec.Status == StatusActive {
+		if err := s.cancelAutomationDeliveries(oldRec.ID); err != nil {
+			return nil, err
+		}
 		s.revokeGitCredentialProviderLeases(oldRec.RepositoryProviders)
 	}
 	if wasRunning {
@@ -114,11 +118,32 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	// not a manifest fact) must be carried forward or an auto-update would
 	// silently reset the very toggle that triggered it.
 	if hadOldRec {
+		rec.InstallationID = oldRec.InstallationID
 		rec.AutoUpdate = oldRec.AutoUpdate
+	}
+	if rec.InstallationID == "" {
+		rec.InstallationID = uuid.NewString()
 	}
 	if err := s.store.Save(rec); err != nil {
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
+	}
+	if err := s.reviewInstalledApprovals(rec); err != nil {
+		if hadOldRec {
+			if restoreErr := s.store.Save(oldRec); restoreErr != nil {
+				s.log.Warn("plugins: failed to restore old plugin record after approval review error",
+					zap.String("plugin_id", rec.ID), zap.Error(restoreErr))
+				s.registry.Add(rec)
+				return nil, errors.Join(err, fmt.Errorf("plugins: restore previous plugin record: %w", restoreErr))
+			}
+		} else if deleteErr := s.store.Delete(rec.ID); deleteErr != nil {
+			s.log.Warn("plugins: failed to delete plugin record after approval review error",
+				zap.String("plugin_id", rec.ID), zap.Error(deleteErr))
+			s.registry.Add(rec)
+			return nil, errors.Join(err, fmt.Errorf("plugins: remove failed plugin record: %w", deleteErr))
+		}
+		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
+		return nil, err
 	}
 	s.registry.Add(rec)
 	s.agentToolInstallMu.Unlock()
@@ -141,6 +166,18 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return rec, activateErr
 	}
 	return installed, activateErr
+}
+
+func (s *Service) reviewInstalledApprovals(rec *store.Record) error {
+	ledger := s.approvalLedger()
+	if ledger == nil {
+		return nil
+	}
+	caps, err := ManifestCapabilityIDs(rec.Manifest)
+	if err != nil {
+		return err
+	}
+	return ledger.reviewManifestChange(rec.InstallationID, ManifestCapabilityDigest(rec.Manifest), caps, time.Now().UTC(), true)
 }
 
 // extractPackage runs pkgtar.Install and registers the extracted version
@@ -206,7 +243,10 @@ func previousVersion(oldRec *store.Record, hadOldRec bool) string {
 // (cmd/kandev's `Version` default, mirrored by internal/system/updates'
 // devVersion). It sorts meaninglessly against real semver, and a developer
 // running from source must still be able to install a package that declares
-// a min_kandev_version, so it disables the check entirely.
+// a min_kandev_version, so it disables the release-boundary comparison only.
+// Manifest-level capability floors (e.g. api_read:messages >= 0.91.1) are
+// validated independently of the running version and remain enforced on dev
+// and unwired builds.
 const DevKandevVersion = "dev"
 
 // checkMinKandevVersion rejects a package whose manifest declares a
@@ -214,22 +254,10 @@ const DevKandevVersion = "dev"
 // tags may carry a leading `v`; development and git-describe build strings do
 // not provide a trustworthy release boundary, so they deliberately skip this
 // release-only compatibility gate. An invalid manifest minimum is rejected.
+// The capability floor above is enforced earlier, in Manifest validation,
+// regardless of what running version (if any) is wired here.
 func (s *Service) checkMinKandevVersion(minVersion string) error {
-	if minVersion == "" || s.kandevVersion == "" || s.kandevVersion == DevKandevVersion {
-		return nil
-	}
-	runningVersion, runningRelease := manifest.NormalizeReleaseVersion(s.kandevVersion)
-	if !runningRelease {
-		return nil
-	}
-	minimumVersion, minimumRelease := manifest.NormalizeReleaseVersion(minVersion)
-	if !minimumRelease {
-		return fmt.Errorf("plugins: min_kandev_version %q is not a release version", minVersion)
-	}
-	if manifest.CompareVersions(runningVersion, minimumVersion) < 0 {
-		return fmt.Errorf("plugins: requires kandev >= %s, running %s", minVersion, s.kandevVersion)
-	}
-	return nil
+	return manifest.CheckMinimumKandevVersion(minVersion, s.kandevVersion)
 }
 
 // rollbackFailedInstall cleans up after a store.Save failure partway
@@ -352,11 +380,20 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.cancelAutomationDeliveries(id); err != nil {
+		return err
+	}
 	wasRunning := s.runtime != nil && s.runtime.Running(id)
 	if s.runtime != nil {
 		s.runtime.Stop(id)
 	}
 	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
+	if rec.InstallationID != "" {
+		if err := s.approvalTombstoneInstallation(rec.InstallationID); err != nil {
+			s.reconcileAbortedUninstall(id, wasRunning)
+			return fmt.Errorf("plugins: tombstone approval history: %w", err)
+		}
+	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
@@ -364,6 +401,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if err := s.deletePluginUserState(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin user state: %w", err)
+	}
+	if err := s.deletePluginAgentConversations(ctx, id); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)
@@ -438,4 +479,25 @@ func (s *Service) deletePluginUserState(ctx context.Context, id string) error {
 		return nil
 	}
 	return s.userStateCleanup.DeleteAllForPlugin(ctx, id)
+}
+
+// deletePluginAgentConversations removes every managed agent conversation
+// (hidden ephemeral task + session) id owns, across every workspace and
+// conversation key. Provenance-safe: the underlying DeleteAllForPlugin only
+// matches ephemeral tasks stamped with id's own plugin_id metadata, so
+// ordinary user tasks and other plugins' managed conversations are never
+// reachable from here. A nil agentConvs (agent_conversation was never wired,
+// or a narrowly constructed test host) is a no-op — a plugin that never used
+// the capability has nothing to clean up. Unlike deletePluginState
+// (plugin_state, best-effort), this is fail-visible: an error aborts the
+// uninstall rather than silently orphaning hidden conversations, matching
+// deletePluginSecrets/deletePluginUserState's ordering (nothing destructive
+// to the package/record has happened yet, so a retry is safe).
+func (s *Service) deletePluginAgentConversations(ctx context.Context, id string) error {
+	svc := s.agentConversationDeps()
+	if svc == nil {
+		return nil
+	}
+	_, err := svc.DeleteAllForPlugin(ctx, id)
+	return err
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -53,6 +54,12 @@ type Hub struct {
 	sessionDataProvider       SessionDataProvider
 	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
+	pluginConversationService *plugins.Service
+
+	// clientDisconnectListener releases connection-bound resources after a
+	// client is removed from the hub. It runs asynchronously so durable cleanup
+	// cannot block the hub event loop.
+	clientDisconnectListener func(connectionID string)
 
 	// sessionMode tracks per-session focus state and fires listeners when
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
@@ -70,8 +77,11 @@ type Hub struct {
 	// value = unscoped, today's behavior. See access.go.
 	authPolicy AuthPolicy
 
-	mu     sync.RWMutex
-	logger *logger.Logger
+	// orderedSessionMu closes the replay/register/append race for the ordered
+	// session stream. Never acquire it while holding h.mu or a client mutex.
+	orderedSessionMu sync.Mutex
+	mu               sync.RWMutex
+	logger           *logger.Logger
 }
 
 // NewHub creates a new WebSocket hub
@@ -90,6 +100,19 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		dispatcher:               dispatcher,
 		sessionMode:              newSessionModeTracker(),
 		logger:                   log.WithFields(zap.String("component", "ws_hub")),
+	}
+}
+
+func (h *Hub) SetPluginConversationService(service *plugins.Service) {
+	h.mu.Lock()
+	h.pluginConversationService = service
+	h.mu.Unlock()
+	if service != nil {
+		service.SetSessionEventSink(func(event plugins.SessionEvent) {
+			h.orderedSessionMu.Lock()
+			defer h.orderedSessionMu.Unlock()
+			h.broadcastCommittedOrderedSessionEvent(service, event)
+		})
 	}
 }
 
@@ -137,7 +160,9 @@ func (h *Hub) Run(ctx context.Context) {
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
 	metricClientIDs := make([]string, 0, len(h.systemMetricsSubscribers))
+	disconnectedIDs := make([]string, 0, len(h.clients))
 	for client := range h.clients {
+		disconnectedIDs = append(disconnectedIDs, client.ID)
 		if client.systemMetricsSubscribed {
 			metricClientIDs = append(metricClientIDs, client.ID)
 			client.systemMetricsSubscribed = false
@@ -146,6 +171,7 @@ func (h *Hub) closeAllClients() {
 		delete(h.clients, client)
 	}
 	tracker := h.metricsInterestTracker
+	listener := h.clientDisconnectListener
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
 	h.runSubscribers = make(map[string]map[*Client]bool)
@@ -156,6 +182,12 @@ func (h *Hub) closeAllClients() {
 	for _, clientID := range metricClientIDs {
 		if tracker != nil {
 			tracker.MetricsUnsubscribe(clientID)
+		}
+	}
+
+	if listener != nil {
+		for _, clientID := range disconnectedIDs {
+			go listener(clientID)
 		}
 	}
 
@@ -205,10 +237,15 @@ func (h *Hub) removeClient(client *Client) {
 		metricClientID = client.ID
 		tracker = h.metricsInterestTracker
 	}
+	listener := h.clientDisconnectListener
 	h.mu.Unlock()
 
 	if tracker != nil && metricClientID != "" {
 		tracker.MetricsUnsubscribe(metricClientID)
+	}
+
+	if listener != nil {
+		go listener(client.ID)
 	}
 
 	for _, sessionID := range dedupStrings(affectedSessions) {
@@ -216,6 +253,14 @@ func (h *Hub) removeClient(client *Client) {
 	}
 
 	h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+}
+
+// SetClientDisconnectListener registers a callback for connection teardown.
+// The callback runs once for each client that was present in the hub.
+func (h *Hub) SetClientDisconnectListener(listener func(connectionID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clientDisconnectListener = listener
 }
 
 func (h *Hub) SetSystemMetricsInterestTracker(tracker SystemMetricsInterestTracker) {
@@ -488,12 +533,22 @@ func (h *Hub) getSessionRecipientsLocked(sessionID string) []*Client {
 // BroadcastToSession sends a notification to clients subscribed to OR focused on
 // a specific session. See getSessionRecipientsLocked for why focus is included.
 func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
+	h.appendAndBroadcastOrderedSessionEvent(sessionID, msg)
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
 	clients := h.authorizedSessionRecipients(sessionID)
+	if _, ordered := orderedEventTypeByAction[msg.Action]; ordered {
+		legacyClients := clients[:0]
+		for _, client := range clients {
+			if !client.hasOrderedSessionSubscription(sessionID) {
+				legacyClients = append(legacyClients, client)
+			}
+		}
+		clients = legacyClients
+	}
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),

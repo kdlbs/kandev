@@ -186,6 +186,116 @@ describe("task.updated task-level activity aggregate (live propagation + safe fa
   });
 });
 
+// mergeTaskParkedFields' (parked_epoch, parked_revision) lexicographic discard
+// rule (spec D1): the backend always serializes these three fields on
+// task.updated (no omitempty — see task-06), so the only guard needed is
+// against an out-of-order WS delivery, not an omitted field.
+describe("task.updated task-level parked-on-background-work projection", () => {
+  function parkedFor(store: ReturnType<typeof makeStore>, id: string) {
+    const task = store.getState().kanban.tasks.find((t) => t.id === id);
+    return {
+      parkedOnBackgroundWork: task?.parkedOnBackgroundWork,
+      parkedRevision: task?.parkedRevision,
+      parkedEpoch: task?.parkedEpoch,
+    };
+  }
+
+  it("applies parked_on_background_work/parked_revision/parked_epoch", () => {
+    const store = storeWithTask({ id: "t1" });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1"),
+        parked_on_background_work: true,
+        parked_revision: 1,
+        parked_epoch: 100,
+      }),
+    );
+
+    expect(parkedFor(store, "t1")).toEqual({
+      parkedOnBackgroundWork: true,
+      parkedRevision: 1,
+      parkedEpoch: 100,
+    });
+  });
+
+  it("rejects a stale snapshot with a lower revision in the same epoch", () => {
+    const store = storeWithTask({
+      id: "t1",
+      parkedOnBackgroundWork: true,
+      parkedRevision: 2,
+      parkedEpoch: 100,
+    });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1"),
+        parked_on_background_work: false,
+        parked_revision: 1,
+        parked_epoch: 100,
+      }),
+    );
+
+    expect(parkedFor(store, "t1")).toEqual({
+      parkedOnBackgroundWork: true,
+      parkedRevision: 2,
+      parkedEpoch: 100,
+    });
+  });
+
+  it("rejects a snapshot from an older process epoch even with a higher revision", () => {
+    const store = storeWithTask({
+      id: "t1",
+      parkedOnBackgroundWork: true,
+      parkedRevision: 1,
+      parkedEpoch: 200,
+    });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1"),
+        parked_on_background_work: false,
+        parked_revision: 99,
+        parked_epoch: 100,
+      }),
+    );
+
+    expect(parkedFor(store, "t1")).toEqual({
+      parkedOnBackgroundWork: true,
+      parkedRevision: 1,
+      parkedEpoch: 200,
+    });
+  });
+
+  it("accepts a newer epoch even with a lower revision", () => {
+    const store = storeWithTask({
+      id: "t1",
+      parkedOnBackgroundWork: true,
+      parkedRevision: 50,
+      parkedEpoch: 100,
+    });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1"),
+        parked_on_background_work: false,
+        parked_revision: 1,
+        parked_epoch: 200,
+      }),
+    );
+
+    expect(parkedFor(store, "t1")).toEqual({
+      parkedOnBackgroundWork: false,
+      parkedRevision: 1,
+      parkedEpoch: 200,
+    });
+  });
+});
+
 describe("task.updated interrupted marker (live propagation + safe fallback)", () => {
   function interruptedFor(store: ReturnType<typeof makeStore>, id: string) {
     const kanban = store.getState().kanban.tasks.find((t) => t.id === id)?.interrupted;

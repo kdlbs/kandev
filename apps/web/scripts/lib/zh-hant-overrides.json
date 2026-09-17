@@ -1,12 +1,17 @@
 {
   "web": {
     "zh-tw": {
+      "agents": {
+        "dynamicProfileSettings": "動態設定檔設定"
+      },
       "settings": {
         "preventAutoStartAgentOnOpen": "開啟任務時不自動啟動代理程式",
         "preventAutoStartAgentOnOpenHelp": "重新啟動後，或從工作流程最後一步開啟任務時，不會自動啟動代理程式，改為顯示「啟動代理程式」按鈕。"
       },
-      "agents": {
-        "dynamicProfileSettings": "動態設定檔設定"
+      "common": {
+        "nativeFolderPickerUnavailable": "原生資料夾選擇器無法使用。請重新載入 Kandev 後再試。",
+        "sidebarWeeks_one": "{{count}}週",
+        "sidebarWeeks_other": "{{count}}週"
       },
       "github": {
         "resolvedFromOneNamedHostAccount": "需要時從一個指定的主機帳戶解析。受管理任務會取得限定範圍的中介身分；除非在下方選取，否則不會繼承主機 Git。",
@@ -14,6 +19,7 @@
         "withManagedWorkspaceCredentialsKandevConfigures": "使用受管理的工作區認證資訊時，Kandev 會在新啟動的任務處理程序中，將 agentctl 設為 Git 的認證輔助程式。當 Git 要求取得已附加 GitHub HTTPS 儲存庫的認證資訊時，輔助程式會兌換僅適用於該任務與儲存庫的 broker 租約。認證資訊會在需要時傳回 Git，且不會寫入儲存庫或 Git 設定。gh 命令會使用 Kandev 支援 broker 的轉接程式。繼承執行器設定則會略過這兩者，改用所選執行器可見的認證資訊。變更會套用至新啟動的任務及下次繼續執行，不會影響已在執行的處理程序。"
       },
       "task": {
+        "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。",
         "proxy": "代理伺服器",
         "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。"
       },
@@ -29,12 +35,17 @@
       }
     },
     "zh-hk": {
+      "agents": {
+        "dynamicProfileSettings": "動態設定檔設定"
+      },
       "settings": {
         "preventAutoStartAgentOnOpen": "開啟任務時不自動啓動代理程式",
         "preventAutoStartAgentOnOpenHelp": "重新啓動後，或從工作流程最後一步開啟任務時，不會自動啓動代理程式，改為顯示「啓動代理程式」按鈕。"
       },
-      "agents": {
-        "dynamicProfileSettings": "動態設定檔設定"
+      "common": {
+        "nativeFolderPickerUnavailable": "原生資料夾選擇器無法使用。請重新載入 Kandev 後再試。",
+        "sidebarWeeks_one": "{{count}}週",
+        "sidebarWeeks_other": "{{count}}週"
       },
       "github": {
         "resolvedFromOneNamedHostAccount": "需要時從一個指定的主機帳戶解析。受管理任務會取得限定範圍的中介身份；除非在下方選取，否則不會繼承主機 Git。",

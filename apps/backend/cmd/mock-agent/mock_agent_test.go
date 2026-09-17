@@ -89,6 +89,73 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestNewSessionKeepsMCPServersScopedToSession(t *testing.T) {
+	mcpServers = nil
+	t.Cleanup(func() { mcpServers = nil })
+
+	agent := &mockAgent{
+		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+	first, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+		McpServers: []acp.McpServer{{Sse: &acp.McpServerSseInline{
+			Name: "kandev",
+			Url:  "http://127.0.0.1:10001/sse",
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	second, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+		McpServers: []acp.McpServer{{Sse: &acp.McpServerSseInline{
+			Name: "kandev",
+			Url:  "http://127.0.0.1:10002/sse",
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+
+	firstServer := agent.sessionMCPServers[first.SessionId]["kandev"]
+	if firstServer.URL != "http://127.0.0.1:10001/sse" {
+		t.Fatalf("first session MCP URL = %q, want first endpoint", firstServer.URL)
+	}
+	secondServer := agent.sessionMCPServers[second.SessionId]["kandev"]
+	if secondServer.URL != "http://127.0.0.1:10002/sse" {
+		t.Fatalf("second session MCP URL = %q, want second endpoint", secondServer.URL)
+	}
+}
+
+func TestParseResumeDelayFromArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{name: "separate value", args: []string{"mock-agent", "--delay-resume", "2s"}, want: 2 * time.Second},
+		{name: "equals value", args: []string{"mock-agent", "--delay-resume=1500ms"}, want: 1500 * time.Millisecond},
+		{name: "missing value", args: []string{"mock-agent", "--delay-resume"}},
+		{name: "invalid value", args: []string{"mock-agent", "--delay-resume", "later"}},
+		{name: "negative value", args: []string{"mock-agent", "--delay-resume=-1s"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseResumeDelayFromArgs(tt.args); got != tt.want {
+				t.Fatalf("parseResumeDelayFromArgs() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseResumeDelayFlagUsesEnvironment(t *testing.T) {
+	t.Setenv("E2E_MOCK_AGENT_RESUME_DELAY", "3s")
+	if got := parseResumeDelayFlag(); got != 3*time.Second {
+		t.Fatalf("parseResumeDelayFlag() = %s, want 3s", got)
+	}
+}
+
 func TestParseSavedPromptDeliveryScenarioRequiresTrustedExpansionShape(t *testing.T) {
 	const directive = savedPromptDeliveryDirective
 
@@ -156,6 +223,20 @@ type capturingUpdater struct {
 
 func newCapturingUpdater() *capturingUpdater {
 	return &capturingUpdater{anySeen: make(chan struct{}), textSeen: make(chan struct{})}
+}
+
+func TestHandlePromptUtilityProfileUsesSelectedModel(t *testing.T) {
+	updater := newCapturingUpdater()
+	handlePrompt(&emitter{
+		ctx:  context.Background(),
+		conn: updater,
+		sid:  acp.SessionId("utility-profile-session"),
+	}, "/e2e:utility-profile", modelSmart)
+
+	texts := updater.textMessages()
+	if len(texts) != 1 || texts[0] != "utility profile model: "+modelSmart {
+		t.Fatalf("utility profile response = %v, want [%q]", texts, "utility profile model: "+modelSmart)
+	}
 }
 
 func (u *capturingUpdater) SessionUpdate(_ context.Context, n acp.SessionNotification) error {

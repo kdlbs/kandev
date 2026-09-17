@@ -16,6 +16,8 @@ import {
   defaultAutomationsState,
   defaultSystemState,
   defaultReviewState,
+  defaultNeedsYouInboxState,
+  defaultFailedInboxState,
 } from "./slices";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
@@ -31,7 +33,9 @@ export const defaultState = {
   sidebarArchivedTasks: defaultKanbanState.sidebarArchivedTasks,
   workflows: defaultKanbanState.workflows,
   workspaceContextGeneration: defaultKanbanState.workspaceContextGeneration,
+  workspaceContextRead: defaultKanbanState.workspaceContextRead,
   tasks: defaultKanbanState.tasks,
+  taskRemoval: defaultKanbanState.taskRemoval,
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
   repositorySets: defaultWorkspaceState.repositorySets,
@@ -65,6 +69,8 @@ export const defaultState = {
   taskPlans: defaultSessionState.taskPlans,
   walkthroughs: defaultSessionState.walkthroughs,
   taskReview: defaultReviewState.taskReview,
+  needsYouInbox: defaultNeedsYouInboxState.needsYouInbox,
+  failedInbox: defaultFailedInboxState.failedInbox,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -72,6 +78,7 @@ export const defaultState = {
   gitStatus: defaultSessionRuntimeState.gitStatus,
   environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
+  gitCheckoutGeneration: defaultSessionRuntimeState.gitCheckoutGeneration,
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,
   availableCommands: defaultSessionRuntimeState.availableCommands,
@@ -85,6 +92,7 @@ export const defaultState = {
   promptUsage: defaultSessionRuntimeState.promptUsage,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   embeddedVscodeSupport: defaultSessionRuntimeState.embeddedVscodeSupport,
+  workspaceRestoration: defaultSessionRuntimeState.workspaceRestoration,
   githubStatus: defaultGitHubState.githubStatus,
   githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
@@ -177,7 +185,7 @@ function mergeCodeHostFields(
 /** Merge quick-chat state from hydration over defaults, applying locally stored chat names to the SSR-provided sessions. */
 function mergeQuickChatState(initialState: HydrationState): DefaultState["quickChat"] {
   const { sessions, ...hydratedQuickChat } = initialState.quickChat ?? {};
-  const quickChat = {
+  const quickChat: DefaultState["quickChat"] = {
     ...defaultState.quickChat,
     ...hydratedQuickChat,
     unseenIdleByWorkspace: {},
@@ -185,8 +193,21 @@ function mergeQuickChatState(initialState: HydrationState): DefaultState["quickC
     sessionOwnership: {},
     syncRevisionByWorkspace: {},
     tombstonedSessions: {},
+    rememberedSelectionByWorkspace: {},
+    rememberedSelectionOrder: [],
+    selectionStorageIdentity: null,
+    selectionReadyByWorkspace: {},
+    selectionRevisionByWorkspace: {},
+    pendingOpen: null,
   };
-  return sessions ? mergeHydratedQuickChatSessions(quickChat, sessions) : quickChat;
+  const merged = sessions ? mergeHydratedQuickChatSessions(quickChat, sessions) : quickChat;
+  for (const session of sessions ?? []) {
+    merged.selectionReadyByWorkspace[session.workspaceId] = true;
+  }
+  if (sessions?.length === 0 && initialState.workspaces?.activeId) {
+    merged.selectionReadyByWorkspace[initialState.workspaces.activeId] = true;
+  }
+  return merged;
 }
 
 /** Merge sidebar view state, preferring the server-provided views, active view, and draft from user settings when present. */
@@ -291,6 +312,10 @@ function mergePromptHistoryState(initialState: HydrationState) {
       ...defaultState.messagePrompts.generationBySession,
       ...initialState.messagePrompts?.generationBySession,
     },
+    refreshGenerationBySession: {
+      ...defaultState.messagePrompts.refreshGenerationBySession,
+      ...initialState.messagePrompts?.refreshGenerationBySession,
+    },
   };
 }
 
@@ -389,12 +414,34 @@ function mergeTaskSessionState(initialState: HydrationState) {
 // eslint-disable-next-line max-lines-per-function -- merges every hydrated state slice in one place.
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
+  const hydration = { ...initialState };
+  delete hydration.taskRemoval;
   return {
     ...defaultState,
-    ...initialState,
+    ...hydration,
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     kanbanMulti: { ...defaultState.kanbanMulti, ...initialState.kanbanMulti },
     workflows: { ...defaultState.workflows, ...initialState.workflows },
+    workspaceContextRead: {
+      ...defaultState.workspaceContextRead,
+      ...initialState.workspaceContextRead,
+      pending: {
+        ...defaultState.workspaceContextRead.pending,
+        ...initialState.workspaceContextRead?.pending,
+      },
+      errors: {
+        ...defaultState.workspaceContextRead.errors,
+        ...initialState.workspaceContextRead?.errors,
+      },
+      retryAfterMs: {
+        ...defaultState.workspaceContextRead.retryAfterMs,
+        ...initialState.workspaceContextRead?.retryAfterMs,
+      },
+      requestIds: {
+        ...defaultState.workspaceContextRead.requestIds,
+        ...initialState.workspaceContextRead?.requestIds,
+      },
+    },
     workspaceContextGeneration: mergeWorkspaceContextGeneration(initialState),
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
@@ -441,6 +488,10 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     processes: { ...defaultState.processes, ...initialState.processes },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     sessionCommits: { ...defaultState.sessionCommits, ...initialState.sessionCommits },
+    gitCheckoutGeneration: {
+      ...defaultState.gitCheckoutGeneration,
+      ...initialState.gitCheckoutGeneration,
+    },
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     agents: { ...defaultState.agents, ...initialState.agents },
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },
@@ -476,6 +527,15 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       ...initialState.linearIssueWatches,
     },
     office: { ...defaultState.office, ...initialState.office },
+    needsYouInbox: { ...defaultState.needsYouInbox, ...initialState.needsYouInbox },
+    failedInbox: {
+      ...defaultState.failedInbox,
+      ...initialState.failedInbox,
+      readRevisionByWorkspaceId: {
+        ...defaultState.failedInbox.readRevisionByWorkspaceId,
+        ...initialState.failedInbox?.readRevisionByWorkspaceId,
+      },
+    },
     features: { ...defaultState.features, ...initialState.features },
     auth: { ...defaultState.auth, ...initialState.auth },
     ...mergeSessionHostnamesState(initialState),

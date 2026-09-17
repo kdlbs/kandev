@@ -7,8 +7,23 @@ import {
   handleEntityReferenceMenuKeyDown,
   isEntityReferenceQueryAllowed,
 } from "./tiptap-entity-reference-suggestion";
-import { createMentionSuggestion } from "./tiptap-suggestion";
+import { createMentionSuggestion, MentionSuggestionPluginKey } from "./tiptap-suggestion";
 import * as entityReferenceSuggestions from "./tiptap-entity-reference-suggestion";
+
+function createSuggestionPositioningProps() {
+  return {
+    placement: "bottom-start" as const,
+    offset: { mainAxis: 4, crossAxis: 0 },
+    flip: true,
+    floatingUi: {
+      placement: "bottom-start" as const,
+      strategy: "absolute" as const,
+      middleware: [],
+    },
+    mount: vi.fn(() => vi.fn()),
+    loading: false,
+  };
+}
 
 describe("entity reference suggestion", () => {
   it("provides an independent # suggestion config", () => {
@@ -236,6 +251,7 @@ describe("entity reference suggestion lifecycle", () => {
       command: vi.fn(),
       decorationNode: null,
       clientRect: () => new DOMRect(10, 20, 1, 10),
+      ...createSuggestionPositioningProps(),
     };
 
     expect(lifecycle).toBeDefined();
@@ -290,6 +306,29 @@ describe("entity reference suggestion lifecycle", () => {
 });
 
 describe("createMentionSuggestion", () => {
+  it("exits TipTap suggestion state when Escape closes the menu", () => {
+    const suggestion = createMentionSuggestion(
+      { getItems: vi.fn().mockResolvedValue([]), onSelect: vi.fn() },
+      vi.fn(),
+      vi.fn(),
+    );
+    const lifecycle = suggestion.render?.();
+    const transaction = { setMeta: vi.fn(() => ({ id: "exit" })) };
+    const dispatch = vi.fn();
+
+    const handled = lifecycle?.onKeyDown?.({
+      view: { state: { tr: transaction }, dispatch } as never,
+      event: new KeyboardEvent("keydown", { key: "Escape" }),
+      range: { from: 1, to: 2 },
+    });
+
+    expect(handled).toBe(true);
+    expect(transaction.setMeta).toHaveBeenCalledWith(MentionSuggestionPluginKey, {
+      exit: true,
+    });
+    expect(dispatch).toHaveBeenCalledWith({ id: "exit" });
+  });
+
   it("keeps Kandev task discovery in the @ menu", async () => {
     const file: MentionItem = {
       id: "src/app.ts",
@@ -356,6 +395,7 @@ describe("createMentionSuggestion", () => {
       command,
       decorationNode: null,
       clientRect: null,
+      ...createSuggestionPositioningProps(),
     });
 
     const menu = setMenuState.mock.calls[0]?.[0];

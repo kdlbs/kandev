@@ -160,10 +160,14 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 - **GIVEN** a broker-enabled managed task whose login profile replaces its inherited `PATH`,
   **WHEN** Git requests GitHub HTTPS credentials, **THEN** the configured helper invokes the
   instance-owned `agentctl` directly and does not search or fall through to an ambient helper.
-- **GIVEN** a broker-enabled Local or Worktree task whose checkout or setup script invokes Git
-  before the task instance is created, **WHEN** Git requests GitHub HTTPS credentials, **THEN** the
+- **GIVEN** a broker-enabled Local or Worktree task whose Kandev-owned checkout invokes Git before
+  the task instance is created, **WHEN** Git requests GitHub HTTPS credentials, **THEN** the
   configured helper invokes the standalone launcher's absolute `agentctl` executable without
   consulting `PATH` or an ambient helper.
+- **GIVEN** a Local or Worktree per-repository setup script, **WHEN** Kandev builds its environment,
+  **THEN** the script receives resolved profile and repository values, user-owned indexed Git
+  configuration, and Kandev's managed build cache, but receives no managed broker capability,
+  Kandev-generated Git credential helper, or managed `gh` shim routing.
 - **GIVEN** a broker-enabled Docker or Sprites task whose prepare script clones before `agentctl`
   starts, **WHEN** Git requests GitHub HTTPS credentials during that clone, **THEN** the configured
   helper invokes the already-installed absolute executor binary and redeems the task lease without
@@ -257,3 +261,21 @@ New-workspace defaults are defined by
 [ADR-2026-08-02-new-workspace-github-access-defaults](../../../decisions/2026-08-02-new-workspace-github-access-defaults.md).
 The system-service ownership boundary is defined by
 [ADR-2026-07-31-system-service-user-continuity](../../../decisions/2026-07-31-system-service-user-continuity.md).
+
+
+## Upgrade recovery guidance
+
+`AC-INTEGRATIONS-GITHUB-AUTHENTICATION-001.13` uses the existing public integration guide.
+The guide distinguishes the historical `managed` schema default from the executor default for new workspaces.
+An existing policy does not record whether the user selected it or a migration supplied it.
+Recovery therefore uses an explicit task-access selection through the existing workspace connection dialog.
+The procedure does not infer consent from an absent App registration or current credential health.
+PAT and named CLI connections also support managed task access.
+
+Local and Worktree launches reconcile Kandev-managed origins through the existing repository preparation path.
+User-managed origins remain under user control. Remote executors require credentials in their own execution environment.
+The guide must not promise that host `gh auth status` proves task Git access.
+The current managed admission gate validates repository identity, not inherited transport authentication.
+
+The [upgrade recovery fix package](../../../plans/github-credential-upgrade-recovery/plan.md)
+owns delivery of this guidance. It changes no runtime or persistence boundary.

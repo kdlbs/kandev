@@ -21,6 +21,8 @@ import {
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
 import { useOfficeTopbar } from "../../components/office-topbar-context";
+import { isRoutineFiring } from "../../lib/routine-status";
+import { routineNotFiringMessage } from "../../lib/routine-not-firing";
 import { useTranslation } from "react-i18next";
 
 // Lift the form state out of the component so the file stays under the
@@ -56,7 +58,7 @@ function buildDraft(routine: Routine, triggers: RoutineTrigger[]): DraftState {
     status: (routine.status as DraftState["status"]) ?? "active",
     assigneeAgentProfileId: routine.assigneeAgentProfileId ?? "",
     concurrencyPolicy: routine.concurrencyPolicy ?? "coalesce_if_active",
-    catchUpPolicy: routine.catchUpPolicy ?? "enqueue_missed_with_cap",
+    catchUpPolicy: routine.catchUpPolicy ?? "summarize_missed",
     catchUpMax: routine.catchUpMax ?? 25,
     triggerKind,
     cronExpression: cron?.cronExpression ?? "",
@@ -113,7 +115,7 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
       await runRoutine(routine.id);
       toast.success(t("office:routineFired"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("office:failedToRunRoutine"));
+      toast.error(routineNotFiringMessage(err, t, "office:failedToRunRoutine"));
     }
   }, [routine.id]);
 
@@ -139,7 +141,10 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
     <div className="p-6 space-y-6 max-w-3xl">
       <DetailGeneralCard draft={draft} update={update} agents={agents} />
       <DetailTriggerCard draft={draft} update={update} />
-      <DetailReadOnlyCard lastFiredAt={lastFired} nextRunAt={cronTrigger?.nextRunAt ?? null} />
+      <DetailReadOnlyCard
+        lastFiredAt={lastFired}
+        nextRunAt={isRoutineFiring(draft.status) ? (cronTrigger?.nextRunAt ?? null) : null}
+      />
     </div>
   );
 }
@@ -163,7 +168,7 @@ function DetailGeneralCard({
         <BasicGeneralFields draft={draft} update={update} />
         <StatusAndAssigneeFields draft={draft} update={update} agents={agents} />
         <PolicyFields draft={draft} update={update} />
-        {draft.catchUpPolicy === "enqueue_missed_with_cap" && (
+        {draft.catchUpPolicy === "summarize_missed" && (
           <Field label={t("office:catchUpMax")}>
             <Input
               type="number"
@@ -293,8 +298,8 @@ function PolicyFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="enqueue_missed_with_cap" className="cursor-pointer">
-              {t("office:enqueueMissedWithCap")}
+            <SelectItem value="summarize_missed" className="cursor-pointer">
+              {t("office:summarizeMissed")}
             </SelectItem>
             <SelectItem value="skip_missed" className="cursor-pointer">
               {t("office:skipMissed")}

@@ -147,7 +147,11 @@ test.describe("Clarification flow", () => {
     });
     await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
       await heldResponse;
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
     });
 
     try {
@@ -248,6 +252,13 @@ test.describe("Clarification flow", () => {
       1,
       "custom clarification should be durably pending before navigation",
     );
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "custom clarification should park its session before navigation",
+      timeout: 60_000,
+    });
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -1076,7 +1087,11 @@ test.describe("Multi-question clarification carousel", () => {
     });
     await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
       await heldResponse;
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
     });
 
     try {

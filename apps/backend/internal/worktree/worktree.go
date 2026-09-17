@@ -78,8 +78,28 @@ type Worktree struct {
 	// closed if the recorded path or branch advanced before teardown.
 	CleanupHeadOID string `json:"-"`
 
+	// CleanupHeadOIDUnavailable indicates that the current durable cleanup
+	// snapshot intentionally omitted this worktree's commit identity. It is
+	// internal provenance, so it is rebuilt when a snapshot is loaded.
+	CleanupHeadOIDUnavailable bool `json:"-"`
+
+	// BranchCompactedAt records that exact-SHA local-ref deletion completed.
+	// A nil value keeps an interrupted archived candidate eligible for retry.
+	BranchCompactedAt *time.Time `json:"-"`
 	// BaseBranch is the branch this worktree was created from.
 	BaseBranch string `json:"base_branch"`
+
+	// BranchOwner identifies whether Kandev created the local branch ref. Only
+	// refs with BranchOwnerManaged are candidates for terminal compaction.
+	BranchOwner string `json:"-"`
+
+	// IntegrationRef is the exact intended base/integration branch captured at
+	// materialization time. Cleanup never guesses this value from branch names.
+	IntegrationRef string `json:"-"`
+
+	// RecoveryHeadSHA is the exact commit used to recreate a safely compacted
+	// managed branch after archive/unarchive.
+	RecoveryHeadSHA string `json:"-"`
 
 	// Status indicates the current state of the worktree.
 	// Valid values: active, merged, deleted
@@ -180,6 +200,19 @@ type CreateRequest struct {
 	// BaseBranch is the branch to base the worktree on (required).
 	// Typically "main" or "master".
 	BaseBranch string
+
+	// RecoveryClaim carries the durable environment authority through the
+	// recovery publication CAS. It is internal state and is never serialized
+	// into a user-facing request.
+	RecoveryClaim *models.TaskEnvironmentRecoveryClaim
+
+	// RecoveryOperationID lets all repository slots in one admission share the
+	// same restart-safe recovery record identity.
+	RecoveryOperationID string
+
+	// IntegrationRef is the verified branch against which terminal cleanup may
+	// prove a managed branch fully integrated. Empty fails closed.
+	IntegrationRef string
 
 	// FallbackBaseBranch is an optional branch to retry with when BaseBranch
 	// does not exist in the repository. Typically populated with the

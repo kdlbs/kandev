@@ -62,7 +62,7 @@ func TestQueueRunCtx_AgentActorInheritsCausationFromItsLiveClaimedRun(t *testing
 	ss.SetRunsService(runsSvc)
 
 	// Seed the actor's own live, claimed run: a root cause at depth 0.
-	if err := ss.QueueRun(ctx, actorAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
+	if _, err := ss.QueueRun(ctx, actorAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
 		t.Fatalf("queue actor's own run: %v", err)
 	}
 	actorRun, err := repo.RunsRepository().ClaimRun(ctx, actorAgentID)
@@ -71,7 +71,7 @@ func TestQueueRunCtx_AgentActorInheritsCausationFromItsLiveClaimedRun(t *testing
 	}
 
 	// A comment from the actor agent wakes testAgentID.
-	if err := ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
+	if _, err := ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
 		Reason:    scheduler.RunReasonTaskComment,
 		TaskID:    "task-1",
 		ActorID:   actorAgentID,
@@ -87,8 +87,8 @@ func TestQueueRunCtx_AgentActorInheritsCausationFromItsLiveClaimedRun(t *testing
 	if woken.CausationDepth != actorRun.CausationDepth+1 {
 		t.Errorf("causation_depth = %d, want %d (actor's depth + 1)", woken.CausationDepth, actorRun.CausationDepth+1)
 	}
-	if woken.CausationID != actorRun.CausationID {
-		t.Errorf("causation_id = %q, want the actor's chain id %q", woken.CausationID, actorRun.CausationID)
+	if woken.ChainCausationID != actorRun.ChainCausationID {
+		t.Errorf("causation_id = %q, want the actor's chain id %q", woken.ChainCausationID, actorRun.ChainCausationID)
 	}
 }
 
@@ -119,7 +119,7 @@ func TestQueueRunCtx_AgentActorWithNoLiveClaimedRunResolvesAsRoot(t *testing.T) 
 	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
 	ss.SetRunsService(runsSvc)
 
-	if err := ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
+	if _, err := ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
 		Reason:    scheduler.RunReasonTaskComment,
 		TaskID:    "task-1",
 		ActorID:   actorAgentID,
@@ -135,7 +135,7 @@ func TestQueueRunCtx_AgentActorWithNoLiveClaimedRunResolvesAsRoot(t *testing.T) 
 	if woken.CausationDepth != 0 {
 		t.Errorf("causation_depth = %d, want 0", woken.CausationDepth)
 	}
-	if woken.CausationID != woken.ID {
-		t.Errorf("causation_id = %q, want self-rooted %q", woken.CausationID, woken.ID)
+	if woken.ChainCausationID != woken.ID {
+		t.Errorf("causation_id = %q, want self-rooted %q", woken.ChainCausationID, woken.ID)
 	}
 }

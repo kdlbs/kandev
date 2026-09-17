@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/github"
@@ -16,6 +17,7 @@ import (
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -302,15 +304,31 @@ func (a *routineWakeupAdapter) CreateWakeupRequest(
 		Reason:         req.Reason,
 		Payload:        req.Payload,
 		RequestedAt:    req.RequestedAt,
+		CausationID:    req.CausationID,
 	}
 	if req.IdempotencyKey != "" {
 		row.IdempotencyKey = sql.NullString{String: req.IdempotencyKey, Valid: true}
 	}
-	return a.repo.CreateWakeupRequest(ctx, row)
+	if err := a.repo.CreateWakeupRequest(ctx, row); err != nil {
+		if errors.Is(err, officesqlite.ErrWakeupIdempotencyConflict) {
+			runsservice.ReportDurableDedup(runsservice.QueueSourceWakeup, req.Reason, req.IdempotencyKey, req.AgentProfileID)
+			// Wraps both sentinels so a caller can check either: routines
+			// callers key off ErrWakeupAlreadyRequested to treat this as
+			// success by another route, while errors.Is against the
+			// sqlite-layer ErrWakeupIdempotencyConflict still matches.
+			return fmt.Errorf("%w: %w", officeroutines.ErrWakeupAlreadyRequested, err)
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *routineWakeupAdapter) Dispatch(ctx context.Context, requestID string) error {
 	return a.dispatcher.Dispatch(ctx, requestID)
+}
+
+func (a *routineWakeupAdapter) FailWakeupRequest(ctx context.Context, requestID, reason string) error {
+	return a.repo.MarkWakeupRequestFailed(ctx, requestID, reason)
 }
 
 // configSyncerAdapter bridges config.ConfigService to the onboarding.ConfigSyncer

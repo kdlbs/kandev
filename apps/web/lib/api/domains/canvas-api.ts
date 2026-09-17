@@ -6,6 +6,15 @@ export type CanvasReleaseStatus = "valid" | "pending_permission" | "invalid" | "
 
 export type CanvasRelease = {
   id: string;
+  package_id?: string;
+  version?: string;
+  display_name?: string;
+  description?: string;
+  author?: string;
+  license?: string;
+  source_mode?: "static" | "project" | string;
+  min_kandev_version?: string;
+  repo_url?: string;
   package_digest?: string;
   validation_status: CanvasReleaseStatus | string;
   validation_error?: string;
@@ -15,7 +24,9 @@ export type CanvasRelease = {
   source_actor_kind?: string;
   source_user_id?: string;
   source_task_id?: string;
+  source_task_title?: string;
   source_session_id?: string;
+  source_session_name?: string;
   protocol_version?: number;
   created_at?: string;
 };
@@ -83,7 +94,9 @@ export type CanvasPromotionPreview = {
   source_actor_kind?: string;
   source_user_id?: string;
   source_task_id?: string;
+  source_task_title?: string;
   source_session_id?: string;
+  source_session_name?: string;
   active_release?: CanvasRelease;
   permissions?: CanvasPermissionReview;
   active_release_id?: string;

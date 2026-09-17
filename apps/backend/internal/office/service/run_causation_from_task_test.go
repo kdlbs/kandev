@@ -206,7 +206,7 @@ func TestQueueTaskAssignedRun_InheritsCarrierFromTaskMetadata(t *testing.T) {
 	}
 
 	// The creating run: what the task-boundary carrier will point back to.
-	if err := svc.QueueRunWithActor(ctx, creator.ID, "spawn_agent_run", `{}`, "",
+	if _, err := svc.QueueRunWithActor(ctx, creator.ID, "spawn_agent_run", `{}`, "",
 		models.ActorKindAgent, creator.ID, ""); err != nil {
 		t.Fatalf("queue creating run: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestQueueTaskAssignedRun_InheritsCarrierFromTaskMetadata(t *testing.T) {
 
 	seedOfficeTaskWithMetadata(t, repo, "task-carrier-1", carrierMetadataLiteral(creatingRun))
 
-	if err := svc.queueTaskAssignedRun(ctx, "task-carrier-1", assignee.ID, false); err != nil {
+	if err := svc.queueTaskAssignedRun(ctx, "task-carrier-1", assignee.ID, nil, false); err != nil {
 		t.Fatalf("queueTaskAssignedRun: %v", err)
 	}
 
@@ -235,8 +235,8 @@ func TestQueueTaskAssignedRun_InheritsCarrierFromTaskMetadata(t *testing.T) {
 	if assignedRun == nil {
 		t.Fatal("task-assigned run not found")
 	}
-	if assignedRun.CausationID != creatingRun.CausationID {
-		t.Errorf("causation_id = %q, want carried %q", assignedRun.CausationID, creatingRun.CausationID)
+	if assignedRun.ChainCausationID != creatingRun.ChainCausationID {
+		t.Errorf("causation_id = %q, want carried %q", assignedRun.ChainCausationID, creatingRun.ChainCausationID)
 	}
 	if assignedRun.ParentRunID != creatingRun.ID {
 		t.Errorf("parent_run_id = %q, want the carrier's creating run %q", assignedRun.ParentRunID, creatingRun.ID)
@@ -269,7 +269,7 @@ func TestQueueTaskAssignedRun_NoCarrierRootsAsSystemActor(t *testing.T) {
 		taskmodels.MetaKeyAutoStartOnCreate: true,
 	})
 
-	if err := svc.queueTaskAssignedRun(ctx, "task-plain-1", assignee.ID, false); err != nil {
+	if err := svc.queueTaskAssignedRun(ctx, "task-plain-1", assignee.ID, nil, false); err != nil {
 		t.Fatalf("queueTaskAssignedRun: %v", err)
 	}
 
@@ -281,9 +281,9 @@ func TestQueueTaskAssignedRun_NoCarrierRootsAsSystemActor(t *testing.T) {
 	if run.ActorKind != models.ActorKindSystem {
 		t.Errorf("actor_kind = %q, want %q (no carrier to inherit)", run.ActorKind, models.ActorKindSystem)
 	}
-	if run.CausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
+	if run.ChainCausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
 		t.Errorf("lineage = {causation=%q parent=%q depth=%d}, want a fresh root",
-			run.CausationID, run.ParentRunID, run.CausationDepth)
+			run.ChainCausationID, run.ParentRunID, run.CausationDepth)
 	}
 	if run.HumanRooted {
 		t.Error("human_rooted = true, want false with no carrier")
@@ -316,7 +316,7 @@ func TestQueueTaskAssignedRun_InheritsRoutineFireCarrier(t *testing.T) {
 		taskmodels.MetaKeyOfficeCarrierActorID:        "",
 	})
 
-	if err := svc.queueTaskAssignedRun(ctx, "task-routine-fire-1", assignee.ID, false); err != nil {
+	if err := svc.queueTaskAssignedRun(ctx, "task-routine-fire-1", assignee.ID, nil, false); err != nil {
 		t.Fatalf("queueTaskAssignedRun: %v", err)
 	}
 
@@ -325,9 +325,9 @@ func TestQueueTaskAssignedRun_InheritsRoutineFireCarrier(t *testing.T) {
 		t.Fatalf("list runs: %v (got %d)", err, len(runs))
 	}
 	run := runs[0]
-	if run.CausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
+	if run.ChainCausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
 		t.Errorf("lineage = {causation=%q parent=%q depth=%d}, want a fresh root (AC.24)",
-			run.CausationID, run.ParentRunID, run.CausationDepth)
+			run.ChainCausationID, run.ParentRunID, run.CausationDepth)
 	}
 	if run.RoutineID != "routine-fire-1" {
 		t.Errorf("routine_id = %q, want carried %q", run.RoutineID, "routine-fire-1")

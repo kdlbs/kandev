@@ -105,6 +105,13 @@ Multiple sessions in the *same* task share the same worktree on disk (same files
   `agentctl` starts. A non-zero exit, timeout, missing primary checkout, or conflicting `origin`
   fails the launch; Kandev does not
   start `agentctl` or the agent in an empty or ambiguous workspace.
+- Managed preparation text is shell-portable. The profile shell may be `sh`, `bash`, or `zsh`, so
+  every parameter expansion that a `:` follows is braced (`${name}:`); zsh otherwise parses `$name:r`
+  as a modifier and silently corrupts fetch refspecs.
+- A profile stores the generated prepare script, and a stored script wins over the managed default,
+  so preparation repairs the one fragment Kandev itself generated before that rule existed: an
+  unbraced `refs/heads/$name:refs/remotes/origin/$name` is braced when the stored script is
+  resolved. Any other expansion in a stored script is left exactly as its author wrote it.
 - On subsequent sessions for the same task on the same host, the default preparation path reuses the
   matching checkout without deleting local commits or untracked work. The profile prepare script may
   run again because it is a per-session pre-launch hook and must therefore be idempotent when the
@@ -158,7 +165,8 @@ This design follows [ADR-2026-09-05-agent-owned-credential-file-conflicts](../..
 
 ### Recovery after backend restart
 
-- Persist in `ExecutorRunning.Metadata` (allow-listed in `persistentMetadataKeys`): `ssh_host`, `ssh_port`, `ssh_user`, `ssh_host_fingerprint`, `ssh_remote_task_dir`, `ssh_remote_session_dir`, `ssh_remote_agentctl_port`, `ssh_remote_agentctl_pid`, `ssh_local_forward_port`, `ssh_workdir_root`, `ssh_proxy_jump`, `ssh_identity_source`, `ssh_identity_file`.
+- Persist in `ExecutorRunning.Metadata` (allow-listed in `persistentMetadataKeys`): `ssh_host`, `ssh_port`, `ssh_user`, `ssh_host_fingerprint`, `ssh_remote_task_dir`, `ssh_remote_session_dir`, `ssh_remote_agentctl_port`, `ssh_remote_agentctl_pid`, `ssh_remote_agentctl_instance_id`, `ssh_local_forward_port`, `ssh_workdir_root`, `ssh_proxy_jump`, `ssh_identity_source`, `ssh_identity_file`.
+- The remote controller retains its launch-time instance ID across backend restarts, independently of each recovered local execution's ID. Same-session recovery preserves `ssh_remote_agentctl_instance_id` and uses it for authenticated HTTP and WebSocket requests. For legacy rows without that field, the previous execution ID (or current ID when no previous execution exists) provides the initial fallback; recovery records it explicitly for subsequent restarts. This identity is session-scoped: sibling sessions never inherit it, and confirmed-dead controller or broker-refresh replacement clears it before launching a fresh controller with its own ID.
 - `ResumeRemoteInstance` re-opens an SSH connection per surviving session using its full `(host, port, user, identity_source, identity_file, proxy_jump, host_fingerprint)` tuple — no sharing across sessions, so two profiles on the same host with different keys don't get merged. It re-establishes each session's local port forward to its recorded remote port, verifies the remote agentctl is alive (`kill -0 <pid>` for liveness, then HTTP probe on the forwarded port), and re-binds the stream manager. If the remote process is confirmed gone, the resume preflight yields to normal creation of a fresh instance.
 - The liveness probe distinguishes a remote `kill -0` exit, which confirms that the recorded process is unavailable, from an SSH session or transport failure, which leaves liveness unknown. A confirmed-absent process clears only the stale session-runtime metadata (remote session directory, controller PID and port, and local-forward details), preserves the SSH connection configuration and remote task directory, and continues through normal instance creation. The new controller receives the existing ACP resume token so it loads the provider conversation. An unknown liveness result remains a hard resume error and does not create a competing controller.
 

@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -10,6 +12,48 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
+
+const allowUserNamespacesProfileConfigKey = "allow_user_namespaces"
+
+// operatorOnlyConfigKeys are executor profile Config keys that the
+// agent-exposed MCP tools (create_executor_profile, update_executor_profile)
+// must reject. These keys can only be set through the operator HTTP/WS API.
+// This is a narrow security guard: it prevents self-enablement of container
+// security relaxations from within a task, without widening the surface onto
+// the operator path (which already exposes prepare_script — strictly more
+// powerful).
+var operatorOnlyConfigKeys = []string{
+	allowUserNamespacesProfileConfigKey,
+}
+
+// rejectOperatorConfigKeys returns an error if the config map contains any
+// key that is reserved for the operator path. The error names the offending
+// key and returns ws.ErrorCodeValidation.
+func rejectOperatorConfigKeys(config map[string]string) error {
+	var offending []string
+	for _, key := range operatorOnlyConfigKeys {
+		if _, ok := config[key]; ok {
+			offending = append(offending, key)
+		}
+	}
+	if len(offending) > 0 {
+		return fmt.Errorf("config key(s) reserved for operator: %s", strings.Join(offending, ", "))
+	}
+	return nil
+}
+
+func preserveOperatorConfigKeys(config, current map[string]string) map[string]string {
+	preserved := make(map[string]string, len(config)+len(operatorOnlyConfigKeys))
+	for key, value := range config {
+		preserved[key] = value
+	}
+	for _, key := range operatorOnlyConfigKeys {
+		if value, ok := current[key]; ok {
+			preserved[key] = value
+		}
+	}
+	return preserved
+}
 
 func (h *Handlers) handleListExecutors(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	executors, err := h.taskSvc.ListExecutors(ctx)
@@ -73,6 +117,10 @@ func (h *Handlers) handleCreateExecutorProfile(ctx context.Context, msg *ws.Mess
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "name is required", nil)
 	}
 
+	if err := rejectOperatorConfigKeys(req.Config); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	profile, err := h.taskSvc.CreateExecutorProfile(ctx, &service.CreateExecutorProfileRequest{
 		ExecutorID:    req.ExecutorID,
 		Name:          req.Name,
@@ -106,13 +154,29 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "profile_id is required", nil)
 	}
 
+	if err := rejectOperatorConfigKeys(req.Config); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	// MCP updates rewrite the full profile row, so every update needs the
+	// profile version observed before the request's fields are applied.
+	current, err := h.taskSvc.GetExecutorProfile(ctx, req.ProfileID)
+	if err != nil {
+		h.logger.Error("failed to load executor profile before MCP update", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor profile: "+err.Error(), nil)
+	}
+	if req.Config != nil {
+		req.Config = preserveOperatorConfigKeys(req.Config, current.Config)
+	}
+	expectedUpdatedAt := &current.UpdatedAt
+
 	profile, err := h.taskSvc.UpdateExecutorProfile(ctx, req.ProfileID, &service.UpdateExecutorProfileRequest{
-		Name:          req.Name,
-		McpPolicy:     req.McpPolicy,
-		Config:        req.Config,
-		PrepareScript: req.PrepareScript,
-		CleanupScript: req.CleanupScript,
-		EnvVars:       req.EnvVars,
+		Name:              req.Name,
+		McpPolicy:         req.McpPolicy,
+		Config:            req.Config,
+		PrepareScript:     req.PrepareScript,
+		CleanupScript:     req.CleanupScript,
+		EnvVars:           req.EnvVars,
+		ExpectedUpdatedAt: expectedUpdatedAt,
 	})
 	if err != nil {
 		h.logger.Error("failed to update executor profile", zap.Error(err))

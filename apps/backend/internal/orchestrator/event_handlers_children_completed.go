@@ -4,13 +4,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/office/dashboard"
+	"github.com/kandev/kandev/internal/office/waveidentity"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -74,10 +78,15 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 		s.taskRuntimeStateMu.Unlock()
 		return
 	}
+	if task.IsFromOffice {
+		s.taskRuntimeStateMu.Unlock()
+		s.markOfficeTaskCompletedForTerminalStep(ctx, taskID, terminalStepID)
+		return
+	}
 	oldState := task.State
 	task.State = v1.TaskStateCompleted
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.taskRuntimeStateMu.Unlock()
 		s.logger.Warn("terminal step completion: failed to mark task completed",
 			zap.String("task_id", taskID),
@@ -88,6 +97,118 @@ func (s *Service) markTaskCompletedForTerminalStep(ctx context.Context, taskID, 
 	s.publishTaskUpdated(ctx, task)
 	s.publishTaskStateChanged(ctx, task, oldState)
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateCompleted)
+}
+
+// markOfficeTaskCompletedForTerminalStep routes an Office task's terminal
+// step completion through Office's own status pipeline (UpdateTaskStatus)
+// instead of a raw state write, so the approval gate runs (tasks-01.md:76).
+// UpdateTaskStatus persists a redirect to in_review and then returns a
+// typed *dashboard.ApprovalsPendingError when the gate fires — the write
+// has already succeeded, so that return is not a failure and is not
+// logged as one, and no completion side-effects fire below: the redirect
+// is not a completion.
+//
+// A nil error means the gate did not redirect, so the seam persisted
+// "done" (state = COMPLETED). That path must still carry the same
+// side-effects the raw completion write does — publishing task.updated /
+// task.state_changed and driving the parent's on_children_completed
+// trigger — or dependency resolution, the parent workflow transition, and
+// every task.updated subscriber silently stop seeing Office completions.
+//
+// The caller's taskRuntimeStateMu check-then-act is not atomic across this
+// call (the seam runs Office's reactivity pipeline and publishes, so
+// holding that global lock across it risks lock inversion). Two
+// deliveries for the same task can therefore both pass the caller's check
+// before either has written. lockOfficeTerminalCompletion serializes by
+// task ID instead, and the task is re-read and re-checked once inside
+// that lock: whichever delivery gets there first does the write and fires
+// the side effects below; a second, now-redundant delivery finds the task
+// already terminal and returns without calling the seam a second time.
+//
+// The lock is released as soon as the write (or redirect) is durable and
+// before any of the side effects below run, for the same reason the caller
+// releases taskRuntimeStateMu early: processParentChildrenCompletedForTaskState
+// walks up into the parent's own on_children_completed handling, which can
+// itself reach this same lock family (for an Office parent) or
+// lockChildCompletionOperation. Holding this task's lock across that call
+// would invert lock order against a concurrent completion elsewhere in the
+// same ancestry and risk deadlock.
+func (s *Service) markOfficeTaskCompletedForTerminalStep(ctx context.Context, taskID, terminalStepID string) {
+	if s.officeTaskStatusUpdater == nil {
+		// No seam wired (partial wiring, or a test): skip the write rather
+		// than falling through to the raw path, which would bypass the gate.
+		return
+	}
+
+	unlock := s.lockOfficeTerminalCompletion(taskID)
+
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		unlock()
+		s.logger.Warn("terminal step completion: failed to reload office task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if models.IsTerminalTaskState(task.State) {
+		unlock()
+		return
+	}
+	if terminalStepID != "" && task.WorkflowStepID != terminalStepID {
+		unlock()
+		return
+	}
+	oldState := task.State
+
+	err = s.officeTaskStatusUpdater.UpdateTaskStatus(ctx, dashboard.TaskStatusUpdateRequest{
+		TaskID:                 task.ID,
+		NewStatus:              "done",
+		SuppressStatusActivity: true,
+	})
+	var pending *dashboard.ApprovalsPendingError
+	if err != nil {
+		unlock()
+		if !errors.As(err, &pending) {
+			s.logger.Warn("terminal step completion: office status update failed",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+		}
+		return
+	}
+	unlock()
+
+	task.State = v1.TaskStateCompleted
+	task.UpdatedAt = time.Now().UTC()
+	s.publishTaskUpdated(ctx, task)
+	s.publishTaskStateChanged(ctx, task, oldState)
+	s.processParentChildrenCompletedForTaskState(ctx, task.ID, v1.TaskStateCompleted)
+}
+
+// lockOfficeTerminalCompletion serializes markOfficeTaskCompletedForTerminalStep
+// calls for the same task ID, mirroring lockChildCompletionOperation.
+func (s *Service) lockOfficeTerminalCompletion(taskID string) func() {
+	s.officeTerminalCompletionLocksMu.Lock()
+	if s.officeTerminalCompletionLocks == nil {
+		s.officeTerminalCompletionLocks = make(map[string]*childCompletionOperationLock)
+	}
+	entry := s.officeTerminalCompletionLocks[taskID]
+	if entry == nil {
+		entry = &childCompletionOperationLock{}
+		s.officeTerminalCompletionLocks[taskID] = entry
+	}
+	entry.refs++
+	s.officeTerminalCompletionLocksMu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		s.officeTerminalCompletionLocksMu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(s.officeTerminalCompletionLocks, taskID)
+		}
+		s.officeTerminalCompletionLocksMu.Unlock()
+		entry.mu.Unlock()
+	}
 }
 
 func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID string) bool {
@@ -113,7 +234,7 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 		return false
 	}
 
-	result, ok := s.evaluateChildrenCompleted(ctx, parent, session, rows)
+	result, ok := s.evaluateChildrenCompleted(ctx, parent, session, rows, operationID)
 	if !ok {
 		return false
 	}
@@ -147,7 +268,6 @@ func (s *Service) readyChildCompletionRows(ctx context.Context, parentID string)
 			zap.Error(err))
 		return nil, false
 	}
-	s.annotateTerminalChildSteps(ctx, rows)
 	if len(rows) == 0 || !allChildrenTerminal(rows) {
 		return nil, false
 	}
@@ -223,15 +343,20 @@ func (s *Service) evaluateChildrenCompleted(
 	parent *models.Task,
 	session *models.TaskSession,
 	rows []models.ChildCompletionRow,
+	operationID string,
 ) (engine.HandleResult, bool) {
 	state := s.buildMachineState(ctx, parent, session)
 	result, err := s.workflowEngine.HandleTrigger(ctx, engine.HandleInput{
-		TaskID:         parent.ID,
-		SessionID:      session.ID,
-		Trigger:        engine.TriggerOnChildrenCompleted,
-		EvaluateOnly:   true,
-		PreloadedState: &state,
-		Payload:        childCompletionPayload(rows),
+		TaskID:       parent.ID,
+		SessionID:    session.ID,
+		Trigger:      engine.TriggerOnChildrenCompleted,
+		OperationID:  operationID,
+		EvaluateOnly: true,
+		// The outer handler owns the final idempotency mark because it must
+		// commit the transition lifecycle before accepting this operation.
+		DeferOperationMark: true,
+		PreloadedState:     &state,
+		Payload:            childCompletionPayload(parent.ID, rows),
 	})
 	if err != nil {
 		s.logger.Warn("on_children_completed: workflow engine error",
@@ -255,29 +380,11 @@ func (s *Service) markChildCompletionApplied(ctx context.Context, parentID, oper
 
 func allChildrenTerminal(rows []models.ChildCompletionRow) bool {
 	for _, row := range rows {
-		if !models.IsTerminalTaskState(row.State) && !row.TerminalWorkflowStep {
+		if !models.IsTerminalTaskState(row.State) {
 			return false
 		}
 	}
 	return true
-}
-
-func (s *Service) annotateTerminalChildSteps(ctx context.Context, rows []models.ChildCompletionRow) {
-	if s.workflowStepGetter == nil {
-		return
-	}
-	cache := make(map[string]bool)
-	for i := range rows {
-		if models.IsTerminalTaskState(rows[i].State) || rows[i].WorkflowStepID == "" {
-			continue
-		}
-		terminal, ok := cache[rows[i].WorkflowStepID]
-		if !ok {
-			terminal = s.workflowStepIsTerminal(ctx, rows[i].WorkflowStepID)
-			cache[rows[i].WorkflowStepID] = terminal
-		}
-		rows[i].TerminalWorkflowStep = terminal
-	}
 }
 
 func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID string) bool {
@@ -298,7 +405,14 @@ func (s *Service) workflowStepIsTerminal(ctx context.Context, workflowStepID str
 	return wfmodels.IsTerminalStep(step, nextStep)
 }
 
-func childCompletionPayload(rows []models.ChildCompletionRow) engine.OnChildrenCompletedPayload {
+// childCompletionPayload builds the engine payload for an
+// on_children_completed dispatch. rows arrive ordered by created_at (see
+// ListChildCompletionRows) with terminality already confirmed by the
+// caller's single read (readyChildCompletionRows) — that same read is
+// what the wave identity is derived from, so this function only re-sorts
+// a copy of rows ascending by id before deriving it; it performs no read
+// of its own.
+func childCompletionPayload(parentID string, rows []models.ChildCompletionRow) engine.OnChildrenCompletedPayload {
 	summaries := make([]engine.ChildSummary, 0, len(rows))
 	for _, row := range rows {
 		summaries = append(summaries, engine.ChildSummary{
@@ -307,13 +421,27 @@ func childCompletionPayload(rows []models.ChildCompletionRow) engine.OnChildrenC
 			Summary: row.Title,
 		})
 	}
-	return engine.OnChildrenCompletedPayload{ChildSummaries: summaries}
+	waveKey, waveString := childCompletionWaveIdentity(parentID, rows)
+	return engine.OnChildrenCompletedPayload{
+		ChildSummaries: summaries,
+		WaveKey:        waveKey,
+		WaveString:     waveString,
+	}
+}
+
+// childCompletionWaveIdentity derives the completion-wave identity from
+// rows sorted ascending by id — a copy, so it doesn't disturb rows'
+// created_at ordering, which childCompletionOperationID still depends on.
+func childCompletionWaveIdentity(parentID string, rows []models.ChildCompletionRow) (waveKey, waveString string) {
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	sort.Strings(ids)
+	return waveidentity.WaveKey(parentID, ids), waveidentity.WaveString(parentID, ids)
 }
 
 func childCompletionStatus(row models.ChildCompletionRow) string {
-	if row.TerminalWorkflowStep && !models.IsTerminalTaskState(row.State) {
-		return string(v1.TaskStateCompleted)
-	}
 	return string(row.State)
 }
 
@@ -327,12 +455,6 @@ func childCompletionOperationID(parentID string, rows []models.ChildCompletionRo
 		b.WriteString(string(row.State))
 		b.WriteString(":")
 		b.WriteString(row.WorkflowStepID)
-		b.WriteString(":")
-		if row.TerminalWorkflowStep {
-			b.WriteString("terminal")
-		} else {
-			b.WriteString("active")
-		}
 		b.WriteString(":")
 		b.WriteString(row.UpdatedAt.UTC().Format(time.RFC3339Nano))
 	}

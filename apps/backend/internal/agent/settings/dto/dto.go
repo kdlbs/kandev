@@ -20,13 +20,14 @@ type AgentProfileDTO struct {
 	FallbackModel string `json:"fallback_model,omitempty"`
 	// AutoFallback opts the profile into the legacy automatic-fallback
 	// behavior (session-start best-effort, office re-dispatch).
-	AutoFallback   bool               `json:"auto_fallback"`
-	ConfigOptions  map[string]string  `json:"config_options,omitempty"`
-	AllowIndexing  bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
-	AutoApprove    bool               `json:"auto_approve"`
-	CLIFlags       []CLIFlagDTO       `json:"cli_flags"`
-	EnvVars        []ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CLIPassthrough bool               `json:"cli_passthrough"`
+	AutoFallback      bool               `json:"auto_fallback"`
+	RequireExactModel bool               `json:"require_exact_model"`
+	ConfigOptions     map[string]string  `json:"config_options,omitempty"`
+	AllowIndexing     bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
+	AutoApprove       bool               `json:"auto_approve"`
+	CLIFlags          []CLIFlagDTO       `json:"cli_flags"`
+	EnvVars           []ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CLIPassthrough    bool               `json:"cli_passthrough"`
 	// Enabled gates the profile from new-work selection. When false the
 	// profile is hidden from task/session creation pickers but still serves
 	// existing sessions and remains editable in settings.
@@ -34,7 +35,20 @@ type AgentProfileDTO struct {
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string `json:"command_prefix,omitempty"`
-	UserModified  bool   `json:"user_modified"`
+	// ProviderKind is "" (native) or "openai_compatible". When
+	// "openai_compatible", Kandev injects ProviderBaseURL + the key behind
+	// ProviderAPIKeySecretID into the agent it runs.
+	ProviderKind string `json:"provider_kind,omitempty"`
+	// ProviderBaseURL is the absolute http(s) endpoint root of the
+	// OpenAI-compatible provider.
+	ProviderBaseURL string `json:"provider_base_url,omitempty"`
+	// ProviderAPIKeySecretID references the Kandev global secret holding the
+	// bearer key. The value is never returned.
+	ProviderAPIKeySecretID string `json:"provider_api_key_secret_id,omitempty"`
+	// ProviderSupported is computed at read time: true when the profile's
+	// agent advertises OpenAI-compatible provider support. Not persisted.
+	ProviderSupported bool `json:"provider_supported"`
+	UserModified      bool `json:"user_modified"`
 	// WorkspaceID scopes the profile to an office workspace. Empty for
 	// shallow kanban-only profiles. Surfaced so consumers (e.g. test
 	// cleanup helpers) can distinguish office-owned profiles from
@@ -143,8 +157,11 @@ type AgentDTO struct {
 	// flag agents that need login or reinstallation without fetching the
 	// full model config separately. "" for agents that aren't probed
 	// (mock, tui-only).
-	CapabilityStatus string    `json:"capability_status,omitempty"`
-	CapabilityError  string    `json:"capability_error,omitempty"`
+	CapabilityStatus string `json:"capability_status,omitempty"`
+	CapabilityError  string `json:"capability_error,omitempty"`
+	// InferenceCapable identifies agents accepted by the sessionless host
+	// utility runner. Profile pickers use it to prevent invalid selections.
+	InferenceCapable bool      `json:"inference_capable"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -426,10 +443,11 @@ type ListAgentUpdateJobsResponse struct {
 }
 
 type AgentProfileMcpConfigDTO struct {
-	ProfileID string                         `json:"profile_id"`
-	Enabled   bool                           `json:"enabled"`
-	Servers   map[string]mcpconfig.ServerDef `json:"servers"`
-	Meta      map[string]any                 `json:"meta,omitempty"`
+	ProfileID   string                         `json:"profile_id"`
+	WorkspaceID string                         `json:"-"`
+	Enabled     bool                           `json:"enabled"`
+	Servers     map[string]mcpconfig.ServerDef `json:"servers"`
+	Meta        map[string]any                 `json:"meta,omitempty"`
 }
 
 // CommandPreviewRequest is the request body for previewing the agent CLI command

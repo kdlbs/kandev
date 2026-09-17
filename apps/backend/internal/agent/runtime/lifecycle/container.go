@@ -16,7 +16,9 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/agent/docker/seccomp"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -38,6 +40,9 @@ const (
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth            *acpprovider.GatewayAuth
 	AgentConfig                    agents.Agent
 	WorkspacePath                  string // If empty, workspace is not mounted (will clone inside container)
 	TaskID                         string
@@ -59,6 +64,7 @@ type ContainerConfig struct {
 	McpProfile                     *mcpprofile.Context
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
 	ImageTagOverride               string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
+	AllowUserNamespaces            bool   // If true, the container is launched with a relaxed seccomp profile and apparmor=unconfined.
 	LocalClonePath                 string // Host path for file:// repository clone URLs; mounted read-only at the same path.
 	BootstrapNonce                 string // one-time nonce for agentctl handshake (set internally)
 	AgentctlStartupConfig          commonconfig.AgentctlStartupConfig
@@ -95,6 +101,8 @@ func namespacesMCPToolsByServerFromAgent(agent agents.Agent) bool {
 	return rt != nil && rt.NamespacesMCPToolsByServer
 }
 
+// buildContainerCreateInstanceRequest builds the agentctl request for a fresh
+// Docker instance, including the task and session identity used by MCP tools.
 func buildContainerCreateInstanceRequest(
 	config ContainerConfig,
 	agentType string,
@@ -106,7 +114,7 @@ func buildContainerCreateInstanceRequest(
 		WorkspacePath: "/workspace",
 		AgentCommand:  "",
 		AgentType:     agentType,
-		Env:           config.Credentials,
+		Env:           selectedCheckoutAgentEnv(config.Credentials, config.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			config.AutoApprovePermissions,
 			config.AutoApprovePermissionsOverride,
@@ -114,6 +122,7 @@ func buildContainerCreateInstanceRequest(
 		AutoStart:                  false,
 		McpServers:                 config.McpServers,
 		SessionID:                  config.SessionID,
+		TaskID:                     config.TaskID,
 		DisableAskQuestion:         disableAskQuestion,
 		AssumeMcpSse:               assumeMcpSse,
 		AssumeMcpHttp:              assumeMcpHttp,
@@ -123,6 +132,7 @@ func buildContainerCreateInstanceRequest(
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
+		ProviderGatewayAuth:        config.ProviderGatewayAuth,
 		BaseBranches:               config.BaseBranches,
 		RemoteContributions:        config.RemoteContributions,
 		ContributionDestinations:   config.ContributionDestinations,
@@ -512,6 +522,9 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	if config.PrepareScript != "" {
 		env = append(env, "KANDEV_PREPARE_SCRIPT="+config.PrepareScript)
 	}
+	if selectedCheckoutIsPullRequest(config.Metadata) {
+		env = append(env, selectedCheckoutMarker+"=1")
+	}
 
 	// We always launch agentctl as the container's main process and fan out the
 	// agent subprocess from there via the agentctl HTTP API. This frees user-built
@@ -542,7 +555,11 @@ if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then
     echo "[kandev-bootstrap] prepare script failed (exit $prep_rc); starting agentctl anyway so the host can connect and the user can debug via Executor Settings" >&2
-  fi
+	fi
+fi
+if [ "${` + selectedCheckoutMarker + `:-}" = "1" ]; then
+  ` + selectedCheckoutCredentialScrubScript(config.Metadata) + `
+  rm -f /run/kandev/auth.env 2>/dev/null || true
 fi
 exec /usr/local/bin/agentctl`,
 	}
@@ -557,8 +574,13 @@ exec /usr/local/bin/agentctl`,
 		Mounts:       mounts,
 		PortBindings: dockerAgentctlPortBindings(),
 		NetworkMode:  cm.networkName,
-		Memory:       memoryBytes,
-		CPUQuota:     cpuQuota,
+		// Give every agent container the host.docker.internal alias so a profile
+		// whose OpenAI-compatible provider is a service on the developer's host
+		// (loopback URLs are rewritten to this hostname) resolves on Linux too,
+		// matching Docker Desktop. Requires Docker Engine 20.10+.
+		ExtraHosts: []string{acpprovider.DockerHostGatewayHost + ":host-gateway"},
+		Memory:     memoryBytes,
+		CPUQuota:   cpuQuota,
 		Labels: map[string]string{
 			"kandev.managed":             boolStringTrue,
 			"kandev.instance_id":         config.InstanceID,
@@ -569,6 +591,13 @@ exec /usr/local/bin/agentctl`,
 			"com.kandev.image":           imageName,
 		},
 		AutoRemove: false, // We manage cleanup ourselves
+	}
+	if config.AllowUserNamespaces {
+		securityOpt, err := securityOptsForUserNamespaces()
+		if err != nil {
+			return docker.ContainerConfig{}, err
+		}
+		containerCfg.SecurityOpt = securityOpt
 	}
 	if scope := os.Getenv(e2eDockerScopeEnv); scope != "" {
 		containerCfg.Labels[e2eDockerScopeLabel] = scope
@@ -586,6 +615,23 @@ exec /usr/local/bin/agentctl`,
 	}
 
 	return containerCfg, nil
+}
+
+// securityOptsForUserNamespaces returns Docker SecurityOpt values that relax
+// seccomp and AppArmor to allow user namespace creation by processes without
+// CAP_SYS_ADMIN. An error is returned rather than swallowed: the operator
+// explicitly opted the profile in, so silently launching a container without
+// the relaxation would reproduce the exact bwrap failure the setting exists to
+// fix, with no signal as to why.
+func securityOptsForUserNamespaces() ([]string, error) {
+	profileJSON, err := seccomp.UsernsProfileJSON()
+	if err != nil {
+		return nil, fmt.Errorf("build user namespace seccomp profile: %w", err)
+	}
+	return []string{
+		"seccomp=" + profileJSON,
+		"apparmor=unconfined",
+	}, nil
 }
 
 // formatCoreutilsTimeout converts a Go duration to the single-unit format

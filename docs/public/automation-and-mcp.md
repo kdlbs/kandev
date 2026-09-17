@@ -20,6 +20,22 @@ Use workflow events for predictable transitions on existing work. Use a workspac
 
 Across Kandev's task, configuration, external, and Office MCP modes, each tool call is validated against that mode's live `tools/list` schema before its handler runs. Missing required fields, wrong types, declared constraint violations, and unknown top-level fields return a tool error without performing the requested action. A missing-field error names each absent schema property, but never echoes submitted argument values. Nested configuration maps still accept arbitrary keys when their schema defines them as open.
 
+## Task creation boundaries
+
+Task creation depends on the caller surface and the destination workspace:
+
+| Caller | Creation path | Allowed destination |
+| --- | --- | --- |
+| Kanban task session | `create_task_kandev` | Authorized Kanban workspaces |
+| Office run | Office skills and injected `$KANDEV_CLI kandev task create` | The Office workspace and runtime scope |
+| External MCP client | Existing `create_task_kandev` | Authorized Kanban or Office workspaces |
+
+Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
+
+The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+
+Omit `workspace_mode` to use defaulting instead of sending an empty string. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
+
 ## Quick path
 
 - Use a **workflow event** for predictable transitions on existing tasks.
@@ -219,6 +235,53 @@ The same data is available directly over REST for scripting: `GET /api/v1/worksp
 ## Task MCP
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
+
+### Manage linked pull and merge requests
+
+Task MCP provides one shared contract for GitHub pull requests and GitLab merge
+requests. Use `get_task_change_requests_kandev` to read the current task's
+linked requests, automation settings, and provider capabilities.
+
+Use `manage_task_change_request_kandev` with `operation` set to `link`, `unlink`,
+or `replace`. Every mutation needs `task_id`, `provider` (`github` or `gitlab`),
+the canonical `repository_id`, and a positive request number. A number by itself
+is rejected, so a fork and its canonical repository can safely have the same
+number. For example:
+
+```json
+{
+  "operation": "link",
+  "task_id": "…",
+  "provider": "gitlab",
+  "repository_id": "…",
+  "number": 42
+}
+```
+
+`replace` also requires `old_provider`, `old_repository_id`, and `old_number`.
+Replacement supports one provider at a time. Every successful mutation returns
+the resulting active link set, and the target task must be reachable from the
+the calling task's workspace. For replacement, `old_provider` must equal
+`provider`; cross-provider replacement is rejected.
+
+Use `update_task_change_request_automation_kandev` for an exact association or
+for all current links of explicitly selected providers on the current task.
+Association targets require `provider`, `repository_id`, and `number`. Task
+targets require a nonempty `providers` list. Prompt overrides are task/provider
+settings and can be changed only with a task target. The tool does not create
+defaults for future links.
+
+`report_change_request_auto_fix_outcome_kandev` is available only when GitHub is
+among the task's supported providers. It reports the outcome of a server-bound
+GitHub auto-fix turn; it does not report manual work or GitLab auto-fix turns.
+
+`list_tasks_kandev` and `list_related_tasks_kandev` expose active GitHub PR and
+GitLab MR associations in the provider-neutral `change_requests` field; the
+legacy `prs` field remains GitHub-only for compatibility.
+
+Unlinking changes only the active association and its matching automation
+state. It does not delete conversation history, terminal receipts, or the
+upstream pull request or merge request.
 
 Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent clients show or register a server-qualified alias instead. For example, a client may expose canonical `step_complete_kandev` as `mcp__kandev__step_complete_kandev`. That qualified form is client-specific, not a second tool or a universal name; use the form exposed by the active client.
 
@@ -535,20 +598,21 @@ Task-mode review automation tools follow the providers attached to the task's
 repositories. Kandev computes their union when the session launches or
 resumes:
 
-| Attached providers  | Discoverable tools                                                  |
-| ------------------- | ------------------------------------------------------------------- |
-| GitHub only         | `get_task_pr_automation_kandev`, `update_task_pr_automation_kandev` |
-| GitLab only         | `get_task_mr_automation_kandev`, `update_task_mr_automation_kandev` |
-| GitHub and GitLab   | Both provider-specific pairs                                        |
-| None or unsupported | Neither pair                                                        |
+| Attached providers  | Discoverable tools                                                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| GitHub only         | `get_task_change_requests_kandev`, `manage_task_change_request_kandev`, `update_task_change_request_automation_kandev`, and `report_change_request_auto_fix_outcome_kandev` |
+| GitLab only         | `get_task_change_requests_kandev`, `manage_task_change_request_kandev`, and `update_task_change_request_automation_kandev` |
+| GitHub and GitLab   | The four tools above                                                                                                 |
+| None or unsupported | None of these change-request tools                                                                                   |
 
 Adding a repository source successfully to an idle task can update the live
 session's task MCP tool list after materialization. If live refresh is
 temporarily unavailable, the source attachment remains committed and the next
 launch or resume reconciles the tool list. Tool discovery only describes the
 available surface; backend authorization and task/provider validation remain
-authoritative for every call. The existing automation request and response
-payloads are unchanged.
+authoritative for every call. After an upgrade, rediscover the catalog or resume
+the task so cached clients use the shared names. An already-running older
+agentctl keeps its old catalog until it resumes on the new runtime.
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
 
@@ -582,12 +646,11 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `ask_user_question_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
 - `list_related_tasks_kandev`;
-- `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`.
+- `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`;
 - `show_rich_output_kandev`;
-- `record_step_decision_kandev` records an `approved` or `rejected` verdict for the current workflow step. It requires a non-empty reason, and a later verdict supersedes the earlier one.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, related-task discovery, task documents, quorum decisions, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, related-task discovery, task documents, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 
@@ -602,6 +665,19 @@ If `agentctl kandev ...` reports that `KANDEV_API_URL` or `KANDEV_API_KEY` is
 missing, do not set either variable yourself. A regular task session should use
 its injected Kandev MCP tools. An Office-owned task must be started or woken
 through Office so the scheduler can supply its signed runtime context.
+
+Reviewers and approvers record a workflow-step verdict through the task-bound
+runtime CLI. The command accepts only `approved` or `rejected` and requires a
+non-empty reason:
+
+```bash
+$KANDEV_CLI kandev task decision --decision approved --reason "..."
+```
+
+The runtime derives the task, session, and agent identity from the signed run
+context. A repeated decision supersedes the earlier decision for that
+participant and step. Comments and approval-inbox commands do not record a
+workflow-step verdict.
 
 An Office run can inspect the projects in its current workspace:
 
@@ -722,15 +798,51 @@ Kandev does not upgrade or proxy configured third-party MCP servers. Their suppo
 
 This compatibility work does not add MCP Tasks, new OAuth behavior, or third-party MCP proxying.
 
-External MCP exposes 42 tools in these groups:
+External MCP exposes tools in these groups:
 
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
 - saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
+- agent-accessible settings: search setting definitions, describe a field, list authorized resource targets, read saved values, and update declared values through one compact contract;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
 
-`export_workflow_kandev` takes `workflow_id` and returns one version 1 `kandev_workflow` JSON document. It omits instance IDs and timestamps. Pass its JSON text unchanged as `document` to `import_workflow_kandev` when it is within the existing 1 MiB import limit.
+### Agent-accessible settings
+
+External and task-scoped agents can use the same compact settings tools:
+
+```text
+search_settings_kandev
+describe_setting_kandev
+list_settings_resources_kandev
+get_settings_kandev
+update_settings_kandev
+```
+
+Search returns metadata only. Use `describe_setting_kandev` for the schema,
+target rules, authority, replacement behavior, and recovery guidance for one
+field. Use `list_settings_resources_kandev` when a field needs an exact
+workspace, repository, profile, task, or integration target. Then pass one
+target and the declared field paths to `get_settings_kandev` or
+`update_settings_kandev`.
+
+The backend validates every target and change against the owning domain. Writes
+keep the existing domain authorization, reference checks, atomicity, events,
+and cache behavior. Saved credential values are not returned. Secret-bearing
+fields return redacted values or safe references, and credential enrollment,
+deployment-owned configuration, plugin-owned settings, client-local state,
+and lifecycle actions remain on their existing explicit surfaces.
+
+The compact envelope is stable as domains grow. Agents should discover fields
+at runtime instead of assuming that a domain's full schema is present in the
+tool definition. Existing lifecycle tools and compatibility MCP tools remain
+available where documented.
+
+`export_workflow_kandev` takes `workflow_id` and returns one version 2
+`kandev_workflow` JSON document with explicit step completion booleans. It omits
+instance IDs and timestamps. Pass its JSON text unchanged as `document` to
+`import_workflow_kandev` when it is within the existing 1 MiB import limit.
+Version 1 documents remain accepted for compatibility.
 
 ### Read a saved prompt
 
@@ -883,3 +995,19 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 - **External client cannot stream:** verify the base backend URL and configure the reverse proxy for both the selected MCP transport and long-lived requests.
 
 Related: [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), [Agents and profiles](agents-and-profiles.md), and [Integrations](integrations.md).
+
+
+## Plugin webhooks
+
+Plugins with automation adapters add their own provider group under **Add
+Condition**. Choose a condition, configure its repository and filters, and save
+the automation. Expand the condition and select **Configure webhook**, then copy
+its URL and use **Reveal secret** to obtain the signing secret for the provider's
+webhook settings. Keep both the automation and condition enabled.
+
+Save filter changes before configuring the binding again. After **Rotate secret**,
+update the provider's webhook secret. **Revoke webhook** removes the binding URL;
+configuring it again creates a new URL. **Refresh deliveries** shows receipt
+outcomes and links to the task when one exists. A 202 response means Kandev stored
+the delivery; it does not mean the agent has finished or started successfully.
+The original generic **Webhook** condition continues to use `X-Webhook-Secret`.

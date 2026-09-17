@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -11,6 +12,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -122,6 +125,108 @@ func TestSQLiteStore_ProjectsStableTaskDirName(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_CompareAndSwapWorktree(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-cas", "task-cas")
+	expected := &Worktree{
+		ID:           "wt-cas-original",
+		SessionID:    "session-cas",
+		RepositoryID: "repo-cas",
+		BranchSlug:   "main",
+		Path:         "/tmp/cas-original",
+		Branch:       "feature/cas",
+		Status:       StatusActive,
+	}
+	if err := store.CreateWorktree(ctx, expected); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	replacement := *expected
+	replacement.ID = "wt-cas-replacement"
+	replacement.Path = "/tmp/cas-replacement"
+	replacement.Branch = "feature/cas-recovered"
+	replacement.UpdatedAt = time.Now().UTC().Add(time.Second)
+	swapped, err := store.CompareAndSwapWorktree(ctx, expected, &replacement)
+	if err != nil {
+		t.Fatalf("compare-and-swap: %v", err)
+	}
+	if !swapped {
+		t.Fatal("compare-and-swap rejected the unchanged durable row")
+	}
+
+	current, err := store.GetWorktreeByID(ctx, replacement.ID)
+	if err != nil {
+		t.Fatalf("load replacement: %v", err)
+	}
+	if current == nil || current.Path != replacement.Path || current.Branch != replacement.Branch {
+		t.Fatalf("replacement = %+v, want path %q and branch %q", current, replacement.Path, replacement.Branch)
+	}
+	if swapped, err := store.CompareAndSwapWorktree(ctx, expected, &replacement); err != nil {
+		t.Fatalf("stale compare-and-swap: %v", err)
+	} else if swapped {
+		t.Fatal("stale compare-and-swap unexpectedly succeeded")
+	}
+}
+
+func TestSQLiteStore_CompareAndSwapWorktreeWithRecoveryClaim(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	store.seedSessionWithEnvironment(t, "session-guarded-cas", "task-guarded-cas")
+	expected := &Worktree{
+		ID:                "wt-guarded-cas-original",
+		SessionID:         "session-guarded-cas",
+		RepositoryID:      "repo-guarded-cas",
+		BranchSlug:        "main",
+		Path:              "/tmp/guarded-cas-original",
+		Branch:            "feature/guarded-cas",
+		TaskEnvironmentID: "env-session-guarded-cas",
+		Status:            StatusActive,
+	}
+	if err := store.CreateWorktree(ctx, expected); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	claim, err := store.AcquireTaskEnvironmentRecoveryClaim(ctx, models.TaskEnvironmentRecoveryClaimRequest{
+		TaskEnvironmentID:   expected.TaskEnvironmentID,
+		OwnerTaskID:         "task-guarded-cas",
+		OwnershipGeneration: 1,
+		SessionID:           "session-guarded-cas-recovery",
+		OperationID:         "operation-guarded-cas",
+		ExecutorType:        string(models.ExecutorTypeWorktree),
+	})
+	if err != nil {
+		t.Fatalf("acquire recovery claim: %v", err)
+	}
+	defer func() { _ = store.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) }()
+
+	replacement := *expected
+	replacement.ID = "wt-guarded-cas-replacement"
+	replacement.Path = "/tmp/guarded-cas-replacement"
+	replacement.Branch = "feature/guarded-cas-recovered"
+	replacement.UpdatedAt = time.Now().UTC().Add(time.Second)
+	swapped, err := store.CompareAndSwapWorktreeWithRecoveryClaim(ctx, expected, &replacement, claim)
+	if err != nil {
+		t.Fatalf("guarded compare-and-swap: %v", err)
+	}
+	if !swapped {
+		t.Fatal("guarded compare-and-swap rejected the current durable row")
+	}
+
+	staleClaim := *claim
+	staleClaim.OwnershipGeneration++
+	if _, err := store.CompareAndSwapWorktreeWithRecoveryClaim(ctx, &replacement, expected, &staleClaim); !errors.Is(err, recoveryclaim.ErrClaimMismatch) {
+		t.Fatalf("stale guarded compare-and-swap error = %v, want ErrClaimMismatch", err)
+	}
+	current, err := store.GetWorktreeByID(ctx, replacement.ID)
+	if err != nil {
+		t.Fatalf("load replacement: %v", err)
+	}
+	if current == nil || current.Path != replacement.Path || current.Branch != replacement.Branch {
+		t.Fatalf("replacement after stale publication = %+v, want path %q and branch %q", current, replacement.Path, replacement.Branch)
+	}
+}
+
 func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -201,6 +306,64 @@ func TestSQLiteStore_ListActiveWorktreePaths(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestSQLiteStore_CountWorktreeBranchOwnersCountsPhysicalRepositoryClaimants(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repoPath := filepath.Join(t.TempDir(), "repo")
+
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('workspace', 'workspace', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	for _, repoID := range []string{"repo-owner-a", "repo-owner-b"} {
+		if _, err := store.db.ExecContext(ctx, `
+			INSERT INTO repositories (
+				id, workspace_id, name, local_path, created_at, updated_at
+			) VALUES (?, 'workspace', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, repoID, repoID, repoPath); err != nil {
+			t.Fatalf("seed repository %s: %v", repoID, err)
+		}
+	}
+	for _, seed := range []struct {
+		sessionID string
+		taskID    string
+		repoID    string
+		wtID      string
+	}{
+		{"session-claimant-a", "task-claimant-a", "repo-owner-a", "wt-claimant-a"},
+		{"session-claimant-b", "task-claimant-b", "repo-owner-b", "wt-claimant-b"},
+	} {
+		store.seedSessionWithEnvironment(t, seed.sessionID, seed.taskID)
+		if err := store.CreateWorktree(ctx, &Worktree{
+			ID:             seed.wtID,
+			SessionID:      seed.sessionID,
+			RepositoryID:   seed.repoID,
+			RepositoryPath: repoPath,
+			Path:           filepath.Join(t.TempDir(), seed.wtID),
+			Branch:         "feature/shared",
+			BranchOwner:    BranchOwnerManaged,
+			IntegrationRef: "main",
+			Status:         StatusDeleted,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			DeletedAt:      &now,
+		}); err != nil {
+			t.Fatalf("create %s: %v", seed.wtID, err)
+		}
+	}
+
+	got, err := store.CountWorktreeBranchOwners(ctx, repoPath, "feature/shared")
+	if err != nil {
+		t.Fatalf("count branch owners: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("branch owners = %d, want 2", got)
 	}
 }
 

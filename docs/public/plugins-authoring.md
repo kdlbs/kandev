@@ -121,6 +121,12 @@ does not need a Go backend or an injected Kandev JavaScript API.
    the app needs.
 5. Package the manifest and static files as a gzip-compressed tar archive.
 
+For a new owner-created task canvas, the first valid release can receive the
+declared supported task-scoped permissions through its initial permission
+policy. Imported packages and later permission increases need human approval.
+Keep `network_origins` as exact HTTPS origins. Do not use wildcards, paths,
+credentials, query strings, or fragments.
+
 For example, a page can read task data with the browser Fetch API:
 
 ```js
@@ -134,6 +140,15 @@ const tasks = await response.json();
 Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
 relative so the same package works in task and workspace scope. Do not copy a
 capability URL from the host into the app.
+
+Kandev injects a reserved startup bootstrap into the packaged entry document.
+It runs before authored scripts, reports an initial document error when one is
+observed, and checks `./_kandev/v1/context` after the document loads. The host
+reveals the frame only after it receives a versioned acknowledgement for the
+current startup attempt. A missing acknowledgement or context failure makes
+the canvas recoverable after 15 seconds. Keep the entry document and its
+relative assets valid HTML, and make the app render its own loading and error
+states after startup.
 
 The frame has an opaque browser origin. Do not use `localStorage`,
 `sessionStorage`, IndexedDB, or service workers. Use the state protocol for
@@ -156,6 +171,24 @@ The manifest limit is 64 KiB and the normalized path limit is 240 bytes.
 Build and test the archive outside Kandev. Kandev validates the archive before
 it stores or runs a release. Use [Agent-authored Canvases](canvases.md) for
 creation, permission review, promotion, Quick Chat editing, and recovery.
+
+### Share a portable canvas
+
+For a canvas that another workspace can install, add the `distribution` block
+described in the [manifest reference](plugins-manifest.md#portable-canvas-distribution-metadata).
+Choose `static` when the packaged application is the only source you want to
+share. Choose `project` when you retain a bounded editable project under
+`distribution/source/`. Do not put screenshots in the package.
+
+After a valid release is active, use **Share canvas** in the host or workspace
+canvas list. Prepare and download the bundle and source archive, inspect them
+for private content, and share them as files or HTTPS links. This action does
+not create a repository, release, registry entry, or pull request.
+
+To list the canvas, publish the exact bundle as a versioned release asset and
+add a `kind: canvas` entry with one to eight ordered `previews` objects to a
+trusted registry. The first preview is the cover. Preview URLs and alt text
+are registry metadata and are not part of the package manifest.
 
 There is no separate HTTP server to launch. pluginsdk.Serve owns the
 go-plugin/gRPC handshake and Host injection. The backend implements
@@ -235,6 +268,12 @@ curated React, UI, and app-store surface.
 - capabilities.auth is the highest-risk capability. A webhook response may
   assert a verified external identity with X-Kandev-Auth-Login; only assert an
   email the IdP verified as owned by the subject. See [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
+- Plugin installations also carry a host-minted opaque installation identity
+  and a generic capability-approval ledger. That ledger records approval
+  history, exact approval revisions, and revocation tombstones for the host
+  boundary, but there is no public mutation UI in this release. Future exact
+  Host adapters consume the approval receipt/query surface; they do not derive
+  authority from plugin IDs, package digests, or workspace state.
 
 An isolated web app has a separate browser boundary. Kandev loads it in a
 sandboxed iframe with an opaque origin. It cannot use the host DOM, cookies,
@@ -279,7 +318,18 @@ of truth and must be updated together when the contract changes:
 - Wire contract: apps/backend/proto/kandev/plugin/v1/plugin.proto.
 - Manifest model and semantic validation: apps/backend/internal/plugins/manifest.
 - Package integrity and installation: apps/backend/internal/plugins/pkgtar.
-- Durable decisions: [ADR 0043](../decisions/0043-plugin-host-data-api.md), [ADR 0047](../decisions/0047-plugin-host-conversation-reads.md), [ADR 0048](../decisions/0048-plugin-host-utility-agent-invoke.md), and [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
+- Durable decisions: [ADR 0043](../decisions/0043-plugin-host-data-api.md),
+  [ADR 0047](../decisions/0047-plugin-host-conversation-reads.md),
+  [ADR 0048](../decisions/0048-plugin-host-utility-agent-invoke.md),
+  [ADR 0050](../decisions/0050-plugin-external-auth-capability.md),
+  [explicit plugin utility selection](../decisions/2026-09-14-explicit-plugin-utility-selection.md), and
+  [Browser conversation facade ADR](../decisions/2026-09-06-browser-plugin-conversation-facade.md).
+
+The browser conversation facade ADR is still proposed while this prerequisite
+package is under review. Until that ADR is accepted, normative authority is
+split deliberately: requirements define observable behavior, the system design
+defines Host architecture, and `PLUGIN-API.md` defines the Host-only wire
+contract.
 
 ## Frontend contract
 
@@ -329,6 +379,48 @@ If a bundle registers a component at its exact plugin detail route, Kandev
 keeps that component and renders the host-owned shortcut card alongside it.
 Nested plugin settings routes remain fully plugin-owned.
 
+### Browser conversation facade
+
+Native UI plugins read prompt history through `host.conversation`, not through
+`host.store`, raw WebSocket frames, first-party `/api/v1` URLs, or the Go Host
+reader. The facade requires `capabilities.api_read: ["messages"]`, and every
+manifest declaring that capability requires `min_kandev_version: "0.91.1"` or
+later. The same floor applies to Go `host.Messages().List` plugins. It returns
+sanitized public SDK DTOs. Inside a task panel, prefer the injected
+`conversation.history` handle so the read stays bound to that panel's task,
+session, and plugin generation:
+
+```tsx
+function PromptHistory({ sessionId, conversation }: PluginTaskPanelProps) {
+  const { messages, loading, loadMore } =
+    conversation.history.useSessionMessages({ sessionId });
+  return <PromptList messages={messages} loading={loading} onLoadMore={loadMore} />;
+```
+
+Panel handles are independently scoped and become inert on unmount, identity
+change, disable, or reload. `host.conversation` is the equivalent nearest-scope
+accessor; outside a panel it returns stable empty state. Use the canonical
+[PLUGIN-API contract](../plans/plugins/PLUGIN-API.md) for DTOs, pagination,
+ordered updates, lifecycle, and retryable errors.
+Browser route errors use `unauthenticated`/non-retryable for `401`,
+`not_found`/non-retryable for `404`, `invalid_query`/non-retryable for `400`,
+and `upstream_failure`/retryable for every authorized `5xx`.
+Within a task panel, omitted `taskId` inherits the panel task, explicit
+`null` reads the whole selected session, and an explicit task ID must match the
+panel task. `loadMore()` resolves to the number of newly projected messages;
+joined, exhausted, closed, and removed calls are deterministic, while
+transport failures reject with the typed error and preserve committed state.
+The turns hook follows the same scope and lifecycle rules, favorites remain
+read-only and reactive, and `session.removed` retains visible rows while
+closing future reads.
+
+| Need | Browser facade | Go Host API |
+| --- | --- | --- |
+| Surface | `host.conversation` or `conversation.history` | `host.Messages().List` |
+| Runtime | Native UI bundle | Plugin server process |
+| Data | Sanitized browser DTOs and ordered live updates | Typed paginated reader |
+| Forbidden shortcut | `host.store`, raw WS, `/api/v1` | Private application imports |
+
 ### Frontend hook/API matrix
 
 | Surface                         | Location and input                                                                                                                                                                                                                                                                                     | Manifest requirement                                                   | Cleanup/lifecycle                                                                                                                                                                                               | Small example                                                                                                       |
@@ -338,13 +430,13 @@ Nested plugin settings routes remain fully plugin-owned.
 | registerSettingsRoute           | registerSettingsRoute(fullPath, Component) with an exact path under /settings/plugins/<id>/...; settings shell supplies chrome                                                                                                                                                                         | Active ui.bundle                                                       | Route is removed on disable/uninstall                                                                                                                                                                           | registry.registerSettingsRoute("/settings/plugins/acme/health", HealthPage)                                         |
 | registerComponent               | registerComponent(slot, Component); component receives { slotProps?: unknown }                                                                                                                                                                                                                         | Active ui.bundle                                                       | Every registration is owner-tracked, error-isolated, and bulk-revoked                                                                                                                                           | registry.registerComponent("task-sidebar", Panel)                                                                   |
 | registerWsHandler               | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                                    | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
-| registerKeybinding              | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo on the installed plugin detail page at **Settings > Plugins > `<plugin>`**                                                                                                                                                                                  | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
+| registerKeybinding              | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo on the installed plugin detail page at **Settings > Plugins > `<plugin>`**                                                                                                       | ui.bundle and ui.keybindings[]                                         | Handler is removed on disable/uninstall; core shortcuts win, and editable targets are skipped unless that entry set ui.keybindings[].allow_in_editor                                                            | registry.registerKeybinding("open-panel", () => host.openModal(...))                                                |
 | registerIntegrationSettings     | One provider-owned settings component with an optional action mounted in the detail header and the integrations index card                                                                                                                                                                             | Active ui.bundle                                                       | Registration is exclusive by id and revoked on unload; host owns workspace selection and settings navigation; component and action receive the routed `workspaceId`, and action receives its `surface`          | registry.registerIntegrationSettings({ id: "acme", Component, action: Toggle })                                     |
 | registerTranslations            | Flat English fallback plus optional Kandev locale catalogs, isolated to this plugin's namespace                                                                                                                                                                                                        | Active ui.bundle                                                       | Catalogs are replaced atomically, removed on unload, and registry consumers invalidate when the host locale changes                                                                                             | registry.registerTranslations({ en: { settings: "Settings" }, "pt-pt": { settings: "Definições" } })                |
 | registerRepositoryProvider      | Provider-owned paged/searchable repository list, URL match/inspect, branches, and optional native `createChangeRequest` transport                                                                                                                                                                      | ui.bundle and matching `repository_providers[]` id                     | Registration and in-flight callbacks are result-fenced on unload; host owns native task and Create PR UI                                                                                                        | registry.registerRepositoryProvider({ id: "acme", ...provider })                                                    |
 | registerTaskAction              | Child action inside the task menu's native Link section                                                                                                                                                                                                                                                | Active ui.bundle                                                       | Action is revoked on unload; host supplies current task/workspace and desktop/mobile presentation                                                                                                               | registry.registerTaskAction({ id: "link-pr", placement: "link", ... })                                              |
 | registerReviewProvider          | Normalized task reviews, workspace associations, unlink, and shared Review panel                                                                                                                                                                                                                       | ui.bundle and matching `repository_providers[]` id                     | Snapshots/subscriptions are owner-scoped and revoked on unload; host owns status chrome, indicators, unlink UI, and responsive Review placement                                                                 | registry.registerReviewProvider({ id: "acme", ...reviews })                                                         |
-| registerTaskPanel               | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation }                                                                                                                              | Active ui.bundle                                                       | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance                                        | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel })                                  |
+| registerTaskPanel               | { id, title, titleKey?, icon?, Component, mobileEnabled?, visible?(context) }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, sessionKind, presentation, conversation: { openMessage(messageId), history } }; `titleKey` is a plugin translation key with literal `title` fallback | Active ui.bundle | Panel renders behind its own error boundary with reactive localized titles; a throwing `visible` hides the item; handles are generation-bound and independently scoped, inert after unmount, identity change, disable, reload, or uninstall; `host.conversation` outside a panel returns stable empty state; desktop preserves layout identity on navigation and mobile uses the full-height Chat surface | registry.registerTaskPanel({ id: "notes", title: "Notes", titleKey: "panels.notes", Component: NotesPanel }) |
 | registerTaskMenuAction          | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a flat item on cards and desktop/mobile task-row menus                                                                                                          | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
 | registerTaskFilter              | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | registerTaskListFacet           | { id, label, getValues({ taskId, workspaceId }), subscribe? }; adds page-local Sort and Group choices on `/tasks`                                                                                                                                                                                      | Active ui.bundle                                                       | Values apply only to the loaded page, callbacks are isolated, and registrations are revoked on disable/unload                                                                                                   | registry.registerTaskListFacet({ id: "tags", label: "Tag", getValues: taskTags })                                   |
@@ -528,6 +620,7 @@ to strings, but an unmounted name renders nowhere.
 | chat-input-actions        | Task or Quick Chat composer toolbar                                                        | PluginComposerSlotProps                                          |
 | task-create-input-actions | Task creation composer toolbar                                                             | PluginComposerSlotProps                                          |
 | new-session-input-actions | New-session composer toolbar                                                               | PluginComposerSlotProps                                          |
+| chat-submit-decoration    | Layer over the composer's send button                                                      | ChatSubmitDecorationSlotProps                                    |
 | chat-top-bar              | Session top bar                                                                            | { taskId, taskTitle?, workspaceId, activeSessionId, sessionIds } |
 | main-top-bar              | Home/Kanban/Tasks top bar                                                                  | { workspaceId, workspaceLabel?, currentPage }                    |
 | app-status-bar-left       | Left side of desktop status bar or mobile status drawer                                    | AppStatusBarSlotProps                                            |
@@ -581,7 +674,7 @@ subscription vocabulary and wildcard rules are in the
 | Config                | GetConfig                                                                      | None                                                                        | Reads this plugin's validated config_schema; secret fields are cleartext in the subprocess; config updates restart active plugins                                                           |
 | Secrets               | RevealSecret, GetSecret, SetSecret, DeleteSecret                               | secrets: true                                                               | Encrypted vault; plugin-owned keys are namespaced; never log values                                                                                                                         |
 | Tasks                 | Tasks().List, Tasks().Get                                                      | api_read: tasks                                                             | Typed DTOs and opaque pagination cursor                                                                                                                                                     |
-| Tasks writes          | Tasks().Create, Tasks().Update, Tasks().Move                                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire. Update rejects a workflow step change; Move is the only path that moves a task between steps                         |
+| Tasks writes          | Tasks().Create, Tasks().Update, Tasks().Move                                   | api_write: tasks                                                            | Implemented; routed through Kandev services so events/WS updates fire. Create and Update support priority. Update rejects a workflow step change; Move is the only path that moves a task between steps                         |
 | Sessions              | Sessions().List, Sessions().CodeStats                                          | api_read: sessions                                                          | Typed session and computed code-stat records                                                                                                                                                |
 | Workspaces            | Workspaces().List                                                              | api_read: workspaces                                                        | Instance-visible workspaces                                                                                                                                                                 |
 | Workflows             | Workflows().List, Workflows().ListSteps                                        | api_read: workflows                                                         | List steps by workflow id                                                                                                                                                                   |
@@ -591,7 +684,8 @@ subscription vocabulary and wildcard rules are in the
 | Message send          | Messages().Send                                                                | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
 | Interactions          | Interactions().ListPending, Interactions().Get                                 | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
 | Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions                                                     | Routed through the services the native UI drives; first terminal response wins                                                                                                              |
-| Utility agent         | InvokeUtilityAgent(ctx, prompt)                                                | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
+| Agent invocation      | InvokeUtilityAgent(ctx, prompt, options...)                                    | agent_invoke: true                                                          | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
+| Agent conversations   | AgentConversations(host): Ensure, Dispatch, Delete                             | agent_conversation: true                                                    | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin |
 
 The Go signatures, filters, DTOs, and pagination types live in
 apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
@@ -698,6 +792,10 @@ side effect.
 A plugin calls back into kandev through the injected `Host`:
 
 ```go
+type UtilityAgentOptions struct {
+	ProfileID string
+}
+
 type Host interface {
 	GetState(ctx context.Context, scope, scopeID, key string) (value map[string]any, found bool, err error)
 	SetState(ctx context.Context, scope, scopeID, key string, value map[string]any) error
@@ -738,10 +836,10 @@ type Host interface {
 	// delivers a user prompt through the task session (api_write:messages).
 	Messages() MessageReader
 
-	// InvokeUtilityAgent runs a one-shot completion using this plugin's
-	// selected utility agent (capability agent_invoke). No API key of your
-	// own; FailedPrecondition when no valid enabled agent is selected.
-	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
+	// InvokeUtilityAgent runs a one-shot completion. No options uses the
+	// platform default. UtilityAgentOptions.ProfileID selects one eligible
+	// profile for this call (capability agent_invoke).
+	InvokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (string, error)
 }
 ```
 
@@ -763,6 +861,33 @@ without the capability returns `PermissionDenied` from `List`.
 Pending agent interactions are an additive, optional Host extension too;
 discover it the same way with `pluginsdk.Interactions(host)`. See "Pending
 agent interactions" below for the contract.
+
+Managed agent conversations are another optional Host extension. They let a
+backend plugin keep one hidden agent session for each workspace and stable
+conversation key:
+
+```go
+conversations, ok := pluginsdk.AgentConversations(host)
+if !ok {
+	return errors.New("this Kandev host does not support agent conversations")
+}
+
+descriptor, status, err := conversations.Ensure(ctx, pluginsdk.AgentConversationSpec{
+	WorkspaceID:     workspaceID,
+	ConversationKey: "coordinator",
+	BasePrompt:      "Review this workspace and report actionable changes.",
+	AgentProfileID:  configuredProfileID,
+})
+```
+
+Declare `agent_conversation: true` before using the manager. `Ensure` returns
+`created`, `exists`, or `configuration_required`; the last result creates no
+task or session. `Dispatch` returns `started`, `sent`, `duplicate_occurrence`,
+or `skipped_busy`. Supply a stable occurrence key when a scheduled event may be
+retried; a busy dispatch does not consume it. `Delete` is idempotent and only
+removes conversations owned by the calling plugin. Disabling or uninstalling
+the plugin removes all of that plugin's managed conversations across
+workspaces.
 
 **Host state** is a small key/value store kandev keeps for your plugin in
 its own database. Each entry is addressed by a `(scope, scopeID, key)`
@@ -860,9 +985,20 @@ first" apart from "my cached id is stale". Do not retry a
 `FailedPrecondition`.
 
 `host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
-completion using the utility agent selected for this plugin in **Settings >
-Plugins > `<plugin>`** (capability `agent_invoke`), and returns its text. Declare
-the selector in `manifest.yaml`:
+completion using the platform default profile configured in **Settings >
+Utility Agents** (capability `agent_invoke`), and returns its text. A plugin can
+pass an explicit profile for one call:
+
+```go
+text, err := host.InvokeUtilityAgent(ctx, prompt, pluginsdk.UtilityAgentOptions{
+	ProfileID: savedProfileID,
+})
+```
+
+The plugin owns persistence of `savedProfileID`. An empty or unset preference
+should omit the override or pass an empty ProfileID. The host does not inspect
+the plugin's configuration to choose a profile. Declare an optional profile
+field when the plugin wants the standard Settings picker:
 
 ```yaml
 capabilities:
@@ -871,30 +1007,34 @@ capabilities:
 config_schema:
   type: object
   properties:
-    utility_agent:
+    agent_profile:
       type: string
-      format: utility-agent
-      title: Utility Agent
-      description: Agent used for this plugin's LLM calls
-  required: ["utility_agent"]
+      format: agent-profile
+      title: Utility agent profile
+      description: Optional profile used for this plugin's LLM calls
 ```
 
-The picker displays configured built-in and custom agent names but stores the
-selected agent's stable ID. Omit `utility_agent` from `required` only when the
-plugin supports operating without LLM delegation; optional selectors include a
-**Not set** choice. The plugin needs no provider API key because it delegates to
-a kandev-configured agent. A missing, deleted, or disabled selection returns
-gRPC `FailedPrecondition`, so handle that as "ask the operator to configure
-one" rather than a transient failure. This is the LLM step behind, e.g., a
-"summarize yesterday" plugin: read the conversation with `host.Messages()`,
-then summarize it with `host.InvokeUtilityAgent(...)`.
+The picker displays eligible global agent profiles and stores the selected
+profile's stable ID. The field is ordinary plugin configuration; read it with
+`host.GetConfig` and pass the value explicitly. A missing, deleted, disabled,
+CLI-passthrough, workspace-scoped, or non-inference explicit profile returns
+gRPC `FailedPrecondition`. The host does not switch to the default after an
+invalid explicit value. A revised SDK calls a separate wire method for the
+override, so an older host returns `Unimplemented` instead of silently
+ignoring the selection. Existing prompt-only wire callers continue to use the
+platform default on a revised host. The plugin needs no provider API key
+because it delegates to a kandev-configured profile. This is the LLM step
+behind, for example, a "summarize yesterday" plugin: read the conversation
+with `host.Messages()`, then summarize it with
+`host.InvokeUtilityAgent(ctx, prompt, options...)`.
 
 **Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
 checked against your manifest's `capabilities` before the handler runs:
 `GetState`/`SetState`/`DeleteState`/`ListState` require
 `capabilities.state: true`; `GetSecret`/`SetSecret`/`DeleteSecret`/
 `RevealSecret` require `capabilities.secrets: true`; `InvokeUtilityAgent`
-requires `capabilities.agent_invoke: true`; each data-reader accessor requires
+requires `capabilities.agent_invoke: true`; managed conversation operations
+require `capabilities.agent_conversation: true`; each data-reader accessor requires
 its resource in `capabilities.api_read` (e.g. `tasks`, `sessions`, `messages`,
 `interactions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`).
 Calling one without the declared capability returns gRPC `PermissionDenied`
@@ -915,7 +1055,16 @@ session or resumes/starts it when appropriate, returning `queued`, `sent`, or
 Task writes use Kandev's first-party service layer, so normal task events and
 browser updates occur. Kandev stamps the source as `plugin:<id>` and reserves
 the `metadata.source` key; plugin metadata is stored under that source. `.Update`
-writes only title, description, and state: it rejects a workflow step change.
+writes title, description, state, and priority: it rejects a workflow step
+change. Priority accepts only `critical`, `high`, `medium`, or `low`; omitted
+priority on `.Create` defaults to `medium`.
+
+The read-side `Task.Labels` field remains available only as deprecated API v1
+compatibility for plugins built against Kandev v0.93.0. New plugins should keep
+provider-specific labels or tracker annotations in plugin-owned task state and
+render them through task UI slots. `.Create` and `.Update` do not write Kandev
+task labels.
+
 Moving a task between workflow steps goes through `.Move` instead, which routes
 through the same path the board's own drag-and-drop move uses (validation, WIP
 admission, `task.moved` publication, auto-start gates, queue reconciliation),
@@ -1034,7 +1183,7 @@ Kandev invokes the active manifest owner from the backend. It supplies a verifie
 workspace context and a body with only the submitted URL:
 
 ```json
-{"url":"https://code.example.com/owner/repository"}
+{ "url": "https://code.example.com/owner/repository" }
 ```
 
 The preferred response nests the complete descriptor under `repository`:
@@ -1252,7 +1401,8 @@ interface PluginRegistry {
     registration: IntegrationSettingsRegistration,
   ): void;
   // Named slot injection. Initial slots: "task-sidebar", "settings-nav",
-  // "main-nav-footer", "chat-input-actions", "chat-top-bar", "main-top-bar",
+  // "main-nav-footer", "chat-input-actions", "chat-submit-decoration",
+  // "chat-top-bar", "main-top-bar",
   // "app-status-bar-left", "app-status-bar-right", and "plugin-settings"
   // (see "Named slots" below).
   registerComponent(
@@ -1619,6 +1769,7 @@ plugins at once. Available slots:
 | `chat-input-actions`        | Task or Quick Chat composer toolbar                                                                    | `PluginComposerSlotProps`                                         |
 | `task-create-input-actions` | Task creation composer toolbar                                                                         | `PluginComposerSlotProps`                                         |
 | `new-session-input-actions` | New-session composer toolbar                                                                           | `PluginComposerSlotProps`                                         |
+| `chat-submit-decoration`    | Layer over the chat composer's send button, for adornments that belong on the send affordance itself   | `ChatSubmitDecorationSlotProps`                                   |
 | `chat-top-bar`              | Session top bar, beside the CPU/DB metrics and the document/editor/debug controls                      | `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }` |
 | `main-top-bar`              | Default app top bar (Home / Kanban / Tasks), beside the CPU/DB metrics and the view/display controls   | `{ workspaceId, workspaceLabel, currentPage }`                    |
 | `app-status-bar-left`       | Default-left item in the global status surface                                                         | `AppStatusBarSlotProps`                                           |
@@ -1750,6 +1901,56 @@ metric chips.
 ```js
 // inside initialize(registry, host):
 registry.registerComponent("chat-top-bar", makeTopBarStatus(host));
+```
+
+### Decorating the send button
+
+`chat-input-actions` contributes a _sibling_ icon button. When the adornment
+belongs on the send affordance itself -- a progress ring, a state dot -- register
+a `chat-submit-decoration` component instead. The host layers it over the send
+button's own box:
+
+```ts
+import type { ChatSubmitDecorationSlotProps } from "@kandev/plugin-sdk";
+```
+
+```ts
+type ChatSubmitDecorationSlotProps = {
+  taskId: string | null; // null for task-less quick chat
+  taskTitle?: string;
+  activeSessionId: string | null;
+  sessionIds: string[]; // every kandev session id on the task
+  presentation: "desktop" | "mobile";
+  isSending: boolean; // the composer is dispatching this message
+  isAgentBusy: boolean; // agent mid-turn; the next send queues
+  disabled: boolean; // the send button is disabled
+  planModeEnabled: boolean; // the button sends a plan request
+};
+```
+
+Two rules the host enforces for you:
+
+- **The layer is `pointer-events-none`**, so a decoration can never swallow a
+  click meant for send. For hover or focus disclosure, keep the decoration
+  inert and observe the host send button from an effect; remove those listeners
+  when the component unmounts. Your component renders inside the decoration
+  layer, not beside the button, so its immediate `parentElement` is not the
+  positioned button wrapper. Use `pointer-events-auto` only as a last resort
+  for a separate hit target that does not obstruct send. If the plugin needs
+  its own action, prefer a sibling `chat-input-actions` contribution.
+- **The layer is positioned to the button's box**, so size against `inset-0`
+  rather than measuring the DOM. Stay inside that box: the desktop toolbar takes
+  `overflow-x-auto` when it collapses at narrow widths, which makes CSS compute
+  the vertical axis to `auto` as well, so anything drawn on a negative inset is
+  clipped there. Put a ring on the button's rim, not around it.
+
+The decoration renders only while the send button does. Mid-turn with an empty
+composer the button is replaced by Cancel, and the decoration goes with it.
+Use `isSending` to stand down while the host's own spinner owns the button.
+
+```js
+// inside initialize(registry, host):
+registry.registerComponent("chat-submit-decoration", makeCacheRing(host));
 ```
 
 ### Default app top bar

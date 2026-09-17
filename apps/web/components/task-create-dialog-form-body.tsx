@@ -16,6 +16,8 @@ import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import { RUNNER_INELIGIBLE_REASON_KEYS } from "@/components/task-create-dialog-helpers";
 import { useTranslation } from "react-i18next";
 
 type SelectorOption = {
@@ -63,6 +65,10 @@ type CreateEditSelectorsProps = {
   selectedAgentProfileName: string | null;
   effectiveWorkflowName: string | null;
   executorProfileName: string | null;
+  /** Gates the executor-profile column independently of isTaskStarted. */
+  runnerEditable: boolean;
+  /** Presented instead of the selector when runnerEditable is false. */
+  runnerIneligibleReason: string;
 };
 
 type AgentColumnProps = Pick<
@@ -263,36 +269,47 @@ function AgentColumn({
   );
 }
 
+function RunnerIneligibleNote({ reason }: { reason: string }) {
+  const { t } = useTranslation();
+  const key = RUNNER_INELIGIBLE_REASON_KEYS[reason] ?? "task:runnerReasonEvaluationUnavailable";
+  return (
+    <div
+      className="flex h-auto min-h-7 items-center rounded-sm border border-input px-3 py-1.5 text-xs text-muted-foreground"
+      data-testid="runner-ineligible-note"
+    >
+      <span>{t(key)}</span>
+    </div>
+  );
+}
+
 export const CreateEditSelectors = memo(function CreateEditSelectors(
   props: CreateEditSelectorsProps,
 ) {
   const { t } = useTranslation();
-  if (props.isTaskStarted) return null;
-  const {
-    executorProfileOptions,
-    executorProfileId,
-    onExecutorProfileChange,
-    executorsLoading,
-    ExecutorProfileSelectorComponent,
-  } = props;
+  const showAgentColumn = !props.isTaskStarted;
+  const { executorProfileOptions, executorProfileId, onExecutorProfileChange, executorsLoading } =
+    props;
+  const { ExecutorProfileSelectorComponent, runnerEditable, runnerIneligibleReason } = props;
 
   // Branch + repo selection (and the FreshBranchToggle, which is per-task
   // branch strategy) live in the chip row above the description; this row
   // carries only agent and executor profile selectors.
   return (
     <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="min-w-0">{showAgentColumn && <AgentColumn {...props} />}</div>
       <div className="min-w-0">
-        <AgentColumn {...props} />
-      </div>
-      <div className="min-w-0">
-        <ExecutorProfileSelectorComponent
-          options={executorProfileOptions}
-          value={executorProfileId}
-          onValueChange={onExecutorProfileChange}
-          placeholder={executorsLoading ? t("task:loadingProfiles") : t("task:selectProfile")}
-          disabled={executorsLoading}
-          popoverPortal
-        />
+        {runnerEditable ? (
+          <ExecutorProfileSelectorComponent
+            options={executorProfileOptions}
+            value={executorProfileId}
+            onValueChange={onExecutorProfileChange}
+            placeholder={executorsLoading ? t("task:loadingProfiles") : t("task:selectProfile")}
+            disabled={executorsLoading}
+            popoverPortal
+          />
+        ) : (
+          <RunnerIneligibleNote reason={runnerIneligibleReason} />
+        )}
       </div>
     </div>
   );
@@ -384,6 +401,7 @@ type WorkflowSectionProps = {
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
+  launchPreview?: TaskCreateLaunchPreview | null;
   /**
    * When true the picker is hidden entirely. Used by feature wrappers
    * (Improve Kandev) where the workflow is enforced and the user must not be
@@ -401,6 +419,7 @@ function renderWorkflowSection({
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
+  launchPreview,
   workflowLocked,
 }: WorkflowSectionProps) {
   // Hidden workflows (e.g. improve-kandev) are excluded from the picker; they
@@ -418,6 +437,7 @@ function renderWorkflowSection({
         selectedWorkflowId={effectiveWorkflowId ?? null}
         onWorkflowChange={onWorkflowChange}
         agentProfiles={agentProfiles}
+        launchPreview={launchPreview}
       />
     );
   }
@@ -470,6 +490,7 @@ export const WorkflowSection = memo(function WorkflowSection(workflowProps: Work
 
 export type DialogPromptSectionProps = {
   isSessionMode: boolean;
+  promptReferencesEnabled?: boolean;
   isTaskStarted: boolean;
   initialDescription: string;
   fs: DialogFormState;
@@ -485,6 +506,7 @@ export type DialogPromptSectionProps = {
   descriptionPlaceholder?: string;
   /** Optional slot rendered above the description textarea (e.g. a tab toggle). */
   aboveDescriptionSlot?: React.ReactNode;
+  launchPreview?: TaskCreateLaunchPreview | null;
   /**
    * Whether the description textarea should grab focus on mount. Defaults to
    * `!isTaskStarted`. Callers that render a task-name input above the
@@ -510,6 +532,7 @@ function importBindings<T>(
 
 export function DialogPromptSection({
   isSessionMode,
+  promptReferencesEnabled = false,
   isTaskStarted,
   initialDescription,
   fs,
@@ -522,6 +545,7 @@ export function DialogPromptSection({
   extraFormSlot,
   descriptionPlaceholder,
   aboveDescriptionSlot,
+  launchPreview,
   autoFocusDescription,
   onComposerSubmit,
 }: DialogPromptSectionProps) {
@@ -534,6 +558,7 @@ export function DialogPromptSection({
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
+        promptReferencesEnabled={promptReferencesEnabled}
         workspaceId={workspaceId}
         autoFocus={shouldAutoFocus}
         initialDescription={initialDescription}
@@ -546,6 +571,7 @@ export function DialogPromptSection({
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
+        launchPreview={launchPreview}
         jiraImport={importBindings(importsEnabled, ws, onJiraImport)}
         linearImport={importBindings(importsEnabled, ws, onLinearImport)}
         onComposerSubmit={onComposerSubmit}

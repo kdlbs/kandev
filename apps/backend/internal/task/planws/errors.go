@@ -43,6 +43,30 @@ var (
 	revisionIDRequired   = mapping{service.ErrRevisionIDRequired, ws.ErrorCodeValidation, "revision_id is required"}
 	revisionNotFound     = mapping{service.ErrRevisionNotFound, ws.ErrorCodeNotFound, "Revision not found"}
 	revisionTaskMismatch = mapping{service.ErrRevisionTaskMismatch, ws.ErrorCodeValidation, "Revision does not belong to task"}
+	planIDRequired       = mapping{service.ErrPlanIDRequired, ws.ErrorCodeValidation, "plan_id is required"}
+	commentIDRequired    = mapping{service.ErrPlanCommentIDRequired, ws.ErrorCodeValidation, "comment id is required"}
+	commentIDInvalid     = mapping{service.ErrPlanCommentIDInvalid, ws.ErrorCodeValidation, "comment id must be a UUID"}
+	commentBodyRequired  = mapping{service.ErrPlanCommentBodyRequired, ws.ErrorCodeValidation, "comment body is required"}
+	commentBodyTooLarge  = mapping{service.ErrPlanCommentBodyTooLarge, ws.ErrorCodeValidation, "plan comment body is too large"}
+	commentTextTooLarge  = mapping{service.ErrPlanCommentTextTooLarge, ws.ErrorCodeValidation, "plan comment selected text is too large"}
+	commentLimitExceeded = mapping{service.ErrPlanCommentLimitExceeded, ws.ErrorCodeValidation, "task plan comment collection is too large"}
+	commentVersionNeeded = mapping{service.ErrPlanCommentVersionNeeded, ws.ErrorCodeValidation, "expected_version must be positive"}
+	commentAnchorInvalid = mapping{service.ErrPlanCommentAnchorInvalid, ws.ErrorCodeValidation, "plan comment anchor is invalid"}
+	planCommentsChanged  = mapping{service.ErrTaskPlanCommentsChanged, ws.ErrorCodePlanCommentsChanged, "Task plan comments changed"}
+	contentRequired      = mapping{service.ErrContentRequired, ws.ErrorCodeValidation, "content is required"}
+	// appendFragmentWhitespaceOnly maps the whitespace-only fragment error.
+	appendFragmentWhitespaceOnly = mapping{
+		service.ErrPlanAppendFragmentWhitespaceOnly, ws.ErrorCodeValidation,
+		"append fragment must contain a non-whitespace character",
+	}
+	// planContentUnreadable reports a stored-plan read failure as a distinct
+	// code from planNotFound so the caller cannot mistake one for the other.
+	// The message is fixed rather than derived from err.Error(), so it never
+	// leaks the underlying storage failure.
+	planContentUnreadable = mapping{
+		service.ErrPlanContentReadFailed, ws.ErrorCodeInternalError,
+		"Could not read the current plan content; the append was not applied",
+	}
 
 	// allMappings is the vocabulary reachable by an action that can surface any
 	// plan or revision failure.
@@ -55,6 +79,9 @@ var (
 		revisionIDRequired,
 		revisionNotFound,
 		revisionTaskMismatch,
+		contentRequired,
+		appendFragmentWhitespaceOnly,
+		planContentUnreadable,
 	}
 )
 
@@ -93,6 +120,32 @@ func contentTooLargeResponse(msg *ws.Message, err error) (*ws.Message, bool, err
 	return out, true, mapErr
 }
 
+// PlanCommentError maps task-plan comment validation, lookup, and conflict failures.
+// A conflict carries the current snapshot so the client can reconcile immediately.
+func PlanCommentError(msg *ws.Message, err error, snapshot interface{}) (*ws.Message, error) {
+	if errors.Is(err, service.ErrTaskPlanCommentsChanged) {
+		details := map[string]interface{}{}
+		if snapshot != nil {
+			details["snapshot"] = snapshot
+		}
+		return ws.NewError(msg.ID, msg.Action, planCommentsChanged.code, planCommentsChanged.message, details)
+	}
+	return errorResponse(msg, err, "Failed to update task plan comments", []mapping{
+		taskIDRequired,
+		planIDRequired,
+		commentIDRequired,
+		commentIDInvalid,
+		commentBodyRequired,
+		commentBodyTooLarge,
+		commentTextTooLarge,
+		commentLimitExceeded,
+		commentVersionNeeded,
+		commentAnchorInvalid,
+		taskNotFound,
+		planNotFound,
+	})
+}
+
 // CreateError maps a PlanService.CreatePlan failure.
 //
 // ErrTaskPlanNotFound is deliberately absent: CreatePlan only returns it when
@@ -119,7 +172,10 @@ func UpdateError(msg *ws.Message, err error) (*ws.Message, error) {
 	if out, matched, mapErr := contentTooLargeResponse(msg, err); matched {
 		return out, mapErr
 	}
-	return errorResponse(msg, err, "Failed to update task plan: "+err.Error(), []mapping{taskIDRequired, taskNotFound, planNotFound})
+	return errorResponse(msg, err, "Failed to update task plan: "+err.Error(), []mapping{
+		taskIDRequired, taskNotFound, planNotFound,
+		contentRequired, appendFragmentWhitespaceOnly, planContentUnreadable,
+	})
 }
 
 // DeleteError maps a PlanService.DeletePlan failure.

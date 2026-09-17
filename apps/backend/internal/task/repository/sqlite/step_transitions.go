@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -137,6 +138,48 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	// trail; the ledger table itself is that audit trail.
 	steptelemetry.RecordLedgerRow(r.log, attribution.Trigger)
 	return id, nil
+}
+
+// GetLatestTaskStepTransitionID returns the immutable ledger identity of the
+// task's latest workflow-step entry. Loaded task projections intentionally do
+// not carry the transient transition field, so retryable workflow routing uses
+// this read when it needs to reconstruct the current entry after a restart.
+func (r *Repository) GetLatestTaskStepTransitionID(ctx context.Context, taskID string) (int64, error) {
+	var id int64
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id
+		FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), taskID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// CountStepEntries returns the number of committed task_step_transitions
+// rows whose to_workflow_step_id is stepID for taskID — the recorded entry
+// count REQ-TWS-001 floors at 1 to derive the step-entry number. Recorded
+// entries before the ledger's first row (2026-08-16) do not exist and cannot
+// be counted, so the result is a lower bound on the true entry count for a
+// task whose history predates the ledger. An empty taskID or stepID returns
+// (0, nil) without issuing a query: the ledger normalizes "" to NULL, so a
+// query would only ever be able to return 0.
+func (r *Repository) CountStepEntries(ctx context.Context, taskID, stepID string) (int, error) {
+	if taskID == "" || stepID == "" {
+		return 0, nil
+	}
+	const query = `SELECT COUNT(*) FROM task_step_transitions WHERE task_id = ? AND to_workflow_step_id = ?`
+	var count int
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), taskID, stepID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count step entries: %w", err)
+	}
+	return count, nil
 }
 
 // formatEntryID converts recordStepTransition's ledger identifier into the

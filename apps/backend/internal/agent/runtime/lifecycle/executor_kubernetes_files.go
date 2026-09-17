@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	"github.com/kandev/kandev/internal/agent/remoteauth"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 )
 
 var kubernetesSafePathComponent = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -194,7 +195,7 @@ func materializeKubernetesSkills(
 		if manifest.ProjectSkillDir != "" {
 			return fmt.Errorf("manifest project skill directory is unsafe")
 		}
-		projectDir = ".agents/skills"
+		projectDir = skill.DefaultProjectSkillDir
 	}
 	for _, item := range manifest.Skills {
 		if !kubernetesSafeComponent(item.Slug) {

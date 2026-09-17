@@ -4,7 +4,7 @@ import type { SidebarTaskRowTrailing } from "@/lib/state/slices/ui/sidebar-task-
 import { formatRelativeTime, formatSidebarElapsedTime } from "@/lib/i18n/formats";
 import { cn } from "@/lib/utils";
 
-type DiffStats = { additions: number; deletions: number };
+export type DiffStats = { additions: number; deletions: number };
 
 function hasDiffStats(diffStats?: DiffStats): diffStats is DiffStats {
   return Boolean(diffStats?.additions || diffStats?.deletions);

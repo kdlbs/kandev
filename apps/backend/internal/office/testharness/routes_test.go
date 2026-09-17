@@ -66,7 +66,7 @@ func seedTask(t *testing.T, db *sqlx.DB, taskID string) {
 func newRouter(t *testing.T, repo *sqliterepo.Repository, eb bus.EventBus) *gin.Engine {
 	t.Helper()
 	r := gin.New()
-	RegisterRoutes(r, repo, nil, nil, nil, eb, logger.Default())
+	RegisterRoutes(r, repo, nil, nil, nil, eb, logger.Default(), nil, nil)
 	return r
 }
 
@@ -121,7 +121,7 @@ func TestSeedCostEventPreservesOutputTokenPresence(t *testing.T) {
 		t.Fatalf("new office repo: %v", err)
 	}
 	router := gin.New()
-	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default())
+	RegisterRoutes(router, taskRepo, officeRepo, nil, nil, nil, logger.Default(), nil, nil)
 
 	post := func(body map[string]any) {
 		t.Helper()
@@ -179,6 +179,24 @@ func TestSeedCostEventPreservesOutputTokenPresence(t *testing.T) {
 		if version == nil || *version != officemodels.CostContractVersion {
 			t.Errorf("cost_contract_version for %s = %v, want %d", taskID, version, officemodels.CostContractVersion)
 		}
+	}
+}
+
+func TestBackgroundProbeRouteNotMountedWithoutOrchestrator(t *testing.T) {
+	// newRouter always passes a nil orchestratorSvc — this pins that
+	// RegisterRoutes only mounts POST /background-probe when one is supplied
+	// (task-09's e2e feasibility depends on the real wiring test, run via
+	// helpers.go with the real *orchestrator.Service; this test only pins the
+	// nil-guard so the route never panics on a nil *orchestrator.Service).
+	repo, _ := newTestRepo(t)
+	r := newRouter(t, repo, nil)
+	w := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"session_id":"s1","results":["live"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/background-probe", body)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when no orchestrator service is supplied, got %d", w.Code)
 	}
 }
 
@@ -331,6 +349,51 @@ func TestSeedTaskSessionUsesRequestedSessionID(t *testing.T) {
 	}
 	if session.TaskID != taskID {
 		t.Fatalf("task_id = %q, want %q", session.TaskID, taskID)
+	}
+}
+
+func TestSeedTaskSessionUpdateAppliesErrorMessage(t *testing.T) {
+	repo, sqlxDB := newTestRepo(t)
+	taskID := uuid.New().String()
+	sessionID := uuid.New().String()
+	seedTask(t, sqlxDB, taskID)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"state":      "RUNNING",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	completedAt := time.Now().UTC().Format(time.RFC3339)
+	updateBody := mustJSON(t, map[string]interface{}{
+		"task_id":       taskID,
+		"session_id":    sessionID,
+		"state":         "FAILED",
+		"completed_at":  completedAt,
+		"error_message": "boom",
+	})
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("get updated session: %v", err)
+	}
+	if session.ErrorMessage != "boom" {
+		t.Fatalf("error_message = %q, want %q", session.ErrorMessage, "boom")
 	}
 }
 

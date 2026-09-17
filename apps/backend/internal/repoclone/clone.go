@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -35,6 +36,8 @@ const (
 	managedWorkspacesDir         = "workspaces"
 	providerCloneDir             = "_providers"
 	maxGitDiagnosticBytes        = 4096
+	gitFetchTimeout              = 30 * time.Second
+	gitCloneTimeout              = 5 * time.Minute
 )
 
 var (
@@ -224,8 +227,13 @@ func (c *Cloner) WorkspaceProviderRepoPath(
 }
 
 // WorkspaceProviderRepositoryPath isolates managed clones using the provider's
-// opaque connection scope and immutable repository ID. Legacy callers that do
-// not yet carry both fields retain the origin/owner/name layout.
+// opaque connection scope and immutable repository ID. A non-empty scope
+// selects this isolated layout and requires a paired repository ID (the path
+// segment needs both to stay unique); a bare repository ID with no scope is
+// the normal shape for every built-in provider (GitHub, GitLab, Azure
+// DevOps) — none of them resolve a provider connection scope — so it falls
+// through to the legacy origin/owner/name layout below, same as when both
+// are empty.
 func (c *Cloner) WorkspaceProviderRepositoryPath(
 	workspaceID, provider, providerHost, providerScope, providerRepositoryID, owner, name string,
 ) (string, error) {
@@ -242,9 +250,9 @@ func (c *Cloner) WorkspaceProviderRepositoryPath(
 			return "", err
 		}
 	}
-	if providerScope != "" || providerRepositoryID != "" {
-		if strings.TrimSpace(providerScope) == "" || strings.TrimSpace(providerRepositoryID) == "" {
-			return "", errors.New("provider scope and repository ID must be supplied together")
+	if providerScope != "" {
+		if strings.TrimSpace(providerRepositoryID) == "" {
+			return "", errors.New("provider scope requires a paired repository ID")
 		}
 		return filepath.Join(
 			basePath, managedWorkspacesDir, workspaceID, provider, "_scopes",
@@ -508,13 +516,9 @@ func (c *Cloner) refreshWorkspaceRepository(
 		if refspec != "" {
 			args = append(args, refspec)
 		}
-		cmd := subproc.NewGitCommand(ctx, args...)
-		cleanup, err := configureGitCommand(cmd, auth)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-		if out, runErr := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); runErr != nil {
+		if out, runErr := c.runConfiguredGitCombined(ctx, gitFetchTimeout, args,
+			func(cmd *exec.Cmd) (func(), error) { return configureGitCommand(cmd, auth) },
+		); runErr != nil {
 			return fmt.Errorf("refresh scoped workspace repository: %s: %w",
 				redactCloneOutput(string(out), authToken(auth)), runErr)
 		}
@@ -524,7 +528,7 @@ func (c *Cloner) refreshWorkspaceRepository(
 		return err
 	}
 	if prNumber > 0 {
-		prRefspec := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", prNumber, prNumber)
+		prRefspec := fmt.Sprintf("pull/%d/head:refs/kandev/pull/%d/head", prNumber, prNumber)
 		if err := runFetch(prRefspec); err != nil {
 			return fmt.Errorf("refresh scoped workspace pull request: %w", err)
 		}
@@ -789,16 +793,10 @@ func gitCredentialOrigin(cloneURL string) (string, error) {
 
 func (c *Cloner) fetch(ctx context.Context, repoPath string, auth *cloneAuth) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	cmd := subproc.NewGitCommand(
-		ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
-	)
-	cleanup, err := configureGitCommand(cmd, auth)
-	if err != nil {
-		c.logger.Warn("configure Git fetch credentials failed", zap.String("path", repoPath), zap.Error(err))
-		return
-	}
-	defer cleanup()
-	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
+	args := []string{"-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags}
+	if out, err := c.runConfiguredGitCombined(ctx, gitFetchTimeout, args,
+		func(cmd *exec.Cmd) (func(), error) { return configureGitCommand(cmd, auth) },
+	); err != nil {
 		c.logger.Warn("git fetch failed (non-fatal)",
 			zap.String("path", repoPath), zap.String("output", redactCloneOutput(string(out), authToken(auth))), zap.Error(err))
 	}
@@ -814,13 +812,9 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 		args = append(args, "--filter=blob:none")
 	}
 	args = append(args, gitNoTags, "--", cloneURL, targetPath)
-	cmd := subproc.NewGitCommand(ctx, args...)
-	cleanup, err := configureGitCommand(cmd, auth)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
+	if out, err := c.runConfiguredGitCombined(ctx, gitCloneTimeout, args,
+		func(cmd *exec.Cmd) (func(), error) { return configureGitCommand(cmd, auth) },
+	); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", redactCloneOutput(string(out), authToken(auth)), err)
 	}
 	return nil
@@ -828,11 +822,13 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 
 func (c *Cloner) fetchWithHTTPHeader(ctx context.Context, repoPath, authURL, header string) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	cmd := subproc.NewGitCommand(
-		ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
-	)
-	configureHTTPHeaderCommand(cmd, authURL, header)
-	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
+	args := []string{"-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags}
+	if out, err := c.runConfiguredGitCombined(ctx, gitFetchTimeout, args,
+		func(cmd *exec.Cmd) (func(), error) {
+			configureHTTPHeaderCommand(cmd, authURL, header)
+			return func() {}, nil
+		},
+	); err != nil {
 		c.logger.Warn("authenticated git fetch failed (non-fatal)",
 			zap.String("path", repoPath), zap.String("output", string(out)), zap.Error(err))
 	}
@@ -843,14 +839,47 @@ func (c *Cloner) cloneWithHTTPHeader(ctx context.Context, cloneURL, targetPath, 
 		return fmt.Errorf("create parent directory: %w", err)
 	}
 	c.logger.Info("cloning authenticated repository", zap.String("url", redactCloneURL(cloneURL)), zap.String("target", targetPath))
-	cmd := subproc.NewGitCommand(
-		ctx, "clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath,
-	)
-	configureHTTPHeaderCommand(cmd, cloneURL, header)
-	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
+	args := []string{"clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath}
+	if out, err := c.runConfiguredGitCombined(ctx, gitCloneTimeout, args,
+		func(cmd *exec.Cmd) (func(), error) {
+			configureHTTPHeaderCommand(cmd, cloneURL, header)
+			return func() {}, nil
+		},
+	); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
 	return nil
+}
+
+func (c *Cloner) runConfiguredGitCombined(
+	ctx context.Context,
+	execTimeout time.Duration,
+	args []string,
+	configure func(*exec.Cmd) (func(), error),
+) ([]byte, error) {
+	template := subproc.NewGitCommand(ctx, args...)
+	cleanup, err := configure(template)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		execTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = template.Dir
+			cmd.Env = append([]string(nil), template.Env...)
+			cmd.ExtraFiles = append([]*os.File(nil), template.ExtraFiles...)
+			return cmd
+		},
+	)
+	if runErr == nil {
+		runErr = execCtxErr
+	}
+	return output, runErr
 }
 
 func configureGitCommand(cmd *exec.Cmd, auth *cloneAuth) (func(), error) {

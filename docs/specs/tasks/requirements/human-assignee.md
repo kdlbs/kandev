@@ -61,6 +61,9 @@ that I can continue it without waiting for them to hand it off.
   including when the assignee is cleared.
 - **AC-TASKS-HUMAN-ASSIGNEE-001.8:** The system shall treat the human assignee
   as advisory, granting and withholding no permission on the basis of it.
+- **AC-TASKS-HUMAN-ASSIGNEE-001.9:** When authentication is not enabled, the
+  web interface shall hide all human-assignee controls and indicators. It shall
+  not clear a stored assignment.
 
 ### REQ-TASKS-HUMAN-ASSIGNEE-002: Actor attribution
 

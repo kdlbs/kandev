@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -99,6 +100,96 @@ func TestGetTaskEnvironmentMissingReturnsSentinel(t *testing.T) {
 
 	if !errors.Is(err, ErrTaskEnvironmentNotFound) {
 		t.Fatalf("GetTaskEnvironment error = %v, want ErrTaskEnvironmentNotFound", err)
+	}
+}
+
+func TestSetTaskEnvironmentTaskDirNameIfEmptyClaimsOnce(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	workspaceID := "workspace-task-environment-task-dir"
+	taskID := "task-environment-task-dir"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "Task"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-task-dir",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		Status:       models.TaskEnvironmentStatusCreating,
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	claimed, err := repo.SetTaskEnvironmentTaskDirNameIfEmpty(ctx, env.ID, "task-root_abc")
+	if err != nil {
+		t.Fatalf("SetTaskEnvironmentTaskDirNameIfEmpty: %v", err)
+	}
+	if !claimed {
+		t.Fatal("first task directory claim = false, want true")
+	}
+	claimed, err = repo.SetTaskEnvironmentTaskDirNameIfEmpty(ctx, env.ID, "other-root_def")
+	if err != nil {
+		t.Fatalf("second SetTaskEnvironmentTaskDirNameIfEmpty: %v", err)
+	}
+	if claimed {
+		t.Fatal("second task directory claim = true, want false")
+	}
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.TaskDirName != "task-root_abc" {
+		t.Fatalf("persisted TaskDirName = %q, want task-root_abc", persisted.TaskDirName)
+	}
+}
+
+func TestUpdateTaskEnvironmentDoesNotClearTaskDirNameFromStaleWriter(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	workspaceID := "workspace-task-environment-stale-task-dir"
+	taskID := "task-environment-stale-task-dir"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "Task"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	env := &models.TaskEnvironment{
+		ID:           "env-stale-task-dir",
+		TaskID:       taskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+		TaskDirName:  "canonical-root_abc",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	stale := *env
+	stale.TaskDirName = ""
+	stale.WorkspacePath = "/workspace/canonical-root_abc/repo"
+	if err := repo.UpdateTaskEnvironment(ctx, &stale); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if persisted.TaskDirName != env.TaskDirName {
+		t.Fatalf("stale update cleared TaskDirName = %q, want %q", persisted.TaskDirName, env.TaskDirName)
+	}
+
+	later := *persisted
+	later.TaskDirName = "later-root_def"
+	if err := repo.UpdateTaskEnvironment(ctx, &later); err != nil {
+		t.Fatalf("UpdateTaskEnvironment with later name: %v", err)
+	}
+	persisted, err = repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after later update: %v", err)
+	}
+	if persisted.TaskDirName != env.TaskDirName {
+		t.Fatalf("later update replaced TaskDirName = %q, want %q", persisted.TaskDirName, env.TaskDirName)
 	}
 }
 
@@ -243,6 +334,7 @@ func TestFinalizeTaskEnvironmentMaterializationPublishesInventoryAtomically(t *t
 		ExecutorType:             string(models.ExecutorTypeWorktree),
 		Status:                   models.TaskEnvironmentStatusCreating,
 		MaterializationSessionID: "session-materializer",
+		TaskDirName:              "claimed-root_abc",
 	}
 	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
@@ -250,6 +342,7 @@ func TestFinalizeTaskEnvironmentMaterializationPublishesInventoryAtomically(t *t
 	env.Status = models.TaskEnvironmentStatusReady
 	env.MaterializationSessionID = ""
 	env.WorkspacePath = "/tasks/task-finalize/repo"
+	env.TaskDirName = "stale-materializer-root_def"
 	if err := repo.FinalizeTaskEnvironmentMaterialization(ctx, env, []*models.TaskEnvironmentRepo{{
 		RepositoryID: "repository-1", WorktreeID: "worktree-1", WorktreePath: env.WorkspacePath, WorktreeBranch: "feature/finalize",
 	}}, "session-materializer"); err != nil {
@@ -262,6 +355,9 @@ func TestFinalizeTaskEnvironmentMaterializationPublishesInventoryAtomically(t *t
 	}
 	if persisted.Status != models.TaskEnvironmentStatusReady || persisted.MaterializationSessionID != "" {
 		t.Fatalf("environment = status %q owner %q, want ready with no owner", persisted.Status, persisted.MaterializationSessionID)
+	}
+	if persisted.TaskDirName != "claimed-root_abc" {
+		t.Fatalf("finalize replaced claimed TaskDirName = %q, want claimed-root_abc", persisted.TaskDirName)
 	}
 	if len(persisted.Repos) != 1 || persisted.Repos[0].WorktreeID != "worktree-1" {
 		t.Fatalf("canonical inventory = %#v, want one finalized repository", persisted.Repos)
@@ -313,7 +409,7 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 	}
 	env := &models.TaskEnvironment{
 		ID: "env-transition", TaskID: "task-transition", ExecutorType: string(models.ExecutorTypeLocal),
-		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/workspace/old",
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/workspace/old", TaskDirName: "claimed-transition-root",
 	}
 	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
@@ -329,8 +425,10 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 
 	env.ExecutorType = string(models.ExecutorTypeWorktree)
 	env.WorkspacePath = "/workspace/new"
+	env.TaskDirName = "stale-transition-root"
 	if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
 		RepositoryID: "repo-keep", BranchSlug: "main", WorktreeID: "wt-new", WorktreePath: "/workspace/new/repo",
+		WorktreeBranchOwner: "kandev", WorktreeIntegrationRef: "develop",
 	}}, true); err != nil {
 		t.Fatalf("PersistTaskEnvironmentTransition: %v", err)
 	}
@@ -342,12 +440,15 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 	if persisted.ExecutorType != string(models.ExecutorTypeWorktree) || persisted.WorkspacePath != "/workspace/new" {
 		t.Fatalf("environment = %#v, want rebound executor and path", persisted)
 	}
+	if persisted.TaskDirName != "claimed-transition-root" {
+		t.Fatalf("transition replaced claimed TaskDirName = %q, want claimed-transition-root", persisted.TaskDirName)
+	}
 	if len(persisted.Repos) != 2 {
 		t.Fatalf("repository inventory = %#v, want active row plus tombstone", persisted.Repos)
 	}
 	for _, row := range persisted.Repos {
-		if row.ID == "keep" && row.WorktreeID != "wt-new" {
-			t.Fatalf("kept row = %#v, want refreshed worktree", row)
+		if row.ID == "keep" && (row.WorktreeID != "wt-new" || row.WorktreeBranchOwner != "kandev" || row.WorktreeIntegrationRef != "develop") {
+			t.Fatalf("kept row = %#v, want refreshed worktree safety metadata", row)
 		}
 		if row.ID == "remove" && (row.Status != worktreeRepoStatusDeleted || row.DeletedAt == nil) {
 			t.Fatalf("removed row = %#v, want deleted tombstone", row)
@@ -368,6 +469,139 @@ func TestPersistTaskEnvironmentTransitionReconcilesInventoryAtomically(t *testin
 	for _, row := range persisted.Repos {
 		if row.ID == "remove" && (row.Status != worktreeRepoStatusActive || row.DeletedAt != nil || row.WorktreeID != "wt-recreated") {
 			t.Fatalf("recreated row = %#v, want active row", row)
+		}
+	}
+}
+
+func TestPersistTaskEnvironmentTransitionClearsCompactionMetadataOnPhysicalReplacement(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-transition-compaction")
+	archivedAt := time.Now().UTC().Add(-time.Hour)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:          "task-transition-compaction",
+		WorkspaceID: "workspace-transition-compaction",
+		Title:       "transition compaction",
+		ArchivedAt:  &archivedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET archived_at = ? WHERE id = ?`), archivedAt, "task-transition-compaction"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	env := &models.TaskEnvironment{
+		ID: "env-transition-compaction", TaskID: "task-transition-compaction", ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: "/workspace/old",
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	compactedAt := time.Now().UTC().Add(-30 * time.Minute)
+	if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+		ID: "compacted-repo", TaskEnvironmentID: env.ID, RepositoryID: "repo-compacted", BranchSlug: "main",
+		WorktreeID: "wt-old", WorktreeBranch: "feature/old", WorktreeBranchOwner: "kandev",
+		WorktreeIntegrationRef: "main", WorktreeRecoveryHeadSHA: strings.Repeat("a", 40),
+		WorktreeBranchCompactedAt: &compactedAt, Status: worktreeRepoStatusDeleted, DeletedAt: &compactedAt,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
+	}
+
+	if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
+		RepositoryID: "repo-compacted", BranchSlug: "main", WorktreeID: "wt-new",
+		WorktreePath: "/workspace/new/repo", WorktreeBranch: "feature/new",
+		WorktreeBranchOwner: "kandev", WorktreeIntegrationRef: "main",
+	}}, true); err != nil {
+		t.Fatalf("PersistTaskEnvironmentTransition: %v", err)
+	}
+
+	persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment after replacement: %v", err)
+	}
+	if len(persisted.Repos) != 1 {
+		t.Fatalf("repository inventory after replacement = %#v, want one row", persisted.Repos)
+	}
+	replaced := persisted.Repos[0]
+	if replaced.Status != worktreeRepoStatusActive || replaced.DeletedAt != nil || replaced.WorktreeID != "wt-new" {
+		t.Fatalf("replaced row = %#v, want active replacement worktree", replaced)
+	}
+	if replaced.WorktreeRecoveryHeadSHA != "" || replaced.WorktreeBranchCompactedAt != nil {
+		t.Fatalf("replaced row kept stale compaction metadata: head=%q compacted_at=%v", replaced.WorktreeRecoveryHeadSHA, replaced.WorktreeBranchCompactedAt)
+	}
+
+	if err := repo.PersistTaskEnvironmentTransition(ctx, env, nil, true); err != nil {
+		t.Fatalf("PersistTaskEnvironmentTransition tombstone replacement: %v", err)
+	}
+	var candidateCount int
+	if err := repo.db.QueryRowContext(ctx, repo.db.Rebind(`
+		SELECT COUNT(1)
+		FROM task_environment_repos ter
+		INNER JOIN task_environments te ON ter.task_environment_id = te.id
+		INNER JOIN tasks t ON te.task_id = t.id
+		WHERE ter.worktree_id = ?
+		  AND t.archived_at IS NOT NULL
+		  AND ter.status = ?
+		  AND ter.deleted_at IS NOT NULL
+		  AND ter.worktree_branch_owner = ?
+		  AND ter.worktree_branch_compacted_at IS NULL
+	`), "wt-new", worktreeRepoStatusDeleted, "kandev").Scan(&candidateCount); err != nil {
+		t.Fatalf("query archived maintenance candidate predicate: %v", err)
+	}
+	if candidateCount != 1 {
+		t.Fatalf("archived maintenance candidates for replacement = %d, want 1", candidateCount)
+	}
+}
+
+func TestPersistTaskEnvironmentTransitionUntrackedBranchResumeUpdatesSoleRowInPlace(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	workspaceID := "workspace-untracked-resume"
+	taskID := "task-untracked-resume"
+	repositoryID := "repo-untracked-resume"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "untracked-resume"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: repositoryID, WorkspaceID: workspaceID, Name: "repository"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{TaskID: taskID, RepositoryID: repositoryID, BaseBranch: "main"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	env := &models.TaskEnvironment{
+		ID:            "env-untracked-resume",
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeLocal),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/workspace/untracked-resume",
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID:           "canonical",
+			RepositoryID: repositoryID,
+			BranchSlug:   "main",
+			Position:     0,
+		}},
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	for resume := 0; resume < 2; resume++ {
+		if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
+			RepositoryID: repositoryID,
+			Position:     0,
+		}}, false); err != nil {
+			t.Fatalf("PersistTaskEnvironmentTransition resume %d: %v", resume+1, err)
+		}
+		persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+		if err != nil {
+			t.Fatalf("GetTaskEnvironment resume %d: %v", resume+1, err)
+		}
+		if len(persisted.Repos) != 1 {
+			t.Fatalf("resume %d repos = %#v, want a single canonical row, not a duplicate", resume+1, persisted.Repos)
+		}
+		row := persisted.Repos[0]
+		if row.ID != "canonical" || row.RepositoryID != repositoryID || row.BranchSlug != "main" || row.Status != worktreeRepoStatusActive || row.DeletedAt != nil {
+			t.Fatalf("resume %d row = %#v, want the active canonical row with branch preserved", resume+1, row)
 		}
 	}
 }

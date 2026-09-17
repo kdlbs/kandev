@@ -19,11 +19,14 @@ type sessionRequestCaptureAgent struct {
 	loadRequest  acpsdk.LoadSessionRequest
 	newStarted   chan struct{}
 	releaseNew   chan struct{}
+	newCalls     chan struct{}
 	closeStarted chan struct{}
 	releaseClose chan struct{}
+	closeCalls   chan struct{}
 	loadStarted  chan struct{}
 
 	mu                      sync.Mutex
+	closeStartedOnce        sync.Once
 	sessionCounter          int
 	failNewSessionOnAttempt int
 	closeRequests           []acpsdk.CloseSessionRequest
@@ -63,7 +66,10 @@ func (*sessionRequestCaptureAgent) Cancel(context.Context, acpsdk.CancelNotifica
 
 func (a *sessionRequestCaptureAgent) CloseSession(_ context.Context, req acpsdk.CloseSessionRequest) (acpsdk.CloseSessionResponse, error) {
 	if a.closeStarted != nil {
-		close(a.closeStarted)
+		a.closeStartedOnce.Do(func() { close(a.closeStarted) })
+	}
+	if a.closeCalls != nil {
+		a.closeCalls <- struct{}{}
 	}
 	if a.releaseClose != nil {
 		<-a.releaseClose
@@ -84,6 +90,9 @@ func (*sessionRequestCaptureAgent) ListSessions(context.Context, acpsdk.ListSess
 
 func (a *sessionRequestCaptureAgent) NewSession(_ context.Context, request acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
 	a.newRequest = request
+	if a.newCalls != nil {
+		a.newCalls <- struct{}{}
+	}
 	if a.newStarted != nil {
 		close(a.newStarted)
 		<-a.releaseNew
@@ -258,15 +267,21 @@ func TestResetSessionClosesSupersededSessionWhenAdvertised(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 
+	capture.closeStarted = make(chan struct{})
 	secondID, err := adapter.ResetSession(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ResetSession: %v", err)
+	}
+	select {
+	case <-capture.closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("reset cleanup did not reach session/close")
 	}
 	if secondID == firstID {
 		t.Fatalf("ResetSession returned the same session id %q twice", secondID)
 	}
 
-	closes := capture.recordedCloseRequests()
+	closes := waitForCloseRequests(t, capture, 1)
 	if len(closes) != 1 {
 		t.Fatalf("CloseSession called %d times, want 1", len(closes))
 	}
@@ -353,6 +368,7 @@ func TestResetSessionSucceedsWhenCloseSessionErrors(t *testing.T) {
 	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
 	adapter.capabilities.SessionCapabilities.Close = &acpsdk.SessionCloseCapabilities{}
 	capture.closeErr = errors.New("close failed")
+	capture.closeStarted = make(chan struct{})
 
 	firstID, err := adapter.NewSession(context.Background(), nil)
 	if err != nil {
@@ -366,7 +382,12 @@ func TestResetSessionSucceedsWhenCloseSessionErrors(t *testing.T) {
 	if newID == "" {
 		t.Fatal("ResetSession returned an empty session id")
 	}
-	closes := capture.recordedCloseRequests()
+	select {
+	case <-capture.closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("reset cleanup did not reach session/close")
+	}
+	closes := waitForCloseRequests(t, capture, 1)
 	if len(closes) != 1 {
 		t.Fatalf("CloseSession called %d times, want 1", len(closes))
 	}
@@ -399,6 +420,15 @@ func TestResetSessionSerializesConcurrentLoadDuringClose(t *testing.T) {
 		t.Fatal("reset did not reach session/close")
 	}
 
+	select {
+	case err := <-resetDone:
+		if err != nil {
+			t.Fatalf("ResetSession: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ResetSession remained blocked by superseded-session cleanup")
+	}
+
 	loadDone := make(chan error, 1)
 	go func() {
 		loadDone <- adapter.LoadSession(context.Background(), firstID, nil)
@@ -412,14 +442,6 @@ func TestResetSessionSerializesConcurrentLoadDuringClose(t *testing.T) {
 
 	close(capture.releaseClose)
 	select {
-	case err := <-resetDone:
-		if err != nil {
-			t.Fatalf("ResetSession: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("reset did not complete")
-	}
-	select {
 	case <-capture.loadStarted:
 	case <-time.After(time.Second):
 		t.Fatal("LoadSession did not reach the provider after reset cleanup")
@@ -432,6 +454,139 @@ func TestResetSessionSerializesConcurrentLoadDuringClose(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("LoadSession did not complete after reset cleanup")
 	}
+}
+
+func TestResetSessionSerializesConsecutiveResetsDuringCleanup(t *testing.T) {
+	type resetResult struct {
+		id  string
+		err error
+	}
+
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.Close = &acpsdk.SessionCloseCapabilities{}
+
+	firstID, err := adapter.NewSession(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	capture.closeCalls = make(chan struct{}, 2)
+	capture.releaseClose = make(chan struct{})
+
+	firstResetResult := make(chan resetResult, 1)
+	go func() {
+		id, resetErr := adapter.ResetSession(context.Background(), nil)
+		firstResetResult <- resetResult{id: id, err: resetErr}
+	}()
+	select {
+	case <-capture.closeCalls:
+	case <-time.After(time.Second):
+		t.Fatal("first reset did not start superseded-session cleanup")
+	}
+	select {
+	case result := <-firstResetResult:
+		if result.err != nil {
+			t.Fatalf("first ResetSession: %v", result.err)
+		}
+		if result.id == firstID {
+			t.Fatalf("first reset returned the original session id %q", result.id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first reset remained blocked by superseded-session cleanup")
+	}
+
+	capture.newCalls = make(chan struct{}, 1)
+	secondResetResult := make(chan resetResult, 1)
+	go func() {
+		id, resetErr := adapter.ResetSession(context.Background(), nil)
+		secondResetResult <- resetResult{id: id, err: resetErr}
+	}()
+	select {
+	case <-capture.newCalls:
+		t.Fatal("second reset reached session/new while first cleanup was blocked")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(capture.releaseClose)
+	var secondID string
+	select {
+	case result := <-secondResetResult:
+		if result.err != nil {
+			t.Fatalf("second ResetSession: %v", result.err)
+		}
+		secondID = result.id
+	case <-time.After(time.Second):
+		t.Fatal("second reset did not complete after first cleanup released")
+	}
+	if secondID == firstID {
+		t.Fatalf("second reset returned the original session id %q", secondID)
+	}
+
+	closes := waitForCloseRequests(t, capture, 2)
+	if len(closes) != 2 {
+		t.Fatalf("CloseSession called %d times, want 2", len(closes))
+	}
+	if string(closes[0].SessionId) != firstID || string(closes[1].SessionId) == string(closes[0].SessionId) {
+		t.Fatalf("closed session ids = %v, want the two superseded sessions in order", closes)
+	}
+}
+
+func TestAdapterCloseWaitsForSupersededSessionCleanup(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	adapter.capabilities.SessionCapabilities.Close = &acpsdk.SessionCloseCapabilities{}
+	if _, err := adapter.NewSession(context.Background(), nil); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	capture.closeCalls = make(chan struct{}, 1)
+	capture.releaseClose = make(chan struct{})
+
+	resetDone := make(chan error, 1)
+	go func() {
+		_, err := adapter.ResetSession(context.Background(), nil)
+		resetDone <- err
+	}()
+	select {
+	case <-capture.closeCalls:
+	case <-time.After(time.Second):
+		t.Fatal("reset did not start superseded-session cleanup")
+	}
+	select {
+	case err := <-resetDone:
+		if err != nil {
+			t.Fatalf("ResetSession: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ResetSession remained blocked by superseded-session cleanup")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- adapter.Close() }()
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Adapter.Close returned before session cleanup drained: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(capture.releaseClose)
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Adapter.Close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Adapter.Close did not return after session cleanup released")
+	}
+}
+
+func waitForCloseRequests(t *testing.T, capture *sessionRequestCaptureAgent, want int) []acpsdk.CloseSessionRequest {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if closes := capture.recordedCloseRequests(); len(closes) >= want {
+			return closes
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return capture.recordedCloseRequests()
 }
 
 func newSessionRequestCaptureAdapter(t *testing.T, capabilities acpsdk.McpCapabilities) (*Adapter, *sessionRequestCaptureAgent) {

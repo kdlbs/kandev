@@ -92,7 +92,9 @@ test.describe("Mobile file tree keyboard shortcuts", () => {
       await directNewFile.tap();
     } else {
       await testPage.getByTestId("files-create-menu").tap();
-      await testPage.getByRole("menuitem", { name: "New file" }).tap();
+      const menuItem = testPage.getByRole("menuitem", { name: "New file" });
+      await menuItem.tap();
+      await expect(menuItem).toHaveCount(0);
     }
     const input = testPage.getByPlaceholder("filename...");
     await expect(input).toBeFocused({ timeout: 5_000 });

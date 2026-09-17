@@ -23,6 +23,7 @@ import { timeAgo } from "@/lib/utils/time";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { CONCURRENCY_POLICY_LABEL_KEYS } from "../lib/label-keys";
+import { isRoutineFiring } from "../lib/routine-status";
 
 /**
  * A routine's concurrency policy is a wire value; only its label is copy.
@@ -82,14 +83,15 @@ export function RoutineRow({
   const concurrencyPolicy =
     routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
   const assignee = agents.find((a) => a.id === assigneeId);
-  const isActive = routine.status === "active";
+  const isActive = isRoutineFiring(routine.status);
   const template = routine.taskTemplate as { title?: string; description?: string } | undefined;
   const cronTrigger = triggers.find((t) => t.kind === "cron");
-  const nextFire = nextFireText(t, triggers);
+  const nextFire = isActive ? nextFireText(t, triggers) : "";
 
   return (
     <div>
       <div
+        data-testid={`routine-row-${routine.id}`}
         className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors cursor-pointer"
         onClick={() => onClick(routine.id)}
       >
@@ -131,7 +133,7 @@ export function RoutineRow({
               asChild
               variant="ghost"
               size="icon"
-              className="h-8 w-8 cursor-pointer"
+              className="cursor-pointer"
               onClick={(e) => e.stopPropagation()}
             >
               <Link href={`/office/routines/${routine.id}`}>
@@ -163,7 +165,7 @@ function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 cursor-pointer"
+              className="cursor-pointer"
               onClick={(e) => e.stopPropagation()}
             >
               <IconDots className="h-4 w-4" />
@@ -174,6 +176,7 @@ function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete
       </Tooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
+          data-testid="routine-run-now"
           className="cursor-pointer"
           onClick={(e) => {
             e.stopPropagation();

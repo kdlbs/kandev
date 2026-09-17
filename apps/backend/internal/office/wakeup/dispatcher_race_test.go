@@ -11,10 +11,39 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
-	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
+
+// raceTestRunQueuer adapts a runs/service.Service directly to
+// wakeup.RunQueuer, bypassing office/service.Service: this file is an
+// internal (white-box) wakeup test (needs the unexported
+// coalesceIntoInflightRun), and office/service now imports office/wakeup
+// (pause-gate integration), so importing office/service here would be a
+// test-only import cycle. The dispatcher-level guard office/service.Service
+// adds (agent status) is irrelevant to what this test exercises. Mirrors
+// office/service.Service.QueueRunFromWakeup's shape.
+type raceTestRunQueuer struct {
+	svc *runsservice.Service
+}
+
+func (q *raceTestRunQueuer) QueueRunFromWakeup(
+	ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID string,
+) (string, error) {
+	_, row, err := q.svc.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
+		Reason:          reason,
+		Payload:         map[string]any{"agent_profile_id": agentProfileID},
+		ActorKind:       officemodels.ActorKindSystem,
+		RoutineID:       routineID,
+		ContextSnapshot: contextSnapshot,
+		SkipCoalesce:    true,
+		CausationID:     causationID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return row.ID, nil
+}
 
 // TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote pins the
 // TOCTOU this package's atomic promotion and coalesce transaction exists
@@ -99,10 +128,9 @@ func TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote(t *testing.T) {
 	}
 
 	log := logger.Default()
-	svc := officeservice.NewService(officeservice.ServiceOptions{Repo: repo, Logger: log})
-	svc.SetRunsService(runsservice.New(repo.RunsRepository(), nil, log, nil))
+	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
 	d := NewDispatcher(repo, repo, log)
-	d.SetRunQueuer(svc)
+	d.SetRunQueuer(&raceTestRunQueuer{svc: runsSvc})
 	if err := d.coalesceIntoInflightRun(context.Background(), req, inflight); err != nil {
 		t.Fatalf("coalesceIntoInflightRun: %v", err)
 	}

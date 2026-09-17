@@ -253,6 +253,10 @@ func TestReservedTurnPublishesOnlyAfterAcceptanceAndRollsBackWhenEmpty(t *testin
 	if _, err := repo.GetTurn(ctx, rejected.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("GetTurn(rolled back) error = %v, want sql.ErrNoRows", err)
 	}
+	removedEvents := eventBus.GetPublishedEvents()
+	if len(removedEvents) != 1 || removedEvents[0].Type != events.TurnRemoved {
+		t.Fatalf("rollback events = %#v, want one turn.removed event", removedEvents)
+	}
 
 	accepted, err := svc.ReserveTurn(ctx, sessionID, recovery)
 	if err != nil {
@@ -892,6 +896,47 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 	if info.ACPSessionID != "acp-123" {
 		t.Errorf("expected ACPSessionID 'acp-123', got %q", info.ACPSessionID)
+	}
+}
+
+func TestGetWorkspaceInfoForSessionRestoresOfficeAgentIdentityFromRuntimeInventory(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	sessionID := "session-office-recovery"
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                 sessionID,
+		TaskID:             "task-123",
+		AgentProfileID:     "assignee",
+		ExecutionProfileID: "execution-profile",
+		State:              models.TaskSessionStateRunning,
+		StartedAt:          now,
+		UpdatedAt:          now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:                 sessionID,
+		SessionID:          sessionID,
+		TaskID:             "task-123",
+		ExecutionProfileID: "execution-profile",
+		Runtime:            agentruntime.RuntimeStandalone,
+		Status:             models.ExecutorRunningStatusReady,
+		AgentExecutionID:   "execution-office-recovery",
+		Metadata: map[string]interface{}{
+			lifecycle.MetadataKeyOfficeAgentProfileID: "reviewer",
+		},
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", sessionID)
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if info.AgentProfileID != "reviewer" {
+		t.Fatalf("AgentProfileID = %q, want reviewer from runtime inventory", info.AgentProfileID)
 	}
 }
 

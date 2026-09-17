@@ -32,6 +32,8 @@ type LocalPreparer struct {
 	logger *logger.Logger
 }
 
+const localGitNetworkTimeout = 30 * time.Second
+
 // NewLocalPreparer creates a new LocalPreparer.
 func NewLocalPreparer(log *logger.Logger) *LocalPreparer {
 	return &LocalPreparer{
@@ -315,14 +317,10 @@ func checkoutBranch(
 	var fetchOut []byte
 	var fetchErr error
 	if !remoteSyncHandled {
-		fetchCmd := subproc.NewGitCommand(ctx, "fetch", "origin", branch)
-		fetchCmd.Dir = workDir
-		fetchOut, fetchErr = subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, fetchCmd)
+		fetchOut, fetchErr = runLocalGit(ctx, workDir, "fetch", "origin", branch)
 	}
 
-	cmd := subproc.NewGitCommand(ctx, "checkout", branch)
-	cmd.Dir = workDir
-	out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	out, err := runLocalGit(ctx, workDir, "checkout", branch)
 	outStr := redactCheckoutOutput(strings.TrimSpace(string(out)), sensitiveValues)
 	if err != nil {
 		if fetchErr != nil {
@@ -332,6 +330,23 @@ func checkoutBranch(
 		return outStr, worktree.ClassifyGitError(outStr, err)
 	}
 	return outStr, nil
+}
+
+func runLocalGit(ctx context.Context, workDir string, args ...string) ([]byte, error) {
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		localGitNetworkTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = workDir
+			return cmd
+		},
+	)
+	if runErr == nil {
+		runErr = execCtxErr
+	}
+	return output, runErr
 }
 
 var credentialURLPattern = regexp.MustCompile(`(?i)(https?://)[^\s/@]+@`)

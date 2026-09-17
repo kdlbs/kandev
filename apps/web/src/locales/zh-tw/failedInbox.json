@@ -1,0 +1,18 @@
+{
+  "tabLabel": "失敗",
+  "openTask": "開啟任務",
+  "reasonUnknown": "未記錄失敗原因。",
+  "unknownFailureTime": "失敗時間未知",
+  "originAgentCreated": "由代理建立",
+  "originRoutine": "由例行程式建立",
+  "originOnboarding": "在引導過程中建立",
+  "originAutomationRun": "自動化執行",
+  "originAutomationTask": "由自動化建立",
+  "originGeneric": "自動化",
+  "emptyTitle": "{{workspace}} 中沒有任何失敗事項。",
+  "emptyTitleUnnamedWorkspace": "此工作區中沒有任何失敗事項。",
+  "emptyDescription": "失敗的任務會顯示在此處以供排查,永遠不會計入側邊欄的總數。",
+  "errorTitle": "無法載入失敗的任務",
+  "errorDescription": "載入此工作區中失敗的任務時出錯,系統將自動重試。",
+  "truncatedNotice": "僅顯示最先出現的失敗任務,還有更多等待處理。"
+}

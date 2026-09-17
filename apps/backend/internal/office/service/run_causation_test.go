@@ -60,7 +60,7 @@ func TestQueueRunWithActor_ChainsCausationFromCausingRunID(t *testing.T) {
 	}
 
 	// Root cause: no causingRunID, so this roots a new causation chain.
-	if err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
+	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
 		models.ActorKindAgent, agent.ID, ""); err != nil {
 		t.Fatalf("queue root run: %v", err)
 	}
@@ -72,8 +72,8 @@ func TestQueueRunWithActor_ChainsCausationFromCausingRunID(t *testing.T) {
 		t.Fatalf("want 1 root run, got %d", len(roots))
 	}
 	rootRun := roots[0]
-	if rootRun.CausationID != rootRun.ID {
-		t.Fatalf("root causation_id = %q, want self-rooted %q", rootRun.CausationID, rootRun.ID)
+	if rootRun.ChainCausationID != rootRun.ID {
+		t.Fatalf("root causation_id = %q, want self-rooted %q", rootRun.ChainCausationID, rootRun.ID)
 	}
 	if rootRun.CausationDepth != 0 {
 		t.Fatalf("root causation_depth = %d, want 0", rootRun.CausationDepth)
@@ -81,7 +81,7 @@ func TestQueueRunWithActor_ChainsCausationFromCausingRunID(t *testing.T) {
 
 	// Caused run: names the root as its causing run, exactly what
 	// SpawnAgentRun does with runCtx.RunID.
-	if err := svc.QueueRunWithActor(ctx, agent.ID, "spawn_agent_run", `{}`, "",
+	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "spawn_agent_run", `{}`, "",
 		models.ActorKindAgent, agent.ID, rootRun.ID); err != nil {
 		t.Fatalf("queue caused run: %v", err)
 	}
@@ -105,9 +105,9 @@ func TestQueueRunWithActor_ChainsCausationFromCausingRunID(t *testing.T) {
 	if causedRun.ParentRunID != rootRun.ID {
 		t.Errorf("parent_run_id = %q, want %q (the causing run)", causedRun.ParentRunID, rootRun.ID)
 	}
-	if causedRun.CausationID != rootRun.CausationID {
+	if causedRun.ChainCausationID != rootRun.ChainCausationID {
 		t.Errorf("causation_id = %q, want %q (inherited from the causing run)",
-			causedRun.CausationID, rootRun.CausationID)
+			causedRun.ChainCausationID, rootRun.ChainCausationID)
 	}
 	if causedRun.CausationDepth != rootRun.CausationDepth+1 {
 		t.Errorf("causation_depth = %d, want %d (causing run's depth + 1)",

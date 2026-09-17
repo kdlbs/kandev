@@ -50,7 +50,7 @@ func TestQueueRun_StampsEventPriorityClass(t *testing.T) {
 		t.Fatalf("create agent instance: %v", err)
 	}
 
-	if err := ss.QueueRun(ctx, testAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
+	if _, err := ss.QueueRun(ctx, testAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
 		t.Fatalf("QueueRun: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestQueueRunCtx_StampsEventPriorityClass(t *testing.T) {
 		Reason: scheduler.RunReasonApprovalResolved,
 		TaskID: "task-1",
 	}
-	if err := ss.QueueRunCtx(ctx, testAgentID, c); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, testAgentID, c); err != nil {
 		t.Fatalf("QueueRunCtx: %v", err)
 	}
 

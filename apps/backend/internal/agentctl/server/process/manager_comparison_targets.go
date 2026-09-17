@@ -44,10 +44,47 @@ func (m *Manager) getComparisonTargets() map[string]models.ComparisonTarget {
 func (m *Manager) PrepareComparisonTargets(_ context.Context) {
 	root, trackers := m.snapshotTrackers()
 	if root != nil {
-		m.prepareTrackerComparisonTarget(root)
+		m.prepareTrackerComparisonTarget(root, false)
 	}
 	for _, tracker := range trackers {
-		m.prepareTrackerComparisonTarget(tracker)
+		m.prepareTrackerComparisonTarget(tracker, false)
+	}
+}
+
+// RetryUnavailableComparisonTargets schedules one new materialization attempt
+// for each explicit target that is currently unavailable. This is called only
+// by an explicit fresh Git-status request; it does not create a timer or a
+// background retry loop. Invalid targets remain unavailable until their
+// configuration changes.
+func (m *Manager) RetryUnavailableComparisonTargets() {
+	root, trackers := m.snapshotTrackers()
+
+	m.workspaceTrackersMu.Lock()
+	lazyTrackers := make([]*WorkspaceTracker, 0, len(m.workspaceTrackersBySubpath))
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		lazyTrackers = append(lazyTrackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
+
+	all := make([]*WorkspaceTracker, 0, 1+len(trackers)+len(lazyTrackers))
+	all = append(all, root)
+	all = append(all, trackers...)
+	all = append(all, lazyTrackers...)
+	seen := make(map[*WorkspaceTracker]struct{}, len(all))
+	for _, tracker := range all {
+		if tracker == nil {
+			continue
+		}
+		if _, ok := seen[tracker]; ok {
+			continue
+		}
+		seen[tracker] = struct{}{}
+		resolution := tracker.ComparisonResolution()
+		if !resolution.Explicit || resolution.Status != comparisonTargetStatusUnavailable ||
+			resolution.ErrorCode == comparisonTargetErrorInvalid {
+			continue
+		}
+		m.prepareTrackerComparisonTarget(tracker, true)
 	}
 }
 
@@ -75,7 +112,7 @@ func (m *Manager) UpdateComparisonTargets(_ context.Context, targets map[string]
 		if tracker == nil || comparisonTargetMapsEqual(previous, current, tracker.RepositoryName()) {
 			continue
 		}
-		m.prepareTrackerComparisonTarget(tracker)
+		m.prepareTrackerComparisonTarget(tracker, false)
 	}
 }
 
@@ -85,7 +122,7 @@ func comparisonTargetMapsEqual(previous, current map[string]models.ComparisonTar
 	return leftOK == rightOK && (!leftOK || left.Equal(right))
 }
 
-func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
+func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker, forceRetry bool) {
 	if tracker == nil {
 		return
 	}
@@ -110,13 +147,14 @@ func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
 		return
 	}
 
-	m.scheduleComparisonTargetOperation(repositoryName, tracker, *target)
+	m.scheduleComparisonTargetOperation(repositoryName, tracker, *target, forceRetry)
 }
 
 func (m *Manager) scheduleComparisonTargetOperation(
 	repositoryName string,
 	tracker *WorkspaceTracker,
 	target models.ComparisonTarget,
+	forceRetry bool,
 ) {
 	m.comparisonTargetOpsMu.Lock()
 	if m.comparisonTargetOpsStopping {
@@ -138,7 +176,7 @@ func (m *Manager) scheduleComparisonTargetOperation(
 		return
 	}
 	if existing := m.comparisonTargetOps[repositoryName]; existing != nil {
-		if existing.tracker == tracker && existing.target.Equal(target) {
+		if existing.tracker == tracker && existing.target.Equal(target) && !forceRetry {
 			m.comparisonTargetOpsMu.Unlock()
 			cancel()
 			release()

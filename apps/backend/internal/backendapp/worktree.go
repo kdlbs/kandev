@@ -66,10 +66,10 @@ func (a *bootMsgAdapter) UpdateMessage(ctx context.Context, message *models.Mess
 	return a.svc.UpdateMessage(ctx, message)
 }
 
-func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, *worktree.Recreator, func() error, error) {
+func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Logger, lifecycleMgr *lifecycle.Manager, taskSvc *taskservice.Service) (*worktree.Manager, func() error, error) {
 	manager, cleanup, err := worktree.Provide(dbPool.Writer(), dbPool.Reader(), cfg, log)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	if lifecycleMgr != nil {
 		lifecycleMgr.SetWorktreeManager(manager)
@@ -97,10 +97,7 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 	manager.SetScriptMessageHandler(scriptHandler)
 	manager.SetRepositoryProvider(repoAdapter)
 
-	// Create recreator for orchestrator to use during session resume
-	recreator := worktree.NewRecreator(manager)
-
-	return manager, recreator, cleanup, nil
+	return manager, cleanup, nil
 }
 
 // environmentDestroyerAdapter implements taskservice.EnvironmentDestroyer by
@@ -121,8 +118,14 @@ func (a *environmentDestroyerAdapter) DestroySandbox(ctx context.Context, sandbo
 }
 
 func (a *environmentDestroyerAdapter) DestroyWorktree(ctx context.Context, worktreeID string) error {
-	// removeBranch=false: preserve the branch so unpushed work isn't lost.
-	return a.worktrees.RemoveByID(ctx, worktreeID, false)
+	receipt, err := a.worktrees.RemoveByIDWithReceipt(ctx, worktreeID)
+	if err != nil {
+		return err
+	}
+	if receipt.RetainedReasons[worktree.RetainedActiveReference] > 0 {
+		return fmt.Errorf("worktree %s is still referenced by another task", worktreeID)
+	}
+	return nil
 }
 
 func (a *environmentDestroyerAdapter) GetContainerLiveStatus(ctx context.Context, containerID string) (*taskservice.ContainerLiveStatus, error) {

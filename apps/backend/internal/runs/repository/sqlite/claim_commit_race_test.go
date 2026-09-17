@@ -63,6 +63,7 @@ CREATE TABLE runs (
 	claimed_at TIMESTAMP,
 	finished_at TIMESTAMP,
 	causation_id TEXT NOT NULL DEFAULT '',
+	chain_causation_id TEXT NOT NULL DEFAULT '',
 	parent_run_id TEXT NOT NULL DEFAULT '',
 	causation_depth INTEGER NOT NULL DEFAULT 0,
 	priority_class INTEGER NOT NULL DEFAULT 2,
@@ -70,7 +71,9 @@ CREATE TABLE runs (
 	routine_id TEXT NOT NULL DEFAULT '',
 	actor_kind TEXT NOT NULL DEFAULT 'system',
 	actor_id TEXT NOT NULL DEFAULT '',
-	workspace_id TEXT NOT NULL DEFAULT ''
+	workspace_id TEXT NOT NULL DEFAULT '',
+	wake_wave_key TEXT NOT NULL DEFAULT '',
+	wake_wave_string TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE office_launch_ledger (
 	id           TEXT      PRIMARY KEY,

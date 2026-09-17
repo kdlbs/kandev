@@ -109,7 +109,7 @@ func TestDockerExecutor_RecoverInstances(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
 
-	instances, err := exec.RecoverInstances(context.Background())
+	instances, err := exec.RecoverInstances(context.Background(), nil)
 	if err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
@@ -916,7 +916,8 @@ func TestResolvePrepareScript(t *testing.T) {
 		if !strings.Contains(script, "git remote set-url") {
 			t.Error("expected token stripping after clone")
 		}
-		if !strings.Contains(script, "git checkout -b 'feature/task-abc'") {
+		if !strings.Contains(script, `worktree_branch='feature/task-abc'`) ||
+			!strings.Contains(script, `git checkout -b "$worktree_branch" "origin/$worktree_branch"`) {
 			t.Fatalf("expected Docker prepare script to create task branch, got:\n%s", script)
 		}
 	})

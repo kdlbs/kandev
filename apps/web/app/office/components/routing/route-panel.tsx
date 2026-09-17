@@ -95,7 +95,7 @@ function RouteAttemptRow({ attempt }: { attempt: RouteAttempt }) {
           {durationLabel(t, attempt.started_at, attempt.finished_at)}
         </span>
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-6 w-6 cursor-pointer">
+          <Button variant="ghost" size="icon" className="cursor-pointer">
             {open ? (
               <IconChevronDown className="h-3.5 w-3.5" />
             ) : (

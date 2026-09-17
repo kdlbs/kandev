@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import { Button } from "@kandev/ui/button";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -24,6 +26,7 @@ import {
 } from "@/components/editors/external-vcs-file-link";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { LspStatusButton } from "@/components/editors/lsp-status-button";
+import type { FilePreviewKind } from "@/lib/utils/file-types";
 import type { LspStatus } from "@/lib/lsp/lsp-client-manager";
 import type { LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
 import { useTranslation } from "react-i18next";
@@ -68,11 +71,13 @@ function SaveButton({
 function ToolbarLeft({
   path,
   worktreePath,
+  isSymlink,
   isDirty,
   diffStats,
 }: {
   path: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   isDirty: boolean;
   diffStats: { additions: number; deletions: number } | null;
 }) {
@@ -81,6 +86,7 @@ function ToolbarLeft({
       <ScrollOnOverflow className="min-w-0 font-mono">
         {toRelativePath(path, worktreePath)}
       </ScrollOnOverflow>
+      <SymlinkIndicator isSymlink={isSymlink} showLabel />
       {isDirty && diffStats && (
         <span className="shrink-0 text-xs text-yellow-500">
           {formatDiffStats(diffStats.additions, diffStats.deletions)}
@@ -232,22 +238,49 @@ function DownloadButton({ onDownload }: { onDownload?: () => void }) {
   );
 }
 
-function MarkdownPreviewButton({ onTogglePreview }: { onTogglePreview: () => void }) {
+function PreviewButton({
+  previewKind,
+  onTogglePreview,
+  onPreviewHtml,
+  isPublishingHtmlPreview,
+}: {
+  previewKind: FilePreviewKind;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
+}) {
   const { t } = useTranslation();
+  if (previewKind === "none") return null;
+  const isHtml = previewKind === "html";
+  const action = isHtml ? onPreviewHtml : onTogglePreview;
+  if (!action) return null;
+  const label = isHtml ? t("editors:previewHtml") : t("editors:previewMarkdown");
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           size="sm"
           variant="ghost"
-          onClick={onTogglePreview}
+          onClick={action}
+          disabled={isHtml && isPublishingHtmlPreview}
+          aria-label={label}
+          title={isHtml ? t("task:htmlPreviewTrustedCode") : undefined}
           className="h-8 w-8 p-0 cursor-pointer"
-          data-testid="markdown-preview-toggle"
+          data-testid={isHtml ? "html-preview-toggle" : "markdown-preview-toggle"}
         >
-          <IconEye className="h-4 w-4" />
+          {isHtml && isPublishingHtmlPreview ? (
+            <IconLoader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <IconEye className="h-4 w-4" />
+          )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{t("editors:previewMarkdown")}</TooltipContent>
+      <TooltipContent>
+        <p>{label}</p>
+        {isHtml && (
+          <p className="mt-1 max-w-xs text-muted-foreground">{t("task:htmlPreviewTrustedCode")}</p>
+        )}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -256,6 +289,7 @@ interface MonacoEditorToolbarProps {
   path: string;
   repositoryName?: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   isDirty: boolean;
   isSaving: boolean;
   diffStats: { additions: number; deletions: number } | null;
@@ -277,13 +311,17 @@ interface MonacoEditorToolbarProps {
   onReloadFromAgent?: () => void;
   onDelete?: () => void;
   onDownload?: () => void;
-  onToggleMarkdownPreview?: () => void;
+  previewKind?: FilePreviewKind;
+  onTogglePreview?: () => void;
+  onPreviewHtml?: () => void;
+  isPublishingHtmlPreview?: boolean;
 }
 
 export function MonacoEditorToolbar({
   path,
   repositoryName,
   worktreePath,
+  isSymlink,
   isDirty,
   isSaving,
   diffStats,
@@ -305,7 +343,10 @@ export function MonacoEditorToolbar({
   onReloadFromAgent,
   onDelete,
   onDownload,
-  onToggleMarkdownPreview,
+  previewKind = "none",
+  onTogglePreview,
+  onPreviewHtml,
+  isPublishingHtmlPreview,
 }: MonacoEditorToolbarProps) {
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
@@ -314,6 +355,7 @@ export function MonacoEditorToolbar({
         <ToolbarLeft
           path={path}
           worktreePath={worktreePath}
+          isSymlink={isSymlink}
           isDirty={isDirty}
           diffStats={diffStats}
         />
@@ -339,8 +381,13 @@ export function MonacoEditorToolbar({
               onToggle={onToggleDiffIndicators}
             />
           )}
-          {onToggleMarkdownPreview && (
-            <MarkdownPreviewButton onTogglePreview={onToggleMarkdownPreview} />
+          {(onTogglePreview || onPreviewHtml) && (
+            <PreviewButton
+              previewKind={previewKind}
+              onTogglePreview={onTogglePreview}
+              onPreviewHtml={onPreviewHtml}
+              isPublishingHtmlPreview={isPublishingHtmlPreview}
+            />
           )}
           <WrapButton wrapEnabled={wrapEnabled} onToggleWrap={onToggleWrap} />
           <ReloadFromAgentButton

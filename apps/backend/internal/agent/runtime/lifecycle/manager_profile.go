@@ -171,9 +171,10 @@ func (m *Manager) resolveProfileSessionConfigAndPolicy(ctx context.Context, prof
 		return "", "", nil, StartModelPolicy{}
 	}
 	return info.Model, info.Mode, info.ConfigOptions, StartModelPolicy{
-		Model:         info.Model,
-		FallbackModel: info.FallbackModel,
-		AutoFallback:  info.AutoFallback,
+		Model:             info.Model,
+		FallbackModel:     info.FallbackModel,
+		AutoFallback:      info.AutoFallback,
+		RequireExactModel: info.RequireExactModel,
 	}
 }
 
@@ -190,9 +191,10 @@ func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string)
 		return StartModelPolicy{}
 	}
 	return StartModelPolicy{
-		Model:         info.Model,
-		FallbackModel: info.FallbackModel,
-		AutoFallback:  info.AutoFallback,
+		Model:             info.Model,
+		FallbackModel:     info.FallbackModel,
+		AutoFallback:      info.AutoFallback,
+		RequireExactModel: info.RequireExactModel,
 	}
 }
 
@@ -208,13 +210,17 @@ func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string)
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions, policy := m.resolveProfileSessionConfigAndPolicy(ctx, execution.AgentProfileID)
 	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
+	startupGeneration := execution.startupAttemptSnapshot()
+	markBootReady := func(executionID string) error {
+		return m.markBootReadyForStartup(context.Background(), executionID, startupGeneration)
+	}
 	// The effective runtime model (user-selected, persisted session state)
 	// takes precedence over the profile's start model for the session; the
 	// policy still carries the profile's fallback settings so a gone
 	// effective model is handled the same way (InitializeAndPromptWithLayers
 	// resolves the effective model and applies the policy).
 	return m.sessionManager.InitializeAndPromptWithLayers(
-		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady,
+		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, markBootReady,
 		profileModel, profileMode, profileConfigOptions,
 		runtimeModel, runtimeMode, runtimeConfigOptions,
 		policy,

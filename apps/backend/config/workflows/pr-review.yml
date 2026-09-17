@@ -141,11 +141,10 @@ steps:
 
       AFTER SUBMITTING THE REVIEW:
 
-      Enable all three task-bound lifecycle notifications on whichever
-      provider this task's linked review target is on:
-      - GitHub pull request: use update_task_pr_automation_kandev
-      - GitLab merge request: use update_task_mr_automation_kandev
-      In both cases set:
+      First call get_task_change_requests_kandev and identify the provider of
+      this task's linked review target. Then use
+      update_task_change_request_automation_kandev with target.scope="task"
+      and a providers list that contains that provider. Set:
       - prompt_on_review_requested: true
       - prompt_on_merged: true
       - prompt_on_closed: true
@@ -169,4 +168,5 @@ steps:
     name: Done
     position: 2
     color: bg-green-500
+    complete_task_on_enter: true
     allow_manual_move: true

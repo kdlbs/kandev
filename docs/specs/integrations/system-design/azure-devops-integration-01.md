@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001
 created: 2026-07-17
-updated: 2026-07-31
+updated: 2026-09-07
 owners:
   - tbd
 ---
@@ -150,6 +150,33 @@ Azure Repos data without installing or authenticating the GitHub CLI.
 - Selecting Work items runs the default query as soon as the connected
   project's filters are ready; users do not need to submit the initial search
   manually.
+
+### Remote repository provider eligibility
+
+`useRemoteRepositories(workspaceId)` composes built-in repository discovery
+with the existing workspace-scoped connection signals for GitHub, GitLab, and
+Azure DevOps. It schedules a built-in provider's repository-list request only
+after that provider reports an available connection for the requested
+workspace. The browser-local enable/disable toggle does not participate in
+this decision because
+`AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.5` keeps GitHub, GitLab, and Azure
+DevOps feature behavior independent of that presentation preference.
+
+An unconfigured provider is absent from the request set, provider tabs, and
+`sourceErrors`. A provider that was eligible when discovery started can still
+fail during its repository request; `settleRepositoryRequests` retains that
+bounded error while preserving every successful provider result. Refresh
+re-evaluates connection eligibility before it repeats repository discovery.
+GitLab status entries are keyed by workspace so an explicit task-dialog probe
+cannot overwrite the active workspace's status. Azure DevOps connection state
+is scoped to the requested workspace and re-probes after integration
+availability invalidation and on the shared health cadence.
+Registered plugin repository providers keep their registry-owned availability
+and error contract.
+
+The shared task dialog and repository picker use this state on desktop and
+phone. No responsive composition, touch target, scroll owner, or manual URL
+entry behavior changes.
 
 ## Data Model
 

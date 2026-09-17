@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/office/approvals"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // noopActivityLogger implements shared.ActivityLogger without importing shared.
@@ -25,8 +26,8 @@ type noopRunQueuer struct{}
 
 func (n *noopRunQueuer) QueueRunWithActor(
 	_ context.Context, _, _, _, _ string, _ models.ActorKind, _ string, _ string,
-) error {
-	return nil
+) (runsservice.QueueOutcome, error) {
+	return runsservice.QueueOutcomeQueued, nil
 }
 
 // capturingRunQueuer records the arguments of its last QueueRunWithActor
@@ -44,14 +45,14 @@ type capturingRunQueuer struct {
 func (c *capturingRunQueuer) QueueRunWithActor(
 	_ context.Context, agentInstanceID, reason, _, _ string,
 	actorKind models.ActorKind, actorID string, causingRunID string,
-) error {
+) (runsservice.QueueOutcome, error) {
 	c.called = true
 	c.agentInstanceID = agentInstanceID
 	c.reason = reason
 	c.actorKind = actorKind
 	c.actorID = actorID
 	c.causingRunID = causingRunID
-	return nil
+	return runsservice.QueueOutcomeQueued, nil
 }
 
 type fakeAgentWriter struct {

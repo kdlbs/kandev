@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 
 	"go.uber.org/zap"
 )
@@ -35,7 +36,7 @@ type RunQueuer interface {
 		agentInstanceID, reason, payload, idempotencyKey string,
 		actorKind models.ActorKind, actorID string,
 		causingRunID string,
-	) error
+	) (runsservice.QueueOutcome, error)
 }
 
 // ApprovalService handles approval CRUD and decide logic.
@@ -235,6 +236,7 @@ func (s *ApprovalService) queueApprovalRun(
 	// authenticated agent deciding it), not from within an agent's own
 	// run, so there is no live causing run to chain from: this always
 	// roots a new causation chain (AC-OFFICE-RUN-CAUSATION-001.2).
-	return s.runs.QueueRunWithActor(ctx, approval.RequestedByAgentProfileID,
+	_, err := s.runs.QueueRunWithActor(ctx, approval.RequestedByAgentProfileID,
 		"approval_resolved", payload, idempotencyKey, actorKind, approval.DecidedBy, "")
+	return err
 }

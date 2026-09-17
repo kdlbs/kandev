@@ -281,6 +281,8 @@ type Adapter struct {
 	// Session transitions use a separate mutex because a reset must keep the
 	// adapter transitionally consistent from session/new through session/close.
 	sessionTransitionMu sync.Mutex
+	sessionCleanupDone  chan struct{}
+	sessionCleanupWg    sync.WaitGroup
 	configChangeMu      sync.Mutex
 	configGeneration    uint64
 	contextSamples      map[string]contextWindowSample
@@ -314,6 +316,14 @@ type Adapter struct {
 	asyncTurnMu         sync.Mutex
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
 	asyncTurnEpochs     map[string]uint64
+
+	// turnStartedAt records, per session, the time agentctl last dispatched
+	// session/prompt for it (human or synthetic). It is agentctl's own clock
+	// and never crosses the process boundary; the background-workload
+	// liveness probe compares descendant process start times against it.
+	// Guarded by asyncTurnMu and cleared on the same lifecycle as the
+	// asyncTurn maps above (new session, adapter close).
+	turnStartedAt map[string]time.Time
 
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
@@ -442,6 +452,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		promptGate:                make(chan struct{}, 1),
 		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
 		asyncTurnEpochs:           make(map[string]uint64),
+		turnStartedAt:             make(map[string]time.Time),
 		lifetimeCtx:               ctx,
 		lifetimeCancel:            cancel,
 		closedCh:                  make(chan struct{}),
@@ -504,9 +515,13 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
-		acp.WithMaxQueuedNotifications(notifQueueCap))
-	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
+		a.acpClient,
+		a.stdin,
+		a.stdout,
+		slog.Default().With("component", "acp-conn"),
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
 
@@ -516,7 +531,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID),
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID, a.cfg.ProviderGatewayAuth != nil),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",
@@ -569,6 +584,32 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		AuthMethods:             authMethods,
 	})
 
+	if err := a.applyProviderGatewayAuth(ctx); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	return nil
+}
+
+// applyProviderGatewayAuth authenticates the agent against a Kandev-configured
+// OpenAI-compatible gateway (base URL + bearer key) right after initialize. It
+// is a no-op unless the launch carries provider gateway auth. A failure aborts
+// the connection rather than letting the agent silently fall back to its
+// built-in vendor endpoint.
+func (a *Adapter) applyProviderGatewayAuth(ctx context.Context) error {
+	gw := a.cfg.ProviderGatewayAuth
+	if gw == nil {
+		return nil
+	}
+	if _, err := a.acpConn.Authenticate(ctx, acp.AuthenticateRequest{
+		MethodId: acp.AuthMethodId(gw.MethodID),
+		Meta:     gw.Meta,
+	}); err != nil {
+		return fmt.Errorf("OpenAI-compatible provider authentication failed: %w", err)
+	}
+	a.logger.Info("authenticated against OpenAI-compatible provider gateway",
+		zap.String("auth_method", gw.MethodID))
 	return nil
 }
 
@@ -612,6 +653,15 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
 		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
 	}
+}
+
+// ProviderErrorContext implements adapter.ProviderErrorContextProvider.
+// modelID is empty until the adapter has settled a model for the session: a
+// non-empty currentModelFromConfig(availableConfigOptions) value at read time.
+func (a *Adapter) ProviderErrorContext() (providerID, modelID string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.agentID, currentModelFromConfig(a.availableConfigOptions)
 }
 
 func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {
@@ -712,6 +762,7 @@ func (a *Adapter) Close() error {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
+		a.waitForSessionCleanup()
 		return nil
 	}
 	a.closed = true
@@ -733,6 +784,12 @@ func (a *Adapter) Close() error {
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
 	}
+
+	// A successful reset returns before its best-effort session/close request,
+	// but adapter shutdown owns that worker and must drain it before returning.
+	// Synchronizing with the transition mutex first ensures a reset that is just
+	// committing its cleanup has registered the wait-group entry.
+	a.waitForSessionCleanup()
 
 	// Wait for the update worker to exit before closing updatesCh.
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open

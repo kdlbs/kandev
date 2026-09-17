@@ -1,10 +1,17 @@
 import type {
   ForegroundActivity,
+  ReorderBand,
+  ReorderedTaskPosition,
   TaskPendingAction,
+  TaskOrigin,
   TaskPriority,
   TaskState as TaskStatus,
+  WorkflowProfileSessionEndPolicy,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowSessionTarget,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import type { BeginTaskRemovalInput, TaskRemovalState } from "@/lib/state/task-removal";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -44,10 +51,16 @@ export type KanbanState = {
     position: number;
     events?: KanbanStepEvents;
     allow_manual_move?: boolean;
+    auto_advance_requires_signal?: boolean;
     prompt?: string;
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
     agent_profile_id?: string;
+    session_target?: WorkflowSessionTarget | null;
+    profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+    profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+    complete_task_on_enter?: boolean;
+    cancel_triggers_turn_complete?: boolean;
     /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */
     wip_limit?: number;
     /** Optional upstream step used by automation to pull more work. */
@@ -58,6 +71,15 @@ export type KanbanState = {
      * decisions). Backend never branches on this field.
      */
     stage_type?: "work" | "review" | "approval" | "custom";
+    /**
+     * Last order-revision this step's task order was written at
+     * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37), as of when this step
+     * record was fetched. Seeded into `kanbanMulti.orderRevisionByStepId` on
+     * hydration so a `task.reordered` WS event received right after page
+     * load is compared against the hydrated value instead of the "no
+     * revision recorded yet" fallback.
+     */
+    order_revision?: number;
   }>;
   tasks: Array<{
     id: string;
@@ -72,6 +94,7 @@ export type KanbanState = {
     description?: string;
     autopilot?: boolean;
     priority?: TaskPriority;
+    origin?: TaskOrigin | string;
     position: number;
     state?: TaskStatus;
     /** Primary repository id (lowest position). Kept for backwards compat. */
@@ -114,18 +137,35 @@ export type KanbanState = {
     /** True when a workflow step's auto_start_agent on_enter action failed to
      *  launch a run for this task. */
     autoStartFailed?: boolean;
+    /**
+     * True when the task is waiting on the operator to notice, not on the
+     * operator to act — a settled session with a positively-sampled
+     * background process still live (spec:
+     * docs/specs/disambiguate-waiting/spec.md). Outranked by pending-input
+     * and any live foregroundActivity.
+     */
+    parkedOnBackgroundWork?: boolean;
+    /** Process-local transition generation for parkedOnBackgroundWork; used to discard a stale event. */
+    parkedRevision?: number;
+    /** Process-start epoch (Unix nanoseconds) the revision counter is scoped to; a lower epoch is always stale. */
+    parkedEpoch?: number;
+    /** True when this task inherits an archived parent's workspace and can no
+     *  longer materialize or start. */
+    workspaceOrphaned?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;
+    primaryExecutorProfileId?: string | null;
     primaryExecutorType?: string | null;
     primaryExecutorName?: string | null;
     primaryAgentProfileId?: string | null;
     primaryAgentName?: string | null;
     labels?: string[];
-    origin?: string;
     isRemoteExecutor?: boolean;
+    /** Backend-owned discriminator for task hierarchy rules. Absent means non-Office. */
+    isFromOffice?: boolean;
     /** Human assignee (user id). Independent of any agent assignment. */
     assigneeUserId?: string;
     parentTaskId?: string | null;
@@ -155,6 +195,10 @@ export type KanbanState = {
     issueUrl?: string;
     issueNumber?: number;
     statusSummary?: TaskStatusSummary | null;
+    /** Whether the executor profile can be switched right now. Never gap-filled on merge. */
+    runnerEditable?: boolean;
+    /** Machine-readable reason for `runnerEditable`. Never gap-filled on merge. */
+    runnerIneligibleReason?: string;
   }>;
   isLoading?: boolean;
 };
@@ -170,6 +214,33 @@ export type WorkflowSnapshotData = {
 export type KanbanMultiState = {
   snapshots: Record<string, WorkflowSnapshotData>;
   isLoading: boolean;
+  /**
+   * Last-applied `order_revision` per workflow step
+   * (REQ-TASKS-KANBAN-TASK-REORDERING-001.16/.19/.25/.27). An unsolicited
+   * `task.reordered` WS event only applies when its revision is strictly
+   * greater than this; a response to the board's own reorder request applies
+   * unconditionally and then advances it.
+   */
+  orderRevisionByStepId: Record<string, number>;
+  /**
+   * Bands with a reorder request currently in flight, keyed
+   * `${stepId}:${band}` (REQ-TASKS-KANBAN-TASK-REORDERING-001.27). While a
+   * band's key is present, the board suspends further reorder input on that
+   * band and holds its optimistic order rather than applying an incoming
+   * published order to it.
+   */
+  pendingReorderBandKeys: Record<string, true>;
+  /**
+   * The most recent published order withheld from a band because it arrived
+   * while that band's own reorder request was in flight, keyed
+   * `${stepId}:${band}`. Reconciled against the request's own resolution by
+   * revision (the higher of the two wins, the response breaking a tie) when
+   * that request settles, then cleared either way.
+   */
+  withheldReorderByBandKey: Record<
+    string,
+    { revision: number; tasks: ReorderedTaskPosition[] } | undefined
+  >;
 };
 
 export type SidebarArchivedTasksState = {
@@ -200,6 +271,32 @@ export type WorkflowsState = {
   activeId: string | null;
 };
 
+export const WORKSPACE_CONTEXT_COLLECTIONS = ["workflows", "repositories", "steps"] as const;
+export type WorkspaceContextCollection = (typeof WORKSPACE_CONTEXT_COLLECTIONS)[number];
+export type WorkspaceContextReadError =
+  | "transient"
+  | "access_denied"
+  | "not_found"
+  | "invalid"
+  | "cancelled"
+  | "unknown";
+export type WorkspaceContextReadState = {
+  workspaceId: string | null;
+  generation: number;
+  pending: Record<WorkspaceContextCollection, boolean>;
+  errors: Record<WorkspaceContextCollection, WorkspaceContextReadError | null>;
+  retryAfterMs: Record<WorkspaceContextCollection, number | null>;
+  /** Request owner for each collection's latest asynchronous read. */
+  requestIds: Record<WorkspaceContextCollection, string | null>;
+  /** Snapshot reads are tracked separately from the workflow list read. */
+  snapshotPending: boolean;
+  snapshotError: WorkspaceContextReadError | null;
+  snapshotRetryAfterMs: number | null;
+  snapshotRequestId: string | null;
+  retryVersion: number;
+  retryCycle: number;
+};
+
 export type TaskState = {
   activeTaskId: string | null;
   activeSessionId: string | null;
@@ -227,15 +324,37 @@ export type KanbanSliceState = {
   sidebarArchivedTasks: SidebarArchivedTasksState;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
+  workspaceContextRead: WorkspaceContextReadState;
   tasks: TaskState;
+  /** Browser-local removal intent. It is deliberately excluded from hydration. */
+  taskRemoval: TaskRemovalState;
 };
 
 export type KanbanSliceActions = {
   resetKanbanWorkspaceContext: () => void;
+  // eslint-disable-next-line max-params -- positional arguments mirror the store action's small read contract
+  setWorkspaceContextRead: (
+    collection: WorkspaceContextCollection,
+    workspaceId: string,
+    generation: number,
+    result: "pending" | "success" | WorkspaceContextReadError,
+    retryAfterMs?: number,
+    requestId?: string,
+  ) => void;
+  setWorkspaceSnapshotRead: (
+    workspaceId: string,
+    generation: number,
+    result: "pending" | "success" | WorkspaceContextReadError,
+    retryAfterMs?: number,
+    requestId?: string,
+  ) => void;
+  requestWorkspaceContextRefresh: (resetRetryCycle?: boolean) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;
   setActiveTask: (taskId: string) => void;
+  /** Automatic task selection that must not invalidate a user navigation revision. */
+  setActiveTaskAuto: (taskId: string) => void;
   setActiveSession: (taskId: string, sessionId: string) => void;
   // setActiveSessionAuto updates the active session without creating or
   // clearing a user pin. Callers that intentionally override a pin must clear
@@ -247,11 +366,26 @@ export type KanbanSliceActions = {
   // the live session row with typed store access), so a stale status response
   // can never leave a Start button while the agent is actually running.
   setResumeSkipped: (sessionId: string, skipped: boolean) => void;
+  beginTaskRemoval: (input: Omit<BeginTaskRemovalInput, "token">) => string | null;
+  recordTaskRemovalResult: (
+    token: string,
+    taskIds: string[],
+    outcome: "succeeded" | "failed" | "unknown",
+  ) => void;
+  releaseTaskRemoval: (token: string) => void;
+  advanceTaskNavigationRevision: () => void;
   setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
   removeMultiTask: (workflowId: string, taskId: string) => void;
+  setStepOrderRevision: (stepId: string, revision: number) => void;
+  setBandReorderPending: (stepId: string, band: ReorderBand, pending: boolean) => void;
+  setWithheldReorder: (
+    stepId: string,
+    band: ReorderBand,
+    payload: { revision: number; tasks: ReorderedTaskPosition[] } | null,
+  ) => void;
   setSidebarArchivedTasks: (
     workspaceId: string,
     tasks: KanbanState["tasks"],

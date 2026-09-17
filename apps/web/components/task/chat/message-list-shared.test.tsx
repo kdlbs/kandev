@@ -93,6 +93,8 @@ import {
   getLastUserMessageId,
   getFirstUserMessageId,
   isElementFullyVisible,
+  filterLaunchErrorItems,
+  filterLaunchErrorMessages,
   resolveLastPromptControls,
   resolveLastPromptEdge,
   shouldAutoScrollToBottom,
@@ -128,6 +130,106 @@ describe("getEffectiveActiveTurnId", () => {
 
   it("ignores a stale active turn after the session settles", () => {
     expect(getEffectiveActiveTurnId("turn-stale", false)).toBeNull();
+  });
+});
+
+describe("launch error-owned transcript filtering", () => {
+  it("removes launch-only messages only when the task card owns the error", () => {
+    const emptyTurn = {
+      id: "empty-turn-1",
+      metadata: { empty_turn: true },
+    } as unknown as Message;
+    const runtimeFailure = {
+      id: "runtime-failure-1",
+      metadata: { failure_kind: "provider_quota_limited" },
+    } as unknown as Message;
+
+    expect(filterLaunchErrorMessages([emptyTurn, runtimeFailure], false)).toEqual([
+      emptyTurn,
+      runtimeFailure,
+    ]);
+    expect(filterLaunchErrorMessages([emptyTurn, runtimeFailure], true)).toEqual([runtimeFailure]);
+  });
+
+  it("removes preparation and previous-agent rows while retaining transcript messages", () => {
+    const runtimeMessage = { id: "message-1" } as unknown as Message;
+    const items: RenderItem[] = [
+      { type: "prepare_progress", id: "prepare-1", sessionId: "s1" },
+      {
+        type: "agent_error_notice",
+        id: "agent-error-1",
+        sessionId: "s1",
+        error: { message: "matching error", stamp: "stamp-1" },
+      },
+      {
+        type: "agent_error_notice",
+        id: "agent-error-2",
+        sessionId: "s1",
+        error: { message: "unrelated error", stamp: "old-stamp" },
+      },
+      {
+        type: "message",
+        message: {
+          id: "empty-1",
+          created_at: "2026-06-14T12:00:01Z",
+          metadata: { empty_turn: true },
+        } as unknown as Message,
+      },
+      { type: "message", message: runtimeMessage },
+    ];
+
+    expect(filterLaunchErrorItems(items, true, "stamp-1", "2026-06-14T12:00:00Z")).toEqual([
+      {
+        type: "agent_error_notice",
+        id: "agent-error-2",
+        sessionId: "s1",
+        error: { message: "unrelated error", stamp: "old-stamp" },
+      },
+      { type: "message", message: runtimeMessage },
+    ]);
+  });
+
+  it("keeps stale launch-only history when the current failure has no carried stamp", () => {
+    const staleEmptyTurn = {
+      id: "empty-stale",
+      created_at: "2026-07-21T00:00:00Z",
+      metadata: { empty_turn: true },
+    } as unknown as Message;
+    const currentEmptyTurn = {
+      id: "empty-current",
+      created_at: "2026-07-22T00:00:00Z",
+      metadata: { empty_turn: true },
+    } as unknown as Message;
+
+    expect(filterLaunchErrorMessages([staleEmptyTurn, currentEmptyTurn], true)).toEqual([
+      staleEmptyTurn,
+    ]);
+    expect(
+      filterLaunchErrorItems(
+        [
+          { type: "message", message: staleEmptyTurn },
+          { type: "message", message: currentEmptyTurn },
+        ],
+        true,
+        "current-stamp",
+        "2026-07-22T00:00:00Z",
+      ),
+    ).toEqual([{ type: "message", message: staleEmptyTurn }]);
+  });
+
+  it("filters only launch-only rows carrying the active failure stamp", () => {
+    const staleMissingBranch = {
+      id: "missing-stale",
+      metadata: { failure_kind: "missing_pr_branch", launch_error_stamp: "old-stamp" },
+    } as unknown as Message;
+    const currentMissingBranch = {
+      id: "missing-current",
+      metadata: { failure_kind: "missing_pr_branch", launch_error_stamp: "current-stamp" },
+    } as unknown as Message;
+
+    expect(
+      filterLaunchErrorMessages([staleMissingBranch, currentMissingBranch], true, "current-stamp"),
+    ).toEqual([staleMissingBranch]);
   });
 });
 
@@ -247,7 +349,12 @@ describe("MessageItem agent error notice", () => {
 
   const REMEDIATION_URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
 
-  function renderNotice(error: { message: string; occurredAt?: string; remediationUrl?: string }) {
+  function renderNotice(error: {
+    message: string;
+    occurredAt?: string;
+    remediationUrl?: string;
+    details?: string;
+  }) {
     render(
       <MessageItem
         item={{
@@ -274,6 +381,26 @@ describe("MessageItem agent error notice", () => {
     expect(screen.getByTestId("last-agent-error-notice").textContent).toContain(
       AGENT_ERROR_MESSAGE,
     );
+  });
+
+  it("uses a touch-sized dismiss target on coarse pointers", () => {
+    renderNotice({ message: AGENT_ERROR_MESSAGE });
+
+    expect(screen.getByRole("button").className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(screen.getByRole("button").className).toContain("[@media(pointer:coarse)]:w-11");
+  });
+
+  it("reveals the sanitized failure cause in a collapsed technical-details disclosure", () => {
+    const details = 'workflow step "Review Step": provider context reset: provider reset timed out';
+    renderNotice({ message: "context reset failed", details });
+
+    const disclosure = screen.getByTestId("last-agent-error-details") as HTMLDetailsElement;
+    expect(disclosure.querySelector("summary")?.textContent).toBe("Technical details");
+    expect(disclosure.open).toBe(false);
+
+    fireEvent.click(screen.getByText("Technical details"));
+    expect(disclosure.open).toBe(true);
+    expect(disclosure.textContent).toContain(details);
   });
 
   it("renders a validated remediation link, and nothing for an invalid URL", () => {
@@ -722,6 +849,43 @@ describe("MessageListStatus", () => {
 
     expect(screen.queryByTestId("conversation-loading-state")).not.toBeNull();
     expect(screen.queryByText("Loading conversation...")).not.toBeNull();
+  });
+
+  it("does not show the empty invitation before history is ready", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore={false}
+        showLoadingState
+        messagesLoading
+        isInitialLoading
+        messagesCount={0}
+        sessionId="sess-1"
+        historyStatus="loading"
+        onRetryHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("No messages yet. Start the conversation!")).toBeNull();
+    expect(screen.getByTestId("session-history-loading")).toBeTruthy();
+  });
+
+  it("shows the empty invitation after a successful empty history snapshot", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore={false}
+        showLoadingState={false}
+        messagesLoading={false}
+        isInitialLoading={false}
+        messagesCount={0}
+        sessionId="sess-1"
+        historyStatus="ready"
+        onRetryHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("No messages yet. Start the conversation!")).toBeTruthy();
   });
 });
 

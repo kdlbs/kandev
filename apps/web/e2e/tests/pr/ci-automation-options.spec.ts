@@ -14,6 +14,16 @@ async function seedTaskWithPR(
   title: string,
   prOverrides: Partial<Parameters<ApiClient["mockGitHubAssociateTaskPR"]>[0]> = {},
 ) {
+  // The task-mode MCP catalog is derived from the providers attached to the
+  // task repository before the agent session starts. Keep this fixture's
+  // local checkout paired with the GitHub identity of its linked PR so the
+  // bound auto-fix outcome tool is discoverable during the first turn.
+  await apiClient.updateRepository(seedData.repositoryId, {
+    provider: "github",
+    provider_host: "https://github.com",
+    provider_owner: OWNER,
+    provider_name: REPO,
+  });
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
   const task = await apiClient.createTaskWithAgent(
@@ -68,6 +78,20 @@ async function openPromptDialog(session: SessionPage) {
   const editButton = popover.getByLabel("Edit auto-fix prompt for this task");
   await expect(editButton).toBeVisible();
   await editButton.click({ force: true });
+}
+
+async function primarySessionId(apiClient: ApiClient, taskId: string) {
+  const { sessions } = await apiClient.listTaskSessions(taskId);
+  const session = sessions.find((item) => item.is_primary) ?? sessions[0];
+  if (!session) throw new Error(`Task ${taskId} has no session`);
+  return session.id;
+}
+
+async function listAutoFixMessages(apiClient: ApiClient, sessionId: string) {
+  const { messages } = await apiClient.listSessionMessages(sessionId);
+  return messages.filter(
+    (message) => message.author_type === "user" && message.content.includes("@ci-auto-fix"),
+  );
 }
 
 async function interceptLifecycleError(
@@ -229,7 +253,9 @@ test.describe("PR CI automation options", () => {
 
     await popover.getByLabel("Explain CI automation options").hover();
     const queueRecoveryHelp = testPage.getByRole("tooltip");
-    await expect(queueRecoveryHelp).toContainText("Auto-fix repairs actionable queue removals.");
+    await expect(queueRecoveryHelp).toContainText(
+      "Auto-fix repairs ordinary merge conflicts and actionable queue removals.",
+    );
     await expect(queueRecoveryHelp).toContainText(
       "Auto-merge submits an eligible head or requeues it after a new commit.",
     );
@@ -253,6 +279,8 @@ test.describe("PR CI automation options", () => {
     const feedbackHelp = promptDialog.getByTestId("ci-auto-fix-pr-feedback-help");
     await expect(feedbackHelp).toContainText("new or changed failing checks");
     await expect(feedbackHelp).toContainText("pull or fetch the branch");
+    await expect(promptDialog).toContainText("ordinary merge-conflict context");
+    await expect(promptDialog).toContainText("actionable queue-removal context");
     await testPage.getByLabel("Task auto-fix prompt").fill("Please fix only the new CI issues.");
     await testPage.getByRole("button", { name: "Save prompt" }).click();
 
@@ -275,6 +303,120 @@ test.describe("PR CI automation options", () => {
     await expect(
       reloaded.prTopbarPopover().getByRole("switch", { name: "Auto-merge or requeue when ready" }),
     ).toBeChecked();
+  });
+
+  test("desktop auto-fix repairs an existing merge conflict once", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const headSHA = "head-conflict-desktop";
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI conflict auto-fix desktop", {
+      head_sha: headSHA,
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "dirty",
+    });
+    const sessionId = await primarySessionId(apiClient, taskId);
+    const session = await openTask(testPage, taskId);
+    await session.waitForChatIdle();
+
+    await session.hoverPRTopbar();
+    await session.prTopbarPopover().hover();
+    const popover = session.prTopbarPopover();
+    await expect(popover.getByTestId("pr-ci-automation-controls")).toBeVisible();
+    await popover.getByLabel("Explain CI automation options").hover();
+    const help = testPage.getByRole("tooltip");
+    await expect(help).toContainText(
+      "Auto-fix repairs ordinary merge conflicts and actionable queue removals.",
+    );
+
+    await openPromptDialog(session);
+    const promptDialog = testPage.getByRole("dialog", { name: "Auto-fix prompt" });
+    await expect(promptDialog).toContainText("ordinary merge-conflict context");
+    await expect(promptDialog).toContainText("actionable queue-removal context");
+    await testPage.getByRole("button", { name: "Cancel" }).click();
+
+    await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskId,
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      pr_url: PR_URL,
+      pr_title: "Add CI automation options",
+      head_branch: "feat/ci-automation",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      head_sha: headSHA,
+      review_state: "approved",
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "dirty",
+    });
+
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        return options.pr_states?.find((item) => item.pr_number === PR_NUMBER)
+          ?.auto_fix_round_count;
+      })
+      .toBe(1);
+    await expect(session.prStatusChip().getByTestId("pr-status-auto-fix-chip")).toContainText(
+      "Auto-fix 1/10",
+    );
+    await session.hoverPRTopbar();
+    await session.prTopbarPopover().hover();
+    await session.prTopbarPopover().getByTestId("ci-auto-fix-round-help").hover();
+    await expect(
+      testPage.getByRole("tooltip").getByTestId("ci-auto-fix-round-explanation"),
+    ).toContainText(
+      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
+    );
+    await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
+    const [firstMessage] = await listAutoFixMessages(apiClient, sessionId);
+    expect(firstMessage).toBeDefined();
+    expect(firstMessage?.content).toContain("Merge conflict");
+    expect(firstMessage?.content).toContain("feat/ci-automation");
+    expect(firstMessage?.content).toContain("main");
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskId,
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      pr_url: PR_URL,
+      pr_title: "Add CI automation options",
+      head_branch: "feat/ci-automation",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      head_sha: headSHA,
+      review_state: "approved",
+      checks_state: "success",
+      checks_total: 1,
+      checks_passing: 1,
+      unresolved_review_threads: 0,
+      mergeable_state: "dirty",
+    });
+    await expect
+      .poll(async () => {
+        const options = await apiClient.getTaskCIAutomationOptions(taskId);
+        return options.pr_states?.find((item) => item.pr_number === PR_NUMBER)
+          ?.auto_fix_round_count;
+      })
+      .toBe(1);
+    await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
   });
 
   test("desktop popover keeps two linked PRs' automation switches independent", async ({

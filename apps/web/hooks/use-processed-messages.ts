@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { readInitialPromptPreview, TASK_DESCRIPTION_SYNTHETIC_ID } from "./initial-prompt-preview";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -14,7 +15,8 @@ import {
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import type { LastAgentError } from "@/lib/session-last-agent-error";
+import { lastAgentErrorStamp, type LastAgentError } from "@/lib/session-last-agent-error";
+import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
 import {
   buildChildrenByParentToolCallId,
   buildPermissionsByToolCallId,
@@ -144,10 +146,12 @@ export type GroupedRenderOptions = {
 };
 
 export type ProcessedMessagesOptions = {
+  initialPromptPreview?: unknown;
   historyInitialized?: boolean;
   hasOlderMessages?: boolean;
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
+  currentTurnCompleted?: boolean;
   pendingAction?: TaskPendingAction | null;
 };
 
@@ -362,6 +366,7 @@ function buildGroupedItemsForHook(args: {
     }),
     args.resolvedSessionId,
     args.lastAgentError,
+    args.allSessionMessages,
   );
 }
 
@@ -392,8 +397,16 @@ export function insertLastAgentErrorItem(
   items: RenderItem[],
   resolvedSessionId: string | null,
   error?: LastAgentError | null,
+  persistedMessages: Message[] = [],
 ): RenderItem[] {
   if (!resolvedSessionId || !error) return items;
+  if (
+    persistedMessages.some((message) =>
+      isPersistedRecoveryForSession(message, resolvedSessionId, error),
+    )
+  ) {
+    return items;
+  }
   const notice: AgentErrorNoticeItem = {
     type: "agent_error_notice",
     id: `last-agent-error-${resolvedSessionId}-${error.occurredAt ?? "unknown"}`,
@@ -402,6 +415,21 @@ export function insertLastAgentErrorItem(
   };
   const insertAt = insertionIndexForAgentError(items, error.occurredAt);
   return [...items.slice(0, insertAt), notice, ...items.slice(insertAt)];
+}
+
+function isPersistedRecoveryForSession(
+  message: Message,
+  sessionId: string,
+  error: LastAgentError,
+): boolean {
+  if (message.session_id !== sessionId) return false;
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  if (metadata?.recovery_actions !== true) return false;
+  const messageStamp = metadata.error_stamp ?? metadata.recovery_stamp ?? metadata.failure_stamp;
+  if (typeof messageStamp === "string" && messageStamp !== "") {
+    return messageStamp === lastAgentErrorStamp(error);
+  }
+  return legacyRecoveryMessageMatchesError(message.content, message.created_at, error);
 }
 
 /** Builds the todo checklist from the latest persisted `todo`-type message,
@@ -448,9 +476,13 @@ function usePendingClarificationState(messages: Message[], options: ProcessedMes
   const scope = useMemo(
     () =>
       hasScopeKeys
-        ? { currentTurnId: options.currentTurnId, pendingAction: options.pendingAction }
+        ? {
+            currentTurnId: options.currentTurnId,
+            currentTurnCompleted: options.currentTurnCompleted,
+            pendingAction: options.pendingAction,
+          }
         : undefined,
-    [hasScopeKeys, options.currentTurnId, options.pendingAction],
+    [hasScopeKeys, options.currentTurnCompleted, options.currentTurnId, options.pendingAction],
   );
   return {
     scope,
@@ -481,30 +513,38 @@ export function shouldShowTaskDescriptionFallback(
   taskDescription: string | null,
   visibleMessages: Message[],
   options: Pick<ProcessedMessagesOptions, "historyInitialized" | "hasOlderMessages"> = {},
+  hasInitialPreview = false,
 ): boolean {
   return (
-    Boolean(taskDescription) &&
+    (Boolean(taskDescription) || hasInitialPreview) &&
     options.historyInitialized === true &&
     options.hasOlderMessages === false &&
     !visibleMessages.some((message) => message.author_type === "user")
   );
 }
 
-export const TASK_DESCRIPTION_SYNTHETIC_ID = "task-description";
+export { TASK_DESCRIPTION_SYNTHETIC_ID } from "./initial-prompt-preview";
 
 function buildTaskDescriptionMessage(
-  showFallback: boolean,
+  visibleMessages: Message[],
   taskDescription: string | null,
   taskId: string | null,
   resolvedSessionId: string | null,
+  options: ProcessedMessagesOptions,
 ): Message | null {
-  if (!showFallback) return null;
+  const preview = readInitialPromptPreview(options.initialPromptPreview);
+  if (
+    !shouldShowTaskDescriptionFallback(taskDescription, visibleMessages, options, preview !== null)
+  ) {
+    return null;
+  }
   return {
     id: TASK_DESCRIPTION_SYNTHETIC_ID,
     task_id: toTaskId(taskId ?? ""),
     session_id: toSessionId(resolvedSessionId ?? ""),
     author_type: "user",
-    content: taskDescription ?? "",
+    content: preview?.content ?? taskDescription ?? "",
+    ...(preview ? { metadata: { attachments: preview.attachments } } : {}),
     type: "message",
     created_at: "",
   };
@@ -537,20 +577,23 @@ export function useProcessedMessages(
 
   const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
 
-  const showTaskDescriptionFallback = useMemo(
-    () => shouldShowTaskDescriptionFallback(taskDescription, visibleMessages, options),
-    [taskDescription, visibleMessages, options.historyInitialized, options.hasOlderMessages],
-  );
-  const taskDescriptionMessage: Message | null = useMemo(
-    () =>
-      buildTaskDescriptionMessage(
-        showTaskDescriptionFallback,
-        taskDescription,
-        taskId,
-        resolvedSessionId,
-      ),
-    [showTaskDescriptionFallback, taskDescription, taskId, resolvedSessionId],
-  );
+  const taskDescriptionMessage = useMemo(() => {
+    return buildTaskDescriptionMessage(
+      visibleMessages,
+      taskDescription,
+      taskId,
+      resolvedSessionId,
+      options,
+    );
+  }, [
+    taskId,
+    resolvedSessionId,
+    options.initialPromptPreview,
+    taskDescription,
+    visibleMessages,
+    options.historyInitialized,
+    options.hasOlderMessages,
+  ]);
 
   const allMessages = useMemo(() => {
     return taskDescriptionMessage ? [taskDescriptionMessage, ...visibleMessages] : visibleMessages;

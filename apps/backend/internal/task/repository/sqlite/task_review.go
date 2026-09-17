@@ -298,19 +298,32 @@ func (r *Repository) GetTaskReviewFinding(ctx context.Context, findingID string)
 	return f, err
 }
 
-// UpdateTaskReviewFindingStatus sets a finding's status and resolved_at.
-func (r *Repository) UpdateTaskReviewFindingStatus(ctx context.Context, findingID string, status models.ReviewFindingStatus, resolvedAt *time.Time) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_review_findings SET status = ?, resolved_at = ?, updated_at = ? WHERE id = ?
-	`), string(status), resolvedAt, time.Now().UTC(), findingID)
+// TransitionTaskReviewFindingStatus updates a finding and returns the stored
+// row. The CASE expression reads the old status inside the same database write,
+// so concurrent callers cannot apply a timestamp decision from stale state.
+func (r *Repository) TransitionTaskReviewFindingStatus(ctx context.Context, findingID string, status models.ReviewFindingStatus) (*models.TaskReviewFinding, error) {
+	now := time.Now().UTC()
+	row := r.db.QueryRowxContext(ctx, r.db.Rebind(`
+		UPDATE task_review_findings
+		SET status = ?,
+			resolved_at = CASE
+				WHEN status = ? THEN resolved_at
+				WHEN ? IN ('resolved', 'dismissed') THEN ?
+				ELSE NULL
+			END,
+			updated_at = ?
+		WHERE id = ?
+		RETURNING `+reviewFindingColumns),
+		string(status), string(status), string(status), now,
+		now, findingID)
+	finding, err := scanReviewFinding(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: %s", models.ErrTaskReviewFindingNotFound, findingID)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to update task review finding status: %w", err)
+		return nil, fmt.Errorf("failed to transition task review finding status: %w", err)
 	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("%w: %s", models.ErrTaskReviewFindingNotFound, findingID)
-	}
-	return nil
+	return finding, nil
 }
 
 // DeleteSupersededTaskReviewFindings removes still-open findings from earlier

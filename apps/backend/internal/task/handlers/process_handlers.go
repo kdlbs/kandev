@@ -23,8 +23,10 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 )
 
-// queryValueTrue is the string "true" used in query parameter comparisons.
-const queryValueTrue = "true"
+const (
+	queryValueTrue     = "true"
+	invalidRequestBody = "invalid request body"
+)
 
 type ProcessHandlers struct {
 	service      *service.Service
@@ -68,6 +70,7 @@ func RegisterProcessRoutes(
 	session.POST("/set-model", handlers.httpSetSessionModel)
 	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)
 	session.POST("/authenticate", handlers.httpAuthenticate)
+	session.POST("/html-previews", handlers.httpPublishWorkspacePreview)
 	return handlers
 }
 
@@ -88,7 +91,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 	var body httpStartProcessRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		h.logger.Warn("start process invalid request body", zap.String("session_id", sessionID), zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	h.logger.Debug("start process request",

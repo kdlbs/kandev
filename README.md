@@ -21,6 +21,18 @@ Run it locally or self-host it on your own infrastructure. Use the [mobile remot
 
 Open source, multi-provider, no telemetry, not tied to any cloud.
 
+## Distribution
+
+Kandev is distributed as a native Go binary for each supported platform. The
+compiled web frontend is embedded in that binary. The binary serves the web UI
+and API, so the application server does not need Node.js, a separate web
+server, or a frontend build at runtime.
+
+Homebrew, Scoop, release archives, and the desktop app run this native binary
+directly. The npm/npx package adds a small Node.js platform selector, so Node.js
+is required to launch Kandev through npm/npx but not by the application server.
+Release bundles also include `agentctl` helpers for task environments.
+
 ## Vision
 
 > **Humans stay in control.** Define tasks, build agentic workflows with gates, review every change, decide what ships.
@@ -117,6 +129,7 @@ Kandev can run any agent CLI as a TUI inside a terminal, even when it does not s
 |:--------:|-------------|
 | **Local Process** | Runs the agent as a local process on the host machine |
 | **Docker** | Runs the agent in an isolated Docker container |
+| **Kubernetes** | Runs each task session in an administrator-configured Pod with managed, existing, or disposable workspace storage |
 | **SSH** | Runs the agent on a remote server over SSH |
 | **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
 
@@ -224,8 +237,7 @@ graph LR
     end
 ```
 
-We also want to add support for this remote runtime:
-- **K8s operator** - run agents in a Kubernetes cluster, with auto-scaling and resource management.
+See the [Kubernetes guide](docs/public/k8s.md) for executor configuration and lifecycle. The executor uses ordinary Pods and does not require an operator.
 
 <details>
 <summary><strong>Development</strong></summary>
@@ -236,7 +248,7 @@ We also want to add support for this remote runtime:
 apps/
 ├── backend/    # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
 ├── web/        # Vite/React frontend (SPA, Zustand, real-time subscriptions)
-├── cli/        # CLI tool (npx kandev launcher)
+├── cli/        # npm shim for the native Go runtime
 ├── desktop/    # Tauri desktop shell
 └── packages/   # Shared UI components & types
 ```

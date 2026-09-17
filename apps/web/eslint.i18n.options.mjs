@@ -1570,7 +1570,6 @@ export const i18nGuardFiles = [
   "components/kanban/kanban-header-mobile.tsx",
   "components/kanban/kanban-header.tsx",
   "components/kanban/mobile-column-tabs.tsx",
-  "components/kanban/mobile-drop-targets.tsx",
   "components/kanban/mobile-fab.tsx",
   "components/kanban/mobile-menu-sheet.tsx",
   // Extracted out of mobile-menu-sheet.tsx to stay under the 600-line limit.

@@ -33,7 +33,7 @@ import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import { buildBranchKeywords } from "./branch-picker-options";
+import { branchOptionValue, buildBranchKeywords } from "./branch-picker-options";
 import {
   ensureAgentProfileRecentUseLoaded,
   orderAgentProfilesByRecentUse,
@@ -55,7 +55,7 @@ function ModelProbeWarning({ note }: { note: string }) {
   const trigger = (
     <button
       type="button"
-      className="inline-flex min-h-11 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex min-h-0 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
       aria-label={note}
       aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
@@ -71,7 +71,7 @@ function ModelProbeWarning({ note }: { note: string }) {
     return (
       <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent>
+        <DrawerContent style={{ zIndex: 80 }}>
           <DrawerHeader>
             <DrawerTitle className="sr-only">{note}</DrawerTitle>
             <DrawerDescription>{note}</DrawerDescription>
@@ -84,7 +84,9 @@ function ModelProbeWarning({ note }: { note: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-      <TooltipContent side="top">{note}</TooltipContent>
+      <TooltipContent side="top" style={{ zIndex: 80 }}>
+        {note}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -155,10 +157,7 @@ export function useRepositoryOptions(
 export function useBranchOptions(branchOptionsRaw: Branch[]) {
   return useMemo(() => {
     return branchOptionsRaw.map((branchObj: Branch) => {
-      const displayName =
-        branchObj.type === "remote" && branchObj.remote
-          ? `${branchObj.remote}/${branchObj.name}`
-          : branchObj.name;
+      const displayName = branchOptionValue(branchObj);
       // Keywords give the scorer extra surfaces to match against: the leaf
       // branch name, every path segment, and (for remotes) the remote name.
       const keywords = buildBranchKeywords(branchObj.name, branchObj.remote);
@@ -229,9 +228,12 @@ export function useAgentProfileOptions(
       const startModelGone = Boolean(
         profile.model && advertised.length > 0 && !advertised.includes(profile.model),
       );
-      const modelProbeNote = startModelGone
-        ? t("settings:profileStartModelNotAdvertisedOnHost", { model: profile.model })
-        : undefined;
+      let modelProbeNote: string | undefined;
+      if (startModelGone) {
+        modelProbeNote = t("settings:profileStartModelNotAdvertisedOnHost", {
+          model: profile.model,
+        });
+      }
       const renderProfileLabel = (modelProbeWarning: React.ReactNode) => (
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="flex shrink-0 items-center justify-between gap-2">

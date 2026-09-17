@@ -140,6 +140,19 @@ function CreateMenu({
   onUploadFiles?: (mode: "files" | "folder") => void;
 }) {
   const { t } = useTranslation();
+  const createAfterCloseRef = useRef(false);
+  const handleCreateSelect = useCallback(() => {
+    createAfterCloseRef.current = true;
+  }, []);
+  const handleCloseAutoFocus = useCallback(
+    (event: Event) => {
+      if (!createAfterCloseRef.current) return;
+      event.preventDefault();
+      createAfterCloseRef.current = false;
+      onStartCreate();
+    },
+    [onStartCreate],
+  );
 
   // Without an upload handler there is only one action, so keep the original
   // one-click button rather than burying New File behind a menu.
@@ -170,10 +183,10 @@ function CreateMenu({
         </TooltipTrigger>
         <TooltipContent>{t("task:addToWorkspace")}</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={handleCloseAutoFocus}>
         <DropdownMenuItem
           className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
-          onSelect={onStartCreate}
+          onSelect={handleCreateSelect}
         >
           <IconFilePlus className="h-3.5 w-3.5" />
           {t("task:newFile")}

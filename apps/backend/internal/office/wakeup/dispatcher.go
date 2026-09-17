@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/pause"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -49,7 +50,7 @@ type AgentReader interface {
 // office/service construction cycle: office/service's TaskCreator/other
 // dependencies are wired before the wakeup dispatcher exists).
 type RunQueuer interface {
-	QueueRunFromWakeup(ctx context.Context, agentProfileID, reason, routineID, contextSnapshot string) (runID string, err error)
+	QueueRunFromWakeup(ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID string) (runID string, err error)
 }
 
 // RoutineLookup is the slim interface the dispatcher uses to look up
@@ -84,6 +85,7 @@ type Dispatcher struct {
 	routines  RoutineLookup
 	runQueuer RunQueuer
 	log       *logger.Logger
+	pauseGate shared.PauseGate
 }
 
 // NewDispatcher builds a Dispatcher. log MUST be non-nil; the agents
@@ -120,6 +122,13 @@ func (d *Dispatcher) SetRoutineLookup(routines RoutineLookup) {
 // doc comment for why there is no inline fallback insert here.
 func (d *Dispatcher) SetRunQueuer(runQueuer RunQueuer) {
 	d.runQueuer = runQueuer
+}
+
+// SetPauseGate wires the workspace-pause read used to block the
+// taskless-run creation path (createFreshRun). Optional — when nil the
+// gate is not enforced.
+func (d *Dispatcher) SetPauseGate(g shared.PauseGate) {
+	d.pauseGate = g
 }
 
 // Dispatch processes one wakeup-request by id. The flow is:
@@ -320,15 +329,28 @@ func normaliseRoutinePolicy(p string) string {
 func (d *Dispatcher) createFreshRun(
 	ctx context.Context, req *officesqlite.WakeupRequest,
 ) error {
+	// checkPauseGate runs before the run-queuer nil check: it is
+	// createFreshRun's sole gate insertion point, and a caller wired
+	// with a pause gate but no run queuer (or vice versa) must still
+	// observe the gate's fail-closed/skip outcome rather than an
+	// unrelated configuration error masking it.
+	if err := d.checkPauseGate(ctx, req); err != nil {
+		return err
+	}
 	if d.runQueuer == nil {
 		return fmt.Errorf("create run for wakeup %s: no run queuer configured", req.ID)
 	}
+
 	reason := effectiveReason(req)
 	payload := req.Payload
 	if payload == "" {
 		payload = "{}"
 	}
-	runID, err := d.runQueuer.QueueRunFromWakeup(ctx, req.AgentProfileID, reason, routineIDFromPayload(req), payload)
+	// AC-OFFICE-LOOP-LIVENESS-002.3: req.CausationID is copied onto the
+	// created run's own CausationID column, including on the lost-CAS
+	// fresh-run path — that run still carries the requesting wake's id,
+	// not a new one.
+	runID, err := d.runQueuer.QueueRunFromWakeup(ctx, req.AgentProfileID, reason, routineIDFromPayload(req), payload, req.CausationID)
 	if err != nil {
 		return fmt.Errorf("create run for wakeup %s: %w", req.ID, err)
 	}
@@ -349,4 +371,57 @@ func (d *Dispatcher) createFreshRun(
 		zap.String("source", req.Source),
 		zap.String("reason", reason))
 	return nil
+}
+
+// wakeupPauseSkipReason is the skip reason MarkWakeupRequestSkipped
+// writes when the pause gate blocks createFreshRun — matching the
+// literal the other gate sites use for cross-site debugging
+// consistency (routine skip_reason, halt-sweep cancel reason).
+const wakeupPauseSkipReason = "workspace_paused"
+
+// checkPauseGate is createFreshRun's sole gate insertion point (this is
+// the only source= that reaches CreateRun directly — skip_if_active and
+// coalesce_if_active resolve to either this path or a merge into an
+// existing run, never a bare write of their own). Resolves the
+// request's workspace via the agent it targets: GetAgentInstance's
+// ErrAgentNotFound is deliberately NOT treated as a gate error — F41
+// established this is the one wakeup-dispatch site that observes the
+// wrapped sentinel (it bypasses GetAgentFromConfig), and an agent that
+// no longer exists must not block on a workspace the dispatcher cannot
+// even resolve; launch behaviour for that case is unchanged (proceeds
+// ungated, exactly as before this gate existed). Any other lookup
+// error, or a PauseState error, fails closed. A confirmed pause marks
+// the request skipped so it does not stay perpetually "queued"; a
+// gate-read error deliberately does not — nothing has been written yet,
+// so the request is simply left queued for the next dispatch attempt.
+func (d *Dispatcher) checkPauseGate(ctx context.Context, req *officesqlite.WakeupRequest) error {
+	if d.pauseGate == nil {
+		return nil
+	}
+	agent, err := d.agents.GetAgentInstance(ctx, req.AgentProfileID)
+	if err != nil {
+		if errors.Is(err, officesqlite.ErrAgentNotFound) {
+			return nil
+		}
+		pause.RecordGateError("wakeup_dispatch")
+		d.log.Warn("wakeup dispatch: pause gate agent lookup failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	active, err := d.pauseGate.PauseState(ctx, agent.WorkspaceID)
+	if err != nil {
+		pause.RecordGateError("wakeup_dispatch")
+		d.log.Warn("wakeup dispatch: pause gate read failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	if active == nil {
+		return nil
+	}
+	pause.RecordBlocked("wakeup_dispatch")
+	if err := d.repo.MarkWakeupRequestSkipped(ctx, req.ID, wakeupPauseSkipReason); err != nil {
+		d.log.Warn("wakeup dispatch: mark skipped (paused) failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+	}
+	return shared.ErrWorkspacePaused
 }

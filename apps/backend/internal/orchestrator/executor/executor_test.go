@@ -181,6 +181,52 @@ func TestPrepareSession_Success(t *testing.T) {
 	}
 }
 
+func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-runner-retry"
+	repo.tasks[taskID] = &models.Task{
+		ID:          taskID,
+		WorkspaceID: "workspace-runner-retry",
+		Metadata:    map[string]interface{}{models.MetaKeyExecutorProfileID: "profile-old"},
+	}
+	createAttempts := 0
+	repo.createTaskSessionFunc = func(_ context.Context, session *models.TaskSession) error {
+		createAttempts++
+		if createAttempts == 1 {
+			repo.mu.Lock()
+			repo.tasks[taskID].Metadata[models.MetaKeyExecutorProfileID] = "profile-new"
+			repo.mu.Unlock()
+			return models.ErrTaskRunnerChanged
+		}
+		repo.mu.Lock()
+		repo.sessions[session.ID] = session
+		repo.mu.Unlock()
+		return nil
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{
+		ID:          taskID,
+		WorkspaceID: "workspace-runner-retry",
+		Metadata:    map[string]interface{}{models.MetaKeyExecutorProfileID: "profile-old"},
+	}
+	ctx := WithTaskRunnerProfileExplicit(context.Background(), false)
+
+	sessionID, err := exec.PrepareSession(ctx, task, "agent-profile", "executor", "profile-old", "")
+	if err != nil {
+		t.Fatalf("PrepareSession: %v", err)
+	}
+	if createAttempts != 2 {
+		t.Fatalf("CreateTaskSession attempts = %d, want 2", createAttempts)
+	}
+	created := repo.sessions[sessionID]
+	if created == nil {
+		t.Fatalf("session %q was not stored", sessionID)
+	}
+	if created.ExecutorProfileID != "profile-new" {
+		t.Fatalf("session executor profile = %q, want profile-new", created.ExecutorProfileID)
+	}
+}
+
 func TestPrepareSession_SharedGroupUsesTransactionalWorkspaceBinding(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -2070,15 +2116,17 @@ func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
 	var stopCalled atomic.Bool
 	var stopForce atomic.Bool
 	var stoppedExecutionID atomic.Value
+	var stopReason atomic.Value
 
 	agentManager := &mockAgentManager{
 		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
 			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
 		},
-		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+		stopAgentWithReasonFunc: func(ctx context.Context, agentExecutionID, reason string, force bool) error {
 			stopCalled.Store(true)
 			stopForce.Store(force)
 			stoppedExecutionID.Store(agentExecutionID)
+			stopReason.Store(reason)
 			return nil
 		},
 	}
@@ -2088,6 +2136,27 @@ func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
 	done := make(chan struct{})
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+	})
+	exec.SetOnBootstrapFailureTransition(func(
+		ctx context.Context,
+		taskID, sessionID, _ string,
+		_ models.TaskSessionState,
+		_ string,
+		errorValue models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		changed, _, err := repo.CommitBootstrapFailureIfCurrentExecution(
+			ctx,
+			taskID,
+			sessionID,
+			"exec-456",
+			models.TaskSessionStateStarting,
+			"",
+			errorValue,
+		)
+		if err != nil || !changed {
+			return changed, models.TaskSessionStateStarting, err
+		}
+		return true, models.TaskSessionStateFailed, nil
 	})
 	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
 		return repo.UpdateTaskState(ctx, taskID, state)
@@ -2121,6 +2190,9 @@ verified:
 	}
 	if id, ok := stoppedExecutionID.Load().(string); !ok || id != "exec-456" {
 		t.Errorf("expected StopAgent called with execution ID exec-456, got %v", stoppedExecutionID.Load())
+	}
+	if reason, ok := stopReason.Load().(string); !ok || reason != "agent bootstrap failed" {
+		t.Errorf("expected bootstrap-failure stop reason, got %v", stopReason.Load())
 	}
 
 	// Verify session was marked as FAILED
@@ -2263,6 +2335,15 @@ func TestHandleAgentProcessStartFailure_CancellationDuringCallbackStopsUnclaimed
 	) (bool, models.TaskSessionState, error) {
 		transitionCalls.Add(1)
 		return false, models.TaskSessionStateCancelled, nil
+	})
+	exec.SetOnBootstrapFailureTransition(func(
+		ctx context.Context,
+		taskID, sessionID, _ string,
+		_ models.TaskSessionState,
+		_ string,
+		errorValue models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		return exec.transitionSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message)
 	})
 	exec.SetOnExecutionCleanupClaim(func(sessionID, executionID string) bool {
 		if sessionID != "session-123" || executionID != "exec-456" {
@@ -2607,6 +2688,30 @@ func newRunAgentProcessAsyncFailureFixture(t *testing.T) *runAgentProcessAsyncFa
 			f.sessionFailedSeen = true
 		}
 		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+	})
+	f.exec.SetOnBootstrapFailureTransition(func(
+		ctx context.Context,
+		taskID, sessionID, _ string,
+		_ models.TaskSessionState,
+		_ string,
+		errorValue models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		changed, _, err := repo.CommitBootstrapFailureIfCurrentExecution(
+			ctx,
+			taskID,
+			sessionID,
+			"exec-456",
+			models.TaskSessionStateStarting,
+			"",
+			errorValue,
+		)
+		if changed {
+			f.sessionFailedSeen = true
+		}
+		if err != nil || !changed {
+			return changed, models.TaskSessionStateStarting, err
+		}
+		return true, models.TaskSessionStateFailed, nil
 	})
 	f.exec.SetOnAgentStartFailed(func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
 		f.startFailedCalls++

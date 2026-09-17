@@ -15,6 +15,13 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 )
 
+// pullRequestSnapshotRef is internal state owned by Kandev. Keeping PR heads
+// outside refs/remotes/origin prevents ordinary remote pruning or a user branch
+// named pr/<N> from changing the commit selected for a task launch.
+func pullRequestSnapshotRef(prNumber int) string {
+	return fmt.Sprintf("refs/kandev/pull/%d/head", prNumber)
+}
+
 // isGitRepo checks if a path is a Git repository.
 func (m *Manager) isGitRepo(path string) bool {
 	gitDir := filepath.Join(path, ".git")
@@ -38,27 +45,16 @@ func (m *Manager) isGitRepo(path string) bool {
 //     "missing branch" from a "could not tell" and avoid surfacing a
 //     misleading ErrInvalidBaseBranch.
 func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bool, error) {
-	// Acquire the throttle slot FIRST, then start the inspectTimeout
-	// timer. Building inspectCtx before Acquire (as we did originally)
-	// let throttle queue time eat through the 10s budget under load,
-	// producing 70s-lock-held / signal:killed cascades under git-pool
-	// contention. With this ordering the 10s timer starts the moment
-	// git is about to run, so we get an accurate "could not tell" only
-	// when the inspect itself is the slow part.
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		m.logger.Warn("branchExists bounded by context",
-			zap.String("repository_path", repoPath),
-			zap.String("branch", branch),
-			zap.Error(err))
-		return false, fmt.Errorf("branch check timed out for %q before throttle acquire: %w", branch, err)
-	}
-	defer release()
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--verify", branch)
-	if err := cmd.Run(); err != nil {
-		if ctxErr := inspectCtx.Err(); ctxErr != nil {
+	runErr, execCtxErr := subproc.RunGitAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		m.inspectTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, "rev-parse", "--verify", branch)
+		},
+	)
+	if runErr != nil {
+		if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 			m.logger.Warn("branchExists bounded by context",
 				zap.String("repository_path", repoPath),
 				zap.String("branch", branch),
@@ -117,17 +113,15 @@ func normalizeOriginBranchName(branch string) string {
 // acquiring the lifecycle throttle. The timeout starts after admission so
 // queue wait does not consume the command's inspection budget.
 func (m *Manager) runBoundedGitInspect(ctx context.Context, repoPath string, args ...string) (string, error) {
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		return "", err
-	}
-	defer release()
-
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, args...)
-	output, runErr := cmd.CombinedOutput()
-	if ctxErr := inspectCtx.Err(); ctxErr != nil {
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		m.inspectTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+		},
+	)
+	if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 		return string(output), fmt.Errorf("git inspection timed out: %w", ctxErr)
 	}
 	return string(output), runErr
@@ -212,18 +206,16 @@ func (m *Manager) prepareCheckoutFromRefreshedOrigin(ctx context.Context, repoPa
 }
 
 // prepareBranchFromRefreshedOrigin selects a provider-refreshed source branch
-// without contacting origin. A PR number selects the dedicated origin/pr/<N>
-// ref, which is also how fork PR heads are kept available after the
-// authenticated refresh. When both refs exist, the selected ref is the one
-// that contains the other. A local-only ref is preserved, a refreshed remote
-// ref is returned to the caller as the worktree start point, and divergence or
-// an unverified relationship fails closed.
+// without contacting origin. A PR number selects the dedicated Kandev-owned
+// snapshot ref, which is also how fork PR heads are kept available after the
+// authenticated refresh. PR preparation never creates or resets a local
+// branch with the PR's source name.
 func (m *Manager) prepareBranchFromRefreshedOrigin(
 	ctx context.Context, repoPath, localBranch, sourceBranch string, prNumber int,
 ) (string, error) {
 	remoteRef := "origin/" + sourceBranch
 	if prNumber > 0 {
-		remoteRef = fmt.Sprintf("origin/pr/%d", prNumber)
+		remoteRef = pullRequestSnapshotRef(prNumber)
 	}
 	localExists, err := m.branchExists(ctx, repoPath, localBranch)
 	if err != nil {
@@ -233,6 +225,12 @@ func (m *Manager) prepareBranchFromRefreshedOrigin(
 	if err != nil {
 		return "", err
 	}
+	if prNumber > 0 {
+		if !remoteExists {
+			return "", fmt.Errorf("required fetched remote ref %q is missing: %w", remoteRef, ErrWorkspaceCheckoutFailed)
+		}
+		return remoteRef, nil
+	}
 	if !localExists && !remoteExists {
 		return "", nil
 	}
@@ -240,13 +238,18 @@ func (m *Manager) prepareBranchFromRefreshedOrigin(
 		return "", fmt.Errorf("required fetched remote ref %q is missing", remoteRef)
 	}
 	if !localExists {
-		release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-		if err != nil {
-			return "", err
-		}
-		defer release()
-		cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", localBranch, remoteRef)
-		if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+			ctx,
+			subproc.GitLifecycle,
+			m.inspectTimeout,
+			func(execCtx context.Context) *exec.Cmd {
+				return m.newNonInteractiveGitCmd(execCtx, repoPath, "branch", "--track", localBranch, remoteRef)
+			},
+		)
+		if runErr != nil {
+			if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
+				return "", ctxErr
+			}
 			return "", fmt.Errorf("create local branch %q from refreshed origin: %s: %w",
 				localBranch, strings.TrimSpace(string(output)), runErr)
 		}
@@ -283,27 +286,98 @@ func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch str
 	return BranchStatusMissing
 }
 
+// RecoverBranchStatus restores a safely compacted managed branch from its
+// persisted exact head before reporting status. It performs no fetch.
+func (m *Manager) RecoverBranchStatus(ctx context.Context, wt *Worktree) string {
+	if wt == nil || wt.RepositoryPath == "" || wt.Branch == "" {
+		return BranchStatusMissing
+	}
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+	branchRef := "refs/heads/" + wt.Branch
+	if exists, err := m.branchExists(ctx, wt.RepositoryPath, branchRef); err == nil && exists {
+		return m.existingRecoveredBranchStatus(ctx, wt, branchRef)
+	}
+	if m.restoreManagedBranchFromRecoveryHeadLocked(ctx, wt) == nil && wt.RecoveryHeadSHA != "" {
+		return BranchStatusLocal
+	}
+	return m.BranchRecoveryStatus(ctx, wt.RepositoryPath, wt.Branch)
+}
+
+func (m *Manager) existingRecoveredBranchStatus(ctx context.Context, wt *Worktree, branchRef string) string {
+	if wt.RecoveryHeadSHA == "" {
+		return BranchStatusLocal
+	}
+	current, err := m.resolveCommit(ctx, wt.RepositoryPath, branchRef)
+	if err != nil || !strings.EqualFold(current, wt.RecoveryHeadSHA) {
+		return BranchStatusMissing
+	}
+	if m.finalizeRestoredManagedBranch(ctx, wt, current) != nil {
+		return BranchStatusMissing
+	}
+	return BranchStatusLocal
+}
+
+func (m *Manager) restoreManagedBranchFromRecoveryHeadLocked(ctx context.Context, wt *Worktree) error {
+	if wt == nil || wt.BranchOwner != BranchOwnerManaged || wt.RecoveryHeadSHA == "" {
+		return fmt.Errorf("managed branch recovery metadata is unavailable")
+	}
+	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	resolved, err := m.resolveCommit(inspectCtx, wt.RepositoryPath, wt.RecoveryHeadSHA)
+	if err != nil || resolved != strings.ToLower(wt.RecoveryHeadSHA) {
+		return fmt.Errorf("recovery commit is unavailable")
+	}
+	branchRef := "refs/heads/" + wt.Branch
+	zeroOID := strings.Repeat("0", len(resolved))
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, wt.RepositoryPath, "update-ref", branchRef, resolved, zeroOID)
+	if output, err := runGitCmdCombinedOutput(inspectCtx, cmd); err != nil {
+		return fmt.Errorf("restore managed branch: %s: %w", strings.TrimSpace(string(output)), err)
+	}
+	if err := m.finalizeRestoredManagedBranch(ctx, wt, resolved); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) finalizeRestoredManagedBranch(ctx context.Context, wt *Worktree, resolved string) error {
+	if wt.RecoveryHeadSHA == "" || !strings.EqualFold(wt.RecoveryHeadSHA, resolved) {
+		return fmt.Errorf("restored managed branch does not match its recovery head")
+	}
+	metadataStore, ok := m.store.(BranchMetadataStore)
+	if !ok {
+		return fmt.Errorf("persist restored compacted branch: metadata store is unavailable")
+	}
+	if !m.deleteRecoveryRef(ctx, wt, resolved) {
+		return fmt.Errorf("remove managed branch recovery ref")
+	}
+	persisted, persistErr := metadataStore.PersistBranchRecoveryRestored(ctx, wt.ID, resolved)
+	if persistErr != nil || !persisted {
+		return fmt.Errorf("persist restored compacted branch: %w", persistErr)
+	}
+	wt.RecoveryHeadSHA = ""
+	wt.BranchCompactedAt = nil
+	return nil
+}
+
 // refContains reports whether container already includes every commit in
 // contained, i.e. `git merge-base --is-ancestor contained container`.
 // A non-zero ancestry result is distinct from a failed probe: the former is a
 // proven negative, while the latter must stop required refresh preparation.
 func (m *Manager) refContains(ctx context.Context, repoPath, container, contained string) (bool, error) {
-	// Same Acquire-then-build-execCtx ordering as branchExists.
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		m.logger.Warn("refContains bounded by context before throttle acquire",
-			zap.String("repository_path", repoPath),
-			zap.String("container", container),
-			zap.String("contained", contained),
-			zap.Error(err))
-		return false, fmt.Errorf("acquire Git ancestry check: %w", err)
-	}
-	defer release()
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "merge-base", "--is-ancestor", contained, container)
-	runErr := cmd.Run()
-	if ctxErr := inspectCtx.Err(); ctxErr != nil {
+	runErr, execCtxErr := subproc.RunGitAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		m.inspectTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, "merge-base", "--is-ancestor", contained, container)
+		},
+	)
+	if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 		return false, fmt.Errorf("git ancestry check timed out: %w", ctxErr)
 	}
 	if runErr == nil {
@@ -317,18 +391,16 @@ func (m *Manager) refContains(ctx context.Context, repoPath, container, containe
 }
 
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
-	// Same Acquire-then-build-execCtx ordering as branchExists.
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		return ""
-	}
-	defer release()
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	output, runErr := cmd.Output()
+	output, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		m.inspectTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+		},
+	)
 	if runErr != nil {
-		if ctxErr := inspectCtx.Err(); ctxErr != nil {
+		if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 			m.logger.Warn("currentBranch bounded by context",
 				zap.String("repository_path", repoPath),
 				zap.Error(ctxErr))
@@ -341,13 +413,7 @@ func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, args ...string) *exec.Cmd {
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GCM_INTERACTIVE=Never",
-		"GIT_ASKPASS=echo",
-		"SSH_ASKPASS=/bin/false",
-		"GIT_SSH_COMMAND=ssh -oBatchMode=yes",
-	)
+	cmd.Env = subproc.PrepareGitEnvironment(os.Environ())
 	// After the context cancels and the process is killed, child processes
 	// (e.g. credential helpers) may still hold stdout/stderr pipes open.
 	// WaitDelay bounds how long CombinedOutput waits for those pipes to close.
@@ -729,14 +795,17 @@ func syncFailureCause(reason string, _ error, contextErr error) error {
 func (m *Manager) runGitCombinedAfterAcquire(
 	ctx context.Context, execTimeout time.Duration, repoPath string, args ...string,
 ) ([]byte, error, error) {
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		return nil, err, ctx.Err()
+	return subproc.RunGitCombinedAfterAcquire(ctx, subproc.GitLifecycle, execTimeout, func(execCtx context.Context) *exec.Cmd {
+		return m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+	})
+}
+
+func firstContextError(execCtxErr, runErr error) error {
+	if execCtxErr != nil {
+		return execCtxErr
 	}
-	defer release()
-	execCtx, cancel := context.WithTimeout(ctx, execTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
-	out, runErr := cmd.CombinedOutput()
-	return out, runErr, execCtx.Err()
+	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+		return runErr
+	}
+	return nil
 }

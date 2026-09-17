@@ -61,6 +61,32 @@ func TestLoadTemplates_CancelTriggersTurnCompleteDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadTemplates_CompletionPolicyUsesExplicitFinalStepSetting(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+	for _, template := range templates {
+		for _, step := range template.Steps {
+			want := template.ID != "improve-kandev" && template.ID != "report-kandev-issue" &&
+				step.Position == lastTemplatePosition(template.Steps)
+			if step.CompleteTaskOnEnter != want {
+				t.Errorf("template %q step %q completion policy = %t, want %t", template.ID, step.Name, step.CompleteTaskOnEnter, want)
+			}
+		}
+	}
+}
+
+func lastTemplatePosition(steps []models.StepDefinition) int {
+	last := 0
+	for i, step := range steps {
+		if i == 0 || step.Position > last {
+			last = step.Position
+		}
+	}
+	return last
+}
+
 func TestLoadTemplates_AllValid(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -438,11 +464,9 @@ func TestLoadTemplates_ImproveKandevManagedPublicationPromptContract(t *testing.
 	}
 }
 
-// TestLoadTemplates_PRReviewMRAutomationInstruction is AC30: the pr-review
-// template's review step must instruct the agent to enable lifecycle
-// notifications on whichever provider the task's linked review target is
-// on — update_task_pr_automation_kandev for a GitHub PR,
-// update_task_mr_automation_kandev for a GitLab MR.
+// TestLoadTemplates_PRReviewMRAutomationInstruction verifies that the pr-review
+// template uses the shared automation contract and asks the agent to select the
+// linked provider explicitly before enabling lifecycle notifications.
 func TestLoadTemplates_PRReviewMRAutomationInstruction(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -471,8 +495,10 @@ func TestLoadTemplates_PRReviewMRAutomationInstruction(t *testing.T) {
 		t.Fatal("pr-review template has no review step")
 	}
 	for _, required := range []string{
-		"update_task_pr_automation_kandev",
-		"update_task_mr_automation_kandev",
+		"get_task_change_requests_kandev",
+		"update_task_change_request_automation_kandev",
+		`target.scope="task"`,
+		`providers`,
 		"prompt_on_review_requested",
 		"prompt_on_merged",
 		"prompt_on_closed",

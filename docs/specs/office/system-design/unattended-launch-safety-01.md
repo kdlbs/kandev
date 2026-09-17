@@ -139,18 +139,24 @@ Nine columns are added to `runs`, all non-null with defaults so that existing ro
 converge without a backfill:
 
 ```sql
-causation_id    TEXT    NOT NULL DEFAULT '',
-parent_run_id   TEXT    NOT NULL DEFAULT '',
-causation_depth INTEGER NOT NULL DEFAULT 0,
-priority_class  INTEGER NOT NULL DEFAULT 2,
-human_rooted    INTEGER NOT NULL DEFAULT 0,
-routine_id      TEXT    NOT NULL DEFAULT '',
-actor_kind      TEXT    NOT NULL DEFAULT 'system',
-actor_id        TEXT    NOT NULL DEFAULT '',
-workspace_id    TEXT    NOT NULL DEFAULT ''
+chain_causation_id TEXT    NOT NULL DEFAULT '',
+parent_run_id      TEXT    NOT NULL DEFAULT '',
+causation_depth    INTEGER NOT NULL DEFAULT 0,
+priority_class     INTEGER NOT NULL DEFAULT 2,
+human_rooted       INTEGER NOT NULL DEFAULT 0,
+routine_id         TEXT    NOT NULL DEFAULT '',
+actor_kind         TEXT    NOT NULL DEFAULT 'system',
+actor_id           TEXT    NOT NULL DEFAULT '',
+workspace_id       TEXT    NOT NULL DEFAULT ''
 ```
 
-An index on `(causation_id)` supports chain reconstruction, the claim ordering
+The column is `chain_causation_id`, not `causation_id`: `runs` already carries an
+unrelated `causation_id` column from `REQ-OFFICE-LOOP-LIVENESS-002` (a wakeup-request
+correlation), and this design's chain-root identity reached for the same name
+independently. `office_launch_ledger` below has no such collision, so its own
+column keeps the plain `causation_id` name.
+
+An index on `(chain_causation_id)` supports chain reconstruction, the claim ordering
 index becomes `(status, priority_class, requested_at, id)`, and the self-trigger
 windows need two: `(agent_profile_id, reason, actor_id, requested_at)` for the
 per-reason count of AC-OFFICE-LAUNCH-SAFETY-004.3, and
@@ -178,7 +184,7 @@ refuse the one case the join would have swallowed: `agent_profiles` permits
 budget bucket rather than an error. AC-OFFICE-RUN-CAUSATION-001.20 refuses it at
 enqueue instead.
 
-An empty `causation_id` is the legacy marker required by
+An empty `chain_causation_id` is the legacy marker required by
 AC-OFFICE-RUN-CAUSATION-001.6: a reader treats such a row as its own root at depth
 `0` and does not rewrite it.
 

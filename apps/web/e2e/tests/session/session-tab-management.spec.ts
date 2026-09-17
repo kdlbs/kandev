@@ -447,12 +447,23 @@ test.describe("Session tab management — close behavior", () => {
         .toEqual(expect.objectContaining({ [localChange]: expect.anything() }));
 
       fs.rmSync(localChangePath);
+      // A completed workspace can be in slow polling mode. Force the same
+      // focus-driven refresh a user gets when reopening Changes so the test
+      // waits on the deletion snapshot rather than a background poll tick.
+      await session.clickTab("Files");
+      await session.clickTab("Changes");
       await expect
-        .poll(() => environmentFiles(session1Id), {
-          timeout: 20_000,
-          message: "waiting for the removed Changes file to leave the environment store",
-        })
-        .toEqual({});
+        .poll(
+          async () => {
+            const files = await environmentFiles(session1Id);
+            return files ? Object.hasOwn(files, localChange) : false;
+          },
+          {
+            timeout: 20_000,
+            message: "waiting for the removed Changes file to leave the environment store",
+          },
+        )
+        .toBe(false);
       await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
 
       traffic.frames.length = 0;
@@ -468,23 +479,25 @@ test.describe("Session tab management — close behavior", () => {
         );
 
       await session.sessionTabBySessionId(session1Id).click();
+      await session.clickTab("Files");
+      await session.clickTab("Changes");
       await expect
         .poll(() => receivedGitEvent(session1Id), {
           timeout: 20_000,
           message: "waiting for the first sibling git-status hydration after removal",
         })
         .toBe(true);
-      await session.clickTab("Changes");
       await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
 
       await session.sessionTabBySessionId(session2Id).click();
+      await session.clickTab("Files");
+      await session.clickTab("Changes");
       await expect
         .poll(() => receivedGitEvent(session2Id), {
           timeout: 20_000,
           message: "waiting for the second sibling git-status hydration after removal",
         })
         .toBe(true);
-      await session.clickTab("Changes");
       await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
     } finally {
       fs.rmSync(localChangePath, { force: true });

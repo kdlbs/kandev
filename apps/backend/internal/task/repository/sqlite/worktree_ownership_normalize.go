@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ const (
 
 // worktreeCutover holds the legacy inventory and the normalized result.
 type worktreeCutover struct {
+	ctx                       context.Context
 	envs                      map[string]*legacyEnv
 	taskEnvs                  map[string][]*legacyEnv
 	sessions                  map[string]*legacySession
@@ -59,12 +61,14 @@ type legacySession struct {
 }
 
 type legacyEnvRepo struct {
-	id, envID, repositoryID, branchSlug      string
-	worktreeID, worktreePath, worktreeBranch string
-	position                                 int
-	errorMessage, status                     string
-	mergedAt, deletedAt                      *time.Time
-	createdAt, updatedAt                     time.Time
+	id, envID, repositoryID, branchSlug                                  string
+	worktreeID, worktreePath, worktreeBranch                             string
+	worktreeBranchOwner, worktreeIntegrationRef, worktreeRecoveryHeadSHA string
+	worktreeBranchCompactedAt                                            *time.Time
+	position                                                             int
+	errorMessage, status                                                 string
+	mergedAt, deletedAt                                                  *time.Time
+	createdAt, updatedAt                                                 time.Time
 }
 
 type legacySessionWorktree struct {
@@ -93,7 +97,7 @@ func (c *worktreeCutover) loadLegacy(tx *sqlx.Tx, legacyEnvColumns, legacyRepoCo
 func (c *worktreeCutover) loadLegacyEnvs(tx *sqlx.Tx, columns map[string]bool) error {
 	// Every interpolated expression comes from the fixed deprecated-column allowlist.
 	//nolint:gosec
-	rows, err := tx.Query(fmt.Sprintf(`
+	rows, err := tx.QueryContext(c.ctx, fmt.Sprintf(`
 		SELECT id, task_id, %s, executor_type, executor_id,
 			executor_profile_id, control_port, status,
 			%s, %s, %s, COALESCE(workspace_path, ''),
@@ -137,7 +141,7 @@ func (c *worktreeCutover) loadLegacySessions(tx *sqlx.Tx) error {
 	// query (SQLite is lenient about functional dependency). started_at is
 	// scanned as a string because MIN() makes the driver return the raw
 	// TEXT value instead of a time.
-	rows, err := tx.Query(`
+	rows, err := tx.QueryContext(c.ctx, `
 		SELECT ts.id, ts.task_id, COALESCE(ts.task_environment_id, ''), ts.state,
 			COALESCE(ts.executor_id, ''), COALESCE(ts.executor_profile_id, ''),
 			COALESCE(ts.repository_id, ''), COALESCE(er.container_id, ''),
@@ -186,12 +190,16 @@ func parseLegacyTimestamp(raw string) time.Time {
 func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]bool) error {
 	// Every interpolated expression comes from the fixed lifecycle-column allowlist.
 	//nolint:gosec
-	rows, err := tx.Query(fmt.Sprintf(`
+	rows, err := tx.QueryContext(c.ctx, fmt.Sprintf(`
 		SELECT id, task_environment_id, repository_id, COALESCE(branch_slug, ''),
 			COALESCE(worktree_id, ''), COALESCE(worktree_path, ''),
-			COALESCE(worktree_branch, ''), position, COALESCE(error_message, ''),
-			%s, created_at, updated_at, %s, %s
+		COALESCE(worktree_branch, ''), %s, %s, %s, %s, position, COALESCE(error_message, ''),
+		%s, created_at, updated_at, %s, %s
 		FROM task_environment_repos`,
+		legacyRepoColumnExpr(columns, "worktree_branch_owner", "CAST('unknown' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_integration_ref", "CAST('' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_recovery_head_sha", "CAST('' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_branch_compacted_at", "NULL"),
 		legacyRepoColumnExpr(columns, "status", "CAST('active' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "merged_at", "NULL"),
 		legacyRepoColumnExpr(columns, "deleted_at", "NULL")))
@@ -201,10 +209,11 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var row legacyEnvRepo
-		var mergedAt, deletedAt sql.NullTime
+		var mergedAt, deletedAt, compactedAt sql.NullTime
 		if err := rows.Scan(&row.id, &row.envID, &row.repositoryID, &row.branchSlug,
-			&row.worktreeID, &row.worktreePath, &row.worktreeBranch, &row.position,
-			&row.errorMessage, &row.status, &row.createdAt, &row.updatedAt, &mergedAt, &deletedAt); err != nil {
+			&row.worktreeID, &row.worktreePath, &row.worktreeBranch,
+			&row.worktreeBranchOwner, &row.worktreeIntegrationRef, &row.worktreeRecoveryHeadSHA,
+			&compactedAt, &row.position, &row.errorMessage, &row.status, &row.createdAt, &row.updatedAt, &mergedAt, &deletedAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment repo: %w", err)
 		}
 		if mergedAt.Valid {
@@ -214,6 +223,10 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 		if deletedAt.Valid {
 			t := deletedAt.Time
 			row.deletedAt = &t
+		}
+		if compactedAt.Valid {
+			t := compactedAt.Time
+			row.worktreeBranchCompactedAt = &t
 		}
 		c.envRepos = append(c.envRepos, row)
 	}
@@ -228,7 +241,7 @@ func legacyRepoColumnExpr(columns map[string]bool, column, fallback string) stri
 }
 
 func (c *worktreeCutover) loadLegacySessionWorktrees(tx *sqlx.Tx) error {
-	rows, err := tx.Query(`
+	rows, err := tx.QueryContext(c.ctx, `
 		SELECT session_id, worktree_id, repository_id, COALESCE(branch_slug, ''),
 			position, COALESCE(worktree_path, ''), COALESCE(worktree_branch, ''),
 			status, created_at, updated_at, merged_at, deleted_at
@@ -272,17 +285,21 @@ type taskWorktreeTargets struct {
 }
 
 type envRepoTarget struct {
-	key                      string
-	repositoryID, branchSlug string
-	canonical                bool
-	worktreeID               string
-	worktreePath             string
-	worktreeBranch           string
-	position                 int
-	errorMessage             string
-	status                   string
-	mergedAt, deletedAt      *time.Time
-	createdAt, updatedAt     time.Time
+	key                       string
+	repositoryID, branchSlug  string
+	canonical                 bool
+	worktreeID                string
+	worktreePath              string
+	worktreeBranch            string
+	worktreeBranchOwner       string
+	worktreeIntegrationRef    string
+	worktreeRecoveryHeadSHA   string
+	worktreeBranchCompactedAt *time.Time
+	position                  int
+	errorMessage              string
+	status                    string
+	mergedAt, deletedAt       *time.Time
+	createdAt, updatedAt      time.Time
 }
 
 // normalize builds the final ownership graph in memory: one environment per
@@ -710,7 +727,7 @@ func (c *worktreeCutover) resolveExecutorType(tx *sqlx.Tx, executorID string) (s
 		return cached, nil
 	}
 	var executorType string
-	err := tx.QueryRow(tx.Rebind(`SELECT type FROM executors WHERE id = ?`), executorID).Scan(&executorType)
+	err := tx.QueryRowContext(c.ctx, tx.Rebind(`SELECT type FROM executors WHERE id = ?`), executorID).Scan(&executorType)
 	if errors.Is(err, sql.ErrNoRows) {
 		c.executorTypes[executorID] = executorTypeLocalPC
 		return executorTypeLocalPC, nil
