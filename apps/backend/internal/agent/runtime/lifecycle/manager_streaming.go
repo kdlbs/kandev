@@ -16,6 +16,45 @@ func (e *AgentExecution) clearProtocolMessageCorrelationLocked() {
 	e.protocolThinkingIDs = nil
 }
 
+func (e *AgentExecution) trackResponseAttemptMessageLocked(messageID string) {
+	e.responseAttemptMessageIDs = append(e.responseAttemptMessageIDs, messageID)
+}
+
+func (e *AgentExecution) commitResponseAttemptLocked() {
+	e.responseAttemptMessageIDs = nil
+}
+
+func (e *AgentExecution) detachResponseAttemptLocked() []string {
+	messageIDs := append([]string(nil), e.responseAttemptMessageIDs...)
+	owned := make(map[string]struct{}, len(messageIDs))
+	for _, messageID := range messageIDs {
+		owned[messageID] = struct{}{}
+	}
+	for protocolID, messageID := range e.protocolMessageIDs {
+		if _, ok := owned[messageID]; ok {
+			delete(e.protocolMessageIDs, protocolID)
+		}
+	}
+	for protocolID, messageID := range e.protocolThinkingIDs {
+		if _, ok := owned[messageID]; ok {
+			delete(e.protocolThinkingIDs, protocolID)
+		}
+	}
+	if len(e.protocolMessageIDs) == 0 {
+		e.protocolMessageIDs = nil
+	}
+	if len(e.protocolThinkingIDs) == 0 {
+		e.protocolThinkingIDs = nil
+	}
+	e.messageBuffer.Reset()
+	e.thinkingBuffer.Reset()
+	e.assistantHistoryBuffer.Reset()
+	e.currentMessageID = ""
+	e.currentThinkingID = ""
+	e.commitResponseAttemptLocked()
+	return messageIDs
+}
+
 func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 	execution.streamMu.Lock()
 	defer execution.streamMu.Unlock()
@@ -96,6 +135,7 @@ func (e *AgentExecution) resetStreamingStateLocked() {
 	e.currentMessageID = ""
 	e.currentThinkingID = ""
 	e.clearProtocolMessageCorrelationLocked()
+	e.commitResponseAttemptLocked()
 }
 
 func protocolRecordID(ids *map[string]string, protocolMessageID string) (string, bool) {
@@ -120,6 +160,9 @@ func (m *Manager) publishProtocolMessage(
 ) {
 	execution.messageMu.Lock()
 	messageID, isAppend := protocolRecordID(&execution.protocolMessageIDs, protocolMessageID)
+	if !isAppend {
+		execution.trackResponseAttemptMessageLocked(messageID)
+	}
 	execution.messageMu.Unlock()
 
 	m.publishStreamingContent(execution, "message_streaming", messageID, content, isAppend, diagnostic, promptGeneration, attemptID)
@@ -265,6 +308,9 @@ func (m *Manager) publishProtocolThinking(
 ) {
 	execution.messageMu.Lock()
 	messageID, isAppend := protocolRecordID(&execution.protocolThinkingIDs, protocolMessageID)
+	if !isAppend {
+		execution.trackResponseAttemptMessageLocked(messageID)
+	}
 	execution.messageMu.Unlock()
 
 	m.enqueueStreamingContent(execution, thinkingStreamingEventType, messageID, content, isAppend, false, promptGeneration, attemptID)
@@ -334,6 +380,7 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 	if !isAppend {
 		messageID = uuid.New().String()
 		execution.currentMessageID = messageID
+		execution.trackResponseAttemptMessageLocked(messageID)
 	}
 	execution.messageMu.Unlock()
 
@@ -441,6 +488,7 @@ func (m *Manager) publishStreamingThinking(execution *AgentExecution, content st
 	if !isAppend {
 		thinkingID = uuid.New().String()
 		execution.currentThinkingID = thinkingID
+		execution.trackResponseAttemptMessageLocked(thinkingID)
 	}
 	execution.messageMu.Unlock()
 

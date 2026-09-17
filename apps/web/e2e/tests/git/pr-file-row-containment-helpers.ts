@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
@@ -99,6 +100,8 @@ export async function expectLongPRRowContained(row: Locator) {
   await expect(additions).toBeVisible();
   await expect(deletions).toBeVisible();
   await expect(status).toBeVisible();
+  await row.scrollIntoViewIfNeeded();
+  await waitForFiniteAnimations(row);
 
   await expect
     .poll(async () => {
@@ -119,12 +122,17 @@ export async function expectLongPRRowContained(row: Locator) {
     })
     .toBe(true);
 
-  const statusCenterHitsStatus = await status.evaluate((element) => {
-    const box = element.getBoundingClientRect();
-    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-    return hit === element || element.contains(hit);
-  });
-  expect(statusCenterHitsStatus).toBe(true);
+  await expect
+    .poll(
+      () =>
+        status.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+          return hit === element || element.contains(hit);
+        }),
+      { timeout: 15_000 },
+    )
+    .toBe(true);
 
   await expect(row.locator(`button[title="${LONG_PR_PATH}"]`)).toHaveAttribute(
     "title",

@@ -504,6 +504,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   );
   const switcherProps = buildTaskSwitcherProps({
     grouped,
+    nestHierarchyTasks: displayTasks,
     workflows,
     stepsByWorkflowId,
     highlightedTaskId,

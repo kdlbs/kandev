@@ -146,6 +146,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_MCP_LOG_FILE", Class: "debug", Reason: "agentctl MCP debug logging"},
 	{EnvVar: "KANDEV_DEBUG_LOG_DIR", Class: "debug", Reason: "ACP debug logging directory"},
 	{EnvVar: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", Class: "test", Reason: "profile-selected E2E behavior"},
+	{EnvVar: "KANDEV_MAX_CONCURRENT_SESSIONS", Class: "startup only", Reason: "instance session ceiling, environment-only, resolved once at startup with no YAML setting by contract"},
 }
 
 // ConfigurationCatalog returns a defensive copy of the stable startup

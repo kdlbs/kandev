@@ -12,7 +12,9 @@ export async function checkImmediateArchive(options: {
   screenshotPath: string;
 }) {
   const { page, api, seed, mobile } = options;
-  const baseline = (await api.getUserSettings()).settings.confirm_task_archive;
+  const { settings } = await api.getUserSettings();
+  const baseline =
+    typeof settings.confirm_task_archive === "boolean" ? settings.confirm_task_archive : undefined;
   await api.saveUserSettings({ confirm_task_archive: true });
   const taskOptions = { workflow_id: seed.workflowId, workflow_step_id: seed.startStepId };
   const nav = await api.seedTask(seed.workspaceId, "Keep selected", taskOptions);

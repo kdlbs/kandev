@@ -67,6 +67,7 @@ function CommandItemRow({
       value={cmd.id}
       keywords={getCommandSearchTerms(cmd)}
       onSelect={() => onSelect(cmd)}
+      className="[@media(pointer:coarse)]:min-h-12"
     >
       {cmd.icon && (
         <span

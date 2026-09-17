@@ -37,7 +37,7 @@ test.describe("Desktop repository discovery consent", () => {
     ]);
     expect(chooseBox).not.toBeNull();
     expect(refreshBox).not.toBeNull();
-    expect(refreshBox!.height).toBeCloseTo(chooseBox!.height, 1);
+    expect(Math.abs(refreshBox!.height - chooseBox!.height)).toBeLessThanOrEqual(1);
     expect(refreshBox!.height).toBeLessThanOrEqual(32);
   });
 

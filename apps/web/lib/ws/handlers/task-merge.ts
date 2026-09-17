@@ -135,6 +135,10 @@ export function mergeTaskUpdate(
   if (!hasPayloadField(payload, "labels")) merged.labels = existing.labels;
   if (!hasPayloadField(payload, "origin")) merged.origin = existing.origin;
   preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "is_from_office",
+    taskField: "isFromOffice",
+  });
+  preserveOmittedField(existing, merged, payload, nextTask, {
     payloadKey: "task_pending_action",
     taskField: "taskPendingAction",
   });

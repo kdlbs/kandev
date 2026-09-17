@@ -1,3 +1,4 @@
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
 import { useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
@@ -30,6 +31,10 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
 const NOOP_REFRESH = () => {};
 
 type SidebarTask = AggregatedSidebarTasks["allTasks"][number];
+type SidebarTaskRemovalProjection = Pick<
+  TaskRemovalState,
+  "pendingTokenByTaskId" | "operationsByToken"
+>;
 
 function shallowTaskEqual(previous: SidebarTask, next: SidebarTask): boolean {
   const previousKeys = Object.keys(previous) as Array<keyof SidebarTask>;
@@ -187,8 +192,9 @@ function useSidebarTaskProjection(
   archivedTasks: KanbanState["tasks"],
   workspaceId: string | null,
   needsArchivedTasks: boolean,
-  taskRemoval: TaskRemovalState | undefined,
+  taskRemoval: SidebarTaskRemovalProjection,
 ) {
+  const { operationsByToken, pendingTokenByTaskId } = taskRemoval;
   const previousTasksRef = useRef<SidebarTask[]>([]);
   const merged = useMemo(
     () => mergeSidebarArchivedTasks(activeTasks, archivedTasks, workspaceId, needsArchivedTasks),
@@ -205,8 +211,8 @@ function useSidebarTaskProjection(
     const activeTaskIds = new Set(
       allTasks.filter((task) => task.isArchived !== true).map((task) => task.id),
     );
-    for (const [taskId, token] of Object.entries(taskRemoval?.pendingTokenByTaskId ?? {})) {
-      const operation = taskRemoval?.operationsByToken[token];
+    for (const [taskId, token] of Object.entries(pendingTokenByTaskId)) {
+      const operation = operationsByToken[token];
       if (
         activeTaskIds.has(taskId) &&
         operation?.action === "archive" &&
@@ -238,7 +244,7 @@ function useSidebarTaskProjection(
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
   useAllWorkflowSnapshots(workspaceId);
 
-  const sidebarViews = useAppStore((state) => state.sidebarViews);
+  const sidebarViews = useAppStore((state) => selectSidebarViews(state, workspaceId));
   const effectiveView = useMemo(() => {
     const active =
       sidebarViews?.views.find((view) => view.id === sidebarViews.activeViewId) ??
@@ -251,7 +257,12 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   const needsArchivedTasks = viewRequiresArchivedTasks(effectiveView);
   const archived = useSidebarArchivedTasks(workspaceId, needsArchivedTasks);
 
-  const taskRemoval = useAppStore((state) => state.taskRemoval);
+  const pendingTokenByTaskId = useAppStore((state) => state.taskRemoval.pendingTokenByTaskId);
+  const operationsByToken = useAppStore((state) => state.taskRemoval.operationsByToken);
+  const taskRemoval = useMemo(
+    () => ({ operationsByToken, pendingTokenByTaskId }),
+    [operationsByToken, pendingTokenByTaskId],
+  );
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const workflows = useAppStore((state) => state.workflows.items);

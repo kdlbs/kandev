@@ -266,6 +266,20 @@ export type ReviewProviderRegistration = Parameters<
   PluginSDK.PluginRegistry["registerReviewProvider"]
 >[0];
 
+export type PluginConversationAuthor = PluginSDK.PluginConversationAuthor;
+export type PluginConversationSort = PluginSDK.PluginConversationSort;
+export type PluginConversationMessage = PluginSDK.PluginConversationMessage;
+export type PluginConversationTurn = PluginSDK.PluginConversationTurn;
+export type PluginSessionMessagesQuery = PluginSDK.PluginSessionMessagesQuery;
+export type PluginConversationErrorCode = PluginSDK.PluginConversationErrorCode;
+export type PluginConversationError = PluginSDK.PluginConversationError;
+export type PluginSessionMessagesState = PluginSDK.PluginSessionMessagesState;
+export type PluginSessionTurnsState = PluginSDK.PluginSessionTurnsState;
+export type PluginConversationApi = PluginSDK.PluginConversationApi;
+export type PluginOpenMessageResult = PluginSDK.PluginOpenMessageResult;
+export type PluginTaskPanelConversationCapability = PluginSDK.PluginTaskPanelConversationCapability;
+export type PluginTaskPanelContext = PluginSDK.PluginTaskPanelContext;
+export type PluginSessionKind = PluginSDK.PluginSessionKind;
 /** Presentation context a task panel or kanban menu action renders under. */
 export type PluginPresentation = "desktop" | "mobile";
 

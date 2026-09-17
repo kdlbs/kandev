@@ -1,3 +1,4 @@
+import type { SidebarWorkspaceStateApi } from "@/lib/types/http-user-settings";
 import type {
   Agent,
   AgentProfile,
@@ -74,6 +75,8 @@ export type AgentProfileOption = {
   fallback_model?: string;
   /** Legacy automatic-fallback opt-in. */
   auto_fallback?: boolean;
+  /** Explicit exact-model policy opt-in. */
+  require_exact_model?: boolean;
   workspace_id?: string;
   /** Persisted profile revision (RFC3339 updated_at), used to prefer newer
    * WS-delivered options over a stale in-flight response. */
@@ -283,6 +286,7 @@ export function toAgentProfileOption(
     model?: string;
     fallbackModel?: string;
     autoFallback?: boolean;
+    requireExactModel?: boolean;
     enabled?: boolean;
   },
 ): AgentProfileOption {
@@ -297,6 +301,7 @@ export function toAgentProfileOption(
     model: profile.model ?? undefined,
     fallback_model: profile.fallbackModel ?? undefined,
     auto_fallback: profile.autoFallback ?? undefined,
+    require_exact_model: profile.requireExactModel ?? undefined,
     workspace_id: profile.workspaceId,
     updatedAt: profile.updatedAt,
     enabled: profile.enabled ?? true,
@@ -443,6 +448,7 @@ export type UserSettingsState = {
   lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
+  sidebarViewsByWorkspace: Record<string, SidebarWorkspaceStateApi>;
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
   threadViews: ThreadView[];

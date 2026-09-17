@@ -267,7 +267,21 @@ func (s *Service) RollbackReservedTurn(
 	ctx context.Context,
 	sessionID, turnID string,
 ) (bool, error) {
-	return s.turns.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+	turn, err := s.turns.GetTurn(ctx, turnID)
+	if err != nil {
+		return false, err
+	}
+	if turn.TaskSessionID != sessionID {
+		return false, nil
+	}
+	removed, err := s.turns.DeleteTurnIfUnreferenced(ctx, sessionID, turnID)
+	if err != nil || !removed {
+		return removed, err
+	}
+	if err := s.publishTurnEvent(events.TurnRemoved, turn, nil); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 // createCompletedTurn persists a synthetic turn that is never observable as
@@ -657,6 +671,12 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 // events). A read failure defaults to true so a transient DB error never
 // produces a spurious "empty turn" notice.
 func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
+	// A turn terminated by a recoverable agent failure carries its error entry
+	// as the turn's outcome, so it counts as output even though the
+	// status/recovery message itself is not in the agent-output allowlist.
+	if errorTerminated, _ := turn.Metadata[models.TurnMetaKeyErrorTerminated].(bool); errorTerminated {
+		return true
+	}
 	msgs, err := s.messages.ListMessagesByTurnID(ctx, turn.ID)
 	if err != nil {
 		s.logger.Debug("failed to list messages for had_output; assuming output",

@@ -82,6 +82,7 @@ function makeUnloadedSettings(): UserSettingsState {
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],
     sidebarViews: [],
+    sidebarViewsByWorkspace: {},
     sidebarActiveViewId: null,
     sidebarDraft: null,
     threadViews: [],

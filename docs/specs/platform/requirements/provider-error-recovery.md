@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-08-08
-updated: 2026-09-11
+updated: 2026-09-16
 owners:
   - Kandev
 ---
@@ -11,6 +11,18 @@ owners:
 ## Overview
 
 Agent CLIs and providers report equivalent failures through different ACP frames, HTTP metadata, process exits, and diagnostic strings. Capacity, network, subscription, and quota failures need different recovery behavior, but orchestration code must not branch on provider names or raw prose.
+
+A provider can also abandon a partially streamed response and retry it inside
+the same prompt. That retry must replace the abandoned attempt without leaving
+duplicate transcript rows or stale recovery context.
+
+## Terminology
+
+- **Provider response attempt:** One provider generation attempt inside a
+  Kandev prompt. A provider can retry this attempt without ending the prompt.
+- **Response-attempt retry boundary:** Structured, current-prompt evidence that
+  the provider abandoned its active response attempt and will generate a
+  replacement.
 
 ## Requirements
 
@@ -46,6 +58,11 @@ Agent CLIs and providers report equivalent failures through different ACP frames
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.23:** A recorded diagnostic shall authorize pre-result recovery only when its normalized text is contained in the normalized message of the terminal provider failure, in addition to both classifying to the same high-confidence, fallback-eligible semantic code. Normalization shall trim leading and trailing whitespace and collapse internal whitespace runs to a single space, and comparison shall be case-sensitive. An empty normalized diagnostic shall never satisfy containment. The normalized diagnostic text shall be retained with the recorded diagnostic code, shall be cleared whenever that code is cleared, and shall not be overwritten by a later diagnostic in the same generation. A diagnostic that classifies to the terminal code but whose normalized text is not contained in the terminal message shall keep the output fence and expose manual recovery.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.24:** When a terminal ACP prompt error carries its transient signature only in `RequestError.Data`, Kandev shall present the failure as terminal and expose manual recovery on every occurrence, including repeated failures in the same session, and shall neither show a transient retry notice nor start an automatic retry. This criterion applies to the terminal failure whether or not a diagnostic preceded it, and it does not outrank acceptance criteria `.16` and `.23`: when a diagnostic did precede, those criteria reach the same manual-recovery outcome, because a terminal message that classifies to nothing can match no recorded diagnostic code. The existing session end-to-end specification that drives the mock agent's `/transport-lost` command shall be the surface that observes this outcome: its automatic-retry assertions shall be retargeted to manual recovery, and its retry-cancellation sub-test shall be retired rather than rewritten, because no retry loop exists on this path to cancel. The mock command's envelope shall keep the SDK's own peer-disconnect shape, `Message` `Internal error` with the signature only in `Data`, so the specification keeps exercising a shape that occurs in production. Repository documentation describing that command, or the recovery timeout it drives, shall not state that this path enters the automatic retry ladder. Losing end-to-end coverage of the automatic retry ladder for the transport-loss cause is accepted in this version; the catalogue rule keeps its unit coverage and its remaining surfaces.
 
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.25:** During one interactive transient retry loop, desktop and mobile chat shall show at most one current retry banner. Each subsequent attempt shall update that banner's reason, provider, attempt count, deadline, and Cancel action. Reloading the session shall retain the latest persisted attempt. Existing duplicate retry notices shall consolidate on the next successful retry-notice write. Unrelated messages and other sessions shall remain unchanged. Storage failures shall remain non-fatal and shall not trigger creation of an additional notice when an existing notice cannot be read or updated.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.26:** When a supported adapter receives exact structured evidence that the active provider abandoned the current response attempt and will retry it internally, Kandev shall accept a response-attempt retry boundary within that prompt generation. One prompt generation may contain multiple sequential boundaries; each boundary applies only to assistant and thinking records created after the preceding boundary or commit boundary. Malformed evidence, a false retry flag, an unsupported adapter, a zero or stale prompt generation, and terminal provider errors shall not create that boundary or remove transcript content.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.27:** After Kandev accepts a response-attempt retry boundary, it shall durably remove assistant and thinking messages created by the abandoned attempt. Connected desktop and mobile chats shall remove those messages before later replacement output, and a reload or another viewer shall see only the replacement response.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.28:** Response-attempt cleanup shall preserve messages, tool activity, permission state, and turns committed before the active provider attempt. A repeated retry boundary with no new output shall be a no-op, and abandoned assistant text that has not crossed a history boundary shall not enter later fallback resume context. The boundary shall not erase prompt-level output or effect evidence used to decide whether a separate Kandev-owned replay is safe.
+
 ## Out of scope
 
 - Classifier rules keyed on the structured error kind or JSON-RPC code. The metadata is transported and observable in this version; making it outrank the message-text catalogue is a separate contract change, because it would let a gateway authorize dynamic recovery through a field no fixture yet constrains.
@@ -64,4 +81,6 @@ The migrated technical source is split into
 [part 2](../system-design/provider-error-recovery-02.md) (replay fixture matrix
 and harness) and
 [part 3](../system-design/provider-error-recovery-03.md) (marker propagation,
-diagnostic text correlation, allowlisted prompt-error metadata).
+diagnostic text correlation, allowlisted prompt-error metadata), and
+[part 4](../system-design/provider-response-attempt-recovery.md)
+(provider-owned response-attempt replacement and transcript retraction).

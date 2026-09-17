@@ -57,11 +57,30 @@ vi.mock("@/hooks/domains/session/load-message-window", () => ({
 }));
 
 import {
+  isMessageRowRendered,
   usePendingMessageScroll,
   useScrollTargetConsumption,
   type PendingMessageScrollTarget,
 } from "./task-chat-panel";
+import type { RenderItem } from "@/hooks/use-processed-messages";
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
+
+describe("isMessageRowRendered", () => {
+  it("only treats direct message items as scrollable rows", () => {
+    const items = [
+      {
+        type: "turn_group",
+        id: "group-1",
+        turnId: "turn-1",
+        messages: [{ id: "grouped-prompt" }],
+      },
+      { type: "message", message: { id: "direct-prompt" } },
+    ] as unknown as RenderItem[];
+
+    expect(isMessageRowRendered(items, "grouped-prompt")).toBe(false);
+    expect(isMessageRowRendered(items, "direct-prompt")).toBe(true);
+  });
+});
 
 let pendingFrames: Array<(() => void) | undefined> = [];
 

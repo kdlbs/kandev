@@ -9,8 +9,26 @@ vi.mock("@/lib/api/domains/clarification-inbox-api", () => ({
   listClarificationInbox: (...args: unknown[]) => listClarificationInboxMock(...args),
 }));
 
+const SESSION_STATE_CHANGED = "session.state_changed";
+
+type WsHandler = () => void;
+const wsMocks = vi.hoisted(() => ({
+  handlers: new Map<string, Set<WsHandler>>(),
+}));
+
+function emitWsEvent(type: string) {
+  for (const handler of wsMocks.handlers.get(type) ?? []) handler();
+}
+
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => null,
+  getWebSocketClient: () => ({
+    on: (type: string, handler: WsHandler) => {
+      const handlers = wsMocks.handlers.get(type) ?? new Set<WsHandler>();
+      handlers.add(handler);
+      wsMocks.handlers.set(type, handlers);
+      return () => handlers.delete(handler);
+    },
+  }),
 }));
 
 const readBootPayloadMock = vi.fn();
@@ -58,6 +76,7 @@ beforeEach(() => {
   listClarificationInboxMock.mockResolvedValue(page());
   readBootPayloadMock.mockReset();
   readBootPayloadMock.mockReturnValue({ initialState: {} });
+  wsMocks.handlers.clear();
 });
 
 afterEach(() => {
@@ -237,5 +256,131 @@ describe("useNeedsYouInboxController boot-hydration seed (AC .34, .40, .41)", ()
       await Promise.resolve();
     });
     expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]).toBeUndefined();
+  });
+});
+
+describe("useNeedsYouInboxController WS event coalescing", () => {
+  it("coalesces a burst into a leading read now and one trailing read for what changed inside the window", async () => {
+    vi.useFakeTimers();
+    listClarificationInboxMock.mockResolvedValueOnce(page());
+    listClarificationInboxMock.mockResolvedValueOnce(page());
+    listClarificationInboxMock.mockResolvedValue(page({ count: 3 }));
+    const { result } = renderController(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    // Burst of two distinct signals plus a repeat, all inside the window:
+    // `session.state_changed` and `session.pending_action_changed` are
+    // distinct signals from distinct sessions, not duplicates of one browser
+    // event, so every one of them after the leading read must be queued, not
+    // dropped.
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+      emitWsEvent("session.pending_action_changed");
+      emitWsEvent(SESSION_STATE_CHANGED);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    // Still inside the window: no second read has fired yet, but one is
+    // armed for the remainder of it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(249);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    // The window elapses: the trailing read fires and its result is applied,
+    // so nothing from the burst is silently lost.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
+    expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]?.count).toBe(3);
+
+    // Well past the window: a later, separate event still causes its own
+    // leading read.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("clears a pending trailing read on unmount", async () => {
+    vi.useFakeTimers();
+    const { unmount } = renderController(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+      emitWsEvent(SESSION_STATE_CHANGED);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    // A trailing timer is now armed for the second (queued) event. A read
+    // count alone can't tell whether unmount actually cleared it: the effect
+    // that would turn a leaked timer's tick bump into a read is unmounted
+    // right along with it, so the count stays flat either way. Assert the
+    // timer itself.
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    unmount();
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // R2-F3: `trailingBumpTimeoutRef` must survive an effect re-run triggered
+  // by something other than unmount (here, a connectionStatus change that is
+  // not itself a reconnect-to-"connected" edge) -- the effect's own cleanup
+  // only tears down the WS listeners it registered, and must not silently
+  // drop a still-pending trailing bump.
+  it("does not drop a pending trailing read when the WS effect re-runs for an unrelated reason", async () => {
+    vi.useFakeTimers();
+    listClarificationInboxMock.mockResolvedValueOnce(page());
+    listClarificationInboxMock.mockResolvedValueOnce(page());
+    listClarificationInboxMock.mockResolvedValue(page({ count: 3 }));
+    const { result } = renderController(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+      emitWsEvent(SESSION_STATE_CHANGED);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    // A connectionStatus change that is not a "disconnected -> connected"
+    // edge (so it does not itself trigger a reconnect read) still re-runs the
+    // effect the trailing timer lives inside.
+    act(() => {
+      result.current.getState().setConnectionStatus("reconnecting");
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
+    expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]?.count).toBe(3);
   });
 });

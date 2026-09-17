@@ -151,6 +151,7 @@ func executorNeedsResolvedCredentials(executorType string) bool {
 // WithCancellableResumeContext retain cancellation so an explicit stop can
 // interrupt a startup that is still waiting for ACP readiness.
 func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context), escalateTaskOnFailure, fromResume bool) {
+	e.auditCeilingBypass(ctx, "runAgentProcessAsync", sessionID, true, zap.String("agent_execution_id", agentExecutionID))
 	go func() {
 		startParent := context.WithoutCancel(ctx)
 		updateCtx := startParent
@@ -330,7 +331,9 @@ func (e *Executor) claimForcedExecutionCleanup(sessionID, agentExecutionID strin
 }
 
 func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionID, phase string) {
-	if stopErr := e.agentManager.StopAgent(ctx, agentExecutionID, true); stopErr != nil {
+	if stopErr := e.agentManager.StopAgentWithReason(
+		ctx, agentExecutionID, lifecycle.StopReasonAgentBootstrapFailed, true,
+	); stopErr != nil {
 		e.logger.Warn("failed to clean up agent after "+phase,
 			zap.String("agent_execution_id", agentExecutionID),
 			zap.Error(stopErr))
@@ -423,7 +426,9 @@ func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentE
 	}
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	if stopErr := e.agentManager.StopAgent(stopCtx, agentExecutionID, true); stopErr != nil {
+	if stopErr := e.agentManager.StopAgentWithReason(
+		stopCtx, agentExecutionID, lifecycle.StopReasonAgentBootstrapFailed, true,
+	); stopErr != nil {
 		e.logger.Warn("failed to stop unstarted agent execution",
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", agentExecutionID),
@@ -1385,6 +1390,9 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 		"model":                        profileInfo.Model,
 		"mode":                         profileInfo.Mode,
 		"config_options":               maps.Clone(profileInfo.ConfigOptions),
+		"fallback_model":               profileInfo.FallbackModel,
+		"auto_fallback":                profileInfo.AutoFallback,
+		"require_exact_model":          profileInfo.RequireExactModel,
 		"auto_approve":                 profileInfo.AutoApprove,
 		"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
 		"cli_passthrough":              profileInfo.CLIPassthrough,
@@ -1402,6 +1410,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	executorID := opts.ExecutorID
 	prompt := opts.Prompt
 	startAgent := opts.StartAgent
+	if startAgent {
+		// AC-4c: StartAgent false prepares a workspace and starts no process,
+		// so it is out of AC-4b's scope and must not be instrumented.
+		e.auditCeilingBypass(ctx, "LaunchPreparedSession", sessionID, false)
+	}
 	// Serialise concurrent launches for the same session. Two callers reach
 	// this path on every task: PrepareTaskSession spawns a background launch
 	// (workspace only) the moment a session is created, and StartCreatedSession
@@ -2180,6 +2193,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			RepositoryID:               info.RepositoryID,
 			RepositoryPath:             info.RepositoryPath,
 			BaseBranch:                 info.BaseBranch,
+			IntegrationRef:             info.IntegrationRef,
 			CheckoutBranch:             info.CheckoutBranch,
 			PRNumber:                   info.PRNumber,
 			RemoteContribution:         info.RemoteContribution,
@@ -2253,6 +2267,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.TaskRepositoryID = repoInfo.TaskRepositoryID
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.BaseBranch = repoInfo.BaseBranch
+		req.IntegrationRef = repoInfo.IntegrationRef
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
 		req.RemoteContribution = repoInfo.RemoteContribution
@@ -3007,10 +3022,13 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		branchSlug = topLevelBranchIdentitySlug(req)
 	}
 	worktreeID, worktreePath, worktreeBranch := "", "", ""
+	worktreeBranchOwner, worktreeIntegrationRef := "", ""
 	if resp.WorktreeID != "" {
 		worktreeID = resp.WorktreeID
 		worktreePath = resp.WorktreePath
 		worktreeBranch = resp.WorktreeBranch
+		worktreeBranchOwner = resp.WorktreeBranchOwner
+		worktreeIntegrationRef = resp.WorktreeIntegrationRef
 	}
 	return []*models.TaskEnvironmentRepo{{
 		RepositoryID: req.RepositoryID,
@@ -3019,10 +3037,12 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		// for reuse validation. It is not a physical worktree, so do not copy
 		// the environment-level workspace path (which may be the host's seed
 		// checkout) into the physical-worktree fields.
-		WorktreeID:     worktreeID,
-		WorktreePath:   worktreePath,
-		WorktreeBranch: worktreeBranch,
-		Position:       0,
+		WorktreeID:             worktreeID,
+		WorktreePath:           worktreePath,
+		WorktreeBranch:         worktreeBranch,
+		WorktreeBranchOwner:    worktreeBranchOwner,
+		WorktreeIntegrationRef: worktreeIntegrationRef,
+		Position:               0,
 	}}
 }
 
@@ -3032,13 +3052,15 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	out := make([]*models.TaskEnvironmentRepo, 0, len(worktrees))
 	for i, w := range worktrees {
 		out = append(out, &models.TaskEnvironmentRepo{
-			RepositoryID:   w.RepositoryID,
-			BranchSlug:     w.BranchSlug,
-			WorktreeID:     w.WorktreeID,
-			WorktreePath:   w.WorktreePath,
-			WorktreeBranch: w.WorktreeBranch,
-			Position:       i,
-			ErrorMessage:   w.ErrorMessage,
+			RepositoryID:           w.RepositoryID,
+			BranchSlug:             w.BranchSlug,
+			WorktreeID:             w.WorktreeID,
+			WorktreePath:           w.WorktreePath,
+			WorktreeBranch:         w.WorktreeBranch,
+			WorktreeBranchOwner:    w.WorktreeBranchOwner,
+			WorktreeIntegrationRef: w.WorktreeIntegrationRef,
+			Position:               i,
+			ErrorMessage:           w.ErrorMessage,
 		})
 	}
 	return out
@@ -3120,14 +3142,16 @@ func (e *Executor) persistOneTaskEnvironmentRepoTransition(
 		return e.refreshTaskEnvironmentRepo(ctx, row, w, position, replacePhysical)
 	}
 	row = &models.TaskEnvironmentRepo{
-		TaskEnvironmentID: envID,
-		RepositoryID:      w.RepositoryID,
-		BranchSlug:        w.BranchSlug,
-		WorktreeID:        w.WorktreeID,
-		WorktreePath:      w.WorktreePath,
-		WorktreeBranch:    w.WorktreeBranch,
-		Position:          position,
-		ErrorMessage:      w.ErrorMessage,
+		TaskEnvironmentID:      envID,
+		RepositoryID:           w.RepositoryID,
+		BranchSlug:             w.BranchSlug,
+		WorktreeID:             w.WorktreeID,
+		WorktreePath:           w.WorktreePath,
+		WorktreeBranch:         w.WorktreeBranch,
+		WorktreeBranchOwner:    w.WorktreeBranchOwner,
+		WorktreeIntegrationRef: w.WorktreeIntegrationRef,
+		Position:               position,
+		ErrorMessage:           w.ErrorMessage,
 	}
 	if createErr := e.repo.CreateTaskEnvironmentRepo(ctx, row); createErr != nil {
 		e.logger.Warn("failed to persist task environment repo",
@@ -3174,6 +3198,12 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 		row.WorktreePath = w.WorktreePath
 		row.WorktreeBranch = w.WorktreeBranch
 	}
+	if w.WorktreeBranchOwner != "" || w.WorktreeID == "" {
+		row.WorktreeBranchOwner = w.WorktreeBranchOwner
+	}
+	if w.WorktreeIntegrationRef != "" || w.WorktreeID == "" || replacePhysical {
+		row.WorktreeIntegrationRef = w.WorktreeIntegrationRef
+	}
 	row.Position = position
 	row.ErrorMessage = w.ErrorMessage
 	if replacePhysical {
@@ -3182,6 +3212,8 @@ func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row, w *model
 		// canonical inventory does not remain permanently excluded from reuse.
 		row.Status = taskEnvironmentRepoStatusActive
 		row.DeletedAt = nil
+		row.WorktreeRecoveryHeadSHA = ""
+		row.WorktreeBranchCompactedAt = nil
 	}
 	if err := e.repo.UpdateTaskEnvironmentRepo(ctx, row); err != nil {
 		e.logger.Warn("failed to update task environment repo",
@@ -3200,6 +3232,8 @@ func taskEnvironmentRepoNeedsRefresh(row, w *models.TaskEnvironmentRepo, positio
 			(row.WorktreeID != w.WorktreeID ||
 				row.WorktreePath != w.WorktreePath ||
 				row.WorktreeBranch != w.WorktreeBranch)) ||
+		(w.WorktreeBranchOwner != "" && row.WorktreeBranchOwner != w.WorktreeBranchOwner) ||
+		((w.WorktreeIntegrationRef != "" || replacePhysical) && row.WorktreeIntegrationRef != w.WorktreeIntegrationRef) ||
 		row.Position != position ||
 		row.ErrorMessage != w.ErrorMessage
 }

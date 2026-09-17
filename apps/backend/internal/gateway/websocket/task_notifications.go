@@ -87,14 +87,14 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskSessionCancellationChanged, ws.ActionSessionCancellationChanged)
 	b.subscribe(eventBus, events.SessionPendingActionChanged, ws.ActionSessionPendingActionChanged)
 	b.subscribe(eventBus, events.TaskStatusSummaryUpdated, ws.ActionTaskStatusSummaryUpdated)
-	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
-	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
-	b.subscribe(eventBus, events.MessageDeleted, ws.ActionSessionMessageDeleted)
+	b.subscribeOrderedMessageEvents(eventBus)
 	b.subscribe(eventBus, events.AgentctlStarting, ws.ActionSessionAgentctlStarting)
 	b.subscribe(eventBus, events.AgentctlReady, ws.ActionSessionAgentctlReady)
 	b.subscribe(eventBus, events.AgentctlError, ws.ActionSessionAgentctlError)
 	b.subscribe(eventBus, events.TurnStarted, ws.ActionSessionTurnStarted)
 	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
+	b.subscribe(eventBus, events.TurnRemoved, ws.ActionSessionTurnRemoved)
+	b.subscribe(eventBus, events.SessionRemoved, ws.ActionSessionRemoved)
 	b.subscribe(eventBus, events.MessageQueueStatusChanged, ws.ActionMessageQueueStatusChanged)
 	b.subscribe(eventBus, events.GitHubTaskPRUpdated, ws.ActionGitHubTaskPRUpdated)
 	b.subscribe(eventBus, events.GitHubTaskPRDeleted, ws.ActionGitHubTaskPRDeleted)
@@ -139,11 +139,29 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 // state notifications remain ordered for clients when the event bus is remote.
 func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventBus) {
 	b.subscribeWithResolver(eventBus, ">", func(event *bus.Event) string {
-		switch event.Type {
+		switch event.EffectiveSubject() {
 		case events.TaskStateChanged:
 			return ws.ActionTaskStateChanged
 		case events.TaskSessionStateChanged:
 			return ws.ActionSessionStateChanged
+		default:
+			return ""
+		}
+	})
+}
+
+// subscribeOrderedMessageEvents carries every transcript mutation through one
+// NATS callback queue. Separate subject subscriptions can run concurrently and
+// invert a deletion and its replacement before journal or client fan-out.
+func (b *TaskEventBroadcaster) subscribeOrderedMessageEvents(eventBus bus.EventBus) {
+	b.subscribeWithResolver(eventBus, ">", func(event *bus.Event) string {
+		switch event.EffectiveSubject() {
+		case events.MessageAdded:
+			return ws.ActionSessionMessageAdded
+		case events.MessageUpdated:
+			return ws.ActionSessionMessageUpdated
+		case events.MessageDeleted:
+			return ws.ActionSessionMessageDeleted
 		default:
 			return ""
 		}
@@ -277,9 +295,15 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		// the owning workspace's user when auth is enabled.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
-	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
+	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted,
+		ws.ActionSessionTurnStarted, ws.ActionSessionTurnCompleted, ws.ActionSessionTurnRemoved:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionSessionRemoved:
+		if sessionID != "" {
+			b.hub.appendAndBroadcastOrderedSessionEvent(sessionID, msg)
 			return nil
 		}
 	case ws.ActionSessionWorkspaceSourcesUpdated:

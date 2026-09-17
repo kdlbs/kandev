@@ -1,5 +1,6 @@
 "use client";
 
+import type { WorkflowMovePreviewTarget } from "./workflow-move-preview-footer";
 import {
   useCallback,
   useEffect,
@@ -203,6 +204,7 @@ export function PassthroughToolbar({
       <PassthroughStatusRow
         taskId={taskId}
         sessionId={sessionId}
+        previewTarget={planActions.proceedPreviewTarget}
         nextStepName={planActions.proceedStepName}
         onProceed={planActions.proceed}
         isMoving={planActions.isMoving}
@@ -528,6 +530,7 @@ function CommentCard({
 type StatusRowProps = {
   taskId: string | null;
   sessionId?: string | null;
+  previewTarget?: WorkflowMovePreviewTarget;
   nextStepName: string | null;
   onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isMoving: boolean;
@@ -544,6 +547,7 @@ type StatusRowProps = {
 function PassthroughStatusRow({
   taskId,
   sessionId,
+  previewTarget,
   nextStepName,
   onProceed,
   isMoving,
@@ -583,6 +587,7 @@ function PassthroughStatusRow({
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
           <WorkflowMoveProceedButton
+            previewTarget={previewTarget}
             nextStepName={nextStepName}
             onProceed={onProceed}
             isMoving={isMoving}

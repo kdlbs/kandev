@@ -22,7 +22,7 @@ to own contribution admission and durable bootstrap failure projection.
 | Requirement | Design section |
 | --- | --- |
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-005 | Workspace-only registration |
-| REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006 | Recovery presentation ownership; responsive amendment |
+| REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006 | Recovery presentation ownership; post-start recoverable failure detail; responsive amendment |
 | REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007 | Proposed attempt isolation |
 
 The following amendments are implemented in the
@@ -84,6 +84,26 @@ state. Automatic fallback remains allowed; manual restore remains explicit.
 Success clears only its matching attempt. A stale callback cannot clear a
 newer failure. Retain the archive/navigation generation guards from requirement
 004 and the provider-specific runtime recovery policies.
+
+### Post-start recoverable failure detail (requirement 006)
+
+`createRecoveryStatusMessage` (`internal/orchestrator/event_handlers_agent.go`)
+populates the recovery entry's `error_output` metadata with
+`routingerr.Sanitize(data.FailureDetails)` for post-start recoverable failures,
+matching what the bootstrap, managed-runtime-npm, and provider-quota paths
+already do. Without this, a failure that occurs after agent startup, such as a
+model provider rejecting a dispatched prompt with an invalid-tool-definition
+`400`, left `error_output` empty, so the recovery card showed only the short
+summary line and the collapsed technical-details disclosure never appeared.
+
+The frontend already renders this. `ActionMessageDetails` / `TechnicalDetails`
+(`apps/web/components/task/chat/messages/action-message-details.tsx`) render
+`error_output` inside an initially collapsed disclosure, so no frontend change
+is required. When sanitization yields an empty string, `error_output` is
+omitted and the generic recovery card is shown. Sanitization removes URLs,
+credentials, and identifiers; raw agent stderr is never added to durable
+metadata. The `remediation_url` link stays a separate metadata field and is
+never folded into `error_output`.
 
 ### Responsive amendment
 

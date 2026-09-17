@@ -426,6 +426,9 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"updated_at":         task.UpdatedAt.Format(time.RFC3339Nano),
 		"is_ephemeral":       task.IsEphemeral,
 		"autopilot":          task.Autopilot,
+		// Always explicit because a project reassignment can change Office
+		// ownership in either direction while a client has the task cached.
+		"is_from_office": task.IsFromOffice,
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,

@@ -14,6 +14,7 @@ function buildChangeFacetSignature(facet: FileInfo["staged_change"]): string {
   if (!facet) return "";
   return [
     facet.status,
+    facet.is_symlink ?? "",
     facet.additions ?? 0,
     facet.deletions ?? 0,
     facet.old_path ?? "",
@@ -31,6 +32,7 @@ export function buildGitFileSignature(file: FileInfo | undefined): string {
   if (!file) return "__clean__";
   return [
     file.status ?? "",
+    file.is_symlink ?? "",
     file.staged ? "1" : "0",
     String(file.additions ?? 0),
     String(file.deletions ?? 0),
@@ -82,6 +84,7 @@ export async function syncOpenFileFromWorkspace({
     if (latest.isDirty) {
       if (response.content === latest.content) {
         updateFileState(fileKey, {
+          resolvedPath: response.resolved_path,
           originalContent: response.content,
           originalHash: remoteHash,
           isDirty: false,
@@ -92,8 +95,14 @@ export async function syncOpenFileFromWorkspace({
         updatePanelAfterSave(path, latest.name, latest.repo);
         return;
       }
-      if (latest.hasRemoteUpdate && latest.remoteContent === response.content) return;
+      if (
+        latest.hasRemoteUpdate &&
+        latest.remoteContent === response.content &&
+        latest.resolvedPath === response.resolved_path
+      )
+        return;
       updateFileState(fileKey, {
+        resolvedPath: response.resolved_path,
         hasRemoteUpdate: true,
         remoteContent: response.content,
         remoteOriginalHash: remoteHash,
@@ -104,12 +113,14 @@ export async function syncOpenFileFromWorkspace({
     if (
       latest.content === response.content &&
       latest.originalHash === remoteHash &&
+      latest.resolvedPath === response.resolved_path &&
       !latest.hasRemoteUpdate
     ) {
       return;
     }
 
     updateFileState(fileKey, {
+      resolvedPath: response.resolved_path,
       content: response.content,
       originalContent: response.content,
       originalHash: remoteHash,

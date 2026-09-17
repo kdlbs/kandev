@@ -116,6 +116,7 @@ export function toSheetItem(
     workflowStepColor: facts.workflowStepColor,
     isArchived: task.isArchived === true,
     isPendingArchive: !task.isArchived && ctx.pendingArchiveTaskIds?.has(task.id) === true,
+    isFromOffice: task.isFromOffice,
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorId: task.primaryExecutorId ?? undefined,
     remoteExecutorType: task.primaryExecutorType ?? undefined,

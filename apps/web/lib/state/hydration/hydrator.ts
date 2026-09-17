@@ -1,3 +1,4 @@
+import { mapSidebarWorkspaces } from "../slices/ui/sidebar-workspace-state";
 /* eslint-disable max-lines -- Hydration owns the cross-slice merge boundary. */
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
@@ -217,6 +218,11 @@ function bridgeSidebarViewsFromUserSettings(
   draft: Draft<AppState>,
   userSettings: Partial<AppState["userSettings"]>,
 ): void {
+  draft.sidebarViewsByWorkspace = mapSidebarWorkspaces(
+    userSettings.sidebarViewsByWorkspace,
+    draft.sidebarViewsByWorkspace,
+    userSettings.revision,
+  );
   const serverViews = userSettings.sidebarViews;
   const normalized = serverViews?.map(migrateView) ?? [];
   if (normalized.length > 0) {

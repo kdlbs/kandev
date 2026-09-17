@@ -169,6 +169,7 @@ export function buildSidebarItem(
     createdAt: task.createdAt,
     isArchived: task.isArchived === true,
     isPendingArchive: isPendingArchive(task, context),
+    isFromOffice: task.isFromOffice,
     parentTaskTitle: task.parentTaskId ? context.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,

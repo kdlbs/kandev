@@ -2116,15 +2116,17 @@ func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
 	var stopCalled atomic.Bool
 	var stopForce atomic.Bool
 	var stoppedExecutionID atomic.Value
+	var stopReason atomic.Value
 
 	agentManager := &mockAgentManager{
 		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
 			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
 		},
-		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+		stopAgentWithReasonFunc: func(ctx context.Context, agentExecutionID, reason string, force bool) error {
 			stopCalled.Store(true)
 			stopForce.Store(force)
 			stoppedExecutionID.Store(agentExecutionID)
+			stopReason.Store(reason)
 			return nil
 		},
 	}
@@ -2188,6 +2190,9 @@ verified:
 	}
 	if id, ok := stoppedExecutionID.Load().(string); !ok || id != "exec-456" {
 		t.Errorf("expected StopAgent called with execution ID exec-456, got %v", stoppedExecutionID.Load())
+	}
+	if reason, ok := stopReason.Load().(string); !ok || reason != "agent bootstrap failed" {
+		t.Errorf("expected bootstrap-failure stop reason, got %v", stopReason.Load())
 	}
 
 	// Verify session was marked as FAILED
