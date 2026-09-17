@@ -112,6 +112,9 @@ or schema migration is required.
 - Broadened `cursor.retriable_stream_reset.v1` to classify the same diagnostics
   as high-confidence transient `agent_transport_lost` failures while retaining
   its stable rule identity and cancellation veto.
+- Scoped the catalogue rule to `cursor-acp`, applied the byte bound to raw
+  diagnostics before sanitization, and shared the cancellation predicate
+  between the adapter and classifier.
 - Added coverage for `[unavailable] PING timed out`, `Connection stalled`,
   structured post-barrier settlement, cancellation vetoes at the adapter
   boundary, byte and Unicode-whitespace limits, anchored negatives, and
