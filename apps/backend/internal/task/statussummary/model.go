@@ -4,9 +4,9 @@
 package statussummary
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -117,7 +117,9 @@ func (s TaskStatusSummary) SemanticEqual(other TaskStatusSummary) bool {
 	s.UpdatedAt = time.Time{}
 	other.Revision = 0
 	other.UpdatedAt = time.Time{}
-	return reflect.DeepEqual(s, other)
+	left, leftErr := s.SemanticJSON()
+	right, rightErr := other.SemanticJSON()
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
 }
 
 // Validate enforces the bounded fields at the persistence boundary. Other
