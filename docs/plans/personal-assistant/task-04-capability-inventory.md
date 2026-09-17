@@ -1,7 +1,7 @@
 ---
 id: "04-capability-inventory"
 title: "Native capability inventory"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-durable-intake","03-memory-context"]
 plan: "plan.md"
@@ -112,4 +112,39 @@ and selected test counts along with the normal hook receipt.
 
 ## Results
 
-Pending. Record red/green test evidence, exact commands and counts, relevant artifacts, owned changes and cleanup here; synchronize the plan checkbox only after acceptance is met.
+Implemented the bounded native capability port, owner/runtime routes and CLI.
+The directory composes native operations, scoped profiles and workflows, executor
+profiles, stored health for six integrations, explicit conversation plugin tools,
+configured profile MCP servers and current-session attachment evidence. Cursors
+bind owner/workspace/binding/filter/session/generation; defaults are 50, capped
+at 100. Changed catalogs return 409. Stored metadata and structural schemas are
+allowlisted; provider configuration, secrets, errors and transcripts are omitted.
+Read-only hints grant no authority. The real executor record, current profile and
+connection state must agree before attachment is reported.
+
+Observed red/green: missing API routes returned 404; the CLI rejected the new
+command; manifest and MCP validation rejected explicit conversation opt-in; an
+attachment test exposed reliance on the legacy session execution field. All are
+fixed. Conversation tools require manifest API version 2, use the existing
+per-operation names and registry, and leave old task declarations unchanged.
+
+Verification on the private v0.94.0 workbench:
+
+- The exact work-order capability filter passed **7 tests** (two runtime, five
+  backend adapters). Adjacent GitHub metadata and CLI tests also passed. The
+  nine-test combined filter passed with the race detector before the final
+  extra last-page assertion, which passed in the exact work-order rerun.
+- The profile, plugintools and manifest packages passed in full. The work-order
+  plugin/server filter passed with the race detector, including the two new
+  versioned conversation-surface tests and existing registry behavior.
+- Full orchestration and CLI packages passed with the race detector, including
+  feature-off route checks. Scoped Go lint reported **zero issues**.
+- Synthetic 100-entry directory measured **29,692 bytes**. Schema depth, property
+  and byte bounds, 205-profile pagination, foreign scope, changing generations,
+  disabled profiles, disconnects and secret-bearing metadata were exercised.
+- Public-doc tests passed (61 tests, 48 pages); specification lint and diff checks
+  passed. No schema migration or live provider request was needed.
+
+Evidence logs use the `assistant-capabilities-*` prefix in the local implementation
+record. Task 05 must still enforce invocation authority; directory presence and
+historical health are not execution grants.

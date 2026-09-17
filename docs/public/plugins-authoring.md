@@ -192,8 +192,12 @@ underscore. Very long names receive a short stable hash suffix after the slug
 is truncated. Tool names are host-owned; the plugin-local `name` is used for
 the gRPC dispatch.
 
-Tools may target `kanban-task`, `office-task`, or both. They are not exposed to
-configuration or external MCP clients. Kandev validates the input and optional
+Tools may explicitly target `kanban-task`, `office-task` and, with manifest
+`api_version: 2`, `conversation`. Existing task-only declarations keep their
+original scope. A conversation tool retains the same canonical MCP name;
+there is no generic plugin invocation tool. Tools are not exposed to
+configuration or external MCP clients. Read-only annotations are hints, not
+proof that a plugin is safe for restricted assistant inspection. Kandev validates the input and optional
 output JSON Schemas, supplies task/session/workspace/surface context, enforces
 a 30-second deadline and 1 MiB result limit, and does not retry calls.
 

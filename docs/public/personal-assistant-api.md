@@ -103,6 +103,38 @@ Descriptor, account/profile, reference, resolver-generation and health changes
 invalidate queued context. A fresh check timestamp alone preserves packet
 identity. Validation observations are not stored in the descriptor record. Bitwarden is reported unavailable until a supported resolver is attached; a descriptor alone does not install or unlock it. Locked/unavailable states carry the specified unblock action and never substitute another account or scan the user's vault.
 
+## Capability directory
+
+`GET /assistant/capabilities` and `GET /runtime/capabilities` return the same
+owner-scoped directory. Use `kind` to select `native`, `profile`, `workflow`,
+`executor`, `integration`, `plugin` or `mcp`. Lists default to 50 entries and
+cap at 100. Pass `next_cursor` as `after` with the same filters. A malformed or
+foreign cursor returns 400; a changed directory generation returns 409 and
+requires restarting pagination. Every page rechecks current workspace access.
+
+```sh
+kandev capabilities --kind mcp --session SESSION_ID --limit 50
+```
+
+Add `--after OPAQUE_CURSOR` for later pages. `--session` selects attachment
+evidence for a session of the bound assistant conversation; runtime calls
+otherwise use their own session. Configured profile servers appear separately
+from tools observed on that session. Missing, disconnected, disabled and stale
+states are explicit. Stored integration health does not trigger a fresh provider
+probe or credential reveal.
+
+Entries include stable identity, kind, name, resource scope, generation/revision,
+surfaces, effect, health/reason, `configured`, `attached` and `inspect_allowed`.
+An entry grants no authority. Executors and unverified plugin/MCP operations are
+not marked inspect-safe. Conversation plugin tools require explicit manifest
+API-version-2 opt-in and keep their existing per-operation MCP names.
+
+`input_schema` is a structural projection bounded to 8 KiB, six nested levels
+and 64 properties per object. Descriptions, defaults, examples, references and
+extensions are omitted. `schema_partial: true` means the invocation's full
+native schema must still be consulted and validated. No provider configuration,
+environment, credential value or worker transcript is returned.
+
 ## Coordinator task observations
 
 `GET /api/v1/workspaces/:workspaceId/tasks?view=kanban` is the read-only task

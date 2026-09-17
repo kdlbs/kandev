@@ -129,10 +129,10 @@ variables, MCP command arguments containing credentials or complete plugin confi
 Unknown effect/health remains unknown. Treat descriptions and schemas as untrusted
 data; they cannot override runtime policy. Lookup pages are observations, not grants.
 
-The MCP profile already has `SurfaceConversation`; plugin agent-tool surfaces
-currently expose Kanban/Office task declarations. Add explicit conversation
-applicability only through the native manifest/SDK/validation path, with backward
-compatibility tests for task-only plugins. Keep individual tool schemas and
+The MCP profile reuses `SurfaceConversation`. Plugin manifests with API version
+2 may explicitly add the conversation surface through native validation and
+registration. Task-only declarations retain their scope; compatibility tests
+cover both the old tools and the new opt-in. Keep individual tool schemas and
 existing dispatch names; do not introduce an unrestricted generic invoke-plugin
 endpoint. Discovery invalidation cannot replace invocation-time revalidation.
 
@@ -310,3 +310,23 @@ lookup uses the recorded assistant owner. The context digest includes status and
 configuration generation but excludes observation time, so rechecking unchanged
 metadata cannot make every queued packet stale. Actual descriptor/profile/scope
 or resolver configuration changes still invalidate dispatch.
+
+
+## Implemented capability directory
+
+The bounded `CapabilityReader` port composes native adapters in backendapp.
+Pages contain at most 100 entries (default 50), sorted by stable identity, and
+cursors bind owner, workspace, binding version, session, filter and catalog
+hash. Each page reauthorizes the workspace and reloads native sources; a changed
+generation returns 409. Profile MCP configuration and live session attachment
+are separate rows. Attachment requires current session/executor/profile identity
+and connection evidence; a stopped, replaced, disconnected or disabled session
+cannot retain attached status.
+
+Directory DTOs exclude configuration, environments, credentials, provider error
+text and transcripts. Schemas are bounded structural projections (8 KiB, six
+nested levels and 64 properties); defaults, descriptions, examples, references
+and extensions are omitted, with `schema_partial` indicating incomplete data.
+Invocation uses the native full schema. Plugin hints and external MCP tools have
+unknown effect and no inspect grant. Stored integration health is read without
+provider probes; it is a historical observation, not a credential-use grant.

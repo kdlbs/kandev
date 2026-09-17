@@ -23,13 +23,13 @@ status: in_progress
 
 Extend the existing independent Orchestration runtime, not Office. First make intent and delivery durable; then add proportional routing, shared context and enforceable tools; then reconcile/resolve blockers and expose the central assistant. Add supervised workflow improvement and explicitly linked workspaces only after the single-workspace boundaries are tested.
 
-Implementation was explicitly requested after the design-package handoff. Tasks 01, 02 and 03 are verified. The subsequent binding-switch privacy regression was repaired after the user's explicit follow-up; the [ownership checkpoint](ownership-checkpoint.md) records the retained-owner boundary and passing checks. Later tasks remain pending. The [experiment report](experiments.md) records the pre-implementation baseline.
+Implementation was explicitly requested after the design-package handoff. Tasks 01 through 04 are verified. The subsequent binding-switch privacy regression was repaired after the user's explicit follow-up; the [ownership checkpoint](ownership-checkpoint.md) records the retained-owner boundary and passing checks. Later tasks remain pending. The [experiment report](experiments.md) records the pre-implementation baseline.
 
 ## Continuation context
 
 The historical implementation started before the release rebase. The current private review branch is based on exact v0.94.0 (`bf819a0228e742d069c528293d848c985a4d1bd1`) with the preserved prototype imported above it. Use the [delivery plan](../orchestration-delivery/plan.md) for current repository, candidate and rollout status. Do not use old local baseline SHAs as new integration targets. Re-read current diffs before editing overlapping files.
 
-Delivery task 01 adds an independent assistant flag before coordinator-only dogfooding. Preserve retained-owner/context guards even with that flag off. Continue tasks 04–11 in dependency order; these work orders now include canonical requirement/criterion references and detailed remaining checks. Tasks 01/02 below are historical completed work, not work to redo.
+Delivery task 01 adds an independent assistant flag before coordinator-only dogfooding. Preserve retained-owner/context guards even with that flag off. Continue tasks 05–11 in dependency order; these work orders now include canonical requirement/criterion references and detailed remaining checks. Tasks 01/02 below are historical completed work, not work to redo.
 
 The existing [workspace-orchestrators plan](../workspace-orchestrators/plan.md) covers the already-built foundation. This spec extends its user-facing contract without changing old completion statuses. Runtime ownership stays in internal/orchestration; backendapp supplies adapters to core services.
 
@@ -182,7 +182,7 @@ Execute sequentially in the primary conversation. Waves show dependencies only; 
 | --- | --- | --- |
 | 1 | [01 Durable intake and ownership](task-01-durable-intake.md) | Done, backend |
 | 2 | [02 Objectives and proportional routing](task-02-objectives-routing.md); [03 Scoped memory and handoffs](task-03-memory-context.md) | 02 and 03 done |
-| 3 | [04 Native capability inventory](task-04-capability-inventory.md); [06 Attention reconciliation](task-06-attention.md) | Pending |
+| 3 | [04 Native capability inventory](task-04-capability-inventory.md); [06 Attention reconciliation](task-06-attention.md) | 04 done; 06 pending |
 | 4 | [05 Enforced inspection](task-05-tool-authority.md) | Pending |
 | 5 | [07 Native resolution and controls](task-07-input-resolution.md) | Pending |
 | 6 | [08 Assistant interface](task-08-assistant-ui.md) | Pending |
@@ -208,4 +208,4 @@ Delivery task 01 supplies the assistant rollout gate before any live candidate.
 
 ## Handoff checkpoint
 
-The original design-package handoff and subsequent ownership escalation were completed. The user explicitly requested the ownership repair, which is now implemented and verified; see [ownership-checkpoint.md](ownership-checkpoint.md). Task 03 is complete; continue task 04 without restarting completed investigation or discarding the existing implementation.
+The original design-package handoff and subsequent ownership escalation were completed. The user explicitly requested the ownership repair, which is now implemented and verified; see [ownership-checkpoint.md](ownership-checkpoint.md). Task 04 is complete; continue task 05 without restarting completed investigation or discarding the existing implementation.

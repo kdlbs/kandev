@@ -46,6 +46,7 @@ type Service struct {
 	Tasks            Tasks
 	Manager          Manager
 	Credentials      CredentialHealthReader
+	Capabilities     CapabilityReader
 	Start            func(context.Context, Launch) error
 	UpdateStatus     func(context.Context, string, string, string) error
 	APIURL, CLI      string

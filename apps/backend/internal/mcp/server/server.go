@@ -918,7 +918,7 @@ func validatePluginToolSurfaces(name string, surfaces []string) error {
 	}
 	seen := make(map[string]struct{}, len(surfaces))
 	for _, surface := range surfaces {
-		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice {
+		if surface != plugintools.SurfaceKanban && surface != plugintools.SurfaceOffice && surface != plugintools.SurfaceConversation {
 			return fmt.Errorf("%s has unsupported surface %q", name, surface)
 		}
 		if _, ok := seen[surface]; ok {

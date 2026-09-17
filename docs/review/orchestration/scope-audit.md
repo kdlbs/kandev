@@ -169,3 +169,13 @@ credential observations and clock-stable context identities. Race, SQLite and
 PostgreSQL conformance/upgrade, CLI and contract tests passed; see the updated
 [task 03 evidence](../../plans/personal-assistant/task-03-memory-context.md).
 The original audit above remains a historical record of its stated commit.
+
+
+### Capability-directory completion after the original audit
+
+Assistant task 04 now supplies owner-scoped native capability discovery with
+bounded generation-aware pagination, structural schema projections, stored
+integration health and current session attachment evidence. Manifest API version
+2 permits explicit conversation-tool opt-in; task-only plugins keep their scope.
+Discovery enables no operation. See the [task 04 evidence](../../plans/personal-assistant/task-04-capability-inventory.md)
+for tests and the remaining authority boundary in task 05.

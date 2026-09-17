@@ -28,9 +28,10 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 		AssistantEnabled: cfg.Features.Orchestration && cfg.Features.PersonalAssistant,
 		Repo:             repos.Orchestration, Personas: personasSvc, Runs: repos.Runs,
 		Auth: runtimeauth.NewAgentAuth(""), Tasks: services.Task,
-		Credentials: assistantCredentialReader{store: repos.Secrets},
-		Manager:     &taskCreatorAdapter{taskSvc: services.Task, profiles: repos.AgentSettings, orch: orch, taskRepo: repos.Task, workflow: repos.Workflow},
-		APIURL:      fmt.Sprintf("http://localhost:%d", apiPort), CLI: cli,
+		Credentials:  assistantCredentialReader{store: repos.Secrets},
+		Capabilities: newAssistantCapabilityReader(repos, services),
+		Manager:      &taskCreatorAdapter{taskSvc: services.Task, profiles: repos.AgentSettings, orch: orch, taskRepo: repos.Task, workflow: repos.Workflow},
+		APIURL:       fmt.Sprintf("http://localhost:%d", apiPort), CLI: cli,
 		Start: func(ctx context.Context, launch orchestrationruntime.Launch) error {
 			return orch.StartTaskWithRoute(ctx, launch.TaskID, launch.PersonaID, orchexecutor.LaunchContext{ExecutorProfileID: launch.ExecutorID, Prompt: launch.Prompt, Env: launch.Env, OnSessionPrepared: launch.OnSessionPrepared}, orchexecutor.RouteOverride{ExecutionProfileID: launch.ProfileID})
 		},
