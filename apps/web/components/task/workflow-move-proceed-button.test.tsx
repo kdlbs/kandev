@@ -222,6 +222,8 @@ describe("WorkflowMoveProceedButton label interaction", () => {
 
     const proceed = screen.getByTestId(PROCEED_TEST_ID);
     const skipCheckbox = screen.getByTestId("workflow-move-skip-step-prompt");
+    const skipLabel = screen.getByText("Skip the step prompt").closest("label");
+    expect(skipLabel?.htmlFor).toBe(skipCheckbox.id);
     fireEvent.blur(proceed, { relatedTarget: skipCheckbox });
     fireEvent.focus(skipCheckbox);
     fireEvent.click(screen.getByText("Skip the step prompt"));

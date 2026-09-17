@@ -55,8 +55,13 @@ the task idle without a recipient when the destination has no launch turn. The
 second line shows the current model or an expected model change and counts
 additional settings changes. Use the info button for the session, profile, model,
 context reset, source-session disposition, and prompt dispatch information.
-The preview sits in a centered footer below the move controls. The next-step
-button above chat shows the same footer in its options popover or touch drawer.
+In the condensed topbar workflow, each eligible step has a **Move here** button
+beside its name. A single line below summarizes the session and model. Expand
+the row's chevron for full transition details and one-time move options. Moving
+does not require expanding the row. The current step has a highlighted background.
+On touch devices, the same controls appear in the bottom drawer.
+The full stepper and the next-step button above chat retain the centered preview
+footer in their options popover or touch drawer.
 Changing the options refreshes that preview.
 The preview is advisory. **Move here** checks routing, permissions, WIP, and
 current session state again when the move runs. A preview can therefore change
@@ -723,7 +728,30 @@ and primary session are eligible, even if other feedback is still being
 restored. A recovered comment must finish its own browser-draft cleanup before
 it can be run.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+### Protect agent plan writes
+
+Every agent plan read returns an opaque `version`. The version changes after a
+title or content write. Comment and implementation-marker changes do not change
+the version.
+
+Use `expected_version` for a whole-document replacement. Kandev rejects the
+write when the stored version differs. The rejection happens before Kandev
+changes the title, content, history, or events.
+
+Kandev also rejects a replacement that looks like accidental truncation. Use
+`edit_task_plan_kandev` for a local text change. Set `allow_truncation` only
+when the reduction is intentional and the current version matches. Kandev
+keeps the previous snapshot in plan history.
+
+Use `update_task_plan_kandev` with `mode="append"` to add a section without
+reading the plan first. The server adds one blank line before the new section.
+Append is not idempotent, so a repeated call adds the section again.
+
+If an agent loses a write response, read the plan before retrying. Use the
+returned version as the next `expected_version`. Do not repeat a whole-document
+replacement with an old version.
 
 ## Arrange task panels
 
@@ -766,6 +794,8 @@ Regular Kanban reads and enforces blocker relationships (see [Task dependencies]
 On a phone, archive uses a focused confirmation step in the open Tasks sheet,
 or a compact bottom sheet from a page. [Phone confirmation controls](mobile-remote-access.md#confirm-an-action-on-a-phone)
 explain how to review the action and return to your list without losing your place.
+
+After you confirm archive, the task stays in the active sidebar and phone task picker in a dimmed, busy state with a spinner while the request is pending. It disappears after a successful archive. If the request fails, the task returns to its normal state. Saved views that include archived tasks still show confirmed archives.
 
 Archive records the task as archived and removes it from active views immediately. Runtime stopping and physical cleanup then run in the background with a 60-second timeout. Cleanup is best-effort: a stop or deletion failure is logged and does not undo the archive, and Kandev preserves a runtime or environment when a nonterminal session cannot be stopped. Shared inherited environments and borrowed worktrees are also preserved while another active task still uses them.
 

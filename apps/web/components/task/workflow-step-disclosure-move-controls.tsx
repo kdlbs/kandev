@@ -1,18 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { StepDisclosureRowActions } from "./workflow-step-disclosure-actions";
 import {
   WorkflowMoveOptionsFields,
   useWorkflowMoveOptionsForm,
   workflowMoveOptionsPayload,
 } from "./workflow-move-options";
-import { WorkflowMovePreviewDisclosure } from "./workflow-move-preview";
+import { CompactWorkflowMovePreview } from "./workflow-move-preview";
 import { useWorkflowMovePreview } from "@/hooks/domains/kanban/use-workflow-move-preview";
 import { useWorkflowMovePreviewRevision } from "@/hooks/domains/kanban/use-workflow-move-preview-revision";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 type StepDisclosureMoveControlsProps = {
+  heading: ReactNode;
   stepId: string;
   taskId: string;
   workflowId: string;
@@ -24,6 +25,7 @@ type StepDisclosureMoveControlsProps = {
 };
 
 export function StepDisclosureMoveControls({
+  heading,
   stepId,
   taskId,
   workflowId,
@@ -49,7 +51,8 @@ export function StepDisclosureMoveControls({
 
   return (
     <>
-      <div className="flex justify-end">
+      <div className="flex min-w-0 items-center gap-2">
+        {heading}
         <StepDisclosureRowActions
           stepId={stepId}
           isMoving={isMoving}
@@ -62,6 +65,11 @@ export function StepDisclosureMoveControls({
           onMove={onMove}
         />
       </div>
+      <CompactWorkflowMovePreview
+        state={previewState}
+        isTouchSurface={isTouchSurface}
+        expanded={showOptions}
+      />
       {showOptions && (
         <div
           className="pb-1 pl-4 pr-1"
@@ -76,7 +84,6 @@ export function StepDisclosureMoveControls({
           />
         </div>
       )}
-      <WorkflowMovePreviewDisclosure state={previewState} isTouchSurface={isTouchSurface} />
     </>
   );
 }

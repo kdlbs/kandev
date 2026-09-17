@@ -278,6 +278,10 @@ type InstanceConfig struct {
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
+	// InjectedKandevMCP records that this instance configuration was created
+	// with the host-owned Kandev MCP server injected into McpServers.
+	InjectedKandevMCP bool `json:"-"`
+
 	// ProcessBufferMaxBytes caps per-process output buffer size
 	ProcessBufferMaxBytes int64
 
@@ -618,6 +622,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	// to forward tool calls to the backend.
 	if port > 0 {
 		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
+		cfg.InjectedKandevMCP = true
 	}
 
 	// Parse agent command into args

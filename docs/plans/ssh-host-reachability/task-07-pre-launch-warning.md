@@ -22,10 +22,10 @@ attempt and proceeds anyway. The warning informs; it never gates. **The
 warning renders a `session.launch.warning` event the backend pushes (task 05's
 single producer); it is never derived client-side from the reachability store
 slice.** There is no interactive/non-interactive split to implement here —
-that split was retired at the backend. The event always lands in the launched
-session's own stream, and a client that initiated that launch renders the same
-event inline at the initiation point as well. Both are this task's
-responsibility.
+that split was retired at the backend. The gateway replays the latest warning
+to a later subscriber while the backend is running, and a client that initiated
+that launch renders the same event inline at the initiation point as well.
+Both are this task's responsibility.
 
 ## In scope
 

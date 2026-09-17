@@ -68,23 +68,4 @@ describe("ordered session event envelopes", () => {
       }),
     ).toBe("project");
   });
-
-  it("classifies launch warnings as replayable ordered events", () => {
-    expect(
-      orderedCoreDisposition({
-        ...validEvent,
-        event_type: "session.launch.warning",
-        payload: {
-          type: "session.launch.warning",
-          session_id: "session-1",
-          task_id: "task-1",
-          executor_id: "executor-1",
-          host: "10.0.0.5",
-          state: "unreachable",
-          reason: "timeout",
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    ).toBe("project");
-  });
 });

@@ -1,3 +1,5 @@
+import { mapSidebarWorkspaces } from "../ui/sidebar-workspace-state";
+import type { UISliceState } from "../ui/types";
 import type { StateCreator } from "zustand";
 import { createDefaultUserSettings } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
@@ -179,6 +181,23 @@ function createAgentUpdateJobActions(
   };
 }
 
+function applyUserSettingsState(
+  draft: SettingsSlice,
+  settings: SettingsSliceState["userSettings"],
+) {
+  const order = compareUserSettingsRevisions(settings.revision, draft.userSettings.revision);
+  if (order !== null && order < 0) return;
+  draft.userSettings = settings;
+  if ("sidebarViewsByWorkspace" in draft) {
+    const sidebar = draft as SettingsSlice & Pick<UISliceState, "sidebarViewsByWorkspace">;
+    sidebar.sidebarViewsByWorkspace = mapSidebarWorkspaces(
+      settings.sidebarViewsByWorkspace,
+      sidebar.sidebarViewsByWorkspace,
+      settings.revision,
+    );
+  }
+}
+
 function createCoreActions(
   set: ImmerSet,
 ): Pick<
@@ -273,9 +292,7 @@ function createCoreActions(
       }),
     setUserSettings: (settings) =>
       set((draft) => {
-        const order = compareUserSettingsRevisions(settings.revision, draft.userSettings.revision);
-        if (order !== null && order < 0) return;
-        draft.userSettings = settings;
+        applyUserSettingsState(draft, settings);
       }),
     bumpAgentProfilesVersion: () =>
       set((draft) => {

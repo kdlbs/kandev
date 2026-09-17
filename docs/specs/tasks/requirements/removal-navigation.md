@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-09-10
 owners:
@@ -79,6 +79,30 @@ removal, replacement eligibility, and recovery depend on the task lifecycle.
   restart a session because removal empties its session list. After confirmed
   failure, ordinary task behavior shall resume only for an available task.
 
+### REQ-TASKS-REMOVAL-NAVIGATION-003: Immediate archive visibility
+
+**Intent:** Show accepted archive targets as busy until they are removed from
+active task navigation after the archive operation completes.
+
+#### Acceptance criteria
+
+- **AC-TASKS-REMOVAL-NAVIGATION-003.1:** After archive acceptance, every visible
+  active task in the removal set shall remain in the desktop sidebar and phone
+  task picker in a dimmed, busy state with a spinner on the next render, before
+  the archive request, destination lookup, or live event completes. The row
+  shall keep its place and expose no stale interactive state. Opening or
+  cancelling confirmation shall leave rows unchanged.
+- **AC-TASKS-REMOVAL-NAVIGATION-003.2:** Refreshes and live updates during the
+  operation shall preserve the pending presentation. Successful targets shall
+  be removed after completion and failed targets that remain active shall return
+  to their normal presentation without overwriting newer task data or user
+  navigation. Bulk partial failure shall restore only failed targets.
+- **AC-TASKS-REMOVAL-NAVIGATION-003.3:** Archiving an unselected task shall leave
+  the selected task and route unchanged. Non-cascade archive shall not hide
+  surviving subtasks. Existing archived-inclusive saved views shall continue to
+  show confirmed archived tasks according to their filters; pending archive
+  intent shall not manufacture a confirmed archived task.
+
 ## Compatibility and exclusions
 
 Existing archive confirmation preferences and cascade choices remain governed
@@ -88,7 +112,7 @@ This adds local user-action presentation guarantees; it does not change task API
 permissions, session-only deletion, Quick Chat expiration/close, or server cleanup.
 Remote/API/MCP removal retains existing lifecycle reconciliation and redirects.
 Cold unavailable task routes retain [their current contract](missing-task-route-recovery.md).
-Undo, animations, new settings, and a new mobile navigation composition are excluded.
+Undo, new settings, and a new mobile navigation composition are excluded.
 
 ## System design
 
@@ -97,3 +121,5 @@ Undo, animations, new settings, and a new mobile navigation composition are excl
 ## Implementation plans
 
 - [Task removal navigation](../../../plans/task-removal-navigation/plan.md)
+
+- [Immediate sidebar archive](../../../plans/immediate-sidebar-archive/plan.md)

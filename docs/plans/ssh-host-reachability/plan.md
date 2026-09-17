@@ -75,9 +75,10 @@ that affect this plan and its work orders:
   rather than reading a zero effective interval literally.
 - The pre-launch warning collapsed from two mechanisms (an interactive prompt
   versus a session-recorded non-interactive note) into one: the backend always
-  emits a `session.launch.warning` event to the launched session's stream, and
-  a client that initiated that launch also renders the same event inline.
-  There is no "interactive user" branch on the backend. **The system design
+  emits a `session.launch.warning` event for the launched session, and the
+  gateway replays the latest warning to a later subscriber while the backend
+  is running. A client that initiated that launch also renders the same event
+  inline. There is no "interactive user" branch on the backend. **The system design
   attributes the producer to `internal/task/service`; that package is not in
   the launch call path.** Per `apps/backend/AGENTS.md`'s Execution Flow
   (Orchestrator → Lifecycle Manager → ExecutorBackend) and the verified call
@@ -367,8 +368,8 @@ through a narrow read-only accessor immediately before that call — never insid
 `CreateInstance` itself, so the negative test (`CreateInstance` reads no record)
 stays meaningful. When the executor is `ssh`, the record's state is
 `unreachable`, and either periodic probing is enabled or the record's `checked_at`
-is within three times the *default* interval, it appends
-`session.launch.warning` to the launched session's ordered event stream via the
+is within three times the *default* interval, it publishes
+`session.launch.warning` for the launched session via the
 `Manager`'s existing `eventPublisher` (the mechanism behind
 `PublishPrepareProgress`), carrying `executor_id`, `host`, `state`, `reason`,
 `last_success_at`, and a timestamp. A read failure produces no warning and
@@ -376,8 +377,8 @@ cannot delay the launch. Every launch path — WS-initiated, a
 dependency chain, a workflow transition, an autostart — converges on this one
 call site, so none can diverge from another. A client that initiated the
 launch itself renders the same event inline at the point of initiation, in
-addition to it appearing in the session's stream; there is no second backend
-code path to keep in step.
+addition to it appearing in the session-scoped event stream; there is no second
+backend code path to keep in step.
 
 ### Frontend (`apps/web`)
 
@@ -402,10 +403,11 @@ is open — and runs **no timer at all** while `probing_enabled` is `false`,
 fetching once on open and again after an immediate probe instead of reading a
 zero effective interval as a cadence.
 
-**The pre-launch warning renders an ordered event, not a derived client
-computation.** The backend always appends `session.launch.warning` to the
-launched session's own stream (see Launch interaction above); the session view
-renders it there through the existing session-scoped WS-event handler pattern
+**The pre-launch warning renders a session event, not a derived client
+computation.** The backend always publishes `session.launch.warning` for the
+launched session (see Launch interaction above); the gateway replays the latest
+warning to a later subscriber while the backend is running. The session view
+renders it through the existing session-scoped WS-event handler pattern
 (the `executor-prepare.ts` shape), and a client that initiated that launch
 also renders the same event inline at the initiation point, naming the host
 and the age of the last successful probe. Neither surface derives

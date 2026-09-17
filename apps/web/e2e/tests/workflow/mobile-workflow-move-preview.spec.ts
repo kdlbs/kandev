@@ -54,11 +54,23 @@ test.describe("mobile: workflow move preview", () => {
     await expect(preview).toContainText("Reuse current session");
     await expect(preview).toContainText("mock-fast");
 
-    const detailsToggle = preview.getByTestId("workflow-move-preview-details-toggle");
+    const move = row.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
+    await expect(move).toBeVisible();
+    await expect(row.getByTestId("workflow-move-preview-details")).toHaveCount(0);
+    const labelBox = await row.getByText(targetStep.name, { exact: true }).boundingBox();
+    const moveBox = await move.boundingBox();
+    expect(labelBox).not.toBeNull();
+    expect(moveBox).not.toBeNull();
+    expect(
+      Math.abs(labelBox!.y + labelBox!.height / 2 - moveBox!.y - moveBox!.height / 2),
+    ).toBeLessThan(2);
+    await expect(preview).toHaveCSS("text-align", "left");
+    const detailsToggle = row.getByTestId(`workflow-step-disclosure-options-${targetStep.id}`);
     const toggleBox = await detailsToggle.boundingBox();
     expect(toggleBox).not.toBeNull();
     if (!toggleBox) return;
     expect(toggleBox.height).toBeGreaterThanOrEqual(44);
+    expect(toggleBox.width).toBeGreaterThanOrEqual(44);
     await detailsToggle.tap();
     await expect(row.getByTestId("workflow-move-preview-details")).toBeVisible();
 

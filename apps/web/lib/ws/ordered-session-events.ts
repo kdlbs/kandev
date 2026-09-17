@@ -24,6 +24,12 @@ export type CoreSessionStream = {
   recoveryGeneration: number;
   recoveryWatermark?: number;
   recoveryHydration?: Promise<boolean>;
+  conversationScopeId: string;
+  conversationEpoch?: string;
+  conversationAppliedRevision?: string;
+  conversationRecoveryRevision?: string;
+  conversationPendingChanges: unknown[];
+  conversationCheckTimer?: ReturnType<typeof setTimeout>;
 };
 
 const ORDERED_EVENT_ACTIONS: Readonly<Record<string, BackendMessageType>> = {
@@ -33,7 +39,6 @@ const ORDERED_EVENT_ACTIONS: Readonly<Record<string, BackendMessageType>> = {
   "session.turn.started": "session.turn.started",
   "session.turn.completed": "session.turn.completed",
   "session.turn.removed": "session.turn.removed",
-  "session.launch.warning": "session.launch.warning",
 };
 const IGNORABLE_ORDERED_EVENT_TYPES: Readonly<Record<string, true>> = {
   "session.workspace_sources.updated": true,
@@ -82,14 +87,6 @@ function isProjectableCorePayload(
         isTimestamp(payload.started_at) &&
         isTimestamp(payload.completed_at) &&
         isTimestamp(payload.updated_at)
-      );
-    case "session.launch.warning":
-      return (
-        isNonEmptyString(payload.executor_id) &&
-        isNonEmptyString(payload.host) &&
-        isNonEmptyString(payload.state) &&
-        isNonEmptyString(payload.reason) &&
-        isTimestamp(payload.timestamp)
       );
     case "session.removed":
       return true;

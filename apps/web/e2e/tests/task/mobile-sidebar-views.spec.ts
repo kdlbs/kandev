@@ -223,9 +223,11 @@ test.describe("Mobile sidebar — view system", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-          (view) => view.name === "New view",
-        );
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+            | Array<{ name?: string }>
+            | undefined
+        )?.some((view) => view.name === "New view");
       })
       .toBe(true);
 
@@ -767,9 +769,12 @@ test.describe("Mobile sidebar — view system", () => {
       collapsed_groups: [],
     }));
     const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-      sidebar_views: views,
-      sidebar_active_view_id: views[0].id,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: views,
+        active_view_id: views[0].id,
+        draft: null,
+      },
     });
     expect(response.ok).toBe(true);
 

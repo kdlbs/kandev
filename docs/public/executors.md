@@ -452,11 +452,11 @@ the last successful probe was (or that none has ever succeeded), and a manual
 **Probe now** action.
 
 If a task launches against a host currently recorded as unreachable, Kandev
-appends a `session.launch.warning` event to the launched session's ordered
-stream. The task's chat panel shows an inline warning naming the host and the
-age of the last successful probe before the attempt proceeds. A later session
-subscriber can replay the same warning from the stream; workflow and dependency
-launches use the same event path.
+publishes a `session.launch.warning` event for the launched session. The task's
+chat panel shows an inline warning naming the host and the age of the last
+successful probe before the attempt proceeds. The gateway keeps the latest
+warning while the backend is running, so a later session subscriber receives
+it too. Workflow and dependency launches use the same event path.
 
 The probe deliberately does two things and no more: it reports what it
 observed, and it never blocks or delays a launch on that basis. It does not

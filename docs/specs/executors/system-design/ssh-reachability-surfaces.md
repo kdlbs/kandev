@@ -175,12 +175,13 @@ last completed and last successful probe (or that none is recorded), the stale
 marker, the probing-is-off notice, and the immediate-probe button. It owns the
 once-per-effective-interval refetch above and is the only component to refetch.
 
-**Launch surfaces.** The backend always emits `session.launch.warning` to the
-launched session's stream; the session view renders it there, and a client that
+**Launch surfaces.** The backend always emits `session.launch.warning` for the
+launched session; the session view renders it there, and a client that
 initiated the launch itself also renders it inline at the initiation point,
-naming the host and the last-success age. Both render the one event, so there is
-no second code path to keep in step. The launch-failure attribution renders what
-the backend reports; the frontend adds no text of its own.
+naming the host and the last-success age. The gateway caches the latest warning
+for each session and replays it to a later subscriber until the session reaches
+`RUNNING` or is removed. The launch-failure attribution renders what the
+backend reports; the frontend adds no text of its own.
 
 **Cross-cutting.** All copy goes through `t()` with keys in all five locales;
 reason tokens render through a translated label map, never raw. State is text as
@@ -206,13 +207,14 @@ cannot delay the launch. `CreateInstance` remains free of any record read, and a
 read failure produces no warning rather than blocking or retrying.
 
 **One mechanism, not two.** Rather than branch on whether a human is watching,
-the warning is *always* appended to the launched session's ordered event
-stream as a `session.launch.warning` event carrying `executor_id`, `host`,
-`state`, `reason`, `last_success_at` (null when none has been recorded), and a
-timestamp. A client that initiated that launch interactively renders the same
-event inline as well. Every other path — a dependency chain, a workflow
-transition, or an autostart — leaves it in the stream, where a later subscriber
-can replay it. One producer and one payload keep all launch paths aligned.
+the warning is *always* published as a `session.launch.warning` event carrying
+`executor_id`, `host`, `state`, `reason`, `last_success_at` (null when none has
+been recorded), and a timestamp. A client that initiated that launch
+interactively renders the same event inline as well. The gateway keeps the
+latest warning per session and replays it to a later subscriber while the
+backend is running. Every other path — a dependency chain, a workflow
+transition, or an autostart — uses the same event path. One producer and one
+payload keep all launch paths aligned.
 
 **When it is raised.** Only when the record's state is `unreachable`. While
 periodic probing is enabled, any `unreachable` record qualifies. While probing

@@ -61,8 +61,8 @@ matches what shipped.
   `ssh`, the record's state is `unreachable`, and either periodic probing is
   enabled or the record's `checked_at` falls within three times the *default*
   interval (`AC-…-001.28`'s reading stays valid even with probing off), it
-  appends `session.launch.warning` to the launched session's ordered event
-  stream via the `Manager`'s existing `eventPublisher`, carrying `executor_id`,
+  publishes `session.launch.warning` for the launched session via the
+  `Manager`'s existing `eventPublisher`, carrying `executor_id`,
   `host`, `state`, `reason`, `last_success_at` (null when none recorded), and a
   timestamp. A read failure produces no warning and cannot delay the launch.
   Every launch path — WS-initiated, a dependency chain, a workflow transition,
@@ -216,8 +216,8 @@ Implemented as specified.
   one `rt.CreateInstance` call site, never from inside `CreateInstance`
   itself. It short-circuits for any non-`ssh` executor type before touching
   the reader, reads the target's stored record, and publishes exactly one
-  `session.launch.warning` (to the launched session's own event stream, via
-  the existing `Manager.eventPublisher`) when the record's state is
+  `session.launch.warning` for the launched session via the existing
+  `Manager.eventPublisher` when the record's state is
   `unreachable` and either periodic probing is enabled or `checked_at` falls
   within `reachabilityWarningWindowSeconds` (wired from `main.go` as 3x
   `reachability.DefaultIntervalSeconds`, not the operator-configured/effective

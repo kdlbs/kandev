@@ -125,3 +125,8 @@ Validation failures are returned as MCP tool error results. They identify the in
 - Changing MCP transport, authorization, tool availability by mode, or backend action payloads.
 - Adding automatic tool-call retries or agent-client-specific schema rewriting.
 - Duplicating every registered tool schema in the first-turn task context.
+
+## Implementation Plans
+
+- [MCP tool argument validation](../../../plans/mcp-tool-argument-validation/plan.md): original implementation package.
+- [MCP validation diagnostic repair](../../../plans/mcp-tool-argument-validation-repair/plan.md): follow-up package for complete unknown-argument diagnostics.

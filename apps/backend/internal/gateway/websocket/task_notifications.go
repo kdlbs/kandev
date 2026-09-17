@@ -291,6 +291,9 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			return nil
 		}
 	case ws.ActionSessionStateChanged:
+		if sessionID != "" && extractStringField(data, "new_state") == string(models.TaskSessionStateRunning) {
+			b.hub.clearSessionLaunchWarning(sessionID)
+		}
 		// Broadcast beyond the session subscribers so the sidebar task
 		// switcher can track state changes for all tasks — but scoped to
 		// the owning workspace's user when auth is enabled.
@@ -299,12 +302,17 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted,
 		ws.ActionSessionTurnStarted, ws.ActionSessionTurnCompleted, ws.ActionSessionTurnRemoved:
 		if sessionID != "" {
+			b.hub.BroadcastConversationMutation(data)
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
 	case ws.ActionSessionRemoved:
 		if sessionID != "" {
-			b.hub.appendAndBroadcastOrderedSessionEvent(sessionID, msg)
+			b.hub.clearSessionLaunchWarning(sessionID)
+			if _, hasReceipt := conversationReceiptFromData(data); hasReceipt {
+				b.hub.BroadcastConversationMutation(data)
+			}
+			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
 	case ws.ActionSessionWorkspaceSourcesUpdated:
