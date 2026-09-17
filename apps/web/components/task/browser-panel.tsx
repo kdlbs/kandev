@@ -11,6 +11,7 @@ import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
 import { usePreviewCapture } from "@/hooks/use-preview-capture";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
 import { openExternalLink } from "@/lib/desktop/external-links";
+import { previewSourceLabel } from "@/lib/preview-feedback-source";
 import { useTranslation } from "react-i18next";
 
 function BrowserPanelContent({
@@ -153,7 +154,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
     source: {
       kind: "browser",
       sessionId: activeSessionId ?? undefined,
-      label: url.directUrl,
+      label: previewSourceLabel(url.directUrl),
     },
   });
 

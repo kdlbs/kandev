@@ -82,4 +82,55 @@ describe("usePreviewFeedback", () => {
     await waitFor(() => expect(result.current.feedback.snapshot?.revision).toBe(2));
     expect(api.getTaskPreviewFeedback).toHaveBeenCalledWith("task-1");
   });
+
+  it("keeps idempotency IDs independent for concurrent failed drafts", async () => {
+    const requests: Array<{
+      input: { id: string; comment: string };
+      resolve: (value: TaskPreviewFeedbackSnapshot) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    api.createTaskPreviewFeedback.mockImplementation(
+      (input: { id: string; comment: string }) =>
+        new Promise<TaskPreviewFeedbackSnapshot>((resolve, reject) => {
+          requests.push({ input, resolve, reject });
+        }),
+    );
+    const { result } = renderHook(() => usePreviewFeedback("task-1"), { wrapper });
+    const firstDraft = {
+      kind: "text" as const,
+      comment: "first",
+      sourceKind: "browser" as const,
+      sourceLabel: "Local app",
+      pageRoute: "/checkout",
+      pageTitle: "Checkout",
+    };
+    const secondDraft = { ...firstDraft, comment: "second" };
+
+    let firstRequest: Promise<TaskPreviewFeedbackSnapshot | null> | undefined;
+    let secondRequest: Promise<TaskPreviewFeedbackSnapshot | null> | undefined;
+    act(() => {
+      firstRequest = result.current.create(firstDraft);
+      secondRequest = result.current.create(secondDraft);
+    });
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0].input.id).not.toBe(requests[1].input.id);
+
+    await act(async () => {
+      requests[1].resolve(snapshot(2));
+      await secondRequest;
+      requests[0].reject(new Error("first request failed"));
+      await firstRequest;
+    });
+
+    let retry: Promise<TaskPreviewFeedbackSnapshot | null> | undefined;
+    act(() => {
+      retry = result.current.create(firstDraft);
+    });
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2].input.id).toBe(requests[0].input.id);
+    await act(async () => {
+      requests[2].resolve(snapshot(3));
+      await retry;
+    });
+  });
 });

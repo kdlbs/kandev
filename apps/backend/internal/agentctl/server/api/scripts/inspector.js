@@ -11,6 +11,7 @@
   var candidateLabel = null;
   var screenshotOverlay = null;
   var screenshotStart = null;
+  var screenshotCurrent = null;
   var projectedMarkers = [];
   var originalCursor = document.documentElement.style.cursor;
   var originalTouchAction = document.documentElement.style.touchAction;
@@ -26,6 +27,19 @@
     } catch (error) {}
   }
 
+  function sanitizedSearch() {
+    var sensitiveQueryParameter = /(?:^|[_-])(access[_-]?token|id[_-]?token|token|secret|password|passwd|auth(?:orization)?|credential|cookie|session|capability|signature|sig|nonce|code|state|key)(?:$|[_-])/i;
+    var kept = [];
+    try {
+      var params = new URLSearchParams(location.search);
+      params.forEach(function (value, name) {
+        if (sensitiveQueryParameter.test(name)) return;
+        kept.push(encodeURIComponent(name) + '=' + encodeURIComponent(value));
+      });
+    } catch (error) {}
+    return kept.length ? '?' + kept.join('&') : '';
+  }
+
   function currentPageRoute() {
     var path = location.pathname;
     var prefix = window.__kandevProxyPrefix;
@@ -34,7 +48,7 @@
         path = path.slice(prefix.length) || '/';
       }
     }
-    return path + location.search + location.hash;
+    return path + sanitizedSearch();
   }
 
   function pageIdentity() {
@@ -51,6 +65,14 @@
     });
   }
 
+  function selectorIsUnique(selector) {
+    try {
+      return document.querySelectorAll(selector).length === 1;
+    } catch (error) {
+      return false;
+    }
+  }
+
   function getSelector(element) {
     var parts = [];
     var current = element;
@@ -59,22 +81,24 @@
       var id = current.getAttribute('id');
       if (id) {
         parts.unshift(tag + '#' + escapeSelector(id));
-        break;
-      }
-      var part = tag;
-      var parent = current.parentElement;
-      if (parent) {
-        var siblings = Array.prototype.filter.call(parent.children, function (child) {
-          return child.tagName === current.tagName;
-        });
-        if (siblings.length > 1) {
-          part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
+      } else {
+        var part = tag;
+        var parent = current.parentElement;
+        if (parent) {
+          var siblings = Array.prototype.filter.call(parent.children, function (child) {
+            return child.tagName === current.tagName;
+          });
+          if (siblings.length > 1) {
+            part += ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')';
+          }
         }
+        parts.unshift(part);
       }
-      parts.unshift(part);
-      current = parent;
+      var selector = parts.join(' > ');
+      if (selector.length <= 4096 && selectorIsUnique(selector)) return selector;
+      current = current.parentElement;
     }
-    return parts.join(' > ').slice(0, 4096);
+    return undefined;
   }
 
   function elementClasses(element) {
@@ -283,6 +307,7 @@
 
   function hideScreenshotOverlay() {
     screenshotStart = null;
+    screenshotCurrent = null;
     if (screenshotOverlay) screenshotOverlay.style.display = 'none';
   }
 
@@ -337,11 +362,17 @@
     window.setTimeout(captureTextSelection, 0);
   }
 
+  function onTextTouchEnd() {
+    if (mode !== 'text') return;
+    window.setTimeout(captureTextSelection, 0);
+  }
+
   function onScreenshotPointerDown(event) {
     if (mode !== 'screenshot') return;
     event.preventDefault();
     event.stopPropagation();
     screenshotStart = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    screenshotCurrent = { x: event.clientX, y: event.clientY };
     positionScreenshotOverlay(screenshotStart, screenshotStart);
   }
 
@@ -350,7 +381,27 @@
     if (!screenshotStart || screenshotStart.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    positionScreenshotOverlay(screenshotStart, { x: event.clientX, y: event.clientY });
+    screenshotCurrent = { x: event.clientX, y: event.clientY };
+    positionScreenshotOverlay(screenshotStart, screenshotCurrent);
+  }
+
+  function completeScreenshot(end) {
+    if (mode !== 'screenshot' || !screenshotStart || !end) return false;
+    var start = screenshotStart;
+    var left = Math.min(start.x, end.x);
+    var top = Math.min(start.y, end.y);
+    var width = Math.abs(end.x - start.x);
+    var height = Math.abs(end.y - start.y);
+    hideScreenshotOverlay();
+    if (width < 5 || height < 5) return false;
+    var identity = pageIdentity();
+    send('screenshot-region-selected', {
+      page_route: identity.page_route,
+      page_title: identity.page_title,
+      capture_rect: rectSnapshot({ left: left, top: top, width: width, height: height }),
+    });
+    setMode(null);
+    return true;
   }
 
   function onScreenshotPointerUp(event) {
@@ -359,20 +410,7 @@
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    var start = screenshotStart;
-    var left = Math.min(start.x, event.clientX);
-    var top = Math.min(start.y, event.clientY);
-    var width = Math.abs(event.clientX - start.x);
-    var height = Math.abs(event.clientY - start.y);
-    hideScreenshotOverlay();
-    if (width < 5 || height < 5) return;
-    var identity = pageIdentity();
-    send('screenshot-region-selected', {
-      page_route: identity.page_route,
-      page_title: identity.page_title,
-      capture_rect: rectSnapshot({ left: left, top: top, width: width, height: height }),
-    });
-    setMode(null);
+    completeScreenshot({ x: event.clientX, y: event.clientY });
   }
 
   function onScreenshotPointerCancel(event) {
@@ -382,7 +420,18 @@
   }
 
   function onCaptureKeyDown(event) {
-    if (!mode || event.key !== 'Escape') return;
+    if (!mode) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (mode === 'text') {
+        window.setTimeout(captureTextSelection, 0);
+      } else if (mode === 'screenshot') {
+        completeScreenshot(screenshotCurrent);
+      }
+      return;
+    }
+    if (event.key !== 'Escape') return;
     event.preventDefault();
     setMode(null);
     send('capture-cancelled', {});
@@ -395,6 +444,7 @@
     document.removeEventListener('touchend', onElementTouchEnd, true);
     document.removeEventListener('click', onElementClick, true);
     document.removeEventListener('mouseup', onTextMouseUp, true);
+    document.removeEventListener('touchend', onTextTouchEnd, true);
     document.removeEventListener('pointerdown', onScreenshotPointerDown, true);
     document.removeEventListener('pointermove', onScreenshotPointerMove, true);
     document.removeEventListener('pointerup', onScreenshotPointerUp, true);
@@ -423,6 +473,7 @@
         break;
       case 'text':
         document.addEventListener('mouseup', onTextMouseUp, true);
+        document.addEventListener('touchend', onTextTouchEnd, true);
         break;
       case 'screenshot':
         document.addEventListener('pointerdown', onScreenshotPointerDown, true);
@@ -481,9 +532,11 @@
   }
 
   function routeDidChange() {
-    if (mode === 'screenshot') {
+    if (mode) {
       setMode(null);
       send('capture-cancelled', {});
+    } else {
+      hideCandidate();
     }
     var identity = pageIdentity();
     send('route-changed', identity);

@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
+import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import type { TaskPreviewFeedback, TaskPreviewFeedbackSnapshot } from "@/lib/types/http";
 
 export type PreviewFeedbackCollectionController = {
@@ -43,6 +44,23 @@ function feedbackEvidence(item: TaskPreviewFeedback) {
   if (item.kind === "text") return item.selected_text ?? "";
   if (item.kind === "element") return previewFeedbackElementLabel(item);
   return item.screenshot_attachment?.name ?? "";
+}
+
+function FeedbackEvidence({ item }: { item: TaskPreviewFeedback }) {
+  const { t } = useTranslation();
+  if (item.kind === "screenshot" && item.screenshot_attachment) {
+    return (
+      <div className="mt-1 space-y-1">
+        <img
+          src={attachmentContentUrl(item.screenshot_attachment.attachment_id)}
+          alt={t("task:previewScreenshotAlt")}
+          className="max-h-40 w-full rounded border bg-background object-contain"
+        />
+        <p className="truncate font-mono text-xs">{item.screenshot_attachment.name}</p>
+      </div>
+    );
+  }
+  return <p className="line-clamp-2 break-words font-mono text-xs">{feedbackEvidence(item)}</p>;
 }
 
 function PendingFeedbackItem({
@@ -79,7 +97,7 @@ function PendingFeedbackItem({
           <p className="truncate text-xs text-muted-foreground">
             {item.source_label} · {item.page_route}
           </p>
-          <p className="line-clamp-2 break-words font-mono text-xs">{feedbackEvidence(item)}</p>
+          <FeedbackEvidence item={item} />
         </div>
         <Button
           type="button"

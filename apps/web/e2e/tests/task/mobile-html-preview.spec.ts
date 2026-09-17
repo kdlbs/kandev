@@ -318,6 +318,9 @@ test.describe("Mobile HTML preview", () => {
     ).toBeGreaterThanOrEqual(16);
     const collectionItems = collectionBody.getByTestId("preview-feedback-item");
     await expect(collectionItems).toHaveCount(2);
+    await expect(
+      collectionItems.nth(1).getByRole("img", { name: "Screenshot preview" }),
+    ).toBeVisible();
 
     const firstItem = collectionItems.nth(0);
     await firstItem.getByRole("button", { name: "Edit feedback" }).tap();

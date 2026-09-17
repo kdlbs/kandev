@@ -67,6 +67,28 @@ func TestValidatePreviewScreenshotRejectsInvalidPNGBytes(t *testing.T) {
 	}
 }
 
+func TestValidatePreviewScreenshotRejectsTruncatedPNGData(t *testing.T) {
+	svc, _, _, _ := newAttachmentTestService(t)
+	content := encodePreviewPNG(t, image.Rect(0, 0, 20, 20))
+	// DecodeConfig can read the dimensions from the PNG header even when the
+	// image data is missing. Full decoding must still reject the attachment.
+	truncated := content[:33]
+	attachment, err := svc.Stage(
+		context.Background(), "user-a", "ws-att", "capture.png", "image/png", "image", "prompt",
+		bytes.NewReader(truncated),
+	)
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	err = svc.ValidatePreviewScreenshot(
+		context.Background(), "user-a", "ws-att", "task-1", attachment.ID,
+	)
+	if !errors.Is(err, previewfeedback.ErrCaptureInvalid) {
+		t.Fatalf("ValidatePreviewScreenshot error = %v, want ErrCaptureInvalid", err)
+	}
+}
+
 func TestValidatePreviewScreenshotRejectsOversizedPixelMetadata(t *testing.T) {
 	svc, _, _, _ := newAttachmentTestService(t)
 	content := previewPNGWithDimensions(t, 4001, 4000)

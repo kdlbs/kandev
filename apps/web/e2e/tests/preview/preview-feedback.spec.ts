@@ -119,6 +119,9 @@ test.describe("Web preview feedback", () => {
       await expect(collection).toBeVisible();
       const collectionItems = collection.getByTestId("preview-feedback-item");
       await expect(collectionItems).toHaveCount(4);
+      await expect(
+        collectionItems.nth(2).getByRole("img", { name: "Screenshot preview" }),
+      ).toBeVisible();
 
       const firstItem = collectionItems.nth(0);
       await firstItem.getByRole("button", { name: "Edit feedback" }).click();

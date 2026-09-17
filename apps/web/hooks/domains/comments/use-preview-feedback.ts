@@ -58,7 +58,11 @@ type CreateDraft = Omit<CreateTaskPreviewFeedbackInput, "taskId" | "id">;
 function usePreviewFeedbackMutations(taskId: string | null | undefined, store: AppStore) {
   const [isMutating, setIsMutating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
-  const pendingCreate = useRef<{ key: string; id: string } | null>(null);
+  const pendingCreate = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    pendingCreate.current.clear();
+  }, [taskId]);
 
   const apply = useCallback(
     async (operation: () => Promise<TaskPreviewFeedbackSnapshot>) => {
@@ -85,17 +89,16 @@ function usePreviewFeedbackMutations(taskId: string | null | undefined, store: A
     async (draft: CreateDraft) => {
       if (!taskId) return null;
       const key = JSON.stringify([taskId, draft]);
-      if (pendingCreate.current?.key !== key) {
-        pendingCreate.current = { key, id: generateUUID() };
-      }
+      const id = pendingCreate.current.get(key) ?? generateUUID();
+      pendingCreate.current.set(key, id);
       const result = await apply(() =>
         createTaskPreviewFeedback({
           ...draft,
           taskId,
-          id: pendingCreate.current?.id ?? generateUUID(),
+          id,
         }),
       );
-      if (result) pendingCreate.current = null;
+      if (result) pendingCreate.current.delete(key);
       return result;
     },
     [apply, taskId],

@@ -91,6 +91,23 @@ func TestInspectorScript_TracksRoutesAndProjectsMarkers(t *testing.T) {
 	}
 }
 
+func TestInspectorScript_SanitizesRoutesAndCompletesTouchKeyboardCaptures(t *testing.T) {
+	wants := []string{
+		"function sanitizedSearch()",
+		"location.search",
+		"document.addEventListener('touchend', onTextTouchEnd, true)",
+		"event.key === 'Enter'",
+		"event.key === ' '",
+		"querySelectorAll(selector).length === 1",
+		"hideCandidate();",
+	}
+	for _, want := range wants {
+		if !strings.Contains(inspectorScript, want) {
+			t.Errorf("inspector should include %q", want)
+		}
+	}
+}
+
 func TestInspectorScript_OwnsDragGesturesOnlyInScreenshotMode(t *testing.T) {
 	wants := []string{
 		"function onScreenshotPointerDown(",

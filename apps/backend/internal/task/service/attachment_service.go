@@ -328,6 +328,12 @@ func validatePreviewScreenshotFile(file *os.File, expectedSize int64) error {
 	if uint64(config.Width)*uint64(config.Height) > uint64(previewfeedback.MaxScreenshotPixels) {
 		return previewfeedback.ErrCaptureTooLarge
 	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek preview screenshot for decode: %w", err)
+	}
+	if _, err := png.Decode(io.LimitReader(file, previewfeedback.MaxScreenshotBytes+1)); err != nil {
+		return fmt.Errorf("%w: invalid PNG data", previewfeedback.ErrCaptureInvalid)
+	}
 	return nil
 }
 

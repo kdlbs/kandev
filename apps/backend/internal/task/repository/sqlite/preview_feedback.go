@@ -471,7 +471,7 @@ func (r *Repository) readPreviewFeedbackSnapshot(
 	if err != nil {
 		return nil, fmt.Errorf("list task preview feedback: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	items := make([]*models.TaskPreviewFeedback, 0)
 	for rows.Next() {
 		item := &models.TaskPreviewFeedback{}
 		var textAnchor, elementSnapshot, captureRect string
@@ -487,17 +487,24 @@ func (r *Repository) readPreviewFeedbackSnapshot(
 		item.TextAnchor = previewRawJSON(textAnchor)
 		item.ElementSnapshot = previewRawJSON(elementSnapshot)
 		item.CaptureRect = previewRawJSON(captureRect)
-		if item.ScreenshotAttachmentID != "" {
-			item.ScreenshotAttachment, err = r.getAttachmentQuery(ctx, q, item.ScreenshotAttachmentID)
-			if err != nil {
-				return nil, err
-			}
-		}
-		snapshot.Items = append(snapshot.Items, item)
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate task preview feedback: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task preview feedback rows: %w", err)
+	}
+	for _, item := range items {
+		if item.ScreenshotAttachmentID == "" {
+			continue
+		}
+		item.ScreenshotAttachment, err = r.getAttachmentQuery(ctx, q, item.ScreenshotAttachmentID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	snapshot.Items = items
 	return snapshot, nil
 }
 

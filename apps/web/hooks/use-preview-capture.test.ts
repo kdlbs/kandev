@@ -8,6 +8,7 @@ const TOTAL_SELECTOR = "#total";
 const SCREENSHOT_ATTACHMENT_ID = "screenshot-attachment-1";
 const PNG_MIME_TYPE = "image/png";
 const SCREENSHOT_EVENT_TYPE = "screenshot-region-selected";
+const PREVIEW_URL = "blob:preview-screenshot";
 
 const feedback = vi.hoisted(() => ({
   items: [] as TaskPreviewFeedback[],
@@ -122,7 +123,7 @@ beforeEach(() => {
   attachments.deleteAttachment.mockResolvedValue(undefined);
   Object.defineProperty(URL, "createObjectURL", {
     configurable: true,
-    value: vi.fn(() => "blob:preview-screenshot"),
+    value: vi.fn(() => PREVIEW_URL),
   });
   Object.defineProperty(URL, "revokeObjectURL", {
     configurable: true,
@@ -169,6 +170,20 @@ describe("usePreviewCapture text", () => {
     await act(() => result.current.saveDraft("Retry this"));
     if (result.current.draft?.kind !== "text") throw new Error("expected text draft");
     expect(result.current.draft?.selected_text).toBe("$42.00");
+  });
+
+  it("sanitizes page routes before retaining or saving captured evidence", async () => {
+    const { iframe, result } = setup();
+    const capture = textCapture();
+    capture.payload.page_route = "/checkout?step=shipping&access_token=secret#payment";
+
+    act(() => dispatch(iframe.contentWindow, capture));
+    expect(result.current.draft?.page_route).toBe("/checkout?step=shipping");
+
+    await act(() => result.current.saveDraft("Keep this route"));
+    expect(feedback.create).toHaveBeenCalledWith(
+      expect.objectContaining({ pageRoute: "/checkout?step=shipping" }),
+    );
   });
 });
 
@@ -252,7 +267,7 @@ describe("usePreviewCapture screenshots", () => {
     await waitFor(() => expect(result.current.draft?.kind).toBe("screenshot"));
     expect(result.current.isRasterizing).toBe(false);
     if (result.current.draft?.kind !== "screenshot") throw new Error("expected screenshot draft");
-    expect(result.current.draft?.screenshot?.previewUrl).toBe("blob:preview-screenshot");
+    expect(result.current.draft?.screenshot?.previewUrl).toBe(PREVIEW_URL);
     expect(html2canvas).toHaveBeenCalledWith(
       iframe.contentDocument?.documentElement,
       expect.objectContaining({ x: 20, y: 640, width: 300, height: 180 }),
@@ -334,7 +349,7 @@ describe("usePreviewCapture failed screenshots", () => {
 
     act(() => result.current.startCapture("element"));
 
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview-screenshot");
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(PREVIEW_URL);
     expect(attachments.deleteAttachment).toHaveBeenCalledWith(SCREENSHOT_ATTACHMENT_ID);
     expect(result.current.draft).toBeNull();
   });
@@ -380,5 +395,43 @@ describe("usePreviewCapture cancelled uploads", () => {
     await expect(saveResult).resolves.toBe(false);
     expect(attachments.deleteAttachment).toHaveBeenCalledWith("late-screenshot");
     expect(feedback.create).not.toHaveBeenCalled();
+  });
+
+  it("releases an unsaved screenshot when the preview is disabled", async () => {
+    const png = new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], {
+      type: PNG_MIME_TYPE,
+    });
+    html2canvas.mockResolvedValue({
+      width: 20,
+      height: 20,
+      toBlob: (callback: BlobCallback) => callback(png),
+    });
+    const iframe = document.createElement("iframe");
+    document.body.appendChild(iframe);
+    const iframeRef = { current: iframe };
+    const rendered = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        usePreviewCapture({ taskId: "task-1", iframeRef, source, enabled }),
+      { initialProps: { enabled: true } },
+    );
+    act(() =>
+      dispatch(iframe.contentWindow, {
+        source: INSPECTOR_SOURCE,
+        version: INSPECTOR_PROTOCOL_VERSION,
+        type: SCREENSHOT_EVENT_TYPE,
+        payload: {
+          page_route: "/",
+          page_title: "Home",
+          capture_rect: { x: 0, y: 0, width: 20, height: 20 },
+        },
+      }),
+    );
+    await waitFor(() => expect(rendered.result.current.draft?.kind).toBe("screenshot"));
+
+    rendered.rerender({ enabled: false });
+
+    await waitFor(() => expect(rendered.result.current.draft).toBeNull());
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(PREVIEW_URL);
+    rendered.unmount();
   });
 });

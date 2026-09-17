@@ -14,6 +14,7 @@ import {
   type PreviewMarkerProjection,
   type PreviewScreenshotRegion,
 } from "@/lib/preview-inspect-bridge";
+import { sanitizePreviewPageRoute } from "@/lib/preview-feedback-source";
 import { rasterizePreviewRegion } from "@/lib/preview-screenshot";
 import type { TaskPreviewFeedback } from "@/lib/types/http";
 
@@ -74,7 +75,7 @@ function usePreviewInspectorEvents(options: InspectorEventOptions) {
       switch (message.type) {
         case "inspector-ready":
         case "route-changed":
-          options.setPageRoute(message.payload.page_route);
+          options.setPageRoute(sanitizePreviewPageRoute(message.payload.page_route));
           options.setPageTitle(message.payload.page_title);
           options.projectMarkers();
           break;
@@ -83,7 +84,10 @@ function usePreviewInspectorEvents(options: InspectorEventOptions) {
           break;
         case "capture-completed":
           if (!options.enabled) return;
-          options.setDraft(message.payload);
+          options.setDraft({
+            ...message.payload,
+            page_route: sanitizePreviewPageRoute(message.payload.page_route),
+          });
           options.setMode(null);
           options.setCandidateLabel(null);
           break;
@@ -92,7 +96,12 @@ function usePreviewInspectorEvents(options: InspectorEventOptions) {
           options.setCandidateLabel(null);
           break;
         case "screenshot-region-selected":
-          if (options.enabled) options.captureScreenshot(message.payload);
+          if (options.enabled) {
+            options.captureScreenshot({
+              ...message.payload,
+              page_route: sanitizePreviewPageRoute(message.payload.page_route),
+            });
+          }
           break;
         default:
           break;
@@ -116,7 +125,7 @@ function markerProjection(item: TaskPreviewFeedback): PreviewMarkerProjection {
   return {
     id: item.id,
     kind: item.kind,
-    page_route: item.page_route,
+    page_route: sanitizePreviewPageRoute(item.page_route),
     text_anchor: item.text_anchor,
     element_snapshot: item.element_snapshot,
     capture_rect: item.capture_rect,
@@ -144,6 +153,20 @@ function releaseScreenshotDraft(draft: PreviewFeedbackDraft | null) {
   }
 }
 
+function usePreviewDraftCleanup(
+  generationRef: { current: number },
+  draftRef: { current: PreviewFeedbackDraft | null },
+) {
+  useEffect(
+    () => () => {
+      generationRef.current += 1;
+      releaseScreenshotDraft(draftRef.current);
+      draftRef.current = null;
+    },
+    [draftRef, generationRef],
+  );
+}
+
 function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | null>) {
   const [draft, setDraft] = useState<PreviewFeedbackDraft | null>(null);
   const [draftComment, setDraftComment] = useState("");
@@ -152,6 +175,7 @@ function usePreviewDraftState(iframeRef: React.RefObject<HTMLIFrameElement | nul
   const [isUploading, setIsUploading] = useState(false);
   const generationRef = useRef(0);
   const draftRef = useRef<PreviewFeedbackDraft | null>(null);
+  usePreviewDraftCleanup(generationRef, draftRef);
 
   const setNewDraft = useCallback((next: PreviewFeedbackDraft) => {
     releaseScreenshotDraft(draftRef.current);
@@ -362,10 +386,22 @@ export function usePreviewCapture({
 
   useEffect(() => {
     if (enabled) return;
+    draftState.clearForCapture();
     setMode(null);
     setCandidateLabel(null);
     if (iframeRef.current) sendSetPreviewCaptureMode(iframeRef.current, null);
-  }, [enabled, iframeRef]);
+  }, [draftState.clearForCapture, enabled, iframeRef]);
+
+  useEffect(() => {
+    draftState.clearForCapture();
+  }, [
+    draftState.clearForCapture,
+    taskId,
+    source.kind,
+    source.label,
+    source.path,
+    source.sessionId,
+  ]);
 
   usePreviewInspectorEvents({
     iframeRef,

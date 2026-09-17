@@ -53,7 +53,7 @@ describe("BrowserPanel preview feedback", () => {
         source: {
           kind: "browser",
           sessionId: "session-1",
-          label: "http://localhost:3000/products",
+          label: "http://localhost:3000",
         },
       }),
     );

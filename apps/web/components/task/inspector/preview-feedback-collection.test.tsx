@@ -56,6 +56,10 @@ vi.mock("@kandev/ui/drawer", () => ({
   DrawerClose: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+vi.mock("@/lib/api/domains/attachment-api", () => ({
+  attachmentContentUrl: (attachmentId: string) => `/api/v1/attachments/${attachmentId}/content`,
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, values?: { count?: number }) => {
@@ -72,6 +76,7 @@ vi.mock("react-i18next", () => ({
         "task:previewSaveChanges": "Save changes",
         "task:previewPendingEmpty": "No pending preview feedback.",
         "task:previewFeedbackTitle": "Preview feedback",
+        "task:previewScreenshotAlt": "Screenshot preview",
         "task:previewLoadFailed": "The pending preview feedback could not be loaded. Try again.",
         "task:previewMutationFailed": "The feedback could not be saved. Try again.",
         "common:close": "Close",
@@ -180,6 +185,33 @@ describe("PreviewFeedbackCollection", () => {
       (screen.getByRole("textbox", { name: editCommentLabel }) as HTMLTextAreaElement).value,
     ).toBe("Keep my typed change");
     expect(screen.getByRole("alert").textContent).toContain("The feedback could not be saved.");
+  });
+
+  it("renders the authorized screenshot content for a persisted item", () => {
+    const screenshotItem: TaskPreviewFeedback = {
+      ...item,
+      id: "feedback-screenshot-1",
+      kind: "screenshot",
+      screenshot_attachment_id: "attachment-screenshot-1",
+      screenshot_attachment: {
+        attachment_id: "attachment-screenshot-1",
+        name: "preview.png",
+        mime_type: "image/png",
+        kind: "image",
+        delivery_mode: "prompt",
+        size_bytes: 128,
+        state: "claimed",
+      },
+    };
+    const collection = controller({
+      items: [screenshotItem],
+      snapshot: { ...snapshot, items: [screenshotItem] },
+    });
+    render(<PreviewFeedbackCollection collection={collection} touch={false} />);
+
+    expect(screen.getByRole("img", { name: "Screenshot preview" }).getAttribute("src")).toBe(
+      "/api/v1/attachments/attachment-screenshot-1/content",
+    );
   });
 
   it("shows loading errors and the empty collection state", () => {
