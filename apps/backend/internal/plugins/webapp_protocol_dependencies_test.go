@@ -1,9 +1,11 @@
 package plugins
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/webapp"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +28,7 @@ func TestWebAppTaskFromSDK_MapsDependencyFields(t *testing.T) {
 		StartWhenUnblocked: true,
 	}
 
-	wire := webAppTaskFromSDK(task, "ws-1")
+	wire := webAppTaskFromSDK(task, dependencyRedactionScope{kind: instances.ScopeWorkspace, workspaceID: "ws-1"})
 
 	require.True(t, wire.Blocked)
 	require.Equal(t, taskservice.BlockedReasonPending, wire.BlockedReason)
@@ -44,7 +47,7 @@ func TestWebAppTaskFromSDK_MapsDependencyFields(t *testing.T) {
 func TestWebAppTaskFromSDK_BlockedReasonKeyAlwaysPresentEvenWhenEmpty(t *testing.T) {
 	task := pluginsdk.Task{ID: "task-1", Blocked: false, BlockedReason: ""}
 
-	wire := webAppTaskFromSDK(task, "")
+	wire := webAppTaskFromSDK(task, dependencyRedactionScope{kind: instances.ScopeInstance})
 
 	raw, err := json.Marshal(wire)
 	require.NoError(t, err)
@@ -58,7 +61,7 @@ func TestWebAppTaskFromSDK_BlockedReasonKeyAlwaysPresentEvenWhenEmpty(t *testing
 func TestWebAppTaskDependencyRefFromSDK_RedactsOutOfScopeEdge(t *testing.T) {
 	ref := pluginsdk.TaskDependencyRef{ID: "task-0", Title: "Predecessor", State: "TODO", Status: taskservice.DependencyPending, WorkspaceID: "ws-other"}
 
-	out := webAppTaskDependencyRefFromSDK(ref, "ws-1")
+	out := webAppTaskDependencyRefFromSDK(ref, dependencyRedactionScope{kind: instances.ScopeWorkspace, workspaceID: "ws-1"})
 
 	require.Equal(t, "task-0", out.ID)
 	require.Empty(t, out.Title, "title is redacted for an edge end outside the caller's scoped workspace")
@@ -69,14 +72,14 @@ func TestWebAppTaskDependencyRefFromSDK_RedactsOutOfScopeEdge(t *testing.T) {
 func TestWebAppTaskDependencyRefFromSDK_InstanceScopeCallerNeverRedacts(t *testing.T) {
 	ref := pluginsdk.TaskDependencyRef{ID: "task-0", Title: "Predecessor", State: "TODO", WorkspaceID: "ws-other"}
 
-	out := webAppTaskDependencyRefFromSDK(ref, "")
+	out := webAppTaskDependencyRefFromSDK(ref, dependencyRedactionScope{kind: instances.ScopeInstance})
 
 	require.Equal(t, "Predecessor", out.Title)
 	require.Equal(t, "TODO", out.State)
 }
 
 func TestWebAppTaskDependencyRefsFromSDK_EmptyIsNeverNil(t *testing.T) {
-	out := webAppTaskDependencyRefsFromSDK(nil, "ws-1")
+	out := webAppTaskDependencyRefsFromSDK(nil, dependencyRedactionScope{kind: instances.ScopeWorkspace, workspaceID: "ws-1"})
 
 	require.NotNil(t, out)
 	require.Empty(t, out)
@@ -132,14 +135,19 @@ func TestListWebAppTasks_FanOutRefusalBecomesResponseTooLarge(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "response_too_large")
 }
 
-func TestGetWebAppTask_PassesCallerWorkspaceForRedaction(t *testing.T) {
+// TestGetWebAppTask_TaskScopeRedactsEveryEdgeEnd covers
+// AC-PLUGINS-TASK-DEPS-003.8's task-scope rule: task scope admits no end,
+// because an end is never the bound task itself. A task-scoped canvas may
+// see that its task is blocked, but never the title of what blocks it --
+// even when the end's workspace equals the bound one.
+func TestGetWebAppTask_TaskScopeRedactsEveryEdgeEnd(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
 	task := &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}
 	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": task}
 	d.tasks.dependencyViews = map[string]taskservice.DependencyView{
 		"task-1": {
 			Blocked: true, BlockedReason: taskservice.BlockedReasonPending,
-			DependsOn: []taskservice.DependencyRef{{ID: "task-0", Title: "Predecessor", State: "TODO", Status: taskservice.DependencyPending}},
+			DependsOn: []taskservice.DependencyRef{{ID: "task-0", Title: "Predecessor", State: "TODO", Status: taskservice.DependencyPending, WorkspaceID: "ws-1"}},
 		},
 	}
 
@@ -153,5 +161,199 @@ func TestGetWebAppTask_PassesCallerWorkspaceForRedaction(t *testing.T) {
 	svc.handleWebAppProtocol(recorder, httptest.NewRequest(http.MethodGet, "/", nil), "", binding, "v1/data/tasks/task-1")
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	require.Contains(t, recorder.Body.String(), `"title":"Predecessor"`, "an in-scope edge end keeps its title")
+	require.NotContains(t, recorder.Body.String(), `"title":"Predecessor"`, "task scope admits no edge end, even one sharing the bound workspace")
+	require.Contains(t, recorder.Body.String(), `"id":"task-0"`, "the entry is kept, only its title and state are redacted")
+}
+
+// TestGetWebAppTask_WorkspaceScopeAdmitsEdgeEndInSameWorkspace covers
+// AC-PLUGINS-TASK-DEPS-003.8's workspace-scope rule: workspace scope admits
+// an end whose workspace is known equal to the bound workspace.
+func TestGetWebAppTask_WorkspaceScopeAdmitsEdgeEndInSameWorkspace(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	task := &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": task}
+	d.tasks.dependencyViews = map[string]taskservice.DependencyView{
+		"task-1": {
+			Blocked: true, BlockedReason: taskservice.BlockedReasonPending,
+			DependsOn: []taskservice.DependencyRef{{ID: "task-0", Title: "Predecessor", State: "TODO", Status: taskservice.DependencyPending, WorkspaceID: "ws-1"}},
+		},
+	}
+
+	svc := &Service{taskData: d.tasks}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeWorkspace, WorkspaceID: "ws-1",
+		Permissions: []string{"api_read:tasks"},
+	}
+
+	recorder := httptest.NewRecorder()
+	svc.handleWebAppProtocol(recorder, httptest.NewRequest(http.MethodGet, "/", nil), "", binding, "v1/data/tasks/task-1")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"title":"Predecessor"`, "an edge end sharing the bound workspace keeps its title")
+}
+
+// TestGetWebAppTask_WorkspaceScopeFailsClosedOnUnknownEdgeWorkspace covers
+// AC-PLUGINS-TASK-DEPS-003.3: an end whose predicate inputs are unavailable
+// (here, an edge end with no recorded workspace) is treated as not admitted.
+func TestGetWebAppTask_WorkspaceScopeFailsClosedOnUnknownEdgeWorkspace(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	task := &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": task}
+	d.tasks.dependencyViews = map[string]taskservice.DependencyView{
+		"task-1": {
+			Blocked: true, BlockedReason: taskservice.BlockedReasonPending,
+			DependsOn: []taskservice.DependencyRef{{ID: "task-0", Title: "Predecessor", State: "TODO", Status: taskservice.DependencyPending}},
+		},
+	}
+
+	svc := &Service{taskData: d.tasks}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeWorkspace, WorkspaceID: "ws-1",
+		Permissions: []string{"api_read:tasks"},
+	}
+
+	recorder := httptest.NewRecorder()
+	svc.handleWebAppProtocol(recorder, httptest.NewRequest(http.MethodGet, "/", nil), "", binding, "v1/data/tasks/task-1")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.NotContains(t, recorder.Body.String(), `"title":"Predecessor"`, "an edge end with no recorded workspace fails closed, not open")
+}
+
+// TestListWebAppTasks_RepositoryScopeAdmitsEdgeEndReturnedInSameResponse
+// covers AC-PLUGINS-TASK-DEPS-003.8's repository/session rule: such scopes
+// admit an end only when it is also returned in the response as a directly
+// readable task, never by a workspace-equality shortcut.
+func TestListWebAppTasks_RepositoryScopeAdmitsEdgeEndReturnedInSameResponse(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	inScope := &taskmodels.Task{
+		ID: "task-in", WorkspaceID: "ws-1", CreatedAt: time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC),
+		Repositories: []*taskmodels.TaskRepository{{ID: "tr-1", RepositoryID: "repo-1"}},
+	}
+	outOfScope := &taskmodels.Task{
+		ID: "task-out", WorkspaceID: "ws-1", CreatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+		Repositories: []*taskmodels.TaskRepository{{ID: "tr-2", RepositoryID: "repo-2"}},
+	}
+	d.tasks.workspaces = []*taskmodels.Workspace{{ID: "ws-1"}}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{"ws-1": {inScope, outOfScope}}
+	d.tasks.dependencyViews = map[string]taskservice.DependencyView{
+		"task-in": {
+			Blocked: true, BlockedReason: taskservice.BlockedReasonPending,
+			DependsOn: []taskservice.DependencyRef{
+				{ID: "task-out", Title: "Same workspace, different repository", State: "TODO", Status: taskservice.DependencyPending, WorkspaceID: "ws-1"},
+			},
+		},
+	}
+
+	svc := &Service{taskData: d.tasks}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeRepository, WorkspaceID: "ws-1", RepositoryID: "repo-1",
+		Permissions: []string{"api_read:tasks"},
+	}
+
+	recorder := httptest.NewRecorder()
+	svc.handleWebAppProtocol(recorder, httptest.NewRequest(http.MethodGet, "/", nil), "", binding, "v1/data/tasks")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.NotContains(t, recorder.Body.String(), `"title":"Same workspace, different repository"`,
+		"repository scope does not admit by workspace equality; task-out was filtered out of this response by the repository scope, so it is not a directly readable task here")
+}
+
+// ── F1: a scope-check preflight that discards the task must never pay for
+// dependency derivation, because it never serializes the task it fetched ──
+
+func TestUpdateWebAppTask_ScopeCheckPreflightDoesNotDeriveDependencies(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}, APIWrite: []string{"tasks"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", WorkspaceID: "ws-1"}}
+	d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "new title"}
+
+	svc := &Service{}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeWorkspace, WorkspaceID: "ws-1",
+		Permissions: []string{"api_read:tasks", "api_write:tasks"},
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"title":"new title"}`))
+	recorder := httptest.NewRecorder()
+
+	svc.updateWebAppTask(context.Background(), recorder, req, d.host, binding, "task-1")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 1, d.tasks.dependencyViewsCalls,
+		"derivation runs once, for the updated task actually serialized -- not a second time for the discarded scope-check preflight")
+}
+
+func TestSendWebAppMessage_ScopeCheckPreflightDoesNotDeriveDependencies(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}, APIWrite: []string{"messages"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", WorkspaceID: "ws-1"}}
+
+	svc := &Service{}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeWorkspace, WorkspaceID: "ws-1",
+		Permissions: []string{"api_read:tasks", "api_write:messages"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"text":"hello"}`))
+	recorder := httptest.NewRecorder()
+
+	svc.sendWebAppMessage(context.Background(), recorder, req, d.host, binding, "task-1")
+
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.Equal(t, 0, d.tasks.dependencyViewsCalls)
+	require.Equal(t, 0, d.tasks.dependencyViewsBoundedCalls)
+}
+
+func TestListWebAppWorkflows_TaskScopeCheckPreflightDoesNotDeriveDependencies(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks", "workflows"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1"}}
+	d.workflows.workflows = map[string][]*taskmodels.Workflow{"ws-1": {{ID: "wf-1", WorkspaceID: "ws-1"}}}
+
+	svc := &Service{}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeTask, WorkspaceID: "ws-1", TaskID: "task-1",
+		Permissions: []string{"api_read:tasks", "api_read:workflows"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	recorder := httptest.NewRecorder()
+
+	svc.listWebAppWorkflows(context.Background(), recorder, req, d.host, binding)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 0, d.tasks.dependencyViewsCalls)
+	require.Equal(t, 0, d.tasks.dependencyViewsBoundedCalls)
+}
+
+func TestListWebAppWorkflowSteps_TaskScopeCheckPreflightDoesNotDeriveDependencies(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks", "workflows"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1"}}
+	d.workflows.workflows = map[string][]*taskmodels.Workflow{"ws-1": {{ID: "wf-1", WorkspaceID: "ws-1"}}}
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{"wf-1": {{ID: "step-1", WorkflowID: "wf-1"}}}
+
+	svc := &Service{}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeTask, WorkspaceID: "ws-1", TaskID: "task-1",
+		Permissions: []string{"api_read:tasks", "api_read:workflows"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	recorder := httptest.NewRecorder()
+
+	svc.listWebAppWorkflowSteps(context.Background(), recorder, req, d.host, binding, "wf-1")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 0, d.tasks.dependencyViewsCalls)
+	require.Equal(t, 0, d.tasks.dependencyViewsBoundedCalls)
+}
+
+// ── listWebAppTasks's non-task-scope branch must guard a nil task data
+// source the same way the gRPC taskReader.List path already does, rather
+// than panicking inside resolveWorkspaceIDs ─────────────────────────────
+
+func TestListWebAppTasks_NonTaskScopeReturnsUnimplementedWhenTaskDataSourceIsNil(t *testing.T) {
+	svc := &Service{}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeWorkspace, WorkspaceID: "ws-1",
+		Permissions: []string{"api_read:tasks"},
+	}
+
+	recorder := httptest.NewRecorder()
+	svc.handleWebAppProtocol(recorder, httptest.NewRequest(http.MethodGet, "/", nil), "", binding, "v1/data/tasks")
+
+	require.Equal(t, http.StatusNotImplemented, recorder.Code, recorder.Body.String())
 }

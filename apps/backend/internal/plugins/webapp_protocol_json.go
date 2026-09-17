@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/kandev/kandev/internal/plugins/instances"
+	"github.com/kandev/kandev/internal/plugins/webapp"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -92,14 +94,59 @@ type webAppTaskDependencyRef struct {
 	Status string `json:"status,omitempty"`
 }
 
-// webAppTaskDependencyRefFromSDK redacts Title and State when ref falls
-// outside callerWorkspaceID (REQ-PLUGINS-TASK-DEPS-003): a canvas grant is
-// scoped to one workspace (or, for an instance-scoped canvas, none —
-// callerWorkspaceID empty means no redaction applies), and this decision
-// uses only WorkspaceID already carried on ref, never a further read.
-func webAppTaskDependencyRefFromSDK(ref pluginsdk.TaskDependencyRef, callerWorkspaceID string) webAppTaskDependencyRef {
+// dependencyRedactionScope carries what AC-PLUGINS-TASK-DEPS-003.8's
+// admission test needs to decide, for one canvas response, whether an edge
+// end may be disclosed as a directly readable task. It is built once per
+// response from the canvas binding plus the set of task IDs that response
+// already serializes as directly readable tasks (directlyReadableIDs) --
+// never from an additional read.
+type dependencyRedactionScope struct {
+	kind                string
+	workspaceID         string
+	directlyReadableIDs map[string]struct{}
+}
+
+// dependencyRedactionScopeFromBinding builds the scope for one canvas
+// response. directlyReadableIDs must list every task ID that response
+// serializes as a directly readable task (e.g. the single task a GET
+// returns, or the page a list route returns after its own scope narrowing);
+// it is ignored for scope kinds whose admission test doesn't consult it.
+func dependencyRedactionScopeFromBinding(binding webapp.CapabilityBinding, directlyReadableIDs []string) dependencyRedactionScope {
+	ids := make(map[string]struct{}, len(directlyReadableIDs))
+	for _, id := range directlyReadableIDs {
+		ids[id] = struct{}{}
+	}
+	return dependencyRedactionScope{kind: binding.ScopeKind, workspaceID: binding.WorkspaceID, directlyReadableIDs: ids}
+}
+
+// admits reports whether ref may be disclosed as a directly readable task
+// under s, resolving by scope kind exactly as AC-PLUGINS-TASK-DEPS-003.8
+// requires: instance scope admits every end; workspace scope admits an end
+// whose workspace is known equal to the bound workspace; task scope admits
+// no end; repository and session scope admit an end only when it is also
+// returned in the same response as a directly readable task. An end whose
+// predicate inputs are unavailable (e.g. an empty workspace on either side)
+// is never admitted, per AC-PLUGINS-TASK-DEPS-003.3's fail-closed rule.
+func (s dependencyRedactionScope) admits(ref pluginsdk.TaskDependencyRef) bool {
+	switch s.kind {
+	case instances.ScopeInstance:
+		return true
+	case instances.ScopeWorkspace:
+		return s.workspaceID != "" && ref.WorkspaceID != "" && ref.WorkspaceID == s.workspaceID
+	case instances.ScopeRepository, instances.ScopeSession:
+		_, ok := s.directlyReadableIDs[ref.ID]
+		return ok
+	default:
+		// instances.ScopeTask, and any unrecognized scope kind: admit nothing.
+		return false
+	}
+}
+
+// webAppTaskDependencyRefFromSDK redacts Title and State when scope does not
+// admit ref (REQ-PLUGINS-TASK-DEPS-003).
+func webAppTaskDependencyRefFromSDK(ref pluginsdk.TaskDependencyRef, scope dependencyRedactionScope) webAppTaskDependencyRef {
 	out := webAppTaskDependencyRef{ID: ref.ID, Title: ref.Title, State: ref.State, Status: ref.Status}
-	if callerWorkspaceID != "" && ref.WorkspaceID != "" && ref.WorkspaceID != callerWorkspaceID {
+	if !scope.admits(ref) {
 		out.Title = ""
 		out.State = ""
 	}
@@ -109,10 +156,10 @@ func webAppTaskDependencyRefFromSDK(ref pluginsdk.TaskDependencyRef, callerWorks
 // webAppTaskDependencyRefsFromSDK never returns nil, even for an empty or
 // nil input: depends_on/blocks always serialize as [], never as null or an
 // absent field.
-func webAppTaskDependencyRefsFromSDK(refs []pluginsdk.TaskDependencyRef, callerWorkspaceID string) []webAppTaskDependencyRef {
+func webAppTaskDependencyRefsFromSDK(refs []pluginsdk.TaskDependencyRef, scope dependencyRedactionScope) []webAppTaskDependencyRef {
 	out := make([]webAppTaskDependencyRef, len(refs))
 	for i, ref := range refs {
-		out[i] = webAppTaskDependencyRefFromSDK(ref, callerWorkspaceID)
+		out[i] = webAppTaskDependencyRefFromSDK(ref, scope)
 	}
 	return out
 }
@@ -162,11 +209,10 @@ type webAppTask struct {
 	StartWhenUnblocked bool                      `json:"start_when_unblocked"`
 }
 
-// webAppTaskFromSDK converts task to its canvas wire form. callerWorkspaceID
-// is the requesting canvas's scoped workspace (binding.WorkspaceID; empty
-// for an instance-scoped canvas) and is used only to redact out-of-scope
-// dependency edge ends.
-func webAppTaskFromSDK(task pluginsdk.Task, callerWorkspaceID string) webAppTask {
+// webAppTaskFromSDK converts task to its canvas wire form. scope is the
+// requesting canvas response's dependency redaction scope, used only to
+// redact out-of-scope dependency edge ends.
+func webAppTaskFromSDK(task pluginsdk.Task, scope dependencyRedactionScope) webAppTask {
 	result := webAppTask{
 		ID:                     task.ID,
 		WorkspaceID:            task.WorkspaceID,
@@ -198,8 +244,8 @@ func webAppTaskFromSDK(task pluginsdk.Task, callerWorkspaceID string) webAppTask
 
 		Blocked:            task.Blocked,
 		BlockedReason:      task.BlockedReason,
-		DependsOn:          webAppTaskDependencyRefsFromSDK(task.DependsOn, callerWorkspaceID),
-		Blocks:             webAppTaskDependencyRefsFromSDK(task.Blocks, callerWorkspaceID),
+		DependsOn:          webAppTaskDependencyRefsFromSDK(task.DependsOn, scope),
+		Blocks:             webAppTaskDependencyRefsFromSDK(task.Blocks, scope),
 		DependsOnTruncated: task.DependsOnTruncated,
 		BlocksTruncated:    task.BlocksTruncated,
 		StartWhenUnblocked: task.StartWhenUnblocked,

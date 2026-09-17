@@ -419,26 +419,55 @@ func (h *pluginHost) attachPullRequests(ctx context.Context, tasks []pluginsdk.T
 	}
 }
 
+// fetchTask resolves id to both wire and raw model forms without attaching
+// pull requests or the dependency projection. model is nil whenever h has no
+// task data source (dto then comes straight from UnimplementedHostData).
+// Callers that only need the task for a scope-match preflight — and discard
+// it immediately after — must use this (or fetchTaskForScopeCheck) rather
+// than taskReader.Get, so a caller that never serializes the task never pays
+// for its dependency derivation either.
+func (h *pluginHost) fetchTask(ctx context.Context, id string) (dto *pluginsdk.Task, model *taskmodels.Task, err error) {
+	if !h.capabilities.CanRead(resourceTasks) {
+		return nil, nil, permissionDenied(apiReadCapability(resourceTasks))
+	}
+	if h.taskData == nil {
+		dto, err = h.UnimplementedHostData.Tasks().Get(ctx, id)
+		return dto, nil, err
+	}
+	task, err := h.taskData.GetTask(ctx, id)
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return nil, nil, taskNotFound(id)
+		}
+		return nil, nil, err
+	}
+	converted := taskModelToDTO(task)
+	return &converted, task, nil
+}
+
+// fetchTaskForScopeCheck resolves id for a scope-match preflight only: the
+// caller discards the task immediately after deciding whether it may act on
+// it, so this must not pay for pull-request or dependency-projection
+// attachment the response will never serialize.
+func (h *pluginHost) fetchTaskForScopeCheck(ctx context.Context, id string) (*pluginsdk.Task, error) {
+	dto, _, err := h.fetchTask(ctx, id)
+	return dto, err
+}
+
 // Get returns a gRPC NotFound error (not a (nil, nil) success) when id
 // doesn't resolve to a task, so the in-process contract matches exactly what
 // a real plugin observes over the wire via grpcHostServer.GetTask.
 func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error) {
-	if !r.host.capabilities.CanRead(resourceTasks) {
-		return nil, permissionDenied(apiReadCapability(resourceTasks))
-	}
-	if r.host.taskData == nil {
-		return r.host.UnimplementedHostData.Tasks().Get(ctx, id)
-	}
-	task, err := r.host.taskData.GetTask(ctx, id)
+	dto, model, err := r.host.fetchTask(ctx, id)
 	if err != nil {
-		if errors.Is(err, repoerrors.ErrTaskNotFound) {
-			return nil, taskNotFound(id)
-		}
 		return nil, err
 	}
-	items := []pluginsdk.Task{taskModelToDTO(task)}
+	if model == nil {
+		return dto, nil
+	}
+	items := []pluginsdk.Task{*dto}
 	r.host.attachPullRequests(ctx, items)
-	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{task}, false); err != nil {
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{model}, false); err != nil {
 		return nil, err
 	}
 	return &items[0], nil

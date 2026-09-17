@@ -19,6 +19,11 @@ import (
 // length) — StartWhenUnblocked reads the stored auto-start intent directly
 // off models[i].
 //
+// A caller without api_read:tasks never reaches real dependency data through
+// this path, even when it holds some other capability (e.g. api_write:tasks)
+// that let it reach a Task DTO in the first place: every task is stamped with
+// the withheld verdict instead of deriving anything.
+//
 // Unlike attachPullRequests, a derivation failure is not left at zero value:
 // BuildDependencyViews/Bounded already substitute the withheld verdict
 // (blocked: true, blocked_reason: "unknown") for every requested id on any
@@ -27,7 +32,14 @@ import (
 // refusal, translated to a single gRPC ResourceExhausted error so a caller
 // never partially serializes a bounded batch around it.
 func (h *pluginHost) attachDependencies(ctx context.Context, tasks []pluginsdk.Task, models []*taskmodels.Task, bounded bool) error {
-	if h.taskData == nil || len(tasks) == 0 {
+	if len(tasks) == 0 {
+		return nil
+	}
+	if !h.capabilities.CanRead(resourceTasks) {
+		withholdDependencies(tasks)
+		return nil
+	}
+	if h.taskData == nil {
 		return nil
 	}
 	var views map[string]taskservice.DependencyView
@@ -52,6 +64,23 @@ func (h *pluginHost) attachDependencies(ctx context.Context, tasks []pluginsdk.T
 		tasks[i].StartWhenUnblocked = !withheld && taskmodels.HasStartWhenUnblockedIntent(models[i])
 	}
 	return nil
+}
+
+// withholdDependencies stamps every task with the fail-closed withheld
+// verdict in place, for a caller that lacks api_read:tasks. It is the same
+// verdict a derivation failure produces, so a write-only caller cannot
+// distinguish "withheld for lack of capability" from "withheld because
+// derivation failed."
+func withholdDependencies(tasks []pluginsdk.Task) {
+	for i := range tasks {
+		tasks[i].Blocked = true
+		tasks[i].BlockedReason = taskservice.BlockedReasonUnknown
+		tasks[i].DependsOn = []pluginsdk.TaskDependencyRef{}
+		tasks[i].Blocks = []pluginsdk.TaskDependencyRef{}
+		tasks[i].DependsOnTruncated = false
+		tasks[i].BlocksTruncated = false
+		tasks[i].StartWhenUnblocked = false
+	}
 }
 
 // dependencyRefsToDTOs converts a derived edge list to its DTO form,

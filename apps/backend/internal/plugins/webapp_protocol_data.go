@@ -50,7 +50,8 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 			writeWebAppJSON(w, r, http.StatusOK, webAppPage[webAppTask]{Items: []webAppTask{}, PageInfo: webAppPageInfo{}})
 			return
 		}
-		items, info := paginate([]webAppTask{webAppTaskFromSDK(*task, binding.WorkspaceID)}, page)
+		scope := dependencyRedactionScopeFromBinding(binding, nil)
+		items, info := paginate([]webAppTask{webAppTaskFromSDK(*task, scope)}, page)
 		writeWebAppJSON(w, r, http.StatusOK, webAppPageFromSDK(items, info))
 		return
 	}
@@ -62,6 +63,11 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 	// approaches.
 	if !host.capabilities.CanRead(resourceTasks) {
 		writeWebAppError(w, http.StatusForbidden, "plugin_permission_denied")
+		return
+	}
+	if host.taskData == nil {
+		_, _, err := host.UnimplementedHostData.Tasks().List(ctx, filter, page)
+		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
 	models, info, err := host.fetchTaskPage(ctx, filter, page)
@@ -83,9 +89,14 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
+	directlyReadableIDs := make([]string, len(survivingDTOs))
+	for i, dto := range survivingDTOs {
+		directlyReadableIDs[i] = dto.ID
+	}
+	scope := dependencyRedactionScopeFromBinding(binding, directlyReadableIDs)
 	filtered := make([]webAppTask, len(survivingDTOs))
 	for i, dto := range survivingDTOs {
-		filtered[i] = webAppTaskFromSDK(dto, binding.WorkspaceID)
+		filtered[i] = webAppTaskFromSDK(dto, scope)
 	}
 	writeWebAppJSON(w, r, http.StatusOK, webAppPageFromSDK(filtered, info))
 }
@@ -104,7 +115,8 @@ func (s *Service) getWebAppTask(ctx context.Context, w http.ResponseWriter, r *h
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*task, binding.WorkspaceID))
+	scope := dependencyRedactionScopeFromBinding(binding, []string{task.ID})
+	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*task, scope))
 }
 
 type webAppTaskPatch struct {
@@ -127,7 +139,7 @@ func (s *Service) updateWebAppTask(ctx context.Context, w http.ResponseWriter, r
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	task, err := host.Tasks().Get(ctx, taskID)
+	task, err := host.fetchTaskForScopeCheck(ctx, taskID)
 	if err != nil || task == nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
@@ -172,7 +184,8 @@ func (s *Service) updateWebAppTask(ctx context.Context, w http.ResponseWriter, r
 		writeWebAppError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*updated, binding.WorkspaceID))
+	scope := dependencyRedactionScopeFromBinding(binding, []string{updated.ID})
+	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*updated, scope))
 }
 
 type webAppMessageRequest struct {
@@ -185,7 +198,7 @@ func (s *Service) sendWebAppMessage(ctx context.Context, w http.ResponseWriter, 
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	task, err := host.Tasks().Get(ctx, taskID)
+	task, err := host.fetchTaskForScopeCheck(ctx, taskID)
 	if err != nil || task == nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
@@ -228,7 +241,7 @@ func (s *Service) listWebAppWorkflows(ctx context.Context, w http.ResponseWriter
 		workflows = append(workflows, items...)
 	}
 	if binding.ScopeKind == instances.ScopeTask {
-		task, err := host.Tasks().Get(ctx, binding.TaskID)
+		task, err := host.fetchTaskForScopeCheck(ctx, binding.TaskID)
 		if err != nil || task == nil {
 			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 			return
@@ -268,7 +281,7 @@ func (s *Service) listWebAppWorkflowSteps(ctx context.Context, w http.ResponseWr
 		}
 	}
 	if binding.ScopeKind == instances.ScopeTask {
-		task, err := host.Tasks().Get(ctx, binding.TaskID)
+		task, err := host.fetchTaskForScopeCheck(ctx, binding.TaskID)
 		if err != nil || task == nil || task.WorkflowID != workflowID {
 			writeWebAppError(w, http.StatusNotFound, "not_found")
 			return
