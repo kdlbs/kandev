@@ -106,4 +106,3 @@ Completed 2026-09-16; revalidated against the updated base on 2026-09-17.
 Full remote-platform build was stopped because local browser checks require only
 host helpers. All browser runs used freshly rebuilt frontend assets and an isolated
 runtime. Fresh desktop and phone PR screenshots were captured with temporary specs, inspected, and retained outside the production diff. The temporary capture specs were removed.
-
