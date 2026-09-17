@@ -106,6 +106,33 @@ One probe error makes aggregate persistence unhealthy. A later successful probe 
 
 Initialization errors remain fatal and cannot recover inside the same process. The process exits through the existing startup error path.
 
+### SQLite maintenance coordination
+
+Periodic SQLite checks use `maintenance.ForPool(pool).TryAcquire()` before
+`Health.Check`. The probe holds this lease until all checks finish. This prevents
+maintenance from taking the writer between a guard check and a database probe.
+The existing two-second probe context bounds the lease duration.
+
+When admission fails, the periodic loop defers that check until its next tick.
+It does not call `RecordProbe`, change store states, or advance check timestamps.
+It emits a debug event with reason `maintenance_busy`, without database paths.
+An unhealthy store remains unhealthy, including alongside healthy stores.
+Ordinary writer contention without a maintenance lease retains current behavior.
+
+Startup calls to `Health.Check` remain strict and never use the deferral path.
+Missing pools remain failures. PostgreSQL uses its current probe path.
+The shared guard also covers backups, restore/reset, and retention batches.
+Their existing shutdown, quiescence, and error handling remain authoritative.
+There is no HTTP allowlist change or new health state.
+
+After lease release, the next periodic tick performs a full probe within the
+normal 15-second interval. A failed operation cannot leave the lease held.
+Fault detection can be delayed for the duration of managed maintenance.
+Existing diagnostic timestamps expose the age of the last completed check.
+
+See [maintenance probe coordination](../../../decisions/2026-09-17-maintenance-health-probe-coordination.md)
+and the [fix package](../../../plans/vacuum-compaction-status/plan.md).
+
 ## Caller errors
 
 `GET /health` remains a pure liveness endpoint. Persistence state does not change its status or body.
