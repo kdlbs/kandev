@@ -75,14 +75,7 @@ export function RoutineRow({
   onClick,
 }: RoutineRowProps) {
   const { t } = useTranslation();
-  // The API may return snake_case fields (assignee_agent_profile_id, concurrency_policy)
-  // before any mapping layer converts them. Use both camelCase and snake_case lookups.
-  const routineRaw = routine as unknown as Record<string, unknown>;
-  const assigneeId =
-    routine.assigneeAgentProfileId ?? (routineRaw.assignee_agent_profile_id as string | undefined);
-  const concurrencyPolicy =
-    routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
-  const assignee = agents.find((a) => a.id === assigneeId);
+  const assignee = agents.find((a) => a.id === routine.assigneeAgentProfileId);
   const isActive = isRoutineFiring(routine.status);
   const template = routine.taskTemplate as { title?: string; description?: string } | undefined;
   const cronTrigger = triggers.find((t) => t.kind === "cron");
@@ -113,7 +106,7 @@ export function RoutineRow({
             )}
             {nextFire && <span>{t("office:nextIn", { when: nextFire })}</span>}
             <span>{routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:neverRun")}</span>
-            <span>{concurrencyLabel(t, concurrencyPolicy)}</span>
+            <span>{concurrencyLabel(t, routine.concurrencyPolicy)}</span>
           </div>
         </div>
         <Badge variant={isActive ? "default" : "secondary"}>
@@ -209,9 +202,6 @@ function RoutineExpandedDetail({
   template: { title?: string; description?: string } | undefined;
 }) {
   const { t } = useTranslation();
-  const routineRaw = routine as unknown as Record<string, unknown>;
-  const concurrencyPolicy =
-    routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
   return (
     <div className="px-4 pb-3 pt-1 ml-7 border-t border-border/50 space-y-2 text-sm">
       {routine.description && (
@@ -226,7 +216,10 @@ function RoutineExpandedDetail({
         label={t("office:lastRun")}
         value={routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:lastRunNever")}
       />
-      <DetailField label={t("office:concurrency")} value={concurrencyLabel(t, concurrencyPolicy)} />
+      <DetailField
+        label={t("office:concurrency")}
+        value={concurrencyLabel(t, routine.concurrencyPolicy)}
+      />
       {routine.variables && Object.keys(routine.variables).length > 0 && (
         <div>
           <span className="text-xs font-medium text-muted-foreground">{t("office:variables")}</span>

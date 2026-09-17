@@ -22,6 +22,7 @@ import type {
   AgentProfile,
   RoutineRun,
   RoutineTrigger,
+  CreateRoutineInput,
 } from "@/lib/state/slices/office/types";
 import { RoutineRow } from "./routine-row";
 import { RunRow } from "./run-row";
@@ -44,15 +45,24 @@ type RoutineFormData = {
   timezone: string;
 };
 
+function buildCreateRoutineInput(data: RoutineFormData): CreateRoutineInput {
+  return {
+    name: data.name,
+    description: data.description,
+    taskTemplate: { title: data.taskTitle, description: data.taskDescription },
+    assigneeAgentProfileId: data.assigneeAgentProfileId,
+    concurrencyPolicy: data.concurrencyPolicy,
+    catchUpPolicy: data.catchUpPolicy,
+    catchUpMax: data.catchUpMax,
+  };
+}
+
 function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Promise<void>) {
   const { t } = useTranslation();
   const handleToggle = useCallback(
     async (id: string, active: boolean) => {
       try {
-        await updateRoutine(id, { status: active ? "active" : "paused" } as Record<
-          string,
-          unknown
-        >);
+        await updateRoutine(id, { status: active ? "active" : "paused" });
         await fetchRoutines();
         toast.success(active ? t("office:routineActivated") : t("office:routinePaused"));
       } catch (err) {
@@ -78,37 +88,37 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
   const handleCreate = useCallback(
     async (data: RoutineFormData, onDone: () => void) => {
       if (!workspaceId) return;
+      let routine: Routine;
       try {
-        const template = JSON.stringify({
-          title: data.taskTitle,
-          description: data.taskDescription,
-        });
-        const res = await createRoutine(workspaceId, {
-          name: data.name,
-          description: data.description,
-          taskTemplate: JSON.parse(template),
-          assigneeAgentProfileId: data.assigneeAgentProfileId,
-          concurrencyPolicy: data.concurrencyPolicy,
-          catchUpPolicy: data.catchUpPolicy,
-          catchUpMax: data.catchUpMax,
-        } as Record<string, unknown>);
-        if (data.triggerKind === "cron" && data.cronExpression && res) {
-          const routineObj = res as unknown as { routine?: { id: string } };
-          const routineId = routineObj.routine?.id ?? (res as unknown as { id: string }).id;
-          if (routineId) {
-            await createRoutineTrigger(routineId, {
-              kind: data.triggerKind as "cron",
-              cronExpression: data.cronExpression,
-              timezone: data.timezone,
-            });
-          }
-        }
-        onDone();
-        await fetchRoutines();
-        toast.success(t("office:routineCreated"));
+        routine = await createRoutine(workspaceId, buildCreateRoutineInput(data));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("office:failedToCreateRoutine"));
+        return;
       }
+
+      const cronExpression = data.cronExpression.trim();
+      if (data.triggerKind === "cron" && cronExpression) {
+        try {
+          await createRoutineTrigger(routine.id, {
+            kind: "cron",
+            cronExpression,
+            timezone: data.timezone,
+          });
+        } catch (err) {
+          onDone();
+          await fetchRoutines();
+          toast.error(
+            t("office:routineCreatedWithoutSchedule", {
+              error: err instanceof Error ? err.message : t("office:failedToCreateRoutine"),
+            }),
+          );
+          return;
+        }
+      }
+
+      onDone();
+      await fetchRoutines();
+      toast.success(t("office:routineCreated"));
     },
     [workspaceId, fetchRoutines],
   );

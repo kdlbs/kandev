@@ -22,9 +22,7 @@ export default async function RoutineDetailPage({ params }: Props) {
         triggers: [] as RoutineTrigger[],
       })),
     ]);
-    routine =
-      (routineRes as unknown as { routine?: Routine }).routine ??
-      (routineRes as unknown as Routine);
+    routine = routineRes;
     triggers = triggersRes.triggers ?? [];
   } catch {
     routine = null;

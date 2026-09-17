@@ -25,10 +25,7 @@ export function RoutineDetailRoute({ routineId }: { routineId: string }) {
           triggers: [] as RoutineTrigger[],
         })),
       ]);
-      const routine =
-        (routineResponse as unknown as { routine?: Routine }).routine ??
-        (routineResponse as unknown as Routine);
-      return { routine, triggers: triggersResponse.triggers ?? [] };
+      return { routine: routineResponse, triggers: triggersResponse.triggers ?? [] };
     }
 
     loadRoutineDetail()

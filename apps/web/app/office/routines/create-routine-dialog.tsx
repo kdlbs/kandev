@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconArrowLeft, IconArrowRight } from "@tabler/icons-react";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { coerceCatchUpMax } from "../lib/catch-up-max";
 import { useTranslation } from "react-i18next";
 
 type CreateRoutineDialogProps = {
@@ -306,7 +307,7 @@ function PolicyFields({
             type="number"
             min={1}
             value={state.catchUpMax}
-            onChange={(e) => onUpdate({ catchUpMax: Number(e.target.value) || 25 })}
+            onChange={(e) => onUpdate({ catchUpMax: coerceCatchUpMax(e.target.value) })}
             className="mt-1.5"
           />
           <p className="text-xs text-muted-foreground mt-1.5">
