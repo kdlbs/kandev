@@ -1869,6 +1869,9 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 			return nil, ErrActiveTaskSessions
 		}
 	}
+	if err := s.guardRetainedRemoteDockerConnection(ctx, executor, req); err != nil {
+		return nil, err
+	}
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
 	if err := s.executors.UpdateExecutor(ctx, executor); err != nil {
@@ -1949,11 +1952,16 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
-	if executor.Type == models.ExecutorTypeKubernetes {
+	// Both types retain compute past an ordinary stop, and both are reached
+	// again through this row: deleting it soft-deletes the only record that
+	// says where the Pod or container lives.
+	if executor.Type == models.ExecutorTypeKubernetes || executor.Type == models.ExecutorTypeRemoteDocker {
 		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
 		if inventoryErr != nil {
-			s.logger.Error("failed to check retained Kubernetes inventory for executor",
-				zap.String("executor_id", id), zap.Error(inventoryErr))
+			s.logger.Error("failed to check retained inventory for executor",
+				zap.String("executor_id", id),
+				zap.String("executor_type", string(executor.Type)),
+				zap.Error(inventoryErr))
 			return inventoryErr
 		}
 		if retained {
@@ -1965,6 +1973,59 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
 	return nil
+}
+
+// remoteDockerConnectionKeys are the config fields that decide which daemon a
+// remote Docker profile reaches.
+// The keys are spelled locally, as this package already does for the SSH
+// executor, rather than importing the runtime tier.
+var remoteDockerConnectionKeys = []string{
+	sshMetaHost,
+	sshMetaHostAlias,
+	sshMetaPort,
+	sshMetaUser,
+	sshMetaIdentitySource,
+	sshMetaIdentityFile,
+	sshMetaProxyJump,
+	sshMetaHostFingerprint,
+}
+
+// guardRetainedRemoteDockerConnection refuses to repoint a remote Docker
+// executor while a container it created is still retained.
+//
+// An ordinary stop preserves the container, and every later inspect, resume,
+// and teardown reaches it through this row's current connection. Changing the
+// connection leaves that container on the original host with nothing pointing
+// at it. Fields that do not select a daemon, a rename for instance, stay
+// editable: the guard protects reachability, not the row.
+func (s *Service) guardRetainedRemoteDockerConnection(
+	ctx context.Context, executor *models.Executor, req *UpdateExecutorRequest,
+) error {
+	if executor.Type != models.ExecutorTypeRemoteDocker || req.Config == nil {
+		return nil
+	}
+	if !remoteDockerConnectionChanged(executor.Config, req.Config) {
+		return nil
+	}
+	retained, err := s.hasExecutorRunningInventory(ctx, executor.ID)
+	if err != nil {
+		s.logger.Error("failed to check retained remote Docker inventory before a connection change",
+			zap.String("executor_id", executor.ID), zap.Error(err))
+		return err
+	}
+	if retained {
+		return ErrActiveTaskSessions
+	}
+	return nil
+}
+
+func remoteDockerConnectionChanged(current, next map[string]string) bool {
+	for _, key := range remoteDockerConnectionKeys {
+		if strings.TrimSpace(current[key]) != strings.TrimSpace(next[key]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
