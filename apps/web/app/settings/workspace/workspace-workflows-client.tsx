@@ -31,7 +31,6 @@ import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-setti
 import {
   deleteWorkflowAction,
   exportAllWorkflowsAction,
-  importWorkflowsAction,
   reorderWorkflowsAction,
 } from "@/app/actions/workspaces";
 import {
@@ -43,6 +42,7 @@ import {
 } from "@/lib/types/http";
 import { WorkflowDialogs } from "@/app/settings/workspace/workspace-workflows-dialogs";
 import { useWorkflowCreation } from "@/app/settings/workspace/use-workflow-creation";
+import { useWorkflowImport } from "@/app/settings/workspace/use-workflow-import";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 
 type WorkspaceWorkflowsClientProps = {
@@ -81,10 +81,6 @@ function useWorkflowImportExport(
 ) {
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [exportYaml, setExportYaml] = useState("");
-  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
-  const [importYaml, setImportYaml] = useState("");
-  const [importLoading, setImportLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportAll = async () => {
     if (!workspace) return;
@@ -105,57 +101,11 @@ function useWorkflowImportExport(
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setImportYaml(event.target?.result as string);
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  };
-
-  const handleImport = async () => {
-    if (!workspace || !importYaml.trim()) return;
-    setImportLoading(true);
-    try {
-      const result = await importWorkflowsAction(workspace.id, importYaml.trim());
-      const created = result.created ?? [];
-      const skipped = result.skipped ?? [];
-      const parts: string[] = [];
-      if (created.length > 0)
-        parts.push(translate("workflows:importCreated", { names: created.join(", ") }));
-      if (skipped.length > 0)
-        parts.push(translate("workflows:importSkipped", { names: skipped.join(", ") }));
-      toast({ title: translate("workflows:importCompleteTitle"), description: parts.join(". ") });
-      setIsImportDialogOpen(false);
-      setImportYaml("");
-      if (created.length > 0) router.refresh();
-    } catch (error) {
-      toast({
-        title: translate("workflows:failedToImportWorkflows"),
-        description: error instanceof Error ? error.message : translate("workflows:invalidYaml"),
-        variant: "error",
-      });
-    } finally {
-      setImportLoading(false);
-    }
-  };
-
   return {
     isExportDialogOpen,
     setIsExportDialogOpen,
     exportYaml,
-    isImportDialogOpen,
-    setIsImportDialogOpen,
-    importYaml,
-    setImportYaml,
-    importLoading,
-    fileInputRef,
     handleExportAll,
-    handleFileUpload,
-    handleImport,
   };
 }
 
@@ -602,6 +552,7 @@ function useWorkspaceWorkflowsPage(
   const workflowIdMappingsRef = useRef(new Map<string, string>());
 
   const importExport = useWorkflowImportExport(workspace, workflowItems, router, toast);
+  const importState = useWorkflowImport({ workspace, router, toast });
   const actions = useWorkflowActions({
     workspace,
     workflowItems,
@@ -638,6 +589,7 @@ function useWorkspaceWorkflowsPage(
     workflowOrderDirtyIds,
     isWorkflowDirty,
     ...importExport,
+    ...importState,
     ...actions,
     handleWorkflowSaved,
     handleReorderWorkflows,

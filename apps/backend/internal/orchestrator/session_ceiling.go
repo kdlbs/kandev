@@ -94,6 +94,16 @@ type admissionDecision struct {
 	handedOff       bool
 }
 
+// SessionCeilingObservation is a point-in-time view of the admission
+// controller. It is deliberately separate from a launch deferral so callers
+// can refresh displayed capacity without changing queue ownership or time.
+type SessionCeilingObservation struct {
+	InUse      int
+	Limit      int
+	ObservedAt time.Time
+	Known      bool
+}
+
 // sessionCeilingController is the single admission controller. Every mutation of
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
@@ -130,6 +140,40 @@ func (c *sessionCeilingController) population(ctx context.Context) (int, error) 
 		return 0, err
 	}
 	return c.populationLocked(counted), nil
+}
+
+func (c *sessionCeilingController) observation(ctx context.Context) (SessionCeilingObservation, error) {
+	if c == nil {
+		return SessionCeilingObservation{}, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	counted, err := c.countedRowsLocked(ctx)
+	observedAt := time.Now().UTC()
+	if c.now != nil {
+		observedAt = c.now().UTC()
+	}
+	observation := SessionCeilingObservation{
+		Limit:      c.ceiling,
+		ObservedAt: observedAt,
+		Known:      err == nil,
+	}
+	if err != nil {
+		return observation, err
+	}
+	observation.InUse = c.populationLocked(counted)
+	return observation, nil
+}
+
+// CurrentSessionCeilingObservation exposes the controller's current bounded
+// reading to composition-layer status projections. A population read failure
+// returns the ceiling and a Known=false observation so queue ownership can
+// still be displayed without claiming a count.
+func (s *Service) CurrentSessionCeilingObservation(ctx context.Context) (SessionCeilingObservation, error) {
+	if s == nil || s.sessionCeiling == nil {
+		return SessionCeilingObservation{}, nil
+	}
+	return s.sessionCeiling.observation(ctx)
 }
 
 // countedRowsLocked reads the persisted half of the population. It is derived at

@@ -661,11 +661,13 @@ func boundedConversation(userMessages []string, conversation string) string {
 	}
 }
 
-// ContinuationPrompt renders a bounded, provider-neutral handoff. The
-// original prompt remains first so providers that do not understand the
-// optional package still receive the user's request.
+// ContinuationPrompt renders a provider-neutral handoff. The original prompt
+// remains first, credential-redacted but otherwise verbatim and unbounded,
+// so providers that do not understand the optional package still receive
+// the user's request whole; the continuation package appended after it is
+// bounded.
 func ContinuationPrompt(prompt string, continuation Continuation) string {
-	prompt = strings.TrimSpace(routingerr.Sanitize(prompt))
+	prompt = strings.TrimSpace(routingerr.SanitizeCredentialsUnbounded(prompt))
 	continuation = sanitizeContinuation(continuation)
 	fields := make([]string, 0, 7)
 	if continuation.TaskDescription != "" {

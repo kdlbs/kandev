@@ -123,6 +123,7 @@ type MessageCreator interface {
 	// normalized contains the typed tool payload data.
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error
+	UpsertAgentPlanMessage(ctx context.Context, taskID, sourceToolCallID, agentSessionID, content, turnID string) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreateSessionMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
@@ -700,6 +701,19 @@ type Service struct {
 	// reclaiming the same marker while its detached launch is still running.
 	autoStartOnCreateMu       sync.Mutex
 	autoStartOnCreateInFlight map[string]struct{}
+
+	// ceilingEntryAdmissionLocks serialize the durable workflow-entry binding,
+	// ceiling queue, and task-state reconciliation for one task. The lock is
+	// deliberately task-scoped so unrelated queued launches can progress in
+	// parallel while an old entry cannot race a successor route.
+	ceilingEntryAdmissionLocksMu sync.Mutex
+	ceilingEntryAdmissionLocks   map[string]*ceilingEntryAdmissionLock
+	// ceilingEntryDispatchCommits retain immutable workflow-entry ownership
+	// after the admission lock is released and while provider I/O is in flight.
+	// Route writers consult this map so a successor cannot replace the route in
+	// the validation-to-dispatch window.
+	ceilingEntryDispatchCommitsMu sync.Mutex
+	ceilingEntryDispatchCommits   map[string]*ceilingEntryDispatchCommit
 
 	// Message creator for saving agent responses
 	messageCreator MessageCreator

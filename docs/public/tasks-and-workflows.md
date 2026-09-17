@@ -71,11 +71,32 @@ while a turn is running or while another session becomes available.
 
 The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
 
+For a keyboard move, open the task and press `Cmd/Ctrl+K`, search for **Move to**, and
+press Enter. Choose the destination step, type any instructions, and press
+`Cmd/Ctrl+Enter` to move. In a step destination list, press `Cmd/Ctrl+Enter`
+to move immediately with defaults, or `Enter` to open options. This also works
+when choosing a step in another workflow. The same submit shortcut works in the existing move-options
+forms. Plain Enter in Instructions inserts a newline. Failed moves retain your
+instructions so you can correct and retry them.
+
 Available options are **Reset context**, **Instructions**, and **Skip step prompt**. The normalized one-time `entry_options` object carries `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. By default, instructions are appended after the destination step prompt. Skip step prompt suppresses the destination step's configured prompt (and its task-description fallback) for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. Reset context is additive, so it cannot disable a reset already required by the destination step. On touch devices the same controls open in a bottom Drawer.
 
 Moves keep the existing reachability, authorization, WIP, archive, workspace, and active-session rules. Reset runs when either the destination or override requests it, and instructions are appended once. An entry override that carries instructions requires an active target session or a destination step that auto-starts an agent. Pull-request draft versus ready-for-review behavior is not part of these move options; configure that in the PR step's normal automation.
 
 When the source agent is running, the move is deferred until its turn ends. The complete normalized options survive WIP admission, promotion, and backend restart, then apply once at destination entry. A plain move remains valid without a target session or auto-start, but agent-facing options are rejected when there is no recipient.
+
+## Task actions from the command palette
+
+While a task is open, `Cmd/Ctrl+K` offers the task actions available from its sidebar
+menu, including Pin/Unpin, Color, Priority, Edit, Rename, Create subtask, Nest under,
+Link, Move to, Send to workflow, Archive, and Delete. Detach and plugin actions
+appear when applicable. These commands target the open task, even when the search
+also shows other tasks. Duplicate remains disabled.
+
+Use arrow keys and Enter to choose an action or nested option. Back or Escape
+returns to the previous choices. Archive and Delete retain their confirmations.
+On phones, task overflow retains touch access; an attached keyboard can open the
+palette, whose choices also support touch.
 
 ## Prepare a workspace
 
@@ -600,6 +621,18 @@ sidebar shows a queue icon whose tooltip gives the task's position in that
 destination queue. If the configured
 feeder is also full, creation returns a conflict. Ephemeral tasks are not
 counted.
+
+A task can also show **Queued** after workflow entry selects a session but the
+agent session ceiling blocks automatic launch. This is different from WIP
+queueing: WIP waits before destination entry, while session-capacity queueing
+keeps the selected session and retries it automatically. Task details and the
+task navigator show the destination, the latest capacity observation, queue
+time, and retry state. They do not show a queue position or estimated start
+time. Capacity counts older than 40 seconds, or counts unavailable because the
+client is disconnected, are labelled stale while the destination remains
+visible. Opening a task or a parked predecessor does not start it. Use the
+explicit **Start** or **Resume** action, or send a message, to override the
+automatic ceiling for that conversation.
 
 Integration watchers use the same admission rule. For example, a GitHub review
 watch targeting a `Review` step with a limit of two admits at most two newly

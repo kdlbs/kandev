@@ -415,6 +415,7 @@ type Service struct {
 	taskLifecycleCoordinator        TaskLifecycleCoordinator
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
+	statusSummaryLaunchQueue        TaskStatusSummaryLaunchQueueReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
 	queuedPromptCounter             QueuedPromptCounter
 	eventBus                        bus.EventBus
@@ -422,9 +423,10 @@ type Service struct {
 	discoveryConfig                 RepositoryDiscoveryConfig
 	discoveryCacheMu                sync.Mutex
 	discoveryCache                  map[string]discoveryCacheEntry
+	discoveryRootCache              map[string]discoveryRootCacheEntry
 	discoveryFlights                map[string]*discoveryFlight
 	discoveryNow                    func() time.Time
-	discoveryScanRoot               func(context.Context, string, int) ([]LocalRepository, error)
+	discoveryScanRoot               func(context.Context, string, int) (repositoryDiscoveryScanResult, error)
 	filesystemWarnings              *fsdiagnostics.WarningLimiter
 	worktreeCleanup                 WorktreeCleanup
 	canvasCleanup                   CanvasCleanup
@@ -698,6 +700,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
 		discoveryCache:        make(map[string]discoveryCacheEntry),
+		discoveryRootCache:    make(map[string]discoveryRootCacheEntry),
 		discoveryFlights:      make(map[string]*discoveryFlight),
 		discoveryNow:          time.Now,
 		discoveryScanRoot:     scanRootForRepos,

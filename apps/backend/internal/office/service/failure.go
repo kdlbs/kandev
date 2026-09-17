@@ -165,11 +165,6 @@ func (s *Service) MarkAgentPausedFixed(
 		// Both the pause marker and its durable recovery work are gone.
 		return s.repo.DismissInboxItem(ctx, userID, InboxKindAgentPausedAfterFails, agentID)
 	}
-	if err := s.repo.DismissInboxItem(
-		ctx, userID, InboxKindAgentPausedAfterFails, agentID,
-	); err != nil {
-		return fmt.Errorf("dismiss: %w", err)
-	}
 
 	if autoPaused {
 		if err := s.clearAutoPause(ctx, agent); err != nil {
@@ -179,6 +174,15 @@ func (s *Service) MarkAgentPausedFixed(
 			s.logger.Warn("reset counter on unpause failed",
 				zap.String("agent", agentID), zap.Error(err))
 		}
+	}
+	// Dismissed only once the auto-pause this call observed is actually
+	// cleared (or there was none to clear): a refused clearAutoPause
+	// returns above, leaving the inbox entry for a still-active pause
+	// visible and this call retryable instead of silently swallowed.
+	if err := s.repo.DismissInboxItem(
+		ctx, userID, InboxKindAgentPausedAfterFails, agentID,
+	); err != nil {
+		return fmt.Errorf("dismiss: %w", err)
 	}
 	return s.recoverPausedTasks(ctx, agentID, recoveries)
 }
@@ -209,6 +213,7 @@ func (s *Service) loadPauseRecoveries(
 func (s *Service) clearAutoPause(
 	ctx context.Context, agent *models.AgentInstance,
 ) error {
+	originalReason := agent.PauseReason
 	for attempt := 0; attempt < 2; attempt++ {
 		changed, err := s.clearAutoPauseAttempt(ctx, agent)
 		if err != nil {
@@ -224,6 +229,15 @@ func (s *Service) clearAutoPause(
 		}
 		if !strings.HasPrefix(current.PauseReason, autoPauseReasonPrefix) {
 			return nil
+		}
+		// Still paused but with a reason this call never observed means a
+		// newer auto-pause landed between our read and the CAS above.
+		// Retrying against it would clear that newer pause and let the
+		// caller reset the counter and recover tasks from this call's
+		// stale snapshot instead. Abort so the newer pause stays intact
+		// and reachable by a fresh "Mark fixed".
+		if current.Status == models.AgentStatusPaused && current.PauseReason != originalReason {
+			return fmt.Errorf("clear pause reason: a newer auto-pause is in progress")
 		}
 		agent = current
 	}
@@ -242,9 +256,8 @@ func (s *Service) clearAutoPauseAttempt(
 func (s *Service) unpauseAgentIfCurrent(
 	ctx context.Context, agent *models.AgentInstance,
 ) (bool, error) {
-	changed, err := s.repo.UpdateAgentStatusFieldsIfCurrent(
-		ctx, agent.ID, string(models.AgentStatusPaused),
-		string(models.AgentStatusIdle), "",
+	changed, err := s.repo.UnpauseAgentIfCurrent(
+		ctx, agent.ID, agent.PauseReason, string(models.AgentStatusIdle),
 	)
 	if err != nil {
 		return false, fmt.Errorf("unpause agent: %w", err)

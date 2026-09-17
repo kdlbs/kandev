@@ -14,10 +14,12 @@ const status: ToolPayloadRetentionStatus = {
 };
 function deferred<T>() {
   let resolve!: (v: T) => void;
-  const promise = new Promise<T>((r) => {
+  let reject!: (cause: unknown) => void;
+  const promise = new Promise<T>((r, j) => {
     resolve = r;
+    reject = j;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 beforeEach(() => {
   vi.resetAllMocks();
@@ -89,6 +91,77 @@ it("keeps saved policy on failure and releases the mutation lock for retry", asy
   await act(async () => {
     await result.current.save(status.policy);
   });
+  expect(result.current.error).toBeNull();
+});
+
+it("clears a recovered status error on background polling", async () => {
+  vi.useFakeTimers();
+  let unmount: (() => void) | undefined;
+  try {
+    const readError = new Error("status unavailable");
+    vi.mocked(api.fetchToolPayloadRetention)
+      .mockResolvedValueOnce(status)
+      .mockRejectedValueOnce(readError)
+      .mockResolvedValueOnce(status);
+    const rendered = renderHook(useToolPayloadRetention);
+    unmount = rendered.unmount;
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(rendered.result.current.error).toBe(readError);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(rendered.result.current.error).toBeNull();
+  } finally {
+    unmount?.();
+    vi.useRealTimers();
+  }
+});
+
+it("keeps action failures when a status read succeeds", async () => {
+  const { result } = renderHook(useToolPayloadRetention);
+  await waitFor(() => expect(result.current.status).toEqual(status));
+  const actionError = new Error("analysis failed");
+  vi.mocked(api.analyzeToolPayloadRetention).mockRejectedValueOnce(actionError);
+  await act(async () => {
+    await expect(result.current.analyze(status.policy.age)).rejects.toBe(actionError);
+  });
+  expect(result.current.error).toBe(actionError);
+  vi.mocked(api.fetchToolPayloadRetention).mockResolvedValueOnce(status);
+  await act(async () => {
+    await result.current.reload();
+  });
+  expect(result.current.error).toBe(actionError);
+});
+
+it("does not let a stale status failure replace a mutation result", async () => {
+  const { result } = renderHook(useToolPayloadRetention);
+  await waitFor(() => expect(result.current.status).toEqual(status));
+  const old = deferred<ToolPayloadRetentionStatus>();
+  vi.mocked(api.fetchToolPayloadRetention).mockReturnValueOnce(old.promise);
+  let reload!: Promise<void>;
+  act(() => {
+    reload = result.current.reload();
+  });
+  const saved = {
+    ...status,
+    policy: { ...status.policy, revision: 1, age: { value: 4, unit: "months" as const } },
+  };
+  vi.mocked(api.saveToolPayloadRetention).mockResolvedValue(saved);
+  await act(async () => {
+    await result.current.save(saved.policy);
+  });
+  const staleError = new Error("stale read failed");
+  await act(async () => {
+    old.reject(staleError);
+    await reload;
+  });
+  expect(result.current.status).toEqual(saved);
   expect(result.current.error).toBeNull();
 });
 it("cancels the accepted operation and applies the returned status", async () => {

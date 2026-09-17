@@ -1,13 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { RoutineDetailView } from "./routine-detail-view";
+import { reconcileCronTrigger } from "./cron-reconcile";
+import {
+  OfficeTopbarChromeProvider,
+  useOfficeTopbarChrome,
+} from "../../components/office-topbar-context";
+
+const refreshMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/routing/client-router", () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ refresh: refreshMock, push: vi.fn(), replace: vi.fn() }),
 }));
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock("@/lib/api/domains/office-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/office-api")>(
@@ -19,6 +28,18 @@ vi.mock("@/lib/api/domains/office-api", async () => {
     runRoutine: vi.fn().mockResolvedValue({}),
   };
 });
+
+vi.mock("./cron-reconcile", async () => {
+  const actual = await vi.importActual<typeof import("./cron-reconcile")>("./cron-reconcile");
+  return {
+    ...actual,
+    reconcileCronTrigger: vi.fn(),
+  };
+});
+
+import { toast } from "sonner";
+
+const reconcileCronTriggerMock = vi.mocked(reconcileCronTrigger);
 
 afterEach(() => {
   cleanup();
@@ -51,7 +72,28 @@ const cronTrigger: RoutineTrigger = {
   updatedAt: TIMESTAMP,
 };
 
+const relistedCronTrigger: RoutineTrigger = {
+  id: "trigger-2",
+  routineId: "routine-1",
+  kind: "cron",
+  cronExpression: "*/10 * * * *",
+  timezone: "UTC",
+  nextRunAt: "2026-06-06T00:00:00Z",
+  enabled: true,
+  createdAt: TIMESTAMP,
+  updatedAt: TIMESTAMP,
+};
+
 const NO_TRIGGERS: RoutineTrigger[] = [];
+
+// Save/Run Now are contributed through useOfficeTopbar's actions slot (a
+// context the office shell's topbar renders elsewhere), not RoutineDetailView's
+// own return tree, so a direct render needs the provider plus a consumer that
+// actually displays the slot for the buttons to be reachable at all.
+function TopbarActions() {
+  const chrome = useOfficeTopbarChrome();
+  return <>{chrome?.actions}</>;
+}
 
 function renderDetailView(routine: Routine, triggers: RoutineTrigger[]) {
   return render(
@@ -61,7 +103,10 @@ function renderDetailView(routine: Routine, triggers: RoutineTrigger[]) {
         office: { ...defaultOfficeState.office },
       }}
     >
-      <RoutineDetailView initialRoutine={routine} initialTriggers={triggers} />
+      <OfficeTopbarChromeProvider>
+        <RoutineDetailView initialRoutine={routine} initialTriggers={triggers} />
+        <TopbarActions />
+      </OfficeTopbarChromeProvider>
     </StateProvider>,
   );
 }
@@ -89,6 +134,12 @@ describe("RoutineDetailView next-fire display", () => {
   it("shows no next-fire countdown for a routine loaded as paused", () => {
     renderDetailView({ ...baseRoutine, status: "paused" }, [cronTrigger]);
     expect(screen.getByText("Next fire: -")).toBeTruthy();
+  });
+
+  it("shows no next-fire countdown for a routine loaded with an unrecognized status", () => {
+    renderDetailView({ ...baseRoutine, status: "draft" }, [cronTrigger]);
+    expect(screen.getByText("Next fire: -")).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 });
 
@@ -141,5 +192,254 @@ describe("RoutineDetailView catch-up policy labeling (AC-003.6)", () => {
       name: /summarize missed/i,
     });
     expect(option.textContent).toMatch(/once|single/i);
+  });
+});
+
+describe("RoutineDetailView catch-up max editing", () => {
+  it("keeps the raw value while editing and coerces it at save time", async () => {
+    const { updateRoutine } = await import("@/lib/api/domains/office-api");
+    reconcileCronTriggerMock.mockResolvedValue({ kind: "unchanged" });
+    renderDetailView(
+      { ...baseRoutine, catchUpPolicy: "summarize_missed", catchUpMax: 25 },
+      NO_TRIGGERS,
+    );
+
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input.value).toBe("");
+    fireEvent.change(input, { target: { value: "7" } });
+    expect(input.value).toBe("7");
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(updateRoutine).toHaveBeenCalledWith(
+        "routine-1",
+        expect.objectContaining({ catchUpMax: 7 }),
+      ),
+    );
+  });
+});
+
+// AC-003.17: a stored status outside the three selectable options renders no
+// selection (the control does not invent a value) and a save omits the field
+// rather than sending an invented one.
+describe("RoutineDetailView draft status normalization (AC-003.17)", () => {
+  it("shows no selected status option when the stored status is not one of the three known values", () => {
+    renderDetailView({ ...baseRoutine, status: "draft" }, NO_TRIGGERS);
+    const statusField = screen.getByText("Status").closest("div") as HTMLElement;
+    const statusCombobox = within(statusField).getByRole("combobox");
+    expect(statusCombobox.textContent).toBe("");
+  });
+
+  it("keeps the known status selected when it is one of the three options", () => {
+    renderDetailView({ ...baseRoutine, status: "paused" }, NO_TRIGGERS);
+    const statusField = screen.getByText("Status").closest("div") as HTMLElement;
+    expect(within(statusField).getByText("Paused")).toBeTruthy();
+  });
+
+  it("omits status from the save patch when the stored status was unrecognized", async () => {
+    const { updateRoutine } = await import("@/lib/api/domains/office-api");
+    reconcileCronTriggerMock.mockResolvedValue({ kind: "unchanged" });
+    renderDetailView({ ...baseRoutine, status: "draft" }, NO_TRIGGERS);
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      expect(updateRoutine).toHaveBeenCalledWith(
+        "routine-1",
+        expect.objectContaining({ status: undefined }),
+      );
+    });
+  });
+});
+
+// TS-005: a rejected updateRoutine must not fall through into a cron
+// reconcile attempt against a routine whose own field save just failed, and
+// must re-enable the Save button so the operator can retry.
+describe("RoutineDetailView save failure (TS-005)", () => {
+  it("shows the server error and does not attempt a cron reconcile when updateRoutine rejects", async () => {
+    const { updateRoutine } = await import("@/lib/api/domains/office-api");
+    vi.mocked(updateRoutine).mockRejectedValueOnce(new Error("name already exists"));
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    const saveButton = screen.getByRole("button", { name: /save/i });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("name already exists"));
+    expect(reconcileCronTriggerMock).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: /save/i }).textContent).not.toMatch(/saving/i);
+  });
+
+  it("shows an error toast and re-enables Save if reconcileCronTrigger throws instead of resolving with a failure outcome", async () => {
+    // reconcileCronTrigger is designed to always resolve (every internal call
+    // is its own try/catch), but nothing in its type enforces that. Save must
+    // still catch it, toast, and clear the saving flag if a future change
+    // breaks that invariant, rather than leaving an unhandled rejection and a
+    // permanently-disabled button.
+    reconcileCronTriggerMock.mockRejectedValueOnce(new Error("unexpected"));
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    const saveButton = screen.getByRole("button", { name: /save/i });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("unexpected"));
+    expect((screen.getByRole("button", { name: /save/i }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+});
+
+// AC-002.9 / SRF-34: describeCronOutcome (through handleSave) must map every
+// CronReconcileOutcome branch to the correct toast kind, message, and
+// refresh decision — including the SRF-34 uncovered cell (a failed trigger
+// mutation whose re-list also fails), which must show the fate-unknown
+// message rather than AC-002.9's "saved but schedule was not" text.
+describe("RoutineDetailView stale schedule state", () => {
+  it("blocks another save after a successful schedule mutation has an unknown trigger state", async () => {
+    const { updateRoutine } = await import("@/lib/api/domains/office-api");
+    reconcileCronTriggerMock.mockResolvedValueOnce({ kind: "success", triggers: null });
+    renderDetailView(baseRoutine, [cronTrigger]);
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "The routine was saved. The displayed schedule may be stale until you reload the page.",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "The routine was saved, but the schedule's fate is unknown. Reload the page to see the current state.",
+      ),
+    );
+    expect(reconcileCronTriggerMock).toHaveBeenCalledTimes(1);
+    expect(updateRoutine).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("RoutineDetailView save outcome mapping (AC-002.9, SRF-34)", () => {
+  function clickSave() {
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+  }
+
+  it("shows the plain saved toast and refreshes when the cron draft is unchanged", async () => {
+    reconcileCronTriggerMock.mockResolvedValue({ kind: "unchanged" });
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    clickSave();
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Routine saved"));
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(refreshMock).toHaveBeenCalled();
+  });
+
+  it("shows the plain saved toast and refreshes on a successful reconcile with a fresh trigger list", async () => {
+    reconcileCronTriggerMock.mockResolvedValue({ kind: "success", triggers: [] });
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    clickSave();
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Routine saved"));
+    expect(refreshMock).toHaveBeenCalled();
+  });
+
+  it("shows the stale-schedule toast and does not refresh when a successful reconcile's re-list fails", async () => {
+    reconcileCronTriggerMock.mockResolvedValue({ kind: "success", triggers: null });
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    clickSave();
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        "The routine was saved. The displayed schedule may be stale until you reload the page.",
+      ),
+    );
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the fate-unknown toast, not AC-002.9's saved-but-not text, when a failed create's re-list also fails (SRF-34)", async () => {
+    reconcileCronTriggerMock.mockResolvedValue({
+      kind: "create-failed",
+      message: "invalid cron expression",
+      triggers: null,
+    });
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    clickSave();
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "The routine was saved, but the schedule's fate is unknown. Reload the page to see the current state.",
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the fate-unknown toast when a failed delete's re-list also fails (SRF-34)", async () => {
+    reconcileCronTriggerMock.mockResolvedValue({
+      kind: "delete-failed",
+      message: "server error",
+      triggers: null,
+    });
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    clickSave();
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "The routine was saved, but the schedule's fate is unknown. Reload the page to see the current state.",
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("names the create failure, does not refresh, and renders the re-listed schedule when the re-list succeeds", async () => {
+    reconcileCronTriggerMock.mockResolvedValue({
+      kind: "create-failed",
+      message: "invalid cron expression",
+      triggers: [relistedCronTrigger],
+    });
+    renderDetailView(baseRoutine, [cronTrigger]);
+
+    clickSave();
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "The routine was saved, but the schedule change failed: invalid cron expression",
+      ),
+    );
+    expect(refreshMock).not.toHaveBeenCalled();
+    // Proves setTriggers(outcome.triggers) actually reaches the DOM: the
+    // Schedule card must show the re-listed trigger's next fire, not the
+    // pre-save trigger it replaced.
+    expect(screen.getByText(/Next fire: 6\/6\/2026/)).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
+  });
+
+  it("names the delete failure, the surviving cron count, and renders the re-listed schedule when the re-list succeeds", async () => {
+    reconcileCronTriggerMock.mockResolvedValue({
+      kind: "delete-failed",
+      message: "server error",
+      triggers: [relistedCronTrigger],
+    });
+    renderDetailView(baseRoutine, [cronTrigger]);
+
+    clickSave();
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "The routine was saved, but removing the old schedule failed: server error. 1 cron schedule is now active.",
+      ),
+    );
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/Next fire: 6\/6\/2026/)).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 });
