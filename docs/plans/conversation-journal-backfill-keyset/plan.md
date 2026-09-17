@@ -4,7 +4,7 @@ status: done
 requirements:
   - REQ-TASKS-JOURNAL-BACKFILL-001
 system_design:
-  - docs/specs/tasks/system-design/conversation-journal-backfill-performance.md
+  - ../../specs/tasks/system-design/conversation-journal-backfill-performance.md
 ---
 
 # Conversation Journal Backfill Keyset Plan

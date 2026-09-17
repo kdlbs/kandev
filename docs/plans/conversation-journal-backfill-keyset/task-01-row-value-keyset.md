@@ -11,7 +11,7 @@ acceptance_criteria:
   - AC-TASKS-JOURNAL-BACKFILL-001.1
   - AC-TASKS-JOURNAL-BACKFILL-001.2
 system_design:
-  - docs/specs/tasks/system-design/conversation-journal-backfill-performance.md
+  - ../../specs/tasks/system-design/conversation-journal-backfill-performance.md
 ---
 
 # Task 01: Row-value keyset for conversation journal backfill
