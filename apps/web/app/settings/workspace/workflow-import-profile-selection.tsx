@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Drawer, DrawerContent, DrawerFooter } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type {
   WorkflowImportPreview,
   WorkflowImportProfileCandidate,
@@ -43,6 +44,9 @@ type WorkflowImportProfileSelectionProps = {
   onRetryPreview: () => void | Promise<void>;
   importLoading: boolean;
 };
+
+const DESKTOP_CONTROL_SIZE_CLASS = "min-h-11 md:min-h-7";
+const TOUCH_CONTROL_SIZE_CLASS = "min-h-11";
 
 function profileField(value: string, translate: (key: string) => string): string {
   return value || translate("workflows:importProfileNotSet");
@@ -185,7 +189,7 @@ function SelectionRow({
       ref={triggerRef}
       disabled={preview.profiles.length === 0}
       onClick={mobile ? () => onOpenChange(true) : undefined}
-      className="min-h-11 w-full cursor-pointer justify-start text-left sm:min-h-7"
+      className={`${mobile ? TOUCH_CONTROL_SIZE_CLASS : DESKTOP_CONTROL_SIZE_CLASS} w-full cursor-pointer justify-start text-left`}
       data-testid={`workflow-import-profile-select-${key}`}
     >
       {selectedProfile ? (
@@ -301,7 +305,13 @@ function SelectionRows({
   );
 }
 
-function EmptyProfileCallout({ onRetry }: { onRetry: () => void | Promise<void> }) {
+function EmptyProfileCallout({
+  onRetry,
+  touch,
+}: {
+  onRetry: () => void | Promise<void>;
+  touch: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div
@@ -314,7 +324,7 @@ function EmptyProfileCallout({ onRetry }: { onRetry: () => void | Promise<void> 
           href="/settings/agents"
           target="_blank"
           rel="noreferrer"
-          className="inline-flex min-h-11 cursor-pointer items-center gap-1 text-sm text-primary underline-offset-4 hover:underline sm:min-h-7"
+          className={`${touch ? TOUCH_CONTROL_SIZE_CLASS : DESKTOP_CONTROL_SIZE_CLASS} inline-flex cursor-pointer items-center gap-1 text-sm text-primary underline-offset-4 hover:underline`}
         >
           {t("workflows:openAgentSettings")}
           <IconExternalLink className="h-4 w-4" aria-hidden="true" />
@@ -322,7 +332,7 @@ function EmptyProfileCallout({ onRetry }: { onRetry: () => void | Promise<void> 
         <Button
           type="button"
           variant="outline"
-          className="min-h-11 cursor-pointer sm:min-h-7"
+          className={`${touch ? TOUCH_CONTROL_SIZE_CLASS : DESKTOP_CONTROL_SIZE_CLASS} cursor-pointer`}
           onClick={onRetry}
         >
           {t("workflows:retryImportPreview")}
@@ -336,6 +346,7 @@ function SelectionFooter({
   canImport,
   importLoading,
   showRetry,
+  touch,
   onOpenChange,
   onImport,
   onRetry,
@@ -343,6 +354,7 @@ function SelectionFooter({
   canImport: boolean;
   importLoading: boolean;
   showRetry: boolean;
+  touch: boolean;
   onOpenChange: (open: boolean) => void;
   onImport: () => void | Promise<void>;
   onRetry: () => void | Promise<void>;
@@ -355,7 +367,7 @@ function SelectionFooter({
         variant="outline"
         onClick={() => onOpenChange(false)}
         disabled={importLoading}
-        className="min-h-11 cursor-pointer sm:min-h-7"
+        className={`${touch ? TOUCH_CONTROL_SIZE_CLASS : DESKTOP_CONTROL_SIZE_CLASS} cursor-pointer`}
       >
         {t("common:cancel")}
       </Button>
@@ -365,7 +377,7 @@ function SelectionFooter({
           variant="outline"
           onClick={onRetry}
           disabled={importLoading}
-          className="min-h-11 cursor-pointer sm:min-h-7"
+          className={`${touch ? TOUCH_CONTROL_SIZE_CLASS : DESKTOP_CONTROL_SIZE_CLASS} cursor-pointer`}
         >
           {t("workflows:retryImportPreview")}
         </Button>
@@ -374,13 +386,14 @@ function SelectionFooter({
         type="button"
         onClick={onImport}
         disabled={!canImport || importLoading}
-        className="min-h-11 cursor-pointer sm:min-h-7"
+        className={`${touch ? TOUCH_CONTROL_SIZE_CLASS : DESKTOP_CONTROL_SIZE_CLASS} cursor-pointer`}
         data-testid="workflow-import-profile-submit"
       >
-        <span role="status" aria-live="polite">
-          {importLoading ? t("workflows:importing") : t("workflows:importContinue")}
-        </span>
+        {t("workflows:importContinue")}
       </Button>
+      <span className="sr-only" role="status" aria-live="polite">
+        {importLoading ? t("workflows:importing") : ""}
+      </span>
     </>
   );
 }
@@ -422,7 +435,7 @@ function MobileSelectionBody({
   return (
     <>
       {preview.profiles.length === 0 && missingSteps.length > 0 && (
-        <EmptyProfileCallout onRetry={onRetryPreview} />
+        <EmptyProfileCallout onRetry={onRetryPreview} touch />
       )}
       <SelectionRows
         preview={preview}
@@ -468,7 +481,15 @@ function MobileProfileSelection({
   };
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] outline-none">
+      <DrawerContent
+        className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] !max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] outline-none"
+        onEscapeKeyDown={(event) => {
+          if (mobileView === "picker") {
+            event.preventDefault();
+            openMobilePicker(null);
+          }
+        }}
+      >
         <div
           className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-background shadow-2xl shadow-black/20"
           data-testid="workflow-import-profile-selection"
@@ -478,10 +499,7 @@ function MobileProfileSelection({
             activeStep={activeStep}
             onBack={() => openMobilePicker(null)}
           />
-          <div
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[env(safe-area-inset-bottom,0px)]"
-            aria-live="polite"
-          >
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[env(safe-area-inset-bottom,0px)]">
             <MobileSelectionBody
               mobileView={mobileView}
               activeStep={activeStep}
@@ -500,6 +518,7 @@ function MobileProfileSelection({
             <SelectionFooter
               canImport={missingSteps.length === 0}
               importLoading={importLoading}
+              touch
               showRetry={
                 profileConflicts.length > 0 ||
                 (preview.profiles.length === 0 && missingSteps.length > 0)
@@ -543,9 +562,9 @@ function DesktopProfileSelection({
             {t("workflows:importResolveProfilesDescription")}
           </p>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" aria-live="polite">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {preview.profiles.length === 0 && missingSteps.length > 0 && (
-            <EmptyProfileCallout onRetry={onRetryPreview} />
+            <EmptyProfileCallout onRetry={onRetryPreview} touch={false} />
           )}
           <SelectionRows
             preview={preview}
@@ -561,6 +580,7 @@ function DesktopProfileSelection({
           <SelectionFooter
             canImport={canImport}
             importLoading={importLoading}
+            touch={false}
             showRetry={profileConflicts.length > 0}
             onOpenChange={onOpenChange}
             onImport={onImport}
@@ -574,5 +594,10 @@ function DesktopProfileSelection({
 
 export function WorkflowImportProfileSelection(props: WorkflowImportProfileSelectionProps) {
   const { isMobile } = useResponsiveBreakpoint();
-  return isMobile ? <MobileProfileSelection {...props} /> : <DesktopProfileSelection {...props} />;
+  const usesTouchDrawer = useTouchDrawer();
+  return isMobile || usesTouchDrawer ? (
+    <MobileProfileSelection {...props} />
+  ) : (
+    <DesktopProfileSelection {...props} />
+  );
 }

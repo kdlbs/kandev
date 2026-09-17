@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -154,4 +155,102 @@ func TestImportWorkflowsWithBindingsRejectsMissingBindingWithoutWrites(t *testin
 	require.Len(t, conflict.Conflicts, 1)
 	assert.Equal(t, ImportProfileReasonMissingSelection, conflict.Conflicts[0].Reason)
 	assert.Empty(t, provider.workflows)
+}
+
+func TestImportWorkflowsWithBindingsCleansUpWorkflowWhenPersistenceFails(t *testing.T) {
+	svc, _, provider := setupTestServiceWithProvider(t)
+	provider.forceUpdateWorkflowErr = fmt.Errorf("update workflow failed")
+	export := &models.WorkflowExport{
+		Version: models.ExportVersion,
+		Type:    models.ExportType,
+		Workflows: []models.WorkflowPortable{{
+			Name:   "Failed persistence",
+			Prompt: "Imported prompt",
+			Steps:  []models.StepPortable{{Name: "Build", Position: 0}},
+		}},
+	}
+
+	_, err := svc.ImportWorkflowsWithBindings(context.Background(), "ws-1", export, nil)
+	require.Error(t, err)
+	assert.Empty(t, provider.workflows, "a failed import must not leave the workflow available for retries")
+	assert.Equal(t, []string{"imported-Failed persistence"}, provider.deleted)
+}
+
+func TestImportWorkflowsWithBindingsCleansUpPreviouslyCreatedSteps(t *testing.T) {
+	svc, db, provider := setupTestServiceWithProvider(t)
+	_, err := db.Exec(`
+		CREATE TRIGGER fail_import_step
+		BEFORE INSERT ON workflow_steps
+		WHEN NEW.name = 'Fail'
+	BEGIN
+		SELECT RAISE(ABORT, 'forced step failure');
+	END`)
+	require.NoError(t, err)
+	export := &models.WorkflowExport{
+		Version: models.ExportVersion,
+		Type:    models.ExportType,
+		Workflows: []models.WorkflowPortable{{
+			Name: "Failed step persistence",
+			Steps: []models.StepPortable{
+				{Name: "Create", Position: 0},
+				{Name: "Fail", Position: 1},
+			},
+		}},
+	}
+
+	_, err = svc.ImportWorkflowsWithBindings(context.Background(), "ws-1", export, nil)
+	require.Error(t, err)
+	assert.Empty(t, provider.workflows)
+	assert.Equal(t, []string{"imported-Failed step persistence"}, provider.deleted)
+	steps, err := svc.repo.ListStepsByWorkflow(context.Background(), "imported-Failed step persistence")
+	require.NoError(t, err)
+	assert.Empty(t, steps, "a failed import must remove steps created before the failing step")
+}
+
+func TestValidateImportProfileBindingsRejectsMalformedBindingSets(t *testing.T) {
+	requested := &models.AgentProfilePortable{AgentName: "Agent", Model: "model", Mode: "mode"}
+	export := &models.WorkflowExport{
+		Version: models.ExportVersion,
+		Type:    models.ExportType,
+		Workflows: []models.WorkflowPortable{{
+			Name:  "Imported",
+			Steps: []models.StepPortable{{Name: "Build", Position: 0, AgentProfile: requested}},
+		}},
+	}
+	expected := expectedImportProfileSteps(export)
+
+	tests := []struct {
+		name     string
+		bindings []ImportProfileBinding
+	}{
+		{
+			name: "unknown step key",
+			bindings: []ImportProfileBinding{{
+				WorkflowIndex: 0, StepPosition: 99, RequestedProfile: requested, ProfileID: "profile",
+			}},
+		},
+		{
+			name: "duplicate binding",
+			bindings: []ImportProfileBinding{
+				{WorkflowIndex: 0, StepPosition: 0, RequestedProfile: requested, ProfileID: "profile"},
+				{WorkflowIndex: 0, StepPosition: 0, RequestedProfile: requested, ProfileID: "profile"},
+			},
+		},
+		{
+			name: "descriptor mismatch",
+			bindings: []ImportProfileBinding{{
+				WorkflowIndex: 0, StepPosition: 0,
+				RequestedProfile: &models.AgentProfilePortable{AgentName: "Other"},
+				ProfileID:        "profile",
+			}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := validateImportProfileBindings(test.bindings, expected)
+			var bindingsErr *InvalidImportProfileBindingsError
+			require.ErrorAs(t, err, &bindingsErr)
+		})
+	}
 }

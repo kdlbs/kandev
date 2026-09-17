@@ -27,6 +27,10 @@ type ImportProfileCatalog interface {
 	GetEligibleProfile(ctx context.Context, id string) (*ImportProfileCandidate, error)
 }
 
+type workflowImportDeletionProvider interface {
+	DeleteWorkflow(ctx context.Context, id string) error
+}
+
 // ImportProfileCandidate is an enabled, global agent profile that can be used
 // as a replacement for a portable profile descriptor.
 type ImportProfileCandidate struct {
@@ -284,6 +288,13 @@ func (s *Service) persistImportedWorkflow(
 	if err != nil {
 		return nil, fmt.Errorf("create workflow: %w", err)
 	}
+	createdSteps := make([]*models.WorkflowStep, 0, len(prepared.steps))
+	rollback := func(cause error) (*taskmodels.Workflow, error) {
+		if cleanupErr := s.rollbackImportedWorkflow(ctx, wf, createdSteps); cleanupErr != nil {
+			return nil, errors.Join(cause, fmt.Errorf("cleanup imported workflow: %w", cleanupErr))
+		}
+		return nil, cause
+	}
 
 	needsUpdate := false
 	if prepared.workflowProfileID != "" {
@@ -296,16 +307,38 @@ func (s *Service) persistImportedWorkflow(
 	}
 	if needsUpdate {
 		if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
-			return nil, fmt.Errorf("set workflow fields: %w", err)
+			return rollback(fmt.Errorf("set workflow fields: %w", err))
 		}
 	}
 	for _, step := range prepared.steps {
 		step.WorkflowID = wf.ID
 		if err := s.repo.CreateStep(ctx, step); err != nil {
-			return nil, fmt.Errorf("create step %q: %w", step.Name, err)
+			return rollback(fmt.Errorf("create step %q: %w", step.Name, err))
 		}
+		createdSteps = append(createdSteps, step)
 	}
 	return wf, nil
+}
+
+func (s *Service) rollbackImportedWorkflow(
+	ctx context.Context,
+	wf *taskmodels.Workflow,
+	createdSteps []*models.WorkflowStep,
+) error {
+	var cleanupErr error
+	for index := len(createdSteps) - 1; index >= 0; index-- {
+		if err := s.repo.DeleteStep(ctx, createdSteps[index].ID); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete step %q: %w", createdSteps[index].Name, err))
+		}
+	}
+	deleter, ok := s.workflowProvider.(workflowImportDeletionProvider)
+	if !ok {
+		return errors.Join(cleanupErr, errors.New("workflow provider cannot delete imported workflows"))
+	}
+	if err := deleter.DeleteWorkflow(ctx, wf.ID); err != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete workflow %q: %w", wf.Name, err))
+	}
+	return cleanupErr
 }
 
 func (s *Service) importProfilePreviewData(

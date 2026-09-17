@@ -31,13 +31,13 @@ All identifiers in this table have prefix `AC-TASKS-IMPORT-PROFILES-`.
 
 ## Existing components
 
-- `internal/workflow/service/service.go`: `ImportWorkflows`, `importSingleWorkflow`, `stepFromPortableWithMatcher`, and `validateWorkflowSessionTargets`.
-- `internal/backendapp/services.go`: `buildAgentProfileMatcher` and `selectAgentProfileCandidate`.
-- `internal/workflow/handlers/handlers.go`: `httpImportWorkflows` and workspace routes.
-- `internal/workflow/controller/controller.go`: `ImportWorkflowsRequest` and controller delegation.
-- `app/settings/workspace/workspace-workflows-client.tsx`: `useWorkflowImportExport` currently sends YAML directly.
-- `app/settings/workspace/workspace-workflows-dialogs.tsx`: `ImportWorkflowsDialog` currently offers upload and paste.
-- `app/actions/workspaces.ts` and `lib/types/http.ts`: HTTP actions and response types.
+- `apps/backend/internal/workflow/service/service.go`: `ImportWorkflows`, `importSingleWorkflow`, `stepFromPortableWithMatcher`, and `validateWorkflowSessionTargets`.
+- `apps/backend/internal/backendapp/services.go`: `buildAgentProfileMatcher` and `selectAgentProfileCandidate`.
+- `apps/backend/internal/workflow/handlers/handlers.go`: `httpImportWorkflows` and workspace routes.
+- `apps/backend/internal/workflow/controller/controller.go`: `ImportWorkflowsRequest` and controller delegation.
+- `apps/web/app/settings/workspace/workspace-workflows-client.tsx`: `useWorkflowImportExport` currently sends YAML directly.
+- `apps/web/app/settings/workspace/workspace-workflows-dialogs.tsx`: `ImportWorkflowsDialog` currently offers upload and paste.
+- `apps/web/app/actions/workspaces.ts` and `apps/web/lib/types/http.ts`: HTTP actions and response types.
 
 New import resolution code belongs in focused service, handler, hook, and component files beside these boundaries.
 The backend wiring supplies a context-aware profile catalog to the workflow service.
@@ -119,7 +119,7 @@ The client uses structured fields, never an English error-string match.
 The existing `ApiError` handling must retain structured details for this action, or the action must decode its response locally.
 
 The no-write guarantee covers preflight, selection, and validation failures across the submitted batch.
-Storage failures retain the existing import persistence semantics. This change does not promise a new cross-repository transaction.
+Storage failures trigger compensating deletion of steps and the newly created workflow for the current item. This change does not introduce a cross-repository transaction.
 After an uncertain network result, retry rechecks name deduplication before creation.
 
 ## Client flow and recovery

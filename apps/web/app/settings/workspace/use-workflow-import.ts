@@ -171,7 +171,6 @@ function useWorkflowImportState(workspaceId: string | undefined) {
   const invalidatePreview = useCallback(() => {
     if (submissionRef.current) return;
     generationRef.current += 1;
-    submissionRef.current = false;
     clearReview();
   }, [clearReview]);
 

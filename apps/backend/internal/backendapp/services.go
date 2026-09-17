@@ -1875,6 +1875,11 @@ func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *
 	return err
 }
 
+// DeleteWorkflow implements the compensating cleanup used by workflow imports.
+func (a *workflowProviderAdapter) DeleteWorkflow(ctx context.Context, id string) error {
+	return a.svc.DeleteWorkflow(ctx, id)
+}
+
 // buildAgentProfileResolver creates a resolver that converts profile IDs to portable form for export.
 func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolver {
 	return func(profileID string) *wfmodels.AgentProfilePortable {

@@ -79,6 +79,18 @@ workflows:
 
       await selectProfile.tap();
       await expect(selection.getByRole("button", { name: "Back", exact: true })).toBeVisible();
+      await testPage.keyboard.press("Escape");
+      await expect(selection.getByRole("button", { name: "Back", exact: true })).not.toBeVisible();
+      await expect(selectProfile).toBeVisible();
+
+      await testPage.setViewportSize({ width: 767, height: 851 });
+      const boundaryBox = await selectProfile.boundingBox();
+      expect(boundaryBox).not.toBeNull();
+      expect(boundaryBox!.height).toBeGreaterThanOrEqual(44);
+      await testPage.setViewportSize({ width: 393, height: 851 });
+
+      await selectProfile.tap();
+      await expect(selection.getByRole("button", { name: "Back", exact: true })).toBeVisible();
       await selection.getByTestId(`workflow-import-profile-option-${replacement.id}`).tap();
       await expect(selection.getByRole("button", { name: "Back", exact: true })).not.toBeVisible();
       await submit.tap();

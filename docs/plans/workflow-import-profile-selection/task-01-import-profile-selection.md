@@ -161,18 +161,26 @@ profile conflicts, and raw YAML behavior.
 Review fixups preserve a non-null empty profile catalog, invalidate canceled
 previews and late file reads, keep final submission ownership through draft
 edits, and keep the selection surface mounted during pending submission.
-Focused regressions cover empty-catalog HTTP serialization, rendered desktop
-and phone empty/loading states, deferred cancellation and reopen, late
-file-read results, and in-flight edit/repeated-submit protection.
+Storage failures compensate by deleting already-created steps and the new
+workflow. Focused regressions cover empty-catalog HTTP serialization,
+malformed binding validation, partial-step rollback, rendered desktop and
+phone empty/loading states, deferred cancellation and reopen, late file-read
+results, stable busy status, in-flight edit/repeated-submit protection, coarse
+pointer tablet drawers, picker Escape navigation, and the 767 px touch-target
+boundary.
 
 Verification passed:
 
 - Backend focused workflow, controller, handler, and profile-catalog tests,
   including the empty eligible-catalog HTTP array regression.
-- Focused frontend Vitest suite: 12 tests passed, including rendered desktop
-  and phone empty/loading states, deferred cancellation and reopen, late
-  file-read results, and in-flight edit/repeated-submit protection.
+- Focused frontend Vitest suite: 15 tests passed, including rendered desktop
+  and phone empty/loading states, the deferred final-submit dialog path,
+  deferred cancellation and reopen, late file-read results, stable busy
+  status, and in-flight edit/repeated-submit protection.
+- Focused backend import suite passed, including malformed binding rejection,
+  workflow-field rollback, and partial-step rollback.
 - Frontend typecheck, ESLint, i18n checks, and E2E production build.
 - Desktop Chromium workflow import E2E: 8 tests passed.
-- Mobile Chromium workflow import E2E: 1 test passed.
+- Mobile Chromium workflow import E2E: 1 test passed, including picker Escape
+  navigation, coarse-pointer drawer behavior, and the 767 px control boundary.
 - Public-doc validation, specification validation and lint, and `git diff --check`.

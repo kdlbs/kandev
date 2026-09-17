@@ -128,7 +128,6 @@ These views cover AC-TASKS-IMPORT-PROFILES-001.1, .3, .6, .8, and .9.
 | 001.2, .4 | Existing service import/sync tests remain unchanged in behavior |
 
 All identifiers have prefix `AC-TASKS-IMPORT-PROFILES-`.
-Planned test files do not exist until implementation.
 
 ## E2E tests
 

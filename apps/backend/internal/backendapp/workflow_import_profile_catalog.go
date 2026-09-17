@@ -27,6 +27,8 @@ func (c workflowImportProfileCatalog) ListEligibleProfiles(ctx context.Context) 
 		return nil, err
 	}
 	profiles := make([]workflowservice.ImportProfileCandidate, 0)
+	// TODO: replace this per-agent loop with a batch profile query when the
+	// agent settings repository exposes one.
 	for _, agent := range agents {
 		candidates, listErr := c.repo.ListAgentProfiles(ctx, agent.ID)
 		if listErr != nil {
