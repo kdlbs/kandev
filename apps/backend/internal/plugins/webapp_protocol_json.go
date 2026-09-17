@@ -148,8 +148,11 @@ type webAppTask struct {
 	ProjectID              string                 `json:"project_id,omitempty"`
 	ExternalID             string                 `json:"external_id,omitempty"`
 
-	Blocked       bool   `json:"blocked"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
+	Blocked bool `json:"blocked"`
+	// BlockedReason never carries omitempty: it is "" on an unblocked task, and
+	// the key must stay present so absence is never a third state alongside the
+	// other seven projection fields.
+	BlockedReason string `json:"blocked_reason"`
 	// DependsOn/Blocks never carry omitempty: an empty dependency graph still
 	// reports [], not an absent or null field.
 	DependsOn          []webAppTaskDependencyRef `json:"depends_on"`

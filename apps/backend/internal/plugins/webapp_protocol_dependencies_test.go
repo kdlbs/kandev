@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -33,6 +34,25 @@ func TestWebAppTaskFromSDK_MapsDependencyFields(t *testing.T) {
 	require.True(t, wire.DependsOnTruncated)
 	require.False(t, wire.BlocksTruncated)
 	require.True(t, wire.StartWhenUnblocked)
+}
+
+// TestWebAppTaskFromSDK_BlockedReasonKeyAlwaysPresentEvenWhenEmpty guards the
+// presence rule for the not-blocked case, which none of the other dependency
+// fixtures exercises (they all set Blocked: true). blocked_reason is "" on an
+// unblocked task, so an omitempty tag would silently drop the key from the
+// wire response for every unblocked task -- the majority case.
+func TestWebAppTaskFromSDK_BlockedReasonKeyAlwaysPresentEvenWhenEmpty(t *testing.T) {
+	task := pluginsdk.Task{ID: "task-1", Blocked: false, BlockedReason: ""}
+
+	wire := webAppTaskFromSDK(task, "")
+
+	raw, err := json.Marshal(wire)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	value, present := decoded["blocked_reason"]
+	require.True(t, present, "blocked_reason key must always be present, never omitted, even when empty")
+	require.Equal(t, "", value)
 }
 
 func TestWebAppTaskDependencyRefFromSDK_RedactsOutOfScopeEdge(t *testing.T) {
