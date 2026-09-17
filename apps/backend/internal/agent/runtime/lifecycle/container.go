@@ -292,6 +292,7 @@ func (cm *ContainerManager) createAndStartContainer(
 
 	controlHost, controlPort, err := cm.resolveContainerEndpoint(ctx, containerID, AgentCtlPort, containerIP)
 	if err != nil {
+		cm.removeContainerBestEffort(containerID)
 		return "", "", "", 0, fmt.Errorf("failed to resolve agentctl control endpoint: %w", err)
 	}
 	return containerID, containerIP, controlHost, controlPort, nil

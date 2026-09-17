@@ -8,7 +8,11 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconBrandDocker } from "@tabler/icons-react";
 import { useAppStoreApi } from "@/components/state-provider";
-import { createExecutor, createExecutorProfile } from "@/lib/api/domains/settings-api";
+import {
+  createExecutor,
+  createExecutorProfile,
+  deleteExecutor,
+} from "@/lib/api/domains/settings-api";
 import { SSHConnectionCard } from "@/components/settings/ssh-connection-card";
 import type { SSHExecutorConfig } from "@/components/settings/ssh-connection-card";
 import { testRemoteDockerConnection } from "@/lib/api/domains/remote-docker-api";
@@ -38,7 +42,16 @@ export function RemoteDockerCreatePage() {
         type: "remote_docker",
         config: buildSSHExecutorConfig(cfg),
       });
-      const profile = await createExecutorProfile(created.id, { name: cfg.name });
+      // The hub lists profiles, not bare executors, so an executor whose
+      // default profile failed is stored but invisible: the administrator sees
+      // only a failed save, and retrying adds a duplicate. Roll it back.
+      let profile;
+      try {
+        profile = await createExecutorProfile(created.id, { name: cfg.name });
+      } catch (cause) {
+        await deleteExecutor(created.id).catch(() => undefined);
+        throw cause;
+      }
       const next: Executor = {
         id: created.id,
         name: created.name,
