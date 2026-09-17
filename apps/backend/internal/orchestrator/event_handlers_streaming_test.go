@@ -311,6 +311,15 @@ func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 	)
 }
 
+func (m *serviceBackedMessageCreator) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, agentSessionID, content, turnID string,
+) error {
+	return m.svc.UpsertAgentPlanMessage(
+		ctx, agentSessionID, sourceToolCallID, content, taskID, turnID,
+	)
+}
+
 func newServiceBackedMessageCreator(repo *sqliterepo.Repository) *serviceBackedMessageCreator {
 	services := taskservice.NewService(taskservice.Repos{
 		Workspaces:       repo,
@@ -376,6 +385,28 @@ func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Du
 }
 func (b *recordingEventBus) Close()            {}
 func (b *recordingEventBus) IsConnected() bool { return true }
+
+// @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.1
+func TestHandleAgentPlanEventUsesCorrelatedMessageUpdate(t *testing.T) {
+	messages := &mockMessageCreator{}
+	service := &Service{messageCreator: messages, logger: testLogger()}
+	service.activeTurns.Store("session-plan", "turn-plan")
+
+	service.handleAgentPlanEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task-plan",
+		SessionID: "session-plan",
+		Data: &lifecycle.AgentStreamEventData{
+			ToolCallID:  "call-plan",
+			PlanContent: "# Plan\n\n1. Read",
+		},
+	})
+
+	require.Zero(t, messages.sessionMessageAttempts)
+	require.Zero(t, messages.toolUpdateWrites)
+	require.Equal(t, 1, messages.agentPlanUpserts)
+	require.Equal(t, "call-plan", messages.lastAgentPlanToolCallID)
+	require.Equal(t, "# Plan\n\n1. Read", messages.lastAgentPlanContent)
+}
 
 func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	ctx := context.Background()

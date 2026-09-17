@@ -30,6 +30,8 @@ const (
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
 
+var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
 		context.Context,
@@ -1018,6 +1020,39 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 // The normalized parameter contains typed tool payload data that gets added to metadata.
 func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, normalized *streams.NormalizedPayload) error {
 	return s.UpdateToolCallMessageWithCreate(ctx, sessionID, toolCallID, "", status, result, title, normalized, "", "", "")
+}
+
+// UpsertAgentPlanMessage persists the latest snapshot for one plan-producing
+// tool call. Its deterministic identity makes first delivery and retries use
+// the same row without the missing-tool retry delay.
+func (s *Service) UpsertAgentPlanMessage(
+	ctx context.Context,
+	sessionID, sourceToolCallID, content, taskID, turnID string,
+) error {
+	name := fmt.Sprintf("%s\x00%s\x00%s", sessionID, turnID, sourceToolCallID)
+	messageID := uuid.NewSHA1(agentPlanMessageIDNamespace, []byte(name)).String()
+	correlationID := "agent-plan:" + messageID
+	message, err := s.CreateMessageIdempotent(ctx, messageID, &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeAgentPlan),
+		Metadata: map[string]interface{}{
+			"tool_call_id":            correlationID,
+			"agent_plan_tool_call_id": sourceToolCallID,
+		},
+	})
+	if err != nil || message.Content == content {
+		return err
+	}
+	message.Content = content
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
+		return err
+	}
+	return s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 }
 
 // UpdateToolCallMessageWithCreate is like UpdateToolCallMessage but can create the message if not found.
