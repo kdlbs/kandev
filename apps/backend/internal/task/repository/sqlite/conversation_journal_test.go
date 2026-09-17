@@ -553,6 +553,68 @@ func TestConversationJournalBackfillPagesAcrossSessionsAndTimestampTies(t *testi
 	}
 }
 
+func TestConversationJournalBackfillPagesAcrossSessionsAndTurnTimestampTies(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	sessions := []string{"session-turn-page-a", "session-turn-page-b", "session-turn-page-c"}
+	const perSession = conversationJournalBackfillBatchSize + 17
+	sharedStartedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	now := time.Now().UTC()
+	for _, sessionID := range sessions {
+		taskID := "task-" + sessionID
+		seedForMsgTest(t, repo, taskID, sessionID, fmt.Sprintf("%s-turn-000", sessionID))
+		for i := 1; i < perSession; i++ {
+			turnID := fmt.Sprintf("%s-turn-%03d", sessionID, i)
+			if _, err := repo.db.Exec(repo.db.Rebind(`
+				INSERT INTO task_session_turns
+					(id, task_session_id, task_id, started_at, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`), turnID, sessionID, taskID, now, now, now); err != nil {
+				t.Fatalf("insert turn %s: %v", turnID, err)
+			}
+		}
+	}
+	// Every turn shares one started_at so a batch boundary always falls inside a
+	// timestamp tie and only the id term of the keyset can order the next page.
+	if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE task_session_turns SET started_at = ?`), sharedStartedAt); err != nil {
+		t.Fatalf("collapse turn timestamps: %v", err)
+	}
+	if _, err := repo.db.Exec(`
+		DELETE FROM conversation_session_events;
+		DELETE FROM conversation_message_versions;
+		DELETE FROM conversation_turn_versions;
+		DELETE FROM conversation_session_streams;
+	`); err != nil {
+		t.Fatalf("clear journal: %v", err)
+	}
+
+	if err := repo.backfillConversationJournal(); err != nil {
+		t.Fatalf("backfill conversation journal: %v", err)
+	}
+
+	var sourceCount, journaledCount, duplicateCount int
+	if err := repo.db.Get(&sourceCount, `SELECT COUNT(*) FROM task_session_turns`); err != nil {
+		t.Fatalf("count source turns: %v", err)
+	}
+	if err := repo.db.Get(&journaledCount, `SELECT COUNT(DISTINCT turn_id) FROM conversation_turn_versions`); err != nil {
+		t.Fatalf("count journaled turns: %v", err)
+	}
+	if err := repo.db.Get(&duplicateCount, `
+		SELECT COUNT(*) FROM (
+			SELECT turn_id FROM conversation_turn_versions GROUP BY turn_id HAVING COUNT(*) > 1
+		)`); err != nil {
+		t.Fatalf("count duplicate journal rows: %v", err)
+	}
+	if want := len(sessions) * perSession; sourceCount != want {
+		t.Fatalf("source turn count = %d, want %d", sourceCount, want)
+	}
+	if journaledCount != sourceCount {
+		t.Fatalf("journaled turns = %d, want every one of %d source turns", journaledCount, sourceCount)
+	}
+	if duplicateCount != 0 {
+		t.Fatalf("turns journaled more than once = %d, want 0", duplicateCount)
+	}
+}
+
 func TestConversationJournalSenderTaskIDRequiresString(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
