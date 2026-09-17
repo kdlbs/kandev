@@ -701,6 +701,13 @@ type Service struct {
 	autoStartOnCreateMu       sync.Mutex
 	autoStartOnCreateInFlight map[string]struct{}
 
+	// ceilingEntryAdmissionLocks serialize the durable workflow-entry binding,
+	// ceiling queue, and task-state reconciliation for one task. The lock is
+	// deliberately task-scoped so unrelated queued launches can progress in
+	// parallel while an old entry cannot race a successor route.
+	ceilingEntryAdmissionLocksMu sync.Mutex
+	ceilingEntryAdmissionLocks   map[string]*ceilingEntryAdmissionLock
+
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 

@@ -415,6 +415,7 @@ type Service struct {
 	taskLifecycleCoordinator        TaskLifecycleCoordinator
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
+	statusSummaryLaunchQueue        TaskStatusSummaryLaunchQueueReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
 	queuedPromptCounter             QueuedPromptCounter
 	eventBus                        bus.EventBus

@@ -140,6 +140,10 @@
   "mcpStrategyOption": "{{name}}: {{mechanism}}",
   "model": "Ḿōďēĺ",
   "modelHeading": "Ḿōďēĺ",
+  "fallbackNone": "ƒàĺĺƀàćķ: ńōńē",
+  "fallbackExact": "ƒàĺĺƀàćķ: ēxàćţ",
+  "fallbackNext": "ƒàĺĺƀàćķ: ńēxţ",
+  "fallbackModel": "ƒàĺĺƀàćķ: {{model}}",
   "modelRequiredForAllProfiles": "Ḿōďēĺ ĩś ŕēqũĩŕēď ƒōŕ àĺĺ ƥŕōƒĩĺēś.",
   "noAuthHintLogin": "Ćĺĩćķ Ōƥēń ţēŕḿĩńàĺ ţō śĩĝń ĩń, ţĥēń ŕēƒŕēśĥ.",
   "noAuthHintNotInstalled": "Ĩńśţàĺĺ ţĥē àĝēńţ ĆĹĨ, ţĥēń ćĺĩćķ Ŕēƒŕēśĥ.",
@@ -313,5 +317,5 @@
   "providerApiKeyLabel": "ÀƤĨ ķēŷ",
   "providerApiKeyHelp": "Ķàńďēv śēćŕēţ ĥōĺďĩńĝ ţĥē ƀēàŕēŕ ţōķēń śēńţ ţō ţĥē ƥŕōvĩďēŕ. Ĺēàvē ũńśēţ ƒōŕ à ŕōũţēŕ ţĥàţ ńēēďś ńō àũţĥ.",
   "providerModelSlash": "Ŕēḿōvē ţĥē śĺàśĥ ƒŕōḿ ţĥē ḿōďēĺ ńàḿē: àń ŌƥēńÀĨ-ćōḿƥàţĩƀĺē ƥŕōvĩďēŕ ēxƥēćţś à ƀàŕē ḿōďēĺ ĩď.",
-  "providerPassthroughUnsupported": "Đĩśàƀĺē ĆĹĨ ƥàśśţĥŕōũĝĥ ţō ũśē àń ŌƥēńÀĨ-ćōḿƥàţĩƀĺē ƥŕōvĩďēŕ."
+  "providerPassthroughUnsupported": "Ďĩśàƀĺē ĆĹĨ ƥàśśţĥŕōũĝĥ ţō ũśē àń ŌƥēńÀĨ-ćōḿƥàţĩƀĺē ƥŕōvĩďēŕ."
 }

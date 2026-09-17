@@ -28,6 +28,27 @@ const makeModelOptions = (count: number) =>
   }));
 
 describe("ModelConfigSelector", () => {
+  it("shows the provider icon in the trigger and open model heading", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={[{ id: "sonnet", name: "Sonnet" }]}
+        currentModel="sonnet"
+        onModelChange={() => {}}
+        providerIcon={<svg data-testid="provider-glyph" />}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: modelSettingsButtonName });
+    expect(within(trigger).getByTestId("provider-glyph")).toBeTruthy();
+    fireEvent.click(trigger);
+    const group = screen.getByRole("group", { name: "Model" });
+    const labelId = group.getAttribute("aria-labelledby");
+    expect(labelId).not.toBeNull();
+    const heading = document.getElementById(labelId!);
+    expect(heading).not.toBeNull();
+    expect(within(heading!).getByTestId("provider-glyph")).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Sonnet" })).toBeTruthy();
+  });
+
   it("passes custom trigger classes to the button", () => {
     render(
       <ModelConfigSelector

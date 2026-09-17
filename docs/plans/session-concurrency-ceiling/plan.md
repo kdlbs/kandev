@@ -42,6 +42,10 @@ remain separate during repair.
 
 ## Risks
 
+Follow-up: [queued session ownership](../queued-session-ownership/plan.md) adds
+passive-origin enforcement and task queue visibility. Existing manual override
+semantics and the completed work order remain unchanged.
+
 - A repository read failure before a process callback is treated as not owned,
   so a reservation can wait for the sweep instead of being released by an
   ambiguous callback.
