@@ -487,6 +487,10 @@ logs include session ID, execution ID, and intent stamp.
 
 ## Implementation plans
 
+- [Queued session ownership](../../../plans/queued-session-ownership/plan.md)
+  extends parking and admission through the paired
+  [inspection and queue design](queued-session-ownership.md). Stop-intent
+  tombstones remain callback evidence, not current activation policy.
 - [Explicit session targeting](../../../plans/workflow-session-targeting/plan.md)
 - [Same-profile fresh-session repair](../../../plans/workflow-same-profile-new-session/plan.md)
 

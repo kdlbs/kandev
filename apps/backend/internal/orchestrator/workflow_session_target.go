@@ -165,6 +165,8 @@ func (s *Service) resolveBoundSourceWorkflowSession(
 }
 
 func (s *Service) persistWorkflowSessionRoute(ctx context.Context, taskID string, route models.WorkflowSessionRoute) error {
+	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
 	setter, ok := s.repo.(taskMetadataKeySetter)
 	if !ok {
 		return nil
@@ -233,9 +235,12 @@ func (s *Service) promoteWorkflowSessionRoute(
 	destination *models.TaskSession,
 	route *models.WorkflowSessionRoute,
 ) (bool, error) {
+	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
 	if destination == nil {
 		return false, nil
 	}
+	destinationParkingStamp := s.captureWorkflowParkingStamp(ctx, destination.ID)
 	if promoter, ok := s.repo.(workflowSessionRoutePromoter); ok && route != nil {
 		committed := *route
 		committed.DestinationID = destination.ID
@@ -244,6 +249,7 @@ func (s *Service) promoteWorkflowSessionRoute(
 		if err != nil || !promoted {
 			return promoted, err
 		}
+		s.clearWorkflowParkingForExplicitExecution(ctx, destination.ID, destinationParkingStamp)
 		s.publishPrimarySessionUpdate(ctx, taskID, destination.ID)
 		return true, nil
 	}
@@ -259,8 +265,36 @@ func (s *Service) promoteWorkflowSessionRoute(
 			return false, err
 		}
 	}
+	// Promotion is the workflow's explicit selection of this destination,
+	// whether the compatibility path has a route object or only a primary
+	// session. Clear the selected destination's current parking projection;
+	// the stamped stop-intent tombstone remains for delayed callbacks.
+	s.clearWorkflowParkingForExplicitExecution(ctx, destination.ID, destinationParkingStamp)
 	s.publishPrimarySessionUpdate(ctx, taskID, destination.ID)
 	return true, nil
+}
+
+func (s *Service) clearWorkflowParkingForExplicitExecution(
+	ctx context.Context,
+	destinationID string,
+	authorizedStamp string,
+) {
+	if destinationID == "" || authorizedStamp == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, destinationID)
+	if err != nil || session == nil {
+		return
+	}
+	parking, ok := models.LoadWorkflowParking(session.Metadata)
+	if !ok || parking.Stamp != authorizedStamp {
+		return
+	}
+	// The marker was captured from the selected destination before the route
+	// commit. Its old route identity is expected to differ when a workflow
+	// returns to a parked session, so the authorization is the exact stamp, not
+	// the newly committed route.
+	s.clearWorkflowParkingMarker(ctx, destinationID, authorizedStamp)
 }
 
 func workflowSessionRouteMatchesStep(route *models.WorkflowSessionRoute, step *wfmodels.WorkflowStep, profileID string) bool {
@@ -282,6 +316,16 @@ func (s *Service) reuseRecordedWorkflowSession(
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 ) (*models.TaskSession, bool, error) {
 	if recordedRoute.Phase == workflowSessionRouteCommitted {
+		// A committed route can be replayed after the selected session was
+		// parked (for example after a restart). Reusing that exact destination
+		// is an authorized workflow activation, so clear only its current
+		// parking projection. The execution stop-intent tombstone remains the
+		// fence for any delayed callback from the earlier park.
+		s.clearWorkflowParkingForExplicitExecution(
+			ctx,
+			recordedSession.ID,
+			s.captureWorkflowParkingStamp(ctx, recordedSession.ID),
+		)
 		return recordedSession, recordedSession.ID != currentSession.ID, nil
 	}
 	if recordedSession.ID == currentSession.ID {
@@ -351,7 +395,7 @@ func (s *Service) workflowEntryIdentity(ctx context.Context, taskID string, entr
 			return "legacy:" + task.UpdatedAt.UTC().Format(time.RFC3339Nano)
 		}
 	}
-	return "legacy:unknown"
+	return legacyWorkflowEntryIdentity
 }
 
 func (s *Service) reuseResolvedWorkflowSession(
@@ -420,6 +464,7 @@ func (s *Service) prepareExplicitWorkflowSession(
 	baseRoute := models.WorkflowSessionRoute{
 		OperationID:       operationID,
 		DestinationStepID: step.ID,
+		EntryIdentity:     entryIdentity,
 		TargetKind:        string(step.SessionTarget.Kind),
 		TargetStepID:      step.SessionTarget.StepID,
 		AgentProfileID:    targetProfile,

@@ -2,13 +2,32 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const cardRenderCounts = vi.hoisted(() => new Map<string, number>());
+const virtualizerState = vi.hoisted(() => ({
+  measurementsCache: [] as Array<{ index: number; key: string; size: number }>,
+  elementsCache: new Map<string, HTMLDivElement>(),
+  measureElement: vi.fn((node: HTMLDivElement | null) => {
+    if (!node) return;
+    if (node.dataset.taskId === "task-a") {
+      virtualizerState.measurementsCache[0]!.size = 180;
+    }
+  }),
+}));
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
     getTotalSize: () => count * 100,
     getVirtualItems: () =>
-      Array.from({ length: count }, (_, index) => ({ index, start: index * 100 })),
-    measureElement: vi.fn(),
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        key: `task-${index}`,
+        size: 100,
+        start: index * 100,
+      })),
+    measurementsCache: virtualizerState.measurementsCache,
+    elementsCache: virtualizerState.elementsCache,
+    measureElement: virtualizerState.measureElement,
+    resizeItem: vi.fn(),
+    measure: vi.fn(),
   }),
 }));
 
@@ -52,13 +71,16 @@ function TaskList({
   tasks,
   deletingTaskId,
   archivingTaskId,
+  onContentHeightChange,
 }: {
   tasks: Task[];
   deletingTaskId?: string;
   archivingTaskId?: string;
+  onContentHeightChange?: (height: number, element: HTMLDivElement) => void;
 }) {
   return (
     <VirtualizedColumnTaskList
+      onContentHeightChange={onContentHeightChange}
       orderedTasks={tasks}
       queuedStartIndex={tasks.length}
       queuedCount={0}
@@ -75,10 +97,61 @@ function TaskList({
   );
 }
 
-beforeEach(() => cardRenderCounts.clear());
+beforeEach(() => {
+  cardRenderCounts.clear();
+  virtualizerState.measurementsCache = [];
+  virtualizerState.elementsCache.clear();
+  virtualizerState.measureElement.mockClear();
+});
 afterEach(cleanup);
 
 describe("VirtualizedColumnTaskList card render isolation", () => {
+  it("reports only the first six logical rows for compact lane sizing", () => {
+    const report = vi.fn();
+    const tasks = Array.from({ length: 8 }, (_, index) => ({
+      ...TASK_A,
+      id: `task-${index}`,
+      title: `Task ${index}`,
+      position: index,
+    }));
+
+    render(<TaskList tasks={tasks} onContentHeightChange={report} />);
+
+    expect(report).toHaveBeenLastCalledWith(600, expect.any(HTMLDivElement));
+  });
+
+  it("invalidates an offscreen prefix row and remeasures it when it returns", () => {
+    virtualizerState.measurementsCache = [
+      { index: 0, key: TASK_A.id, size: 300 },
+      { index: 1, key: TASK_B.id, size: 100 },
+    ];
+    const report = vi.fn();
+    const view = render(<TaskList tasks={[TASK_A, TASK_B]} onContentHeightChange={report} />);
+
+    expect(report).toHaveBeenLastCalledWith(400, expect.any(HTMLDivElement));
+
+    view.rerender(
+      <TaskList
+        tasks={[{ ...TASK_A, title: "Updated prefix task" }, TASK_B]}
+        onContentHeightChange={report}
+      />,
+    );
+
+    expect(report).toHaveBeenLastCalledWith(192, expect.any(HTMLDivElement));
+
+    const returnedRow = document.createElement("div");
+    returnedRow.dataset.taskId = TASK_A.id;
+    virtualizerState.elementsCache.set(TASK_A.id, returnedRow);
+    view.rerender(
+      <TaskList
+        tasks={[{ ...TASK_A, title: "Updated prefix task" }, TASK_B]}
+        onContentHeightChange={report}
+      />,
+    );
+
+    expect(report).toHaveBeenLastCalledWith(276, expect.any(HTMLDivElement));
+  });
+
   it("does not rerender an unchanged card after a sibling task updates", () => {
     const view = render(<TaskList tasks={[TASK_A, TASK_B]} />);
 

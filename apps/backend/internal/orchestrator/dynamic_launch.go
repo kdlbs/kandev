@@ -404,6 +404,11 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	options executor.LaunchOptions,
 	continuationInput *dynamicruntime.ContinuationInput,
 ) (*executor.TaskExecution, error) {
+	if task != nil {
+		if err := s.validateContextCeilingEntry(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
 	if s.profileExecutionResolver == nil {
 		return s.launchConcretePreparedSession(ctx, task, sessionID, options)
 	}
@@ -438,6 +443,11 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	} else {
 		selected.Continuation = *continuationInput
 	}
+	if task != nil {
+		if err := s.validateContextCeilingEntry(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
 	result, err := conductor.LaunchSelected(ctx, selected)
 	if err != nil {
 		return nil, err
@@ -457,6 +467,11 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	if task != nil {
+		if err := s.validateContextCeilingEntry(ctx, task.ID); err != nil {
+			return nil, err
+		}
+	}
 	if options.StartAgent && (options.Prompt != "" || len(options.Attachments) > 0) {
 		s.beginInitialPromptAttempt(sessionID, false)
 	}
@@ -1064,6 +1079,7 @@ const (
 	dynamicRelaunchFailed dynamicRelaunchOutcome = iota
 	dynamicRelaunchDeferred
 	dynamicRelaunchSucceeded
+	dynamicRelaunchSuperseded
 )
 
 // relaunchDynamicTaskAfterFailure preserves the historical boolean API for
@@ -1084,7 +1100,27 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcome(
 	executionProfileID string,
 	origin launchOrigin,
 ) (outcome dynamicRelaunchOutcome) {
-	seam5Res, deferredLaunch, err := s.admitOrDeferSeam5(ctx, data.TaskID, origin, seam5DynamicRelaunchPayload(data, executionProfileID))
+	return s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, executionProfileID, origin, ceilingEntryBindingFromContext(ctx))
+}
+
+//nolint:cyclop // Dynamic relaunch keeps admission, failure recovery, and generation fencing in one boundary.
+func (s *Service) relaunchDynamicTaskAfterFailureOutcomeWithBinding(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+	origin launchOrigin,
+	binding *models.CeilingWorkflowEntryBinding,
+) (outcome dynamicRelaunchOutcome) {
+	if binding != nil {
+		if err := s.validateClaimedCeilingBinding(ctx, data.TaskID, binding); err != nil {
+			if errors.Is(err, ErrCeilingLaunchSuperseded) {
+				return dynamicRelaunchSuperseded
+			}
+			return dynamicRelaunchFailed
+		}
+		ctx = withCeilingEntryBinding(ctx, binding)
+	}
+	seam5Res, deferredLaunch, err := s.admitOrDeferSeam5WithBinding(ctx, data.TaskID, origin, seam5DynamicRelaunchPayloadWithBinding(data, executionProfileID, binding), binding)
 	if err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the dynamic relaunch could not be admitted or recorded",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
@@ -1121,6 +1157,14 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcome(
 	task, session, prompt, ok := s.prepareDynamicRelaunchAfterFailure(ctx, data)
 	if !ok {
 		return dynamicRelaunchFailed
+	}
+	if binding != nil {
+		if err := s.validateClaimedCeilingBinding(ctx, data.TaskID, binding); err != nil {
+			if errors.Is(err, ErrCeilingLaunchSuperseded) {
+				return dynamicRelaunchSuperseded
+			}
+			return dynamicRelaunchFailed
+		}
 	}
 	return s.launchPreparedDynamicRelaunch(ctx, data, task, session, prompt, executionProfileID, seam5Res)
 }

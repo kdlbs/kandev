@@ -27,6 +27,18 @@ import { seedSettledSessionBoundaries } from "@/lib/state/slices/session/turn-ac
 import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import { normalizeThreadViews } from "./slices/ui/thread-view-builtins";
+import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
+
+function mergeHydratedSettingsAgents(
+  incoming: HydrationState["settingsAgents"],
+): DefaultState["settingsAgents"] {
+  if (!incoming) return defaultState.settingsAgents;
+  return {
+    ...defaultState.settingsAgents,
+    ...incoming,
+    items: incoming.items.map(normalizeAgentProfiles),
+  };
+}
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -456,7 +468,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     repositoryBranches: { ...defaultState.repositoryBranches, ...initialState.repositoryBranches },
     repositoryScripts: { ...defaultState.repositoryScripts, ...initialState.repositoryScripts },
     executors: { ...defaultState.executors, ...initialState.executors },
-    settingsAgents: { ...defaultState.settingsAgents, ...initialState.settingsAgents },
+    settingsAgents: mergeHydratedSettingsAgents(initialState.settingsAgents),
     agentDiscovery: { ...defaultState.agentDiscovery, ...initialState.agentDiscovery },
     availableAgents: { ...defaultState.availableAgents, ...initialState.availableAgents },
     agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },

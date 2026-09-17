@@ -40,6 +40,9 @@ const (
 	// the ceiling (AC-15d): the record is retained for a later pass and the
 	// failure is logged, since — unlike a refusal — nothing else observes it.
 	ceilingReplayFailed
+	// ceilingReplaySuperseded is a terminal disposition for a claimed launch
+	// whose workflow entry or destination changed before dispatch.
+	ceilingReplaySuperseded
 )
 
 // drainDeferredCeilingLaunches is AC-15c's pass driver: one sweep tick walks
@@ -62,13 +65,80 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	}
 }
 
+// reconcileDeferredCeilingTaskState repairs the state written by older
+// versions that left a valid, idle queued destination in REVIEW. It only moves
+// REVIEW to SCHEDULING after authoritative queue and session checks; a read
+// failure leaves the existing state untouched.
+//
+//nolint:cyclop // State repair validates queue ownership, route identity, and a final compare-and-set.
+func (s *Service) reconcileDeferredCeilingTaskState(
+	ctx context.Context, task *models.Task, deferral models.CeilingDeferral,
+) {
+	if task == nil || task.State != v1.TaskStateReview {
+		return
+	}
+	ctx, release := s.lockCeilingEntryAdmission(ctx, task.ID)
+	defer release()
+	observedDeferral, valid, err := s.readValidCeilingDeferredLaunch(ctx, task)
+	if err != nil || !valid {
+		return
+	}
+	if equivalent, compareErr := sameCeilingDeferralIdentity(observedDeferral, deferral); compareErr != nil || !equivalent {
+		return
+	}
+	if blockingSessionID, ok := s.otherWorkingSessionID(ctx, task.ID, ""); !ok || blockingSessionID != "" {
+		return
+	}
+	// The queue record and task route are independently mutable. Re-read both
+	// immediately before the state CAS so an older sweep snapshot cannot repair
+	// REVIEW after a successor launch replaced the record.
+	latestTask, taskErr := s.repo.GetTask(ctx, task.ID)
+	if taskErr != nil || latestTask == nil || latestTask.State != v1.TaskStateReview ||
+		latestTask.IsFromOffice || taskArchived(latestTask) {
+		return
+	}
+	current, currentValid, readErr := s.readValidCeilingDeferredLaunch(ctx, latestTask)
+	if readErr != nil || !currentValid {
+		return
+	}
+	equivalent, compareErr := sameCeilingDeferralIdentity(current, observedDeferral)
+	if compareErr != nil || !equivalent {
+		return
+	}
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		ctx, task.ID, v1.TaskStateScheduling, []v1.TaskState{v1.TaskStateReview},
+	)
+	if err != nil {
+		s.logger.Zap().Warn("could not repair queued task state",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return
+	}
+	if updated {
+		s.logger.Zap().Info("repaired queued task state from REVIEW to SCHEDULING",
+			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)))
+		task.State = v1.TaskStateScheduling
+	}
+}
+
 // retryOneDeferredCeilingLaunch reads one task's deferral, evaluates AC-17b's
 // drop reasons, and otherwise dispatches to the kind's own replay.
 func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *models.Task) {
 	if task == nil || task.ID == "" {
 		return
 	}
-	raw, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	// The lister snapshot is only an index. Reload both task and record before
+	// admission so a later workflow entry cannot inherit the old destination.
+	freshTask, err := s.repo.GetTask(ctx, task.ID)
+	if err != nil || freshTask == nil {
+		return
+	}
+	task = freshTask
+	raw, _, err := s.repo.GetTaskDeferredLaunch(ctx, task.ID)
+	if err != nil {
+		s.logger.Zap().Warn("could not read deferred launch for retry sweep",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return
+	}
 	deferral, err := models.ReadCeilingDeferral(raw)
 	if err != nil {
 		var unreplayable *models.UnreplayableCeilingRecordError
@@ -81,25 +151,77 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 		// task's fault; leave it for the next tick to see the current state.
 		return
 	}
+	deferral, err = s.enrichCeilingDeferralBinding(ctx, task, deferral)
+	if err != nil {
+		if errors.Is(err, ErrCeilingLaunchSuperseded) {
+			// A successor record won while this legacy record was being enriched.
+			// Leave the successor untouched for the next sweep; this pass must not
+			// retarget the old launch to it.
+			return
+		}
+		s.logger.Zap().Warn("could not bind deferred workflow entry for retry sweep",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return
+	}
+
+	// A valid queued destination repairs the legacy REVIEW projection before a
+	// replay attempt. The repair itself is fail-closed on queue/route reads.
+	s.reconcileDeferredCeilingTaskState(ctx, task, deferral)
 
 	if reasonCode, detail, drop := s.evaluateCeilingDropReasons(ctx, task, deferral); drop {
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral, reasonCode, detail)
 		return
 	}
 
-	switch s.replayCeilingDeferral(ctx, task, deferral) {
+	claim, found, claimErr := s.claimCeilingDeferredLaunch(
+		ctx, task.ID, sessionIDFromCeilingPayload(deferral), ceilingClaimOwnerReplay,
+	)
+	if claimErr != nil {
+		s.logger.Zap().Warn("could not claim deferred launch for retry sweep",
+			zap.String("task_id", task.ID), zap.Error(claimErr))
+		return
+	}
+	if !found || claim == nil {
+		// No matching record, or Send Now already owns it.
+		return
+	}
+	deferral = claim.deferral
+
+	defer claim.releaseIfHeld(ctx)
+	currentTask, currentErr := s.repo.GetTask(ctx, task.ID)
+	if currentErr != nil || currentTask == nil {
+		return
+	}
+	if disposition, detail, _ := s.validateCeilingEntry(ctx, currentTask, claim.deferral); disposition != ceilingEntryValid {
+		if disposition == ceilingEntrySuperseded {
+			s.dropCeilingDeferral(ctx, currentTask, sessionIDFromCeilingPayload(claim.deferral), claim.deferral,
+				ceilingReasonSuperseded, detail)
+		}
+		return
+	}
+
+	switch s.replayCeilingDeferral(ctx, currentTask, deferral) {
 	case ceilingReplaySucceeded:
-		s.clearCeilingDeferredRecord(ctx, task.ID)
+		claim.settle(ctx)
 		s.publishTaskUpdatedByID(ctx, task.ID)
+	case ceilingReplaySuperseded:
+		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
+			ceilingReasonSuperseded, "workflow destination changed before dispatch")
 	case ceilingReplayFailed:
 		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason; will retry on a later sweep",
 			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)))
 	case ceilingReplayStillDeferred:
+		// Remove the in-flight claim after the replay gate has restored the
+		// durable deferral. The next sweep must be able to own it again.
+		claim.releaseIfHeld(ctx)
 		// Left exactly as stored: the replay's own admission gate already
 		// re-persisted this same record via deferCeilingRefusal's
 		// equivalence check (AC-32/AC-55a). AC-49g: retry the card note if
 		// an earlier attempt to write it failed.
 		s.attemptCeilingSurfaceWrite(ctx, task.ID)
+		// Refresh the task projection so the queue keeps the latest capacity
+		// observation while its durable recipient and queue time remain stable.
+		s.publishTaskUpdatedByID(ctx, task.ID)
 	}
 }
 
@@ -107,6 +229,11 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 // names, for the six kinds that carry one. CeilingLaunchStart carries none:
 // no session exists yet at seam 1.
 func sessionIDFromCeilingPayload(deferral models.CeilingDeferral) string {
+	if binding, present, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload); err == nil && present {
+		if binding.DestinationSessionID != "" {
+			return binding.DestinationSessionID
+		}
+	}
 	if deferral.Kind == models.CeilingLaunchStart {
 		return ""
 	}
@@ -148,6 +275,17 @@ func (s *Service) evaluateCeilingDropReasons(
 			return ceilingReasonDroppedLaunchGateDeclined, "terminal PR auto-start gate declined the launch", true
 		}
 	}
+	if disposition, detail, validationErr := s.validateCeilingEntry(ctx, task, deferral); validationErr != nil {
+		// A route or step read error is uncertainty, not proof that the queued
+		// entry is obsolete. Preserve the record for a later sweep.
+		return "", "", false
+	} else if disposition == ceilingEntrySuperseded {
+		return ceilingReasonSuperseded, detail, true
+	} else if disposition == ceilingEntryUnavailable {
+		// Read uncertainty is not a terminal disposition. Keep the durable
+		// record for a later pass and leave the current task state untouched.
+		return "", "", false
+	}
 	return "", "", false
 }
 
@@ -178,20 +316,41 @@ func (s *Service) dropCeilingDeferral(
 		}
 	}
 
-	s.clearCeilingDeferredRecord(ctx, task.ID)
+	s.clearCeilingDeferredRecord(ctx, task.ID, deferral)
 	s.publishTaskUpdatedByID(ctx, task.ID)
 }
 
 // clearCeilingDeferredRecord is AC-17's "clear the whole record" disposition,
 // applied on both a successful replay and a drop, under the same
-// compare-and-set retry loop deferCeilingRefusal itself uses.
-func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string) {
+// compare-and-set retry loop deferCeilingRefusal itself uses. When an expected
+// deferral is supplied, the clear is also bound to that exact record. A stale
+// replay must not remove a newer successor that won the intervening CAS.
+func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string, expected ...models.CeilingDeferral) {
+	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
 	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
 		existingRaw, prior, err := s.repo.GetTaskDeferredLaunch(ctx, taskID)
 		if err != nil {
 			s.logger.Zap().Warn("could not read deferred launch while clearing a ceiling record",
 				zap.String("task_id", taskID), zap.Error(err))
 			return
+		}
+		if len(expected) > 0 {
+			current, readErr := models.ReadCeilingDeferral(existingRaw)
+			if readErr != nil {
+				return
+			}
+			equivalent, compareErr := sameCeilingDeferralIdentity(current, expected[0])
+			if compareErr != nil {
+				s.logger.Zap().Warn("could not compare deferred launch while clearing a ceiling record",
+					zap.String("task_id", taskID), zap.Error(compareErr))
+				return
+			}
+			if !equivalent {
+				s.logger.Zap().Info("leaving a newer ceiling deferred record in place after stale replay",
+					zap.String("task_id", taskID))
+				return
+			}
 		}
 		record := stripCeilingRecordKeys(existingRaw)
 		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, record)
@@ -210,6 +369,17 @@ func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string)
 	}
 	s.logger.Zap().Warn("could not clear a ceiling deferred record after repeated compare-and-set losses",
 		zap.String("task_id", taskID))
+}
+
+// sameCeilingDeferralIdentity compares the stable identity of one queued
+// launch. Capacity observations and surface bookkeeping may change while a
+// record waits, but a replacement workflow entry must never inherit the state
+// repair or dispatch of its predecessor.
+func sameCeilingDeferralIdentity(a, b models.CeilingDeferral) (bool, error) {
+	if a.Origin != b.Origin || !a.QueuedAt.Equal(b.QueuedAt) {
+		return false, nil
+	}
+	return models.CeilingDeferralsEquivalent(a, b)
 }
 
 // stripCeilingRecordKeys removes every ceiling_-prefixed key from a
@@ -238,21 +408,45 @@ func stripCeilingRecordKeys(existing interface{}) map[string]interface{} {
 // deferral's kind. The closed set is exhaustive; a kind outside it was
 // already rejected as unreplayable by ReadCeilingDeferral before this point.
 func (s *Service) replayCeilingDeferral(ctx context.Context, task *models.Task, deferral models.CeilingDeferral) ceilingReplayOutcome {
+	if task == nil || task.ID == "" {
+		return ceilingReplayFailed
+	}
+	ctx, release := s.lockCeilingEntryAdmission(ctx, task.ID)
+	defer release()
+	current, err := s.repo.GetTask(ctx, task.ID)
+	if err != nil || current == nil {
+		return ceilingReplayFailed
+	}
+	disposition, _, validationErr := s.validateCeilingEntry(ctx, current, deferral)
+	if validationErr != nil {
+		return ceilingReplayFailed
+	}
+	if disposition == ceilingEntrySuperseded {
+		return ceilingReplaySuperseded
+	}
+	if disposition == ceilingEntryUnavailable {
+		return ceilingReplayFailed
+	}
+	replayCtx := ctx
+	if binding, present, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload); bindingErr == nil && present {
+		replayCtx = withCeilingEntryBinding(ctx, &binding)
+	}
+	replayCtx = withCeilingEntryKind(replayCtx, deferral.Kind)
 	switch deferral.Kind {
 	case models.CeilingLaunchStart:
-		return s.replayCeilingLaunchStart(ctx, task, deferral.Payload)
+		return s.replayCeilingLaunchStart(replayCtx, current, deferral.Payload)
 	case models.CeilingLaunchStartCreated:
-		return s.replayCeilingLaunchStartCreated(ctx, task, deferral.Payload)
+		return s.replayCeilingLaunchStartCreated(replayCtx, current, deferral.Payload)
 	case models.CeilingLaunchPromptEnsure:
-		return s.replayCeilingLaunchPromptEnsure(ctx, task, deferral.Payload)
+		return s.replayCeilingLaunchPromptEnsure(replayCtx, current, deferral.Payload)
 	case models.CeilingLaunchWorkflowStepEnsure:
-		return s.replayCeilingLaunchWorkflowStepEnsure(ctx, task, deferral.Payload)
+		return s.replayCeilingLaunchWorkflowStepEnsure(replayCtx, current, deferral.Payload)
 	case models.CeilingLaunchQueueDrainEnsure:
-		return s.replayCeilingLaunchQueueDrainEnsure(ctx, task, deferral.Payload)
+		return s.replayCeilingLaunchQueueDrainEnsure(replayCtx, current, deferral.Payload)
 	case models.CeilingLaunchResume:
-		return s.replayCeilingLaunchResume(ctx, task, deferral.Payload)
+		return s.replayCeilingLaunchResume(replayCtx, current, deferral.Payload)
 	case models.CeilingLaunchDynamicRelaunch:
-		return s.replayCeilingLaunchDynamicRelaunch(ctx, task, deferral.Payload)
+		return s.replayCeilingLaunchDynamicRelaunch(replayCtx, current, deferral.Payload)
 	default:
 		return ceilingReplayFailed
 	}
@@ -335,6 +529,10 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	decodeCeilingPayloadField(payload["additional_skill_slugs"], &additionalSkillSlugs)
 	var entryOptions *workflowmove.EntryOptions
 	decodeCeilingPayloadField(payload["entry_options"], &entryOptions)
+	var entryBinding *models.CeilingWorkflowEntryBinding
+	if binding, present, err := models.ReadCeilingWorkflowEntryBinding(payload); err == nil && present {
+		entryBinding = &binding
+	}
 
 	env = s.remintCeilingLaunchCredentials(ctx, task.ID, env)
 
@@ -350,7 +548,8 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		// an explicit automatic Origin override, and re-deriving from
 		// auto_start alone would replay it as a manual override that bypasses
 		// the ceiling.
-		Origin: launchOrigin(stringField(payload, "origin")),
+		Origin:              launchOrigin(stringField(payload, "origin")),
+		ceilingEntryBinding: entryBinding,
 	}
 	if spawnRaw, ok := payload["spawn_origin"].(map[string]interface{}); ok {
 		opts.SpawnOrigin = &SpawnOrigin{
@@ -390,6 +589,10 @@ func (s *Service) replayCeilingLaunchStartCreated(ctx context.Context, task *mod
 	decodeCeilingPayloadField(payload[metaKeyAttachments], &attachments)
 	var references []v1.EntityReference
 	decodeCeilingPayloadField(payload["references"], &references)
+	var entryBinding *models.CeilingWorkflowEntryBinding
+	if binding, present, err := models.ReadCeilingWorkflowEntryBinding(payload); err == nil && present {
+		entryBinding = &binding
+	}
 
 	options := startCreatedSessionOptions{
 		skipTaskDescriptionFallback: boolField(payload, "skip_task_description_fallback"),
@@ -399,6 +602,7 @@ func (s *Service) replayCeilingLaunchStartCreated(ctx context.Context, task *mod
 		includeCanvasGuidance:       boolField(payload, "include_canvas_guidance"),
 		promptReferencesPrepared:    boolField(payload, "prompt_references_prepared"),
 		preserveDirectPrompt:        boolField(payload, "preserve_direct_prompt"),
+		ceilingEntryBinding:         entryBinding,
 	}
 
 	execution, err := s.startCreatedSession(
@@ -435,6 +639,9 @@ func (s *Service) replayCeilingLaunchPromptEnsure(ctx context.Context, task *mod
 		fallbackLaunchPrompt:      stringField(payload, "fallback_launch_prompt"),
 		fallbackRetryPrompt:       stringField(payload, "fallback_retry_prompt"),
 	}
+	if binding, present, bindingErr := models.ReadCeilingWorkflowEntryBinding(payload); bindingErr == nil && present {
+		options.ceilingEntryBinding = &binding
+	}
 
 	_, err := s.promptTask(
 		ctx, task.ID,
@@ -449,6 +656,9 @@ func (s *Service) replayCeilingLaunchPromptEnsure(ctx context.Context, task *mod
 	)
 	if err == nil {
 		return ceilingReplaySucceeded
+	}
+	if errors.Is(err, ErrCeilingLaunchSuperseded) {
+		return ceilingReplaySuperseded
 	}
 	if _, ok := isSeam3Refusal(err); ok {
 		return ceilingReplayStillDeferred
@@ -473,6 +683,8 @@ func (s *Service) replayCeilingLaunchWorkflowStepEnsure(ctx context.Context, tas
 	switch {
 	case err == nil:
 		return ceilingReplaySucceeded
+	case errors.Is(err, ErrCeilingLaunchSuperseded):
+		return ceilingReplaySuperseded
 	case errors.Is(err, errSeam3WorkflowStepEnsureDeferred):
 		return ceilingReplayStillDeferred
 	default:
@@ -486,7 +698,15 @@ func (s *Service) replayCeilingLaunchWorkflowStepEnsure(ctx context.Context, tas
 // itself uses.
 func (s *Service) replayCeilingLaunchQueueDrainEnsure(ctx context.Context, task *models.Task, payload map[string]interface{}) ceilingReplayOutcome {
 	sessionID := stringField(payload, metaKeySessionID)
-	s.tryEnsureExecution(ctx, sessionID, seam3CallShapeQueueDrain, launchOriginAutomatic, stringField(payload, "queued_message_id"))
+	err := s.tryEnsureExecutionWithBinding(ctx, sessionID, seam3CallShapeQueueDrain, launchOriginAutomatic, stringField(payload, "queued_message_id"), ceilingEntryBindingFromContext(ctx))
+	if errors.Is(err, ErrCeilingLaunchSuperseded) {
+		return ceilingReplaySuperseded
+	}
+	if err != nil {
+		if _, ok := isSeam3Refusal(err); !ok {
+			return ceilingReplayFailed
+		}
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -522,11 +742,13 @@ func (s *Service) replayCeilingLaunchDynamicRelaunch(ctx context.Context, task *
 		AgentExecutionID: stringField(payload, "agent_execution_id"),
 		AgentProfileID:   stringField(payload, metaKeyAgentProfileID),
 	}
-	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, stringField(payload, "execution_profile_id"), launchOriginAutomatic) {
+	switch s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, stringField(payload, "execution_profile_id"), launchOriginAutomatic, ceilingEntryBindingFromContext(ctx)) {
 	case dynamicRelaunchSucceeded:
 		return ceilingReplaySucceeded
 	case dynamicRelaunchDeferred:
 		return ceilingReplayStillDeferred
+	case dynamicRelaunchSuperseded:
+		return ceilingReplaySuperseded
 	default:
 		return ceilingReplayFailed
 	}
@@ -540,6 +762,8 @@ func (s *Service) replayCeilingLaunchDynamicRelaunch(ctx context.Context, task *
 // else is a non-ceiling failure.
 func ceilingReplayOutcomeFromExecution(execution *executor.TaskExecution, err error) ceilingReplayOutcome {
 	switch {
+	case errors.Is(err, ErrCeilingLaunchSuperseded):
+		return ceilingReplaySuperseded
 	case err != nil:
 		return ceilingReplayFailed
 	case execution == nil:

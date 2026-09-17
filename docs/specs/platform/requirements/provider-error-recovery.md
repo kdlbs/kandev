@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-08-08
-updated: 2026-09-16
+updated: 2026-09-17
 owners:
   - Kandev
 ---
@@ -62,6 +62,7 @@ duplicate transcript rows or stale recovery context.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.26:** When a supported adapter receives exact structured evidence that the active provider abandoned the current response attempt and will retry it internally, Kandev shall accept a response-attempt retry boundary within that prompt generation. One prompt generation may contain multiple sequential boundaries; each boundary applies only to assistant and thinking records created after the preceding boundary or commit boundary. Malformed evidence, a false retry flag, an unsupported adapter, a zero or stale prompt generation, and terminal provider errors shall not create that boundary or remove transcript content.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.27:** After Kandev accepts a response-attempt retry boundary, it shall durably remove assistant and thinking messages created by the abandoned attempt. Connected desktop and mobile chats shall remove those messages before later replacement output, and a reload or another viewer shall see only the replacement response.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.28:** Response-attempt cleanup shall preserve messages, tool activity, permission state, and turns committed before the active provider attempt. A repeated retry boundary with no new output shall be a no-op, and abandoned assistant text that has not crossed a history boundary shall not enter later fallback resume context. The boundary shall not erase prompt-level output or effect evidence used to decide whether a separate Kandev-owned replay is safe.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.29:** The primary launch prompt shall receive credential-only, unbounded redaction every attempt including attempt 0, never the diagnostic tier reserved for provider output and `FailureReason`.
 
 ## Out of scope
 

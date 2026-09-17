@@ -61,3 +61,15 @@ it.each(["", "-1", "5001", "0.5", "abc"])("rejects invalid delay draft %s", (val
     buildAppearanceUserSettingsPatch({ ...saved, sidebarHoverDelayMs: value }, saved),
   ).toThrow();
 });
+
+// @covers AC-UI-CHAT-MOTION-002.2
+it("tracks local chat motion edits through revision and save rebasing", () => {
+  const saved = {
+    ...createAppearanceSavedState("dark", "flat", true, defaultState.userSettings),
+    chatAnimationsEnabled: true,
+  };
+  const draft = { ...saved, chatAnimationsEnabled: false };
+  expect(appearanceRevision(draft)).not.toBe(appearanceRevision(saved));
+  expect(buildAppearanceUserSettingsPatch(draft, saved)).toEqual({});
+  expect(rebaseAppearanceDraft(draft, saved, saved)).toEqual(draft);
+});

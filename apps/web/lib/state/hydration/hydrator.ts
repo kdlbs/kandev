@@ -27,6 +27,7 @@ import {
   readMcpAttachmentHistory,
   shouldReplaceMcpAttachmentHistory,
 } from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
+import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
@@ -170,7 +171,10 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   const preserveLiveAgentProfiles =
     (state.agentProfiles?.version ?? 0) < draft.agentProfiles.version;
   if (state.settingsAgents && !preserveLiveAgentProfiles) {
-    deepMerge(draft.settingsAgents, state.settingsAgents);
+    deepMerge(draft.settingsAgents, {
+      ...state.settingsAgents,
+      items: state.settingsAgents.items.map(normalizeAgentProfiles),
+    });
   }
   if (state.agentProfiles) {
     // Preserve a newer profile mutation delivered over WebSocket while this
