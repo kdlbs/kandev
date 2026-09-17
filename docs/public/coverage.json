@@ -260,11 +260,19 @@
       ],
       "sources": [
         "apps/backend/internal/mcp/handlers/review.go",
+        "apps/backend/internal/mcp/handlers/task_plan_edit.go",
+        "apps/backend/internal/mcp/handlers/task_plan_recovery.go",
+        "apps/backend/internal/task/service/plan_exact_edit.go",
+        "apps/backend/internal/task/service/plan_revision_recovery.go",
         "apps/web/components/review/review-dialog.tsx",
         "apps/web/components/review/walkthrough-overlay.tsx"
       ],
       "tests": [
         "apps/backend/internal/mcp/handlers/review_test.go",
+        "apps/backend/internal/mcp/handlers/task_plan_safe_edits_test.go",
+        "apps/backend/internal/mcp/server/task_plan_safe_edits_integration_test.go",
+        "apps/backend/internal/task/service/plan_exact_edit_test.go",
+        "apps/backend/internal/task/service/plan_agent_recovery_test.go",
         "apps/web/components/review/review-dialog.build-files.test.ts",
         "apps/web/components/review/walkthrough-overlay.test.tsx"
       ],
@@ -272,9 +280,13 @@
         "create_task_plan_kandev",
         "delete_task_plan_kandev",
         "delete_walkthrough_kandev",
+        "edit_task_plan_kandev",
         "get_task_plan_kandev",
+        "get_task_plan_revision_kandev",
         "get_walkthrough_kandev",
+        "list_task_plan_revisions_kandev",
         "publish_review_findings_kandev",
+        "restore_task_plan_revision_kandev",
         "show_walkthrough_kandev",
         "update_task_plan_kandev"
       ]

@@ -383,6 +383,8 @@ Literal values remain in profile configuration. A secret reference avoids copyin
 
 In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, the runtime selects the first allow-once or allow-always response without waiting. If the agent supplies no allow response, Kandev selects its first response even when that response is not approval; with no responses, it cancels.
 
+Claude ACP also has a narrower built-in rule. When the agent uses the host-injected `kandev` MCP server, Kandev automatically selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled. This covers every tool on that server, including task creation, task deletion, and plan changes. It is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, and ambiguous requests keep the normal permission flow.
+
 An external MCP client can also list live pending requests for an authorized task and submit one
 exact option originally offered by the agent. The request-generation ID prevents an old approval
 from targeting a replacement prompt that reused a provider pending ID. Kandev records who selected

@@ -83,8 +83,8 @@ func (e StoreInitErrors) CombinedError() error {
 
 // Provide builds the plugin service and preserves the historical provider
 // contract by returning the aggregate of required store errors.
-func Provide(ctx context.Context, cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error) {
-	svc, cleanup, storeErrors := ProvideWithStoreErrors(ctx, cfg, dbPool, secrets, eventBus, log)
+func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error) {
+	svc, cleanup, storeErrors := ProvideWithStoreErrors(cfg, dbPool, secrets, eventBus, log)
 	return svc, cleanup, storeErrors.CombinedError()
 }
 
@@ -92,7 +92,7 @@ func Provide(ctx context.Context, cfg *config.Config, dbPool *db.Pool, secrets S
 // reports each required SQL store independently. The backend records these
 // results against the required-store tracker, while filesystem and runtime
 // capabilities remain independently degradable.
-func ProvideWithStoreErrors(ctx context.Context, cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, StoreInitErrors) {
+func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, StoreInitErrors) {
 	dir := filepath.Join(cfg.ResolvedHomeDir(), pluginsSubdir)
 	pluginStore := store.NewFSStore(dir)
 	pluginStore.SetLogger(log)
@@ -118,13 +118,8 @@ func ProvideWithStoreErrors(ctx context.Context, cfg *config.Config, dbPool *db.
 
 	configureWebAppStorage(cfg, svc, instanceStore, instanceState, log)
 	svc.SetSecrets(secrets)
-	if dbPool != nil && dbPool.Writer() != nil {
-		svc.SetConversationJournalDB(dbPool.Writer())
-	}
 	if err := svc.SetPluginsDir(dir); err != nil {
-		warnProvider(log, "Plugins durable conversation state initialization failed; continuing with degraded conversation capabilities", err)
-	} else if err := svc.syncAllCommittedSessionEventsAtBoot(ctx); err != nil {
-		warnProvider(log, "Plugins committed conversation journal synchronization failed; continuing with degraded conversation capabilities", err)
+		warnProvider(log, "Plugins conversation binding key initialization failed; continuing with degraded conversation capabilities", err)
 	}
 
 	seedMarketplace(svc, sourceStore, storeErrors, log)
@@ -138,11 +133,8 @@ func ProvideWithStoreErrors(ctx context.Context, cfg *config.Config, dbPool *db.
 	if cfg.Features.Canvases {
 		stopArtifactCleanup = svc.StartWebAppArtifactCleanupWorker(context.Background())
 	}
-	stopSessionEventMaintenance := svc.StartSessionEventMaintenanceWorker(context.Background())
-
 	cleanup := func() error {
 		stopArtifactCleanup()
-		stopSessionEventMaintenance()
 		svc.closeWebAppEvents()
 		return svc.Close()
 	}

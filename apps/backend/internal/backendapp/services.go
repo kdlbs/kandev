@@ -258,6 +258,7 @@ func initCoreTaskServices(
 			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
+	wireSidebarWorkspaceAccess(userSvc, taskSvc)
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
 	// Workspace membership needs to resolve colleague names and reject
 	// disabled or unknown accounts before writing a row.
@@ -271,6 +272,20 @@ func initCoreTaskServices(
 		dynamicResolver: dynamicResolver, dynamicBindingResolver: dynamicBindingResolver,
 		workflowSvc: workflowSvc, taskSvc: taskSvc, orgSvc: orgSvc, unitSvc: unitSvc,
 	}, nil
+}
+
+func wireSidebarWorkspaceAccess(userSvc *userservice.Service, taskSvc *taskservice.Service) {
+	userSvc.SetSidebarWorkspaceAccess(func(ctx context.Context) ([]string, error) {
+		workspaces, err := taskSvc.ListWorkspaces(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(workspaces))
+		for _, workspace := range workspaces {
+			ids = append(ids, workspace.ID)
+		}
+		return ids, nil
+	})
 }
 
 // initManagedRuntimeAndDiscovery loads the managed-runtime default
@@ -402,6 +417,12 @@ func initIntegrationWiring(
 	if err != nil {
 		return nil, err
 	}
+	cleanupTransferred := false
+	defer func() {
+		if !cleanupTransferred && pluginsCleanup != nil {
+			_ = pluginsCleanup()
+		}
+	}()
 	canvasSvc, canvasDistributionSvc, err := initCanvasWiring(cfg, dbPool, eventBus, storeTracker, taskSvc, pluginsSvc, version, log)
 	if err != nil {
 		return nil, err
@@ -416,12 +437,14 @@ func initIntegrationWiring(
 	if err != nil {
 		return nil, err
 	}
-	return &integrationWiring{
+	wiring := &integrationWiring{
 		pluginsSvc: pluginsSvc, pluginsCleanup: pluginsCleanup, agentConversationsSvc: agentConversationsSvc,
 		canvasSvc: canvasSvc, canvasDistributionSvc: canvasDistributionSvc,
 		gitCredentialBroker: gitCredentialBroker, shareHTTP: shareHTTP,
 		automationComponents: automationComponents,
-	}, nil
+	}
+	cleanupTransferred = true
+	return wiring, nil
 }
 
 // wireTaskWorkflowCrossReferences wires the task and workflow services'
@@ -1692,7 +1715,7 @@ func initPluginsServiceRequired(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) (*plugins.Service, func() error, plugins.StoreInitErrors) {
-	return plugins.ProvideWithStoreErrors(ctx, cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
+	return plugins.ProvideWithStoreErrors(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
 }
 
 func recordPluginStores(tracker *requiredstores.Tracker, initErrors plugins.StoreInitErrors) error {

@@ -1,3 +1,4 @@
+import { mapSidebarWorkspaces } from "./slices/ui/sidebar-workspace-state";
 import {
   defaultKanbanState,
   defaultWorkspaceState,
@@ -139,6 +140,7 @@ export const defaultState = {
   sessionFailureNotification: defaultUIState.sessionFailureNotification,
   bottomTerminal: defaultUIState.bottomTerminal,
   sidebarViews: defaultUIState.sidebarViews,
+  sidebarViewsByWorkspace: defaultUIState.sidebarViewsByWorkspace,
   threadViews: defaultUIState.threadViews,
   collapsedSubtaskParents: defaultUIState.collapsedSubtaskParents,
   kanbanPreviewedTaskId: defaultUIState.kanbanPreviewedTaskId,
@@ -588,6 +590,11 @@ function mergeUIPanelState(initialState: HydrationState) {
     sessionFailureNotification: mergeSessionFailureNotification(initialState),
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
     sidebarViews: mergeSidebarViewState(initialState),
+    sidebarViewsByWorkspace: mapSidebarWorkspaces(
+      initialState.userSettings?.sidebarViewsByWorkspace,
+      initialState.sidebarViewsByWorkspace,
+      initialState.userSettings?.revision,
+    ),
     threadViews: mergeThreadViewState(initialState),
     sidebarTaskPrefs: mergeSidebarTaskPrefsState(initialState),
     collapsedSubtaskParents:

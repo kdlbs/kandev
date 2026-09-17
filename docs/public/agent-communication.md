@@ -258,6 +258,10 @@ These tools complement cross-task communication for common coordination patterns
 | `move_task_kandev` | Hand off a task to a workflow step with optional one-time entry options for the receiving agent |
 | `create_task_plan_kandev` | Record an agreed implementation plan (both tasks can create/update their own plans) |
 | `get_task_plan_kandev` | Read a task's plan; useful before messaging to share a structured proposal |
+| `edit_task_plan_kandev` | Apply one exact, unique text edit to a reachable task plan |
+| `list_task_plan_revisions_kandev` | List bounded metadata for a reachable task plan's history |
+| `get_task_plan_revision_kandev` | Read one exact revision before a conditional restore |
+| `restore_task_plan_revision_kandev` | Restore a revision after checking current and source versions |
 | `step_complete_kandev` | Signal that the current workflow step is done (task-mode only) |
 | `ask_user_question_kandev` | Escalate to a human when agent negotiation cannot resolve a question |
 
