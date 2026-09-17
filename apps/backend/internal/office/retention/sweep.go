@@ -299,13 +299,13 @@ func (s *Sweeper) sweepRuns(ctx context.Context, q queryer, cfg TableSettings, n
 		}}, satelliteResults{}
 	}
 	return SweptTableResult{TableSweepResult: TableSweepResult{
-		Deleted: result.RunsDeleted,
-		Backlog: eligible > int64(batchLimit),
-	}}, satelliteResults{
-		RunEvents:     TableSweepResult{Deleted: result.RunEventsDeleted},
-		RouteAttempts: TableSweepResult{Deleted: result.RouteAttemptsDeleted},
-		RunSkills:     TableSweepResult{Deleted: result.RunSkillsDeleted},
-	}
+			Deleted: result.RunsDeleted,
+			Backlog: eligible > int64(batchLimit),
+		}}, satelliteResults{
+			RunEvents:     TableSweepResult{Deleted: result.RunEventsDeleted},
+			RouteAttempts: TableSweepResult{Deleted: result.RouteAttemptsDeleted},
+			RunSkills:     TableSweepResult{Deleted: result.RunSkillsDeleted},
+		}
 }
 
 // retentionCutoff turns a table's configured window into the instant a

@@ -157,7 +157,9 @@ export type Routine = {
   description?: string;
   taskTemplate: Record<string, unknown>;
   assigneeAgentProfileId?: string;
-  status: RoutineStatus;
+  // The server can store any status string; only the three named
+  // RoutineStatus values are selectable from the detail form.
+  status: string;
   concurrencyPolicy: string;
   catchUpPolicy?: string;
   catchUpMax?: number;
@@ -180,7 +182,8 @@ export type RoutineRunStatus =
 export type RoutineTrigger = {
   id: string;
   routineId: string;
-  kind: RoutineTriggerKind;
+  // The server can store any trigger kind; only "cron" is creatable from the UI today.
+  kind: string;
   cronExpression?: string;
   timezone?: string;
   publicId?: string;
@@ -197,7 +200,8 @@ export type RoutineRun = {
   routineId: string;
   triggerId?: string;
   source: string;
-  status: RoutineRunStatus;
+  // The server can store any run status string.
+  status: string;
   triggerPayload?: string;
   linkedTaskId?: string;
   coalescedIntoRunId?: string;
@@ -211,6 +215,46 @@ export type RoutineRun = {
   startedAt?: string;
   completedAt?: string;
   createdAt: string;
+};
+
+/** Fields the client can supply when creating a routine (POST body, camelCase). */
+export type CreateRoutineInput = {
+  name: string;
+  description?: string;
+  taskTemplate?: Record<string, unknown> | string;
+  assigneeAgentProfileId?: string;
+  concurrencyPolicy?: string;
+  catchUpPolicy?: string;
+  catchUpMax?: number;
+  variables?: Record<string, unknown> | string;
+};
+
+/**
+ * Fields the client can patch on a routine (PATCH body, camelCase). Absent
+ * keys are omitted from the request and preserve the stored value; empty
+ * strings clear the field, except concurrencyPolicy/catchUpPolicy (omitted
+ * rather than cleared) and status (never sent empty).
+ */
+export type UpdateRoutinePatch = {
+  name?: string;
+  description?: string;
+  taskTemplate?: Record<string, unknown> | string;
+  assigneeAgentProfileId?: string;
+  status?: RoutineStatus | string;
+  concurrencyPolicy?: string;
+  catchUpPolicy?: string;
+  catchUpMax?: number;
+  variables?: Record<string, unknown> | string;
+};
+
+/** Fields the client can supply when creating a trigger (POST body, camelCase). */
+export type CreateTriggerInput = {
+  kind: RoutineTriggerKind;
+  cronExpression?: string;
+  timezone?: string;
+  publicId?: string;
+  signingMode?: string;
+  secret?: string;
 };
 
 export type InboxItemType =

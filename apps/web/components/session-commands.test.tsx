@@ -160,4 +160,10 @@ describe("session palette copy", () => {
 
     expect(groups.size).toBe(1);
   });
+
+  it("omits the task cancel entry while Quick Chat owns the foreground", () => {
+    const commands = buildSessionCommands(true, vi.fn(), markerT, { suppressCancel: true });
+
+    expect(commands.find((command) => command.id === "session-cancel")).toBeUndefined();
+  });
 });

@@ -2,6 +2,7 @@ import { reviewItemId } from "@/components/task/review-selection";
 import { reviewPanelId } from "@/lib/state/dockview-panel-actions";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type {
+  PluginConversationApi,
   PluginHostApi,
   PluginModalHandle,
   PluginStorageApi,
@@ -111,6 +112,7 @@ export function generationFencedHost(
     pluginId: host.pluginId,
     React: host.React,
     jsx: host.jsx,
+    conversation: generationFencedConversation(host.conversation, isCurrent),
     store: { ...host.store, setState, subscribe },
     context: generationFencedContext(host, isCurrent, resources),
     api: {
@@ -150,6 +152,45 @@ export function generationFencedHost(
     useSettingsSaveContributor: host.useSettingsSaveContributor,
     setIntegrationEnabled: (integrationId, workspaceId, enabled) => {
       if (isCurrent()) host.setIntegrationEnabled(integrationId, workspaceId, enabled);
+    },
+  };
+}
+
+function generationFencedConversation(
+  conversation: PluginConversationApi,
+  isCurrent: () => boolean,
+): PluginConversationApi {
+  return {
+    useSessionMessages(query) {
+      const state = conversation.useSessionMessages(query);
+      if (isCurrent()) return state;
+      return {
+        messages: [],
+        loading: false,
+        hydrated: false,
+        loadingMore: false,
+        error: null,
+        hasMore: false,
+        removed: false,
+        loadMore: async () => 0,
+        retry: () => {},
+      };
+    },
+    useSessionTurns(sessionId, taskId) {
+      const state = conversation.useSessionTurns(sessionId, taskId);
+      if (isCurrent()) return state;
+      return {
+        turns: [],
+        loading: false,
+        hydrated: false,
+        error: null,
+        removed: false,
+        retry: () => {},
+      };
+    },
+    useMessageFavorite(sessionId, messageId) {
+      const favorite = conversation.useMessageFavorite(sessionId, messageId);
+      return isCurrent() ? favorite : false;
     },
   };
 }

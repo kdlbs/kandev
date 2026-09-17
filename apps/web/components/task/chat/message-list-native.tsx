@@ -2,15 +2,10 @@
 
 /* eslint-disable max-lines -- native transcript composition owns scrolling. */
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  memo,
-  forwardRef,
-  useImperativeHandle,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useRef, memo, forwardRef, useImperativeHandle } from "react";
+import { cancelChatScrollMotion } from "./chat-scroll-motion";
+import { useChatMotion } from "@/hooks/use-chat-motion";
+import { ChatMotionProvider } from "./chat-motion";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
@@ -95,6 +90,7 @@ type NativeMessageListScrollParams = {
   isWorking: boolean;
   sessionId: string | null;
   enabled: boolean;
+  motionEnabled: boolean;
   dividerBeforeItemKey?: string | null;
   anchoredBarHeight?: number;
   /** Initial/refetch loading: the sentinel's hard block. */
@@ -110,7 +106,6 @@ type NativeMessageListScrollParams = {
   /** Changes when transcript status rows can add/remove space above messages. */
   scrollLayoutKey: string;
   isVisible: boolean;
-  recoveryRevealKey?: string | null;
 };
 
 type ScrollToDividerOptions = {
@@ -121,21 +116,7 @@ type ScrollToDividerOptions = {
   isProgrammaticScrollLocked?: () => boolean;
   isVisible?: boolean;
   historyRefreshPending?: boolean;
-  recoveryRevealKey?: string | null;
 };
-
-function consumeRecoveryRevealForDivider(
-  recoveryRevealKey: string | null,
-  didInitialScroll: React.RefObject<boolean>,
-  activationPendingRef: React.RefObject<boolean>,
-): boolean {
-  if (recoveryRevealKey === null) return false;
-  // The native initial-position hook owns the recovery reveal. Mark this
-  // hook consumed so its normal bottom/divider placement cannot override it.
-  didInitialScroll.current = true;
-  activationPendingRef.current = false;
-  return true;
-}
 
 function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
   const {
@@ -146,6 +127,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     isWorking,
     sessionId,
     enabled,
+    motionEnabled,
     dividerBeforeItemKey,
     anchoredBarHeight,
     messagesLoading,
@@ -159,7 +141,6 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     onFirstMessageHiddenChange,
     scrollLayoutKey,
     isVisible,
-    recoveryRevealKey,
   } = params;
   const {
     handleScrollToMessage,
@@ -175,6 +156,7 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     isWorking,
     sessionId,
     enabled,
+    motionEnabled,
     hasUnreadDivider: Boolean(dividerBeforeItemKey),
     messagesLoading,
     historyRefreshPending,
@@ -182,7 +164,6 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     isLoadingMore,
     loadMore,
     isVisible,
-    recoveryRevealKey,
   });
   const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
   useEffect(() => {
@@ -196,7 +177,6 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     isProgrammaticScrollLocked,
     isVisible,
     historyRefreshPending,
-    recoveryRevealKey,
   });
   useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
     handleScrollToMessage,
@@ -304,7 +284,6 @@ type NativeMessageListBodyProps = {
   onScrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
   autoScrollEnabled: boolean;
   dividerBeforeItemKey?: string | null;
-  prependContent?: ReactNode;
   launchErrorOwned: boolean;
   launchErrorStamp?: string;
   launchErrorOccurredAt?: string;
@@ -346,7 +325,7 @@ type NativeMessageListBodyProps = {
  *   keep their existing visible-host behavior without participating in read
  *   tracking.
  */
-// eslint-disable-next-line max-lines-per-function -- divider and recovery placement share one scroll lifecycle.
+// eslint-disable-next-line max-lines-per-function -- divider and initial placement share one scroll lifecycle.
 export function useScrollToDividerOrBottom(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   itemCount: number,
@@ -362,7 +341,6 @@ export function useScrollToDividerOrBottom(
     isProgrammaticScrollLocked = () => false,
     isVisible = true,
     historyRefreshPending = false,
-    recoveryRevealKey = null,
   } = options;
   const { isVisibleRef, activationPendingRef } = useActivationPending(isVisible);
   const isUserScrollingRef = useDividerUserScrolling(scrollRef);
@@ -393,8 +371,6 @@ export function useScrollToDividerOrBottom(
     }
     const el = scrollRef.current;
     if (!el || historyRefreshPending) return;
-    if (consumeRecoveryRevealForDivider(recoveryRevealKey, didInitialScroll, activationPendingRef))
-      return;
     if (itemCount === 0) return;
 
     const placeInitialPosition = () => {
@@ -427,6 +403,7 @@ export function useScrollToDividerOrBottom(
           // the desktop anchored prompt bar still reserves its measured height.
           const containerRect = el.getBoundingClientRect();
           const dividerRect = dividerEl.getBoundingClientRect();
+          cancelChatScrollMotion(el);
           el.scrollTop += dividerRect.top - containerRect.top - anchoredBarOffsetPx;
           onDividerScroll?.();
           didScrollToDivider.current = true;
@@ -444,6 +421,7 @@ export function useScrollToDividerOrBottom(
         activationPendingRef.current = false;
         return;
       }
+      cancelChatScrollMotion(el);
       el.scrollTop = el.scrollHeight;
       didInitialScroll.current = true;
       activationPendingRef.current = false;
@@ -464,7 +442,6 @@ export function useScrollToDividerOrBottom(
     isProgrammaticScrollLocked,
     isVisible,
     historyRefreshPending,
-    recoveryRevealKey,
     scrollRef,
   ]);
 }
@@ -520,14 +497,12 @@ function NativeMessageListBody({
   onScrollToMessage,
   autoScrollEnabled,
   dividerBeforeItemKey,
-  prependContent,
   launchErrorOwned,
   launchErrorStamp,
   launchErrorOccurredAt,
 }: NativeMessageListBodyProps) {
   return (
-    <div className="p-4">
-      {prependContent ? <div className="mb-4">{prependContent}</div> : null}
+    <div className="p-4" data-chat-content>
       {/* Sentinel for lazy loading older messages */}
       {hasMore && <div ref={sentinelRef} className="h-px" />}
 
@@ -623,8 +598,6 @@ export const NativeMessageList = memo(
       launchErrorOwned = false,
       launchErrorStamp,
       launchErrorOccurredAt,
-      prependContent,
-      recoveryRevealKey,
     }: MessageListProps,
     ref,
   ) {
@@ -670,6 +643,7 @@ export const NativeMessageList = memo(
     const streamingMessageId = getStreamingAgentMessageId(visibleMessages);
     const lastTurnGroupId = useMemo(() => getLastTurnGroupId(visibleItems), [visibleItems]);
     const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
+    const motionEnabled = useChatMotion();
     const { handleScrollToMessage, sentinelRef, retryLoadMore, showRecovery } =
       useNativeMessageListScroll({
         scrollRef,
@@ -679,6 +653,7 @@ export const NativeMessageList = memo(
         isWorking,
         sessionId,
         enabled: autoScrollEnabled,
+        motionEnabled,
         dividerBeforeItemKey,
         anchoredBarHeight,
         messagesLoading,
@@ -699,51 +674,58 @@ export const NativeMessageList = memo(
           isWorking,
         ].join(":"),
         isVisible,
-        recoveryRevealKey,
       });
 
     return (
       <SessionPanelContent
         ref={scrollRef}
         className={`relative chat-message-list p-0 ${
-          autoScrollEnabled ? "[overflow-anchor:auto]" : "[overflow-anchor:none]"
+          autoScrollEnabled &&
+          (!motionEnabled || messagesLoading || historyRefreshPending || isLoadingMore)
+            ? "[overflow-anchor:auto]"
+            : "[overflow-anchor:none]"
         }`}
       >
         {stickyPromptBar}
-        <NativeMessageListBody
-          items={visibleItems}
-          messages={visibleMessages}
-          footerActionMessages={visibleFooterActionMessages}
-          permissionsByToolCallId={permissionsByToolCallId}
-          childrenByParentToolCallId={childrenByParentToolCallId}
-          taskId={taskId}
+        <ChatMotionProvider
           sessionId={sessionId}
-          isWorking={isWorking}
-          messagesLoading={messagesLoading}
-          sessionState={sessionState}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          isInitialLoading={isInitialLoading}
-          showLoadingState={showLoadingState}
-          historyStatus={historyStatus}
-          historyError={historyError}
-          onRetryHistory={onRetryHistory}
-          retryLoadMore={retryLoadMore}
-          showRecovery={showRecovery}
-          sentinelRef={sentinelRef}
-          lastTurnGroupId={lastTurnGroupId}
-          activeTurnId={effectiveActiveTurnId}
-          streamingMessageId={streamingMessageId}
-          onScrollToMessage={handleScrollToMessage}
-          autoScrollEnabled={autoScrollEnabled}
-          dividerBeforeItemKey={dividerBeforeItemKey}
-          prependContent={prependContent}
-          launchErrorOwned={launchErrorOwned}
-          launchErrorStamp={launchErrorStamp}
-          launchErrorOccurredAt={launchErrorOccurredAt}
-        />
+          messages={visibleMessages}
+          live={isVisible && !messagesLoading && !historyRefreshPending && !isLoadingMore}
+        >
+          <NativeMessageListBody
+            items={visibleItems}
+            messages={visibleMessages}
+            footerActionMessages={visibleFooterActionMessages}
+            permissionsByToolCallId={permissionsByToolCallId}
+            childrenByParentToolCallId={childrenByParentToolCallId}
+            taskId={taskId}
+            sessionId={sessionId}
+            isWorking={isWorking}
+            messagesLoading={messagesLoading}
+            sessionState={sessionState}
+            worktreePath={worktreePath}
+            onOpenFile={onOpenFile}
+            hasMore={hasMore}
+            isLoadingMore={isLoadingMore}
+            isInitialLoading={isInitialLoading}
+            showLoadingState={showLoadingState}
+            historyStatus={historyStatus}
+            historyError={historyError}
+            onRetryHistory={onRetryHistory}
+            retryLoadMore={retryLoadMore}
+            showRecovery={showRecovery}
+            sentinelRef={sentinelRef}
+            lastTurnGroupId={lastTurnGroupId}
+            activeTurnId={effectiveActiveTurnId}
+            streamingMessageId={streamingMessageId}
+            onScrollToMessage={handleScrollToMessage}
+            autoScrollEnabled={autoScrollEnabled}
+            dividerBeforeItemKey={dividerBeforeItemKey}
+            launchErrorOwned={launchErrorOwned}
+            launchErrorStamp={launchErrorStamp}
+            launchErrorOccurredAt={launchErrorOccurredAt}
+          />
+        </ChatMotionProvider>
       </SessionPanelContent>
     );
   }),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -26,6 +26,10 @@ import { useTranslation } from "react-i18next";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 import { useWorkflowMoveSubmit, workflowMoveShortcutLabel } from "./use-workflow-move-submit";
+import {
+  WorkflowMovePreviewFooter,
+  type WorkflowMovePreviewTarget,
+} from "./workflow-move-preview-footer";
 
 export type WorkflowMoveOptionsDraft = {
   resetContext: boolean;
@@ -88,6 +92,8 @@ export function WorkflowMoveOptionsFields({
   autoFocusInstructions,
 }: WorkflowMoveOptionsFieldsProps) {
   const { t } = useTranslation();
+  const resetContextId = useId();
+  const skipStepPromptId = useId();
   const rowClass = isTouchSurface
     ? "flex items-center gap-2.5 min-h-11"
     : "flex items-start gap-2.5";
@@ -98,25 +104,31 @@ export function WorkflowMoveOptionsFields({
   );
   return (
     <div className={cn("grid min-w-0 gap-3 text-xs/relaxed", isTouchSurface && "text-sm/relaxed")}>
-      <label className={rowClass}>
+      <div className={rowClass}>
         <Checkbox
           className={checkboxClass}
           checked={draft.resetContext}
           onCheckedChange={(checked) => onDraftChange({ resetContext: checked === true })}
+          id={resetContextId}
           data-testid="workflow-move-reset-context"
         />
-        <span className="leading-snug">{t("task:workflowMoveResetContext")}</span>
-      </label>
+        <label className="cursor-pointer leading-snug" htmlFor={resetContextId}>
+          {t("task:workflowMoveResetContext")}
+        </label>
+      </div>
       <div className={rowClass}>
-        <label className="flex min-w-0 flex-1 items-start gap-2.5">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
           <Checkbox
             className={checkboxClass}
             checked={draft.skipStepPrompt}
             onCheckedChange={(checked) => onDraftChange({ skipStepPrompt: checked === true })}
+            id={skipStepPromptId}
             data-testid="workflow-move-skip-step-prompt"
           />
-          <span className="leading-snug">{t("task:workflowMoveSkipStepPrompt")}</span>
-        </label>
+          <label className="cursor-pointer leading-snug" htmlFor={skipStepPromptId}>
+            {t("task:workflowMoveSkipStepPrompt")}
+          </label>
+        </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -154,6 +166,7 @@ export type WorkflowMoveOptionsSubmit = (
 ) => boolean | void | Promise<boolean | void>;
 
 type WorkflowMoveOptionsFormProps = {
+  previewTarget?: WorkflowMovePreviewTarget;
   isMoving: boolean;
   isTouchSurface: boolean;
   instructionsRows?: number;
@@ -227,6 +240,7 @@ function WorkflowMoveOptionsActions({
  * form open so nothing the user typed is lost.
  */
 export function WorkflowMoveOptionsForm({
+  previewTarget,
   isMoving,
   isTouchSurface,
   instructionsRows,
@@ -253,11 +267,19 @@ export function WorkflowMoveOptionsForm({
         onCancel={onCancel}
         onSubmit={() => void submit()}
       />
+      {previewTarget && (
+        <WorkflowMovePreviewFooter
+          target={previewTarget}
+          entryOptions={workflowMoveOptionsPayload(draft)}
+          isTouchSurface={isTouchSurface}
+        />
+      )}
     </div>
   );
 }
 
 type WorkflowMoveOptionsProps = {
+  previewTarget?: WorkflowMovePreviewTarget;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   targetStepName: string;
@@ -268,6 +290,7 @@ type WorkflowMoveOptionsProps = {
 
 /** Fine-pointer Dialog wrapper around the shared form. */
 export function WorkflowMoveDialog({
+  previewTarget,
   open,
   onOpenChange,
   targetStepName,
@@ -285,6 +308,7 @@ export function WorkflowMoveDialog({
         </DialogHeader>
         <WorkflowMoveOptionsForm
           autoFocusInstructions={autoFocusInstructions}
+          previewTarget={previewTarget}
           isMoving={isMoving}
           isTouchSurface={false}
           onSubmit={onSubmit}
@@ -297,6 +321,7 @@ export function WorkflowMoveDialog({
 
 /** Touch Drawer wrapper around the shared form. */
 export function WorkflowMoveOptions({
+  previewTarget,
   open,
   onOpenChange,
   targetStepName,
@@ -321,6 +346,7 @@ export function WorkflowMoveOptions({
         >
           <WorkflowMoveOptionsForm
             autoFocusInstructions={autoFocusInstructions}
+            previewTarget={previewTarget}
             isMoving={isMoving}
             isTouchSurface
             onSubmit={onSubmit}

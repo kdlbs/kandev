@@ -22,6 +22,7 @@ const emptyWorkspaceState = (): NeedsYouInboxWorkspaceState => ({
   hasMore: false,
   status: "idle",
   appliedGeneration: 0,
+  lastAppliedOk: false,
 });
 
 // Typed against the full `AppState` (the zustand slices-pattern shape), not
@@ -63,6 +64,7 @@ export const createNeedsYouInboxSlice = (set: ImmerSet): NeedsYouInboxSlice => (
         hasMore: page.hasMore,
         status: "ready",
         appliedGeneration: generation,
+        lastAppliedOk: true,
       };
     }),
 
@@ -93,6 +95,7 @@ export const createNeedsYouInboxSlice = (set: ImmerSet): NeedsYouInboxSlice => (
         hasMore: seed.hasMore,
         status: "idle",
         appliedGeneration: 0,
+        lastAppliedOk: false,
       };
     }),
 

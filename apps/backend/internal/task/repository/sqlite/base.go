@@ -45,6 +45,11 @@ type Repository struct {
 	// ownership cutover. It is separate from the worktree failpoint because the
 	// two migrations can be exercised independently in the same repository.
 	failGitSnapshotCutoverAfter string
+	// failConversationJournalCleanupAfter is a test-only failpoint for the
+	// atomic removal of the retired conversation journal. It lets migration
+	// tests prove that a failed cleanup leaves the source tables and legacy
+	// tables unchanged for a retry.
+	failConversationJournalCleanupAfter string
 	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
 	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
 	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns

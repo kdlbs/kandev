@@ -16,15 +16,17 @@ export default async function RoutineDetailPage({ params }: Props) {
   let routine: Routine | null = null;
   let triggers: RoutineTrigger[] = [];
   try {
+    // A failed trigger list must not silently become "no trigger exists":
+    // the client's save-time reconciliation (cron-reconcile.ts) trusts this
+    // initial list to detect an already-armed cron trigger, so swallowing a
+    // failure here would make a later Save create a duplicate schedule
+    // instead of replacing the one that failed to load. Let it fail the
+    // whole page load instead, same as a `getRoutine` failure below.
     const [routineRes, triggersRes] = await Promise.all([
       getRoutine(id, { cache: "no-store" }),
-      listRoutineTriggers(id, { cache: "no-store" }).catch(() => ({
-        triggers: [] as RoutineTrigger[],
-      })),
+      listRoutineTriggers(id, { cache: "no-store" }),
     ]);
-    routine =
-      (routineRes as unknown as { routine?: Routine }).routine ??
-      (routineRes as unknown as Routine);
+    routine = routineRes;
     triggers = triggersRes.triggers ?? [];
   } catch {
     routine = null;

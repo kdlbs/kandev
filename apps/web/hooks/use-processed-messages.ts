@@ -15,7 +15,8 @@ import {
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import type { LastAgentError } from "@/lib/session-last-agent-error";
+import { lastAgentErrorStamp, type LastAgentError } from "@/lib/session-last-agent-error";
+import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
 import {
   buildChildrenByParentToolCallId,
   buildPermissionsByToolCallId,
@@ -150,6 +151,7 @@ export type ProcessedMessagesOptions = {
   hasOlderMessages?: boolean;
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
+  currentTurnCompleted?: boolean;
   pendingAction?: TaskPendingAction | null;
 };
 
@@ -364,6 +366,7 @@ function buildGroupedItemsForHook(args: {
     }),
     args.resolvedSessionId,
     args.lastAgentError,
+    args.allSessionMessages,
   );
 }
 
@@ -394,8 +397,16 @@ export function insertLastAgentErrorItem(
   items: RenderItem[],
   resolvedSessionId: string | null,
   error?: LastAgentError | null,
+  persistedMessages: Message[] = [],
 ): RenderItem[] {
   if (!resolvedSessionId || !error) return items;
+  if (
+    persistedMessages.some((message) =>
+      isPersistedRecoveryForSession(message, resolvedSessionId, error),
+    )
+  ) {
+    return items;
+  }
   const notice: AgentErrorNoticeItem = {
     type: "agent_error_notice",
     id: `last-agent-error-${resolvedSessionId}-${error.occurredAt ?? "unknown"}`,
@@ -404,6 +415,21 @@ export function insertLastAgentErrorItem(
   };
   const insertAt = insertionIndexForAgentError(items, error.occurredAt);
   return [...items.slice(0, insertAt), notice, ...items.slice(insertAt)];
+}
+
+function isPersistedRecoveryForSession(
+  message: Message,
+  sessionId: string,
+  error: LastAgentError,
+): boolean {
+  if (message.session_id !== sessionId) return false;
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  if (metadata?.recovery_actions !== true) return false;
+  const messageStamp = metadata.error_stamp ?? metadata.recovery_stamp ?? metadata.failure_stamp;
+  if (typeof messageStamp === "string" && messageStamp !== "") {
+    return messageStamp === lastAgentErrorStamp(error);
+  }
+  return legacyRecoveryMessageMatchesError(message.content, message.created_at, error);
 }
 
 /** Builds the todo checklist from the latest persisted `todo`-type message,
@@ -450,9 +476,13 @@ function usePendingClarificationState(messages: Message[], options: ProcessedMes
   const scope = useMemo(
     () =>
       hasScopeKeys
-        ? { currentTurnId: options.currentTurnId, pendingAction: options.pendingAction }
+        ? {
+            currentTurnId: options.currentTurnId,
+            currentTurnCompleted: options.currentTurnCompleted,
+            pendingAction: options.pendingAction,
+          }
         : undefined,
-    [hasScopeKeys, options.currentTurnId, options.pendingAction],
+    [hasScopeKeys, options.currentTurnCompleted, options.currentTurnId, options.pendingAction],
   );
   return {
     scope,

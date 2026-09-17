@@ -23,7 +23,7 @@ export const GATING_MEMBER = {
   displayName: "Sam Member",
 };
 
-export const DATA_STORAGE_ROUTE = "/settings/system/data-storage";
+export const DATA_STORAGE_ROUTE = "/settings/system/data-storage?tab=database";
 export const STORAGE_ROUTE = "/settings/system/storage";
 
 /** Creates the member account from an authenticated admin context. */
@@ -43,7 +43,7 @@ type Snapshot = { name: string; kind: string };
 
 /**
  * Creates a manual snapshot as the admin and resolves its filename. Create is
- * asynchronous (202 + job id), so poll the listing until the file lands: the
+ * asynchronous (202 + job id), so wait for the job and inspect its result: the
  * member specs need a real row to prove the listing survives the gate.
  */
 export async function createSnapshotAsAdmin(
@@ -53,19 +53,27 @@ export async function createSnapshotAsAdmin(
   const created = await adminContext.request.post(`${baseUrl}/api/v1/system/backups`);
   expect(created.status(), await created.text()).toBe(202);
 
-  let name = "";
+  const { job_id: jobId } = (await created.json()) as { job_id: string };
+  let job: { state: string; message?: string; result?: { name?: string } } = { state: "queued" };
   await expect
     .poll(
       async () => {
-        const snapshots = await listSnapshots(adminContext.request, baseUrl);
-        const manual = snapshots.find((snapshot) => snapshot.kind === "manual");
-        name = manual?.name ?? "";
-        return name;
+        const response = await adminContext.request.get(`${baseUrl}/api/v1/system/jobs/${jobId}`);
+        expect(response.ok(), await response.text()).toBe(true);
+        job = await response.json();
+        return ["succeeded", "failed"].includes(job.state);
       },
       { timeout: 20_000 },
     )
-    .not.toBe("");
-  return name;
+    .toBe(true);
+  expect(job.state, `Snapshot job ${jobId}: ${job.message ?? JSON.stringify(job)}`).toBe(
+    "succeeded",
+  );
+  const name = job.result?.name;
+  expect(name).toBeTruthy();
+  const snapshots = await listSnapshots(adminContext.request, baseUrl);
+  expect(snapshots).toContainEqual(expect.objectContaining({ name, kind: "manual" }));
+  return name!;
 }
 
 export async function listSnapshots(
@@ -98,6 +106,7 @@ export async function expectMemberApiGating(
     "/storage/settings",
     "/storage/runs",
     "/storage/quarantine",
+    "/database/tool-payload-retention",
   ]) {
     const res = await api.get(`${system}${path}`);
     expect(res.status(), `GET ${path}: ${await res.text()}`).toBe(200);
@@ -110,6 +119,33 @@ export async function expectMemberApiGating(
 
   const denials: Array<[string, Promise<{ status(): number; text(): Promise<string> }>]> = [
     ["POST /backups", api.post(`${system}/backups`)],
+    [
+      "PUT /database/tool-payload-retention",
+      api.put(`${system}/database/tool-payload-retention`, {
+        data: {
+          enabled: true,
+          age: { value: 3, unit: "months" },
+          revision: 1,
+          backup_choice: "skip",
+        },
+      }),
+    ],
+    [
+      "POST /database/tool-payload-retention/analyze",
+      api.post(`${system}/database/tool-payload-retention/analyze`, {
+        data: { age: { value: 3, unit: "months" } },
+      }),
+    ],
+    [
+      "POST /database/tool-payload-retention/run",
+      api.post(`${system}/database/tool-payload-retention/run`, { data: { revision: 1 } }),
+    ],
+    [
+      "POST /database/tool-payload-retention/cancel",
+      api.post(`${system}/database/tool-payload-retention/cancel`, {
+        data: { operation_id: "member-denied" },
+      }),
+    ],
     [
       "POST /backups/:name/restore",
       api.post(`${system}/backups/${snapshotName}/restore`, { data: { confirm: "RESTORE" } }),

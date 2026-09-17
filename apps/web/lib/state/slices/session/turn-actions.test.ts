@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- Turn reconciliation fixtures cover the store contract in one file. */
 import { describe, expect, it } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
@@ -282,6 +283,30 @@ describe("mergeTurnsSnapshot", () => {
     expect(store.getState().turns.bySession[SESSION_ID]).toHaveLength(2);
     expect(store.getState().turns.loadedBySession[SESSION_ID]).toBe(true);
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-new");
+  });
+
+  it("replaces rows missing from an authoritative recovery snapshot", () => {
+    const store = makeStore();
+    seedSession(store, "RUNNING", LATER_AT);
+    store.getState().addTurn(turn("turn-stale", { started_at: STARTED_AT }));
+    store.getState().addTurn(turn("turn-kept", { started_at: LATER_AT }));
+    store.getState().setActiveTurn(SESSION_ID, "turn-kept");
+
+    store.getState().mergeTurnsSnapshot(
+      SESSION_ID,
+      [
+        turn("turn-kept", {
+          started_at: LATER_AT,
+          updated_at: LATER_AT,
+          completed_at: COMPLETED_AT,
+        }),
+      ],
+      0,
+      { replace: true },
+    );
+
+    expect(store.getState().turns.bySession[SESSION_ID].map(({ id }) => id)).toEqual(["turn-kept"]);
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
   });
 });
 

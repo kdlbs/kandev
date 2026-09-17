@@ -1,7 +1,11 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { useRegularMode } from "../../helpers/regular-mode";
-import { waitForSessionDone, waitForSessionState } from "../../helpers/session";
+import {
+  waitForAgentMessage,
+  waitForSessionDone,
+  waitForSessionState,
+} from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -57,6 +61,18 @@ async function waitForParentQuestion(apiClient: ApiClient, parentTaskID: string)
     )
     .not.toBe("");
   return questionID;
+}
+
+async function waitForChildAnswerTurn(apiClient: ApiClient, sessionID: string): Promise<void> {
+  // The mock answer turn can complete before a state poll observes RUNNING.
+  // A second durable turn is the stable proof that the parent answer was
+  // admitted and executed, even when the session is already waiting again.
+  await expect
+    .poll(async () => (await apiClient.listSessionTurns(sessionID)).turns.length, {
+      timeout: 60_000,
+      message: "parent answer should create a child turn",
+    })
+    .toBeGreaterThanOrEqual(2);
 }
 
 test.describe("Task autopilot", () => {
@@ -133,15 +149,7 @@ test.describe("Task autopilot", () => {
 
     const questionID = await waitForParentQuestion(apiClient, parent.id);
 
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(child.id);
-          return sessions[0]?.state ?? "";
-        },
-        { timeout: 60_000, message: "parent answer should resume the child" },
-      )
-      .not.toBe("WAITING_FOR_INPUT");
+    await waitForChildAnswerTurn(apiClient, childSessionId);
 
     const childSession = new SessionPage(testPage);
     await testPage.goto(`/t/${child.id}`);
@@ -170,7 +178,7 @@ test.describe("Task autopilot", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(240_000);
 
     const parent = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -218,12 +226,8 @@ test.describe("Task autopilot", () => {
     });
 
     const questionID = await waitForParentQuestion(apiClient, parent.id);
-    await expect
-      .poll(async () => (await apiClient.listTaskSessions(child.id)).sessions[0]?.state ?? "", {
-        timeout: 60_000,
-        message: "queued parent answer should resume the child",
-      })
-      .not.toBe("WAITING_FOR_INPUT");
+    await waitForAgentMessage(apiClient, parent.session_id, "Parent is ready.", 60_000);
+    await waitForChildAnswerTurn(apiClient, child.session_id);
 
     const childMessages = await apiClient.listSessionMessages(child.session_id);
     expect(

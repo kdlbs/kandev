@@ -182,6 +182,7 @@ func errorFromMap(now time.Time, sessionID string, data map[string]interface{}) 
 		phase = ""
 	}
 	return &ActiveErrorSummary{
+		Scope:            normalizeErrorScope(stringField(data, "scope"), sessionID != ""),
 		SessionID:        truncateString(sessionID, maxSessionIDBytes),
 		TaskRepositoryID: truncateString(stringField(data, "task_repository_id"), maxTaskRepositoryIDBytes),
 		ExecutionID:      truncateString(firstString(data, "execution_id", "agent_execution_id"), maxSessionIDBytes),
@@ -201,7 +202,7 @@ func errorEqual(a, b *ActiveErrorSummary) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.SessionID == b.SessionID && a.TaskRepositoryID == b.TaskRepositoryID &&
+	return a.Scope == b.Scope && a.SessionID == b.SessionID && a.TaskRepositoryID == b.TaskRepositoryID &&
 		a.ExecutionID == b.ExecutionID && a.AttemptID == b.AttemptID && a.Phase == b.Phase &&
 		a.Stamp == b.Stamp && a.OccurredAt.Equal(b.OccurredAt) &&
 		a.Preview == b.Preview && a.Details == b.Details && a.Category == b.Category &&

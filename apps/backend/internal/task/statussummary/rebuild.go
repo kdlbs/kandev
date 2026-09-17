@@ -64,6 +64,7 @@ type RebuildInput struct {
 	// QueuedPromptCount is the authoritative pending prompt count for the task
 	// (all sessions). Supplied by the caller; 0 means nothing is queued.
 	QueuedPromptCount int
+	LaunchQueue       *LaunchQueueSummary
 	Now               time.Time
 }
 
@@ -73,18 +74,20 @@ type RebuildInput struct {
 // replaying any session stream.
 func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	state := &projectionState{
-		sessions:           make(map[string]sessionObservation, len(input.Sessions)),
-		pending:            make(map[string]string, len(input.PendingActions)),
-		pendingRequests:    make(map[string]pendingRequestIdentity),
-		errors:             make(map[string]*ActiveErrorSummary),
-		clearedErrorStamps: make(map[string]string),
-		git:                make(map[string]GitSummary, len(input.Git)),
-		prs:                make(map[string]pullRequestObservation, len(input.PullRequests)),
-		pendingObserved:    true,
-		activityObserved:   input.ActivityObserved,
-		errorsObserved:     true,
-		gitObserved:        input.GitObserved,
-		prObserved:         input.PRObserved,
+		sessions:            make(map[string]sessionObservation, len(input.Sessions)),
+		pending:             make(map[string]string, len(input.PendingActions)),
+		pendingRequests:     make(map[string]pendingRequestIdentity),
+		errors:              make(map[string]*ActiveErrorSummary),
+		clearedErrorStamps:  make(map[string]string),
+		git:                 make(map[string]GitSummary, len(input.Git)),
+		prs:                 make(map[string]pullRequestObservation, len(input.PullRequests)),
+		pendingObserved:     true,
+		activityObserved:    input.ActivityObserved,
+		errorsObserved:      true,
+		gitObserved:         input.GitObserved,
+		prObserved:          input.PRObserved,
+		launchQueueObserved: true,
+		launchQueue:         cloneLaunchQueue(input.LaunchQueue),
 	}
 	for _, inputSession := range input.Sessions {
 		if strings.TrimSpace(inputSession.ID) == "" {
@@ -140,6 +143,7 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 		copy.OccurredAt = now.UTC()
 	}
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
+	copy.Scope = normalizeErrorScope(copy.Scope, copy.SessionID != "")
 	copy.SessionID = truncateString(copy.SessionID, maxSessionIDBytes)
 	copy.TaskRepositoryID = truncateString(copy.TaskRepositoryID, maxTaskRepositoryIDBytes)
 	copy.ExecutionID = truncateString(copy.ExecutionID, maxSessionIDBytes)
@@ -156,4 +160,14 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 	}
 	copy.Stamp = truncateString(copy.Stamp, maxActiveErrorStampBytes)
 	return &copy
+}
+
+func normalizeErrorScope(scope string, sessionOwned bool) string {
+	if scope == models.ErrorScopeSession || scope == models.ErrorScopeTask {
+		return scope
+	}
+	if sessionOwned {
+		return models.ErrorScopeSession
+	}
+	return models.ErrorScopeTask
 }

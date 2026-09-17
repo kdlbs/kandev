@@ -23,6 +23,7 @@ import { timeAgo } from "@/lib/utils/time";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { CONCURRENCY_POLICY_LABEL_KEYS } from "../lib/label-keys";
+import { isRoutineFiring } from "../lib/routine-status";
 
 /**
  * A routine's concurrency policy is a wire value; only its label is copy.
@@ -31,6 +32,25 @@ import { CONCURRENCY_POLICY_LABEL_KEYS } from "../lib/label-keys";
 function concurrencyLabel(t: TFunction, policy: string): string {
   const key = CONCURRENCY_POLICY_LABEL_KEYS[policy];
   return key ? t(key) : policy;
+}
+
+/** A declared variable's wire value is `{ default: string }`; a bare string passes through unchanged. */
+export function formatVariableValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "default" in value) {
+    const declaredDefault = (value as { default?: unknown }).default;
+    if (typeof declaredDefault === "string") return declaredDefault;
+  }
+  return "";
+}
+
+/**
+ * `task_template` is an unvalidated wire string decoded to `Record<string, unknown>`
+ * (`parseOptionalJSONObject`); a non-string `title`/`description` must not reach a JSX
+ * text node, so this coerces anything else to "" instead of casting.
+ */
+export function templateText(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 type RoutineRowProps = {
@@ -74,22 +94,20 @@ export function RoutineRow({
   onClick,
 }: RoutineRowProps) {
   const { t } = useTranslation();
-  // The API may return snake_case fields (assignee_agent_profile_id, concurrency_policy)
-  // before any mapping layer converts them. Use both camelCase and snake_case lookups.
-  const routineRaw = routine as unknown as Record<string, unknown>;
-  const assigneeId =
-    routine.assigneeAgentProfileId ?? (routineRaw.assignee_agent_profile_id as string | undefined);
-  const concurrencyPolicy =
-    routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
-  const assignee = agents.find((a) => a.id === assigneeId);
-  const isActive = routine.status === "active";
-  const template = routine.taskTemplate as { title?: string; description?: string } | undefined;
+  const assignee = agents.find((a) => a.id === routine.assigneeAgentProfileId);
+  const isActive = isRoutineFiring(routine.status);
+  const rawTemplate = routine.taskTemplate as Record<string, unknown> | undefined;
+  const template = {
+    title: templateText(rawTemplate?.title),
+    description: templateText(rawTemplate?.description),
+  };
   const cronTrigger = triggers.find((t) => t.kind === "cron");
-  const nextFire = nextFireText(t, triggers);
+  const nextFire = isActive ? nextFireText(t, triggers) : "";
 
   return (
     <div>
       <div
+        data-testid={`routine-row-${routine.id}`}
         className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors cursor-pointer"
         onClick={() => onClick(routine.id)}
       >
@@ -111,7 +129,7 @@ export function RoutineRow({
             )}
             {nextFire && <span>{t("office:nextIn", { when: nextFire })}</span>}
             <span>{routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:neverRun")}</span>
-            <span>{concurrencyLabel(t, concurrencyPolicy)}</span>
+            <span>{concurrencyLabel(t, routine.concurrencyPolicy)}</span>
           </div>
         </div>
         <Badge variant={isActive ? "default" : "secondary"}>
@@ -174,6 +192,7 @@ function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete
       </Tooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
+          data-testid="routine-run-now"
           className="cursor-pointer"
           onClick={(e) => {
             e.stopPropagation();
@@ -203,19 +222,16 @@ function RoutineExpandedDetail({
 }: {
   routine: Routine;
   assignee: AgentProfile | undefined;
-  template: { title?: string; description?: string } | undefined;
+  template: { title: string; description: string };
 }) {
   const { t } = useTranslation();
-  const routineRaw = routine as unknown as Record<string, unknown>;
-  const concurrencyPolicy =
-    routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
   return (
     <div className="px-4 pb-3 pt-1 ml-7 border-t border-border/50 space-y-2 text-sm">
       {routine.description && (
         <DetailField label={t("office:description")} value={routine.description} />
       )}
-      {template?.title && <DetailField label={t("office:taskTitle")} value={template.title} />}
-      {template?.description && (
+      {template.title && <DetailField label={t("office:taskTitle")} value={template.title} />}
+      {template.description && (
         <DetailField label={t("office:taskDescription")} value={template.description} />
       )}
       <DetailField label={t("office:assignee")} value={assignee?.name ?? t("office:unassigned")} />
@@ -223,14 +239,17 @@ function RoutineExpandedDetail({
         label={t("office:lastRun")}
         value={routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:lastRunNever")}
       />
-      <DetailField label={t("office:concurrency")} value={concurrencyLabel(t, concurrencyPolicy)} />
+      <DetailField
+        label={t("office:concurrency")}
+        value={concurrencyLabel(t, routine.concurrencyPolicy)}
+      />
       {routine.variables && Object.keys(routine.variables).length > 0 && (
         <div>
           <span className="text-xs font-medium text-muted-foreground">{t("office:variables")}</span>
           <div className="mt-1 space-y-0.5">
             {Object.entries(routine.variables).map(([key, val]) => (
               <div key={key} className="text-xs font-mono text-muted-foreground">
-                {key}: {String(val)}
+                {key}: {formatVariableValue(val)}
               </div>
             ))}
           </div>

@@ -718,6 +718,7 @@ export class ApiClient {
       model: string;
       fallback_model?: string;
       auto_fallback?: boolean;
+      require_exact_model?: boolean;
       auto_approve?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
@@ -732,6 +733,7 @@ export class ApiClient {
       model: opts.model,
       fallback_model: opts.fallback_model,
       auto_fallback: opts.auto_fallback,
+      require_exact_model: opts.require_exact_model,
       auto_approve: opts.auto_approve,
       mode: opts.mode,
       config_options: opts.config_options,
@@ -762,6 +764,9 @@ export class ApiClient {
     patch: {
       name?: string;
       model?: string;
+      fallback_model?: string;
+      auto_fallback?: boolean;
+      require_exact_model?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
@@ -1146,6 +1151,14 @@ export class ApiClient {
     });
   }
 
+  async updateExecutorProfile(
+    executorId: string,
+    profileId: string,
+    updates: { config: Record<string, string> },
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/executors/${executorId}/profiles/${profileId}`, updates);
+  }
+
   async deleteExecutorProfile(profileId: string): Promise<void> {
     await this.request("DELETE", `/api/v1/executor-profiles/${profileId}`);
   }
@@ -1204,6 +1217,10 @@ export class ApiClient {
 
   async getUserSettings(): Promise<{
     settings: {
+      sidebar_views_by_workspace: Record<
+        string,
+        { views: Array<Record<string, unknown>>; active_view_id: string; draft: unknown }
+      >;
       workspace_id?: string;
       workflow_filter_id?: string;
       terminal_link_behavior?: string;
@@ -1230,7 +1247,6 @@ export class ApiClient {
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
-    sidebar_active_view_id?: string;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
     show_scroll_to_start?: boolean;
@@ -1246,9 +1262,12 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     default_utility_agent_profile_id?: string;
-    sidebar_views?: unknown[];
-    sidebar_active_view_id?: string;
-    sidebar_draft?: unknown;
+    sidebar_view_state?: {
+      workspace_id: string;
+      views?: unknown[];
+      active_view_id?: string;
+      draft?: unknown;
+    };
     thread_views?: unknown[];
     thread_active_view_id?: string;
     thread_view_draft?: unknown;
@@ -1434,6 +1453,7 @@ export class ApiClient {
       repositoryId?: string;
       startedAt?: string;
       completedAt?: string;
+      errorMessage?: string;
       commandCount?: number;
       metadata?: Record<string, unknown>;
     },
@@ -1447,6 +1467,7 @@ export class ApiClient {
     if (opts.repositoryId !== undefined) body.repository_id = opts.repositoryId;
     if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
     if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
+    if (opts.errorMessage !== undefined) body.error_message = opts.errorMessage;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
     return this.request("POST", "/api/v1/_test/task-sessions", body);
@@ -1511,7 +1532,7 @@ export class ApiClient {
       turnStartedAt?: string;
       turnCompletedAt?: string;
     },
-  ): Promise<void> {
+  ): Promise<{ messageId: string; turnId: string | null }> {
     const body: Record<string, unknown> = { session_id: sessionId, type: opts.type };
     if (opts.content !== undefined) body.content = opts.content;
     if (opts.metadata !== undefined) body.metadata = opts.metadata;
@@ -1521,7 +1542,24 @@ export class ApiClient {
     if (opts.newTurn !== undefined) body.new_turn = opts.newTurn;
     if (opts.turnStartedAt !== undefined) body.turn_started_at = opts.turnStartedAt;
     if (opts.turnCompletedAt !== undefined) body.turn_completed_at = opts.turnCompletedAt;
-    await this.request("POST", "/api/v1/_test/messages", body);
+    const result = await this.request<{ message_id: string; turn_id?: string | null }>(
+      "POST",
+      "/api/v1/_test/messages",
+      body,
+    );
+    return { messageId: result.message_id, turnId: result.turn_id ?? null };
+  }
+
+  async updateSessionMessage(messageId: string, content: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/_test/messages/${messageId}`, { content });
+  }
+
+  async deleteSessionMessage(messageId: string): Promise<void> {
+    await this.request("DELETE", `/api/v1/_test/messages/${messageId}`);
+  }
+
+  async completeSessionTurn(turnId: string): Promise<void> {
+    await this.request("POST", `/api/v1/_test/turns/${turnId}/complete`);
   }
 
   async seedToolCallMessages(
@@ -2591,7 +2629,7 @@ export class ApiClient {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/task-sessions/${sessionId}`);
+    await this.request("DELETE", `/api/v1/_test/task-sessions/${sessionId}`);
   }
 
   async getTask(taskId: string): Promise<{
@@ -2904,6 +2942,18 @@ export class ApiClient {
     enabled: boolean,
   ): Promise<{ session_id: string; auto_run: boolean; dispatched: boolean }> {
     return this.wsRequest("message.queue.auto_run.set", {
+      task_id: identity.taskId,
+      session_id: identity.sessionId,
+      session_incarnation_id: identity.sessionIncarnationId,
+      enabled,
+    });
+  }
+
+  async setQueueAutoMerge(
+    identity: QueueSessionIdentityInput,
+    enabled: boolean,
+  ): Promise<{ session_id: string; auto_merge_enabled: boolean }> {
+    return this.wsRequest("message.queue.auto_merge.set", {
       task_id: identity.taskId,
       session_id: identity.sessionId,
       session_incarnation_id: identity.sessionIncarnationId,
@@ -3779,6 +3829,7 @@ type WorkspaceRoutingConfig = {
   provider_order: string[];
   default_tier: string;
   provider_profiles: Record<string, RoutingProviderProfile>;
+  role_tiers?: Record<string, string>;
   [key: string]: unknown;
 };
 
@@ -3803,7 +3854,7 @@ function routingWorkspaceIDs(body: string): string[] {
   }
 }
 
-function removeRoutingProfileReferences(
+export function removeRoutingProfileReferences(
   config: WorkspaceRoutingConfig,
   profileId: string,
 ): WorkspaceRoutingConfig | undefined {
@@ -3834,8 +3885,18 @@ function removeRoutingProfileReferences(
   if (!removed) return undefined;
 
   const updatedConfig = { ...config, provider_profiles: providerProfiles };
+  const roleTiers = config.role_tiers
+    ? Object.fromEntries(
+        Object.entries(config.role_tiers).filter(
+          ([, tier]) =>
+            tier === "" ||
+            tierMappedOnAnyProvider(tier, updatedConfig.provider_order, providerProfiles),
+        ),
+      )
+    : undefined;
   return {
     ...updatedConfig,
+    ...(roleTiers ? { role_tiers: roleTiers } : {}),
     enabled: config.enabled && routingConfigCanStayEnabled(updatedConfig),
   };
 }
@@ -3855,6 +3916,17 @@ function routingConfigCanStayEnabled(config: WorkspaceRoutingConfig): boolean {
       config.provider_profiles[providerID]?.execution_profile_ids?.[config.default_tier] !==
       undefined,
   );
+}
+
+function tierMappedOnAnyProvider(
+  tier: string,
+  providerOrder: string[],
+  providerProfiles: Record<string, RoutingProviderProfile>,
+): boolean {
+  return providerOrder.some((providerID) => {
+    const executionProfileID = providerProfiles[providerID]?.execution_profile_ids?.[tier];
+    return typeof executionProfileID === "string" && executionProfileID !== "";
+  });
 }
 
 // --- Jira / Linear mock payload types ---

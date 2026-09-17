@@ -419,6 +419,9 @@ func startServices( //nolint:cyclop
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
 	}
+	if services.PluginsCleanup != nil {
+		addCleanup(services.PluginsCleanup)
+	}
 	agentRegistry.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	if services.Workflow != nil {
 		addCleanup(services.Workflow.Close)
@@ -1010,6 +1013,7 @@ func startGatewayAndServe(
 	}
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
+	gateway.Hub.SetConversationSourceReader(services.Task)
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
 	// WS gateway per-user scoping (opt-in auth): connection auth on upgrade
@@ -1032,22 +1036,27 @@ func startGatewayAndServe(
 	// Per-instance servers enforce the same single rotating credential as
 	// the control server -- see config.AgentConfig's field doc.
 	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneAuthToken)
-	hostUtilityMgr.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
+	pluginProfileResolver := profilebinding.New(repos.AgentSettings, func(agentID string) bool {
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
-	}))
+	})
+	hostUtilityMgr.SetProfileResolver(pluginProfileResolver)
+	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
 
-	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
-	// calls to the utility agent selected in each plugin's configuration and
-	// runs them through the sessionless host-utility tier, at the first point
-	// where hostUtilityMgr is live.
-	if services.Plugins != nil && services.Utility != nil {
-		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
+	// Wire Host.InvokeUtilityAgent at the first point where the sessionless
+	// host-utility tier is live. The host reads the platform default from user
+	// settings; plugins provide any per-call override explicitly.
+	if services.Plugins != nil && services.User != nil {
+		services.Plugins.SetUtilityAgent(
+			pluginsDefaultUtilityProfileAdapter{source: services.User},
+			pluginsAgentProfileAdapter{resolver: pluginProfileResolver},
+			pluginsHostUtilityAdapter{mgr: hostUtilityMgr},
+		)
 	}
 
 	bootstrap := ctx.Value(bootstrapContextKey{}).(*bootstrapRuntime)
@@ -1099,6 +1108,14 @@ func startGatewayAndServe(
 	if services.Plugins != nil {
 		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
 		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
+	}
+
+	// Wire the managed conversation dispatcher, for the same boot-ordering
+	// reason as SetWriteDeps just above: AgentConversations was constructed
+	// during service initialization, but its dispatch path needs the
+	// orchestrator, which exists only here.
+	if services.AgentConversations != nil {
+		SetAgentConversationsDispatcher(services.AgentConversations, services.Task, orchestratorSvc, log)
 	}
 
 	// ============================================
@@ -1166,6 +1183,18 @@ func startGatewayAndServe(
 		MessageQueue:         orchestratorSvc.GetMessageQueue(),
 		MessageQueueConfig:   queueConfiguration(cfg),
 		TaskSessions:         repos.Task,
+		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
+			for _, id := range ids {
+				message, err := services.Task.GetMessage(eventCtx, id)
+				if err != nil {
+					log.Warn("failed to load retained tool message for publication", zap.Error(err))
+					continue
+				}
+				if err := services.Task.PublishMessageEvent(eventCtx, events.MessageUpdated, message); err != nil {
+					log.Warn("failed to publish retained tool message", zap.Error(err))
+				}
+			}
+		},
 	})
 	storageComposition, err := provideStorageCompositionWithDependencies(
 		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
@@ -1205,7 +1234,11 @@ func startGatewayAndServe(
 			log.Warn("profile reconciler error", zap.Error(err))
 		}
 		if migrated, err := services.Utility.MigrateLegacyBindings(hostUtilityCtx); err != nil {
-			log.Warn("utility profile migration failed", zap.Error(err))
+			if errors.Is(err, context.Canceled) {
+				log.Debug("utility profile migration failed (context canceled during shutdown)", zap.Error(err))
+			} else {
+				log.Warn("utility profile migration failed", zap.Error(err))
+			}
 		} else if migrated > 0 {
 			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
 		}
@@ -1672,6 +1705,9 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRouteReturningSession(
 	route officescheduler.RouteOverride,
 ) (string, error) {
 	execution, err := a.startTaskWithRoute(ctx, taskID, agentProfileID, launch, route)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}
@@ -1723,6 +1759,10 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
+	// A ceiling-deferred Office launch is replayed by the orchestrator's own
+	// sweep, independent of this scheduler; it needs a fresh runtime JWT
+	// rather than the one captured (and redacted) at defer time.
+	orchestratorSvc.SetCeilingLaunchCredentialReminter(orchScheduler)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can
@@ -2224,6 +2264,9 @@ func (a *officeOrchestratorTaskStarter) StartTaskWithEnvReturningSession(
 ) (string, error) {
 	execution, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID, executorID,
 		executorProfileID, priority, prompt, workflowStepID, planMode, attachments, env, nil)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}
@@ -2250,6 +2293,9 @@ func (a *officeOrchestratorTaskStarter) StartTaskWithLaunchContextReturningSessi
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
 		launch.WorkflowStepID, launch.PlanMode, launch.Attachments, launch.Env,
 		launch.AdditionalSkillSlugs)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}

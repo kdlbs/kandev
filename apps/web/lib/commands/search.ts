@@ -109,9 +109,12 @@ export function selectCommandSearchResult(options: CommandSearchSelectionOptions
     if (isVisibleCommand(commands, preferredValue, normalizedSearch)) return preferredValue;
   }
 
-  const firstCommand = normalizedSearch
-    ? (findFirstMatchingCommand(commands, normalizedSearch)?.id ?? "")
-    : (commands.find((command) => !command.disabled && !command.searchOnly)?.id ?? "");
+  let firstCommand = "";
+  if (normalizedSearch) {
+    firstCommand = findFirstMatchingCommand(commands, normalizedSearch)?.id ?? "";
+  } else if (commandsLeadResults) {
+    firstCommand = commands.find((command) => !command.disabled && !command.searchOnly)?.id ?? "";
+  }
   const firstTask = taskResultValues[0] ?? "";
   return commandsLeadResults ? firstCommand || firstTask : firstTask || firstCommand;
 }

@@ -5,6 +5,7 @@ type E2EStoreWindow = Window & {
     getState: () => {
       taskSessions: { items: Record<string, Record<string, unknown>> };
       tasks: { activeSessionId: string | null };
+      quickChat: { activeSessionId: string | null };
       sessionAgentctl: { itemsBySessionId: Record<string, { status?: string }> };
       setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
       setAuthState: (state: {
@@ -107,6 +108,28 @@ export async function waitForActiveSessionForegroundActivity(
   );
 }
 
+export async function waitForActiveSessionSupportsSteering(
+  page: Page,
+  expected = true,
+): Promise<void> {
+  await page.waitForFunction(
+    (expectedValue) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) return false;
+      const state = store.getState();
+      const sessionId = state.tasks.activeSessionId;
+      return sessionId
+        ? state.taskSessions.items[sessionId]?.supports_steering === expectedValue
+        : false;
+    },
+    expected,
+    {
+      timeout: 15_000,
+      message: "Active session did not negotiate the expected steering capability",
+    },
+  );
+}
+
 /** Seed the stale activity projection that can survive a missed reconnect event. */
 export async function seedActiveSessionForegroundActivity(
   page: Page,
@@ -147,6 +170,85 @@ export async function waitForActiveSessionCancellationPending(
     },
     pending,
     { timeout: 20_000 },
+  );
+}
+
+export async function waitForActiveQuickChatSupportsSteering(
+  page: Page,
+  expected = true,
+): Promise<string> {
+  await page.waitForFunction(
+    (expectedValue) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) return false;
+      const state = store.getState();
+      const sessionId = state.quickChat.activeSessionId;
+      return (
+        sessionId !== null &&
+        state.taskSessions.items[sessionId]?.supports_steering === expectedValue
+      );
+    },
+    expected,
+    { timeout: 20_000, message: "Quick Chat did not negotiate the expected steering capability" },
+  );
+  return page.evaluate(() => {
+    const sessionId = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().quickChat
+      .activeSessionId;
+    if (!sessionId) throw new Error("Quick Chat has no active session");
+    return sessionId;
+  });
+}
+
+export async function waitForActiveQuickChatForegroundActivity(
+  page: Page,
+  activity: "generating" | "background" | null,
+): Promise<void> {
+  await page.waitForFunction(
+    (expected) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) return false;
+      const state = store.getState();
+      const sessionId = state.quickChat.activeSessionId;
+      if (!sessionId) return false;
+      const current = state.taskSessions.items[sessionId]?.foreground_activity;
+      return expected === null ? current == null : current === expected;
+    },
+    activity,
+    { timeout: 20_000, message: "Quick Chat foreground activity did not reach the expected state" },
+  );
+}
+
+export async function waitForQuickChatCancellationPending(
+  page: Page,
+  sessionId: string,
+  pending: boolean,
+): Promise<void> {
+  await page.waitForFunction(
+    ({ expected, sid }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      return store?.getState().taskSessions.items[sid]?.cancellation_pending === expected;
+    },
+    { expected: pending, sid: sessionId },
+    { timeout: 20_000, message: `Quick Chat cancellation_pending did not become ${pending}` },
+  );
+}
+
+export async function waitForQuickChatSessionSettled(page: Page, sessionId: string): Promise<void> {
+  await page.waitForFunction(
+    (sid) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      const session = store?.getState().taskSessions.items[sid];
+      if (!session) return false;
+      return (
+        ["IDLE", "WAITING_FOR_INPUT", "COMPLETED", "FAILED", "CANCELLED"].includes(
+          String(session.state),
+        ) &&
+        session.cancellation_pending === false &&
+        session.foreground_activity == null
+      );
+    },
+    sessionId,
+    { timeout: 20_000, message: `Quick Chat session ${sessionId} did not settle` },
   );
 }
 

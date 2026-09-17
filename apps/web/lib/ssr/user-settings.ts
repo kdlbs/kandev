@@ -67,6 +67,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     lspStatusLocation: "toolbar",
     savedLayouts: [],
     sidebarViews: [],
+    sidebarViewsByWorkspace: {},
     sidebarActiveViewId: null,
     sidebarDraft: null,
     threadViews: [DEFAULT_THREAD_VIEW],
@@ -99,6 +100,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
     resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     quickChatTabOrderByWorkspace: {},
@@ -315,6 +318,7 @@ export function buildCoreFields(
     ...buildBehaviorFields(s, current),
     ...buildAppearanceFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,
+    sidebarViewsByWorkspace: s.sidebar_views_by_workspace ?? current.sidebarViewsByWorkspace,
     sidebarViews: mapDefined(s.sidebar_views, current.sidebarViews, (views) =>
       views.map(fromApiSidebarView),
     ) as SidebarView[],
@@ -377,6 +381,8 @@ export function buildCoreFields(
       parseAppStatusBarOrder,
     ),
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
+    sidebarHoverEnabled: s.sidebar_hover_enabled ?? current.sidebarHoverEnabled,
+    sidebarHoverDelayMs: s.sidebar_hover_delay_ms ?? current.sidebarHoverDelayMs,
     quickChatTabOrderByWorkspace:
       s.quick_chat_tab_order_by_workspace ?? current.quickChatTabOrderByWorkspace,
     resolveSessionHostnames: s.resolve_session_hostnames ?? current.resolveSessionHostnames,

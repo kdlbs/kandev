@@ -143,6 +143,8 @@ type UserSettings struct {
 	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
 	LspStatusLocation                 string                            `json:"lsp_status_location"`
 	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
+	SidebarViewsByWorkspace           map[string]SidebarWorkspaceState  `json:"sidebar_views_by_workspace"`
+	SidebarWorkspaceVersion           int                               `json:"sidebar_workspace_version"`
 	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
 	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
@@ -170,6 +172,8 @@ type UserSettings struct {
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	SidebarHoverEnabled               bool                              `json:"sidebar_hover_enabled"`
+	SidebarHoverDelayMs               int                               `json:"sidebar_hover_delay_ms"`
 	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
 	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`

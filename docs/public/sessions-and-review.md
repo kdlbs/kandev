@@ -59,9 +59,11 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
-Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev shows one recovery card in the selected session's chat. It labels the safe cause, keeps technical details collapsed, and offers **Resume**, **Restore read-only workspace**, or **Start fresh session** when each action is valid.
+Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev adds one recovery entry to the selected session's chat. The entry stays in chronological history after recovery and later agent output. Only the current unresolved failure shows recovery controls. Older entries keep their message and technical details, and repeated delivery of the same failure does not create another entry. History loading and new messages use the normal chat scroll behavior.
 
-**Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. A successful restore keeps the recovery card visible until a later resume succeeds. Kandev keeps the card in the chat scroll area and uses stacked touch-sized actions on phones. A failure in another session or an unrelated provider error remains on its own existing surface.
+**Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
+
+Failures during task or workspace preparation appear as one task error strip below the task header and above the session and Plan tabs. The strip remains visible when you switch sessions or tabs and disappears only after task recovery succeeds. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
@@ -79,7 +81,7 @@ When you queue a prompt, Kandev records a submission identity before it reports 
 
 A full queue, invalid content or attachment, identity conflict, or unavailable session shows a **Message not sent** error and keeps the draft and attachments. If delivery remains uncertain, Kandev shows **Message send status unknown** and keeps them for inspection. A confirmed admission clears only the submitted draft; a failed queue refresh does not turn an accepted admission into a failure.
 
-Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
+Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. This includes a turn that Auto-run delivered from the FIFO queue after its prompt handoff completes. The handoff remains protected while it is completing, so a concurrent Send Now conflict keeps the rows pending for retry. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
@@ -253,9 +255,29 @@ the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under
 Provider Usage**. Kandev hides the context ring rather than presenting
 impossible data when reported use exceeds the reported window.
 
+## Control chat animations
+
+Open **Settings > Preferences > Appearance** and change **Chat animations**.
+The setting is on by default and controls incoming text, new chat items, and
+smooth scrolling on this device. Choose **Save changes** to keep the choice
+across reloads, or **Reset** to discard the preview.
+
+Your device's reduced-motion preference disables these effects even when the
+switch is on. Turning chat animations off keeps content visible immediately
+and leaves the session's auto-scroll preference unchanged. Scroll up to read
+history without being pulled back by incoming content. Rich-output chart
+animations have their own Appearance setting.
+
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.
+
+Symbolic links have a link icon beside their filename in workspace **Staged**
+and **Unstaged** rows, including untracked links. Opening a readable link shows
+**Symlink** beside its path in the file editor. These indicators are also visible
+on phones. In **Files**, symbolic links use a link icon in place of the usual
+file or folder icon. Each Changes row identifies the entry in that change layer; a deleted
+link keeps its marker. Opening and saving files follows the existing behavior.
 
 Changes are grouped by repository and then by state:
 

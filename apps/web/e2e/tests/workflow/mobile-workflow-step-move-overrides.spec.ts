@@ -1,3 +1,4 @@
+import { expectPreviewFooter } from "./workflow-move-preview-assertions";
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
@@ -101,6 +102,11 @@ test("submits mobile move options with an attached keyboard", async ({
   await longPress(testPage, nextStepButton);
 
   await expectMoveOptionsDrawer(testPage);
+  await expectPreviewFooter(
+    testPage.getByTestId("workflow-move-options"),
+    "workflow-move-submit",
+    true,
+  );
   await fillMoveOverrides(testPage);
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
   await testPage.getByTestId("workflow-move-instructions").press("Meta+Enter");

@@ -110,7 +110,11 @@ func marshalSnapshot(registry *settingscatalog.Registry, mutableFields map[strin
 }
 
 func mutableFieldInventory() map[string][]string {
-	userFields := jsonFieldPaths(reflect.TypeFor[userdto.UpdateUserSettingsRequest](), nil)
+	userFields := jsonFieldPaths(reflect.TypeFor[userdto.UpdateUserSettingsRequest](), map[string]struct{}{
+		// sidebar_view_state is a workspace-scoped patch envelope, not a
+		// standalone user-settings catalog field.
+		"sidebar_view_state": {},
+	})
 	// sidebar_task_colors is the public patch alias. The DTO stores its
 	// normalized form as sidebar_task_color_patch before calling the service.
 	userFields = append(userFields, "sidebar_task_colors")

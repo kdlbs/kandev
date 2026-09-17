@@ -366,7 +366,7 @@ func handleAutopilotParentQuestion(e *emitter, prompt string) bool {
 		toolKeyTaskID:          childTaskID,
 		"reply_to_question_id": questionID,
 	})
-	result, err := callMCPTool("kandev", "message_task_kandev", map[string]any{
+	result, err := e.callMCPTool("kandev", "message_task_kandev", map[string]any{
 		toolKeyTaskID:          childTaskID,
 		clarificationPromptKey: "Use the first safe option and continue.",
 		"reply_to_question_id": questionID,
@@ -435,6 +435,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitSubagentSequence(e, model)
 	case strings.EqualFold(cmd, "/subtask") || strings.HasPrefix(strings.ToLower(cmd), "/subtask "):
 		emitCreateSubtask(e, cmd, model)
+	case strings.EqualFold(cmd, "/e2e:utility-profile"):
+		e.text("utility profile model: " + model)
 	case strings.HasPrefix(cmd, "/e2e:"):
 		rest := strings.TrimPrefix(cmd, "/e2e:")
 		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
@@ -818,7 +820,7 @@ func emitCreateSubtask(e *emitter, cmd, model string) {
 	e.startTool(toolID, "create_task_kandev", acp.ToolKindOther, args)
 	randomDelay(model)
 
-	result, err := callMCPTool("kandev", "create_task_kandev", args)
+	result, err := e.callMCPTool("kandev", "create_task_kandev", args)
 	if err != nil {
 		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("Failed to create subtask: %v", err))

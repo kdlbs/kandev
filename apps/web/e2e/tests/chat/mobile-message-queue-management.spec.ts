@@ -9,7 +9,11 @@ import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scrol
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
-import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
+import { watchWs } from "../../helpers/causal-waits";
+import {
+  expectSendNowInterruptsRunningFIFOTurn,
+  expectSendNowWorkflowRunning,
+} from "./message-queue-workflow-helpers";
 
 registerSeparateQueueRows(test);
 
@@ -21,12 +25,24 @@ test("mobile Send Now keeps a workflow transition running", async ({
   await expectSendNowWorkflowRunning(testPage, apiClient, seedData, true);
 });
 
+test("mobile Send Now interrupts a running FIFO turn", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(150_000);
+  const gateway = watchWs(testPage);
+  await expectSendNowInterruptsRunningFIFOTurn(testPage, apiClient, seedData, true, gateway);
+  await assertNoDocumentHorizontalOverflow(testPage);
+});
+
 async function expectTouchTarget(locator: Locator): Promise<void> {
   await expect(locator).toBeVisible();
   const box = await locator.boundingBox();
   expect(box).not.toBeNull();
-  expect(box!.width).toBeGreaterThanOrEqual(44);
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  // CSS layout can report 43.999... for a 44px device-pixel target.
+  expect(Math.round(box!.width)).toBeGreaterThanOrEqual(44);
+  expect(Math.round(box!.height)).toBeGreaterThanOrEqual(44);
 }
 
 async function expectEffectiveTouchTarget(locator: Locator): Promise<void> {
@@ -40,8 +56,8 @@ async function expectEffectiveTouchTarget(locator: Locator): Promise<void> {
       height: rect.height - px(after.top) - px(after.bottom),
     };
   });
-  expect(size.width).toBeGreaterThanOrEqual(44);
-  expect(size.height).toBeGreaterThanOrEqual(44);
+  expect(Math.round(size.width)).toBeGreaterThanOrEqual(44);
+  expect(Math.round(size.height)).toBeGreaterThanOrEqual(44);
 }
 
 function scriptedQueueMessage(marker: string, delayMs = 250): string {

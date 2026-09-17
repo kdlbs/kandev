@@ -31,6 +31,14 @@ const (
 	maxActiveErrorCategoryBytes = 64
 	maxPullRequestStateBytes    = 64
 	maxPullRequestURLBytes      = 2048
+	maxLaunchQueueIDBytes       = 256
+	maxLaunchQueueReasonBytes   = 64
+)
+
+const (
+	LaunchQueueReasonSessionCapacity      = "session_capacity"
+	LaunchQueueReasonOwnershipUnavailable = "ownership_unavailable"
+	LaunchQueueReasonReplayError          = "replay_error"
 )
 
 // TaskStatusSummary is the complete replacement value delivered to task-list
@@ -45,6 +53,7 @@ type TaskStatusSummary struct {
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
 	// QueuedPromptCount is the number of prompts currently en-queued for the
@@ -52,6 +61,25 @@ type TaskStatusSummary struct {
 	// message.queue.get). Omitted when zero so task rows without queued work
 	// stay byte-identical to earlier builds.
 	QueuedPromptCount int `json:"queued_prompt_count,omitempty"`
+	// LaunchQueue is the live task-level projection for automatic session work
+	// waiting on admission. It is independent of the selected transcript.
+	LaunchQueue *LaunchQueueSummary `json:"launch_queue,omitempty"`
+}
+
+type LaunchQueueSummary struct {
+	SessionID      string               `json:"session_id,omitempty"`
+	AgentProfileID string               `json:"agent_profile_id,omitempty"`
+	WorkflowStepID string               `json:"workflow_step_id,omitempty"`
+	QueuedAt       time.Time            `json:"queued_at"`
+	Reason         string               `json:"reason"`
+	Retrying       bool                 `json:"retrying"`
+	Capacity       *LaunchQueueCapacity `json:"capacity,omitempty"`
+}
+
+type LaunchQueueCapacity struct {
+	InUse      int       `json:"in_use"`
+	Limit      int       `json:"limit"`
+	ObservedAt time.Time `json:"observed_at"`
 }
 
 type PrimarySessionSummary struct {
@@ -60,6 +88,7 @@ type PrimarySessionSummary struct {
 }
 
 type ActiveErrorSummary struct {
+	Scope            string                   `json:"scope,omitempty"`
 	SessionID        string                   `json:"session_id,omitempty"`
 	TaskRepositoryID string                   `json:"task_repository_id,omitempty"`
 	ExecutionID      string                   `json:"execution_id,omitempty"`
@@ -136,7 +165,13 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validateActiveError(s.ActiveError); err != nil {
 		return err
 	}
-	return validatePullRequest(s.PullRequest)
+	if err := validateActiveError(s.TaskError); err != nil {
+		return err
+	}
+	if err := validatePullRequest(s.PullRequest); err != nil {
+		return err
+	}
+	return validateLaunchQueue(s.LaunchQueue)
 }
 
 func validatePrimarySession(session *PrimarySessionSummary) error {
@@ -158,6 +193,7 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 		value string
 		limit int
 	}{
+		{"active error scope", activeError.Scope, maxActiveErrorCategoryBytes},
 		{"active error session id", activeError.SessionID, maxSessionIDBytes},
 		{"active error task repository id", activeError.TaskRepositoryID, maxTaskRepositoryIDBytes},
 		{"active error execution id", activeError.ExecutionID, maxSessionIDBytes},
@@ -167,6 +203,9 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 		{"active error preview", activeError.Preview, MaxActiveErrorPreviewBytes},
 		{"active error details", activeError.Details, MaxActiveErrorDetailsBytes},
 		{"active error category", activeError.Category, maxActiveErrorCategoryBytes},
+	}
+	if activeError.Scope != "" && activeError.Scope != models.ErrorScopeSession && activeError.Scope != models.ErrorScopeTask {
+		return fmt.Errorf("active error has unknown scope")
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
@@ -215,6 +254,44 @@ func validatePullRequest(pr *PullRequestSummary) error {
 	return nil
 }
 
+func validateLaunchQueue(queue *LaunchQueueSummary) error {
+	if queue == nil {
+		return nil
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+		limit int
+	}{
+		{"launch queue session id", queue.SessionID, maxLaunchQueueIDBytes},
+		{"launch queue agent profile id", queue.AgentProfileID, maxLaunchQueueIDBytes},
+		{"launch queue workflow step id", queue.WorkflowStepID, maxLaunchQueueIDBytes},
+		{"launch queue reason", queue.Reason, maxLaunchQueueReasonBytes},
+	} {
+		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
+			return err
+		}
+	}
+	if queue.QueuedAt.IsZero() {
+		return fmt.Errorf("launch queue queued_at is required")
+	}
+	if queue.Reason != LaunchQueueReasonSessionCapacity &&
+		queue.Reason != LaunchQueueReasonOwnershipUnavailable &&
+		queue.Reason != LaunchQueueReasonReplayError {
+		return fmt.Errorf("launch queue has unknown reason")
+	}
+	if queue.Capacity == nil {
+		return nil
+	}
+	if queue.Capacity.InUse < 0 || queue.Capacity.Limit < 0 {
+		return fmt.Errorf("launch queue capacity cannot be negative")
+	}
+	if queue.Capacity.ObservedAt.IsZero() {
+		return fmt.Errorf("launch queue capacity observed_at is required")
+	}
+	return nil
+}
+
 func validateUTF8Bytes(field, value string, maxBytes int) error {
 	if !utf8.ValidString(value) {
 		return fmt.Errorf("%s must be valid UTF-8", field)
@@ -239,9 +316,11 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		ActiveSubagentCount: s.ActiveSubagentCount,
 		PendingAction:       s.PendingAction,
 		ActiveError:         s.ActiveError,
+		TaskError:           s.TaskError,
 		Git:                 s.Git,
 		PullRequest:         s.PullRequest,
 		QueuedPromptCount:   s.QueuedPromptCount,
+		LaunchQueue:         s.LaunchQueue,
 	})
 }
 
@@ -252,7 +331,9 @@ type semanticPayload struct {
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
 	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
+	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
 }

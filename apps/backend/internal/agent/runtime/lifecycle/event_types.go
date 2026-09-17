@@ -195,6 +195,9 @@ type AgentStreamEventData struct {
 	IsAppend bool `json:"is_append,omitempty"`
 	// MessageType distinguishes between "message" and "thinking" content types
 	MessageType string `json:"message_type,omitempty"`
+	// RetractedMessageIDs lists abandoned assistant and thinking records in
+	// allocation order for a response-attempt reset.
+	RetractedMessageIDs []string `json:"retracted_message_ids,omitempty"`
 
 	// AvailableCommands contains the slash commands available from the agent.
 	// Populated when Type is "available_commands".

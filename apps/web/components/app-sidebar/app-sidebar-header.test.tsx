@@ -96,3 +96,17 @@ describe("AppSidebarHeader", () => {
     expect(setWorkspacePickerOpen).toHaveBeenCalledWith(false);
   });
 });
+
+it("offers permanent expansion while displaying the hover-revealed workspace picker", () => {
+  const toggle = vi.fn();
+  render(
+    <TooltipProvider>
+      <WorkspaceScopeProvider>
+        <AppSidebarHeader collapsed={false} hoverRevealed onToggleCollapse={toggle} />
+      </WorkspaceScopeProvider>
+    </TooltipProvider>,
+  );
+  expect(screen.getByTestId("workspace-picker")).toBeTruthy();
+  screen.getByRole("button", { name: "Expand sidebar" }).click();
+  expect(toggle).toHaveBeenCalledOnce();
+});

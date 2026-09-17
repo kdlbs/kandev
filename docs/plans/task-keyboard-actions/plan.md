@@ -188,3 +188,16 @@ Additional isolated browser checks confirmed cross-workflow options submission,
 colored rows, immediate movement, and standalone desktop/mobile archive surfaces.
 Rendered screenshots were inspected. The temporary verification instance on
 48431 was stopped; the user's playground and main instance were left untouched.
+
+## PR remediation
+
+Merged the current main-branch move-preview and hover-control changes while
+preserving guarded keyboard submission in both full and compact controls.
+Moved palette command registration under the archived-task provider and restored
+task-first idle selection while asynchronous task results load.
+
+Local verification: 51 focused unit tests, typecheck, targeted lint, 10 distinct
+desktop browser scenarios, and 4 phone browser scenarios passed. Browser coverage
+includes archived Rename/Link/Delete availability, move previews' existing controls,
+modified-Enter submission, retry retention, and native phone drawers.
+Remote CI and review completion remain pending until the remediation is pushed.

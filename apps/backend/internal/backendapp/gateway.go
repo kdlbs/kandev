@@ -335,6 +335,22 @@ func provideGateway(
 				return loadTaskGitObservations(ctx, taskRepo, taskID)
 			},
 			LoadPullRequests: loadPullRequests,
+			LoadLaunchQueue: func(ctx context.Context, taskID string) (*statussummary.LaunchQueueSummary, error) {
+				task, err := taskRepo.GetTask(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				if task == nil {
+					return nil, fmt.Errorf("task %q not found", taskID)
+				}
+				observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
+				return statussummary.LaunchQueueSummaryFromTaskWithCapacity(task, &statussummary.LaunchQueueCapacityObservation{
+					InUse:      observation.InUse,
+					Limit:      observation.Limit,
+					ObservedAt: observation.ObservedAt,
+					Known:      observationErr == nil && observation.Known,
+				}), nil
+			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
 				if err != nil {
@@ -510,6 +526,7 @@ func loadTaskSessionObservations(
 		}
 		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
 			input.ActiveError = &statussummary.ActiveErrorSummary{
+				Scope:            models.ErrorScopeSession,
 				SessionID:        session.ID,
 				TaskRepositoryID: lastError.TaskRepositoryID,
 				ExecutionID:      lastError.ExecutionID,
@@ -551,10 +568,13 @@ func loadTaskLaunchErrorObservation(
 	return statussummary.TaskLaunchErrorObservation{
 		Observed: true,
 		Error: &statussummary.ActiveErrorSummary{
+			Scope:            models.ErrorScopeTask,
+			SessionID:        errorValue.SessionID,
 			TaskRepositoryID: errorValue.TaskRepositoryID,
 			Stamp:            errorValue.Stamp(),
 			OccurredAt:       errorValue.OccurredAt,
 			Preview:          errorValue.Message,
+			Details:          errorValue.Details,
 			Category:         errorValue.Code,
 			RecoveryActions:  errorValue.RecoveryActions,
 		},

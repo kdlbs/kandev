@@ -12,16 +12,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
-import {
-  updateRoutine,
-  runRoutine,
-  createRoutineTrigger,
-  deleteRoutineTrigger,
-} from "@/lib/api/domains/office-api";
-import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
+import { updateRoutine, runRoutine } from "@/lib/api/domains/office-api";
+import type {
+  Routine,
+  RoutineStatus,
+  RoutineTrigger,
+  UpdateRoutinePatch,
+} from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
 import { useOfficeTopbar } from "../../components/office-topbar-context";
+import { isRoutineFiring } from "../../lib/routine-status";
+import { routineNotFiringMessage } from "../../lib/routine-not-firing";
+import { coerceCatchUpMax } from "../../lib/catch-up-max";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { reconcileCronTrigger, type CronReconcileOutcome } from "./cron-reconcile";
 
 // Lift the form state out of the component so the file stays under the
 // 100-line per-function ceiling and the helpers can render typed slices
@@ -29,15 +34,23 @@ import { useTranslation } from "react-i18next";
 type DraftState = {
   name: string;
   description: string;
-  status: "active" | "paused" | "archived";
+  // Undefined means the stored status is not one of the three selectable
+  // options; the control shows no selection and a save omits the field.
+  status: RoutineStatus | undefined;
   assigneeAgentProfileId: string;
   concurrencyPolicy: string;
   catchUpPolicy: string;
-  catchUpMax: number;
+  catchUpMax: string;
   triggerKind: "cron" | "webhook";
   cronExpression: string;
   timezone: string;
 };
+
+const ROUTINE_STATUSES: RoutineStatus[] = ["active", "paused", "archived"];
+
+function normalizeDraftStatus(status: string): RoutineStatus | undefined {
+  return (ROUTINE_STATUSES as string[]).includes(status) ? (status as RoutineStatus) : undefined;
+}
 
 function pickTriggerKind(triggers: RoutineTrigger[]): "cron" | "webhook" {
   const cron = triggers.find((t) => t.kind === "cron");
@@ -53,14 +66,60 @@ function buildDraft(routine: Routine, triggers: RoutineTrigger[]): DraftState {
   return {
     name: routine.name,
     description: routine.description ?? "",
-    status: (routine.status as DraftState["status"]) ?? "active",
+    status: normalizeDraftStatus(routine.status),
     assigneeAgentProfileId: routine.assigneeAgentProfileId ?? "",
     concurrencyPolicy: routine.concurrencyPolicy ?? "coalesce_if_active",
     catchUpPolicy: routine.catchUpPolicy ?? "summarize_missed",
-    catchUpMax: routine.catchUpMax ?? 25,
+    catchUpMax: String(coerceCatchUpMax(routine.catchUpMax)),
     triggerKind,
     cronExpression: cron?.cronExpression ?? "",
     timezone: cron?.timezone ?? "UTC",
+  };
+}
+
+function buildUpdatePatch(draft: DraftState): UpdateRoutinePatch {
+  return {
+    name: draft.name,
+    description: draft.description,
+    status: draft.status,
+    assigneeAgentProfileId: draft.assigneeAgentProfileId,
+    concurrencyPolicy: draft.concurrencyPolicy,
+    catchUpPolicy: draft.catchUpPolicy,
+    catchUpMax: coerceCatchUpMax(draft.catchUpMax),
+  };
+}
+
+function describeCronOutcome(
+  outcome: CronReconcileOutcome,
+  t: TFunction,
+): { toastKind: "success" | "error"; message: string; refresh: boolean } {
+  if (outcome.kind === "unchanged") {
+    return { toastKind: "success", message: t("office:routineSaved"), refresh: true };
+  }
+  if (outcome.kind === "success") {
+    return outcome.triggers === null
+      ? {
+          toastKind: "success",
+          message: t("office:routineSavedScheduleMayBeStale"),
+          refresh: false,
+        }
+      : { toastKind: "success", message: t("office:routineSaved"), refresh: true };
+  }
+  if (outcome.triggers === null) {
+    return { toastKind: "error", message: t("office:routineScheduleFateUnknown"), refresh: false };
+  }
+  if (outcome.kind === "create-failed") {
+    return {
+      toastKind: "error",
+      message: t("office:routineSavedScheduleChangeFailed", { error: outcome.message }),
+      refresh: false,
+    };
+  }
+  const count = outcome.triggers.filter((trigger) => trigger.kind === "cron").length;
+  return {
+    toastKind: "error",
+    message: t("office:routineSavedScheduleDeleteFailed", { error: outcome.message, count }),
+    refresh: false,
   };
 }
 
@@ -74,7 +133,7 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
   const router = useRouter();
   const agents = useAppStore(selectOfficeAgentProfiles);
   const [routine] = useState(initialRoutine);
-  const [triggers, setTriggers] = useState(initialTriggers);
+  const [triggers, setTriggers] = useState<RoutineTrigger[] | null>(initialTriggers);
   const [draft, setDraft] = useState<DraftState>(buildDraft(initialRoutine, initialTriggers));
   const [saving, setSaving] = useState(false);
   const update = useCallback(
@@ -82,38 +141,51 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
     [],
   );
 
-  const cronTrigger = triggers.find((t) => t.kind === "cron");
+  const cronTrigger = triggers?.find((t) => t.kind === "cron");
   const lastFired = cronTrigger?.lastFiredAt ?? null;
 
   const handleSave = useCallback(async () => {
+    if (triggers === null) {
+      toast.error(t("office:routineScheduleFateUnknown"));
+      return;
+    }
     setSaving(true);
     try {
-      await updateRoutine(routine.id, {
-        name: draft.name,
-        description: draft.description,
-        status: draft.status,
-        assigneeAgentProfileId: draft.assigneeAgentProfileId,
-        concurrencyPolicy: draft.concurrencyPolicy,
-        catchUpPolicy: draft.catchUpPolicy,
-        catchUpMax: draft.catchUpMax,
-      } as Record<string, unknown>);
-      const nextTriggers = await syncCronTrigger(routine.id, draft, triggers);
-      setTriggers(nextTriggers);
-      toast.success(t("office:routineSaved"));
-      router.refresh();
+      await updateRoutine(routine.id, buildUpdatePatch(draft));
     } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveRoutine"));
+      setSaving(false);
+      return;
+    }
+
+    try {
+      const outcome = await reconcileCronTrigger(routine.id, draft, triggers);
+      if (outcome.kind !== "unchanged") setTriggers(outcome.triggers);
+      const result = describeCronOutcome(outcome, t);
+      if (result.toastKind === "success") {
+        toast.success(result.message);
+      } else {
+        toast.error(result.message);
+      }
+      if (result.refresh) router.refresh();
+    } catch (err) {
+      // reconcileCronTrigger is designed to always resolve (every internal
+      // call is its own try/catch) rather than throw, but nothing enforces
+      // that contract. Catching here — not just the `finally` below — keeps
+      // a future violation from becoming an unhandled rejection out of an
+      // unawaited click handler on top of a stuck Save button.
       toast.error(err instanceof Error ? err.message : t("office:failedToSaveRoutine"));
     } finally {
       setSaving(false);
     }
-  }, [routine.id, draft, triggers, router]);
+  }, [routine.id, draft, triggers, router, t]);
 
   const handleRunNow = useCallback(async () => {
     try {
       await runRoutine(routine.id);
       toast.success(t("office:routineFired"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("office:failedToRunRoutine"));
+      toast.error(routineNotFiringMessage(err, t, "office:failedToRunRoutine"));
     }
   }, [routine.id]);
 
@@ -139,7 +211,12 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
     <div className="p-6 space-y-6 max-w-3xl">
       <DetailGeneralCard draft={draft} update={update} agents={agents} />
       <DetailTriggerCard draft={draft} update={update} />
-      <DetailReadOnlyCard lastFiredAt={lastFired} nextRunAt={cronTrigger?.nextRunAt ?? null} />
+      <DetailReadOnlyCard
+        lastFiredAt={lastFired}
+        nextRunAt={
+          isRoutineFiring(draft.status ?? routine.status) ? (cronTrigger?.nextRunAt ?? null) : null
+        }
+      />
     </div>
   );
 }
@@ -169,7 +246,8 @@ function DetailGeneralCard({
               type="number"
               min={1}
               value={draft.catchUpMax}
-              onChange={(e) => update({ catchUpMax: Number(e.target.value) || 25 })}
+              onChange={(e) => update({ catchUpMax: e.target.value })}
+              onBlur={(e) => update({ catchUpMax: String(coerceCatchUpMax(e.target.value)) })}
             />
           </Field>
         )}
@@ -216,7 +294,7 @@ function StatusAndAssigneeFields({
     <div className="grid grid-cols-2 gap-4">
       <Field label={t("common:status")}>
         <Select
-          value={draft.status}
+          value={draft.status ?? ""}
           onValueChange={(v) => update({ status: v as DraftState["status"] })}
         >
           <SelectTrigger className="cursor-pointer">
@@ -398,43 +476,4 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
-}
-
-// syncCronTrigger reconciles the routine's cron trigger with the
-// draft's expression / timezone / kind. Two paths:
-//   - Draft.kind === "cron" with a non-empty expression → ensure a
-//     matching trigger exists (delete the old one + create a new one
-//     when the expression changes; the trigger model has no PATCH
-//     endpoint today and the cron-expression is the schedule's
-//     identity, so a delete + create is the simplest path).
-//   - Draft.kind === "webhook" or empty cron → leave triggers alone for
-//     now. A future iteration can add explicit webhook config.
-async function syncCronTrigger(
-  routineId: string,
-  draft: DraftState,
-  triggers: RoutineTrigger[],
-): Promise<RoutineTrigger[]> {
-  if (draft.triggerKind !== "cron" || !draft.cronExpression.trim()) {
-    return triggers;
-  }
-  const existing = triggers.find((t) => t.kind === "cron");
-  if (
-    existing &&
-    existing.cronExpression === draft.cronExpression &&
-    (existing.timezone ?? "UTC") === draft.timezone
-  ) {
-    return triggers;
-  }
-  if (existing) {
-    await deleteRoutineTrigger(existing.id);
-  }
-  const res = await createRoutineTrigger(routineId, {
-    kind: "cron",
-    cronExpression: draft.cronExpression,
-    timezone: draft.timezone,
-  });
-  const created = (res as unknown as { trigger?: RoutineTrigger }).trigger ?? null;
-  const next = triggers.filter((t) => t.id !== existing?.id);
-  if (created) next.push(created);
-  return next;
 }

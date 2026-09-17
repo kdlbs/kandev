@@ -196,6 +196,14 @@ export function useProfileSave({
       });
       return;
     }
+    if (draft.requireExactModel && !draft.model.trim()) {
+      toast({
+        title: translate("settings:requireExactModelValidationTitle"),
+        description: translate("settings:requireExactModelValidation"),
+        variant: "error",
+      });
+      return;
+    }
     // Model is optional — an empty profile model means "use the agent's
     // default", which is applied through ACP session model selection at session start.
     setSaveStatus("loading");
@@ -209,6 +217,7 @@ export function useProfileSave({
           model: draft.model,
           fallback_model: draft.fallbackModel ?? "",
           auto_fallback: draft.autoFallback ?? false,
+          require_exact_model: draft.requireExactModel ?? false,
           mode: draft.mode,
           config_options: draft.configOptions ?? {},
           ...permissionsToProfilePatch(draft),
@@ -221,6 +230,13 @@ export function useProfileSave({
               : undefined,
           cli_flags: draft.cliFlags,
           command_prefix: draft.commandPrefix ?? "",
+          provider_kind: draft.providerKind ?? "",
+          provider_base_url:
+            (draft.providerKind ?? "") === "openai_compatible" ? (draft.providerBaseUrl ?? "") : "",
+          provider_api_key_secret_id:
+            (draft.providerKind ?? "") === "openai_compatible"
+              ? (draft.providerApiKeySecretId ?? "")
+              : "",
           env_vars: draft.envVars ?? [],
         },
         force,

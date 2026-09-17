@@ -71,7 +71,7 @@ function CommandItemRow({
       keywords={getCommandSearchTerms(cmd)}
       disabled={cmd.disabled}
       className={cn(
-        "cursor-pointer [@media(pointer:coarse)]:min-h-11",
+        "cursor-pointer [@media(pointer:coarse)]:min-h-12",
         cmd.destructive && "text-destructive",
       )}
       onSelect={() => {

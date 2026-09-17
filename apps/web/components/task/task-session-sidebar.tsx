@@ -76,6 +76,7 @@ export function useSidebarData(workspaceId: string | null) {
 
   const {
     allTasks,
+    pendingArchiveTaskIds,
     allSteps,
     stepsByWorkflowId,
     wipQueueByTaskId,
@@ -115,6 +116,7 @@ export function useSidebarData(workspaceId: string | null) {
       repositoriesById,
       stepColorById,
       automaticColorSettings,
+      pendingArchiveTaskIds,
     };
     const items: TaskSwitcherItem[] = allTasks.map((task) => buildSidebarItem(task, mapCtx));
     if (
@@ -136,6 +138,7 @@ export function useSidebarData(workspaceId: string | null) {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     automaticColorSettings,
+    pendingArchiveTaskIds,
   ]);
 
   return {
@@ -503,6 +506,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   );
   const switcherProps = buildTaskSwitcherProps({
     grouped,
+    nestHierarchyTasks: displayTasks,
     workflows,
     stepsByWorkflowId,
     highlightedTaskId,

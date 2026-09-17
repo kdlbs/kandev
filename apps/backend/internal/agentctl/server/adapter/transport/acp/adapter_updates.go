@@ -177,6 +177,13 @@ func (a *Adapter) handleACPUpdate(
 	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
+		if a.observesResponseAttemptReset(promptGeneration, event) {
+			leadingEvent = &AgentEvent{
+				Type:             streams.EventTypeResponseAttemptReset,
+				SessionID:        sessionID,
+				PromptGeneration: promptGeneration,
+			}
+		}
 		if event != nil && (a.observeCodexProviderEvidence(promptGeneration, event) ||
 			a.observeCursorRetriableEvidence(promptGeneration, event)) {
 			// Suppress provider control/evidence chunks. The adapter emits one
@@ -238,6 +245,15 @@ func (a *Adapter) handleACPUpdate(
 			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, supplemental)
 		}
 	}
+}
+
+func (a *Adapter) observesResponseAttemptReset(promptGeneration uint64, event *AgentEvent) bool {
+	if event == nil || event.Type != streams.EventTypeSessionInfo || promptGeneration == 0 ||
+		!a.dialect.resetsResponseAttempt(event.SessionMeta) {
+		return false
+	}
+	turn := a.currentPromptTurn()
+	return turn != nil && turn.promptGeneration == promptGeneration
 }
 
 func (a *Adapter) observeCursorRetriableEvidence(promptGeneration uint64, event *AgentEvent) bool {

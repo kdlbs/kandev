@@ -86,11 +86,6 @@ const HARNESS_RENDER_ERROR = "harness did not render";
 const NATIVE_SCROLL_MANAGEMENT_TEST_ID = "native-scroll-management-container";
 const AUTO_SCROLL_CONTAINER_TEST_ID = "auto-scroll-container";
 const CACHED_MESSAGE_ID = "cached-message";
-const RECOVERY_SESSION_ID = "session-recovery";
-const RECOVERY_MESSAGE_ID = "recovery-message";
-const OLDEST_ACTIVITY_ID = "activity-old";
-const NEWEST_MESSAGE_ID = "newest";
-const OLDER_MESSAGE_ID = "older";
 const TEST_MESSAGES = [{} as Message];
 /** Always returns false: the harness never locks programmatic scrolling. */
 const NEVER_LOCKED = () => false;
@@ -114,7 +109,6 @@ function Harness({
   enabled = true,
   sessionId = null,
   isProgrammaticScrollLocked = NEVER_LOCKED,
-  recoveryRevealKey = null,
 }: {
   itemCount: number;
   anchoredBarOffsetPx: number;
@@ -127,7 +121,6 @@ function Harness({
   enabled?: boolean;
   sessionId?: string | null;
   isProgrammaticScrollLocked?: () => boolean;
-  recoveryRevealKey?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -155,7 +148,6 @@ function Harness({
     sessionId,
     isProgrammaticScrollLocked,
     isVisible,
-    recoveryRevealKey,
   } as Parameters<typeof useScrollToDividerOrBottom>[4];
   useScrollToDividerOrBottom(scrollRef, itemCount, dividerKey, anchoredBarOffsetPx, scrollOptions);
   return (
@@ -188,6 +180,7 @@ function AutoScrollHarness({
   messages = TEST_MESSAGES,
   markRef,
   enabled = true,
+  motionEnabled = false,
   isVisible = true,
   sessionId = null,
   metrics,
@@ -197,6 +190,7 @@ function AutoScrollHarness({
   messages?: Message[];
   markRef?: { current?: () => void };
   enabled?: boolean;
+  motionEnabled?: boolean;
   isVisible?: boolean;
   sessionId?: string | null;
   metrics?: NativeScrollMetrics;
@@ -211,6 +205,7 @@ function AutoScrollHarness({
     isWorking,
     sessionId,
     enabled,
+    motionEnabled,
     hasUnreadDivider,
     isProgrammaticScrollLocked: NEVER_LOCKED,
     isVisible,
@@ -290,7 +285,6 @@ function NativeScrollManagementHarness({
   historyRefreshPending = false,
   hasUnreadDivider = false,
   hasMore = true,
-  recoveryRevealKey = null,
 }: {
   items: RenderItem[];
   messages?: Message[];
@@ -304,7 +298,6 @@ function NativeScrollManagementHarness({
   historyRefreshPending?: boolean;
   hasUnreadDivider?: boolean;
   hasMore?: boolean;
-  recoveryRevealKey?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollMetrics(scrollRef, metrics);
@@ -322,7 +315,6 @@ function NativeScrollManagementHarness({
     loadMore,
     isVisible,
     historyRefreshPending,
-    recoveryRevealKey,
   });
   if (recoveryRef) recoveryRef.current = showRecovery;
   return (
@@ -371,301 +363,6 @@ describe("isElementInPreloadRegion", () => {
 
 // eslint-disable-next-line max-lines-per-function -- pagination invariants share one fixture and lifecycle.
 describe("useNativeScrollManagement transcript pagination", () => {
-  it("reveals recovery at the top once per error stamp and preserves same-stamp scrolling", () => {
-    const metrics = { scrollHeight: 1000, scrollTop: 240, clientHeight: 400 };
-    const { rerender } = render(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(RECOVERY_MESSAGE_ID)]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        recoveryRevealKey="session-recovery:bootstrap-1"
-      />,
-    );
-
-    expect(metrics.scrollTop).toBe(0);
-
-    metrics.scrollTop = 240;
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(RECOVERY_MESSAGE_ID)]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        recoveryRevealKey="session-recovery:bootstrap-1"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(240);
-
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(RECOVERY_MESSAGE_ID)]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-      />,
-    );
-    expect(metrics.scrollTop).toBe(240);
-
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(RECOVERY_MESSAGE_ID)]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        recoveryRevealKey="session-recovery:bootstrap-1"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(0);
-
-    metrics.scrollTop = 240;
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(RECOVERY_MESSAGE_ID)]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        recoveryRevealKey="session-recovery:bootstrap-2"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(0);
-  });
-
-  // eslint-disable-next-line max-lines-per-function -- recovery ownership and the subsequent prepend handoff share one controlled lifecycle.
-  it("keeps recovery visible while an older page settles, then resumes normal anchoring after user scroll", async () => {
-    const page = Promise.withResolvers<number>();
-    const metrics = { scrollHeight: 100, scrollTop: 0, clientHeight: 50 };
-    const activity = transcriptActivity(OLDEST_ACTIVITY_ID, "turn-1");
-    const newest = transcriptMessage(NEWEST_MESSAGE_ID);
-    const { rerender } = render(
-      <NativeScrollManagementHarness
-        items={[activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        loadMore={() => page.promise}
-        recoveryRevealKey="session-recovery:failure-1"
-      />,
-    );
-    const scroller = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
-    const wrappedLoadMore = sharedSentinelCalls.at(-1)?.[4] as () => Promise<number>;
-
-    const pendingLoad = wrappedLoadMore();
-    rerender(
-      <NativeScrollManagementHarness
-        items={[activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        isLoadingMore
-        loadMore={() => page.promise}
-        recoveryRevealKey="session-recovery:failure-1"
-      />,
-    );
-    metrics.scrollHeight = 200;
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(OLDER_MESSAGE_ID), activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        isLoadingMore
-        loadMore={() => page.promise}
-        recoveryRevealKey="session-recovery:failure-1"
-      />,
-    );
-
-    expect(metrics.scrollTop).toBe(0);
-
-    page.resolve(1);
-    await act(async () => {
-      await pendingLoad;
-    });
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(OLDER_MESSAGE_ID), activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        loadMore={() => page.promise}
-        recoveryRevealKey="session-recovery:failure-1"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(0);
-
-    const nextPage = Promise.withResolvers<number>();
-    const nextLoadMore = sharedSentinelCalls.at(-1)?.[4] as () => Promise<number>;
-    const pendingNextLoad = nextLoadMore();
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(OLDER_MESSAGE_ID), activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        isLoadingMore
-        loadMore={() => nextPage.promise}
-        recoveryRevealKey="session-recovery:failure-1"
-      />,
-    );
-    act(() => {
-      scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: 100 }));
-      metrics.scrollTop = 40;
-      scroller.dispatchEvent(new Event("scroll"));
-    });
-    expect(metrics.scrollTop).toBe(40);
-
-    metrics.scrollHeight = 300;
-    rerender(
-      <NativeScrollManagementHarness
-        items={[
-          transcriptMessage("older-2"),
-          transcriptMessage(OLDER_MESSAGE_ID),
-          activity,
-          newest,
-        ]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        isLoadingMore
-        loadMore={() => nextPage.promise}
-        recoveryRevealKey="session-recovery:failure-1"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(140);
-
-    nextPage.resolve(1);
-    await act(async () => {
-      await pendingNextLoad;
-    });
-    rerender(
-      <NativeScrollManagementHarness
-        items={[
-          transcriptMessage("older-2"),
-          transcriptMessage(OLDER_MESSAGE_ID),
-          activity,
-          newest,
-        ]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        loadMore={() => nextPage.promise}
-        recoveryRevealKey="session-recovery:failure-1"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(140);
-  });
-
-  it("keeps an already-loading older page below a newly revealed recovery card", async () => {
-    const page = Promise.withResolvers<number>();
-    const metrics = { scrollHeight: 100, scrollTop: 0, clientHeight: 50 };
-    const activity = transcriptActivity(OLDEST_ACTIVITY_ID, "turn-1");
-    const newest = transcriptMessage(NEWEST_MESSAGE_ID);
-    const { rerender } = render(
-      <NativeScrollManagementHarness
-        items={[activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        loadMore={() => page.promise}
-      />,
-    );
-    const wrappedLoadMore = sharedSentinelCalls.at(-1)?.[4] as () => Promise<number>;
-    const pendingLoad = wrappedLoadMore();
-
-    rerender(
-      <NativeScrollManagementHarness
-        items={[activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        isLoadingMore
-        loadMore={() => page.promise}
-      />,
-    );
-    rerender(
-      <NativeScrollManagementHarness
-        items={[activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        isLoadingMore
-        loadMore={() => page.promise}
-        recoveryRevealKey="session-recovery:failure-2"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(0);
-
-    metrics.scrollHeight = 200;
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(OLDER_MESSAGE_ID), activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        isLoadingMore
-        loadMore={() => page.promise}
-        recoveryRevealKey="session-recovery:failure-2"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(0);
-
-    page.resolve(1);
-    await act(async () => {
-      await pendingLoad;
-    });
-    rerender(
-      <NativeScrollManagementHarness
-        items={[transcriptMessage(OLDER_MESSAGE_ID), activity, newest]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        loadMore={() => page.promise}
-        recoveryRevealKey="session-recovery:failure-2"
-      />,
-    );
-    expect(metrics.scrollTop).toBe(0);
-  });
-
-  it("resumes normal auto-scroll after the initial recovery placement is consumed", () => {
-    const metrics = { scrollHeight: 100, scrollTop: 0, clientHeight: 50 };
-    const firstMessage = { id: "first-message" } as Message;
-    const scrollerMessages = [firstMessage];
-    const activity = transcriptActivity(OLDEST_ACTIVITY_ID, "turn-1");
-    const newest = transcriptMessage(NEWEST_MESSAGE_ID);
-    const { rerender } = render(
-      <NativeScrollManagementHarness
-        items={[activity, newest]}
-        messages={scrollerMessages}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        hasMore={false}
-        recoveryRevealKey="session-recovery:placement-1"
-      />,
-    );
-    const scroller = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
-
-    metrics.scrollTop = 50;
-    act(() => {
-      scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: 100 }));
-      scroller.dispatchEvent(new Event("scroll"));
-    });
-    metrics.scrollHeight = 150;
-    rerender(
-      <NativeScrollManagementHarness
-        items={[activity, newest]}
-        messages={[...scrollerMessages, { id: "second-message" } as Message]}
-        metrics={metrics}
-        sessionId={RECOVERY_SESSION_ID}
-        enabled
-        hasMore={false}
-        recoveryRevealKey="session-recovery:placement-1"
-      />,
-    );
-
-    expect(metrics.scrollTop).toBe(2_147_483_647);
-  });
-
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.11
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.14
   it("places cached enabled history before refresh and reconciles after it settles", () => {
@@ -1049,48 +746,6 @@ describe("useNativeScrollManagement transcript pagination", () => {
     expect(sharedSentinelRecheck).not.toHaveBeenCalled();
   });
 
-  it("does not recheck a restored transcript while explicit recovery is active", () => {
-    const requestAnimationFrame = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        callback(0);
-        return 1;
-      });
-    const recoveryRef = { current: false };
-    const { rerender } = render(
-      <NativeScrollManagementHarness
-        items={[]}
-        sessionId="session-1"
-        recoveryRef={recoveryRef}
-        isVisible={false}
-      />,
-    );
-    const options = sharedSentinelCalls.at(-1)?.[5] as {
-      onLoadSettled: (result: {
-        count: number;
-        rejected: boolean;
-        continuation: "no-progress";
-      }) => void;
-    };
-    act(() => {
-      options.onLoadSettled({ count: 0, rejected: false, continuation: "no-progress" });
-    });
-    sharedSentinelRecheck.mockClear();
-
-    rerender(
-      <NativeScrollManagementHarness
-        items={[]}
-        sessionId="session-1"
-        recoveryRef={recoveryRef}
-        isVisible
-      />,
-    );
-
-    expect(recoveryRef.current).toBe(true);
-    expect(sharedSentinelRecheck).not.toHaveBeenCalled();
-    requestAnimationFrame.mockRestore();
-  });
-
   it("retries a disarmed short page on the next upward scroll", () => {
     const metrics = { scrollHeight: 1000, scrollTop: 100, clientHeight: 400 };
     render(<NativeScrollManagementHarness items={[]} metrics={metrics} />);
@@ -1201,7 +856,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     await pendingLoad;
   });
 
-  it("continues while the sentinel remains in preload even when the visible boundary changes", async () => {
+  it("continues while the sentinel remains in preload and the visible boundary is stable", async () => {
     const loadMore = vi.fn(async () => 20);
     const newest = transcriptMessage("newest");
     const { rerender } = render(
@@ -1234,7 +889,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     options = sharedSentinelCalls.at(-1)?.[5] as {
       shouldContinueWhileIntersecting: () => boolean;
     };
-    expect(options.shouldContinueWhileIntersecting()).toBe(true);
+    expect(options.shouldContinueWhileIntersecting()).toBe(false);
   });
 
   it("anchors a prepend below a fixed task description row", () => {
@@ -1351,18 +1006,10 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
 // eslint-disable-next-line max-lines-per-function -- this suite keeps the related scroll invariants together.
 describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
-  it("leaves an active recovery transcript at the top for its first reveal", () => {
-    render(
-      <Harness
-        itemCount={2}
-        anchoredBarOffsetPx={0}
-        dividerKey={null}
-        scrollHeight={1000}
-        recoveryRevealKey="session-1:bootstrap-1"
-      />,
-    );
+  it("places an enabled transcript at the bottom on its first render", () => {
+    render(<Harness itemCount={2} anchoredBarOffsetPx={0} dividerKey={null} scrollHeight={1000} />);
 
-    expect(screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID).scrollTop).toBe(0);
+    expect(screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID).scrollTop).toBe(1000);
   });
 
   it("waits for an inactive transcript to become visible before placing the initial view", () => {
@@ -2098,12 +1745,14 @@ type ScrollToMessageHandle = (
 function ScrollToMessageHarness({
   rows,
   onHandle,
+  motionEnabled = true,
 }: {
   rows: string[];
+  motionEnabled?: boolean;
   onHandle: (handle: ScrollToMessageHandle) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const handle = useScrollToMessage(scrollRef, (performScroll) => performScroll());
+  const handle = useScrollToMessage(scrollRef, (performScroll) => performScroll(), motionEnabled);
   useLayoutEffect(() => {
     onHandle(handle);
   }, [handle, onHandle]);
@@ -2547,4 +2196,106 @@ describe("useScrollToMessage — absent superseder", () => {
       scrollIntoView.mockRestore();
     }
   });
+});
+
+it("smooth follow defers its write and yields to manual input", () => {
+  let time = 0;
+  let serial = 0;
+  const frames = new Map<number, FrameRequestCallback>();
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    frames.set(++serial, cb);
+    return serial;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  const step = () =>
+    act(() => {
+      time += 16;
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((cb) => cb(time));
+    });
+  const view = render(
+    <AutoScrollHarness isWorking={false} hasUnreadDivider={false} motionEnabled />,
+  );
+  const el = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+  setScrollMetrics(el);
+  el.scrollTop = 0;
+  view.rerender(
+    <AutoScrollHarness
+      isWorking={false}
+      hasUnreadDivider={false}
+      motionEnabled
+      messages={[...TEST_MESSAGES]}
+    />,
+  );
+  expect(el.scrollTop).toBe(0);
+  step();
+  step();
+  expect(el.scrollTop).toBeGreaterThan(0);
+  expect(el.scrollTop).toBeLessThan(600);
+  const top = el.scrollTop;
+  act(() => el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 })));
+  view.rerender(
+    <AutoScrollHarness
+      isWorking={false}
+      hasUnreadDivider={false}
+      motionEnabled
+      messages={[...TEST_MESSAGES]}
+    />,
+  );
+  step();
+  expect(el.scrollTop).toBe(top);
+  view.unmount();
+  vi.unstubAllGlobals();
+});
+
+it("updates explicit navigation when chat motion is disabled", () => {
+  let handle: ScrollToMessageHandle | null = null;
+  const onHandle = (next: ScrollToMessageHandle) => {
+    handle = next;
+  };
+  const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+  const view = render(<ScrollToMessageHarness rows={["nav"]} onHandle={onHandle} />);
+  act(() => {
+    handle!("nav");
+  });
+  expect(scroll).toHaveBeenLastCalledWith({ block: "center", behavior: "smooth" });
+  view.rerender(
+    <ScrollToMessageHarness rows={["nav"]} onHandle={onHandle} motionEnabled={false} />,
+  );
+  act(() => {
+    handle!("nav");
+  });
+  expect(scroll).toHaveBeenLastCalledWith({ block: "center", behavior: "auto" });
+});
+
+it("cancels pending navigation landing when reduced motion becomes effective", () => {
+  const frames: Array<() => void> = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+    frames.push(callback);
+    return frames.length;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
+  let handle: ScrollToMessageHandle | null = null;
+  const onHandle = (next: ScrollToMessageHandle) => {
+    handle = next;
+  };
+  const view = render(<ScrollToMessageHarness rows={["cancel"]} onHandle={onHandle} />);
+  const root = screen.getByTestId(SCROLL_TO_MESSAGE_ROOT);
+  const target = root.querySelector<HTMLElement>("#msg-cancel")!;
+  root.getBoundingClientRect = () => createRect(0, 400);
+  target.getBoundingClientRect = () => createRect(120 - root.scrollTop, 20);
+  act(() => {
+    handle!("cancel", { align: "start" });
+  });
+  view.rerender(
+    <ScrollToMessageHarness rows={["cancel"]} onHandle={onHandle} motionEnabled={false} />,
+  );
+  act(() => {
+    for (let i = 0; i < 5 && frames.length; i++) frames.shift()!();
+  });
+  expect(root.scrollTop).toBe(0);
+  view.unmount();
+  vi.unstubAllGlobals();
 });

@@ -1,3 +1,4 @@
+import { mapSidebarWorkspaces } from "../slices/ui/sidebar-workspace-state";
 /* eslint-disable max-lines -- Hydration owns the cross-slice merge boundary. */
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
@@ -26,6 +27,7 @@ import {
   readMcpAttachmentHistory,
   shouldReplaceMcpAttachmentHistory,
 } from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
+import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
@@ -164,14 +166,34 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
 /** Hydrate settings slices, preserving loading states. */
 function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   if (state.executors) deepMerge(draft.executors, state.executors);
-  if (state.settingsAgents) deepMerge(draft.settingsAgents, state.settingsAgents);
   if (state.agentDiscovery) deepMerge(draft.agentDiscovery, state.agentDiscovery);
   mergeWithLoading(draft.availableAgents, state.availableAgents);
-  if (state.agentProfiles) deepMerge(draft.agentProfiles, state.agentProfiles);
+  const preserveLiveAgentProfiles =
+    (state.agentProfiles?.version ?? 0) < draft.agentProfiles.version;
+  if (state.settingsAgents && !preserveLiveAgentProfiles) {
+    deepMerge(draft.settingsAgents, {
+      ...state.settingsAgents,
+      items: state.settingsAgents.items.map(normalizeAgentProfiles),
+    });
+  }
+  if (state.agentProfiles) {
+    // Preserve a newer profile mutation delivered over WebSocket while this
+    // snapshot was in flight; otherwise the stale response can erase it.
+    if (!preserveLiveAgentProfiles) {
+      deepMerge(draft.agentProfiles, state.agentProfiles);
+    }
+  }
   mergeWithLoading(draft.editors, state.editors);
   mergeWithLoading(draft.prompts, state.prompts);
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
-  if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
+  if (state.settingsData) {
+    // A rejected agent snapshot is incomplete. Leave the loading marker false
+    // so the settings data hook can retry the complete list.
+    const settingsData = preserveLiveAgentProfiles
+      ? { ...state.settingsData, agentsLoaded: false }
+      : state.settingsData;
+    deepMerge(draft.settingsData, settingsData);
+  }
   if (state.sleepInhibition) deepMerge(draft.sleepInhibition, state.sleepInhibition);
   if (state.agentProfileRecentUse) {
     draft.agentProfileRecentUse = mergeAgentProfileRecentUseState(
@@ -200,6 +222,11 @@ function bridgeSidebarViewsFromUserSettings(
   draft: Draft<AppState>,
   userSettings: Partial<AppState["userSettings"]>,
 ): void {
+  draft.sidebarViewsByWorkspace = mapSidebarWorkspaces(
+    userSettings.sidebarViewsByWorkspace,
+    draft.sidebarViewsByWorkspace,
+    userSettings.revision,
+  );
   const serverViews = userSettings.sidebarViews;
   const normalized = serverViews?.map(migrateView) ?? [];
   if (normalized.length > 0) {

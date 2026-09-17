@@ -58,6 +58,8 @@ export type Agent = {
    */
   capability_status?: CapabilityStatus;
   capability_error?: string;
+  /** Whether this agent supports sessionless host-utility inference. */
+  inference_capable?: boolean;
   created_at: string;
   updated_at: string;
 };

@@ -255,6 +255,15 @@ it("keeps the composer mounted and focused as the queue fills and drains", () =>
   }
 });
 
+it.each(["direct", "queue"] as const)(
+  "projects the derived %s input mode on the composer surface",
+  (inputMode) => {
+    renderComposer({ inputMode });
+
+    expect(screen.getByTestId("chat-input-area").getAttribute("data-input-mode")).toBe(inputMode);
+  },
+);
+
 describe("resolveInputPlaceholder", () => {
   it("invites queueing while a clarification remains pending", () => {
     expect(resolveInputPlaceholder(false, undefined, false, true, false)).toBe(

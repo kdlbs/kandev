@@ -30,6 +30,7 @@ import {
 } from "@/components/task/task-launch-error-context";
 import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
 import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
+import { TaskSharedError } from "@/components/task/task-shared-error";
 import {
   buildDebugEntries,
   buildArchivedValue,
@@ -397,7 +398,6 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               isPassthrough={sessionPanel.isSessionPassthrough}
               isTaskArchived={archivedValue.isArchived}
             />
-            <TaskCommands />
             <TaskPRShortcut taskId={taskProps.taskId} />
             <TaskDebugOverlay entries={debugEntries} />
             {!isMobile && (
@@ -416,6 +416,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               />
             )}
             <TaskArchivedProvider value={archivedValue}>
+              <TaskCommands />
               <TaskLaunchErrorProvider
                 value={{
                   taskId: task.id,
@@ -432,7 +433,10 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                   workspaceId={task?.workspace_id ?? null}
                   isPassthrough={sessionPanel.isSessionPassthrough}
                 />
-                <TaskLayout {...layoutProps} />
+                <TaskSharedError reserveMobileTopBar={isMobile} />
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <TaskLayout {...layoutProps} />
+                </div>
               </TaskLaunchErrorProvider>
             </TaskArchivedProvider>
           </div>

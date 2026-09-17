@@ -34,6 +34,10 @@ func TestMessageToAPIProjectsTypedShellOutputWithoutMutation(t *testing.T) {
 	require.Equal(t, float64(len("warning\n")), output["stderr_bytes"])
 	require.Equal(t, float64(exitCode), output["exit_code"])
 	require.Equal(t, true, output["truncated"])
+	projectedAgain := jsonMetadata(t, ProjectMessageMetadata(projected))
+	outputAgain := projectedAgain["normalized"].(map[string]any)["shell_exec"].(map[string]any)["output"].(map[string]any)
+	require.Equal(t, true, outputAgain["has_output"])
+	require.Equal(t, float64(len("pass ✓\n")), outputAgain["stdout_bytes"])
 	require.Equal(t, "pass ✓\n", normalized.ShellExec().Output.Stdout)
 	require.Equal(t, "warning\n", normalized.ShellExec().Output.Stderr)
 }
@@ -122,4 +126,23 @@ func jsonMetadata(t *testing.T, metadata map[string]any) map[string]any {
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 	return decoded
+}
+
+func TestShellExitCodeJSONNumber(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		want  int
+		valid bool
+	}{
+		{"0", 0, true}, {"1", 1, true}, {"-1", -1, true},
+		{"1.5", 0, false}, {"9223372036854775808", 0, false}, {"not-a-number", 0, false},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			value, ok := intFromAny(json.Number(tc.raw))
+			require.Equal(t, tc.valid, ok)
+			if ok {
+				require.Equal(t, tc.want, value)
+			}
+		})
+	}
 }

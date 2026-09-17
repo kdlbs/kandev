@@ -106,6 +106,13 @@ test.describe("Command palette archive", () => {
         .filter({ has: testPage.getByText("Create Subtask", { exact: true }) }),
     ).toBeVisible();
 
+    for (const label of ["Rename", "Link", "Delete"]) {
+      await dialog.getByRole("combobox").fill(label);
+      await expect(
+        dialog.getByRole("option").filter({ has: testPage.getByText(label, { exact: true }) }),
+      ).toBeVisible();
+    }
+
     await dialog.getByRole("combobox").fill("archive");
     await expect(
       dialog

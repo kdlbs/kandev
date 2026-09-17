@@ -1,0 +1,15 @@
+=== RUN   TestConversationLargeLegacyUpgrade
+    conversation_upgrade_large_test.go:47: seeded_messages=500
+    conversation_upgrade_large_test.go:47: seeded_messages=10500
+    conversation_upgrade_large_test.go:47: seeded_messages=20500
+    conversation_upgrade_large_test.go:47: seeded_messages=30500
+    conversation_upgrade_large_test.go:47: seeded_messages=40500
+    conversation_upgrade_large_test.go:49: legacy_db_bytes=2953932800
+    conversation_upgrade_large_test.go:65: open_and_backup_ms=10814.908
+    conversation_upgrade_large_test.go:71: cleanup_ms=625.067
+    conversation_upgrade_large_test.go:77: task_repository_startup_ms=32.546
+    conversation_upgrade_large_test.go:94: post_cleanup_pages=721175 free_pages=605351
+    conversation_upgrade_large_test.go:95: stream_seconds=60 workers=8 target_updates_per_second=800 updates=44204 write_failures=0 probes=599 probe_failures=0 worst_probe_ms=115.891
+--- PASS: TestConversationLargeLegacyUpgrade (163.02s)
+PASS
+ok  	github.com/kandev/kandev/internal/task/repository/sqlite	163.042s

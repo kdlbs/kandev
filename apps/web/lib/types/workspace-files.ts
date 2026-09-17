@@ -74,6 +74,7 @@ export type FileChangeNotificationPayload = {
 };
 
 export type OpenFileTab = {
+  resolvedPath?: string;
   path: string;
   name: string;
   repo?: string;
