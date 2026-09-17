@@ -97,7 +97,8 @@ func TestMirrorStartupCostPopulated(t *testing.T) {
 			journal := seedPrimaryJournalFixture(t, filepath.Join(dir, "journal.db"), shape)
 			totalEvents := shape.sessions * shape.eventsPerSession
 
-			// Production shape: file-backed mirror, one commit per event.
+			// Production shape: file-backed mirror, batched commits
+			// (mirrorSweepBatchSize events per transaction).
 			fileService := newMirrorService(t, journal, filepath.Join(dir, "session-events.sqlite"))
 			started := time.Now()
 			mirrored, err := fileService.syncAllCommittedSessionEvents(context.Background())
@@ -196,7 +197,7 @@ func TestMirrorCommitBatchingFloor(t *testing.T) {
 		name        string
 		commitEvery int // 0 means one transaction for the whole sweep
 	}{
-		{name: "per-event(today)", commitEvery: 1},
+		{name: "per-event(pre-batching)", commitEvery: 1},
 		{name: "per-session", commitEvery: eventsPerSession},
 		{name: "per-256-events", commitEvery: 256},
 		{name: "whole-sweep", commitEvery: 0},

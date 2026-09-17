@@ -89,6 +89,179 @@ func TestAppendCommittedBatchFallsBackToPerEventOnApplyFailure(t *testing.T) {
 	require.Len(t, eventsC, 1)
 }
 
+// TestMirrorSyncBatchSkipsRemainingEventsOfAFailedSessionInFlushEach is the
+// regression test for review round 1's R1-F1: previously, once flushEach's
+// per-event fallback failed one event, it moved on to that SAME session's
+// next queued event. Applied against the freshly-undone (and so, again,
+// brand-new) partition, that next event satisfies mirrorGapHealable's
+// newPartition case and "heals" straight over the failed sequence — jumping
+// the watermark past it for good, so the failed event is never re-queried
+// on a later sweep. This reproduces it with no fault injection: occupy the
+// globally-unique session_events.event_id on an unrelated session, then feed
+// the target session seq 1 with that same id (applies fine in-memory,
+// UNIQUE-constraint-fails on persist) followed by seq 2 in the same flush.
+func TestMirrorSyncBatchSkipsRemainingEventsOfAFailedSessionInFlushEach(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-events.db")
+	log, err := NewSessionEventLog(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, log.Close()) })
+	start := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+
+	occupied := SessionEvent{
+		SessionID: "session-other", TaskID: stringPtr("task-other"), Sequence: 1,
+		ID: "shared-event-id", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+		Payload: validMessageAddedPayload("other1"), CreatedAt: start,
+	}
+	appended, err := log.AppendCommitted(occupied)
+	require.NoError(t, err)
+	require.True(t, appended)
+
+	zSeq1 := SessionEvent{
+		SessionID: "session-z", TaskID: stringPtr("task-z"), Sequence: 1,
+		// Collides with "session-other"'s durably committed event_id: the
+		// in-memory apply cannot see it (dup/gap checks are per-session), so
+		// only the durable INSERT fails.
+		ID: "shared-event-id", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+		Payload: validMessageAddedPayload("z1"), CreatedAt: start,
+	}
+	zSeq2 := SessionEvent{
+		SessionID: "session-z", TaskID: stringPtr("task-z"), Sequence: 2,
+		ID: "session-z:2", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+		Payload: validMessageAddedPayload("z2"), CreatedAt: start,
+	}
+	good := SessionEvent{
+		SessionID: "session-good", TaskID: stringPtr("task-good"), Sequence: 1,
+		ID: "session-good:1", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+		Payload: validMessageAddedPayload("good1"), CreatedAt: start,
+	}
+
+	// One batch spanning session-z (bad) and session-good (fine) forces
+	// AppendCommittedBatch to fail on zSeq1's persist and mirrorSyncBatch to
+	// fall back to flushEach.
+	batch := newMirrorSyncBatch(log, 256, true)
+	batch.add(zSeq1)
+	batch.add(zSeq2)
+	batch.add(good)
+	batch.flush()
+
+	require.Len(t, batch.failures, 1)
+	require.Contains(t, batch.failures[0], "session-z")
+	require.Equal(t, uint64(0), log.Watermark("session-z"))
+	require.Equal(t, uint64(1), log.Watermark("session-good"))
+
+	require.NoError(t, log.Close())
+	reopened, err := NewSessionEventLog(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+	eventsZ, _ := reopened.EventsAfter("session-z", 0)
+	// Not []SessionEvent{zSeq2}: that would mean zSeq1 was silently dropped
+	// and the watermark advanced over it, exactly the R1-F1 regression.
+	require.Empty(t, eventsZ)
+}
+
+// TestAppendCommittedBatchUndoesAllAppliedEventsOnPersistFailure proves the
+// other half of AppendCommittedBatch's all-or-nothing contract: when every
+// event applies cleanly in-memory (no dup/gap/terminal rejection) but the
+// durable transaction itself fails, undo() still unwinds every outcome the
+// call accumulated, not just the ones a mid-loop apply failure would have
+// left behind. Duplicate/gap/terminal checks are keyed by session, so a
+// same-event_id collision across two different (both brand-new) sessions is
+// invisible until the INSERT runs — exactly the shape that reaches the
+// persist-time undo() path instead of the apply-time one.
+func TestAppendCommittedBatchUndoesAllAppliedEventsOnPersistFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-events.db")
+	log, err := NewSessionEventLog(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, log.Close()) })
+	start := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+
+	occupied := SessionEvent{
+		SessionID: "session-occupied", TaskID: stringPtr("task-occupied"), Sequence: 1,
+		ID: "shared-event-id", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+		Payload: validMessageAddedPayload("occupied"), CreatedAt: start,
+	}
+	appended, err := log.AppendCommitted(occupied)
+	require.NoError(t, err)
+	require.True(t, appended)
+
+	eventD := SessionEvent{
+		SessionID: "session-d", TaskID: stringPtr("task-d"), Sequence: 1,
+		// Collides with "session-occupied"'s durably committed event_id.
+		ID: "shared-event-id", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+		Payload: validMessageAddedPayload("d1"), CreatedAt: start,
+	}
+	eventE := SessionEvent{
+		SessionID: "session-e", TaskID: stringPtr("task-e"), Sequence: 1,
+		ID: "session-e:1", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+		Payload: validMessageAddedPayload("e1"), CreatedAt: start,
+	}
+
+	appendedBatch, err := log.AppendCommittedBatch([]SessionEvent{eventE, eventD})
+	require.Error(t, err)
+	require.Nil(t, appendedBatch)
+	require.Equal(t, uint64(0), log.Watermark("session-d"))
+	require.Equal(t, uint64(0), log.Watermark("session-e"))
+
+	require.NoError(t, log.Close())
+	reopened, err := NewSessionEventLog(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+	eventsD, _ := reopened.EventsAfter("session-d", 0)
+	eventsE, _ := reopened.EventsAfter("session-e", 0)
+	require.Empty(t, eventsD)
+	require.Empty(t, eventsE)
+	occupiedEvents, _ := reopened.EventsAfter("session-occupied", 0)
+	require.Len(t, occupiedEvents, 1)
+}
+
+// TestAppendCommittedBatchDuplicateHandling covers AppendCommittedBatch's
+// two branches that TestAppendCommittedBatchFallsBackToPerEventOnApplyFailure
+// and TestAppendCommittedBatchUndoesAllAppliedEventsOnPersistFailure do not
+// reach: a duplicate event (already durably committed) applies with no error
+// and outcome.appended=false, so it contributes nothing to persist.
+func TestAppendCommittedBatchDuplicateHandling(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session-events.db")
+	log, err := NewSessionEventLog(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, log.Close()) })
+	start := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+
+	original := SessionEvent{
+		SessionID: "session-x", TaskID: stringPtr("task-x"), Sequence: 1,
+		ID: "session-x:1", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+		Payload: validMessageAddedPayload("x1"), CreatedAt: start,
+	}
+	appended, err := log.AppendCommitted(original)
+	require.NoError(t, err)
+	require.True(t, appended)
+
+	t.Run("all duplicates short-circuits with no persist attempt", func(t *testing.T) {
+		result, err := log.AppendCommittedBatch([]SessionEvent{original})
+		require.NoError(t, err)
+		require.Nil(t, result)
+		require.Equal(t, uint64(1), log.Watermark("session-x"))
+	})
+
+	t.Run("mixed duplicate and new event persists only the new one", func(t *testing.T) {
+		next := SessionEvent{
+			SessionID: "session-x", TaskID: stringPtr("task-x"), Sequence: 2,
+			ID: "session-x:2", ProtocolVersion: SessionEventProtocolVersion, EventType: "message.added",
+			Payload: validMessageAddedPayload("x2"), CreatedAt: start,
+		}
+		result, err := log.AppendCommittedBatch([]SessionEvent{original, next})
+		require.NoError(t, err)
+		require.Equal(t, []SessionEvent{next}, result)
+		require.Equal(t, uint64(2), log.Watermark("session-x"))
+
+		require.NoError(t, log.Close())
+		reopened, err := NewSessionEventLog(path)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+		events, _ := reopened.EventsAfter("session-x", 0)
+		require.Len(t, events, 2)
+	})
+}
+
 // cancelAfterN reports ctx.Err() as nil for its first n calls and then as
 // context.Canceled forever after, letting a test deterministically cancel a
 // loop after a specific number of iterations without racing a timer.
@@ -120,8 +293,24 @@ func TestMirrorSweepCancellationStopsBetweenSessionsWithoutAdvancingPastCommit(t
 
 	ctx := &cancelAfterN{Context: context.Background(), remaining: 2}
 	mirrored, err := service.sweepCommittedSessionEvents(ctx, true)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, context.Canceled)
 	require.Len(t, mirrored, 4) // exactly the first two sessions' two events each
+
+	// The durable log agrees: the two swept sessions are fully mirrored,
+	// the two the cancellation stopped before reaching are absent.
+	require.NoError(t, service.sessionEvents.Close())
+	reopened, err := NewSessionEventLog(filepath.Join(dir, "session-events.sqlite"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+	for _, sessionID := range sessionIDs[:2] {
+		events, _ := reopened.EventsAfter(sessionID, 0)
+		require.Len(t, events, 2)
+	}
+	for _, sessionID := range sessionIDs[2:] {
+		events, _ := reopened.EventsAfter(sessionID, 0)
+		require.Empty(t, events)
+	}
+	service.sessionEvents = reopened
 
 	require.Equal(t, uint64(2), service.sessionEvents.Watermark(sessionIDs[0]))
 	require.Equal(t, uint64(2), service.sessionEvents.Watermark(sessionIDs[1]))

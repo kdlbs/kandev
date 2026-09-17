@@ -161,7 +161,12 @@ func (s *Service) queryCommittedSessionEvents(ctx context.Context, sessionID str
 			event.TaskID = &taskID.String
 		}
 		if event.Sequence > expected+1 && s.log != nil {
-			s.log.Warn("journal mirror healed a retention gap",
+			// This observes a gap in the primary journal's own returned
+			// rows, before any append is attempted — it does not mean the
+			// gap was healed. Whether the mirror can accept it is decided
+			// separately by mirrorGapHealable at append time, and it may
+			// instead be rejected with ErrForwardGap.
+			s.log.Warn("journal mirror observed a primary-journal sequence gap",
 				zap.String("session_id", sessionID),
 				zap.Uint64("expected_sequence", expected+1),
 				zap.Uint64("sequence", event.Sequence),
@@ -355,10 +360,31 @@ func (s *Service) sweepCommittedSessionEvents(ctx context.Context, collect bool)
 		}
 	}
 	batch.flush()
+	return s.finishSweep(ctx, batch, swept, len(sessionIDs))
+}
+
+// finishSweep logs the outcome of one sweepCommittedSessionEvents pass and
+// turns it into the pass's return value. A cancelled sweep is reported and
+// returned as distinct from a completed one — see sweepCommittedSessionEvents
+// for why silently reporting a cancelled, partial sweep as "completed" is
+// the R1-F1-adjacent bug this guards against: an operator (or the boot log)
+// needs to be able to tell "everything was mirrored" from "shutdown cut this
+// short, and the rest resumes next sweep" instead of treating both as success.
+func (s *Service) finishSweep(ctx context.Context, batch *mirrorSyncBatch, swept, totalSessions int) ([]SessionEvent, error) {
+	cancelled := ctx.Err() != nil
 	if s.log != nil {
-		s.log.Info("Plugins conversation journal mirror sweep completed",
-			zap.Int("sessions", swept), zap.Int("events_mirrored", batch.count),
-			zap.Int("session_failures", len(batch.failures)))
+		if cancelled {
+			s.log.Warn("Plugins conversation journal mirror sweep cancelled",
+				zap.Int("sessions_swept", swept), zap.Int("sessions_total", totalSessions),
+				zap.Int("events_mirrored", batch.count), zap.Int("session_failures", len(batch.failures)))
+		} else {
+			s.log.Info("Plugins conversation journal mirror sweep completed",
+				zap.Int("sessions", swept), zap.Int("events_mirrored", batch.count),
+				zap.Int("session_failures", len(batch.failures)))
+		}
+	}
+	if cancelled {
+		return batch.mirrored, fmt.Errorf("mirror sweep cancelled after %d/%d sessions: %w", swept, totalSessions, ctx.Err())
 	}
 	if len(batch.failures) > 0 {
 		return batch.mirrored, fmt.Errorf("mirror %d session partition(s): %s", len(batch.failures), strings.Join(batch.failures, "; "))
@@ -372,15 +398,23 @@ func (s *Service) sweepCommittedSessionEvents(ctx context.Context, collect bool)
 // or unlucky event cannot block every other session's otherwise-good writes
 // in the same batch: each AppendCommitted call is its own lock/commit cycle,
 // so a failure there is isolated to that one event instead of unwinding
-// everything queued alongside it.
+// everything queued alongside it. Once a session records a failure, every
+// remaining event queued for that session (in this flush and any later one)
+// is skipped rather than attempted: a later event in the same session can
+// land past the sequence the failed write would have occupied and advance
+// the watermark over it (mirrorGapHealable treats an empty, non-terminal
+// partition as healable), which would silently drop the failed event for
+// good instead of leaving it to be re-queried, from its real watermark, by
+// the next sweep.
 type mirrorSyncBatch struct {
-	log       *SessionEventLog
-	flushSize int
-	collect   bool
-	pending   []SessionEvent
-	mirrored  []SessionEvent
-	count     int
-	failures  []string
+	log            *SessionEventLog
+	flushSize      int
+	collect        bool
+	pending        []SessionEvent
+	mirrored       []SessionEvent
+	count          int
+	failures       []string
+	failedSessions map[string]struct{}
 }
 
 func newMirrorSyncBatch(log *SessionEventLog, flushSize int, collect bool) *mirrorSyncBatch {
@@ -388,6 +422,9 @@ func newMirrorSyncBatch(log *SessionEventLog, flushSize int, collect bool) *mirr
 }
 
 func (b *mirrorSyncBatch) add(event SessionEvent) {
+	if b.isFailedSession(event.SessionID) {
+		return
+	}
 	b.pending = append(b.pending, event)
 	if len(b.pending) >= b.flushSize {
 		b.flush()
@@ -410,15 +447,39 @@ func (b *mirrorSyncBatch) flush() {
 
 func (b *mirrorSyncBatch) flushEach(pending []SessionEvent) {
 	for _, event := range pending {
+		if b.isFailedSession(event.SessionID) {
+			continue
+		}
 		appended, err := b.log.AppendCommitted(event)
 		if err != nil {
-			b.failures = append(b.failures, event.SessionID+": "+err.Error())
+			b.markSessionFailed(event.SessionID, err)
 			continue
 		}
 		if appended {
 			b.recordAppended([]SessionEvent{event})
 		}
 	}
+}
+
+func (b *mirrorSyncBatch) isFailedSession(sessionID string) bool {
+	_, failed := b.failedSessions[sessionID]
+	return failed
+}
+
+// markSessionFailed records the session's first failure and stops the
+// session from being queued or retried again in this sweep. One entry per
+// session keeps the sweep-level error bounded (and its "%d session
+// partition(s)" label accurate) even when a persistent condition, such as a
+// full disk, fails every event of every session it reaches.
+func (b *mirrorSyncBatch) markSessionFailed(sessionID string, err error) {
+	if _, already := b.failedSessions[sessionID]; already {
+		return
+	}
+	if b.failedSessions == nil {
+		b.failedSessions = make(map[string]struct{})
+	}
+	b.failedSessions[sessionID] = struct{}{}
+	b.failures = append(b.failures, sessionID+": "+err.Error())
 }
 
 func (b *mirrorSyncBatch) recordAppended(events []SessionEvent) {
