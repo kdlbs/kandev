@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // TestApplyTaskMutation_SameAgentRepeatAssignment_QueuesWithoutInterrupt
@@ -94,6 +95,55 @@ func TestApplyTaskMutation_DifferentAgentReassignment_InterruptsPreviousAssignee
 	}
 	if !found {
 		t.Fatalf("expected a task_assigned run queued for agent-new, got %+v", res.Runs)
+	}
+}
+
+// TestApplyTaskMutation_DifferentAgentReassignment_RateLimitedStillInterrupts
+// pins AC-OFFICE-ASSIGN-RATE-001.7 through the real dispatcher, not just
+// through checkAssignmentWakeAllowance or QueueRun directly: when the
+// task's agent-initiated assignment allowance is already exhausted, the
+// reassignment wake itself is refused (absent from res.Runs), but the
+// mutation is not aborted — the previous assignee's session interrupt
+// (res.InterruptSessionID, set in reactToAssigneeChange before queue() is
+// ever called) still fires, and ApplyTaskMutation returns no error.
+func TestApplyTaskMutation_DifferentAgentReassignment_RateLimitedStillInterrupts(t *testing.T) {
+	repo := newReactivityTestRepo(t)
+	ss := newChildrenCompletedTestScheduler(t, repo)
+	createChildrenCompletedAgent(t, repo, "agent-old")
+	createChildrenCompletedAgent(t, repo, "agent-new")
+
+	taskID := "task-reassign-rate-limited"
+	for i := 0; i < AssignmentWakeAllowanceN; i++ {
+		createAssignmentWakeRun(t, repo, taskID, time.Now().UTC())
+	}
+
+	task := &TaskSnapshot{
+		ID:                     taskID,
+		WorkspaceID:            "ws-1",
+		AssigneeAgentProfileID: "agent-old",
+	}
+	newAssignee := "agent-new"
+	gen := int64(1)
+	change := TaskMutation{
+		NewAssigneeID:        &newAssignee,
+		AssignmentGeneration: &gen,
+		ActorID:              "agent-old",
+		ActorType:            "agent",
+	}
+
+	res, err := ss.ApplyTaskMutation(context.Background(), task, change)
+	if err != nil {
+		t.Fatalf("ApplyTaskMutation: %v", err)
+	}
+
+	if res.InterruptSessionID != task.ID {
+		t.Fatalf("InterruptSessionID = %q, want %q (a refusal must not abort the mutation's other effects)",
+			res.InterruptSessionID, task.ID)
+	}
+	for _, r := range res.Runs {
+		if r.AgentID == "agent-new" && r.Reason == RunReasonTaskAssigned {
+			t.Fatalf("expected the rate-limited reassignment wake to be refused (absent from res.Runs), got %+v", res.Runs)
+		}
 	}
 }
 
