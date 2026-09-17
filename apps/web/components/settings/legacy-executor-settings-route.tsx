@@ -1,13 +1,36 @@
 "use client";
 
 import ExecutorEditPage from "@/app/settings/executor/[id]/page";
-import ProfileDetailPage from "@/app/settings/executor/[id]/profile/[profileId]/page";
+import { Button } from "@kandev/ui/button";
+import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
+import { useRouter } from "@/lib/routing/client-router";
 import {
   executorConnectionSettingsPath,
   executorProfileSettingsPath,
 } from "@/lib/settings/executor-settings-routes";
+import type { Executor } from "@/lib/types/http";
 import { SettingsRedirect } from "@/src/settings-route-helpers";
+import { useTranslation } from "react-i18next";
+
+const EXECUTORS_ROUTE = "/settings/executors";
+
+function ProfileUnavailableState({ executor }: { executor: Executor | null }) {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const destination = executor ? executorConnectionSettingsPath(executor) : EXECUTORS_ROUTE;
+
+  return (
+    <Card data-testid="executor-profile-unavailable">
+      <CardContent className="py-12 text-center">
+        <p className="text-muted-foreground">{t("executors:profileNotFound")}</p>
+        <Button className="mt-4 cursor-pointer" onClick={() => router.push(destination)}>
+          {executor ? t("executors:backToExecutor") : t("executors:backToExecutors")}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function LegacyExecutorSettingsRoute({
   executorId,
@@ -20,22 +43,20 @@ export function LegacyExecutorSettingsRoute({
     (state) => state.executors.items.find((item) => item.id === executorId) ?? null,
   );
 
+  if (profileId !== undefined) {
+    const profile = executor?.profiles?.find(
+      (candidate) => candidate.id === profileId && candidate.executor_id === executorId,
+    );
+    if (!executor || !profile) return <ProfileUnavailableState executor={executor} />;
+    return <SettingsRedirect to={executorProfileSettingsPath(profile.id)} />;
+  }
+
   if (executor?.type === "k8s") {
-    const destinationProfileId = profileId
-      ? executor.profiles?.find((profile) => profile.id === profileId)?.id
-      : executor.profiles?.[0]?.id;
-    if (profileId && !destinationProfileId) {
-      return <ProfileDetailPage executorId={executorId} profileId={profileId} />;
-    }
-    const destination = destinationProfileId
-      ? executorProfileSettingsPath(executor, destinationProfileId)
+    const destination = executor.profiles?.[0]?.id
+      ? executorProfileSettingsPath(executor.profiles[0].id)
       : executorConnectionSettingsPath(executor);
     return <SettingsRedirect to={destination} />;
   }
 
-  return profileId ? (
-    <ProfileDetailPage executorId={executorId} profileId={profileId} />
-  ) : (
-    <ExecutorEditPage executorId={executorId} />
-  );
+  return <ExecutorEditPage executorId={executorId} />;
 }

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-17
-status: draft
+status: complete
 requirements:
   - REQ-EXECUTORS-PROFILE-EDITOR-001
 system_design:
@@ -17,8 +17,8 @@ profile entry points to the existing complete editor. One sequential work
 order covers route generation, bookmark compatibility, and regression tests.
 
 The [requirement](../../specs/executors/requirements/profile-editor.md) and
-[design](../../specs/executors/system-design/profile-editor.md) are draft
-artifacts for review. Implementation remains pending.
+[design](../../specs/executors/system-design/profile-editor.md) define the
+implementation boundary. Task 01 is complete.
 
 ## Evidence and root cause
 
@@ -32,10 +32,10 @@ renders a separate reduced form for non-Kubernetes profiles.
 
 A read-only Node execution of the actual helper produced:
 
-| Type | Destination for `exec-1` / `profile-1` |
-| --- | --- |
+| Type                                                       | Destination for `exec-1` / `profile-1`        |
+| ---------------------------------------------------------- | --------------------------------------------- |
 | local, worktree, local_docker, remote_docker, ssh, sprites | `/settings/executor/exec-1/profile/profile-1` |
-| k8s | `/settings/executors/profile-1` |
+| k8s                                                        | `/settings/executors/profile-1`               |
 
 A source trace found `DockerSections`, `SSHAgentReadinessCard`,
 `SSHTaskDirReclamationCard`, `KubernetesProfileSections`, `SpritesSections`,
@@ -74,8 +74,8 @@ connection helpers unchanged.
 
 Handle explicit profile IDs first in `LegacyExecutorSettingsRoute`. Validate
 executor/profile ownership before redirecting. Preserve executor-only behavior
-and the unavailable-profile state. Remove the reduced editor's form logic.
-Retain a minimal old-page wrapper if needed for existing file references.
+and the unavailable-profile state. Remove the reduced editor's form logic while
+keeping the legacy route adapter for old bookmarks.
 
 Reuse the complete editor and `SettingsRedirect`. Preserve discovery fragments,
 encoded identifiers, shared save coordination, and existing role gates.
@@ -147,19 +147,18 @@ AC-001.6 under `AC-EXECUTORS-PROFILE-EDITOR`.
 
 The work order lists exact paths and commands. Required regression cases:
 
-| Criteria | Evidence |
-| --- | --- |
-| .1, .7 | Helper unit tests, sidebar/profile-list tests, discovery and route tests |
-| .2, .5 | Desktop Docker edit/build/save/reload plus existing executor-specific E2E |
-| .3, .4 | Legacy route component tests for valid, missing, and mismatched pairs |
-| .5 | Discard, unsaved-navigation guard, and unchanged role gates |
-| .6 | Phone navigation, save/reload, and viewport containment |
+| Criteria | Evidence                                                                  |
+| -------- | ------------------------------------------------------------------------- |
+| .1, .7   | Helper unit tests, sidebar/profile-list tests, discovery and route tests  |
+| .2, .5   | Desktop Docker edit/build/save/reload plus existing executor-specific E2E |
+| .3, .4   | Legacy route component tests for valid, missing, and mismatched pairs     |
+| .5       | Discard, unsaved-navigation guard, and unchanged role gates               |
+| .6       | Phone navigation, save/reload, and viewport containment                   |
 
 First failing regression: `routes every profile to the canonical editor` in
-`apps/web/lib/settings/executor-settings-routes.test.ts`. A current
-non-Kubernetes call returns the singular path instead of the expected plural
-path. Add this regression against the current two-argument helper before
-changing its signature, then migrate the test with its callers.
+`apps/web/lib/settings/executor-settings-routes.test.ts`. It failed against the
+old two-argument helper for non-Kubernetes profiles, then passed after the
+helper and all production callers migrated to the canonical route.
 
 ## E2E tests
 
@@ -181,7 +180,7 @@ No Docker daemon is required for these settings tests.
 
 ## Work orders
 
-- [ ] [Task 01: Unify profile navigation and bookmark handling](task-01-unify-profile-editor.md)
+- [x] [Task 01: Unify profile navigation and bookmark handling](task-01-unify-profile-editor.md) (done)
 
 ## Verification results
 
@@ -197,15 +196,31 @@ Design validation on 2026-09-17:
 - Read-only helper execution and section source trace reproduced the route split.
 - Issue assignment: `carlosflorencio`.
 
-Implementation and browser checks: not run. No production or permanent test
-files changed during investigation.
+Implementation validation on 2026-09-17:
+
+- `pnpm exec vitest run lib/settings/executor-settings-routes.test.ts components/settings/legacy-executor-settings-route.test.tsx components/settings/executor-profiles-card.test.tsx components/settings/executor-profile-navigation.test.tsx components/app-sidebar/sections/settings/settings-menu-branches.test.ts src/settings-routes.test.ts src/settings-route-helpers.test.ts lib/settings-discovery/catalog.test.ts components/settings/settings-layout-client.test.tsx`: 9 files and 126 tests passed.
+- `pnpm run typecheck`: passed.
+- `pnpm run i18n:check`: passed; 8,397 referenced keys and complete required catalogs.
+- `pnpm e2e:run --project chromium tests/settings/executor-profile-routing.spec.ts tests/settings/docker-profile-persistence.spec.ts tests/settings/kubernetes-executor.spec.ts tests/settings/ssh-profile-connection-link.spec.ts tests/settings/executor-agent-config.spec.ts`: 12 tests passed, including the production Vite build.
+- `pnpm e2e:run --project mobile-chrome tests/settings/mobile-executor-profile-routing.spec.ts tests/settings/mobile-kubernetes-executor.spec.ts tests/settings/mobile-ssh-profile-connection-link.spec.ts tests/settings/mobile-executor-agent-config.spec.ts`: 6 tests passed, including the production Vite build.
+- `node --test scripts/validate-public-docs.test.mjs`: 62 tests passed.
+- `node scripts/validate-public-docs.mjs`: 46 published pages validated.
+- `python3 scripts/list-docs.py validate`: passed for 285 decisions and 988 specifications.
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- Explicit ESLint checks for every changed TypeScript/TSX file and Prettier checks for changed source/test files and plan Markdown: passed.
+- `git diff --check`: passed.
+
+The reduced profile editor was removed. The legacy route now validates executor
+ownership, preserves query/hash suffixes, and redirects valid bookmarks to the
+canonical editor. No backend or persistence changes were required.
 
 ## Risks
 
-- Unconditional redirects can open a profile owned by another executor.
-- Removing the reduced form changes its header and delete-return destination
-  to the canonical editor's existing behavior.
-- Removing the old file can break guard inventories or imports. Prefer a
-  minimal compatibility wrapper when the repository expects the path.
-- Role-gated controls and discovery fragments must survive route convergence.
-- Browser coverage must activate navigation controls, not only visit URLs.
+- Legacy bookmark redirects validate executor/profile ownership before opening
+  the canonical editor.
+- The canonical editor now owns the profile header, delete-return destination,
+  type-specific controls, and save coordination.
+- The legacy adapter preserves the old route surface while invalid pairs render
+  localized recovery instead of mounting an editor.
+- Role-gated controls, discovery fragments, and mobile safe-area behavior passed
+  the focused component and browser coverage.

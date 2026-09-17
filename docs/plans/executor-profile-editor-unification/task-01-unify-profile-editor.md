@@ -1,7 +1,7 @@
 ---
 id: "01-unify-profile-editor"
 title: "Unify profile navigation and bookmark handling"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -143,7 +143,7 @@ unavailable-state extraction is necessary.
 
 ## Dependencies
 
-None. Implementation requires a later explicit user request.
+None.
 
 ## Risks
 
@@ -163,4 +163,25 @@ See the plan's ownership, compatibility, permissions, and test-entry-point risks
 
 ## Results
 
-Pending. No implementation or regression test changes exist yet.
+Implementation complete on 2026-09-17.
+
+- `executorProfileSettingsPath` now accepts one profile ID and all production
+  profile links use the encoded canonical `/settings/executors/:profileId`
+  route.
+- The reduced singular profile editor was removed. `LegacyExecutorSettingsRoute`
+  retains executor-only behavior, validates legacy executor/profile ownership,
+  preserves query and hash suffixes, and renders localized recovery for invalid
+  pairs.
+- Component coverage includes the RED-to-GREEN helper regression, legacy route
+  hydration and ownership cases, profile cards, settings tree, discovery, hub,
+  and task-disclosure navigation.
+- Desktop routing coverage exercises hub, settings tree, executor profile list,
+  legacy bookmarks, Docker build/save/reload, and unsaved-change discard.
+- Phone coverage exercises the complete Docker editor, touch-sized controls,
+  save/reload, legacy bookmarks, and horizontal-overflow protection.
+- `pnpm exec vitest run lib/settings/executor-settings-routes.test.ts components/settings/legacy-executor-settings-route.test.tsx components/settings/executor-profiles-card.test.tsx components/settings/executor-profile-navigation.test.tsx components/app-sidebar/sections/settings/settings-menu-branches.test.ts src/settings-routes.test.ts src/settings-route-helpers.test.ts lib/settings-discovery/catalog.test.ts components/settings/settings-layout-client.test.tsx`: 9 files and 126 tests passed.
+- `pnpm run typecheck`, `pnpm run i18n:check`, explicit changed-source ESLint
+  and Prettier checks, and `git diff --check`: passed.
+- `pnpm e2e:run --project chromium tests/settings/executor-profile-routing.spec.ts tests/settings/docker-profile-persistence.spec.ts tests/settings/kubernetes-executor.spec.ts tests/settings/ssh-profile-connection-link.spec.ts tests/settings/executor-agent-config.spec.ts`: 12 tests passed.
+- `pnpm e2e:run --project mobile-chrome tests/settings/mobile-executor-profile-routing.spec.ts tests/settings/mobile-kubernetes-executor.spec.ts tests/settings/mobile-ssh-profile-connection-link.spec.ts tests/settings/mobile-executor-agent-config.spec.ts`: 6 tests passed.
+- `node --test scripts/validate-public-docs.test.mjs`, `node scripts/validate-public-docs.mjs`, `python3 scripts/list-docs.py validate`, and `python3 scripts/lint-spec-files.py --all`: passed.

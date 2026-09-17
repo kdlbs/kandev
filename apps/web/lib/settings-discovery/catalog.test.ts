@@ -197,8 +197,12 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
       ],
       executors: [
         {
-          type: "docker",
+          type: "local_docker",
           profiles: [{ id: "executor / one", name: "Docker Local" }],
+        },
+        {
+          type: "ssh",
+          profiles: [{ id: "ssh profile / two", name: "SSH Remote" }],
         },
       ],
     });
@@ -211,6 +215,9 @@ describe("resolveSettingsDiscovery dynamic entries", () => {
     );
     expect(resolved.find((entry) => entry.id === "executor-profile:executor / one")?.href).toBe(
       "/settings/executors/executor%20%2F%20one",
+    );
+    expect(resolved.find((entry) => entry.id === "executor-profile:ssh profile / two")?.href).toBe(
+      "/settings/executors/ssh%20profile%20%2F%20two",
     );
     expect(resolved.find((entry) => entry.id === "workspace:workspace / one:name")?.href).toBe(
       "/settings/workspaces/workspace%20%2F%20one#setting-workspace-workspace%20%2F%20one-name",
