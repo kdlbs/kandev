@@ -9,6 +9,8 @@ export type SessionIntent =
   | "workflow_step"
   | "restore_workspace";
 
+export type LaunchActivationSource = "user_action" | "session_open";
+
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";
   data?: string;
@@ -35,6 +37,7 @@ export type LaunchSessionRequest = {
   skip_message_record?: boolean;
   auto_start?: boolean;
   attachments?: MessageAttachment[];
+  activation_source?: LaunchActivationSource;
 };
 
 export type LaunchSessionResponse = {
@@ -47,6 +50,8 @@ export type LaunchSessionResponse = {
   worktree_path?: string;
   worktree_branch?: string;
   error?: string;
+  activation_disposition?: "queued" | "suppressed";
+  activation_reason?: string;
 };
 
 export async function launchSession(
@@ -73,6 +78,8 @@ export type EnsureSessionResponse = {
     | "skipped_terminal_pr";
   newly_created: boolean;
   workspace_path?: string;
+  activation_disposition?: "queued" | "suppressed";
+  activation_reason?: string;
 };
 
 /**
@@ -84,7 +91,12 @@ export type EnsureSessionResponse = {
  */
 export async function ensureTaskSession(
   taskId: string,
-  opts?: { ensureExecution?: boolean; autoStart?: boolean; timeout?: number },
+  opts?: {
+    ensureExecution?: boolean;
+    autoStart?: boolean;
+    activationSource?: LaunchActivationSource;
+    timeout?: number;
+  },
 ): Promise<EnsureSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
@@ -94,6 +106,7 @@ export async function ensureTaskSession(
       task_id: taskId,
       ensure_execution: opts?.ensureExecution,
       ...(opts?.autoStart !== undefined ? { auto_start: opts.autoStart } : {}),
+      ...(opts?.activationSource !== undefined ? { activation_source: opts.activationSource } : {}),
     },
     opts?.timeout ?? 15_000,
   );

@@ -124,6 +124,7 @@ export function toSheetItem(
     automaticColor: automaticColor?.color,
     automaticColorSource: automaticColor?.source,
     queuedCount: task.statusSummary?.queued_prompt_count,
+    launchQueue: task.statusSummary?.launch_queue,
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

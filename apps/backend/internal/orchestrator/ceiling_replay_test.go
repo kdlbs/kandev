@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +16,17 @@ import (
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type ceilingDeferredLaunchReadErrorRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r ceilingDeferredLaunchReadErrorRepo) GetTaskDeferredLaunch(
+	context.Context, string,
+) (map[string]interface{}, interface{}, error) {
+	return nil, nil, r.err
+}
 
 // --- pure unit tests -------------------------------------------------------
 
@@ -83,6 +96,343 @@ func TestClearCeilingDeferredRecord_PreservesCoexistingWIPIntent(t *testing.T) {
 	after := deferredLaunchOf(t, svc, "clear-task-a")
 	require.False(t, models.HasCeilingDeferredIntent(&models.Task{Metadata: after}))
 	require.Equal(t, true, after[models.DeferredLaunchStartWhenUnblockedKey], "clearing the ceiling half must not disturb the WIP-overflow half")
+}
+
+func TestClearCeilingDeferredRecord_DoesNotClearNewerSuccessor(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "clear-task-successor", Title: "t", State: v1.TaskStateInProgress,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}))
+
+	original := models.CeilingDeferral{
+		Kind:       models.CeilingLaunchResume,
+		Payload:    map[string]interface{}{metaKeySessionID: "session-original"},
+		Origin:     string(launchOriginAutomatic),
+		ReasonCode: ceilingReasonRefused,
+		QueuedAt:   time.Now(),
+	}
+	successor := models.CeilingDeferral{
+		Kind:       models.CeilingLaunchStartCreated,
+		Payload:    map[string]interface{}{metaKeySessionID: "session-successor"},
+		Origin:     string(launchOriginAutomatic),
+		ReasonCode: ceilingReasonRefused,
+		QueuedAt:   original.QueuedAt.Add(time.Second),
+	}
+	_, _, err := repo.SetTaskDeferredLaunchIfUnchanged(ctx, "clear-task-successor", tasksqlite.AbsentDeferredLaunch(), models.CeilingRecordKeys(successor))
+	require.NoError(t, err)
+
+	svc.clearCeilingDeferredRecord(ctx, "clear-task-successor", original)
+
+	after := deferredLaunchOf(t, svc, "clear-task-successor")
+	got, err := models.ReadCeilingDeferral(after)
+	require.NoError(t, err)
+	require.Equal(t, successor.Kind, got.Kind)
+	require.Equal(t, "session-successor", sessionIDFromCeilingPayload(got))
+}
+
+func TestClaimCeilingDeferredLaunchSerializesSendNowAndReplay(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "claim-task", Title: "t", State: v1.TaskStateScheduling,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}))
+	queuedAt := time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
+	deferral := models.CeilingDeferral{
+		Kind:    models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{metaKeySessionID: "claim-session"},
+		Origin:  string(launchOriginAutomatic), ReasonCode: ceilingReasonRefused,
+		QueuedAt: queuedAt, Ceiling: 5, Population: 5, PopulationKnown: true,
+	}
+	record := models.CeilingRecordKeys(deferral)
+	record[models.DeferredLaunchStartWhenUnblockedKey] = true
+	_, _, err := repo.SetTaskDeferredLaunchIfUnchanged(ctx, "claim-task", tasksqlite.AbsentDeferredLaunch(), record)
+	require.NoError(t, err)
+
+	first, found, err := svc.claimCeilingDeferredLaunch(ctx, "claim-task", "claim-session", ceilingClaimOwnerSendNow)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, first)
+	second, found, err := svc.claimCeilingDeferredLaunch(ctx, "claim-task", "claim-session", ceilingClaimOwnerReplay)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Nil(t, second, "a replay must not dispatch while Send Now owns the record")
+
+	first.settle(ctx)
+	after := deferredLaunchOf(t, svc, "claim-task")
+	require.False(t, models.HasCeilingDeferredIntent(&models.Task{Metadata: after}))
+	require.Equal(t, true, after[models.DeferredLaunchStartWhenUnblockedKey])
+}
+
+func TestClaimCeilingDeferredLaunchReleasesAfterCapacityBookkeepingChanges(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "claim-bookkeeping", Title: "t", State: v1.TaskStateScheduling,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	deferral := models.CeilingDeferral{
+		Kind:    models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{metaKeySessionID: "claim-bookkeeping-session"},
+		Origin:  string(launchOriginAutomatic), ReasonCode: ceilingReasonRefused,
+		QueuedAt: now, Ceiling: 5, Population: 6, PopulationKnown: true,
+	}
+	record := models.CeilingRecordKeys(deferral)
+	_, _, err := repo.SetTaskDeferredLaunchIfUnchanged(ctx, "claim-bookkeeping", tasksqlite.AbsentDeferredLaunch(), record)
+	require.NoError(t, err)
+
+	claim, found, err := svc.claimCeilingDeferredLaunch(
+		ctx, "claim-bookkeeping", "claim-bookkeeping-session", ceilingClaimOwnerReplay,
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, claim)
+
+	// Capacity observations are mutable queue bookkeeping, not a successor
+	// launch. A claim release must still remove its own marker after that write.
+	updatedRecord := deferredLaunchOf(t, svc, "claim-bookkeeping")
+	updatedRecord[models.CeilingReasonCodeKey] = "capacity_changed"
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "claim-bookkeeping", models.MetaKeyDeferredLaunch, updatedRecord))
+	claim.releaseIfHeld(ctx)
+
+	after := deferredLaunchOf(t, svc, "claim-bookkeeping")
+	_, _, claimed := models.ReadCeilingLaunchClaim(after)
+	require.False(t, claimed, "mutable capacity bookkeeping must not strand the in-flight claim")
+	decoded, err := models.ReadCeilingDeferral(after)
+	require.NoError(t, err)
+	require.Equal(t, "capacity_changed", decoded.ReasonCode)
+}
+
+func TestReplayCeilingDeferralRejectsStaleWorkflowEntryBeforeDispatch(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	task := &models.Task{
+		ID:             "replay-stale-entry",
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-new",
+		Title:          "stale replay",
+		State:          v1.TaskStateScheduling,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		Metadata: map[string]interface{}{models.MetaKeyWorkflowSessionRoute: models.WorkflowSessionRoute{
+			OperationID:       "route-new",
+			DestinationStepID: "step-new",
+			EntryIdentity:     "entry:new",
+			TargetKind:        "new_session",
+			DestinationID:     "session-new",
+			Phase:             "committed",
+		}},
+	}
+	require.NoError(t, repo.CreateTask(ctx, task))
+
+	old := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStart,
+		Payload: map[string]interface{}{
+			metaKeyPrompt: "old workflow prompt",
+			models.CeilingLaunchEntryBindingKey: map[string]interface{}{
+				"workflow_id":            "workflow-1",
+				"destination_step_id":    "step-old",
+				"route_operation_id":     "route-old",
+				"entry_identity":         "entry:old",
+				"destination_session_id": "session-old",
+			},
+		},
+		Origin:     string(launchOriginAutomatic),
+		ReasonCode: ceilingReasonRefused,
+		QueuedAt:   now,
+	}
+
+	// The replay caller may hold an old task snapshot. The method must reload
+	// and reject before any start/LaunchAgent side effect can use that snapshot.
+	outcome := svc.replayCeilingDeferral(ctx, &models.Task{ID: task.ID}, old)
+	require.Equal(t, ceilingReplaySuperseded, outcome)
+	reloaded, err := repo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	route, ok := models.LoadWorkflowSessionRoute(reloaded.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "route-new", route.OperationID)
+}
+
+func TestReplayCeilingDeferralRejectsRouteChangedAfterInitialValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "replay-interleaving", "replay-interleaving-session", "step-old")
+	now := time.Now().UTC()
+	task, err := repo.GetTask(ctx, "replay-interleaving")
+	require.NoError(t, err)
+	entryIdentity := (&Service{repo: repo}).workflowEntryIdentity(ctx, task.ID)
+	oldRoute := models.WorkflowSessionRoute{
+		OperationID:       "route-old",
+		DestinationStepID: "step-old",
+		EntryIdentity:     entryIdentity,
+		TargetKind:        "new_session",
+		DestinationID:     "replay-interleaving-session",
+		Phase:             "committed",
+	}
+	newRoute := oldRoute
+	newRoute.OperationID = "route-new"
+	newRoute.DestinationStepID = "step-new"
+	newRoute.EntryIdentity = "entry:new"
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyWorkflowSessionRoute, oldRoute))
+
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID: "replay-interleaving-session",
+			metaKeyPrompt:    "old workflow prompt",
+			models.CeilingLaunchEntryBindingKey: map[string]interface{}{
+				"workflow_id":            "wf1",
+				"destination_step_id":    "step-old",
+				"route_operation_id":     "route-old",
+				"entry_identity":         entryIdentity,
+				"destination_session_id": "replay-interleaving-session",
+			},
+		},
+		Origin: string(launchOriginAutomatic), ReasonCode: ceilingReasonRefused,
+		QueuedAt: now,
+	}
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(deferral)))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-old"] = &wfmodels.WorkflowStep{ID: "step-old", WorkflowID: "wf1"}
+	var switchOnce sync.Once
+	stepGetter.getStepFunc = func(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+		if stepID == "step-old" {
+			switchOnce.Do(func() {
+				latest, getErr := repo.GetTask(ctx, task.ID)
+				require.NoError(t, getErr)
+				latest.Metadata[models.MetaKeyWorkflowSessionRoute] = newRoute
+				require.NoError(t, repo.UpdateTask(ctx, latest))
+			})
+		}
+		return stepGetter.steps[stepID], nil
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, task.ID, v1.TaskStateScheduling)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	// The old snapshot passes the first route comparison. The step read then
+	// commits a successor before the concrete start-created seam is admitted;
+	// that seam must re-read the route and reject before LaunchAgent.
+	outcome := svc.replayCeilingDeferral(ctx, &models.Task{ID: task.ID}, deferral)
+	require.Equal(t, ceilingReplaySuperseded, outcome)
+	agentMgr.mu.Lock()
+	launchCalls := len(agentMgr.setExecutionDescriptionCalls)
+	agentMgr.mu.Unlock()
+	require.Zero(t, launchCalls, "a stale replay must not dispatch the old workflow entry")
+
+	reloaded, err := repo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	route, ok := models.LoadWorkflowSessionRoute(reloaded.Metadata)
+	require.True(t, ok)
+	require.Equal(t, newRoute.OperationID, route.OperationID)
+}
+
+func TestValidateCeilingEntryAllowsPendingWorkflowStepEnsureOnlyForCurrentEntry(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "workflow-step-pending", "workflow-step-session", "step-source")
+	task, err := repo.GetTask(ctx, "workflow-step-pending")
+	require.NoError(t, err)
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-target"] = &wfmodels.WorkflowStep{ID: "step-target", WorkflowID: "wf1"}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	binding, bound := svc.workflowEntryBindingForStep(ctx, task.ID, stepGetter.steps["step-target"], "workflow-step-session")
+	require.True(t, bound)
+
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchWorkflowStepEnsure,
+		Payload: map[string]interface{}{
+			metaKeySessionID:                    "workflow-step-session",
+			metaKeyWorkflowStepID:               "step-target",
+			models.CeilingLaunchEntryBindingKey: ceilingEntryBindingValue(*binding),
+		},
+		Origin:   string(launchOriginAutomatic),
+		QueuedAt: time.Now().UTC(),
+	}
+
+	disposition, detail, validationErr := svc.validateCeilingEntry(ctx, task, deferral)
+	require.NoError(t, validationErr)
+	require.Equal(t, ceilingEntryValid, disposition, detail)
+
+	// Admission of a newer entry changes both the task step and the ledger
+	// identity. The old queued transition must become terminal rather than
+	// being retargeted to the new step.
+	task.WorkflowStepID = "step-successor"
+	task.UpdatedAt = time.Now().UTC()
+	require.NoError(t, repo.UpdateTaskPreservingDeferredLaunch(ctx, task))
+
+	latest, err := repo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	disposition, detail, validationErr = svc.validateCeilingEntry(ctx, latest, deferral)
+	require.NoError(t, validationErr)
+	require.Equal(t, ceilingEntrySuperseded, disposition, detail)
+}
+
+func TestWriteTaskReviewStateFailsClosedWhenCeilingQueueReadFails(t *testing.T) {
+	baseService, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	task := &models.Task{
+		ID: "review-read-error", Title: "read error", State: v1.TaskStateReview,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, repo.CreateTask(ctx, task))
+	baseTaskRepo := newMockTaskRepo()
+	seedMockTaskState(baseTaskRepo, task.ID, v1.TaskStateReview)
+	readErr := errors.New("deferred launch storage unavailable")
+	baseService.repo = ceilingDeferredLaunchReadErrorRepo{
+		sessionExecutorStore: repo,
+		err:                  readErr,
+	}
+	baseService.taskRepo = baseTaskRepo
+
+	baseService.writeTaskReviewState(ctx, task.ID, "")
+
+	baseTaskRepo.mu.Lock()
+	writes := baseTaskRepo.stateWrites[task.ID]
+	baseTaskRepo.mu.Unlock()
+	require.Zero(t, writes, "queue uncertainty must not publish a REVIEW or Scheduling state")
+}
+
+func TestWriteTaskReviewStateRepairsLegacyReviewQueuedCreatedSession(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	seedTaskAndSessionWithStep(t, repo, "review-legacy-queued", "review-legacy-session", "review-step")
+	require.NoError(t, repo.UpdateTaskState(ctx, "review-legacy-queued", v1.TaskStateReview))
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID: "review-legacy-session",
+		},
+		Origin:          string(launchOriginAutomatic),
+		ReasonCode:      ceilingReasonRefused,
+		QueuedAt:        time.Now().UTC(),
+		Ceiling:         5,
+		Population:      6,
+		PopulationKnown: true,
+	}
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "review-legacy-queued", models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(deferral)))
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "review-legacy-queued", v1.TaskStateReview)
+	svc.taskRepo = taskRepo
+
+	task, err := repo.GetTask(ctx, "review-legacy-queued")
+	require.NoError(t, err)
+	svc.writeTaskReviewState(ctx, task.ID, "review-legacy-session")
+
+	taskRepo.mu.Lock()
+	state := taskRepo.updatedStates[task.ID]
+	writes := taskRepo.stateWrites[task.ID]
+	taskRepo.mu.Unlock()
+	require.Equal(t, v1.TaskStateScheduling, state)
+	require.Equal(t, 1, writes)
 }
 
 // --- ListTasksWithCeilingDeferred -------------------------------------------

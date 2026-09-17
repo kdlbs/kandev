@@ -9,6 +9,7 @@ import { isDebugUI } from "@/lib/config";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 import {
   SIDEBAR_TASK_ROW_DETAIL_KEYS,
   type SidebarTaskRowDetail,
@@ -124,6 +125,33 @@ function WipQueueIndicator({ wipQueue }: { wipQueue?: WipQueueStatus }) {
   );
 }
 
+function LaunchQueueIndicator({
+  launchQueue,
+}: {
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
+}) {
+  const { t } = useTranslation();
+  if (!launchQueue) return null;
+  const label = t("task:launchQueueIndicator");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          data-testid="sidebar-task-launch-queue"
+          tabIndex={0}
+          aria-label={label}
+          title={label}
+          className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground/70 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <IconClockHour4 className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{t("task:launchQueueLabel")}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function PollModeIndicator({
   pollMode,
   config,
@@ -154,6 +182,7 @@ function hasStatsToRender({
   pollMode,
   queuedCount,
   wipQueue,
+  launchQueue,
 }: {
   hasRelativeTime: boolean;
   hasRepository: boolean;
@@ -161,9 +190,16 @@ function hasStatsToRender({
   pollMode: SessionPollMode | null;
   queuedCount?: number;
   wipQueue?: WipQueueStatus;
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
 }): boolean {
   return Boolean(
-    hasRelativeTime || hasRepository || hasPullRequestNumber || pollMode || queuedCount || wipQueue,
+    hasRelativeTime ||
+    hasRepository ||
+    hasPullRequestNumber ||
+    pollMode ||
+    queuedCount ||
+    wipQueue ||
+    launchQueue,
   );
 }
 
@@ -179,6 +215,7 @@ export function TaskItemStatsRow({
   primarySessionId,
   queuedCount,
   wipQueue,
+  launchQueue,
   detailOrder = [...SIDEBAR_TASK_ROW_DETAIL_KEYS],
   showRelativeTime = true,
   showRepository = true,
@@ -191,6 +228,7 @@ export function TaskItemStatsRow({
   primarySessionId?: string | null;
   queuedCount?: number;
   wipQueue?: WipQueueStatus;
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
   detailOrder?: SidebarTaskRowDetail[];
   showRelativeTime?: boolean;
   showRepository?: boolean;
@@ -213,6 +251,7 @@ export function TaskItemStatsRow({
       pollMode,
       queuedCount,
       wipQueue,
+      launchQueue,
     })
   ) {
     return null;
@@ -234,6 +273,7 @@ export function TaskItemStatsRow({
       )}
       <QueuedPromptCount count={queuedCount} />
       <WipQueueIndicator wipQueue={wipQueue} />
+      <LaunchQueueIndicator launchQueue={launchQueue} />
       <PollModeIndicator
         pollMode={pollMode}
         config={pollMode ? POLL_MODE_CONFIG[pollMode] : null}

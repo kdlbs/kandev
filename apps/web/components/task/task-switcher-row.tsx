@@ -194,6 +194,7 @@ function TaskRowItem({
       prInfo={task.prInfo}
       queuedCount={task.queuedCount}
       wipQueue={task.wipQueue}
+      launchQueue={task.launchQueue}
       issueInfo={task.issueInfo}
       agentErrorMessage={task.agentErrorMessage}
       isSubTask={isSubTask}

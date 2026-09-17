@@ -1,0 +1,181 @@
+package orchestrator
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+// ErrCeilingLaunchClaimed reports that another dispatcher currently owns the
+// exact durable ceiling launch. The caller must leave its own work queued and
+// let the owner settle the record.
+var ErrCeilingLaunchClaimed = errors.New("ceiling deferred launch is already claimed")
+
+const (
+	ceilingClaimOwnerSendNow = "send_now"
+	ceilingClaimOwnerReplay  = "ceiling_replay"
+)
+
+// ceilingDeferredLaunchClaim is the ownership token for one exact ceiling
+// record. It is persisted in the shared deferred_launch row while the runtime
+// dispatch is in flight, which serializes replay with an explicit Send Now.
+type ceilingDeferredLaunchClaim struct {
+	svc      *Service
+	taskID   string
+	deferral models.CeilingDeferral
+	id       string
+	owner    string
+	held     bool
+}
+
+// claimCeilingDeferredLaunch claims only a matching ceiling record. The bool
+// reports that a matching record exists; a nil claim with true means another
+// dispatcher owns it. A non-matching record is not an error because a task may
+// receive a successor launch while an older queue snapshot is still visible.
+func (s *Service) claimCeilingDeferredLaunch(
+	ctx context.Context,
+	taskID, expectedSessionID, owner string,
+) (*ceilingDeferredLaunchClaim, bool, error) {
+	if s == nil || s.repo == nil || taskID == "" || owner == "" {
+		return nil, false, nil
+	}
+	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
+		record, prior, err := s.repo.GetTaskDeferredLaunch(ctx, taskID)
+		if err != nil {
+			return nil, false, fmt.Errorf("read ceiling launch claim: %w", err)
+		}
+		deferral, err := models.ReadCeilingDeferral(record)
+		if err != nil {
+			return nil, false, nil
+		}
+		targetsSession, targetErr := s.ceilingDeferralTargetsSession(
+			ctx, taskID, deferral, expectedSessionID,
+		)
+		if targetErr != nil {
+			return nil, false, fmt.Errorf("resolve ceiling launch recipient: %w", targetErr)
+		}
+		if !targetsSession {
+			return nil, false, nil
+		}
+
+		if _, _, claimed := models.ReadCeilingLaunchClaim(record); claimed {
+			// The owner label describes the dispatcher class, not a re-entrant
+			// invocation. Two replay ticks (or two Send Now requests) can use the
+			// same label concurrently, so adopting a same-owner claim would let
+			// both callers dispatch the exact record.
+			return nil, true, nil
+		}
+
+		updated := cloneCeilingRecord(record)
+		claimID := uuid.NewString()
+		updated[models.CeilingLaunchClaimKey] = map[string]interface{}{
+			"id": claimID, "owner": owner,
+		}
+		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, updated)
+		if err != nil {
+			return nil, false, fmt.Errorf("claim ceiling launch: %w", err)
+		}
+		if stored {
+			return &ceilingDeferredLaunchClaim{
+				svc: s, taskID: taskID, deferral: deferral,
+				id: claimID, owner: owner, held: true,
+			}, true, nil
+		}
+		if !lostCompare {
+			return nil, false, fmt.Errorf("claim ceiling launch: repository reported no write")
+		}
+	}
+	return nil, false, fmt.Errorf("claim ceiling launch: compare-and-set retries exhausted")
+}
+
+func cloneCeilingRecord(record map[string]interface{}) map[string]interface{} {
+	if record == nil {
+		return map[string]interface{}{}
+	}
+	clone := make(map[string]interface{}, len(record)+1)
+	for key, value := range record {
+		clone[key] = value
+	}
+	return clone
+}
+
+// releaseIfHeld removes only this claim marker. The deferred launch remains
+// intact so a pre-dispatch failure can be retried by the sweeper.
+func (c *ceilingDeferredLaunchClaim) releaseIfHeld(ctx context.Context) {
+	if c == nil || !c.held || c.svc == nil {
+		return
+	}
+	c.held = false
+	if err := c.svc.mutateCeilingClaim(ctx, c, false); err != nil {
+		c.svc.logger.Zap().Warn("could not release ceiling launch claim",
+			zap.String("task_id", c.taskID), zap.Error(err))
+	}
+}
+
+// settle consumes the exact deferred record after dispatch was accepted. WIP
+// keys that share the row remain untouched.
+func (c *ceilingDeferredLaunchClaim) settle(ctx context.Context) {
+	if c == nil || !c.held || c.svc == nil {
+		return
+	}
+	c.held = false
+	if err := c.svc.mutateCeilingClaim(ctx, c, true); err != nil {
+		c.svc.logger.Zap().Warn("could not settle ceiling launch claim",
+			zap.String("task_id", c.taskID), zap.Error(err))
+	}
+}
+
+// mutateCeilingClaim performs the compare-and-set settlement for one claim.
+// A changed deferral or claim is never modified by this older owner.
+func (s *Service) mutateCeilingClaim(ctx context.Context, claim *ceilingDeferredLaunchClaim, settle bool) error {
+	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
+		record, prior, err := s.repo.GetTaskDeferredLaunch(ctx, claim.taskID)
+		if err != nil {
+			return err
+		}
+		current, err := models.ReadCeilingDeferral(record)
+		if err != nil {
+			return nil
+		}
+		equivalent, err := sameCeilingDeferralIdentity(current, claim.deferral)
+		if err != nil {
+			return err
+		}
+		if !equivalent {
+			// Capacity observations are mutable bookkeeping. The claim id below
+			// still binds the mutation to this exact in-flight owner, while the
+			// stable deferral identity prevents a successor from being touched.
+			return nil
+		}
+		claimID, _, ok := models.ReadCeilingLaunchClaim(record)
+		if !ok || claimID != claim.id {
+			return nil
+		}
+
+		updated := cloneCeilingRecord(record)
+		if settle {
+			updated = stripCeilingRecordKeys(updated)
+		} else {
+			delete(updated, models.CeilingLaunchClaimKey)
+		}
+		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, claim.taskID, prior, updated)
+		if err != nil {
+			return err
+		}
+		if stored {
+			if settle {
+				s.publishTaskUpdatedByID(ctx, claim.taskID)
+			}
+			return nil
+		}
+		if !lostCompare {
+			return fmt.Errorf("repository reported no claim settlement")
+		}
+	}
+	return fmt.Errorf("claim settlement compare-and-set retries exhausted")
+}

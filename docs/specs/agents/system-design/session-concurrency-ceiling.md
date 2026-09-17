@@ -63,6 +63,11 @@ origins never become manual during replay. The sweep clears a record only after
 successful dispatch. A repeated refusal leaves the original timestamp and
 payload in place.
 
+The task-owned [queued session ownership design](../../tasks/system-design/queued-session-ownership.md)
+plans explicit passive-inspection classification at the caller boundary. Opening
+a conversation is not a manual override. Actual explicit execution retains this
+design's manual admission rule; workflow parking eligibility remains task-owned.
+
 ## Failure and recovery
 
 Reservation ownership is session-keyed. A stale process-start callback first

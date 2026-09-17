@@ -4225,7 +4225,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, isPassthrough, hasPlanMode)
 
-	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched)
+	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched, entryID)
 }
 
 // launchAfterOnEnterDispatch runs the auto-start decision that follows
@@ -4237,7 +4237,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 //nolint:cyclop,funlen,gocognit // profile-switch recovery has independent terminal and retry branches.
 func (s *Service) launchAfterOnEnterDispatch(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
-	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool,
+	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool, entryIDs ...int64,
 ) {
 	sessionID := session.ID
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)

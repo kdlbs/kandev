@@ -129,6 +129,127 @@ func TestTaskStatusSummaryQueuedPromptCountAffectsSemanticEquality(t *testing.T)
 	}
 }
 
+func TestTaskStatusSummaryLaunchQueueRoundTripsAndIsSemantic(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	summary := TaskStatusSummary{
+		LaunchQueue: &LaunchQueueSummary{
+			SessionID:      "session-luna",
+			AgentProfileID: "profile-luna",
+			WorkflowStepID: "step-implement",
+			QueuedAt:       queuedAt,
+			Reason:         LaunchQueueReasonSessionCapacity,
+			Retrying:       true,
+			Capacity: &LaunchQueueCapacity{
+				InUse:      5,
+				Limit:      5,
+				ObservedAt: queuedAt,
+			},
+		},
+	}
+	payload, err := summary.SemanticJSON()
+	if err != nil {
+		t.Fatalf("semantic JSON: %v", err)
+	}
+	var decoded TaskStatusSummary
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode semantic JSON: %v", err)
+	}
+	if !summary.SemanticEqual(decoded) {
+		t.Fatalf("launch queue changed after semantic round trip: %#v", decoded.LaunchQueue)
+	}
+
+	changed := summary
+	changed.LaunchQueue = &LaunchQueueSummary{SessionID: "session-other", QueuedAt: queuedAt, Reason: LaunchQueueReasonSessionCapacity}
+	if summary.SemanticEqual(changed) {
+		t.Fatal("launch queue destination must affect semantic equality")
+	}
+}
+
+func TestTaskStatusSummaryLaunchQueueValidationRejectsUnknownOrUnboundedValues(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	valid := TaskStatusSummary{LaunchQueue: &LaunchQueueSummary{
+		SessionID: "session-luna", QueuedAt: queuedAt, Reason: LaunchQueueReasonSessionCapacity,
+		Capacity: &LaunchQueueCapacity{InUse: 1, Limit: 2, ObservedAt: queuedAt},
+	}}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid launch queue rejected: %v", err)
+	}
+	unknownReason := valid
+	unknownReason.LaunchQueue = &LaunchQueueSummary{SessionID: "session-luna", QueuedAt: queuedAt, Reason: "invented"}
+	if err := unknownReason.Validate(); err == nil {
+		t.Fatal("unknown launch queue reason accepted")
+	}
+	invalidCapacity := valid
+	invalidCapacity.LaunchQueue = &LaunchQueueSummary{
+		SessionID: "session-luna", QueuedAt: queuedAt, Reason: LaunchQueueReasonSessionCapacity,
+		Capacity: &LaunchQueueCapacity{InUse: -1, Limit: 2, ObservedAt: queuedAt},
+	}
+	if err := invalidCapacity.Validate(); err == nil {
+		t.Fatal("capacity over limit accepted")
+	}
+}
+
+func TestLaunchQueueSummaryFromTaskUsesDurableCeilingDeferral(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{Metadata: map[string]interface{}{models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			"session_id":       "session-luna",
+			"agent_profile_id": "profile-luna",
+			"workflow_step_id": "step-implement",
+		},
+		ReasonCode:      "ceiling",
+		QueuedAt:        queuedAt,
+		Population:      5,
+		PopulationKnown: true,
+		Ceiling:         5,
+	})}}
+	got := LaunchQueueSummaryFromTask(task)
+	if got == nil || got.SessionID != "session-luna" || got.AgentProfileID != "profile-luna" ||
+		got.WorkflowStepID != "step-implement" || !got.QueuedAt.Equal(queuedAt) ||
+		got.Reason != LaunchQueueReasonSessionCapacity || !got.Retrying {
+		t.Fatalf("launch queue = %+v", got)
+	}
+	if got.Capacity == nil || got.Capacity.InUse != 5 || got.Capacity.Limit != 5 {
+		t.Fatalf("launch queue capacity = %+v", got.Capacity)
+	}
+}
+
+func TestLaunchQueueSummaryFromTaskWithCapacityUsesLatestObservation(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{Metadata: map[string]interface{}{models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			"session_id":       "session-luna",
+			"agent_profile_id": "profile-luna",
+		},
+		QueuedAt:        queuedAt,
+		Population:      5,
+		PopulationKnown: true,
+		Ceiling:         5,
+	})}}
+	observedAt := queuedAt.Add(30 * time.Second)
+	got := LaunchQueueSummaryFromTaskWithCapacity(task, &LaunchQueueCapacityObservation{
+		InUse: 3, Limit: 5, ObservedAt: observedAt, Known: true,
+	})
+	if got == nil || got.Capacity == nil {
+		t.Fatalf("launch queue capacity = %+v, want latest observation", got)
+	}
+	if got.Capacity.InUse != 3 || got.Capacity.Limit != 5 || !got.Capacity.ObservedAt.Equal(observedAt) {
+		t.Fatalf("launch queue capacity = %+v, want 3/5 at %v", got.Capacity, observedAt)
+	}
+	if !got.QueuedAt.Equal(queuedAt) {
+		t.Fatalf("queue time changed with capacity observation: %v", got.QueuedAt)
+	}
+
+	unknown := LaunchQueueSummaryFromTaskWithCapacity(task, &LaunchQueueCapacityObservation{
+		Limit: 5, ObservedAt: observedAt,
+	})
+	if unknown == nil || unknown.Capacity != nil {
+		t.Fatalf("unknown capacity = %+v, want nil while retaining queue", unknown)
+	}
+}
+
 func TestTaskStatusSummaryValidateBoundsErrorPreview(t *testing.T) {
 	valid := TaskStatusSummary{ActiveError: &ActiveErrorSummary{Preview: strings.Repeat("é", MaxActiveErrorPreviewBytes/2)}}
 	if err := valid.Validate(); err != nil {

@@ -12,6 +12,15 @@ owners:
 
 This document is the migrated task-system source for the capability. The source detail below remains authoritative while the system is migrated into separate requirement and design records.
 
+### Planned ownership restriction
+
+[Queued session ownership](queued-session-ownership.md) defines the planned
+restriction on open-time recovery: workflow-parked sessions and an accepted queued
+destination remain protected with either preference value. The default-off
+behavior below continues for otherwise eligible sessions. Explicit user execution
+and legitimate workflow re-entry retain their own activation paths. This extension
+is pending implementation through its linked package.
+
 ## Requirements
 
 ### REQ-TASKS-PREVENT-AGENT-AUTOSTART-ON-OPEN-001: Prevent Agent Auto-Start On Open

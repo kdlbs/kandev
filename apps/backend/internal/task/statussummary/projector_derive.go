@@ -19,7 +19,33 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		PullRequest:         derivePullRequestSummary(state),
 		QueuedPromptCount:   state.queuedCount,
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
+		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
 	}
+}
+
+func cloneLaunchQueue(queue *LaunchQueueSummary) *LaunchQueueSummary {
+	if queue == nil {
+		return nil
+	}
+	copy := *queue
+	if queue.Capacity != nil {
+		capacity := *queue.Capacity
+		copy.Capacity = &capacity
+	}
+	return &copy
+}
+
+func equalLaunchQueue(left, right *LaunchQueueSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if *left != *right {
+		return false
+	}
+	if left.Capacity == nil || right.Capacity == nil {
+		return left.Capacity == right.Capacity
+	}
+	return *left.Capacity == *right.Capacity
 }
 
 func cloneActiveError(value *ActiveErrorSummary) *ActiveErrorSummary {

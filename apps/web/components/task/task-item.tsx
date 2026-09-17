@@ -24,6 +24,7 @@ import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 import {
   resolveTaskRowPresentation,
@@ -117,6 +118,7 @@ type TaskItemProps = {
   queuedCount?: number;
   /** Destination-resident WIP queue status, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
@@ -200,6 +202,7 @@ type TaskItemContentProps = {
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
   wipQueue?: WipQueueStatus;
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
   comparisonUnavailable?: boolean;
@@ -224,6 +227,7 @@ function TaskItemContent({
   prInfo,
   queuedCount,
   wipQueue,
+  launchQueue,
   issueInfo,
   agentErrorMessage,
   comparisonUnavailable,
@@ -277,6 +281,7 @@ function TaskItemContent({
           primarySessionId={primarySessionId}
           queuedCount={queuedCount}
           wipQueue={wipQueue}
+          launchQueue={launchQueue}
           detailOrder={resolvedTaskRow.detailOrder}
           showRelativeTime={resolvedTaskRow.showRelativeTime}
           showRepository={resolvedTaskRow.showRepository}
@@ -366,6 +371,7 @@ export const TaskItem = memo(function TaskItem({
   prInfo,
   queuedCount,
   wipQueue,
+  launchQueue,
   issueInfo,
   isPinned,
   agentErrorMessage,
@@ -433,6 +439,7 @@ export const TaskItem = memo(function TaskItem({
         prInfo={prInfo}
         queuedCount={queuedCount}
         wipQueue={wipQueue}
+        launchQueue={launchQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
         comparisonUnavailable={comparisonUnavailable}

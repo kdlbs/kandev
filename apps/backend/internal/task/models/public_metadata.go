@@ -29,6 +29,7 @@ func PublicTaskMetadata(metadata map[string]interface{}) map[string]interface{} 
 	delete(publicDeferred, DeferredLaunchUserIDKey)
 	delete(publicDeferred, DeferredLaunchRecordRecentUseKey)
 	delete(publicDeferred, CeilingLaunchPayloadKey)
+	delete(publicDeferred, CeilingLaunchClaimKey)
 	public[MetaKeyDeferredLaunch] = publicDeferred
 	return public
 }

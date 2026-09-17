@@ -34,6 +34,10 @@ fresh conversation for independent work.
 - **Profile re-entry:** A profile switch to an agent profile that already has a
   session on the task.
 
+Inspection of parked sessions and deferred destination launches is specified in
+[queued session ownership](queued-session-ownership.md). Selecting a conversation
+for reading is not a workflow re-entry or an explicit request to execute it.
+
 ## Requirements
 
 ### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-001: Configurable step profile-session lifecycle

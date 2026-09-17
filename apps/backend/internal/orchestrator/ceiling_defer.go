@@ -50,6 +50,10 @@ func (s *Service) deferCeilingRefusal(
 	ctx context.Context, taskID, sessionID string, kind models.CeilingLaunchKind, payload map[string]interface{},
 	reasonCode string, population int, populationKnown bool, ceiling int,
 ) error {
+	// Capture the route/entry identity that is already committed at the
+	// admission boundary. The payload remains the first launch description;
+	// this only adds the durable binding needed to reject stale replay.
+	payload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, payload)
 	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
 		existingRaw, prior, err := s.repo.GetTaskDeferredLaunch(ctx, taskID)
 		if err != nil {
@@ -69,7 +73,7 @@ func (s *Service) deferCeilingRefusal(
 
 		if existingCeiling, readErr := models.ReadCeilingDeferral(existingRaw); readErr == nil {
 			// A ceiling_deferred record already exists for this task (AC-12d).
-			equivalent, cmpErr := models.CeilingDeferralsEquivalent(existingCeiling, deferral)
+			equivalent, cmpErr := ceilingDeferralsEquivalentForAdmission(existingCeiling, deferral)
 			if cmpErr != nil {
 				return fmt.Errorf("comparing deferred launch payloads for task %s: %w", taskID, cmpErr)
 			}

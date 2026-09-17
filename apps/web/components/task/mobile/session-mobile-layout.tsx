@@ -39,6 +39,8 @@ import { PromptHistoryPanelContent } from "../prompt-history-panel-content";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
 import { useTranslation } from "react-i18next";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { LaunchQueueStatus } from "../launch-queue-status";
 
 export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
@@ -123,6 +125,7 @@ function MobileChatPanelContent({
   isVisible: boolean;
 }) {
   const { t } = useTranslation();
+  const launchStatusSummary = useTaskStatusSummary(activeTaskId, undefined);
   if (!activeTaskId) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -132,6 +135,7 @@ function MobileChatPanelContent({
   }
   return (
     <div className="flex-1 min-h-0 flex flex-col">
+      <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
       <div className="flex items-center px-1 py-2">
         <MobileSessionsPicker taskId={activeTaskId} sessionId={effectiveSessionId} fullWidth />
       </div>
@@ -151,6 +155,7 @@ function MobileChatPanelContent({
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}
           onPendingScrollConsumed={onScrollTargetConsumed}
+          hideLaunchQueueStatus
         />
       )}
     </div>

@@ -596,6 +596,18 @@ destination queue. If the configured
 feeder is also full, creation returns a conflict. Ephemeral tasks are not
 counted.
 
+A task can also show **Queued** after workflow entry selects a session but the
+agent session ceiling blocks automatic launch. This is different from WIP
+queueing: WIP waits before destination entry, while session-capacity queueing
+keeps the selected session and retries it automatically. Task details and the
+task navigator show the destination, the latest capacity observation, queue
+time, and retry state. They do not show a queue position or estimated start
+time. Capacity counts older than 40 seconds, or counts unavailable because the
+client is disconnected, are labelled stale while the destination remains
+visible. Opening a task or a parked predecessor does not start it. Use the
+explicit **Start** or **Resume** action, or send a message, to override the
+automatic ceiling for that conversation.
+
 Integration watchers use the same admission rule. For example, a GitHub review
 watch targeting a `Review` step with a limit of two admits at most two newly
 observed pull requests at a time. Pull requests that lose the capacity race
