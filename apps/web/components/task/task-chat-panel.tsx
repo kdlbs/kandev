@@ -1170,55 +1170,67 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
     >
-      <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
-        {resolvedSessionId && <LaunchWarning sessionId={resolvedSessionId} />}
-        <TaskMarkdownFileLinkProvider
-          taskId={taskId}
-          sessionId={resolvedSessionId}
-          worktreePath={getSessionWorkspacePath(session)}
-          onOpenFile={onOpenFile}
-        >
-          <MessageList
-            ref={messageListRef}
-            items={groupedItems}
-            messages={allMessages}
-            footerActionMessages={footerActionMessages}
-            permissionsByToolCallId={permissionsByToolCallId}
-            childrenByParentToolCallId={childrenByParentToolCallId}
-            taskId={taskId ?? undefined}
-            sessionId={resolvedSessionId}
-            messagesLoading={messagesLoading}
-            historyRefreshPending={historyRefreshPending}
-            historyStatus={historyStatus}
-            historyError={historyError}
-            onRetryHistory={retryHistory}
-            isWorking={isWorking}
-            sessionState={session?.state}
-            worktreePath={getSessionWorkspacePath(session)}
-            onOpenFile={onOpenFile}
-            dividerBeforeItemKey={dividerBeforeItemKey}
-            lastPromptMessageId={lastPromptMessageId}
-            onLastPromptEdgeChange={setLastPromptEdge}
-            firstMessageId={firstMessageId}
-            onFirstMessageHiddenChange={setIsFirstMessageHidden}
-            anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
-            isVisible={transcriptIsVisible}
-            launchErrorOwned={launchErrorOwned}
-            launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
-            launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
-            stickyPromptBar={
-              showAnchoredBar && lastPromptMessage ? (
-                <AnchoredLastPromptBar
-                  promptText={lastPromptMessage.content}
-                  isVisible={anchoredBarVisible}
-                  onScrollUp={scrollToLastPrompt}
-                  showScrollToLastPrompt={showScrollToLastPrompt}
-                  onHeightChange={setAnchoredBarHeight}
-                />
-              ) : undefined
-            }
-          />
-        </TaskMarkdownFileLinkProvider>
+      <PanelBody
+        padding={false}
+        scroll={false}
+        className="relative flex min-h-0 flex-col overflow-hidden"
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
+          {resolvedSessionId ? (
+            <div className="shrink-0 px-2">
+              <LaunchWarning sessionId={resolvedSessionId} />
+            </div>
+          ) : null}
+          <div className="min-h-0 flex-1">
+            <TaskMarkdownFileLinkProvider
+              taskId={taskId}
+              sessionId={resolvedSessionId}
+              worktreePath={getSessionWorkspacePath(session)}
+              onOpenFile={onOpenFile}
+            >
+              <MessageList
+                ref={messageListRef}
+                items={groupedItems}
+                messages={allMessages}
+                footerActionMessages={footerActionMessages}
+                permissionsByToolCallId={permissionsByToolCallId}
+                childrenByParentToolCallId={childrenByParentToolCallId}
+                taskId={taskId ?? undefined}
+                sessionId={resolvedSessionId}
+                messagesLoading={messagesLoading}
+                historyRefreshPending={historyRefreshPending}
+                historyStatus={historyStatus}
+                historyError={historyError}
+                onRetryHistory={retryHistory}
+                isWorking={isWorking}
+                sessionState={session?.state}
+                worktreePath={getSessionWorkspacePath(session)}
+                onOpenFile={onOpenFile}
+                dividerBeforeItemKey={dividerBeforeItemKey}
+                lastPromptMessageId={lastPromptMessageId}
+                onLastPromptEdgeChange={setLastPromptEdge}
+                firstMessageId={firstMessageId}
+                onFirstMessageHiddenChange={setIsFirstMessageHidden}
+                anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+                isVisible={transcriptIsVisible}
+                launchErrorOwned={launchErrorOwned}
+                launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
+                launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
+                stickyPromptBar={
+                  showAnchoredBar && lastPromptMessage ? (
+                    <AnchoredLastPromptBar
+                      promptText={lastPromptMessage.content}
+                      isVisible={anchoredBarVisible}
+                      onScrollUp={scrollToLastPrompt}
+                      showScrollToLastPrompt={showScrollToLastPrompt}
+                      onHeightChange={setAnchoredBarHeight}
+                    />
+                  ) : undefined
+                }
+              />
+            </TaskMarkdownFileLinkProvider>
+          </div>
+        </div>
         {isJumpLoading && (
           <div
             data-testid="transcript-jump-loading"

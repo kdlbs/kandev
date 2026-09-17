@@ -2,6 +2,8 @@ package reachability
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -79,17 +81,32 @@ func connectionConfigChanged(before, after *models.Executor) bool {
 // reset itself always leaves the unknown/empty-reason placeholder behind.
 func (o *SaveObserver) resetAndProbe(ctx context.Context, executor *models.Executor) {
 	repo := o.poller.store.repo
-	previous, _ := repo.GetExecutorReachability(ctx, executor.ID)
+	previous, readErr := repo.GetExecutorReachability(ctx, executor.ID)
+	if readErr != nil && !errors.Is(readErr, models.ErrExecutorReachabilityNotFound) {
+		o.poller.log.Warn("executor ssh reachability: read before reset failed",
+			zap.String("executor_id", executor.ID), zap.Error(readErr))
+	}
 
 	newHost := executor.Config["ssh_host"]
-	if err := repo.ResetExecutorReachability(ctx, executor.ID, newHost); err != nil {
+	if err := repo.ResetExecutorReachability(ctx, executor.ID, newHost, executor.UpdatedAt); err != nil {
 		o.poller.log.Warn("executor ssh reachability: reset failed",
 			zap.String("executor_id", executor.ID), zap.Error(err))
 		return
 	}
 
-	if recordWorthPublishing(previous) {
-		if reset, err := repo.GetExecutorReachability(ctx, executor.ID); err == nil {
+	if recordWorthPublishing(previous) || (readErr != nil && !errors.Is(readErr, models.ErrExecutorReachabilityNotFound)) {
+		reset, err := repo.GetExecutorReachability(ctx, executor.ID)
+		if err != nil {
+			o.poller.log.Warn("executor ssh reachability: read after reset failed",
+				zap.String("executor_id", executor.ID), zap.Error(err))
+			reset = &models.ExecutorReachability{
+				ExecutorID: executor.ID,
+				State:      models.ExecutorReachabilityStateUnknown,
+				Host:       newHost,
+				UpdatedAt:  time.Now().UTC(),
+			}
+		}
+		if o.poller.publisher != nil {
 			o.poller.publisher.PublishChanged(ctx, reset, o.poller.EffectiveIntervalSeconds())
 		}
 	}

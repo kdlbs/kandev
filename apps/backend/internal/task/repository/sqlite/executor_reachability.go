@@ -149,12 +149,12 @@ func (r *Repository) UpsertExecutorReachability(ctx context.Context, obs models.
 // connection-configuration save. It is its own statement, not a branch of
 // the upsert above: the upsert's state CASE has no unknown branch and its
 // WHERE admits only a strictly later checked_at, which a reset does not
-// carry. There is deliberately no checked_at/updated_at pin — a reset is
-// ordered by the save that caused it, not by an observation clock, and must
-// win over whatever is stored. A no-op when the executor isn't an active SSH
-// executor: AC-EXECUTORS-SSH-REACHABILITY-001.17 keeps a disabled executor's
+// carry. The executor updated_at predicate couples the reset to the save
+// version, so a delayed callback cannot reset a newer configuration. A
+// no-op when the executor isn't an active SSH executor or the version is
+// stale: AC-EXECUTORS-SSH-REACHABILITY-001.17 keeps a disabled executor's
 // record untouched, so eligibility wins over the reset trigger.
-func (r *Repository) ResetExecutorReachability(ctx context.Context, executorID, host string) error {
+func (r *Repository) ResetExecutorReachability(ctx context.Context, executorID, host string, seenUpdatedAt time.Time) error {
 	now := time.Now().UTC()
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executor_reachability (
@@ -162,14 +162,15 @@ func (r *Repository) ResetExecutorReachability(ctx context.Context, executorID, 
 			checked_at, host, last_success_at, updated_at
 		)
 		SELECT ?, 'unknown', '', '', 0, NULL, ?, NULL, ?
-		 WHERE EXISTS (SELECT 1 FROM executors e
+			 WHERE EXISTS (SELECT 1 FROM executors e
 				WHERE e.id = ? AND e.type = 'ssh'
-				  AND e.deleted_at IS NULL AND e.status = 'active')
+				  AND e.deleted_at IS NULL AND e.status = 'active'
+				  AND e.updated_at = ?)
 		ON CONFLICT (executor_id) DO UPDATE SET
 			state = 'unknown', reason = '', message = '', consecutive_failures = 0,
 			host = excluded.host, checked_at = NULL, last_success_at = NULL,
 			updated_at = excluded.updated_at
-	`), executorID, host, now, executorID)
+	`), executorID, host, now, executorID, seenUpdatedAt.UTC())
 	return err
 }
 

@@ -42,6 +42,7 @@ function makeMessage(payload: LaunchWarningPayload): BackendMessageMap["session.
     type: "notification",
     action: "session.launch.warning",
     payload,
+    timestamp: "2026-06-11T00:00:00.000Z",
   };
 }
 

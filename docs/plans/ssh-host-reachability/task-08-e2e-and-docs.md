@@ -24,10 +24,10 @@ system_design:
 
 ## Summary
 
-Prove the assembled capability against a real sshd container that is stopped
-and restarted mid-test, covering the one thing no unit test can: that both
-surfaces flip in the right direction at the right probe. Document the single
-new operator configuration key.
+Prove the assembled capability against a real sshd target while traffic to
+port 22 is blocked and restored, covering the one thing no unit test can: that
+both surfaces flip in the right direction at the right probe. Document the
+single new operator configuration key.
 
 ## In scope
 
@@ -35,14 +35,15 @@ new operator configuration key.
   project, which already gates real-SSH scenarios on `KANDEV_E2E_CONTAINERS=1`
   and owns the `kandev-sshd:e2e` image. Four flows:
   - A reachable host renders the settings panel row as reachable.
-  - The sshd container is stopped; after the failure threshold, the panel
+  - Traffic to the sshd container is blocked; after the failure threshold, the panel
     reports the host unreachable by name.
-  - The container is restarted; the next probe clears the panel on a single
+  - Traffic is restored; the next probe clears the panel on a single
     success, with no confirming probe.
   - A launch started while the host is stopped is attempted and fails with a
     message naming the host, rather than being refused.
-- A short interval set through the documented configuration key for the spec's
-  backend, so the threshold is reached in test time rather than in minutes.
+- The failure threshold is driven by repeated **Probe now** requests. These
+  requests use the same store path as the scheduled poller and avoid a
+  wall-clock dependency in the test.
 - `docs/public/configuration.md` gains
   `executors.sshReachabilityIntervalSeconds` /
   `KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS`: default, supported range,

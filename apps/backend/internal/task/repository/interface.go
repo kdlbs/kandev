@@ -668,13 +668,13 @@ type ExecutorRepository interface {
 	// stored checked_at — see the system design's Persistence section.
 	UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error
 	// ResetExecutorReachability invalidates the stored record after a
-	// connection-configuration save: state becomes unknown, the counter and
+	// connection-configuration save when seenUpdatedAt still matches the
+	// executor row. The version guard prevents a delayed save callback from
+	// resetting a newer configuration. State becomes unknown, the counter and
 	// reason/message clear, host is set to the newly saved value, and both
-	// timestamps become NULL. It is ordered by the save that caused it, not
-	// by an observation clock, so it always wins over the stored record. A
-	// no-op (zero rows affected) when the executor is not an active SSH
-	// executor.
-	ResetExecutorReachability(ctx context.Context, executorID, host string) error
+	// timestamps become NULL. A no-op (zero rows affected) when the executor
+	// is not an active SSH executor or the version is stale.
+	ResetExecutorReachability(ctx context.Context, executorID, host string, seenUpdatedAt time.Time) error
 	// DeleteExecutorReachability removes the stored record. DeleteExecutor
 	// calls this in the same transaction as the soft delete.
 	DeleteExecutorReachability(ctx context.Context, executorID string) error

@@ -1,7 +1,7 @@
 ---
 id: "05-launch-non-gating"
 title: "Launch-path non-gating and failure attribution"
-status: pending
+status: done
 wave: 3
 depends_on: ["03-reachability-poller"]
 plan: "plan.md"
@@ -54,20 +54,20 @@ matches what shipped.
   whether an interactive user is present — the pre-round-5 interactive/
   non-interactive split is retired. `Manager.launchBuildExecutorRequest`, which
   already resolves the per-executor-type backend and calls `rt.CreateInstance`
-  at its single call site for every executor type, reads the target executor's
-  reachability record through a narrow read-only accessor *immediately before*
-  that call — never inside `CreateInstance` itself, so the negative test
+  at its single call site for every executor type, starts a bounded asynchronous
+  read of the target executor's reachability record immediately before that
+  call — never inside `CreateInstance` itself, so the negative test
   (`CreateInstance` reads no record) stays meaningful. When the executor is
   `ssh`, the record's state is `unreachable`, and either periodic probing is
   enabled or the record's `checked_at` falls within three times the *default*
   interval (`AC-…-001.28`'s reading stays valid even with probing off), it
-  publishes `session.launch.warning` to the launched session's own event
+  appends `session.launch.warning` to the launched session's ordered event
   stream via the `Manager`'s existing `eventPublisher`, carrying `executor_id`,
-  `host`, `state`, `reason`, and `last_success_at` (null when none recorded). A
-  read failure produces no warning rather than blocking or retrying the
-  launch. Every launch path — WS-initiated, a dependency chain, a workflow
-  transition, an autostart — converges on this one call site, so none can
-  diverge from another.
+  `host`, `state`, `reason`, `last_success_at` (null when none recorded), and a
+  timestamp. A read failure produces no warning and cannot delay the launch.
+  Every launch path — WS-initiated, a dependency chain, a workflow transition,
+  an autostart — converges on this one call site, so none can diverge from
+  another.
 - A new WS/session event type, `session.launch.warning`, registered alongside
   the existing session event vocabulary so task 07's frontend handler has a
   typed contract to bind to.

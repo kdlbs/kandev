@@ -880,8 +880,14 @@ func startAgentInfrastructure(
 	// the task service's executor-save observer (a changed host resets the
 	// record and dispatches an off-cycle probe) so both the poller and the
 	// reachability HTTP routes below share the one running instance.
-	sshReachabilityPoller := startSSHReachabilityPoller(ctx, repos.Task, cfg.Executors.SSHReachabilityIntervalSeconds, log, addRuntimeCleanup)
-	sshReachabilityPoller.SetPublisher(reachabilitypkg.NewPublisher(eventBus))
+	sshReachabilityPoller := startSSHReachabilityPoller(
+		ctx,
+		repos.Task,
+		cfg.Executors.SSHReachabilityIntervalSeconds,
+		log,
+		reachabilitypkg.NewPublisher(eventBus, log),
+		addRuntimeCleanup,
+	)
 	services.Task.SetExecutorSaveObserver(reachabilitypkg.NewSaveObserver(sshReachabilityPoller))
 
 	// Launch-time session.launch.warning producer (task 05): repos.Task

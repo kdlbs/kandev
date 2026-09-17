@@ -88,7 +88,7 @@ func (f *fakeRepository) UpsertExecutorReachability(_ context.Context, obs model
 	return nil
 }
 
-func (f *fakeRepository) ResetExecutorReachability(_ context.Context, executorID, host string) error {
+func (f *fakeRepository) ResetExecutorReachability(_ context.Context, executorID, host string, _ time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.records[executorID] = &models.ExecutorReachability{ExecutorID: executorID, State: models.ExecutorReachabilityStateUnknown, Host: host, UpdatedAt: time.Now().UTC()}
@@ -266,6 +266,94 @@ func TestPollerPass_NeverExceedsPassConcurrency(t *testing.T) {
 			t.Fatalf("max simultaneous probes = %d, want exactly passConcurrency (%d) since more executors than slots were queued", cp.maxSeen, passConcurrency)
 		}
 	})
+}
+
+func TestPollerProbeEntrypointsShareConcurrencyLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var executors []*models.Executor
+		for i := 0; i < passConcurrency; i++ {
+			executors = append(executors, sshExecutor(string(rune('a'+i))))
+		}
+		repo := newFakeRepository(executors...)
+		p := New(repo, 60, logger.Default())
+		cp := newConcurrencyProbe()
+		p.probe = cp.probe
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		p.Start(ctx)
+		synctest.Wait()
+
+		if ok := p.ProbeNow(sshExecutor("manual")); !ok {
+			t.Fatal("ProbeNow returned false while the poller was running")
+		}
+		synctest.Wait()
+
+		cp.mu.Lock()
+		maxSeen := cp.maxSeen
+		cp.mu.Unlock()
+		close(cp.release)
+		p.Stop()
+		if maxSeen > passConcurrency {
+			t.Fatalf("max simultaneous probes = %d, want at most %d across scheduled and manual probes", maxSeen, passConcurrency)
+		}
+	})
+}
+
+func TestPollerConcurrentStopWaitsForTheFirstStop(t *testing.T) {
+	repo := newFakeRepository()
+	p := New(repo, 0, logger.Default())
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	var inFlight atomic.Int32
+	p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+		inFlight.Add(1)
+		defer inFlight.Add(-1)
+		<-release
+		return agentruntime.SSHProbeOutcome{Success: true, Host: executor.ID}
+	}
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	p.Start(context.Background())
+	if ok := p.ProbeNow(sshExecutor("stop-race")); !ok {
+		t.Fatal("ProbeNow returned false while the poller was running")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if inFlight.Load() == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	firstDone := make(chan struct{})
+	go func() { p.Stop(); close(firstDone) }()
+	for time.Now().Before(deadline) {
+		p.mu.Lock()
+		stopping := p.stopping
+		p.mu.Unlock()
+		if stopping {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	secondDone := make(chan struct{})
+	go func() { p.Stop(); close(secondDone) }()
+	select {
+	case <-secondDone:
+		t.Fatal("concurrent Stop returned before the first Stop drained the probe")
+	case <-time.After(20 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first Stop did not finish")
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent Stop did not finish after the first Stop")
+	}
 }
 
 func TestPollerPass_OverlappingTickIsSkippedNotQueued(t *testing.T) {

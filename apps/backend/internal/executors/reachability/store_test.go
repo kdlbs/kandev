@@ -2,6 +2,7 @@ package reachability
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -45,6 +46,30 @@ func newStoreTestExecutor(t *testing.T, repo *sqlite.Repository) *models.Executo
 		t.Fatalf("create executor: %v", err)
 	}
 	return executor
+}
+
+type microsecondReachabilityRepository struct {
+	*sqlite.Repository
+}
+
+func (r *microsecondReachabilityRepository) UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error {
+	obs.CheckedAt = obs.CheckedAt.UTC().Truncate(time.Microsecond)
+	return r.Repository.UpsertExecutorReachability(ctx, obs)
+}
+
+type failingGetReachabilityRepository struct {
+	*sqlite.Repository
+	err       error
+	failAfter int
+	calls     int
+}
+
+func (r *failingGetReachabilityRepository) GetExecutorReachability(ctx context.Context, executorID string) (*models.ExecutorReachability, error) {
+	r.calls++
+	if r.calls >= r.failAfter {
+		return nil, r.err
+	}
+	return r.Repository.GetExecutorReachability(ctx, executorID)
 }
 
 // @covers AC-EXECUTORS-SSH-REACHABILITY-001.9, AC-EXECUTORS-SSH-REACHABILITY-001.10
@@ -228,6 +253,62 @@ func TestStoreObserveReportsUnchangedWhenStateAndReasonBothRepeat(t *testing.T) 
 	}
 	if second.After == nil {
 		t.Fatalf("After = nil, want the current stored record")
+	}
+}
+
+func TestStoreObserveNormalizesDatabaseTimestampPrecision(t *testing.T) {
+	repo := newStoreTestRepo(t)
+	executor := newStoreTestExecutor(t, repo)
+	s := &store{repo: &microsecondReachabilityRepository{Repository: repo}, log: logger.Default()}
+	checkedAt := time.Date(2026, 1, 1, 0, 0, 0, 123456789, time.UTC)
+
+	result := s.Observe(context.Background(), executor, agentruntime.SSHProbeOutcome{
+		Success: true, Host: "10.0.0.1",
+	}, checkedAt)
+	if !result.Applied {
+		t.Fatalf("result = %+v, want applied despite microsecond storage precision", result)
+	}
+	if result.After == nil || result.After.CheckedAt == nil {
+		t.Fatalf("After = %+v, want a persisted record", result.After)
+	}
+	if want := checkedAt.Truncate(time.Microsecond); !result.After.CheckedAt.Equal(want) {
+		t.Fatalf("CheckedAt = %v, want %v", result.After.CheckedAt, want)
+	}
+}
+
+func TestStoreObserveStopsOnUnexpectedInitialReadError(t *testing.T) {
+	repo := newStoreTestRepo(t)
+	executor := newStoreTestExecutor(t, repo)
+	readErr := errors.New("database unavailable")
+	wrapped := &failingGetReachabilityRepository{Repository: repo, err: readErr, failAfter: 1}
+	s := &store{repo: wrapped, log: logger.Default()}
+
+	result := s.Observe(context.Background(), executor, agentruntime.SSHProbeOutcome{
+		Success: true, Host: "10.0.0.1",
+	}, time.Now().UTC())
+	if result.Applied || result.Observed != nil {
+		t.Fatalf("result = %+v, want no observation when the initial read fails", result)
+	}
+	if _, err := repo.GetExecutorReachability(context.Background(), executor.ID); !errors.Is(err, models.ErrExecutorReachabilityNotFound) {
+		t.Fatalf("stored record error = %v, want no write", err)
+	}
+}
+
+func TestStoreObserveReturnsUnsavedObservationOnReadBackError(t *testing.T) {
+	repo := newStoreTestRepo(t)
+	executor := newStoreTestExecutor(t, repo)
+	readErr := errors.New("read-back unavailable")
+	wrapped := &failingGetReachabilityRepository{Repository: repo, err: readErr, failAfter: 2}
+	s := &store{repo: wrapped, log: logger.Default()}
+
+	result := s.Observe(context.Background(), executor, agentruntime.SSHProbeOutcome{
+		Success: true, Host: "10.0.0.1",
+	}, time.Now().UTC())
+	if result.Applied || result.Observed == nil || result.Observed.State != models.ExecutorReachabilityStateReachable {
+		t.Fatalf("result = %+v, want an unsaved reachable observation", result)
+	}
+	if _, err := repo.GetExecutorReachability(context.Background(), executor.ID); err != nil {
+		t.Fatalf("stored record lookup: %v, want the write to have landed", err)
 	}
 }
 

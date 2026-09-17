@@ -39,6 +39,21 @@ func (f failOnReadReachabilityReader) GetExecutorReachability(context.Context, s
 	return nil, nil
 }
 
+type blockingReachabilityReader struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingReachabilityReader) GetExecutorReachability(ctx context.Context, _ string) (*models.ExecutorReachability, error) {
+	close(r.started)
+	select {
+	case <-r.release:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func newWarningTestManager(t *testing.T, reader ReachabilityReader, probingEnabled bool, windowSeconds int) (*Manager, *bus.MemoryEventBus) {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
@@ -226,6 +241,24 @@ func TestMaybePublishSSHLaunchWarning_NonSSHExecutorNeverReads(t *testing.T) {
 
 	req := &LaunchRequest{ExecutorType: "local_docker", SessionID: "session-1"}
 	mgr.maybePublishSSHLaunchWarning(context.Background(), req, map[string]interface{}{"executor_id": "executor-1"}, req.SessionID)
+}
+
+func TestScheduleSSHLaunchWarningDoesNotWaitForRead(t *testing.T) {
+	reader := &blockingReachabilityReader{started: make(chan struct{}), release: make(chan struct{})}
+	mgr, _ := newWarningTestManager(t, reader, true, warningWindowSeconds)
+	req := &LaunchRequest{ExecutorType: string(models.ExecutorTypeSSH), SessionID: "session-1"}
+
+	started := time.Now()
+	mgr.scheduleSSHLaunchWarning(context.Background(), req, map[string]interface{}{"executor_id": "executor-1"}, req.SessionID)
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("scheduleSSHLaunchWarning waited %v for a blocked read", elapsed)
+	}
+	select {
+	case <-reader.started:
+	case <-time.After(time.Second):
+		t.Fatal("warning read did not start asynchronously")
+	}
+	close(reader.release)
 }
 
 // @covers AC-EXECUTORS-SSH-REACHABILITY-003.1

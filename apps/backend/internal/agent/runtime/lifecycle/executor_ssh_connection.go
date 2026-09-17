@@ -536,11 +536,29 @@ func (c *sshProxyJumpConn) Close() error {
 // (or stalls partway through key exchange) blocks the caller indefinitely.
 // Callers that pass a context with no deadline see unchanged behavior.
 func handshakeWithDeadline(ctx context.Context, conn net.Conn, addr string, cfg *ssh.ClientConfig) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
+	cancelDone := make(chan struct{})
+	stopCancellation := context.AfterFunc(ctx, func() {
+		// ProxyJump tunnels wrap an x/crypto/ssh channel. That channel
+		// reports unsupported deadlines, so closing the owner transport is
+		// the only reliable way to unblock NewClientConn on cancellation.
+		_ = conn.Close()
+		close(cancelDone)
+	})
+	defer func() {
+		if !stopCancellation() {
+			<-cancelDone
+		}
+	}()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 		defer func() { _ = conn.SetDeadline(time.Time{}) }()
 	}
-	return ssh.NewClientConn(conn, addr, cfg)
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		_ = conn.Close()
+		return nil, nil, nil, ctxErr
+	}
+	return sshConn, chans, reqs, err
 }
 
 // dialViaJump implements ProxyJump as a single bastion hop. The bastion is

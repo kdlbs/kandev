@@ -57,18 +57,18 @@ This package gains **three** exported functions and the two types they need:
   `ResolveSSHTarget` takes. That function needs the typed struct, not a map, so
   without this the reachability package must import `internal/ssh` to read an
   executor's own config.
-- `ProbeSSHHost(ctx, target *SSHTarget) ProbeOutcome` — dials with the pinned
-  fingerprint, closes immediately, runs no remote command. **It must bound the
-  handshake on `ctx`, not only the TCP dial.** `ssh.NewClientConn` takes no
-  context and `ssh.ClientConfig.Timeout` covers only `ssh.Dial`'s own TCP
-  connect, so a host that completes TCP and then stalls the handshake — a hung
-  or filtered sshd, the 2026-09-09 shape — would hold its goroutine past
-  `probeTimeout` and past `Stop`. `ProbeSSHHost` sets a deadline on the
-  connection covering the handshake and clears it once the transport is up, so
-  `AC-EXECUTORS-SSH-REACHABILITY-001.8` can abandon the probe and `001.26` can
-  drain.
-- `ClassifyDialError(err error) Reason` — maps a dial error to exactly one
-  reason, and `ProbeOutcome` embeds its result.
+- `ProbeSSHHost(ctx, target *SSHTarget, timeout time.Duration) SSHProbeOutcome`
+  — dials with the pinned fingerprint, closes immediately, runs no remote
+  command, and reports success, cancellation, target host, reason, and a
+  sanitized message. **It bounds the handshake on the derived probe context,
+  not only the TCP dial.** `ssh.NewClientConn` takes no context and
+  `ssh.ClientConfig.Timeout` covers only `ssh.Dial`'s own TCP connect, so a host
+  that completes TCP and then stalls the handshake would hold its goroutine
+  past `probeTimeout` and past `Stop`. `handshakeWithDeadline` sets a deadline
+  when the transport supports it and also closes the owner connection from a
+  context cancellation callback, which covers ProxyJump channel connections.
+- `ClassifyDialError(err error) SSHReachabilityReason` — maps a dial error to
+  exactly one reason from the closed set.
 
 **Classification lives here, not in the reachability package, and that is the
 load-bearing decision in this section.** The error types it must distinguish are

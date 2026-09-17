@@ -96,6 +96,9 @@ func (b *SessionStreamBroadcaster) subscribe(eventBus bus.EventBus, subject, act
 			b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
 			return nil
 		}
+		if action == ws.ActionSessionLaunchWarning && b.hub.appendAndBroadcastOrderedSessionEvent(sessionID, msg) {
+			return nil
+		}
 		b.hub.BroadcastToSession(sessionID, msg)
 		return nil
 	})

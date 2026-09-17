@@ -51,6 +51,11 @@ type LaunchWarningEventPayload struct {
 	Timestamp     string     `json:"timestamp"`
 }
 
+// sshLaunchWarningReadTimeout bounds the best-effort record lookup started by
+// a launch. The lookup must not hold up CreateInstance, but it also must not
+// leave a database call running forever after a launch has finished.
+const sshLaunchWarningReadTimeout = 2 * time.Second
+
 // GetSessionID satisfies the session-routing accessor
 // internal/gateway/websocket.extractSessionID uses to broadcast this event
 // to the correct session's subscribers.
@@ -76,15 +81,32 @@ func (p *EventPublisher) PublishLaunchWarning(sessionID string, payload *LaunchW
 	}
 }
 
+// scheduleSSHLaunchWarning starts the best-effort record lookup without
+// delaying CreateInstance. The request and metadata values used by the
+// goroutine are copied because the launch path may reuse or mutate its input
+// maps after it returns.
+func (m *Manager) scheduleSSHLaunchWarning(ctx context.Context, req *LaunchRequest, metadata map[string]interface{}, sessionID string) {
+	if req == nil || req.ExecutorType != string(models.ExecutorTypeSSH) ||
+		m.reachabilityReader == nil || m.eventPublisher == nil {
+		return
+	}
+	warningReq := *req
+	warningMetadata := map[string]interface{}{
+		"executor_id": getMetadataString(metadata, "executor_id"),
+	}
+	warningCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sshLaunchWarningReadTimeout)
+	go func() {
+		defer cancel()
+		m.maybePublishSSHLaunchWarning(warningCtx, &warningReq, warningMetadata, sessionID)
+	}()
+}
+
 // maybePublishSSHLaunchWarning reads the target executor's reachability
 // record and, when it is unreachable and still warning-eligible, publishes
-// exactly one session.launch.warning. It is a strict read-only accessor
-// call, made from launchBuildExecutorRequest immediately before its single
-// rt.CreateInstance call site — never from inside CreateInstance itself, so
-// the launch-path non-gating contract (REQ-EXECUTORS-SSH-REACHABILITY-003)
-// stays provable: CreateInstance never touches a reachability record on any
-// branch. A read failure or a missing record produces no warning and never
-// blocks or delays the launch.
+// exactly one session.launch.warning. It is a strict read-only accessor call,
+// made from launchBuildExecutorRequest alongside its single CreateInstance
+// call site, never from inside CreateInstance itself. A read failure or a
+// missing record produces no warning.
 func (m *Manager) maybePublishSSHLaunchWarning(ctx context.Context, req *LaunchRequest, metadata map[string]interface{}, sessionID string) {
 	if req == nil || req.ExecutorType != string(models.ExecutorTypeSSH) ||
 		m.reachabilityReader == nil || m.eventPublisher == nil {

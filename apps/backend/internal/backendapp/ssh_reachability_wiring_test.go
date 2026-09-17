@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -32,7 +33,7 @@ func (r *sshReachabilityWiringRepo) UpsertExecutorReachability(context.Context, 
 	return nil
 }
 
-func (r *sshReachabilityWiringRepo) ResetExecutorReachability(context.Context, string, string) error {
+func (r *sshReachabilityWiringRepo) ResetExecutorReachability(context.Context, string, string, time.Time) error {
 	return nil
 }
 
@@ -87,7 +88,7 @@ func TestStartSSHReachabilityPoller_StartsPollerAndRegistersCleanup(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	poller := startSSHReachabilityPoller(ctx, repo, 3600, logger.Default(), addCleanup)
+	poller := startSSHReachabilityPoller(ctx, repo, 3600, logger.Default(), (*reachabilitypkg.Publisher)(nil), addCleanup)
 	if poller == nil {
 		t.Fatal("startSSHReachabilityPoller returned a nil poller")
 	}

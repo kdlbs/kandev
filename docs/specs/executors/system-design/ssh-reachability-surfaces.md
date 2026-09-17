@@ -198,25 +198,21 @@ writer. Making a launch's own dial a probe observation is deferred, so a launch
 that fails against a dead host updates no record, and the settings page can lag
 that host by up to the failure threshold times the effective interval.
 
-**Where the warning is produced.** In the session-creation path in
-`internal/task/service`, at the point a task session is bound to an SSH
-executor, *before* `SSHExecutor.CreateInstance` is called. That keeps
-`CreateInstance` free of any record read, so the statement above stays literally
-true, while giving the warning one producer rather than one per launch entry
-point. The service reads the record through the same read-only accessor the HTTP
-routes use, and a read failure produces no warning rather than blocking or
-retrying: the probe informs, it never gates.
+**Where the warning is produced.** In
+`internal/agent/runtime/lifecycle/manager_launch.go`, the shared launch path
+starts a bounded, best-effort read immediately before its single
+`rt.CreateInstance` call. The read runs asynchronously, so a slow repository
+cannot delay the launch. `CreateInstance` remains free of any record read, and a
+read failure produces no warning rather than blocking or retrying.
 
 **One mechanism, not two.** Rather than branch on whether a human is watching,
-the warning is *always* written to the launched session's own event stream, as a
-`session.launch.warning` event carrying `executor_id`, `host`, `state`, `reason`
-and `last_success_at` (null when none has been recorded). A client that
-initiated that launch interactively renders the same event inline as well; every
-other path — a dependency chain, a workflow transition, an autostart — leaves it
-in the stream, where the user finds it on opening the card. "Interactive user"
-therefore needs no backend definition, which is the point: it was the term that
-forced a cross-layer protocol to be invented, and with one producer and one
-payload no launch path can silently diverge from another.
+the warning is *always* appended to the launched session's ordered event
+stream as a `session.launch.warning` event carrying `executor_id`, `host`,
+`state`, `reason`, `last_success_at` (null when none has been recorded), and a
+timestamp. A client that initiated that launch interactively renders the same
+event inline as well. Every other path — a dependency chain, a workflow
+transition, or an autostart — leaves it in the stream, where a later subscriber
+can replay it. One producer and one payload keep all launch paths aligned.
 
 **When it is raised.** Only when the record's state is `unreachable`. While
 periodic probing is enabled, any `unreachable` record qualifies. While probing

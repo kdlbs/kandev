@@ -14,6 +14,8 @@ var (
 	stateTransitionsTotal  = expvar.NewMap("executor_ssh_reachability_state_transitions_total")
 	passSkippedTotal       = expvar.NewInt("executor_ssh_reachability_pass_skipped_total")
 	writeRefusedTotal      = expvar.NewInt("executor_ssh_reachability_write_refused_total")
+	readBackFailedTotal    = expvar.NewInt("executor_ssh_reachability_read_back_failed_total")
+	publishFailedTotal     = expvar.NewInt("executor_ssh_reachability_publish_failed_total")
 	resetTotal             = expvar.NewInt("executor_ssh_reachability_reset_total")
 	probeDiscardedTotal    = expvar.NewInt("executor_ssh_reachability_probe_discarded_total")
 	probeDurationMsLastRun = expvar.NewInt("executor_ssh_reachability_probe_duration_ms")

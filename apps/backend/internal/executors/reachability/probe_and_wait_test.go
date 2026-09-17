@@ -3,6 +3,7 @@ package reachability
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -73,6 +74,49 @@ func TestPollerProbeAndWait_CoalescesConcurrentCallsForSameExecutor(t *testing.T
 	}
 	if !first.result.Persisted {
 		t.Fatalf("Persisted = false, want true — the probe outcome was a plain success")
+	}
+}
+
+func TestPollerProbeAndWaitDoesNotCoalesceDifferentConnectionConfigs(t *testing.T) {
+	repo := newFakeRepository()
+	p := New(repo, 0, logger.Default())
+	p.Start(context.Background())
+	defer p.Stop()
+
+	var dialCount int32
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+		atomic.AddInt32(&dialCount, 1)
+		started <- struct{}{}
+		<-release
+		return agentruntime.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
+	}
+
+	first := sshExecutor("same-id")
+	first.Config["ssh_host"] = "host-a"
+	second := sshExecutor("same-id")
+	second.Config["ssh_host"] = "host-b"
+	results := make(chan ProbeResult, 2)
+	go func() { result, _ := p.ProbeAndWait(first); results <- result }()
+	go func() { result, _ := p.ProbeAndWait(second); results <- result }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first probe did not start")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("second connection config incorrectly coalesced with the first")
+	}
+	releaseOnce.Do(func() { close(release) })
+	<-results
+	<-results
+	if got := atomic.LoadInt32(&dialCount); got != 2 {
+		t.Fatalf("dial count = %d, want 2 for distinct connection configs", got)
 	}
 }
 
@@ -157,6 +201,9 @@ func TestPollerProbeAndWait_WriteRefusedReportsPersistedFalse(t *testing.T) {
 	}
 	if result.Persisted {
 		t.Fatalf("Persisted = true, want false — the repository write failed")
+	}
+	if result.Record == nil || result.Record.State != models.ExecutorReachabilityStateReachable {
+		t.Fatalf("Record = %+v, want the actual unsaved reachable observation", result.Record)
 	}
 }
 

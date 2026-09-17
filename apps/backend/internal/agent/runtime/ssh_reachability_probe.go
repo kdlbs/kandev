@@ -30,6 +30,12 @@ type SSHProbeOutcome struct {
 	Message   string
 }
 
+// SanitizeSSHReachabilityMessage exposes the runtime-safe SSH diagnostic
+// projection without making higher-level adapters import lifecycle directly.
+func SanitizeSSHReachabilityMessage(err error) string {
+	return lifecycle.SanitizeSSHReachabilityMessage(err)
+}
+
 // SSHReachabilityProber is the runtime seam for a single SSH reachability
 // probe. Higher-level packages depend on this contract instead of the
 // lifecycle implementation details.
@@ -65,7 +71,7 @@ func (a *sshReachabilityProber) Probe(ctx context.Context, config map[string]str
 		return SSHProbeOutcome{
 			Host:    config["ssh_host"],
 			Reason:  SSHReachabilityReasonConfig,
-			Message: err.Error(),
+			Message: lifecycle.SanitizeSSHReachabilityMessage(err),
 		}
 	}
 	outcome := a.probe(ctx, target, timeout)

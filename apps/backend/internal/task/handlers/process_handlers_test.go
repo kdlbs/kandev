@@ -607,7 +607,7 @@ func (m *mockRepository) ListExecutorReachability(ctx context.Context) ([]*model
 func (m *mockRepository) UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error {
 	return nil
 }
-func (m *mockRepository) ResetExecutorReachability(ctx context.Context, executorID, host string) error {
+func (m *mockRepository) ResetExecutorReachability(ctx context.Context, executorID, host string, seenUpdatedAt time.Time) error {
 	return nil
 }
 func (m *mockRepository) DeleteExecutorReachability(ctx context.Context, executorID string) error {

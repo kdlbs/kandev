@@ -1,18 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { IconLoader2 } from "@tabler/icons-react";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import {
-  getSSHExecutorReachability,
-  probeSSHExecutorReachability,
-} from "@/lib/api/domains/ssh-api";
 import type { SSHReachabilityRecord, SSHReachabilityReason } from "@/lib/types/http-ssh";
 import { formatRelative } from "@/lib/i18n/formats";
+import { useSSHReachability } from "@/hooks/domains/settings/use-ssh-reachability";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { settingsActionClassName } from "@/components/settings/settings-control";
@@ -70,67 +65,6 @@ export function reachabilityStateKey(state: SSHReachabilityRecord["state"]): str
   }
 }
 
-// useReachabilityState owns the fetch/refresh/probe-now plumbing so the
-// component renders a thin view layer. The record itself lives in the store
-// (keyed by executor id) so a pushed executor.reachability.changed event and
-// this card's own fetches share one source of truth and the card updates
-// live without polling the store itself.
-function useReachabilityState(executorId: string) {
-  const record = useAppStore((state) => state.sshReachability.byExecutorId[executorId]);
-  const storeApi = useAppStoreApi();
-  const [loadError, setLoadError] = useState(false);
-  const [probing, setProbing] = useState(false);
-  const seqRef = useRef(0);
-
-  const load = useCallback(async () => {
-    const seq = ++seqRef.current;
-    try {
-      const resp = await getSSHExecutorReachability(executorId);
-      if (seq !== seqRef.current) return;
-      setLoadError(false);
-      storeApi.getState().setSSHReachability(resp);
-    } catch {
-      if (seq !== seqRef.current) return;
-      setLoadError(true);
-    }
-  }, [executorId, storeApi]);
-
-  useEffect(() => {
-    seqRef.current = 0;
-    setLoadError(false);
-    void load();
-    return () => {
-      seqRef.current = -1;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [executorId]);
-
-  // Refetch on the configured (effective) interval while the card is open, so
-  // a steady host's checked_at doesn't just age in place — but only when
-  // probing is actually on; a disabled poller has no cadence to follow and
-  // reading its 0 interval literally would spin a zero-delay loop.
-  useEffect(() => {
-    if (!record || !record.probing_enabled || record.probe_interval_seconds <= 0) return;
-    const id = window.setInterval(() => void load(), record.probe_interval_seconds * 1000);
-    return () => window.clearInterval(id);
-  }, [record, load]);
-
-  const probeNow = useCallback(async () => {
-    setProbing(true);
-    try {
-      const resp = await probeSSHExecutorReachability(executorId);
-      setLoadError(false);
-      storeApi.getState().setSSHReachability(resp);
-    } catch {
-      setLoadError(true);
-    } finally {
-      setProbing(false);
-    }
-  }, [executorId, storeApi]);
-
-  return { record, loadError, probing, probeNow };
-}
-
 /**
  * Renders the most recent SSH reachability record for one executor: state,
  * probed host, failure reason/message, consecutive-failure count, and the
@@ -141,7 +75,7 @@ function useReachabilityState(executorId: string) {
  */
 export function SSHReachabilityCard({ executorId }: SSHReachabilityCardProps) {
   const { t } = useTranslation();
-  const { record, loadError, probing, probeNow } = useReachabilityState(executorId);
+  const { record, loadError, probing, probeNow, now } = useSSHReachability(executorId);
 
   return (
     <SettingsCard data-testid="ssh-reachability-card">
@@ -163,7 +97,7 @@ export function SSHReachabilityCard({ executorId }: SSHReachabilityCardProps) {
         }
       />
       <CardContent>
-        <ReachabilityBody record={record} loadError={loadError} />
+        <ReachabilityBody record={record} loadError={loadError} now={now} />
       </CardContent>
     </SettingsCard>
   );
@@ -172,9 +106,11 @@ export function SSHReachabilityCard({ executorId }: SSHReachabilityCardProps) {
 function ReachabilityBody({
   record,
   loadError,
+  now,
 }: {
   record: SSHReachabilityRecord | undefined;
   loadError: boolean;
+  now: number;
 }) {
   const { t } = useTranslation();
   if (!record) {
@@ -191,6 +127,7 @@ function ReachabilityBody({
     record.checked_at,
     record.probe_interval_seconds,
     record.probing_enabled,
+    now,
   );
   const reasonKey = record.reason ? reachabilityReasonKey(record.reason) : null;
   return (

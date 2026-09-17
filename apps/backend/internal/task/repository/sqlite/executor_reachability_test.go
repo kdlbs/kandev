@@ -209,7 +209,7 @@ func TestResetExecutorReachabilityClearsTheRecordButAdvancesUpdatedAt(t *testing
 		t.Fatalf("precondition: expected a populated failure record, got %+v", before)
 	}
 
-	if err := repo.ResetExecutorReachability(ctx, executor.ID, "10.0.0.9"); err != nil {
+	if err := repo.ResetExecutorReachability(ctx, executor.ID, "10.0.0.9", executor.UpdatedAt); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 
@@ -234,6 +234,35 @@ func TestResetExecutorReachabilityClearsTheRecordButAdvancesUpdatedAt(t *testing
 	}
 }
 
+func TestResetExecutorReachabilityIgnoresStaleExecutorVersion(t *testing.T) {
+	repo, _ := newReachabilityTestRepo(t)
+	ctx := context.Background()
+	executor := createSSHExecutor(t, repo)
+	if err := repo.UpsertExecutorReachability(ctx, models.ExecutorReachabilityObservation{
+		ExecutorID: executor.ID, SeenUpdatedAt: executor.UpdatedAt,
+		InitialState: models.ExecutorReachabilityStateReachable,
+		Host:         "10.0.0.1", CheckedAt: time.Now().UTC(), FailureThreshold: 3,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	staleVersion := executor.UpdatedAt
+	executor.Config = map[string]string{"ssh_host": "10.0.0.2"}
+	if err := repo.UpdateExecutor(ctx, executor); err != nil {
+		t.Fatalf("update executor: %v", err)
+	}
+
+	if err := repo.ResetExecutorReachability(ctx, executor.ID, "10.0.0.2", staleVersion); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	got, err := repo.GetExecutorReachability(ctx, executor.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.State != models.ExecutorReachabilityStateReachable || got.Host != "10.0.0.1" {
+		t.Fatalf("record = %+v, want the newer executor version to remain untouched", got)
+	}
+}
+
 // @covers AC-EXECUTORS-SSH-REACHABILITY-001.17, 001.22
 func TestResetExecutorReachabilityIsANoOpForANonActiveExecutor(t *testing.T) {
 	repo, _ := newReachabilityTestRepo(t)
@@ -253,7 +282,7 @@ func TestResetExecutorReachabilityIsANoOpForANonActiveExecutor(t *testing.T) {
 		t.Fatalf("disable executor: %v", err)
 	}
 
-	if err := repo.ResetExecutorReachability(ctx, executor.ID, "10.0.0.9"); err != nil {
+	if err := repo.ResetExecutorReachability(ctx, executor.ID, "10.0.0.9", executor.UpdatedAt); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 

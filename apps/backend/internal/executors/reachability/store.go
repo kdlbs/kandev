@@ -2,6 +2,7 @@ package reachability
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -19,7 +20,7 @@ type Repository interface {
 	ListSSHExecutorsForReachability(ctx context.Context) ([]*models.Executor, error)
 	GetExecutorReachability(ctx context.Context, executorID string) (*models.ExecutorReachability, error)
 	UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error
-	ResetExecutorReachability(ctx context.Context, executorID, host string) error
+	ResetExecutorReachability(ctx context.Context, executorID, host string, seenUpdatedAt time.Time) error
 }
 
 // observeResult reports what Observe actually did, for the poller's logging
@@ -38,6 +39,10 @@ type observeResult struct {
 	// probe route, the change-event publisher) that needs more than the bare
 	// state enum without a second read-back.
 	After *models.ExecutorReachability
+	// Observed is the outcome projected locally from the probe, even when the
+	// repository rejects the write or a read-back fails. It is never published
+	// as durable state, but lets a manual probe show the actual result.
+	Observed *models.ExecutorReachability
 }
 
 // store owns the write path's hysteresis. The consecutive-failure counter
@@ -56,21 +61,29 @@ type store struct {
 // own completion timestamp, supplied by the caller so a test can control it
 // precisely (see the design's last-write-wins contract).
 func (s *store) Observe(ctx context.Context, executor *models.Executor, outcome agentruntime.SSHProbeOutcome, checkedAt time.Time) observeResult {
-	before, _ := s.repo.GetExecutorReachability(ctx, executor.ID)
+	before, err := s.repo.GetExecutorReachability(ctx, executor.ID)
+	if err != nil && !errors.Is(err, models.ErrExecutorReachabilityNotFound) {
+		s.log.Warn("executor ssh reachability: read before write failed",
+			zap.String("executor_id", executor.ID), zap.Error(err))
+		return observeResult{}
+	}
 
+	checkedAt = checkedAt.UTC().Truncate(time.Microsecond)
 	obs := buildObservation(executor, outcome, checkedAt)
+	observed := projectObservation(before, obs)
 	recordProbeOutcome(outcome.Success, string(obs.Reason))
 	if err := s.repo.UpsertExecutorReachability(ctx, obs); err != nil {
 		s.log.Warn("executor ssh reachability: write failed",
 			zap.String("executor_id", executor.ID), zap.Error(err))
-		return observeResult{}
+		return observeResult{Current: observed.State, Observed: observed}
 	}
 
 	after, err := s.repo.GetExecutorReachability(ctx, executor.ID)
 	if err != nil {
 		s.log.Warn("executor ssh reachability: read-back after write failed",
 			zap.String("executor_id", executor.ID), zap.Error(err))
-		return observeResult{}
+		readBackFailedTotal.Add(1)
+		return observeResult{Current: observed.State, Observed: observed}
 	}
 
 	// The upsert's own WHERE (eligibility, last-write-wins on checked_at) may
@@ -81,7 +94,7 @@ func (s *store) Observe(ctx context.Context, executor *models.Executor, outcome 
 		writeRefusedTotal.Add(1)
 		s.log.Debug("executor ssh reachability: write refused",
 			zap.String("executor_id", executor.ID))
-		return observeResult{Current: after.State}
+		return observeResult{Current: after.State, Observed: observed}
 	}
 
 	previous := models.ExecutorReachabilityStateUnknown
@@ -99,7 +112,49 @@ func (s *store) Observe(ctx context.Context, executor *models.Executor, outcome 
 	return observeResult{
 		Applied: true, StateChanged: stateChanged, Changed: changed,
 		Previous: previous, Current: after.State, After: after,
+		Observed: after,
 	}
+}
+
+func projectObservation(before *models.ExecutorReachability, obs models.ExecutorReachabilityObservation) *models.ExecutorReachability {
+	record := &models.ExecutorReachability{
+		ExecutorID:          obs.ExecutorID,
+		State:               obs.InitialState,
+		Reason:              obs.Reason,
+		Message:             obs.Message,
+		ConsecutiveFailures: obs.InitialFailures,
+		Host:                obs.Host,
+		CheckedAt:           checkedAtPtr(obs.CheckedAt),
+		UpdatedAt:           time.Now().UTC(),
+	}
+	if before == nil {
+		if obs.Reason == "" {
+			record.State = models.ExecutorReachabilityStateReachable
+			record.ConsecutiveFailures = 0
+			record.LastSuccessAt = checkedAtPtr(obs.CheckedAt)
+		}
+		return record
+	}
+
+	record.State = before.State
+	record.ConsecutiveFailures = before.ConsecutiveFailures
+	record.LastSuccessAt = before.LastSuccessAt
+	if obs.Reason == "" {
+		record.State = models.ExecutorReachabilityStateReachable
+		record.ConsecutiveFailures = 0
+		record.LastSuccessAt = checkedAtPtr(obs.CheckedAt)
+		return record
+	}
+	record.ConsecutiveFailures++
+	if isStickyReason(obs.Reason) || record.ConsecutiveFailures >= obs.FailureThreshold {
+		record.State = models.ExecutorReachabilityStateUnreachable
+	}
+	return record
+}
+
+func checkedAtPtr(value time.Time) *time.Time {
+	copy := value
+	return &copy
 }
 
 // logTransition logs at Warn going into unreachable and Info coming out of

@@ -25,7 +25,7 @@ test.describe("ssh executor — reachability", () => {
 
     // A fresh probe against the live target starts reachable.
     await page.probeNow();
-    await expect(page.reachabilityState).toHaveText(/reachable/i);
+    await expect(page.reachabilityState).toHaveText(/^reachable$/i);
     await expect(page.reachabilityHost).toContainText(seedData.sshTarget.host);
 
     dropTrafficToPort22(seedData.sshTarget);
@@ -33,11 +33,11 @@ test.describe("ssh executor — reachability", () => {
       // First failed probe: below the two-probe failure threshold, so the
       // panel must not have flipped yet.
       await page.probeNow();
-      await expect(page.reachabilityState).toHaveText(/reachable/i);
+      await expect(page.reachabilityState).toHaveText(/^reachable$/i);
 
       // Second consecutive failure crosses the threshold.
       await page.probeNow();
-      await expect(page.reachabilityState).toHaveText(/unreachable/i);
+      await expect(page.reachabilityState).toHaveText(/^unreachable$/i);
       await expect(page.reachabilityHost).toContainText(seedData.sshTarget.host);
       await expect(page.reachabilityReason).toBeVisible();
     } finally {
@@ -47,7 +47,7 @@ test.describe("ssh executor — reachability", () => {
     // A single successful probe clears an unreachable state immediately;
     // no second confirming probe is required.
     await page.probeNow();
-    await expect(page.reachabilityState).toHaveText(/reachable/i);
+    await expect(page.reachabilityState).toHaveText(/^reachable$/i);
   });
 
   test("a launch started while the host is unreachable is attempted and fails naming the host, not refused", async ({

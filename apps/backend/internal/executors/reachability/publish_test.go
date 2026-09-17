@@ -2,6 +2,7 @@ package reachability
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,15 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type failingPublishEventBus struct {
+	*bus.MemoryEventBus
+	err error
+}
+
+func (b *failingPublishEventBus) Publish(context.Context, string, *bus.Event) error {
+	return b.err
+}
 
 func testEventBusLogger() *bus.MemoryEventBus {
 	return bus.NewMemoryEventBus(logger.Default())
@@ -91,6 +101,18 @@ func TestPublisherPublishChanged_NilSafe(t *testing.T) {
 
 	pub2 := NewPublisher(nil)
 	pub2.PublishChanged(context.Background(), &models.ExecutorReachability{ExecutorID: "exec-1"}, 60)
+}
+
+func TestPublisherPublishChangedCountsPublishFailures(t *testing.T) {
+	before := publishFailedTotal.Value()
+	pub := NewPublisher(&failingPublishEventBus{
+		MemoryEventBus: testEventBusLogger(),
+		err:            errors.New("event bus unavailable"),
+	})
+	pub.PublishChanged(context.Background(), &models.ExecutorReachability{ExecutorID: "exec-1"}, 60)
+	if got := publishFailedTotal.Value(); got != before+1 {
+		t.Fatalf("publishFailedTotal = %d, want %d", got, before+1)
+	}
 }
 
 // @covers AC-EXECUTORS-SSH-REACHABILITY-001.14, AC-EXECUTORS-SSH-REACHABILITY-002.5

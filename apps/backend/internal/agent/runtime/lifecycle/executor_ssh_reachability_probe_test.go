@@ -349,4 +349,24 @@ func TestSSHTargetFromExecutorConfig(t *testing.T) {
 			t.Fatal("expected an error for an invalid port")
 		}
 	})
+
+	t.Run("a missing pinned fingerprint fails resolution", func(t *testing.T) {
+		if _, err := SSHTargetFromExecutorConfig(map[string]string{
+			"ssh_host": "target.internal",
+			"ssh_user": "deploy",
+		}); err == nil {
+			t.Fatal("expected an error when the pinned host fingerprint is missing")
+		}
+	})
+}
+
+func TestSanitizeSSHReachabilityMessageBoundsAndRedacts(t *testing.T) {
+	secret := "ssh: unable to authenticate, password=super-secret-token " + strings.Repeat("x", 700)
+	got := SanitizeSSHReachabilityMessage(errors.New(secret))
+	if len(got) > maxSSHReachabilityMessageBytes {
+		t.Fatalf("message length = %d, want at most %d", len(got), maxSSHReachabilityMessageBytes)
+	}
+	if strings.Contains(got, "super-secret-token") {
+		t.Fatalf("message contains the raw credential: %q", got)
+	}
 }

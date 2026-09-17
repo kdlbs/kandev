@@ -1,7 +1,7 @@
 ---
 id: "06-settings-surface"
 title: "Reachability data layer and settings surface"
-status: pending
+status: done
 wave: 4
 depends_on: ["04-reachability-api-and-events"]
 plan: "plan.md"

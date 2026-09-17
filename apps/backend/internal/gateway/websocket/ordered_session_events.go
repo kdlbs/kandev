@@ -18,6 +18,7 @@ const (
 	orderedTurnStartedEvent    = "session.turn.started"
 	orderedTurnCompletedEvent  = "session.turn.completed"
 	orderedTurnRemovedEvent    = "session.turn.removed"
+	orderedLaunchWarningEvent  = "session.launch.warning"
 	orderedSessionRemovedEvent = "session.removed"
 )
 
@@ -28,32 +29,37 @@ var orderedEventTypeByAction = map[string]string{
 	ws.ActionSessionTurnStarted:    orderedTurnStartedEvent,
 	ws.ActionSessionTurnCompleted:  orderedTurnCompletedEvent,
 	ws.ActionSessionTurnRemoved:    orderedTurnRemovedEvent,
+	ws.ActionSessionLaunchWarning:  orderedLaunchWarningEvent,
 	ws.ActionSessionRemoved:        orderedSessionRemovedEvent,
 }
 
 const orderedContentPayloadKey = "content"
 
 //nolint:cyclop // This boundary coordinates journal sync, poison recording, and live fan-out.
-func (h *Hub) appendAndBroadcastOrderedSessionEvent(sessionID string, message *ws.Message) {
+func (h *Hub) appendAndBroadcastOrderedSessionEvent(sessionID string, message *ws.Message) bool {
 	h.orderedSessionMu.Lock()
 	defer h.orderedSessionMu.Unlock()
 	service := h.pluginConversationService
 	eventType := orderedEventTypeByAction[message.Action]
 	if service == nil || eventType == "" {
-		return
+		return false
 	}
-	if service.HasConversationJournal() {
+	// Launch warnings are lifecycle events, not rows in the primary
+	// conversation journal. Append them to the durable session stream even
+	// when journal mirroring is enabled; otherwise the journal branch would
+	// sync unrelated committed messages and silently drop this warning.
+	if service.HasConversationJournal() && eventType != orderedLaunchWarningEvent {
 		events, err := service.SyncCommittedSessionEvents(context.Background(), sessionID)
 		if err != nil {
 			if h.logger != nil {
 				h.logger.Error("mirror committed ordered session events", zap.Error(err))
 			}
-			return
+			return true
 		}
 		for _, event := range events {
 			h.broadcastCommittedOrderedSessionEvent(service, event)
 		}
-		return
+		return true
 	}
 	var source map[string]any
 	if err := json.Unmarshal(message.Payload, &source); err != nil {
@@ -62,7 +68,7 @@ func (h *Hub) appendAndBroadcastOrderedSessionEvent(sessionID string, message *w
 	payload := sanitizedOrderedSessionPayload(eventType, source)
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return true
 	}
 	var taskID *string
 	if value, ok := payload["task_id"].(string); ok && value != "" {
@@ -73,9 +79,10 @@ func (h *Hub) appendAndBroadcastOrderedSessionEvent(sessionID string, message *w
 		if h.logger != nil {
 			h.logger.Error("append ordered session event", zap.Error(err))
 		}
-		return
+		return true
 	}
 	h.deliverOrderedSessionEvent(service, event, h.orderedSessionRecipients(sessionID))
+	return true
 }
 
 // broadcastCommittedOrderedSessionEvent fans a mirrored primary-journal event
@@ -143,6 +150,8 @@ func sanitizedOrderedSessionPayload(eventType string, source map[string]any) map
 		keys = append(keys, "message_id")
 	case orderedTurnStartedEvent, orderedTurnCompletedEvent, orderedTurnRemovedEvent:
 		keys = append(keys, "id", "started_at", "completed_at", "updated_at", "had_output")
+	case orderedLaunchWarningEvent:
+		keys = append(keys, "executor_id", "host", "state", "reason", "last_success_at", "timestamp")
 	}
 	for _, key := range keys {
 		if value, exists := source[key]; exists {

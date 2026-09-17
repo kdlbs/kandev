@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
@@ -45,7 +46,7 @@ type ReachabilityProber interface {
 func (h *Handler) httpListReachability(c *gin.Context) {
 	dtos, status, err := h.listReachability(c.Request.Context())
 	if err != nil {
-		c.JSON(status, gin.H{errorJSONKey: err.Error()})
+		h.writeReachabilityError(c, status, err)
 		return
 	}
 	c.JSON(status, dtos)
@@ -59,7 +60,7 @@ func (h *Handler) httpGetReachability(c *gin.Context) {
 	}
 	dto, status, err := h.getReachability(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(status, gin.H{errorJSONKey: err.Error()})
+		h.writeReachabilityError(c, status, err)
 		return
 	}
 	c.JSON(status, dto)
@@ -73,10 +74,20 @@ func (h *Handler) httpProbeReachability(c *gin.Context) {
 	}
 	dto, status, err := h.probeReachability(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(status, gin.H{errorJSONKey: err.Error()})
+		h.writeReachabilityError(c, status, err)
 		return
 	}
 	c.JSON(status, dto)
+}
+
+func (h *Handler) writeReachabilityError(c *gin.Context, status int, err error) {
+	message := "reachability request failed"
+	if status >= http.StatusBadRequest && status < http.StatusInternalServerError {
+		message = err.Error()
+	} else if h.logger != nil {
+		h.logger.Error("reachability request failed", zap.Int("status", status), zap.Error(err))
+	}
+	c.JSON(status, gin.H{errorJSONKey: message})
 }
 
 // --- Testable cores ---
@@ -208,7 +219,7 @@ func buildReachabilityDTOFromRecord(executor *models.Executor, record *models.Ex
 			ExecutorID: executor.ID,
 			State:      models.ExecutorReachabilityStateUnreachable,
 			Reason:     models.ExecutorReachabilityReasonConfig,
-			Message:    err.Error(),
+			Message:    agentruntime.SanitizeSSHReachabilityMessage(err),
 			Host:       executor.Config["ssh_host"],
 		}
 		return reachabilitypkg.BuildRecordDTO(executor.ID, synthetic, intervalSeconds, false)

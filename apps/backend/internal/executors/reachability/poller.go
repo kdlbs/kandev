@@ -43,6 +43,10 @@ type Poller struct {
 	// executor id into a single dial. Zero value is ready to use.
 	inflight singleflight.Group
 
+	// probeSem is owned by the poller rather than by a scheduled pass. This
+	// keeps scheduled, manual, and synchronous probes under one cap.
+	probeSem chan struct{}
+
 	// mu guards started/stopping/ctx/cancel/wg against concurrent
 	// Start/Stop/ProbeNow calls. acquire() registers new work on wg under mu
 	// so it can never race a concurrent Stop's wg.Wait() observing the
@@ -53,6 +57,7 @@ type Poller struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+	stopDone chan struct{}
 
 	// passMu guards passRunning, the single-flight gate for the scheduled
 	// pass: an overlapping tick is dropped and counted, never queued.
@@ -73,6 +78,7 @@ func New(repo Repository, intervalSeconds int, log *logger.Logger) *Poller {
 		log:             log,
 		intervalSeconds: effective,
 		probe:           defaultProbe,
+		probeSem:        make(chan struct{}, passConcurrency),
 	}
 }
 
@@ -96,6 +102,7 @@ func (p *Poller) Start(ctx context.Context) {
 	p.stopping = false
 	p.ctx = runCtx
 	p.cancel = cancel
+	p.stopDone = make(chan struct{})
 	if p.intervalSeconds > 0 {
 		p.wg.Add(1)
 	}
@@ -110,8 +117,14 @@ func (p *Poller) Start(ctx context.Context) {
 // them to drain. Calling Stop before Start, or twice in a row, is a no-op.
 func (p *Poller) Stop() {
 	p.mu.Lock()
-	if !p.started || p.stopping {
+	if !p.started {
 		p.mu.Unlock()
+		return
+	}
+	stopDone := p.stopDone
+	if p.stopping {
+		p.mu.Unlock()
+		<-stopDone
 		return
 	}
 	p.stopping = true
@@ -126,6 +139,10 @@ func (p *Poller) Stop() {
 	p.stopping = false
 	p.ctx = nil
 	p.cancel = nil
+	if p.stopDone == stopDone {
+		close(stopDone)
+		p.stopDone = nil
+	}
 	p.mu.Unlock()
 }
 
@@ -145,6 +162,19 @@ func (p *Poller) ProbeNow(executor *models.Executor) bool {
 	return true
 }
 
+func (p *Poller) acquireProbeSlot(ctx context.Context) bool {
+	select {
+	case p.probeSem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (p *Poller) releaseProbeSlot() {
+	<-p.probeSem
+}
+
 // acquire registers one unit of in-flight work on wg, gated by mu so it can
 // never race a concurrent Stop's wg.Wait(). It refuses when the poller isn't
 // started or a Stop is already underway.
@@ -154,6 +184,8 @@ func (p *Poller) acquire() (context.Context, bool) {
 	if !p.started || p.stopping {
 		return nil, false
 	}
+	// loop already owns a WaitGroup reference, so this positive Add cannot
+	// race a Stop waiting for the counter to reach zero.
 	p.wg.Add(1)
 	return p.ctx, true
 }
@@ -213,20 +245,17 @@ func (p *Poller) runPass(ctx context.Context) {
 		return
 	}
 
-	sem := make(chan struct{}, passConcurrency)
 	var wg sync.WaitGroup
 	for _, executor := range executors {
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
+		if !p.acquireProbeSlot(ctx) {
 			wg.Wait()
 			return
 		}
 		wg.Add(1)
 		go func(executor *models.Executor) {
 			defer wg.Done()
-			defer func() { <-sem }()
-			p.probeAndPersist(ctx, executor)
+			defer p.releaseProbeSlot()
+			p.probeAndPersistWithSlot(ctx, executor)
 		}(executor)
 	}
 	wg.Wait()
@@ -237,6 +266,14 @@ func (p *Poller) runPass(ctx context.Context) {
 // cancelled — a cancelled outcome is not an observation about the host and
 // must never be written (see agentruntime.SSHProbeOutcome.Cancelled).
 func (p *Poller) probeAndPersist(ctx context.Context, executor *models.Executor) {
+	if !p.acquireProbeSlot(ctx) {
+		return
+	}
+	defer p.releaseProbeSlot()
+	p.probeAndPersistWithSlot(ctx, executor)
+}
+
+func (p *Poller) probeAndPersistWithSlot(ctx context.Context, executor *models.Executor) {
 	outcome := p.probe(ctx, executor)
 	if outcome.Cancelled {
 		probeDiscardedTotal.Add(1)

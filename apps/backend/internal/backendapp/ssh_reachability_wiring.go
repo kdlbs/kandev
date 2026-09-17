@@ -15,9 +15,11 @@ func startSSHReachabilityPoller(
 	repo reachabilitypkg.Repository,
 	intervalSeconds int,
 	log *logger.Logger,
+	publisher *reachabilitypkg.Publisher,
 	addCleanup func(func() error) func() error,
 ) *reachabilitypkg.Poller {
 	poller := reachabilitypkg.New(repo, intervalSeconds, log)
+	poller.SetPublisher(publisher)
 	poller.Start(ctx)
 	addCleanup(func() error { poller.Stop(); return nil })
 	return poller

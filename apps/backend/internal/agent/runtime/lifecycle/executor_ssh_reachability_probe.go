@@ -8,9 +8,32 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
+
+const maxSSHReachabilityMessageBytes = 512
+
+// SanitizeSSHReachabilityMessage keeps dial diagnostics useful while making
+// sure credentials, local paths, and oversized provider text do not cross the
+// reachability API boundary.
+func SanitizeSSHReachabilityMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := routingerr.Sanitize(err.Error())
+	if len(message) <= maxSSHReachabilityMessageBytes {
+		return message
+	}
+	cut := maxSSHReachabilityMessageBytes - len("…")
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut] + "…"
+}
 
 // SSHReachabilityReason classifies why a probe or launch-time SSH dial
 // failed. The set is closed: ClassifyDialError always returns one of these
@@ -65,7 +88,7 @@ func ProbeSSHHost(ctx context.Context, target *SSHTarget, timeout time.Duration)
 			return outcome
 		}
 		outcome.Reason = ClassifyDialError(err)
-		outcome.Message = err.Error()
+		outcome.Message = SanitizeSSHReachabilityMessage(err)
 		return outcome
 	}
 	defer func() { _ = client.Close() }()
@@ -118,9 +141,10 @@ func isSSHHostKeyMismatch(err error) bool {
 	return errors.As(err, &keyErr) && len(keyErr.Want) > 0
 }
 
-// isSSHAuthFailure relies on string-matching because
-// golang.org/x/crypto/ssh v0.52.0 has no exported error type for an
-// authentication failure — it returns a plain fmt.Errorf.
+// isSSHAuthFailure relies on string-matching because the pinned
+// golang.org/x/crypto/ssh v0.57.0 dependency has no exported error type for
+// an authentication failure — it returns a plain fmt.Errorf. Revisit this
+// classifier when upgrading the dependency if it adds a stable type.
 func isSSHAuthFailure(err error) bool {
 	return strings.Contains(err.Error(), "unable to authenticate")
 }
@@ -139,6 +163,10 @@ func SSHTargetFromExecutorConfig(cfg map[string]string) (*SSHTarget, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("ssh executor has no config")
 	}
+	fingerprint := strings.TrimSpace(cfg["ssh_host_fingerprint"])
+	if fingerprint == "" {
+		return nil, fmt.Errorf("ssh host fingerprint is required for reachability probes")
+	}
 	port := 0
 	if p := strings.TrimSpace(cfg["ssh_port"]); p != "" {
 		n, err := strconv.Atoi(p)
@@ -155,6 +183,6 @@ func SSHTargetFromExecutorConfig(cfg map[string]string) (*SSHTarget, error) {
 		IdentitySource:    SSHIdentitySource(cfg["ssh_identity_source"]),
 		IdentityFile:      cfg["ssh_identity_file"],
 		ProxyJump:         cfg["ssh_proxy_jump"],
-		PinnedFingerprint: cfg["ssh_host_fingerprint"],
+		PinnedFingerprint: fingerprint,
 	})
 }

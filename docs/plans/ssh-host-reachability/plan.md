@@ -301,15 +301,17 @@ that changes every interval does not invalidate the executor list payload:
 | `POST /api/v1/ssh/executors/:id/reachability/probe` | Probe now, persist, return the record. |
 
 The `POST` route coalesces through a `golang.org/x/sync/singleflight` group
-keyed by executor id, so two overlapping requests open one connection and share
-one result. It works while the poller is disabled. The coalesced probe does
+keyed by executor id and the SSH connection configuration, so two overlapping
+requests for one connection open one connection while a request for a changed
+host or pin gets its own probe. It works while the poller is disabled. The
+coalesced probe does
 **not** run on any caller's request context — a disconnecting caller must
 neither cancel it nor fail the other caller waiting on it — but it is also
 **not** `context.Background()`: it is registered on the reachability package's
 own `WaitGroup` and context, the off-cycle-probe primitive task 03 exposes, so
-`Stop` still cancels and awaits it. Status codes are the same shape on all
-three routes: `404` for a nonexistent or soft-deleted executor id, `400` only
-when the id names a non-`ssh` executor. `resolveSSHTarget`'s existing mapping
+`Stop` still cancels and awaits it. Status codes are `404` for a nonexistent
+or soft-deleted executor id, `400` when the id names a non-`ssh` executor, and
+`409` for a probe request against an inactive SSH executor. `resolveSSHTarget`'s existing mapping
 must **not** be reused wholesale for the probe route — that helper also maps a
 config-resolution failure to `400`, which is exactly the case
 `AC-…-002.5` requires to return a `200` outcome carrying reason `config`
@@ -360,16 +362,17 @@ attribution alongside.
 whether an interactive user is present. `Manager.launchBuildExecutorRequest`
 (`manager_launch.go`), which already resolves the per-executor-type backend
 and calls `rt.CreateInstance` at its single call site for every executor type,
-reads the target executor's reachability record through a narrow read-only
-accessor immediately before that call — never inside `CreateInstance` itself,
-so the negative test (`CreateInstance` reads no record) stays meaningful. When
-the executor is `ssh`, the record's state is `unreachable`, and either
-periodic probing is enabled or the record's `checked_at` is within three times
-the *default* interval, it publishes `session.launch.warning` to the launched
-session's own event stream via the `Manager`'s existing `eventPublisher` (the
-mechanism behind `PublishPrepareProgress`), carrying `executor_id`, `host`,
-`state`, `reason`, and `last_success_at`. A read failure produces no warning
-rather than blocking the launch. Every launch path — WS-initiated, a
+starts a bounded asynchronous read of the target executor's reachability record
+through a narrow read-only accessor immediately before that call — never inside
+`CreateInstance` itself, so the negative test (`CreateInstance` reads no record)
+stays meaningful. When the executor is `ssh`, the record's state is
+`unreachable`, and either periodic probing is enabled or the record's `checked_at`
+is within three times the *default* interval, it appends
+`session.launch.warning` to the launched session's ordered event stream via the
+`Manager`'s existing `eventPublisher` (the mechanism behind
+`PublishPrepareProgress`), carrying `executor_id`, `host`, `state`, `reason`,
+`last_success_at`, and a timestamp. A read failure produces no warning and
+cannot delay the launch. Every launch path — WS-initiated, a
 dependency chain, a workflow transition, an autostart — converges on this one
 call site, so none can diverge from another. A client that initiated the
 launch itself renders the same event inline at the point of initiation, in
@@ -399,8 +402,8 @@ is open — and runs **no timer at all** while `probing_enabled` is `false`,
 fetching once on open and again after an immediate probe instead of reading a
 zero effective interval as a cadence.
 
-**The pre-launch warning renders a pushed event, not a derived client
-computation.** The backend always emits `session.launch.warning` to the
+**The pre-launch warning renders an ordered event, not a derived client
+computation.** The backend always appends `session.launch.warning` to the
 launched session's own stream (see Launch interaction above); the session view
 renders it there through the existing session-scoped WS-event handler pattern
 (the `executor-prepare.ts` shape), and a client that initiated that launch

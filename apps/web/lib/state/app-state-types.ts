@@ -600,6 +600,7 @@ export type AppState = KanbanSlice & {
     sessionId: string,
     entry: import("./slices/session-runtime/types").LaunchWarningEntry,
   ) => void;
+  clearLaunchWarning: (sessionId: string) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];

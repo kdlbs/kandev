@@ -527,5 +527,9 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       draft.launchWarning.bySessionId[sessionId] = entry;
     }),
+  clearLaunchWarning: (sessionId) =>
+    set((draft) => {
+      delete draft.launchWarning.bySessionId[sessionId];
+    }),
   ...buildUserShellActions(set),
 });

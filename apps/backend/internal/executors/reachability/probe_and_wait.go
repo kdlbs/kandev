@@ -1,11 +1,14 @@
 package reachability
 
 import (
+	"strings"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// ProbeResult is what ProbeAndWait returns: the record as written (nil when
-// none could be resolved) and whether that specific write actually landed.
+// ProbeResult is what ProbeAndWait returns: the durable record when available,
+// or the locally projected observation when persistence failed, plus whether
+// that specific write actually landed.
 type ProbeResult struct {
 	Record    *models.ExecutorReachability
 	Persisted bool
@@ -34,7 +37,7 @@ type probeAndWaitOutcome struct {
 // stopping); it does not report whether the probe outcome was a success —
 // see ProbeResult.Persisted for whether the result was actually stored.
 func (p *Poller) ProbeAndWait(executor *models.Executor) (ProbeResult, bool) {
-	v, _, _ := p.inflight.Do(executor.ID, func() (any, error) {
+	v, _, _ := p.inflight.Do(probeKey(executor), func() (any, error) {
 		return p.probeAndWaitOnce(executor), nil
 	})
 	outcome := v.(probeAndWaitOutcome)
@@ -49,6 +52,21 @@ func (p *Poller) ProbeAndWait(executor *models.Executor) (ProbeResult, bool) {
 	return ProbeResult{Record: record, Persisted: outcome.persisted}, true
 }
 
+// probeKey includes the connection identity, not only the executor ID. A
+// save can change the host or its pinned key while an older probe is still in
+// flight; those observations must not share a singleflight result.
+func probeKey(executor *models.Executor) string {
+	if executor == nil {
+		return "<nil>"
+	}
+	values := make([]string, 0, len(connectionConfigKeys)+1)
+	values = append(values, executor.ID)
+	for _, key := range connectionConfigKeys {
+		values = append(values, key+"="+executor.Config[key])
+	}
+	return strings.Join(values, "\x00")
+}
+
 // probeAndWaitOnce is the singleflight leader's body: acquire a WaitGroup
 // slot exactly like every other off-cycle unit of work, probe, and persist.
 func (p *Poller) probeAndWaitOnce(executor *models.Executor) probeAndWaitOutcome {
@@ -57,6 +75,10 @@ func (p *Poller) probeAndWaitOnce(executor *models.Executor) probeAndWaitOutcome
 		return probeAndWaitOutcome{}
 	}
 	defer p.wg.Done()
+	if !p.acquireProbeSlot(ctx) {
+		return probeAndWaitOutcome{ran: true}
+	}
+	defer p.releaseProbeSlot()
 
 	outcome := p.probe(ctx, executor)
 	if outcome.Cancelled {
@@ -64,7 +86,11 @@ func (p *Poller) probeAndWaitOnce(executor *models.Executor) probeAndWaitOutcome
 		return probeAndWaitOutcome{ran: true}
 	}
 	result := p.observeAndPublish(ctx, executor, outcome)
-	return probeAndWaitOutcome{ran: true, persisted: result.Applied, record: result.After}
+	record := result.After
+	if record == nil {
+		record = result.Observed
+	}
+	return probeAndWaitOutcome{ran: true, persisted: result.Applied, record: record}
 }
 
 // EffectiveIntervalSeconds returns the clamped interval this poller is

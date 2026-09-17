@@ -4,6 +4,9 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -66,13 +69,19 @@ func BuildRecordDTO(executorID string, record *models.ExecutorReachability, effe
 // per the system design.
 type Publisher struct {
 	eventBus bus.EventBus
+	log      *logger.Logger
 }
 
 // NewPublisher builds a Publisher. A nil eventBus is accepted so a caller
 // that hasn't wired the event bus yet (tests, a degraded boot path) can
-// still construct one; PublishChanged becomes a no-op.
-func NewPublisher(eventBus bus.EventBus) *Publisher {
-	return &Publisher{eventBus: eventBus}
+// still construct one; PublishChanged becomes a no-op. An optional logger
+// records publication failures with the affected executor id.
+func NewPublisher(eventBus bus.EventBus, logs ...*logger.Logger) *Publisher {
+	var log *logger.Logger
+	if len(logs) > 0 {
+		log = logs[0]
+	}
+	return &Publisher{eventBus: eventBus, log: log}
 }
 
 // PublishChanged publishes record's current shape on
@@ -86,5 +95,11 @@ func (p *Publisher) PublishChanged(ctx context.Context, record *models.ExecutorR
 	}
 	dto := BuildRecordDTO(record.ExecutorID, record, effectiveIntervalSeconds, true)
 	event := bus.NewEvent(events.ExecutorReachabilityChanged, "executor-reachability", dto)
-	_ = p.eventBus.Publish(ctx, events.ExecutorReachabilityChanged, event)
+	if err := p.eventBus.Publish(ctx, events.ExecutorReachabilityChanged, event); err != nil {
+		publishFailedTotal.Add(1)
+		if p.log != nil {
+			p.log.Warn("executor ssh reachability: publish failed",
+				zap.String("executor_id", record.ExecutorID), zap.Error(err))
+		}
+	}
 }

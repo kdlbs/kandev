@@ -576,6 +576,7 @@ export type SessionRuntimeSliceActions = {
   failWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt, details: string) => boolean;
   clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
   setLaunchWarning: (sessionId: string, entry: LaunchWarningEntry) => void;
+  clearLaunchWarning: (sessionId: string) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

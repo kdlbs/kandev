@@ -57,7 +57,11 @@ func sshExecutor(id string, status models.ExecutorStatus, config map[string]stri
 }
 
 func resolvableSSHConfig() map[string]string {
-	return map[string]string{"ssh_host": "10.0.0.1", "ssh_user": "deploy"}
+	return map[string]string{
+		"ssh_host":             "10.0.0.1",
+		"ssh_user":             "deploy",
+		"ssh_host_fingerprint": "SHA256:test",
+	}
 }
 
 // fakeReachabilityProber models the exact guarantee *reachability.Poller
