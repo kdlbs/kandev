@@ -628,6 +628,8 @@ func ceilingDeferralsEquivalentForAdmission(a, b models.CeilingDeferral) (bool, 
 // validateCeilingEntry compares a claimed record with the current task-owned
 // route and destination. It is deliberately read-only. Callers retain the
 // record on unavailable reads and only terminally dispose superseded entries.
+// It acquires task admission; a context that already owns that admission is
+// re-entrant.
 func (s *Service) validateCeilingEntry(
 	ctx context.Context,
 	task *models.Task,

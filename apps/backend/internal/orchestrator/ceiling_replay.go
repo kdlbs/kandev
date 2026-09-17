@@ -352,6 +352,14 @@ func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string,
 				return
 			}
 		}
+		if claim, ok := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim); ok && claim.taskID == taskID {
+			claimID, _, held := models.ReadCeilingLaunchClaim(existingRaw)
+			if !held || claimID != claim.id {
+				s.logger.Zap().Debug("skipping ceiling record clear: claim replaced by successor",
+					zap.String("task_id", taskID))
+				return
+			}
+		}
 		record := stripCeilingRecordKeys(existingRaw)
 		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, record)
 		if err != nil {

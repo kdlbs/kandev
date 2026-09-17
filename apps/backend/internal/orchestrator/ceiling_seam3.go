@@ -176,6 +176,7 @@ func seam3PromptEnsureNonReconstructableOptionsSet(options promptTaskOptions) bo
 		options.expectedSessionIdentity != nil ||
 		options.afterDispatch != nil ||
 		options.beforeDispatch != nil ||
+		options.afterDispatchAdmission != nil ||
 		options.disableDispatchRetry
 }
 

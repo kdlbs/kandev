@@ -115,14 +115,19 @@ func testCeilingReplaySuccessorClaim(t *testing.T, changeRoute bool) {
 func TestCeilingPromptRevalidatesAfterDispatchReceipt(t *testing.T) {
 	f := newCeilingDispatchFixture(t)
 	ctx := withCeilingEntryKind(withCeilingEntryBinding(context.Background(), &f.binding), f.deferral.Kind)
+	var afterAdmissionCalled bool
 	_, err := f.svc.promptTask(ctx, f.task.ID, f.route.DestinationID, "old prompt", "", false, nil, false,
 		launchOriginAutomatic, promptTaskOptions{beforeDispatch: func() error {
 			successor := f.route
 			successor.OperationID = "successor-route"
 			return f.svc.persistWorkflowSessionRoute(context.Background(), f.task.ID, successor)
+		}, afterDispatchAdmission: func() error {
+			afterAdmissionCalled = true
+			return nil
 		}})
 	require.ErrorIs(t, err, ErrCeilingLaunchSuperseded)
 	require.Empty(t, f.agent.capturedPrompts)
+	require.False(t, afterAdmissionCalled, "post-admission hooks must not run for a stale claim")
 }
 
 func TestCeilingModelSwitchRevalidatesAfterDispatchReceipt(t *testing.T) {
@@ -135,7 +140,7 @@ func TestCeilingModelSwitchRevalidatesAfterDispatchReceipt(t *testing.T) {
 		successor := f.route
 		successor.OperationID = "successor-route"
 		return f.svc.persistWorkflowSessionRoute(context.Background(), f.task.ID, successor)
-	})
+	}, nil)
 	require.ErrorIs(t, err, ErrCeilingLaunchSuperseded)
 	require.Empty(t, f.agent.capturedPrompts)
 }

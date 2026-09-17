@@ -5605,12 +5605,15 @@ type promptTaskOptions struct {
 	lifecyclePrompt bool
 	afterClaim      func() error
 	afterDispatch   func() error
-	// beforeDispatch is the durable at-most-once boundary for caller-owned
-	// queue receipts. It runs once, immediately before the first provider or
-	// model-switch I/O that can carry the prompt.
-	beforeDispatch        func() error
-	disableDispatchRetry  bool
-	preservePromptContext bool
+	// beforeDispatch runs once before the final dispatch admission boundary.
+	beforeDispatch func() error
+	// afterDispatchAdmission runs once after final dispatch admission succeeds
+	// and before the first provider or model-switch I/O that can carry the
+	// prompt. Queue receipts use this boundary because admission can reject a
+	// stale claim.
+	afterDispatchAdmission func() error
+	disableDispatchRetry   bool
+	preservePromptContext  bool
 	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
 	// dispatch, while delaying the visible turn.started event until acceptance.
 	reserveTurnUntilDispatch  bool
@@ -5811,6 +5814,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		}
 	}
 	runBeforeDispatch := runBeforeDispatchOnce(options.beforeDispatch)
+	runAfterDispatchAdmission := runBeforeDispatchOnce(options.afterDispatchAdmission)
 
 	// Keep the replay payload only after this provider attempt is accepted.
 	// Admission and dispatch failures must not retain prompt attachments until
@@ -5841,6 +5845,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 
 	switchResult, switchHandled, modelSwitchGuard, switchErr := s.resolveModelSwitchAttempt(
 		resumePromptCtx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch, runBeforeDispatch,
+		runAfterDispatchAdmission,
 		resumeAttempt, modelSwitchGuard,
 	)
 	if switchHandled {
@@ -5866,6 +5871,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	return s.runPromptTurn(
 		resumePromptCtx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments, dispatchOnly,
 		effectivePrompt, session, rollback, options, foregroundDispatch, runBeforeDispatch,
+		runAfterDispatchAdmission,
 		releaseDispatchGuard, resumeAttempt,
 	)
 }
@@ -5885,12 +5891,13 @@ func (s *Service) runPromptTurn(
 	options promptTaskOptions,
 	foregroundDispatch *foregroundDispatch,
 	runBeforeDispatch func() error,
+	runAfterDispatchAdmission func() error,
 	releaseDispatchGuard func(),
 	resumeAttempt *resumeAttempt,
 ) (*PromptResult, error) {
 	promptCtx, session, earlyResult, err := s.validateAndRunDispatchBoundary(
 		ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
-		session, rollback, options, foregroundDispatch, runBeforeDispatch, releaseDispatchGuard,
+		session, rollback, options, foregroundDispatch, runBeforeDispatch, runAfterDispatchAdmission, releaseDispatchGuard,
 	)
 	if err != nil || earlyResult != nil {
 		return earlyResult, err
@@ -5997,11 +6004,13 @@ func (s *Service) resolveModelSwitchAttempt(
 	session *models.TaskSession,
 	foregroundDispatch *foregroundDispatch,
 	runBeforeDispatch func() error,
+	runAfterDispatchAdmission func() error,
 	resumeAttempt *resumeAttempt,
 	modelSwitchGuard *lockedCancelInFlightGuard,
 ) (switchResult *PromptResult, handled bool, remainingGuard *lockedCancelInFlightGuard, switchErr error) {
 	result, handledSwitch, attemptErr := s.attemptModelSwitchForPrompt(
 		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch, runBeforeDispatch,
+		runAfterDispatchAdmission,
 	)
 	if !handledSwitch {
 		if modelSwitchGuard != nil {
@@ -6221,8 +6230,8 @@ func (s *Service) finishPromptExecutorDispatch(
 }
 
 // validateAndRunDispatchBoundary resolves promptTask's queued-dispatch
-// identity check and the caller's beforeDispatch hook — the two checks that
-// must both pass immediately before the executor call — rolling back the
+// identity check, pre-admission hook, and post-admission hook — the checks
+// that must all pass immediately before the executor call — rolling back the
 // foreground dispatch and prompt claim on either failure. Only bounded-ack
 // callers preserve request context past this point; ordinary prompts can take
 // minutes, so the executor context is resolved here and threaded back out.
@@ -6230,6 +6239,7 @@ func (s *Service) validateAndRunDispatchBoundary(
 	ctx context.Context, taskID, sessionID, prompt string, planMode, resumedForPrompt bool,
 	attachments []v1.MessageAttachment, session *models.TaskSession, rollback promptClaimRollback,
 	options promptTaskOptions, foregroundDispatch *foregroundDispatch, runBeforeDispatch func() error,
+	runAfterDispatchAdmission func() error,
 	releaseDispatchGuard func(),
 ) (promptCtx context.Context, resolvedSession *models.TaskSession, earlyResult *PromptResult, err error) {
 	promptCtx = options.executorContext(ctx)
@@ -6262,6 +6272,9 @@ func (s *Service) validateAndRunDispatchBoundary(
 	boundaryErr := runBeforeDispatch()
 	if boundaryErr == nil {
 		boundaryErr = s.admitCeilingDispatch(promptCtx, taskID)
+	}
+	if boundaryErr == nil {
+		boundaryErr = runAfterDispatchAdmission()
 	}
 	if boundaryErr != nil {
 		if releaseDispatchGuard != nil {
@@ -6751,8 +6764,9 @@ func (s *Service) promptDispatchCallbackForIdentity(
 }
 
 // attemptModelSwitchForPrompt runs promptTask's pre-dispatch model-switch
-// handling: arming the initial-prompt-attempt evidence and the caller's
-// beforeDispatch hook when a switch is required, then delegating to
+// handling: arming the initial-prompt-attempt evidence, running the caller's
+// pre-admission hook, admitting the dispatch, and running the caller's
+// post-admission hook when a switch is required, then delegating to
 // trySwitchModelForPrompt. handled reports whether the caller already has its
 // full response — a dispatched switch, a switch failure, or a beforeDispatch
 // failure — in which case promptTask returns (result, err) directly without
@@ -6760,12 +6774,16 @@ func (s *Service) promptDispatchCallbackForIdentity(
 func (s *Service) attemptModelSwitchForPrompt(
 	ctx context.Context, taskID, sessionID, model, effectivePrompt string, session *models.TaskSession,
 	foregroundDispatch *foregroundDispatch, runBeforeDispatch func() error,
+	runAfterDispatchAdmission func() error,
 ) (result *PromptResult, handled bool, err error) {
 	if modelSwitchRequired(session, model) {
 		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
 		admissionErr := runBeforeDispatch()
 		if admissionErr == nil {
 			admissionErr = s.admitCeilingDispatch(ctx, taskID)
+		}
+		if admissionErr == nil {
+			admissionErr = runAfterDispatchAdmission()
 		}
 		if admissionErr != nil {
 			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)

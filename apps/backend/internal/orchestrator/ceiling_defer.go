@@ -163,6 +163,8 @@ func (s *Service) deferCeilingRefusal(
 	if surface {
 		s.attemptCeilingSurfaceWrite(ctx, taskID)
 	}
+	// A lost compare means a concurrent writer already moved the record; their
+	// admission path will fire the side effects.
 	if publish {
 		s.publishTaskUpdatedByID(ctx, taskID)
 	}

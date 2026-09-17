@@ -4869,6 +4869,7 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, messageID, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -4888,6 +4889,9 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		metadata:      metadata,
 		requestsInput: requestsInput,
 	})
+	if m.sessionMessageDone != nil {
+		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
+	}
 	return nil
 }
 

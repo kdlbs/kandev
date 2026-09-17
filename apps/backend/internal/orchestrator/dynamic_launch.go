@@ -52,8 +52,10 @@ func (d *dynamicTaskDownstream) Launch(
 	options.AgentProfileID = launch.ExecutionProfileID
 	options.Prompt = launch.Prompt
 	options.PriorACPSession = launch.PriorACPSession
-	if err := d.service.admitCeilingDispatch(ctx, d.task.ID); err != nil {
-		return dynamicruntime.DownstreamExecution{}, err
+	if d.task != nil {
+		if err := d.service.admitCeilingDispatch(ctx, d.task.ID); err != nil {
+			return dynamicruntime.DownstreamExecution{}, err
+		}
 	}
 	d.service.beginDynamicAttempt(d.sessionID)
 	taskID := ""
