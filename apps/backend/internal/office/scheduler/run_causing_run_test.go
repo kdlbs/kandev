@@ -140,6 +140,77 @@ func TestQueueRunCtx_AgentActorWithNoLiveClaimedRunResolvesAsRoot(t *testing.T) 
 	}
 }
 
+// TestQueueRunCtx_AmbiguousMultiClaimActorInheritsDeepestCausationDepth pins
+// the fix for the ambiguous-multi-claim causation-attribution gap: an actor
+// agent holding more than one live claimed run at once (max_concurrent_sessions
+// above 1) must not let the wake resolve as a fresh root cause just because
+// the causing claim can't be identified — that would let an agent already
+// deep in a causation chain launder a self-triggered wake back past the
+// depth ceiling. The wake instead inherits the deepest of the actor's
+// ambiguous claims, so the computed depth is never lower than the true
+// causing claim's depth would have produced, whichever claim it really was.
+func TestQueueRunCtx_AmbiguousMultiClaimActorInheritsDeepestCausationDepth(t *testing.T) {
+	repo := newTestRepoSched(t)
+	ss := buildSchedulerForQueueRun(t, repo)
+	ctx := context.Background()
+
+	actorAgentID := "actor-agent-ambiguous"
+	for _, id := range []string{testAgentID, actorAgentID} {
+		agent := &models.AgentInstance{
+			ID: id, WorkspaceID: testWorkspaceID, Name: id,
+			Role: models.AgentRoleWorker, Status: models.AgentStatusIdle, MaxConcurrentSessions: 2,
+		}
+		if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent %s: %v", id, err)
+		}
+	}
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
+	ss.SetRunsService(runsSvc)
+
+	shallow := &models.Run{
+		ID: "shallow-claim", AgentProfileID: actorAgentID, Reason: "task_assigned",
+		Payload: `{}`, CausationDepth: 1,
+	}
+	if err := repo.RunsRepository().CreateRun(ctx, shallow); err != nil {
+		t.Fatalf("create shallow claim: %v", err)
+	}
+	if _, err := repo.RunsRepository().ClaimRun(ctx, actorAgentID); err != nil {
+		t.Fatalf("claim shallow: %v", err)
+	}
+	deep := &models.Run{
+		ID: "deep-claim", AgentProfileID: actorAgentID, Reason: "task_assigned",
+		Payload: `{}`, CausationDepth: 4,
+	}
+	if err := repo.RunsRepository().CreateRun(ctx, deep); err != nil {
+		t.Fatalf("create deep claim: %v", err)
+	}
+	if _, err := repo.RunsRepository().ClaimRun(ctx, actorAgentID); err != nil {
+		t.Fatalf("claim deep: %v", err)
+	}
+
+	if _, err := ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
+		Reason:    scheduler.RunReasonTaskComment,
+		TaskID:    "task-1",
+		ActorID:   actorAgentID,
+		ActorType: "agent",
+	}); err != nil {
+		t.Fatalf("queue run ctx: %v", err)
+	}
+
+	woken := findRunByAgent(t, repo, testWorkspaceID, testAgentID)
+	if woken.ParentRunID != deep.ID {
+		t.Errorf("parent_run_id = %q, want the deepest ambiguous claim %q", woken.ParentRunID, deep.ID)
+	}
+	if woken.CausationDepth != deep.CausationDepth+1 {
+		t.Errorf("causation_depth = %d, want %d (deepest claim's depth + 1)", woken.CausationDepth, deep.CausationDepth+1)
+	}
+}
+
 // TestQueueRunCtx_CausingRunLookupErrorPropagatesRatherThanSilentlyRooting
 // pins that a genuine repository error resolving the actor's live claimed
 // run (anything other than "no such row") fails the queue attempt instead
@@ -166,8 +237,8 @@ func TestQueueRunCtx_CausingRunLookupErrorPropagatesRatherThanSilentlyRooting(t 
 	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
 	ss.SetRunsService(runsSvc)
 
-	// Drop the runs table so GetClaimedRunForAgent's SELECT fails with a
-	// real error rather than sql.ErrNoRows.
+	// Drop the runs table so GetClaimedRunForCausationAttribution's SELECT
+	// fails with a real error rather than sql.ErrNoRows.
 	if _, err := repo.RunsRepository().Writer().Exec(`DROP TABLE runs`); err != nil {
 		t.Fatalf("drop runs table: %v", err)
 	}

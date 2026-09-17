@@ -167,6 +167,68 @@ func TestGetClaimedRunForAgent_MultipleClaimsResolveAsAmbiguous(t *testing.T) {
 	}
 }
 
+// TestGetClaimedRunForCausationAttribution_ReturnsTheAgentsSoleClaimAcrossTasks
+// pins the sole-claim case, identical to GetClaimedRunForAgent's.
+func TestGetClaimedRunForCausationAttribution_ReturnsTheAgentsSoleClaimAcrossTasks(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	mine := seedTaskRun(t, repo, "mine-claim-other-task", "a1", "t2", "queued")
+	setStatus(t, repo, mine.ID, "claimed", timePtr(base), nil)
+	otherAgent := seedTaskRun(t, repo, "other-agent-claim", "a2", "t1", "queued")
+	setStatus(t, repo, otherAgent.ID, "claimed", timePtr(base.Add(time.Hour)), nil)
+
+	got, err := repo.GetClaimedRunForCausationAttribution(ctx, "a1")
+	if err != nil {
+		t.Fatalf("get claimed run for causation attribution: %v", err)
+	}
+	if got.ID != mine.ID {
+		t.Errorf("claimed run = %q, want %q (a1's sole claim, any task)", got.ID, mine.ID)
+	}
+
+	if _, err := repo.GetClaimedRunForCausationAttribution(ctx, "a-unknown"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown agent err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// TestGetClaimedRunForCausationAttribution_MultipleClaimsResolveToDeepestCausationDepth
+// pins the fix for the ambiguous-multi-claim causation-attribution gap: an
+// agent whose max_concurrent_sessions ceiling is above 1 can hold several
+// claims at once, and GetClaimedRunForAgent's claim-execution fail-closed
+// behavior (resolve to sql.ErrNoRows, same as no claim at all) is wrong
+// reused here, because resolveCausingRunID's caller then treats the wake as
+// a fresh root — silently discarding whatever causation depth every
+// candidate claim actually carried and bypassing the depth ceiling. With no
+// signal for which claim caused this wake, this resolves to the candidate
+// carrying the greatest CausationDepth: whichever claim actually caused it,
+// the computed child depth is never lower than it should be.
+func TestGetClaimedRunForCausationAttribution_MultipleClaimsResolveToDeepestCausationDepth(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	shallow := mustCreateRun(t, repo, &models.Run{
+		ID: "shallow-claim", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t1"}`, CausationDepth: 1,
+	})
+	setStatus(t, repo, shallow.ID, "claimed", timePtr(base), nil)
+	deep := mustCreateRun(t, repo, &models.Run{
+		ID: "deep-claim", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t2"}`, CausationDepth: 4,
+	})
+	// Older claimed_at than shallow: recency must not win over depth.
+	setStatus(t, repo, deep.ID, "claimed", timePtr(base.Add(-time.Hour)), nil)
+
+	got, err := repo.GetClaimedRunForCausationAttribution(ctx, "a1")
+	if err != nil {
+		t.Fatalf("get claimed run for causation attribution: %v", err)
+	}
+	if got.ID != deep.ID {
+		t.Errorf("claimed run = %q, want %q (deepest CausationDepth among ambiguous claims)", got.ID, deep.ID)
+	}
+}
+
 // TestGetClaimedTasklessRunForAgent_OnlyMatchesRunsWithoutATask pins the
 // heartbeat attribution rule: a missing or empty payload task_id counts
 // as taskless, a populated one never does.

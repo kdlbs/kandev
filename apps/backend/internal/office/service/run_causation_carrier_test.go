@@ -99,8 +99,13 @@ func TestCarrierFromTaskMetadata_MalformedDepthRootsTriple(t *testing.T) {
 		"negative":     float64(-1),
 		"fractional":   float64(1.9),
 		"out_of_range": math.MaxFloat64,
-		"nan":          math.NaN(),
-		"inf":          math.Inf(1),
+		// float64(math.MaxInt) rounds up to exactly 2^63, one past the
+		// true math.MaxInt (2^63-1) it is meant to represent: this value
+		// must still be rejected as out of range, not accepted as if it
+		// were math.MaxInt itself.
+		"out_of_range_boundary": float64(math.MaxInt),
+		"nan":                   math.NaN(),
+		"inf":                   math.Inf(1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			metadata := fullCarrierMetadata()

@@ -489,6 +489,41 @@ func (r *Repository) GetClaimedRunForAgent(ctx context.Context, agentProfileID s
 	return &runs[0], nil
 }
 
+// GetClaimedRunForCausationAttribution returns the agent's claimed run to
+// attribute as the cause of a reactivity wake — resolveCausingRunID's sole
+// caller. It shares GetClaimedRunForAgent's agent-scoped, cross-task query
+// but not its ambiguity behavior: GetClaimedRunForAgent fails closed to
+// sql.ErrNoRows on more than one claim, which is correct when the caller
+// then treats "no claim" as "no claim". Here, the caller instead treats a
+// missing claim as "wake resolves as its own root cause" (CausationDepth
+// resets to 0), so failing closed the same way on ambiguity would let a
+// wake from an agent already deep in a causation chain launder itself back
+// to root and bypass the depth ceiling. With no signal for which of the
+// agent's several claims actually caused this wake, this resolves to
+// whichever carries the greatest CausationDepth: whichever claim it really
+// was, the computed child depth is never lower than it should be. Returns
+// sql.ErrNoRows only when the agent holds no claimed run at all.
+func (r *Repository) GetClaimedRunForCausationAttribution(ctx context.Context, agentProfileID string) (*models.Run, error) {
+	var runs []models.Run
+	if err := r.ro.SelectContext(ctx, &runs, r.ro.Rebind(`
+		SELECT * FROM runs
+		WHERE agent_profile_id = ?
+		  AND status = 'claimed'
+	`), agentProfileID); err != nil {
+		return nil, err
+	}
+	if len(runs) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	deepest := runs[0]
+	for _, run := range runs[1:] {
+		if run.CausationDepth > deepest.CausationDepth {
+			deepest = run
+		}
+	}
+	return &deepest, nil
+}
+
 // GetClaimedRunByTaskID returns the claimed run associated with a task payload.
 func (r *Repository) GetClaimedRunByTaskID(ctx context.Context, taskID string) (*models.Run, error) {
 	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")

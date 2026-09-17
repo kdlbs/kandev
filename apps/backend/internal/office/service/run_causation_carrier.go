@@ -220,7 +220,9 @@ func carrierNonNegativeInt(metadata map[string]interface{}, key string) (int, bo
 		carrierInvalid(key, "fractional")
 		return 0, false
 	}
-	if f > float64(math.MaxInt) {
+	// float64 cannot represent math.MaxInt exactly: float64(math.MaxInt)
+	// itself rounds up to 2^63, so the bound must be exclusive.
+	if f >= float64(math.MaxInt) {
 		carrierInvalid(key, "out_of_range")
 		return 0, false
 	}

@@ -396,7 +396,7 @@ func (ss *SchedulerService) resolveCausingRunID(ctx context.Context, actorKind m
 	if actorKind != models.ActorKindAgent || actorID == "" {
 		return "", nil
 	}
-	run, err := ss.repo.RunsRepository().GetClaimedRunForAgent(ctx, actorID)
+	run, err := ss.repo.RunsRepository().GetClaimedRunForCausationAttribution(ctx, actorID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
