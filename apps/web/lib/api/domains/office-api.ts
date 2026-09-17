@@ -16,6 +16,12 @@ import type {
 import type { CLIFlag, AgentRole, AgentStatus } from "@/lib/types/agent-profile";
 import { agentProfileId, workspaceId } from "@/lib/types/ids";
 import { normalizeProject } from "./office-project-normalize";
+import {
+  normalizeRoutineTrigger,
+  normalizeRoutineTriggerList,
+  serializeRoutineTriggerInput,
+  type CreateRoutineTriggerInput,
+} from "./office-routine-normalize";
 
 // Re-export extended API so existing imports continue to work.
 export {
@@ -502,22 +508,31 @@ export function runRoutine(
   });
 }
 
-export function listRoutineTriggers(routineId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ triggers: RoutineTrigger[] }>(
+export async function listRoutineTriggers(
+  routineId: string,
+  options?: ApiRequestOptions,
+): Promise<{ triggers: RoutineTrigger[] }> {
+  const res = await fetchJson<{ triggers: unknown }>(
     `${BASE}/routines/${routineId}/triggers`,
     options,
   );
+  return { triggers: normalizeRoutineTriggerList(res?.triggers) };
 }
 
-export function createRoutineTrigger(
+export async function createRoutineTrigger(
   routineId: string,
-  data: Partial<RoutineTrigger>,
+  data: CreateRoutineTriggerInput,
   options?: ApiRequestOptions,
-) {
-  return fetchJson<{ trigger: RoutineTrigger }>(`${BASE}/routines/${routineId}/triggers`, {
+): Promise<{ trigger: RoutineTrigger | null }> {
+  const res = await fetchJson<{ trigger: unknown }>(`${BASE}/routines/${routineId}/triggers`, {
     ...options,
-    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
+    init: {
+      method: "POST",
+      body: JSON.stringify(serializeRoutineTriggerInput(data)),
+      ...options?.init,
+    },
   });
+  return { trigger: normalizeRoutineTrigger(res?.trigger) };
 }
 
 export function deleteRoutineTrigger(triggerId: string, options?: ApiRequestOptions) {

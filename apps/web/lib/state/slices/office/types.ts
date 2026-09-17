@@ -180,7 +180,9 @@ export type RoutineRunStatus =
 export type RoutineTrigger = {
   id: string;
   routineId: string;
-  kind: RoutineTriggerKind;
+  // RoutineTriggerKind is the set of values consumers compare against, not
+  // this field's type: an unrecognized wire kind is carried through as-is.
+  kind: string;
   cronExpression?: string;
   timezone?: string;
   publicId?: string;

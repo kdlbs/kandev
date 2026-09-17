@@ -24,6 +24,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { CONCURRENCY_POLICY_LABEL_KEYS } from "../lib/label-keys";
 import { isRoutineFiring } from "../lib/routine-status";
+import { selectPrimaryCronTrigger } from "../lib/routine-trigger-selection";
 
 /**
  * A routine's concurrency policy is a wire value; only its label is copy.
@@ -45,23 +46,40 @@ type RoutineRowProps = {
   onClick: (id: string) => void;
 };
 
-// nextFireText returns a human "next fire in <relative>" string for the
-// closest cron trigger, or "" when no cron trigger has a known next
-// fire (manual routines, disabled triggers, fresh-create with no
-// next_run_at yet). Empty string lets the caller skip rendering.
-function nextFireText(t: TFunction, triggers: RoutineTrigger[]): string {
-  const cron = triggers
-    .filter((t) => t.kind === "cron" && t.enabled && t.nextRunAt)
-    .map((t) => new Date(t.nextRunAt as string).getTime())
-    .filter((ms) => !Number.isNaN(ms))
-    .sort((a, b) => a - b);
-  if (cron.length === 0) return "";
-  const ms = cron[0] - Date.now();
+// formatNextFire renders a human "next fire in <relative>" string for a
+// trigger already known (by the caller) to be the primary cron trigger with
+// a resolvable nextRunAt.
+function formatNextFire(t: TFunction, nextRunAt: string): string {
+  const ms = new Date(nextRunAt).getTime() - Date.now();
   if (ms <= 0) return t("office:firesNow");
   if (ms < 60_000) return "<1m";
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
   if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h`;
   return `${Math.round(ms / 86_400_000)}d`;
+}
+
+// The API may return snake_case fields (assignee_agent_profile_id,
+// concurrency_policy) before any mapping layer converts them, so both
+// camelCase and snake_case lookups are needed. Pulled out of RoutineRow to
+// keep that component's own branching under the complexity ceiling.
+function deriveRoutineRowFields(
+  routine: Routine,
+  agents: AgentProfile[],
+  triggers: RoutineTrigger[],
+  t: TFunction,
+) {
+  const routineRaw = routine as unknown as Record<string, unknown>;
+  const assigneeId =
+    routine.assigneeAgentProfileId ?? (routineRaw.assignee_agent_profile_id as string | undefined);
+  const concurrencyPolicy =
+    routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
+  const assignee = agents.find((a) => a.id === assigneeId);
+  const isActive = isRoutineFiring(routine.status);
+  const template = routine.taskTemplate as { title?: string; description?: string } | undefined;
+  const { trigger: cronTrigger, isPrimary } = selectPrimaryCronTrigger(triggers);
+  const nextFire =
+    isActive && isPrimary && cronTrigger?.nextRunAt ? formatNextFire(t, cronTrigger.nextRunAt) : "";
+  return { assignee, concurrencyPolicy, isActive, template, cronTrigger, nextFire };
 }
 
 export function RoutineRow({
@@ -75,18 +93,8 @@ export function RoutineRow({
   onClick,
 }: RoutineRowProps) {
   const { t } = useTranslation();
-  // The API may return snake_case fields (assignee_agent_profile_id, concurrency_policy)
-  // before any mapping layer converts them. Use both camelCase and snake_case lookups.
-  const routineRaw = routine as unknown as Record<string, unknown>;
-  const assigneeId =
-    routine.assigneeAgentProfileId ?? (routineRaw.assignee_agent_profile_id as string | undefined);
-  const concurrencyPolicy =
-    routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
-  const assignee = agents.find((a) => a.id === assigneeId);
-  const isActive = isRoutineFiring(routine.status);
-  const template = routine.taskTemplate as { title?: string; description?: string } | undefined;
-  const cronTrigger = triggers.find((t) => t.kind === "cron");
-  const nextFire = isActive ? nextFireText(t, triggers) : "";
+  const { assignee, concurrencyPolicy, isActive, template, cronTrigger, nextFire } =
+    deriveRoutineRowFields(routine, agents, triggers, t);
 
   return (
     <div>

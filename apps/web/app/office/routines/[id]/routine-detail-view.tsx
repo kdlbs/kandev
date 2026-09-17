@@ -17,13 +17,20 @@ import {
   runRoutine,
   createRoutineTrigger,
   deleteRoutineTrigger,
+  listRoutineTriggers,
 } from "@/lib/api/domains/office-api";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
 import { useOfficeTopbar } from "../../components/office-topbar-context";
 import { isRoutineFiring } from "../../lib/routine-status";
 import { routineNotFiringMessage } from "../../lib/routine-not-firing";
+import { selectPrimaryCronTrigger } from "../../lib/routine-trigger-selection";
 import { useTranslation } from "react-i18next";
+
+// The timezone control is free text with "UTC" as its placeholder, not a
+// value, so a cleared box drafts "". This is the one default both the draft
+// seed (AC-003.7) and trigger sync's comparison (AC-004.12) resolve to.
+const DEFAULT_TIMEZONE = "UTC";
 
 // Lift the form state out of the component so the file stays under the
 // 100-line per-function ceiling and the helpers can render typed slices
@@ -49,8 +56,12 @@ function pickTriggerKind(triggers: RoutineTrigger[]): "cron" | "webhook" {
   return "cron";
 }
 
+// Seeds the editable cron/timezone fields from the same trigger AC-003.5
+// resolves (the REQ-003 primary, else its fallback), not by array position:
+// these values are one operand of AC-004.4's comparison against trigger
+// sync's target, which the selector also resolves.
 function buildDraft(routine: Routine, triggers: RoutineTrigger[]): DraftState {
-  const cron = triggers.find((t) => t.kind === "cron");
+  const { trigger: cron } = selectPrimaryCronTrigger(triggers);
   const triggerKind = pickTriggerKind(triggers);
   return {
     name: routine.name,
@@ -62,7 +73,7 @@ function buildDraft(routine: Routine, triggers: RoutineTrigger[]): DraftState {
     catchUpMax: routine.catchUpMax ?? 25,
     triggerKind,
     cronExpression: cron?.cronExpression ?? "",
-    timezone: cron?.timezone ?? "UTC",
+    timezone: cron?.timezone ?? DEFAULT_TIMEZONE,
   };
 }
 
@@ -84,8 +95,8 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
     [],
   );
 
-  const cronTrigger = triggers.find((t) => t.kind === "cron");
-  const lastFired = cronTrigger?.lastFiredAt ?? null;
+  const { trigger: cronSelection, isPrimary } = selectPrimaryCronTrigger(triggers);
+  const lastFired = cronSelection?.lastFiredAt ?? null;
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -99,16 +110,20 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
         catchUpPolicy: draft.catchUpPolicy,
         catchUpMax: draft.catchUpMax,
       } as Record<string, unknown>);
-      const nextTriggers = await syncCronTrigger(routine.id, draft, triggers);
-      setTriggers(nextTriggers);
-      toast.success(t("office:routineSaved"));
-      router.refresh();
+      const outcome = await syncCronTrigger(routine.id, draft, triggers);
+      setTriggers(outcome.triggers);
+      if (outcome.errorKey) {
+        toast.error(t(outcome.errorKey));
+      } else {
+        toast.success(t("office:routineSaved"));
+        router.refresh();
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("office:failedToSaveRoutine"));
     } finally {
       setSaving(false);
     }
-  }, [routine.id, draft, triggers, router]);
+  }, [routine.id, draft, triggers, router, t]);
 
   const handleRunNow = useCallback(async () => {
     try {
@@ -143,7 +158,9 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
       <DetailTriggerCard draft={draft} update={update} />
       <DetailReadOnlyCard
         lastFiredAt={lastFired}
-        nextRunAt={isRoutineFiring(draft.status) ? (cronTrigger?.nextRunAt ?? null) : null}
+        nextRunAt={
+          isRoutineFiring(draft.status) && isPrimary ? (cronSelection?.nextRunAt ?? null) : null
+        }
       />
     </div>
   );
@@ -405,41 +422,81 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// syncCronTrigger reconciles the routine's cron trigger with the
-// draft's expression / timezone / kind. Two paths:
-//   - Draft.kind === "cron" with a non-empty expression → ensure a
-//     matching trigger exists (delete the old one + create a new one
-//     when the expression changes; the trigger model has no PATCH
-//     endpoint today and the cron-expression is the schedule's
-//     identity, so a delete + create is the simplest path).
-//   - Draft.kind === "webhook" or empty cron → leave triggers alone for
-//     now. A future iteration can add explicit webhook config.
+type SyncOutcome = {
+  triggers: RoutineTrigger[];
+  errorKey?: string;
+};
+
+// syncCronTrigger reconciles the routine's cron trigger with the draft's
+// expression / timezone / kind against the REQ-003 primary selection (the
+// same trigger buildDraft seeded from), so this call's target always agrees
+// with what the page displayed. Draft.kind === "webhook" or an empty
+// expression leaves triggers alone. The trigger model has no PATCH endpoint,
+// so a changed expression is a delete-then-create; a delete that succeeds
+// but whose create then fails must not silently keep the old schedule, so
+// callers get back which cron trigger (if any) survived plus an optional
+// localized error key instead of a thrown generic failure.
 async function syncCronTrigger(
   routineId: string,
   draft: DraftState,
   triggers: RoutineTrigger[],
-): Promise<RoutineTrigger[]> {
+): Promise<SyncOutcome> {
   if (draft.triggerKind !== "cron" || !draft.cronExpression.trim()) {
-    return triggers;
+    return { triggers };
   }
-  const existing = triggers.find((t) => t.kind === "cron");
-  if (
-    existing &&
-    existing.cronExpression === draft.cronExpression &&
-    (existing.timezone ?? "UTC") === draft.timezone
-  ) {
-    return triggers;
+  const resolvedTimezone = draft.timezone === "" ? DEFAULT_TIMEZONE : draft.timezone;
+  const { trigger: target } = selectPrimaryCronTrigger(triggers);
+
+  if (!target) {
+    const created = await createRoutineTrigger(routineId, {
+      kind: "cron",
+      cronExpression: draft.cronExpression,
+      timezone: resolvedTimezone,
+    });
+    if (created.trigger) return { triggers: [...triggers, created.trigger] };
+    return refetchTriggersAfterUnusableCreate(routineId, triggers);
   }
-  if (existing) {
-    await deleteRoutineTrigger(existing.id);
+
+  if (target.cronExpression === draft.cronExpression && target.timezone === resolvedTimezone) {
+    return { triggers };
   }
-  const res = await createRoutineTrigger(routineId, {
-    kind: "cron",
-    cronExpression: draft.cronExpression,
-    timezone: draft.timezone,
-  });
-  const created = (res as unknown as { trigger?: RoutineTrigger }).trigger ?? null;
-  const next = triggers.filter((t) => t.id !== existing?.id);
-  if (created) next.push(created);
-  return next;
+
+  await deleteRoutineTrigger(target.id);
+  const remaining = triggers.filter((t) => t.id !== target.id);
+  let created: { trigger: RoutineTrigger | null };
+  try {
+    created = await createRoutineTrigger(routineId, {
+      kind: "cron",
+      cronExpression: draft.cronExpression,
+      timezone: resolvedTimezone,
+    });
+  } catch {
+    const hasOtherCron = remaining.some((t) => t.kind === "cron");
+    return {
+      triggers: remaining,
+      errorKey: hasOtherCron
+        ? "office:triggerSyncFailedKeptPrevious"
+        : "office:triggerSyncFailedNoSchedule",
+    };
+  }
+  if (created.trigger) return { triggers: [...remaining, created.trigger] };
+  return refetchTriggersAfterUnusableCreate(routineId, remaining);
+}
+
+// A create call that returns a null trigger (the API layer's signal for an
+// unusable/empty response body) leaves the true post-delete state unknown,
+// so re-read it from the server rather than guessing the delete "won".
+async function refetchTriggersAfterUnusableCreate(
+  routineId: string,
+  fallbackTriggers: RoutineTrigger[],
+): Promise<SyncOutcome> {
+  try {
+    const { triggers: refetched } = await listRoutineTriggers(routineId);
+    if (refetched.some((t) => t.kind === "cron")) {
+      return { triggers: refetched };
+    }
+    return { triggers: fallbackTriggers, errorKey: "office:triggerSyncReadBackFailed" };
+  } catch {
+    return { triggers: fallbackTriggers, errorKey: "office:triggerSyncReadBackFailed" };
+  }
 }

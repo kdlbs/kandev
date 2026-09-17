@@ -1,13 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
+import {
+  OfficeTopbarChromeProvider,
+  useOfficeTopbarChrome,
+} from "../../components/office-topbar-context";
 import { RoutineDetailView } from "./routine-detail-view";
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
 }));
+
+const updateRoutineMock = vi.fn().mockResolvedValue({});
+const runRoutineMock = vi.fn().mockResolvedValue({});
+const createRoutineTriggerMock =
+  vi.fn<(routineId: string, data: unknown) => Promise<{ trigger: RoutineTrigger | null }>>();
+const deleteRoutineTriggerMock = vi.fn<(triggerId: string) => Promise<void>>();
+const listRoutineTriggersMock =
+  vi.fn<(routineId: string) => Promise<{ triggers: RoutineTrigger[] }>>();
 
 vi.mock("@/lib/api/domains/office-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/office-api")>(
@@ -15,10 +27,22 @@ vi.mock("@/lib/api/domains/office-api", async () => {
   );
   return {
     ...actual,
-    updateRoutine: vi.fn().mockResolvedValue({}),
-    runRoutine: vi.fn().mockResolvedValue({}),
+    updateRoutine: (...args: [string, unknown]) => updateRoutineMock(...args),
+    runRoutine: (...args: [string]) => runRoutineMock(...args),
+    createRoutineTrigger: (...args: [string, unknown]) => createRoutineTriggerMock(...args),
+    deleteRoutineTrigger: (...args: [string]) => deleteRoutineTriggerMock(...args),
+    listRoutineTriggers: (...args: [string]) => listRoutineTriggersMock(...args),
   };
 });
+
+const toastError = vi.fn();
+const toastSuccess = vi.fn();
+vi.mock("@/lib/toast/sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}));
 
 afterEach(() => {
   cleanup();
@@ -39,11 +63,14 @@ const baseRoutine: Routine = {
   updatedAt: TIMESTAMP,
 };
 
+const DEFAULT_CRON_EXPRESSION = "*/5 * * * *";
+const CHANGED_CRON_EXPRESSION = "0 9 * * *";
+
 const cronTrigger: RoutineTrigger = {
   id: "trigger-1",
   routineId: "routine-1",
   kind: "cron",
-  cronExpression: "*/5 * * * *",
+  cronExpression: DEFAULT_CRON_EXPRESSION,
   timezone: "UTC",
   nextRunAt: "2026-05-05T00:00:00Z",
   enabled: true,
@@ -53,6 +80,11 @@ const cronTrigger: RoutineTrigger = {
 
 const NO_TRIGGERS: RoutineTrigger[] = [];
 
+function TopbarActions() {
+  const chrome = useOfficeTopbarChrome();
+  return <>{chrome?.actions}</>;
+}
+
 function renderDetailView(routine: Routine, triggers: RoutineTrigger[]) {
   return render(
     <StateProvider
@@ -61,9 +93,24 @@ function renderDetailView(routine: Routine, triggers: RoutineTrigger[]) {
         office: { ...defaultOfficeState.office },
       }}
     >
-      <RoutineDetailView initialRoutine={routine} initialTriggers={triggers} />
+      <OfficeTopbarChromeProvider>
+        <RoutineDetailView initialRoutine={routine} initialTriggers={triggers} />
+        <TopbarActions />
+      </OfficeTopbarChromeProvider>
     </StateProvider>,
   );
+}
+
+function clickSave() {
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+}
+
+function setCronExpression(value: string) {
+  fireEvent.change(screen.getByPlaceholderText(DEFAULT_CRON_EXPRESSION), { target: { value } });
+}
+
+function setTimezone(value: string) {
+  fireEvent.change(screen.getByPlaceholderText("UTC"), { target: { value } });
 }
 
 describe("RoutineDetailView next-fire display", () => {
@@ -141,5 +188,190 @@ describe("RoutineDetailView catch-up policy labeling (AC-003.6)", () => {
       name: /summarize missed/i,
     });
     expect(option.textContent).toMatch(/once|single/i);
+  });
+});
+
+describe("RoutineDetailView editable field seeding (AC-003.5, AC-003.7)", () => {
+  it("seeds the editable cron expression and timezone from the primary trigger, not array position", () => {
+    const other = { ...cronTrigger, id: "b", nextRunAt: undefined, enabled: false };
+    const primary = {
+      ...cronTrigger,
+      id: "a",
+      cronExpression: CHANGED_CRON_EXPRESSION,
+      timezone: "America/New_York",
+    };
+    // Primary is listed second: seeding must not pick by array position.
+    renderDetailView(baseRoutine, [other, primary]);
+    expect(screen.getByDisplayValue(CHANGED_CRON_EXPRESSION)).toBeTruthy();
+    expect(screen.getByDisplayValue("America/New_York")).toBeTruthy();
+  });
+
+  it("seeds an empty cron expression and the default timezone when there is no cron trigger", () => {
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+    expect((screen.getByPlaceholderText(DEFAULT_CRON_EXPRESSION) as HTMLInputElement).value).toBe(
+      "",
+    );
+    expect(screen.getByDisplayValue("UTC")).toBeTruthy();
+  });
+});
+
+describe("RoutineDetailView trigger sync (REQ-004)", () => {
+  it("issues neither delete nor create when the draft matches the sync target (AC-004.4)", async () => {
+    renderDetailView(baseRoutine, [cronTrigger]);
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).not.toHaveBeenCalled();
+    expect(createRoutineTriggerMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes then creates when the drafted expression changes, replacing the trigger (AC-004.3)", async () => {
+    createRoutineTriggerMock.mockResolvedValue({
+      trigger: { ...cronTrigger, id: "trigger-2", cronExpression: CHANGED_CRON_EXPRESSION },
+    });
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).toHaveBeenCalledWith("trigger-1");
+    expect(createRoutineTriggerMock).toHaveBeenCalledWith(
+      "routine-1",
+      expect.objectContaining({
+        kind: "cron",
+        cronExpression: CHANGED_CRON_EXPRESSION,
+        timezone: "UTC",
+      }),
+    );
+  });
+
+  it("reports the no-schedule error and drops the deleted trigger when create fails and no cron trigger remains (AC-004.1, AC-004.2)", async () => {
+    deleteRoutineTriggerMock.mockResolvedValue(undefined);
+    createRoutineTriggerMock.mockRejectedValue(new Error("boom"));
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).toHaveBeenCalledWith("trigger-1");
+    expect(toastError).toHaveBeenCalledWith(
+      "Schedule not saved. This routine now has no cron schedule",
+    );
+  });
+
+  it("reports the kept-previous error when create fails but another cron trigger remains (AC-004.2, AC-004.7)", async () => {
+    const other: RoutineTrigger = { ...cronTrigger, id: "trigger-9" };
+    deleteRoutineTriggerMock.mockResolvedValue(undefined);
+    createRoutineTriggerMock.mockRejectedValue(new Error("boom"));
+    renderDetailView(baseRoutine, [cronTrigger, other]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError).toHaveBeenCalledWith(
+      "New schedule not saved. The routine is still on its previous schedule",
+    );
+  });
+
+  it("does not call create and reports the generic save failure when the delete itself fails (AC-004.5)", async () => {
+    deleteRoutineTriggerMock.mockRejectedValue(new Error("delete boom"));
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(createRoutineTriggerMock).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("delete boom");
+  });
+});
+
+describe("RoutineDetailView trigger sync: unusable create and refetch (AC-004.6, AC-004.9)", () => {
+  it("refetches and uses the refetched cron trigger when create succeeds but returns no usable trigger (AC-004.6)", async () => {
+    deleteRoutineTriggerMock.mockResolvedValue(undefined);
+    createRoutineTriggerMock.mockResolvedValue({ trigger: null });
+    listRoutineTriggersMock.mockResolvedValue({
+      triggers: [{ ...cronTrigger, id: "trigger-3", cronExpression: CHANGED_CRON_EXPRESSION }],
+    });
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(listRoutineTriggersMock).toHaveBeenCalledWith("routine-1");
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("treats an empty refetch as a failed read-back rather than an authoritative empty result (AC-004.6, AC-004.9)", async () => {
+    deleteRoutineTriggerMock.mockResolvedValue(undefined);
+    createRoutineTriggerMock.mockResolvedValue({ trigger: null });
+    listRoutineTriggersMock.mockResolvedValue({ triggers: [] });
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError).toHaveBeenCalledWith(
+      "The routine's schedule could not be read back. Reload the page to see its current schedule",
+    );
+  });
+
+  it("reports a read-back failure when the AC-004.6 refetch itself fails (AC-004.9)", async () => {
+    deleteRoutineTriggerMock.mockResolvedValue(undefined);
+    createRoutineTriggerMock.mockResolvedValue({ trigger: null });
+    listRoutineTriggersMock.mockRejectedValue(new Error("network down"));
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError).toHaveBeenCalledWith(
+      "The routine's schedule could not be read back. Reload the page to see its current schedule",
+    );
+  });
+});
+
+describe("RoutineDetailView trigger sync: no target, trimming, timezone (AC-004.10-004.12)", () => {
+  it("creates directly with no delete when the routine has no cron trigger yet (AC-004.10)", async () => {
+    createRoutineTriggerMock.mockResolvedValue({ trigger: cronTrigger });
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+    setCronExpression(DEFAULT_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).not.toHaveBeenCalled();
+    expect(createRoutineTriggerMock).toHaveBeenCalledWith(
+      "routine-1",
+      expect.objectContaining({ kind: "cron", cronExpression: DEFAULT_CRON_EXPRESSION }),
+    );
+  });
+
+  it("reports the generic save failure, not an AC-004.2 message, when arming the first schedule fails (AC-004.10)", async () => {
+    createRoutineTriggerMock.mockRejectedValue(new Error("create boom"));
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+    setCronExpression(DEFAULT_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError).toHaveBeenCalledWith("create boom");
+  });
+
+  it("does not sync when the drafted expression is only whitespace (AC-004.11)", async () => {
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression("   ");
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).not.toHaveBeenCalled();
+    expect(createRoutineTriggerMock).not.toHaveBeenCalled();
+  });
+
+  it("serializes the drafted expression untrimmed once trimming has allowed sync to run (AC-004.11)", async () => {
+    createRoutineTriggerMock.mockResolvedValue({ trigger: cronTrigger });
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression("  0 9 * * *  ");
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(createRoutineTriggerMock).toHaveBeenCalledWith(
+      "routine-1",
+      expect.objectContaining({ cronExpression: "  0 9 * * *  " }),
+    );
+  });
+
+  it("resolves an empty drafted timezone to the AC-003.7 default before comparing, avoiding a spurious delete+create (AC-004.12)", async () => {
+    renderDetailView(baseRoutine, [{ ...cronTrigger, timezone: "UTC" }]);
+    setTimezone("");
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).not.toHaveBeenCalled();
+    expect(createRoutineTriggerMock).not.toHaveBeenCalled();
   });
 });

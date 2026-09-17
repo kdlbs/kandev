@@ -78,6 +78,7 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
   const handleCreate = useCallback(
     async (data: RoutineFormData, onDone: () => void) => {
       if (!workspaceId) return;
+      let routineId: string | undefined;
       try {
         const template = JSON.stringify({
           title: data.taskTitle,
@@ -92,23 +93,34 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
           catchUpPolicy: data.catchUpPolicy,
           catchUpMax: data.catchUpMax,
         } as Record<string, unknown>);
-        if (data.triggerKind === "cron" && data.cronExpression && res) {
-          const routineObj = res as unknown as { routine?: { id: string } };
-          const routineId = routineObj.routine?.id ?? (res as unknown as { id: string }).id;
-          if (routineId) {
-            await createRoutineTrigger(routineId, {
-              kind: data.triggerKind as "cron",
-              cronExpression: data.cronExpression,
-              timezone: data.timezone,
-            });
-          }
-        }
-        onDone();
-        await fetchRoutines();
-        toast.success(t("office:routineCreated"));
+        const routineObj = res as unknown as { routine?: { id: string } };
+        routineId = routineObj.routine?.id ?? (res as unknown as { id: string }).id;
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("office:failedToCreateRoutine"));
+        return;
       }
+
+      // The routine already exists at this point: a failed trigger create must
+      // not be reported as a failed routine create, and must not be retried by
+      // creating a second routine (AC-002.8).
+      if (data.triggerKind === "cron" && data.cronExpression && routineId) {
+        try {
+          await createRoutineTrigger(routineId, {
+            kind: data.triggerKind as "cron",
+            cronExpression: data.cronExpression,
+            timezone: data.timezone,
+          });
+        } catch {
+          onDone();
+          await fetchRoutines();
+          toast.error(t("office:routineCreatedNoSchedule"));
+          return;
+        }
+      }
+
+      onDone();
+      await fetchRoutines();
+      toast.success(t("office:routineCreated"));
     },
     [workspaceId, fetchRoutines],
   );
