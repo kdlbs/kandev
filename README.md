@@ -1,5 +1,8 @@
 # Kandev
 
+> Private orchestration workbench based on v0.94.0. Start with the
+> [review guide and complete remaining-work plan](WORKBENCH.md).
+
 Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value.
 
 [Features](docs/features.md) | [Workflows](docs/workflow-tips.md) | [Run as a Service](docs/run-as-a-service.md) | [Mobile Access](docs/public/mobile-remote-access.md) | [Debug Logs](docs/debug-logs.md) | [Roadmap](docs/roadmap.md) | [Contributing](CONTRIBUTING.md) | [Architecture](docs/ARCHITECTURE.md) | [Discord](https://discord.gg/gWdCPGcFCD)

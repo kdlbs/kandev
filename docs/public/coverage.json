@@ -711,7 +711,8 @@
         "coordination",
         "feature-status",
         "office-provider-routing",
-        "office-config-sync"
+        "office-config-sync",
+        "orchestration-personas"
       ],
       "sources": [
         "apps/backend/internal/office/routes.go",
@@ -861,6 +862,27 @@
       "tests": [
         "scripts/lint-harness-files.test.py",
         ".github/scripts/lint-action-pinning_test.py"
+      ]
+    },
+    {
+      "id": "workspace-orchestration",
+      "audiences": ["user", "operator"],
+      "stability": "experimental",
+      "docs": ["orchestration-personas", "feature-status", "personal-assistant-api"],
+      "sources": [
+        "apps/backend/internal/orchestration/handler.go",
+        "apps/backend/internal/orchestration/runtime/handler.go",
+        "apps/backend/internal/orchestration/runtime/context.go",
+        "apps/backend/internal/backendapp/orchestration.go",
+        "apps/web/app/settings/orchestration/orchestrator-editor.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/orchestration/handler_test.go",
+        "apps/backend/internal/orchestration/runtime/context_dispatch_test.go",
+        "apps/backend/internal/orchestration/runtime/assistant_privacy_test.go",
+        "apps/backend/internal/backendapp/orchestration_test.go",
+        "apps/backend/internal/office/service/workspace_task_events_test.go",
+        "apps/web/e2e/tests/orchestration/workspace-orchestrators.spec.ts"
       ]
     }
   ],

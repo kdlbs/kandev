@@ -14,6 +14,7 @@ This catalog is the entry point for the system-oriented specification layout. Ea
 | Executors    | [README](executors/README.md)    | complete    | 3 requirements, 6 designs    |
 | Integrations | [README](integrations/README.md) | complete    | 18 requirements, 21 designs  |
 | Office       | [README](office/README.md)       | complete    | 19 requirements, 38 designs  |
+| Orchestration | [README](orchestration/README.md) | in_progress | 2 requirement documents, 2 designs |
 | Platform     | [README](platform/README.md)     | complete    | 30 requirements, 10 designs  |
 | Plugins      | [README](plugins/README.md)      | complete    | 7 requirements, 9 designs    |
 | Release      | [README](release/README.md)      | complete    | 5 requirements, 0 designs    |

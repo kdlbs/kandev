@@ -1,0 +1,24 @@
+{
+  "audited_at": "2026-09-17",
+  "feature_commit": "b1cd0d2ea03336ce882d782f0f1ea61975db520c",
+  "base_commit": "bf819a0228e742d069c528293d848c985a4d1bd1",
+  "files": 476,
+  "insertions": 19777,
+  "deletions": 1743,
+  "categories": {
+    "B1 Orchestration runtime and assistant extensions": 83,
+    "B2 Office compatibility and earlier coordinator integration": 73,
+    "B3 Composition, task adapters, ownership and context": 24,
+    "B4 Automation destination and export guard": 8,
+    "B5 Shared run ownership and dispatch": 14,
+    "B6 Core task execution and message queue context": 24,
+    "B7 Database portability and conformance": 7,
+    "B8 CLI, auth, lifecycle, flags and other core seams": 50,
+    "D1 Specifications, plans, ADRs and public docs": 37,
+    "W1 Browser fixtures and scenarios": 7,
+    "W2 Shared chat, identity and session rendering": 50,
+    "W3 Coordinator, Office, automation and navigation UI": 99
+  },
+  "inventory": "scope-file-inventory.csv",
+  "scope": "committed prototype only; audit and new design documents excluded"
+}

@@ -883,3 +883,8 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 - **External client cannot stream:** verify the base backend URL and configure the reverse proxy for both the selected MCP transport and long-lived requests.
 
 Related: [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), [Agents and profiles](agents-and-profiles.md), and [Integrations](integrations.md).
+
+
+### Orchestrator destinations
+
+With experimental workspace Orchestration enabled, **Run with** can select an existing workspace orchestrator. A schedule or **Run now** delivers the automation prompt to its chat using that assignment's configured account, executor, role and workspace context. This destination does not create a separate automation task. History records delivery separately from review completion and links to chat for the result. Configure roles and workspace assignments in Orchestration settings first. See [Workspace orchestration](./orchestration-personas.md#scheduled-orchestrator-prompts).
