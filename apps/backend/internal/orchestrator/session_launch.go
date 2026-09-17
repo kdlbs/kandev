@@ -102,14 +102,15 @@ type SpawnOrigin struct {
 
 // LaunchSessionResponse is the unified response for session.launch.
 type LaunchSessionResponse struct {
-	Success          bool    `json:"success"`
-	TaskID           string  `json:"task_id"`
-	SessionID        string  `json:"session_id,omitempty"`
-	AgentExecutionID string  `json:"agent_execution_id,omitempty"`
-	AgentProfileID   string  `json:"agent_profile_id,omitempty"`
-	State            string  `json:"state"`
-	WorktreePath     *string `json:"worktree_path,omitempty"`
-	WorktreeBranch   *string `json:"worktree_branch,omitempty"`
+	Success                   bool                              `json:"success"`
+	TaskID                    string                            `json:"task_id"`
+	SessionID                 string                            `json:"session_id,omitempty"`
+	AgentExecutionID          string                            `json:"agent_execution_id,omitempty"`
+	AgentProfileID            string                            `json:"agent_profile_id,omitempty"`
+	State                     string                            `json:"state"`
+	WorktreePath              *string                           `json:"worktree_path,omitempty"`
+	WorktreeBranch            *string                           `json:"worktree_branch,omitempty"`
+	ExactProfileLaunchReceipt *models.ExactProfileLaunchReceipt `json:"exact_profile_launch_receipt,omitempty"`
 }
 
 // ResolveIntent infers the session intent from request fields when Intent is empty.
@@ -335,7 +336,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 			TaskID:  req.TaskID,
 		}, nil
 	}
-	return executionToLaunchResponse(req.TaskID, execution), nil
+	return s.withExactProfileLaunchReceipt(ctx, executionToLaunchResponse(req.TaskID, execution)), nil
 }
 
 // shouldBlockAutoStart checks whether the task's workflow step allows auto-starting
@@ -377,7 +378,32 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	if err != nil {
 		return nil, err
 	}
-	return executionToLaunchResponse(req.TaskID, execution), nil
+	return s.withExactProfileLaunchReceipt(ctx, executionToLaunchResponse(req.TaskID, execution)), nil
+}
+
+func (s *Service) withExactProfileLaunchReceipt(
+	ctx context.Context,
+	response *LaunchSessionResponse,
+) *LaunchSessionResponse {
+	if response == nil || response.SessionID == "" {
+		return response
+	}
+	receipts, ok := s.repo.(interface {
+		GetExactProfileLaunchReceipt(context.Context, string, string) (*models.ExactProfileLaunchReceipt, error)
+	})
+	if !ok {
+		return response
+	}
+	receipt, err := receipts.GetExactProfileLaunchReceipt(ctx, response.TaskID, response.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load exact-profile launch receipt",
+			zap.String("task_id", response.TaskID),
+			zap.String("session_id", response.SessionID),
+			zap.Error(err))
+		return response
+	}
+	response.ExactProfileLaunchReceipt = receipt
+	return response
 }
 
 // launchResume resumes a stopped session.
@@ -390,7 +416,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 	if err != nil {
 		return nil, err
 	}
-	return executionToLaunchResponse(req.TaskID, execution), nil
+	return s.withExactProfileLaunchReceipt(ctx, executionToLaunchResponse(req.TaskID, execution)), nil
 }
 
 // launchWorkflowStep starts a session with workflow step prompt configuration.

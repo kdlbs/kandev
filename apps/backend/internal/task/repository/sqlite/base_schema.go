@@ -531,6 +531,43 @@ func (r *Repository) initTaskSchema() error {
 		updated_at TIMESTAMP NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS task_exact_profile_assignments (
+		task_id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL,
+		profile_revision TIMESTAMP NOT NULL,
+		generation BIGINT NOT NULL,
+		source_workflow_id TEXT NOT NULL DEFAULT '',
+		source_workflow_step_id TEXT NOT NULL DEFAULT '',
+		source_task_state TEXT NOT NULL DEFAULT '',
+		active INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_exact_profile_assignments_active
+		ON task_exact_profile_assignments(task_id, active);
+
+	CREATE TABLE IF NOT EXISTS task_exact_profile_launch_receipts (
+		task_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL,
+		generation BIGINT NOT NULL,
+		profile_revision_nanos BIGINT NOT NULL,
+		model TEXT NOT NULL DEFAULT '',
+		outcome TEXT NOT NULL,
+		failure_reason TEXT NOT NULL DEFAULT '',
+		inference_started INTEGER NOT NULL DEFAULT 0,
+		substitution_done INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (task_id, session_id),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_exact_profile_receipts_generation
+		ON task_exact_profile_launch_receipts(task_id, generation);
+
 	CREATE TABLE IF NOT EXISTS repositories (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,

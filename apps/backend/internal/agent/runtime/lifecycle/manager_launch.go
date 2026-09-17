@@ -598,6 +598,9 @@ func (m *Manager) buildAgentCommandWithContext(
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
 	}
+	if req.ExactProfile && req.ExactProfileModel != "" {
+		model = req.ExactProfileModel
+	}
 	cliFlagTokens, commandPrefixTokens, err := m.resolveProfileLaunchTokens(profileInfo)
 	if err != nil {
 		return agentCommands{}, err
@@ -1050,6 +1053,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
 		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
+		ExactProfile:                   reqWithWorktree.ExactProfile,
+		ExactProfileModel:              reqWithWorktree.ExactProfileModel,
+		ExactProfileRevision:           reqWithWorktree.ExactProfileRevision,
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,

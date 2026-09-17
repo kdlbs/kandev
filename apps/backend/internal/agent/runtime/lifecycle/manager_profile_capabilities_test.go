@@ -109,6 +109,16 @@ func TestResolveProfileSessionConfigAndPolicyReadsProfileOnce(t *testing.T) {
 		"session start needs config and policy together; a second read would be a wasted DB hit")
 }
 
+func TestExactProfileStartModelPolicyDisablesSubstitution(t *testing.T) {
+	policy := exactProfileStartModelPolicy(StartModelPolicy{
+		Model: "claude-opus-5", FallbackModel: "claude-sonnet-5", AutoFallback: true,
+	}, true)
+	require.Equal(t, "claude-opus-5", policy.Model)
+	require.Empty(t, policy.FallbackModel)
+	require.False(t, policy.AutoFallback)
+	require.True(t, policy.RequireExactModel)
+}
+
 func TestResolveProfileSessionConfigAndPolicyDegradesGracefully(t *testing.T) {
 	ctx := context.Background()
 

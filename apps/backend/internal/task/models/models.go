@@ -1845,6 +1845,13 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+
+	// ExactProfileGeneration / ExactProfileRevision bind this session to the
+	// task-owned exact assignment that created it. Zero marks a session that
+	// was created before, or outside, an exact assignment; such a session is
+	// never reusable for an exact launch.
+	ExactProfileGeneration int64 `json:"exact_profile_generation,omitempty"`
+	ExactProfileRevision   int64 `json:"exact_profile_revision,omitempty"`
 }
 
 // ToAPI converts internal TaskSession to API type

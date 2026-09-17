@@ -632,6 +632,15 @@ func (s *Service) startCreatedSession(
 
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	exactProfile := false
+	var exactAssignment *ExactProfileLaunchDecision
+	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
+		return nil, err
+	} else if exact != nil {
+		exactAssignment = exact
+		agentProfileID = exact.AgentProfileID
+		exactProfile = true
+	}
 
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
@@ -692,7 +701,9 @@ func (s *Service) startCreatedSession(
 	// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
 	// the caller profile only when neither a step override nor a workflow
 	// default applies; either of those overrides a non-empty caller.
-	effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+	if !exactProfile {
+		effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+	}
 
 	if effectiveProfileID == "" {
 		return nil, fmt.Errorf("agent_profile_id is required")
@@ -739,6 +750,9 @@ func (s *Service) startCreatedSession(
 		s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, session)
 		s.promoteSessionIfTaskHasNoPrimary(ctx, taskID, session)
 	}
+	if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
+		return nil, err
+	}
 
 	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor).
 	if err := s.scheduleTaskForSession(ctx, taskID, sessionID); err != nil {
@@ -783,6 +797,9 @@ func (s *Service) startCreatedSession(
 		seam2Res.rekeyToSession(ctx, activeSession.ID)
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
+		if err := s.persistExactProfileSessionBinding(ctx, session, exactAssignment); err != nil {
+			return nil, err
+		}
 	}
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
 
@@ -881,8 +898,21 @@ func (s *Service) startCreatedSession(
 		mcpMode = executor.McpModeOffice
 	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
+		AgentProfileID:         effectiveProfileID,
+		ExactProfile:           exactProfile,
+		ExactProfileGeneration: exactAssignmentGeneration(exactAssignment),
+		ExactProfileRevision:   exactAssignmentRevision(exactAssignment),
+		ExactProfileModel:      exactProfileModel(exactAssignment),
+		ExecutorID:             executorID,
+		Prompt:                 effectivePrompt,
+		StartAgent:             true,
+		McpMode:                mcpMode,
+		Attachments:            attachments,
+		TurnID:                 initialTurnID,
+	})
 	if err != nil {
+		s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
 		if initialTurnCreated {
@@ -890,6 +920,7 @@ func (s *Service) startCreatedSession(
 		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
+	s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
@@ -1144,6 +1175,7 @@ type startTaskOptions struct {
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// this new session.
 	ProfileExplicit bool
+	ExactProfile    bool
 	// Env holds launch-scoped environment variables for the agent runtime.
 	Env map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
@@ -1282,11 +1314,23 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	var exactAssignment *ExactProfileLaunchDecision
+	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
+		return nil, err
+	} else if exact != nil {
+		exactAssignment = exact
+		agentProfileID = exact.AgentProfileID
+		opts.ProfileExplicit = true
+		opts.ExactProfile = true
+	}
 	// Fail before task-state or session mutations when the selected logical
 	// profile belongs to a disabled dynamic family. The workflow step may later
 	// override the caller profile, so repeat the check after that resolution.
 	if s.profileExecutionResolver != nil {
-		preflightProfileID := s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
+		preflightProfileID := agentProfileID
+		if !opts.ExactProfile {
+			preflightProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
+		}
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, preflightProfileID); err != nil {
 			return nil, err
 		}
@@ -1403,7 +1447,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 	overrideApplied := agentProfileID != callerProfileID
-	if route != nil && route.ExecutionProfileID != "" {
+	if route != nil && route.ExecutionProfileID != "" && (!opts.ExactProfile || isOfficeTask) {
 		agentProfileID = route.ExecutionProfileID
 	}
 
@@ -1447,7 +1491,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, err
 	}
-	if explicitStartRoute != nil && explicitProfileID != "" {
+	if explicitStartRoute != nil && explicitProfileID != "" && !opts.ExactProfile {
 		agentProfileID = explicitProfileID
 		overrideApplied = agentProfileID != callerProfileID
 	}
@@ -1531,6 +1575,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	launchSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload launch session: %w", err)
+	}
+	if exactAssignment != nil && (launchSession.ExactProfileGeneration != exactAssignment.Generation || launchSession.ExactProfileRevision != exactAssignment.Revision) {
+		observedState := launchSession.State
+		launchSession.ExactProfileGeneration = exactAssignment.Generation
+		launchSession.ExactProfileRevision = exactAssignment.Revision
+		if err := s.persistFullTaskSessionIfCurrent(ctx, launchSession, observedState); err != nil {
+			return nil, fmt.Errorf("persist exact profile session binding: %w", err)
+		}
 	}
 	if explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
 		if sourceStep, stepErr := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID); stepErr != nil {
@@ -1640,25 +1692,31 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID:       agentProfileID,
-		OfficeAgentProfileID: officeAgentProfileID,
-		ExecutorID:           executorID,
-		TurnID:               initialTurnID,
-		Prompt:               effectivePrompt,
-		WorkflowStepID:       workflowStepID,
-		StartAgent:           true,
-		McpMode:              mcpMode,
-		Attachments:          attachments,
-		Env:                  env,
-		AdditionalSkillSlugs: append([]string(nil), opts.AdditionalSkillSlugs...),
-		RouteOverride:        route,
+		AgentProfileID:         agentProfileID,
+		ExactProfile:           opts.ExactProfile,
+		ExactProfileGeneration: exactAssignmentGeneration(exactAssignment),
+		ExactProfileRevision:   exactAssignmentRevision(exactAssignment),
+		ExactProfileModel:      exactProfileModel(exactAssignment),
+		OfficeAgentProfileID:   officeAgentProfileID,
+		ExecutorID:             executorID,
+		TurnID:                 initialTurnID,
+		Prompt:                 effectivePrompt,
+		WorkflowStepID:         workflowStepID,
+		StartAgent:             true,
+		McpMode:                mcpMode,
+		Attachments:            attachments,
+		Env:                    env,
+		AdditionalSkillSlugs:   append([]string(nil), opts.AdditionalSkillSlugs...),
+		RouteOverride:          route,
 	})
 	if err != nil {
+		s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
 		if initialTurnCreated {
 			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
+	s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
 	execution.TurnID = initialTurnID
@@ -2833,6 +2891,23 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	var exactAssignment *ExactProfileLaunchDecision
+	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
+		return nil, err
+	} else {
+		exactAssignment = exact
+		if exact == nil && session.ExactProfileGeneration != 0 {
+			return nil, ErrExactProfileAssignmentInvalid
+		}
+		if exact != nil && (session.ExactProfileGeneration != exact.Generation || session.ExactProfileRevision != exact.Revision) {
+			return nil, ErrExactProfileAssignmentInvalid
+		}
+		if exact != nil {
+			options.ExactProfile = true
+			options.ExactProfileModel = exact.Model
+			options.ExactProfileRevision = exact.Revision
+		}
+	}
 	allowCompletedResume := options.AllowCompletedSessionResume &&
 		session.State == models.TaskSessionStateCompleted
 	// The completed-session permission is valid only for the exact completed
@@ -2998,9 +3073,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 			// LaunchPreparedSession. Record this failure with the same state CAS,
 			// persisted recovery claim, and archive-safe task CAS as early launch.
 			err = s.branchRecoveryError(resumeCtx, taskID, sessionID, err)
-			return nil, decorateResumeFailure(s.handleSessionLaunchFailure(
+			failure := decorateResumeFailure(s.handleSessionLaunchFailure(
 				resumeCtx, taskID, sessionID, err, session,
 			))
+			s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), failure)
+			return nil, failure
 		}
 	}
 	if readySession == nil {
@@ -3011,7 +3088,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 				return nil, attemptErr
 			}
 			persistBranchRecovery()
-			return nil, decorateResumeFailure(err)
+			failure := decorateResumeFailure(err)
+			s.recordExactProfileLaunchReceipt(
+				resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), failure,
+			)
+			return nil, failure
 		}
 	}
 	if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
@@ -3019,6 +3100,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, attemptErr
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
+	s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
 	seam4Res.consume()
 	persistBranchRecovery()
 

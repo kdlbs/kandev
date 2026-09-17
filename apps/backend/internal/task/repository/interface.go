@@ -217,6 +217,34 @@ type TaskRepository interface {
 	SwitchTaskRunner(ctx context.Context, req models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error)
 }
 
+// ExactProfileAssignmentRepository persists the guarded task-owned profile
+// selection used by exact-profile launches.
+type ExactProfileAssignmentRepository interface {
+	GetExactProfileAssignment(ctx context.Context, taskID string) (*models.ExactProfileAssignment, error)
+	// AssignExactProfileAssignment atomically records and activates an exact
+	// assignment. A replay of the same generation is a no-op.
+	AssignExactProfileAssignment(ctx context.Context, assignment *models.ExactProfileAssignment) (bool, error)
+	UpsertExactProfileAssignment(ctx context.Context, assignment *models.ExactProfileAssignment) (bool, error)
+	ActivateExactProfileAssignment(ctx context.Context, taskID string, generation int64) (bool, error)
+}
+
+// ExactProfileLaunchReceiptRepository persists and reads the per-session exact
+// launch receipt.
+type ExactProfileLaunchReceiptRepository interface {
+	// RecordExactProfileLaunchReceipt writes the launch outcome for one session.
+	// It is idempotent per (task, session): a repeated call with the same
+	// session returns false without overwriting the original receipt.
+	RecordExactProfileLaunchReceipt(ctx context.Context, receipt *models.ExactProfileLaunchReceipt) (bool, error)
+	// GetExactProfileLaunchReceipt returns a session's receipt, or nil when the
+	// launch predated exact-profile sessions (or was not exact).
+	GetExactProfileLaunchReceipt(ctx context.Context, taskID, sessionID string) (*models.ExactProfileLaunchReceipt, error)
+	// FindExactProfileReusableSession returns the most recently updated
+	// nonterminal session on taskID that was launched for the given
+	// generation/revision of the exact assignment. Sessions launched outside
+	// an active exact assignment, or for a stale generation, are excluded.
+	FindExactProfileReusableSession(ctx context.Context, taskID string, generation, revision int64) (*models.TaskSession, error)
+}
+
 // TaskPriorityRepository updates a task's priority without replacing the
 // complete task row. Implementations use this capability for priority-only
 // mutations so concurrent changes to other task fields are preserved.

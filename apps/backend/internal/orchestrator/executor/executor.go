@@ -455,6 +455,9 @@ type RemoteStatusPollRequest struct {
 type AgentProfileInfo struct {
 	ProfileID                  string
 	ProfileName                string
+	WorkspaceID                string
+	Enabled                    bool
+	Revision                   time.Time
 	AgentID                    string
 	AgentName                  string
 	Model                      string
@@ -480,6 +483,11 @@ type LaunchAgentRequest struct {
 	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID         string
 	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
+	ExactProfile      bool
+	// ExactProfileModel and ExactProfileRevision are the immutable profile
+	// snapshot validated by the orchestrator for this launch.
+	ExactProfileModel    string
+	ExactProfileRevision int64
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
@@ -655,18 +663,22 @@ const McpModeAutomation = mcpmode.Automation
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
-	AgentProfileID       string
-	OfficeAgentProfileID string
-	ExecutorID           string
-	TurnID               string
-	Prompt               string
-	PriorACPSession      string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID       string
-	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
-	McpProfile           *mcpprofile.Context
-	Attachments          []v1.MessageAttachment
-	Env                  map[string]string
+	AgentProfileID         string
+	ExactProfile           bool
+	ExactProfileGeneration int64
+	ExactProfileRevision   int64
+	ExactProfileModel      string
+	OfficeAgentProfileID   string
+	ExecutorID             string
+	TurnID                 string
+	Prompt                 string
+	PriorACPSession        string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID         string
+	StartAgent             bool
+	McpMode                string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile             *mcpprofile.Context
+	Attachments            []v1.MessageAttachment
+	Env                    map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
