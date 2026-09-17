@@ -3,7 +3,9 @@ package sqlite
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,9 +15,9 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// updateMessageWithPayloadGuard takes the writer before reading the tombstone.
-// A stale replacement may update display status, but cannot change the retained
-// tool identity, normalized summary, or removal receipt.
+// updateMessageWithPayloadGuard serializes the metadata read with a concurrent
+// replacement. A stale replacement may update display status, but cannot change
+// the retained tool identity, normalized summary, or removal receipt.
 func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message *models.Message, metadataJSON []byte, requestsInput int) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -29,21 +31,33 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 }
 
 func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sqlx.Tx, message *models.Message, metadataJSON []byte, requestsInput int) error {
-	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET id = id WHERE id = ?`), message.ID)
-	if err != nil {
-		return err
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		// SQLite has a database-level writer lock, and this no-op update takes it
+		// before the retained metadata is read. PostgreSQL uses FOR UPDATE below;
+		// an UPDATE here would fire the conversation revision trigger.
+		result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET id = id WHERE id = ?`), message.ID)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return fmt.Errorf("message not found: %s", message.ID)
+		}
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return fmt.Errorf("message not found: %s", message.ID)
+	query := `SELECT metadata,type,updated_at FROM task_session_messages WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += forUpdateClause
 	}
 	var raw string
 	var storedType models.MessageType
 	var storedUpdatedAt time.Time
-	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT metadata,type,updated_at FROM task_session_messages WHERE id = ?`), message.ID).Scan(&raw, &storedType, &storedUpdatedAt); err != nil {
+	if err := tx.QueryRowContext(ctx, tx.Rebind(query), message.ID).Scan(&raw, &storedType, &storedUpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) && dialect.IsPostgres(r.db.DriverName()) {
+			return fmt.Errorf("message not found: %s", message.ID)
+		}
 		return err
 	}
 	metadataJSON, sanitized, err := mergeRetainedMessageMetadata([]byte(raw), metadataJSON)
