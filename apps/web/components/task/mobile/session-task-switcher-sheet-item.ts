@@ -53,6 +53,10 @@ function sheetPendingFlags(task: KanbanState["tasks"][number]) {
   };
 }
 
+function sheetLaunchQueue(task: KanbanState["tasks"][number]) {
+  return task.statusSummary?.launch_queue;
+}
+
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
   const hasSummary = summary != null;
@@ -124,7 +128,7 @@ export function toSheetItem(
     automaticColor: automaticColor?.color,
     automaticColorSource: automaticColor?.source,
     queuedCount: task.statusSummary?.queued_prompt_count,
-    launchQueue: task.statusSummary?.launch_queue,
+    launchQueue: sheetLaunchQueue(task),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

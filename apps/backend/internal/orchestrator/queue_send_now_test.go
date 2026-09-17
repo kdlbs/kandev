@@ -498,6 +498,20 @@ func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing
 		t.Fatalf("SendQueuedNow did not accept the created-session launch before the timeout: record=%#v session=%#v session_err=%v queue=%#v prompts=%#v descriptions=%#v", deferredLaunchOf(t, svc, "queued-created"), session, sessionErr, status, capturedPrompts, descriptionCalls)
 	}
 
+	// The created-session launch is owned by the Send Now worker. The agent
+	// manager callback above happens before that worker returns and settles the
+	// exact ceiling record, so wait for the durable settlement boundary before
+	// asserting the replay is gone.
+	settleDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(settleDeadline) {
+		record := deferredLaunchOf(t, svc, "queued-created")
+		if record == nil || !models.HasCeilingDeferredIntent(&models.Task{Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch: record,
+		}}) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	record := deferredLaunchOf(t, svc, "queued-created")
 	if record != nil && models.HasCeilingDeferredIntent(&models.Task{Metadata: map[string]interface{}{
 		models.MetaKeyDeferredLaunch: record,
