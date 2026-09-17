@@ -111,12 +111,9 @@ type StoredTaskStatusSummary struct {
 	Summary     TaskStatusSummary
 }
 
-// SemanticEqual compares only fields that task consumers observe as status.
+// SemanticEqual compares valid summaries using the canonical payload stored by
+// the repository, excluding transport metadata and omitted zero values.
 func (s TaskStatusSummary) SemanticEqual(other TaskStatusSummary) bool {
-	s.Revision = 0
-	s.UpdatedAt = time.Time{}
-	other.Revision = 0
-	other.UpdatedAt = time.Time{}
 	left, leftErr := s.SemanticJSON()
 	right, rightErr := other.SemanticJSON()
 	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
