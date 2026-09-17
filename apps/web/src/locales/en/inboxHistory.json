@@ -19,5 +19,7 @@
   "turnAsked": "Asked in turn {{turn}}",
   "turnSupersededBy": "Asked in turn {{askingTurn}}, superseded by turn {{supersedingTurn}}",
   "stepStartsNoAgent": "This task's current step will not start an agent.",
-  "truncatedNotice": "Showing the oldest questions first. More are waiting."
+  "truncatedNotice": "More historical questions are available.",
+  "loadMore": "Load more history",
+  "loadMoreError": "Could not load more history. Try again."
 }

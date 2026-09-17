@@ -8,6 +8,8 @@ const EMPTY_WORKSPACE_STATE: InboxHistoryWorkspaceState = {
   bundles: EMPTY_BUNDLES,
   total: 0,
   hasMore: false,
+  isLoadingMore: false,
+  loadMoreError: false,
   status: "idle",
   appliedGeneration: 0,
 };
@@ -34,4 +36,12 @@ export function selectInboxHistoryStatus(state: AppState) {
 
 export function selectInboxHistoryHasMore(state: AppState): boolean {
   return selectActiveWorkspaceState(state).hasMore;
+}
+
+export function selectInboxHistoryIsLoadingMore(state: AppState): boolean {
+  return selectActiveWorkspaceState(state).isLoadingMore;
+}
+
+export function selectInboxHistoryLoadMoreError(state: AppState): boolean {
+  return selectActiveWorkspaceState(state).loadMoreError;
 }

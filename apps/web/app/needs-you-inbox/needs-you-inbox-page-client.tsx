@@ -31,10 +31,13 @@ import { FailedInboxTabPanel } from "@/components/needs-you-inbox/failed-inbox-t
 import { useFailedInboxController } from "@/hooks/domains/failed-inbox/use-failed-inbox-controller";
 import { buildInboxTabHref, resolveInboxTab, type InboxTab } from "@/lib/failed-inbox/inbox-tab";
 import { useInboxHistoryController } from "@/hooks/domains/inbox-history/use-inbox-history-controller";
+import type { InboxHistoryController } from "@/hooks/domains/inbox-history/use-inbox-history-controller";
 import {
   selectInboxHistoryBundles,
   selectInboxHistoryCount,
   selectInboxHistoryHasMore,
+  selectInboxHistoryIsLoadingMore,
+  selectInboxHistoryLoadMoreError,
   selectInboxHistoryStatus,
 } from "@/lib/state/slices/inbox-history/selectors";
 import { InboxHistoryList } from "@/components/inbox-history/inbox-history-list";
@@ -159,20 +162,25 @@ function resolveHistoryViewMode(status: string, bundleCount: number, hasMore: bo
   return "list";
 }
 
-// The History tab's own read-only content, driven by its own isolated
-// slice -- never the Needs-you slice or its refresh trigger. Takes
-// `refresh` from the parent rather than calling useInboxHistoryController
-// itself, so the controller (and its single read) is mounted exactly once
-// per page, not once per tab activation.
-function InboxHistoryTabContent({ refresh }: { refresh: (workspaceId: string) => Promise<void> }) {
+// The History tab's own read-only content, driven by its own isolated slice --
+// never the Needs-you slice or its refresh trigger. The controller stays in
+// the parent so its lifecycle is mounted exactly once per page, not once per
+// tab activation.
+function InboxHistoryTabContent({ controller }: { controller: InboxHistoryController }) {
   const { t } = useTranslation();
   const status = useAppStore(selectInboxHistoryStatus);
   const bundles = useAppStore(selectInboxHistoryBundles);
   const hasMore = useAppStore(selectInboxHistoryHasMore);
+  const isLoadingMore = useAppStore(selectInboxHistoryIsLoadingMore);
+  const loadMoreError = useAppStore(selectInboxHistoryLoadMoreError);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { refresh, loadMore } = controller;
   const retry = useCallback(() => {
     if (workspaceId) void refresh(workspaceId);
   }, [refresh, workspaceId]);
+  const loadNextPage = useCallback(() => {
+    if (workspaceId) void loadMore(workspaceId);
+  }, [loadMore, workspaceId]);
 
   const viewMode = resolveHistoryViewMode(status, bundles.length, hasMore);
 
@@ -185,7 +193,15 @@ function InboxHistoryTabContent({ refresh }: { refresh: (workspaceId: string) =>
         </p>
       )}
       {viewMode === "empty" && <InboxHistoryEmptyState />}
-      {viewMode === "list" && <InboxHistoryList bundles={bundles} hasMore={hasMore} />}
+      {viewMode === "list" && (
+        <InboxHistoryList
+          bundles={bundles}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          loadMoreError={loadMoreError}
+          onLoadMore={loadNextPage}
+        />
+      )}
     </>
   );
 }
@@ -216,10 +232,9 @@ export function NeedsYouInboxPageClient() {
   // bucket's own refresh triggers, independent of the Needs-you controller
   // mounted at the app shell.
   useFailedInboxController(selectedTab);
-  // The History tab's own single read, driven by its own isolated slice --
-  // mounted once at the page level (not gated by which tab is active), never
-  // the Needs-you slice or its refresh trigger.
-  const refreshHistory = useInboxHistoryController();
+  // The History controller is mounted once at the page level (not gated by
+  // which tab is active), never from the Needs-you slice or its refresh tick.
+  const historyController = useInboxHistoryController();
 
   const retry = useCallback(() => bumpRefreshTick(), [bumpRefreshTick]);
   const selectTab = useCallback(
@@ -245,7 +260,7 @@ export function NeedsYouInboxPageClient() {
           <FailedInboxTabPanel />
         </TabsContent>
         <TabsContent value="history">
-          <InboxHistoryTabContent refresh={refreshHistory} />
+          <InboxHistoryTabContent controller={historyController} />
         </TabsContent>
       </InboxTabStrip>
     </PageShell>

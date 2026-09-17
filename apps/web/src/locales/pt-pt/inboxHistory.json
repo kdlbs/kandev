@@ -19,5 +19,7 @@
   "turnAsked": "Perguntado no turno {{turn}}",
   "turnSupersededBy": "Perguntado no turno {{askingTurn}}, substituído pelo turno {{supersedingTurn}}",
   "stepStartsNoAgent": "A etapa atual desta tarefa não iniciará um agente.",
-  "truncatedNotice": "A mostrar primeiro as perguntas mais antigas. Há mais à espera."
+  "truncatedNotice": "Há mais perguntas históricas disponíveis.",
+  "loadMore": "Carregar mais histórico",
+  "loadMoreError": "Não foi possível carregar mais histórico. Tente novamente."
 }

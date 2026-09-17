@@ -27,8 +27,8 @@ function initialState(enabled: boolean): HydrationState {
 function renderController(enabled = true) {
   return renderHook(
     () => {
-      useInboxHistoryController();
-      return useAppStoreApi();
+      const controller = useInboxHistoryController();
+      return { controller, store: useAppStoreApi() };
     },
     {
       wrapper: ({ children }) => (
@@ -68,7 +68,7 @@ describe("useInboxHistoryController", () => {
     const { result } = renderController(true);
 
     await waitFor(() => {
-      const state = result.current.getState().inboxHistory.byWorkspaceId[WORKSPACE_ID];
+      const state = result.current.store.getState().inboxHistory.byWorkspaceId[WORKSPACE_ID];
       expect(state?.status).toBe("ready");
       expect(state?.total).toBe(3);
     });
@@ -79,7 +79,7 @@ describe("useInboxHistoryController", () => {
     const { result } = renderController(true);
 
     await waitFor(() => {
-      expect(result.current.getState().inboxHistory.byWorkspaceId[WORKSPACE_ID]?.status).toBe(
+      expect(result.current.store.getState().inboxHistory.byWorkspaceId[WORKSPACE_ID]?.status).toBe(
         "error",
       );
     });
@@ -107,5 +107,58 @@ describe("useInboxHistoryController", () => {
     await waitFor(() => expect(listInboxHistoryMock).toHaveBeenCalled());
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it("loads the next page with the cursor and appends it", async () => {
+    listInboxHistoryMock
+      .mockResolvedValueOnce(
+        page({
+          bundles: [{ pending_id: "first" }],
+          total: 2,
+          next_cursor: "cursor-1",
+        }),
+      )
+      .mockResolvedValueOnce(page({ bundles: [{ pending_id: "second" }], total: 2 }));
+    const { result } = renderController(true);
+
+    await waitFor(() => {
+      expect(
+        result.current.store.getState().inboxHistory.byWorkspaceId[WORKSPACE_ID]?.hasMore,
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.controller.loadMore(WORKSPACE_ID);
+    });
+
+    expect(listInboxHistoryMock).toHaveBeenNthCalledWith(2, WORKSPACE_ID, { cursor: "cursor-1" });
+    const state = result.current.store.getState().inboxHistory.byWorkspaceId[WORKSPACE_ID];
+    expect(state?.bundles.map((item) => item.pending_id)).toEqual(["first", "second"]);
+    expect(state?.hasMore).toBe(false);
+  });
+
+  it("keeps the current rows and exposes a retryable load-more error", async () => {
+    listInboxHistoryMock
+      .mockResolvedValueOnce(
+        page({ bundles: [{ pending_id: "first" }], total: 2, next_cursor: "cursor-1" }),
+      )
+      .mockRejectedValueOnce(new Error("boom"));
+    const { result } = renderController(true);
+
+    await waitFor(() => {
+      expect(
+        result.current.store.getState().inboxHistory.byWorkspaceId[WORKSPACE_ID]?.hasMore,
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.controller.loadMore(WORKSPACE_ID);
+    });
+
+    const state = result.current.store.getState().inboxHistory.byWorkspaceId[WORKSPACE_ID];
+    expect(state?.bundles).toHaveLength(1);
+    expect(state?.loadMoreError).toBe(true);
+    expect(state?.isLoadingMore).toBe(false);
+    expect(state?.hasMore).toBe(true);
   });
 });

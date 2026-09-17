@@ -19,5 +19,7 @@
   "turnAsked": "在第 {{turn}} 轮提出",
   "turnSupersededBy": "在第 {{askingTurn}} 轮提出，被第 {{supersedingTurn}} 轮取代",
   "stepStartsNoAgent": "此任务的当前步骤不会启动代理。",
-  "truncatedNotice": "优先显示最早的问题。还有更多正在等待。"
+  "truncatedNotice": "还有更多历史问题可查看。",
+  "loadMore": "加载更多历史记录",
+  "loadMoreError": "无法加载更多历史记录。请重试。"
 }

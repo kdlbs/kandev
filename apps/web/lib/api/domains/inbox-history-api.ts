@@ -3,14 +3,18 @@ import type { InboxHistoryPage } from "@/lib/types/inbox-history";
 
 const BASE = "/api/v1/clarification-inbox/history";
 
-// The single read the History tab issues: no cursor forwarding beyond what
-// the caller explicitly requests, no mutating call anywhere in this module.
+export type ListInboxHistoryOptions = ApiRequestOptions & {
+  cursor?: string;
+};
+
+// The read-only History endpoint. Cursor forwarding is explicit, and this
+// module has no mutating call.
 export function listInboxHistory(
   workspaceId: string,
-  options?: ApiRequestOptions,
+  options?: ListInboxHistoryOptions,
 ): Promise<InboxHistoryPage> {
-  return fetchJson<InboxHistoryPage>(
-    `${BASE}?workspace_id=${encodeURIComponent(workspaceId)}`,
-    options,
-  );
+  const { cursor, ...requestOptions } = options ?? {};
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  if (cursor) query.set("cursor", cursor);
+  return fetchJson<InboxHistoryPage>(`${BASE}?${query.toString()}`, requestOptions);
 }

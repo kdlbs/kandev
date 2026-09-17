@@ -19,5 +19,7 @@
   "turnAsked": "Àśķēď ĩń ţũŕń {{turn}}",
   "turnSupersededBy": "Àśķēď ĩń ţũŕń {{askingTurn}}, śũƥēŕśēďēď ƀŷ ţũŕń {{supersedingTurn}}",
   "stepStartsNoAgent": "Ţĥĩś ţàśķ'ś ćũŕŕēńţ śţēƥ ŵĩĺĺ ńōţ śţàŕţ àń àĝēńţ.",
-  "truncatedNotice": "Śĥōŵĩńĝ ţĥē ōĺďēśţ qũēśţĩōńś ƒĩŕśţ. Ḿōŕē àŕē ŵàĩţĩńĝ."
+  "truncatedNotice": "Ḿōŕē ĥĩśţōŕĩćàĺ qũēśţĩōńś àŕē àvàĩĺàƀĺē.",
+  "loadMore": "Ĺōàď ḿōŕē ĥĩśţōŕŷ",
+  "loadMoreError": "Ćōũĺď ńōţ ĺōàď ḿōŕē ĥĩśţōŕŷ. Ţŕŷ àĝàĩń."
 }

@@ -49,6 +49,7 @@ describe("inbox-history slice", () => {
       bundles: [bundle()],
       total: 1,
       hasMore: true,
+      nextCursor: "cursor-1",
     });
 
     const state = store.getState().inboxHistory.byWorkspaceId.w1;
@@ -56,8 +57,58 @@ describe("inbox-history slice", () => {
     expect(state.total).toBe(1);
     expect(state.bundles).toHaveLength(1);
     expect(state.hasMore).toBe(true);
+    expect(state.nextCursor).toBe("cursor-1");
   });
 
+  it("appends a cursor page and clears its loading state", () => {
+    const store = newStore();
+    const generation = store.getState().beginInboxHistoryRead("w1");
+    store.getState().setInboxHistoryPage("w1", generation, {
+      bundles: [bundle({ pending_id: "first" })],
+      total: 2,
+      hasMore: true,
+      nextCursor: "cursor-1",
+    });
+
+    expect(store.getState().beginInboxHistoryLoadMore("w1", generation)).toBe(true);
+    expect(store.getState().inboxHistory.byWorkspaceId.w1.isLoadingMore).toBe(true);
+
+    store.getState().appendInboxHistoryPage("w1", generation, {
+      bundles: [bundle({ pending_id: "second" })],
+      total: 2,
+      hasMore: false,
+    });
+
+    const state = store.getState().inboxHistory.byWorkspaceId.w1;
+    expect(state.bundles.map((item) => item.pending_id)).toEqual(["first", "second"]);
+    expect(state.hasMore).toBe(false);
+    expect(state.nextCursor).toBeUndefined();
+    expect(state.isLoadingMore).toBe(false);
+    expect(state.loadMoreError).toBe(false);
+  });
+
+  it("keeps loaded rows when a cursor page fails", () => {
+    const store = newStore();
+    const generation = store.getState().beginInboxHistoryRead("w1");
+    store.getState().setInboxHistoryPage("w1", generation, {
+      bundles: [bundle()],
+      total: 2,
+      hasMore: true,
+      nextCursor: "cursor-1",
+    });
+    store.getState().beginInboxHistoryLoadMore("w1", generation);
+    store.getState().setInboxHistoryLoadMoreError("w1", generation);
+
+    const state = store.getState().inboxHistory.byWorkspaceId.w1;
+    expect(state.bundles).toHaveLength(1);
+    expect(state.hasMore).toBe(true);
+    expect(state.nextCursor).toBe("cursor-1");
+    expect(state.loadMoreError).toBe(true);
+    expect(state.isLoadingMore).toBe(false);
+  });
+});
+
+describe("inbox-history slice stale responses", () => {
   // AC .23 (mirrors AC-UI-NEEDS-YOU-INBOX-001.38): a fast workspace switch or
   // overlapping refresh must not let a slower, older response overwrite what
   // a newer one already wrote.

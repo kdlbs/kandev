@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   bumpRefreshTick: vi.fn(),
   useFailedInboxController: vi.fn(),
   inboxHistoryRefresh: vi.fn(),
+  inboxHistoryLoadMore: vi.fn(),
 }));
 
 const EMPTY_TESTID = "needs-you-inbox-empty";
@@ -36,6 +37,8 @@ let historyState: {
   bundles: unknown[];
   total: number;
   hasMore: boolean;
+  isLoadingMore?: boolean;
+  loadMoreError?: boolean;
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -51,12 +54,18 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/inbox-history/use-inbox-history-controller", () => ({
-  useInboxHistoryController: () => mocks.inboxHistoryRefresh,
+  useInboxHistoryController: () => ({
+    refresh: mocks.inboxHistoryRefresh,
+    loadMore: mocks.inboxHistoryLoadMore,
+  }),
 }));
 
 vi.mock("@/components/inbox-history/inbox-history-list", () => ({
-  InboxHistoryList: ({ bundles }: { bundles: unknown[] }) => (
-    <div data-testid="stub-history-list">{bundles.length}</div>
+  InboxHistoryList: ({ bundles, onLoadMore }: { bundles: unknown[]; onLoadMore: () => void }) => (
+    <>
+      <div data-testid="stub-history-list">{bundles.length}</div>
+      <button type="button" data-testid="stub-history-load-more" onClick={onLoadMore} />
+    </>
   ),
 }));
 
@@ -152,6 +161,7 @@ beforeEach(() => {
   mocks.bumpRefreshTick.mockReset();
   mocks.useFailedInboxController.mockReset();
   mocks.inboxHistoryRefresh.mockReset();
+  mocks.inboxHistoryLoadMore.mockReset();
   needsYouState = { status: "idle", bundles: [], hiddenCount: 0, hasMore: false };
   failedState = { rows: [], count: 0, truncated: false, status: "idle" };
   historyState = { status: "idle", bundles: [], total: 0, hasMore: false };
@@ -423,6 +433,16 @@ describe("NeedsYouInboxPageClient — tab strip", () => {
     fireEvent.mouseDown(screen.getByTestId(HISTORY_TAB_TESTID));
 
     expect(screen.getByTestId("stub-history-list").textContent).toBe("1");
+  });
+
+  it("loads another History page from the tab list", () => {
+    historyState = { status: "ready", bundles: [{ pending_id: "h1" }], total: 2, hasMore: true };
+    render(<NeedsYouInboxPageClient />);
+
+    fireEvent.mouseDown(screen.getByTestId(HISTORY_TAB_TESTID));
+    fireEvent.click(screen.getByTestId("stub-history-load-more"));
+
+    expect(mocks.inboxHistoryLoadMore).toHaveBeenCalledWith("w1");
   });
 
   it("shows the History count badge in the Badge variant=secondary idiom, omitted at zero (AC .16)", () => {

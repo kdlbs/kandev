@@ -17,6 +17,8 @@ const emptyWorkspaceState = (): InboxHistoryWorkspaceState => ({
   bundles: [],
   total: 0,
   hasMore: false,
+  isLoadingMore: false,
+  loadMoreError: false,
   status: "idle",
   appliedGeneration: 0,
 });
@@ -39,6 +41,8 @@ export const createInboxHistorySlice = (set: ImmerSet): InboxHistorySlice => ({
       draft.inboxHistory.generationByWorkspaceId[workspaceId] = next;
       const workspace = draft.inboxHistory.byWorkspaceId[workspaceId] ?? emptyWorkspaceState();
       workspace.status = "loading";
+      workspace.isLoadingMore = false;
+      workspace.loadMoreError = false;
       draft.inboxHistory.byWorkspaceId[workspaceId] = workspace;
       generation = next;
     });
@@ -52,9 +56,55 @@ export const createInboxHistorySlice = (set: ImmerSet): InboxHistorySlice => ({
         bundles: page.bundles,
         total: page.total,
         hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+        isLoadingMore: false,
+        loadMoreError: false,
         status: "ready",
         appliedGeneration: generation,
       };
+    }),
+
+  beginInboxHistoryLoadMore: (workspaceId, generation) => {
+    let accepted = false;
+    set((draft) => {
+      if (draft.inboxHistory.generationByWorkspaceId[workspaceId] !== generation) return;
+      const workspace = draft.inboxHistory.byWorkspaceId[workspaceId];
+      if (
+        !workspace ||
+        workspace.status !== "ready" ||
+        !workspace.hasMore ||
+        !workspace.nextCursor ||
+        workspace.isLoadingMore
+      ) {
+        return;
+      }
+      workspace.isLoadingMore = true;
+      workspace.loadMoreError = false;
+      accepted = true;
+    });
+    return accepted;
+  },
+
+  appendInboxHistoryPage: (workspaceId, generation, page) =>
+    set((draft) => {
+      if (draft.inboxHistory.generationByWorkspaceId[workspaceId] !== generation) return;
+      const workspace = draft.inboxHistory.byWorkspaceId[workspaceId];
+      if (!workspace) return;
+      workspace.bundles.push(...page.bundles);
+      workspace.total = page.total;
+      workspace.hasMore = page.hasMore;
+      workspace.nextCursor = page.nextCursor;
+      workspace.isLoadingMore = false;
+      workspace.loadMoreError = false;
+    }),
+
+  setInboxHistoryLoadMoreError: (workspaceId, generation) =>
+    set((draft) => {
+      if (draft.inboxHistory.generationByWorkspaceId[workspaceId] !== generation) return;
+      const workspace = draft.inboxHistory.byWorkspaceId[workspaceId];
+      if (!workspace) return;
+      workspace.isLoadingMore = false;
+      workspace.loadMoreError = true;
     }),
 
   setInboxHistoryError: (workspaceId, generation) =>
