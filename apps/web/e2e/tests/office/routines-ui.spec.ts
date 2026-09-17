@@ -223,7 +223,10 @@ test.describe("Routines UI", () => {
       assignee_agent_profile_id: officeSeed.agentId,
       concurrency_policy: "always_create",
       catch_up_policy: "skip_missed",
-      variables: JSON.stringify({ region: "us-east", tier: "gold" }),
+      // Declared-variable wire shape (backend `parseDeclaredDefaults`,
+      // apps/backend/internal/office/routines/service.go:1273): each entry
+      // is `{ default: string }`, not a bare scalar.
+      variables: JSON.stringify({ region: { default: "us-east" }, tier: { default: "gold" } }),
     })) as { id: string };
     expect(routine.id).toBeTruthy();
 
@@ -236,10 +239,13 @@ test.describe("Routines UI", () => {
     await expect(row.getByText("Always create", { exact: true })).toBeVisible();
 
     // AC-OFFICE-ROUTINE-WIRE-003.11: one entry per declared variable name,
-    // not one entry per character of the encoded JSON string.
+    // not one entry per character of the encoded JSON string. Also proves
+    // Build round 3's fix: a declared variable's `{ default }` object
+    // renders its default value, not the literal string "[object Object]".
     await row.click();
     await expect(testPage.getByText("region: us-east")).toBeVisible();
     await expect(testPage.getByText("tier: gold")).toBeVisible();
+    await expect(testPage.getByText("[object Object]")).toHaveCount(0);
 
     await testPage.goto(`/office/routines/${routine.id}`);
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
