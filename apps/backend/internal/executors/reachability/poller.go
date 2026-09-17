@@ -186,6 +186,8 @@ func (p *Poller) acquire() (context.Context, bool) {
 	}
 	// loop already owns a WaitGroup reference, so this positive Add cannot
 	// race a Stop waiting for the counter to reach zero.
+	// Safe without passMu: dispatchPass is called only from loop, which holds
+	// its own WaitGroup slot, so Stop cannot observe zero before this Add.
 	p.wg.Add(1)
 	return p.ctx, true
 }
