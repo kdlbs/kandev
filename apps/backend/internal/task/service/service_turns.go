@@ -669,7 +669,19 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 		payload["had_output"] = *hadOutput
 	}
 	if len(receipts) > 0 && receipts[0] != nil {
-		payload["conversation_receipt"] = projectConversationReceipt(receipts[0])
+		projectedReceipt := projectConversationReceipt(receipts[0])
+		if hadOutput != nil {
+			for index := range projectedReceipt.Operations {
+				operation := &projectedReceipt.Operations[index]
+				if operation.Entity != models.ConversationEntityTurn || operation.Turn == nil || operation.Turn.ID != turn.ID {
+					continue
+				}
+				output := *hadOutput
+				operation.HadOutput = &output
+				break
+			}
+		}
+		payload["conversation_receipt"] = projectedReceipt
 	}
 	if err := s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload)); err != nil {
 		s.logger.Error("failed to publish turn event",

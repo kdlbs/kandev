@@ -519,6 +519,41 @@ func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
 	}
 }
 
+// publicTurnMetadataKeys is the allowlist for first-party live turn
+// projections. Prompt-dispatch recovery state and arbitrary repository-owned
+// fields stay inside the service and are not sent through the shared event
+// bus. The REST turn DTO has its own compatibility contract; this narrower
+// projection is used only for the v2 Host conversation transport.
+var publicTurnMetadataKeys = [...]string{
+	TurnMetaKeyRuntimeConfigSnapshot,
+	TurnMetaKeyWorkflowStepIDAtStart,
+	TurnMetaKeyLifecycleOnly,
+	"prompt_usage",
+	"model",
+	"agent_id",
+	"agent_type",
+	"usage_multiplier",
+}
+
+// ProjectTurnMetadata returns the first-party-safe metadata needed by live
+// core conversation consumers without exposing arbitrary turn state.
+func ProjectTurnMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if len(metadata) == 0 {
+		return nil
+	}
+	projected := make(map[string]interface{}, len(publicTurnMetadataKeys))
+	for _, key := range publicTurnMetadataKeys {
+		if value, ok := metadata[key]; ok {
+			projected[key] = value
+		}
+	}
+	ClearPromptDispatchMetadata(projected)
+	if len(projected) == 0 {
+		return nil
+	}
+	return projected
+}
+
 // PromptDispatchRecovery identifies the exact clarification claim that an
 // unpublished successor reservation must restore after a backend restart.
 type PromptDispatchRecovery struct {

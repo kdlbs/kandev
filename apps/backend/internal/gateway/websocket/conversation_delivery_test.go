@@ -129,6 +129,57 @@ func TestConversationDeliveryProjectsCoreEntitiesAtTheAPIBoundary(t *testing.T) 
 	}
 }
 
+func TestConversationDeliveryProjectsSafeCoreTurnMetadataAndCompletion(t *testing.T) {
+	hub := NewHub(ws.NewDispatcher(), testLogger())
+	client := NewClient("conversation-client", authn.Identity{UserID: "user-1"}, nil, hub, testLogger())
+	hub.clients[client] = true
+	client.conversationSubscriptions["scope-1"] = conversationSubscription{
+		ScopeID: "scope-1", SessionID: "session-1", ConsumerKind: conversationConsumerCore,
+		UserID: "user-1", Epoch: "epoch-1",
+	}
+	hadOutput := false
+	turn := &models.Turn{
+		ID: "turn-core", TaskSessionID: "session-1", TaskID: "task-1",
+		Metadata: map[string]any{
+			models.TurnMetaKeyRuntimeConfigSnapshot: models.TurnRuntimeConfigSnapshot{Model: "mock-fast"},
+			models.TurnMetaKeyPromptDispatchPending: true,
+			"internal":                              "private turn state",
+		},
+	}
+	hub.BroadcastConversationMutation(&models.ConversationMutationReceipt{
+		SessionID: "session-1", BaseRevision: 1, Revision: 2, Complete: true,
+		Operations: []models.ConversationMutationOperation{{
+			Kind: models.ConversationMutationUpsert, Entity: models.ConversationEntityTurn,
+			ID: turn.ID, SessionID: turn.TaskSessionID, TaskID: turn.TaskID,
+			Turn: turn, HadOutput: &hadOutput,
+		}},
+	})
+
+	var frame ws.Message
+	if err := json.Unmarshal(<-client.send, &frame); err != nil {
+		t.Fatalf("decode changed frame: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(frame.Payload, &payload); err != nil {
+		t.Fatalf("decode changed payload: %v", err)
+	}
+	operation := payload["operations"].([]any)[0].(map[string]any)
+	projected := operation["turn"].(map[string]any)
+	if projected["had_output"] != false {
+		t.Fatalf("core turn had_output = %#v, want false", projected["had_output"])
+	}
+	metadata := projected["metadata"].(map[string]any)
+	if metadata[models.TurnMetaKeyRuntimeConfigSnapshot] == nil {
+		t.Fatal("core turn dropped runtime configuration metadata")
+	}
+	if _, ok := metadata[models.TurnMetaKeyPromptDispatchPending]; ok {
+		t.Fatal("core turn exposed prompt-dispatch metadata")
+	}
+	if _, ok := metadata["internal"]; ok {
+		t.Fatal("core turn exposed private metadata")
+	}
+}
+
 func TestConversationDeliverySendsCoverageOnlyForIrrelevantMutation(t *testing.T) {
 	hub := NewHub(ws.NewDispatcher(), testLogger())
 	client := NewClient("conversation-client", authn.Identity{UserID: "user-1"}, nil, hub, testLogger())

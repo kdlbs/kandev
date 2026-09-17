@@ -265,3 +265,19 @@ The focused changed-package Go suite, Go lint, frontend reconciliation tests,
 TypeScript, focused ESLint, Prettier, specification validators, and whitespace
 checks passed after these changes. Browser E2E and PostgreSQL checks remain
 CI-controlled gates for the delivery branch.
+
+## Live projection regression verification
+
+The delivery branch exposed two live core projection regressions during the
+browser matrix: completed turns did not carry the runtime model snapshot, and
+projected shell-output summaries were treated as empty output on a second
+metadata projection. The fix keeps the core turn metadata allowlisted, carries
+the completion output bit through the source receipt, and makes shell-output
+projection idempotent. Plugin projections remain metadata-free.
+
+The focused backend models, task service, and gateway tests passed. The web
+WebSocket client tests, TypeScript, focused ESLint, backend build, E2E fixture
+build, and plugin package build passed. Desktop Chromium passed all 13 focused
+chat cases, including model-selector recovery and shell-output disclosure.
+Mobile Chromium passed the focused empty-turn case. Backend lint reported zero
+issues and `git diff --check` passed.

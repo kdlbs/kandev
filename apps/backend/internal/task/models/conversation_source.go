@@ -36,6 +36,10 @@ type ConversationMutationOperation struct {
 	PreviousSessionID string                   `json:"previous_session_id,omitempty"`
 	Message           *Message                 `json:"message,omitempty"`
 	Turn              *Turn                    `json:"turn,omitempty"`
+	// HadOutput is populated only on a turn-completion operation. It keeps the
+	// live core projection equivalent to the ordered turn.completed event
+	// without persisting a transient UI-only fact in the turn row.
+	HadOutput *bool `json:"had_output,omitempty"`
 }
 
 // ConversationMutationReceipt describes a complete revision interval for

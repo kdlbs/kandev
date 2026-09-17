@@ -207,6 +207,10 @@ function projectCoreTurnOperation(
       completed_at: turn.completed_at,
       updated_at: turn.updated_at ?? turn.started_at,
       created_at: turn.created_at ?? turn.started_at,
+      execution_profile_id: turn.execution_profile_id,
+      route_generation: turn.route_generation,
+      metadata: turn.metadata,
+      had_output: turn.had_output,
     });
   }
   return { action: coreTurnAction(operation), payload };

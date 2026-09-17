@@ -906,8 +906,10 @@ describe("ordered core session validation", () => {
     const { client, socket } = connectClient({ conversationProtocol: "v2" });
     const projected = vi.fn();
     const changed = vi.fn();
+    const completed = vi.fn();
     client.on("session.message.added", projected);
     client.on("session.conversation.changed", changed);
+    client.on("session.turn.completed", completed);
     const subscription = client.subscribeSessionWithReady("sess-1");
     const v2Request = socket.sent.find(
       (message) => message.action === "session.conversation.subscribe",
@@ -955,6 +957,21 @@ describe("ordered core session validation", () => {
               updated_at: "2026-09-16T12:00:00Z",
             },
           },
+          {
+            kind: "upsert",
+            entity: "turn",
+            id: "turn-1",
+            turn: {
+              task_id: "task-1",
+              started_at: "2026-09-16T11:59:00Z",
+              completed_at: "2026-09-16T12:00:01Z",
+              updated_at: "2026-09-16T12:00:01Z",
+              execution_profile_id: "profile-1",
+              route_generation: 3,
+              metadata: { runtime_config_snapshot: { model: "mock-fast" } },
+              had_output: false,
+            },
+          },
         ],
       },
     });
@@ -965,6 +982,17 @@ describe("ordered core session validation", () => {
     });
     expect(projected).toHaveBeenCalledTimes(1);
     expect(changed).toHaveBeenCalledTimes(1);
+    expect(completed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          id: "turn-1",
+          execution_profile_id: "profile-1",
+          route_generation: 3,
+          metadata: { runtime_config_snapshot: { model: "mock-fast" } },
+          had_output: false,
+        }),
+      }),
+    );
     subscription.unsubscribe();
   });
 

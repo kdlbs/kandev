@@ -33,6 +33,33 @@ func lastTurnCompletedHadOutput(t *testing.T, eventBus *MockEventBus) (bool, boo
 	return false, false
 }
 
+func lastTurnCompletedReceiptHadOutput(t *testing.T, eventBus *MockEventBus) (bool, bool) {
+	t.Helper()
+	published := eventBus.GetPublishedEvents()
+	for i := len(published) - 1; i >= 0; i-- {
+		ev := published[i]
+		if ev.Type != events.TurnCompleted {
+			continue
+		}
+		data, ok := ev.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("turn.completed event data is not a map: %T", ev.Data)
+		}
+		receipt, ok := data["conversation_receipt"].(*models.ConversationMutationReceipt)
+		if !ok || receipt == nil {
+			return false, false
+		}
+		for _, operation := range receipt.Operations {
+			if operation.Entity != models.ConversationEntityTurn || operation.HadOutput == nil {
+				continue
+			}
+			return *operation.HadOutput, true
+		}
+		return false, false
+	}
+	return false, false
+}
+
 func TestCompleteTurn_PublishesHadOutput(t *testing.T) {
 	tests := []struct {
 		name string
@@ -94,6 +121,13 @@ func TestCompleteTurn_PublishesHadOutput(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("had_output = %v, want %v", got, tt.want)
+			}
+			receiptGot, receiptFound := lastTurnCompletedReceiptHadOutput(t, eventBus)
+			if !receiptFound {
+				t.Fatal("conversation receipt missing had_output")
+			}
+			if receiptGot != tt.want {
+				t.Errorf("conversation receipt had_output = %v, want %v", receiptGot, tt.want)
 			}
 		})
 	}

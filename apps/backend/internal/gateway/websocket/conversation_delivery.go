@@ -355,7 +355,7 @@ func projectConversationOperation(subscription conversationSubscription, operati
 		if subscription.ConsumerKind == conversationConsumerPlugin {
 			result.Turn = safePluginConversationTurn(operation.Turn)
 		} else {
-			result.Turn = safeCoreConversationTurn(operation.Turn)
+			result.Turn = safeCoreConversationTurn(operation.Turn, operation.HadOutput)
 		}
 	default:
 		return result, false
@@ -399,10 +399,13 @@ func safePluginConversationTurn(turn *models.Turn) map[string]any {
 	return payload
 }
 
-func safeCoreConversationTurn(turn *models.Turn) map[string]any {
+func safeCoreConversationTurn(turn *models.Turn, hadOutput *bool) map[string]any {
 	payload := map[string]any{
 		"id": turn.ID, "session_id": turn.TaskSessionID, "task_id": turn.TaskID,
 		"started_at": turn.StartedAt, "updated_at": turn.UpdatedAt,
+	}
+	if metadata := models.ProjectTurnMetadata(turn.Metadata); len(metadata) > 0 {
+		payload["metadata"] = metadata
 	}
 	if turn.ExecutionProfileID != "" {
 		payload["execution_profile_id"] = turn.ExecutionProfileID
@@ -412,6 +415,9 @@ func safeCoreConversationTurn(turn *models.Turn) map[string]any {
 	}
 	if turn.CompletedAt != nil {
 		payload["completed_at"] = turn.CompletedAt
+	}
+	if hadOutput != nil {
+		payload["had_output"] = *hadOutput
 	}
 	return payload
 }

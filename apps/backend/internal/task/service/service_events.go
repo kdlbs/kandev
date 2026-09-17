@@ -1071,8 +1071,12 @@ func projectConversationReceipt(receipt *models.ConversationMutationReceipt) *mo
 		}
 		if operation.Turn != nil {
 			turn := *operation.Turn
-			turn.Metadata = nil
+			turn.Metadata = models.ProjectTurnMetadata(turn.Metadata)
 			copyOperation.Turn = &turn
+		}
+		if operation.HadOutput != nil {
+			hadOutput := *operation.HadOutput
+			copyOperation.HadOutput = &hadOutput
 		}
 		projected.Operations = append(projected.Operations, copyOperation)
 	}
