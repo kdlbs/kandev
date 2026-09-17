@@ -1,3 +1,4 @@
+import { buildChatMotionActions, loadChatMotionState } from "./chat-motion-actions";
 import type { StateCreator } from "zustand";
 import {
   getStoredCollapsedSubtaskParents,
@@ -178,6 +179,7 @@ export const defaultUIState: UISliceState = {
     savedMode: DEFAULT_SETTINGS_MENU_MODE,
     expandedKeys: [],
   },
+  chatMotion: { enabled: true, savedEnabled: true },
   richOutputMotion: {
     enabled: true,
     savedEnabled: true,
@@ -377,9 +379,11 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   appSidebar: loadAppSidebarState(),
   settingsMenu: loadSettingsMenuState(),
   richOutputMotion: loadRichOutputMotionState(),
+  chatMotion: loadChatMotionState(),
   ...buildAppSidebarActions(set),
   ...buildSettingsMenuActions(set),
   ...buildRichOutputMotionActions(set),
+  ...buildChatMotionActions(set),
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),

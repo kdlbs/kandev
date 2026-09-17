@@ -274,6 +274,9 @@ export type RichOutputMotionState = {
   savedEnabled: boolean;
 };
 
+/** Chat text and scroll motion, independently saved per device. */
+export type ChatMotionState = { enabled: boolean; savedEnabled: boolean };
+
 /** Unified AppSidebar collapse + per-section expand state (localStorage). */
 export type AppSidebarState = {
   collapsed: boolean;
@@ -335,6 +338,7 @@ export type UISliceState = {
   settingsMenu: SettingsMenuState;
   /** Agent rich-output chart animation preference (localStorage). */
   richOutputMotion: RichOutputMotionState;
+  chatMotion: ChatMotionState;
   /**
    * Most recently dismissed `last_agent_error` stamp per sessionId. Shared by
    * the chat banner and the sidebar error icon so dismissing the banner also
@@ -521,6 +525,9 @@ export type UISliceActions = {
   commitRichOutputAnimations: (enabled: boolean) => void;
   /** Restore the persisted rich-output chart motion preference. */
   restoreRichOutputAnimations: () => void;
+  previewChatAnimations: (enabled: boolean) => void;
+  commitChatAnimations: (enabled: boolean) => void;
+  restoreChatAnimations: () => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

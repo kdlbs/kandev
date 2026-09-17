@@ -30,7 +30,8 @@ restoration, and catch-up after the user enables auto-scroll again.
 
 `message-list-native-scroll.ts` owns one helper that places the native scroll
 container at its maximum vertical offset with a write-only scroll command. The
-common message-update and work-start paths call this helper. They do not read
+common message-update and work-start paths call this helper when chat motion
+is disabled. They do not read
 `scrollHeight`, `clientHeight`, a bounding rectangle, or computed style before
 the write.
 
@@ -42,7 +43,12 @@ to the top of the scroll container.
 The existing near-bottom reference remains the decision input. The helper does
 not add a second animation frame, smooth scrolling, or a resize observer.
 
-Tests instrument the common append path. A `scrollHeight` getter fails the test
+When chat motion is enabled, the same policy requests the cancelable frame
+controller in [Chat Motion](chat-motion.md). That controller reads geometry only
+in scheduled frames. Initial placement, restoration, and prepend compensation
+remain immediate and cancel any active motion before placing the viewport.
+
+Tests instrument the immediate append path. A `scrollHeight` getter fails the test
 if that path reads it. The scroll setter records the WebKit-safe offset.
 
 ## Persistent-panel visibility lifecycle

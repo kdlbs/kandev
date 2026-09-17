@@ -255,6 +255,19 @@ the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under
 Provider Usage**. Kandev hides the context ring rather than presenting
 impossible data when reported use exceeds the reported window.
 
+## Control chat animations
+
+Open **Settings > Preferences > Appearance** and change **Chat animations**.
+The setting is on by default and controls incoming text, new chat items, and
+smooth scrolling on this device. Choose **Save changes** to keep the choice
+across reloads, or **Reset** to discard the preview.
+
+Your device's reduced-motion preference disables these effects even when the
+switch is on. Turning chat animations off keeps content visible immediately
+and leaves the session's auto-scroll preference unchanged. Scroll up to read
+history without being pulled back by incoming content. Rich-output chart
+animations have their own Appearance setting.
+
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.

@@ -56,10 +56,14 @@ function useDebouncedSearch(
 }
 
 /** Focus a hit in the DOM with scroll + flash animation. */
-function focusMessageElement(id: string): boolean {
+function focusMessageElement(id: string, navigate?: (id: string) => boolean): boolean {
   const el = document.getElementById(`msg-${id}`);
   if (!el) return false;
-  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (navigate) {
+    if (!navigate(id)) return false;
+  } else {
+    el.scrollIntoView({ block: "center", behavior: "auto" });
+  }
   el.classList.remove("search-flash");
   // Force reflow so animation replays when re-clicked
   void el.offsetWidth;
@@ -73,29 +77,31 @@ function useSetActiveHit(
   loadOlder: (() => Promise<number>) | undefined,
   setActiveHitIdState: (id: string | null) => void,
   genRef: React.RefObject<number>,
+  navigate?: (id: string) => boolean,
 ) {
   return useCallback(
     async (id: string | null) => {
       setActiveHitIdState(id);
       if (!id) return;
       const myGen = ++genRef.current;
-      if (focusMessageElement(id)) return;
+      if (focusMessageElement(id, navigate)) return;
       if (!loadOlder) return;
       for (let i = 0; i < MAX_BACKFILL_ITERATIONS; i++) {
         const loaded = await loadOlder();
         // Superseded by a newer setActiveHit, or close/unmount bumped genRef.
         if (genRef.current !== myGen) return;
         if (loaded === 0) break;
-        if (focusMessageElement(id)) return;
+        if (focusMessageElement(id, navigate)) return;
       }
     },
-    [loadOlder, setActiveHitIdState, genRef],
+    [loadOlder, setActiveHitIdState, genRef, navigate],
   );
 }
 
 export function useSessionSearch(
   sessionId: string | null | undefined,
   loadOlder?: () => Promise<number>,
+  navigate?: (id: string) => boolean,
 ): SessionSearchHook {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQueryState] = useState("");
@@ -138,7 +144,7 @@ export function useSessionSearch(
     // Abort any in-flight setActiveHit backfill loop.
     activeHitGenRef.current++;
   }, []);
-  const setActiveHit = useSetActiveHit(loadOlder, setActiveHitIdState, activeHitGenRef);
+  const setActiveHit = useSetActiveHit(loadOlder, setActiveHitIdState, activeHitGenRef, navigate);
 
   return {
     isOpen,

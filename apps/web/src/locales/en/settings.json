@@ -797,5 +797,8 @@
   "sidebarHoverDelayError": "Enter a whole number from 0 to 5000.",
   "discoveryAliasesSidebarHover": "sidebar hover reveal delay wait mouse trackpad",
   "autoFocusNewTasks": "Auto-focus new tasks",
-  "autoFocusNewTasksHelp": "Open newly created tasks automatically. Turn this off to stay on your current view. Tasks and agents still start as requested."
+  "autoFocusNewTasksHelp": "Open newly created tasks automatically. Turn this off to stay on your current view. Tasks and agents still start as requested.",
+  "chatAnimations": "Chat animations",
+  "chatAnimationsDescription": "Animate incoming text, new chat items, and scrolling on this device. Respects reduced motion.",
+  "discoveryAliasesChatMotion": "chat animations smooth scrolling text motion"
 }

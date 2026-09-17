@@ -797,5 +797,8 @@
   "sidebarHoverDelayError": "Introduza um número inteiro entre 0 e 5000.",
   "discoveryAliasesSidebarHover": "barra lateral passar rato mostrar atraso espera trackpad",
   "autoFocusNewTasks": "Focar automaticamente novas tarefas",
-  "autoFocusNewTasksHelp": "Abre automaticamente as tarefas recém-criadas. Desative esta opção para manter a vista atual. As tarefas e os agentes continuam a iniciar conforme solicitado."
+  "autoFocusNewTasksHelp": "Abre automaticamente as tarefas recém-criadas. Desative esta opção para manter a vista atual. As tarefas e os agentes continuam a iniciar conforme solicitado.",
+  "chatAnimations": "Animações do chat",
+  "chatAnimationsDescription": "Animar o texto recebido, os novos elementos do chat e a deslocação neste dispositivo. Respeita a preferência de movimento reduzido.",
+  "discoveryAliasesChatMotion": "chat animações deslocação suave texto movimento"
 }

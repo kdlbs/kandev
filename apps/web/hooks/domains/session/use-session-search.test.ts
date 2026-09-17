@@ -127,3 +127,17 @@ describe("useSessionSearch", () => {
     expect(result.current.query).toBe("");
   });
 });
+
+it("delegates search navigation to the transcript scroll owner", async () => {
+  const row = document.createElement("div");
+  row.id = "msg-owned";
+  document.body.append(row);
+  const navigate = vi.fn(() => true);
+  const { result, unmount } = renderHook(() => useSessionSearch("sess-1", undefined, navigate));
+  await act(async () => {
+    result.current.setActiveHit("owned");
+  });
+  expect(navigate).toHaveBeenCalledWith("owned");
+  unmount();
+  row.remove();
+});

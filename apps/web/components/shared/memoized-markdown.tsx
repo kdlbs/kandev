@@ -9,6 +9,7 @@ import {
   remarkPlugins,
   type MarkdownFileLinkContextValue,
 } from "@/components/shared/markdown-components";
+import { ChatMotionSpan, useChatMarkdownMotion } from "./chat-markdown-motion";
 import { normalizeCached } from "@/lib/markdown/normalize-cache";
 
 /**
@@ -24,6 +25,7 @@ type MemoizedMarkdownProps = MarkdownFileLinkContextValue & {
   content: string;
   components?: Components;
   taskId?: string | null;
+  animateText?: boolean;
 };
 
 export const MemoizedMarkdown = memo(function MemoizedMarkdown({
@@ -33,6 +35,7 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   fileRootAliases,
   components,
   taskId = null,
+  animateText = false,
 }: MemoizedMarkdownProps) {
   const inheritedContext = useContext(MarkdownFileLinkContext);
   const fileLinkContext = useMemo(
@@ -50,13 +53,25 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
       worktreePath,
     ],
   );
-  const resolvedComponents = components ?? markdownComponents;
+  const normalized = normalizeCached(content);
+  const motionPlugins = useChatMarkdownMotion(normalized, animateText);
+  const resolvedComponents = useMemo(
+    () =>
+      animateText
+        ? { ...(components ?? markdownComponents), span: ChatMotionSpan }
+        : (components ?? markdownComponents),
+    [animateText, components],
+  );
 
   return (
     <MarkdownTaskContext.Provider value={taskId}>
       <MarkdownFileLinkContext.Provider value={fileLinkContext}>
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={resolvedComponents}>
-          {normalizeCached(content)}
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={motionPlugins}
+          components={resolvedComponents}
+        >
+          {normalized}
         </ReactMarkdown>
       </MarkdownFileLinkContext.Provider>
     </MarkdownTaskContext.Provider>
