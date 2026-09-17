@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -17,7 +17,7 @@ import (
 // is the production implementation; tests substitute a fake so poller
 // lifecycle/concurrency behavior can be verified under testing/synctest
 // without real SSH or network I/O.
-type probeFunc func(ctx context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome
+type probeFunc func(ctx context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome
 
 // Poller sweeps every eligible SSH executor on intervalSeconds, probing each
 // with bounded concurrency and persisting results through store. An
@@ -235,7 +235,7 @@ func (p *Poller) runPass(ctx context.Context) {
 
 // probeAndPersist runs one probe and records it, unless the probe was
 // cancelled — a cancelled outcome is not an observation about the host and
-// must never be written (see lifecycle.SSHProbeOutcome.Cancelled).
+// must never be written (see agentruntime.SSHProbeOutcome.Cancelled).
 func (p *Poller) probeAndPersist(ctx context.Context, executor *models.Executor) {
 	outcome := p.probe(ctx, executor)
 	if outcome.Cancelled {
@@ -249,7 +249,7 @@ func (p *Poller) probeAndPersist(ctx context.Context, executor *models.Executor)
 // write actually changed the stored state or reason, announces it through
 // the publisher — the one propagation path every probe primitive
 // (scheduled pass, ProbeNow, ProbeAndWait) shares.
-func (p *Poller) observeAndPublish(ctx context.Context, executor *models.Executor, outcome lifecycle.SSHProbeOutcome) observeResult {
+func (p *Poller) observeAndPublish(ctx context.Context, executor *models.Executor, outcome agentruntime.SSHProbeOutcome) observeResult {
 	result := p.store.Observe(ctx, executor, outcome, time.Now().UTC())
 	if result.Changed && p.publisher != nil {
 		p.publisher.PublishChanged(ctx, result.After, p.EffectiveIntervalSeconds())

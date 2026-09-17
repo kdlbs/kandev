@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -30,12 +30,12 @@ func TestPollerProbeAndWait_CoalescesConcurrentCallsForSameExecutor(t *testing.T
 	var dialCount int32
 	started := make(chan struct{})
 	release := make(chan struct{})
-	p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
+	p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
 		if atomic.AddInt32(&dialCount, 1) == 1 {
 			close(started)
 		}
 		<-release
-		return lifecycle.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
+		return agentruntime.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
 	}
 
 	executor := sshExecutor("exec-coalesce")
@@ -87,8 +87,8 @@ func TestPollerProbeAndWait_ReturnsIndependentRecordCopies(t *testing.T) {
 	p := New(repo, 60, logger.Default())
 	p.Start(context.Background())
 	defer p.Stop()
-	p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-		return lifecycle.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
+	p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+		return agentruntime.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
 	}
 
 	executor := sshExecutor("exec-copy")
@@ -123,8 +123,8 @@ func TestPollerProbeAndWait_WorksWhilePollerDisabled(t *testing.T) {
 	p := New(repo, 0, logger.Default())
 	p.Start(context.Background())
 	defer p.Stop()
-	p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-		return lifecycle.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
+	p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+		return agentruntime.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
 	}
 
 	result, ran := p.ProbeAndWait(sshExecutor("exec-disabled"))
@@ -147,8 +147,8 @@ func TestPollerProbeAndWait_WriteRefusedReportsPersistedFalse(t *testing.T) {
 	p := New(repo, 60, logger.Default())
 	p.Start(context.Background())
 	defer p.Stop()
-	p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-		return lifecycle.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
+	p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+		return agentruntime.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
 	}
 
 	result, ran := p.ProbeAndWait(sshExecutor("exec-refused"))
@@ -170,9 +170,9 @@ func TestPollerProbeAndWait_RefusedAfterStop(t *testing.T) {
 	p.Stop()
 
 	dialed := false
-	p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
+	p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
 		dialed = true
-		return lifecycle.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
+		return agentruntime.SSHProbeOutcome{Success: true, Host: executor.Config["ssh_host"]}
 	}
 
 	_, ran := p.ProbeAndWait(sshExecutor("exec-stopped"))

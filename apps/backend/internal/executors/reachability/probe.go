@@ -3,23 +3,20 @@ package reachability
 import (
 	"context"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// reachabilityProber is the production seam over the runtime's SSH
+// reachability prober. Tests substitute probeFunc directly, so this stays
+// unexported and unmocked.
+var reachabilityProber = agentruntime.NewSSHReachabilityProber()
+
 // defaultProbe resolves executor's SSH target from its persisted config and
 // probes it. A resolution failure (missing host, invalid port, unresolvable
-// alias) never reaches ProbeSSHHost — it is reported as
-// SSHReachabilityReasonConfig directly, the same reason ProbeSSHHost itself
-// uses for a target with no pinned fingerprint.
-func defaultProbe(ctx context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-	target, err := lifecycle.SSHTargetFromExecutorConfig(executor.Config)
-	if err != nil {
-		return lifecycle.SSHProbeOutcome{
-			Host:    executor.Config["ssh_host"],
-			Reason:  lifecycle.SSHReachabilityReasonConfig,
-			Message: err.Error(),
-		}
-	}
-	return lifecycle.ProbeSSHHost(ctx, target, probeTimeout)
+// alias) never dials — it is reported as
+// agentruntime.SSHReachabilityReasonConfig directly, the same reason a
+// target with no pinned fingerprint uses.
+func defaultProbe(ctx context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+	return reachabilityProber.Probe(ctx, executor.Config, probeTimeout)
 }

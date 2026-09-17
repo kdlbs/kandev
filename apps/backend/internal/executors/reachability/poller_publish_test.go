@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -39,8 +39,8 @@ func TestPollerProbeNow_PublishesOnlyOnChange(t *testing.T) {
 	executor := sshExecutor("exec-publish")
 
 	// First success: unknown -> reachable is a change.
-	p.probe = func(_ context.Context, e *models.Executor) lifecycle.SSHProbeOutcome {
-		return lifecycle.SSHProbeOutcome{Success: true, Host: e.Config["ssh_host"]}
+	p.probe = func(_ context.Context, e *models.Executor) agentruntime.SSHProbeOutcome {
+		return agentruntime.SSHProbeOutcome{Success: true, Host: e.Config["ssh_host"]}
 	}
 	if !p.ProbeNow(executor) {
 		t.Fatal("ProbeNow refused")

@@ -10,10 +10,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// reachabilityConfigValidator is the production seam over the runtime's SSH
+// reachability prober, used only to check whether an executor's config
+// resolves to a dialable target — no probe is actually run here.
+var reachabilityConfigValidator = agentruntime.NewSSHReachabilityProber()
 
 // ReachabilityLister is the narrow repository slice the reachability GET
 // routes need: every stored record in one query (the list route) or a
@@ -198,7 +203,7 @@ func buildReachabilityDTOFromRecord(executor *models.Executor, record *models.Ex
 	if record != nil {
 		return reachabilitypkg.BuildRecordDTO(executor.ID, record, intervalSeconds, true)
 	}
-	if _, err := lifecycle.SSHTargetFromExecutorConfig(executor.Config); err != nil {
+	if err := reachabilityConfigValidator.ValidateConfig(executor.Config); err != nil {
 		synthetic := &models.ExecutorReachability{
 			ExecutorID: executor.ID,
 			State:      models.ExecutorReachabilityStateUnreachable,

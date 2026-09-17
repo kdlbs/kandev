@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -55,7 +55,7 @@ type store struct {
 // Observe records one probe outcome for executor. checkedAt is the probe's
 // own completion timestamp, supplied by the caller so a test can control it
 // precisely (see the design's last-write-wins contract).
-func (s *store) Observe(ctx context.Context, executor *models.Executor, outcome lifecycle.SSHProbeOutcome, checkedAt time.Time) observeResult {
+func (s *store) Observe(ctx context.Context, executor *models.Executor, outcome agentruntime.SSHProbeOutcome, checkedAt time.Time) observeResult {
 	before, _ := s.repo.GetExecutorReachability(ctx, executor.ID)
 
 	obs := buildObservation(executor, outcome, checkedAt)
@@ -133,7 +133,7 @@ func (s *store) logTransition(executor *models.Executor, previous, current model
 //     failureThreshold, so the state stays unknown — a record that doesn't
 //     exist yet is never promoted by a single below-threshold failure, the
 //     same rule the SQL enforces for an existing row.
-func buildObservation(executor *models.Executor, outcome lifecycle.SSHProbeOutcome, checkedAt time.Time) models.ExecutorReachabilityObservation {
+func buildObservation(executor *models.Executor, outcome agentruntime.SSHProbeOutcome, checkedAt time.Time) models.ExecutorReachabilityObservation {
 	reason := models.ExecutorReachabilityReason(outcome.Reason)
 	initialState := models.ExecutorReachabilityStateUnknown
 	initialFailures := 0

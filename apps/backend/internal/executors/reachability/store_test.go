@@ -8,7 +8,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
@@ -63,7 +63,7 @@ func TestStoreObserveHysteresisSequence(t *testing.T) {
 
 	type step struct {
 		label        string
-		outcome      lifecycle.SSHProbeOutcome
+		outcome      agentruntime.SSHProbeOutcome
 		wantState    models.ExecutorReachabilityState
 		wantChanged  bool
 		wantFailures int
@@ -71,15 +71,15 @@ func TestStoreObserveHysteresisSequence(t *testing.T) {
 	steps := []step{
 		{
 			label:        "1: first success establishes reachable",
-			outcome:      lifecycle.SSHProbeOutcome{Success: true, Host: "10.0.0.1"},
+			outcome:      agentruntime.SSHProbeOutcome{Success: true, Host: "10.0.0.1"},
 			wantState:    models.ExecutorReachabilityStateReachable,
 			wantChanged:  true,
 			wantFailures: 0,
 		},
 		{
 			label: "2: below-threshold failure leaves state reachable",
-			outcome: lifecycle.SSHProbeOutcome{
-				Host: "10.0.0.1", Reason: lifecycle.SSHReachabilityReasonNetwork, Message: "connection refused",
+			outcome: agentruntime.SSHProbeOutcome{
+				Host: "10.0.0.1", Reason: agentruntime.SSHReachabilityReasonNetwork, Message: "connection refused",
 			},
 			wantState:    models.ExecutorReachabilityStateReachable,
 			wantChanged:  false,
@@ -87,8 +87,8 @@ func TestStoreObserveHysteresisSequence(t *testing.T) {
 		},
 		{
 			label: "3: failure reaching failureThreshold flips to unreachable",
-			outcome: lifecycle.SSHProbeOutcome{
-				Host: "10.0.0.1", Reason: lifecycle.SSHReachabilityReasonNetwork, Message: "connection refused",
+			outcome: agentruntime.SSHProbeOutcome{
+				Host: "10.0.0.1", Reason: agentruntime.SSHReachabilityReasonNetwork, Message: "connection refused",
 			},
 			wantState:    models.ExecutorReachabilityStateUnreachable,
 			wantChanged:  true,
@@ -96,7 +96,7 @@ func TestStoreObserveHysteresisSequence(t *testing.T) {
 		},
 		{
 			label:        "4: a single success flips back to reachable with a zero counter",
-			outcome:      lifecycle.SSHProbeOutcome{Success: true, Host: "10.0.0.1"},
+			outcome:      agentruntime.SSHProbeOutcome{Success: true, Host: "10.0.0.1"},
 			wantState:    models.ExecutorReachabilityStateReachable,
 			wantChanged:  true,
 			wantFailures: 0,
@@ -134,10 +134,10 @@ func TestStoreObserveHysteresisSequence(t *testing.T) {
 func TestStoreObserveStickyFailureIsUnreachableOnFirstProbe(t *testing.T) {
 	tests := []struct {
 		name   string
-		reason lifecycle.SSHReachabilityReason
+		reason agentruntime.SSHReachabilityReason
 	}{
-		{"config", lifecycle.SSHReachabilityReasonConfig},
-		{"host_key", lifecycle.SSHReachabilityReasonHostKey},
+		{"config", agentruntime.SSHReachabilityReasonConfig},
+		{"host_key", agentruntime.SSHReachabilityReasonHostKey},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -146,7 +146,7 @@ func TestStoreObserveStickyFailureIsUnreachableOnFirstProbe(t *testing.T) {
 			s := &store{repo: repo, log: logger.Default()}
 			ctx := context.Background()
 
-			result := s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{
+			result := s.Observe(ctx, executor, agentruntime.SSHProbeOutcome{
 				Host: "10.0.0.1", Reason: tt.reason, Message: "boom",
 			}, time.Now().UTC())
 
@@ -181,16 +181,16 @@ func TestStoreObserveReportsChangedOnReasonChangeWithoutStateChange(t *testing.T
 	// Two failures reach failureThreshold and flip to unreachable.
 	for i := 0; i < 2; i++ {
 		executor.UpdatedAt = mustGetUpdatedAt(t, repo, executor.ID)
-		s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{
-			Host: "10.0.0.1", Reason: lifecycle.SSHReachabilityReasonNetwork, Message: "connection refused",
+		s.Observe(ctx, executor, agentruntime.SSHProbeOutcome{
+			Host: "10.0.0.1", Reason: agentruntime.SSHReachabilityReasonNetwork, Message: "connection refused",
 		}, base.Add(time.Duration(i)*time.Second))
 	}
 
 	// A third failure with a different transient reason keeps the state
 	// unreachable (already above threshold) but changes the stored reason.
 	executor.UpdatedAt = mustGetUpdatedAt(t, repo, executor.ID)
-	result := s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{
-		Host: "10.0.0.1", Reason: lifecycle.SSHReachabilityReasonTimeout, Message: "handshake timed out",
+	result := s.Observe(ctx, executor, agentruntime.SSHProbeOutcome{
+		Host: "10.0.0.1", Reason: agentruntime.SSHReachabilityReasonTimeout, Message: "handshake timed out",
 	}, base.Add(2*time.Second))
 
 	if result.StateChanged {
@@ -216,13 +216,13 @@ func TestStoreObserveReportsUnchangedWhenStateAndReasonBothRepeat(t *testing.T) 
 	ctx := context.Background()
 
 	executor.UpdatedAt = mustGetUpdatedAt(t, repo, executor.ID)
-	first := s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{Success: true, Host: "10.0.0.1"}, time.Now().UTC())
+	first := s.Observe(ctx, executor, agentruntime.SSHProbeOutcome{Success: true, Host: "10.0.0.1"}, time.Now().UTC())
 	if !first.Changed {
 		t.Fatalf("first observation: Changed = false, want true (unknown -> reachable)")
 	}
 
 	executor.UpdatedAt = mustGetUpdatedAt(t, repo, executor.ID)
-	second := s.Observe(ctx, executor, lifecycle.SSHProbeOutcome{Success: true, Host: "10.0.0.1"}, time.Now().UTC().Add(time.Second))
+	second := s.Observe(ctx, executor, agentruntime.SSHProbeOutcome{Success: true, Host: "10.0.0.1"}, time.Now().UTC().Add(time.Second))
 	if second.Changed {
 		t.Fatalf("second observation: Changed = true, want false — same state (reachable) and reason (success)")
 	}

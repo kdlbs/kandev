@@ -10,7 +10,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -116,7 +116,7 @@ func newConcurrencyProbe() *concurrencyProbe {
 	return &concurrencyProbe{release: make(chan struct{})}
 }
 
-func (c *concurrencyProbe) probe(ctx context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
+func (c *concurrencyProbe) probe(ctx context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
 	c.mu.Lock()
 	c.inFlight++
 	if c.inFlight > c.maxSeen {
@@ -130,21 +130,21 @@ func (c *concurrencyProbe) probe(ctx context.Context, executor *models.Executor)
 		c.mu.Lock()
 		c.inFlight--
 		c.mu.Unlock()
-		return lifecycle.SSHProbeOutcome{Host: executor.ID, Cancelled: true}
+		return agentruntime.SSHProbeOutcome{Host: executor.ID, Cancelled: true}
 	}
 
 	c.mu.Lock()
 	c.inFlight--
 	c.mu.Unlock()
-	return lifecycle.SSHProbeOutcome{Host: executor.ID, Success: true}
+	return agentruntime.SSHProbeOutcome{Host: executor.ID, Success: true}
 }
 
 func TestPollerStart_RunsImmediatePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		repo := newFakeRepository(sshExecutor("a"), sshExecutor("b"))
 		p := New(repo, 60, logger.Default())
-		p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-			return lifecycle.SSHProbeOutcome{Host: executor.ID, Success: true}
+		p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+			return agentruntime.SSHProbeOutcome{Host: executor.ID, Success: true}
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -164,8 +164,8 @@ func TestPollerStart_IsIdempotent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		repo := newFakeRepository(sshExecutor("a"))
 		p := New(repo, 60, logger.Default())
-		p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-			return lifecycle.SSHProbeOutcome{Host: executor.ID, Success: true}
+		p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+			return agentruntime.SSHProbeOutcome{Host: executor.ID, Success: true}
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -191,8 +191,8 @@ func TestPollerZeroInterval_DisablesScheduledPass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		repo := newFakeRepository(sshExecutor("a"))
 		p := New(repo, 0, logger.Default())
-		p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-			return lifecycle.SSHProbeOutcome{Host: executor.ID, Success: true}
+		p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+			return agentruntime.SSHProbeOutcome{Host: executor.ID, Success: true}
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -216,8 +216,8 @@ func TestPollerZeroInterval_ProbeNowStillWorks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		repo := newFakeRepository(sshExecutor("a"))
 		p := New(repo, 0, logger.Default())
-		p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-			return lifecycle.SSHProbeOutcome{Host: executor.ID, Success: true}
+		p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+			return agentruntime.SSHProbeOutcome{Host: executor.ID, Success: true}
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -322,8 +322,8 @@ func TestPollerStop_DiscardsCancelledProbeResult(t *testing.T) {
 func TestPollerProbeNow_RefusedAfterStop(t *testing.T) {
 	repo := newFakeRepository(sshExecutor("a"))
 	p := New(repo, 60, logger.Default())
-	p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-		return lifecycle.SSHProbeOutcome{Host: executor.ID, Success: true}
+	p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+		return agentruntime.SSHProbeOutcome{Host: executor.ID, Success: true}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -340,8 +340,8 @@ func TestPollerListFailure_AbandonsPassWithoutWriting(t *testing.T) {
 		repo := newFakeRepository(sshExecutor("a"))
 		repo.listErr = context.DeadlineExceeded
 		p := New(repo, 60, logger.Default())
-		p.probe = func(_ context.Context, executor *models.Executor) lifecycle.SSHProbeOutcome {
-			return lifecycle.SSHProbeOutcome{Host: executor.ID, Success: true}
+		p.probe = func(_ context.Context, executor *models.Executor) agentruntime.SSHProbeOutcome {
+			return agentruntime.SSHProbeOutcome{Host: executor.ID, Success: true}
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())

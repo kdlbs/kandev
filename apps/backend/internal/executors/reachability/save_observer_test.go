@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -19,8 +19,8 @@ import (
 func newTestSaveObserver(t *testing.T, repo *fakeRepository) (*SaveObserver, *Poller) {
 	t.Helper()
 	poller := New(repo, 0, logger.Default())
-	poller.probe = func(_ context.Context, e *models.Executor) lifecycle.SSHProbeOutcome {
-		return lifecycle.SSHProbeOutcome{Success: true, Host: e.Config["ssh_host"]}
+	poller.probe = func(_ context.Context, e *models.Executor) agentruntime.SSHProbeOutcome {
+		return agentruntime.SSHProbeOutcome{Success: true, Host: e.Config["ssh_host"]}
 	}
 	poller.Start(context.Background())
 	return NewSaveObserver(poller), poller
@@ -174,8 +174,8 @@ func TestSaveObserverPublishesChangeEventWhenPriorRecordWasObserved(t *testing.T
 
 	poller := New(repo, 0, logger.Default())
 	poller.SetPublisher(NewPublisher(eventBus))
-	poller.probe = func(_ context.Context, e *models.Executor) lifecycle.SSHProbeOutcome {
-		return lifecycle.SSHProbeOutcome{Success: true, Host: e.Config["ssh_host"]}
+	poller.probe = func(_ context.Context, e *models.Executor) agentruntime.SSHProbeOutcome {
+		return agentruntime.SSHProbeOutcome{Success: true, Host: e.Config["ssh_host"]}
 	}
 	poller.Start(context.Background())
 	defer poller.Stop()
@@ -227,9 +227,9 @@ func TestSaveObserverDoesNotPublishFromResetWhenNoPriorRecord(t *testing.T) {
 	probeGate := make(chan struct{})
 	poller := New(repo, 0, logger.Default())
 	poller.SetPublisher(NewPublisher(eventBus))
-	poller.probe = func(_ context.Context, e *models.Executor) lifecycle.SSHProbeOutcome {
+	poller.probe = func(_ context.Context, e *models.Executor) agentruntime.SSHProbeOutcome {
 		<-probeGate
-		return lifecycle.SSHProbeOutcome{Success: true, Host: e.Config["ssh_host"]}
+		return agentruntime.SSHProbeOutcome{Success: true, Host: e.Config["ssh_host"]}
 	}
 	poller.Start(context.Background())
 	defer poller.Stop()
