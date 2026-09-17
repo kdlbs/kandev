@@ -126,13 +126,22 @@ describe("WebhookFiltersConfig", () => {
     ]);
   });
 
-  it("commits a blank, never-edited single-value field as an empty array", () => {
+  it("commits a blank single-value field as an explicit empty-string value", () => {
     const onChange = renderFilters([{ path: "severity", op: "eq", values: [] }]);
 
     const input = screen.getByPlaceholderText("critical");
     fireEvent.blur(input);
 
-    expect(onChange).toHaveBeenCalledWith([{ path: "severity", op: "eq", values: [] }]);
+    expect(onChange).toHaveBeenCalledWith([{ path: "severity", op: "eq", values: [""] }]);
+  });
+
+  it("preserves an existing empty-string scalar value after blur", () => {
+    const onChange = renderFilters([{ path: "issue.id", op: "ne", values: [""] }]);
+
+    const input = screen.getByPlaceholderText("critical");
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledWith([{ path: "issue.id", op: "ne", values: [""] }]);
   });
 
   it("commits a blank, never-edited values field as an empty array", () => {

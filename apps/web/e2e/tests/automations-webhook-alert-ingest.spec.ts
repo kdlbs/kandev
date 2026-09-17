@@ -107,6 +107,16 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     await valuesInput.fill("critical, fatal");
     await valuesInput.blur();
 
+    // A Crashlytics alert uses an explicit empty string to reject alerts with
+    // no issue identifier. Leave this scalar value blank, then verify that
+    // save/reload keeps the one-value filter valid.
+    await triggerCard.getByRole("button", { name: "Add filter" }).click();
+    const filterPaths = triggerCard.getByPlaceholder("severity");
+    await filterPaths.nth(1).fill("issue.id");
+    await triggerCard.getByRole("combobox").nth(1).click();
+    await testPage.getByRole("option", { name: "Not equals", exact: true }).click();
+    await triggerCard.getByPlaceholder("critical").blur();
+
     // Repository selector.
     await triggerCard.getByPlaceholder("service").fill("service");
 
@@ -126,9 +136,14 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     const reopened = testPage.getByTestId("trigger-card-webhook");
 
     await expect(reopened.getByPlaceholder("issue.id")).toHaveValue("issue.id");
-    await expect(reopened.getByPlaceholder("severity")).toHaveValue("severity");
-    await expect(reopened.getByRole("combobox")).toContainText("In list");
+    const reopenedFilterPaths = reopened.getByPlaceholder("severity");
+    await expect(reopenedFilterPaths).toHaveCount(2);
+    await expect(reopenedFilterPaths.nth(0)).toHaveValue("severity");
+    await expect(reopenedFilterPaths.nth(1)).toHaveValue("issue.id");
+    await expect(reopened.getByRole("combobox").nth(0)).toContainText("In list");
+    await expect(reopened.getByRole("combobox").nth(1)).toContainText("Not equals");
     await expect(reopened.getByPlaceholder("critical, fatal")).toHaveValue("critical, fatal");
+    await expect(reopened.getByPlaceholder("critical")).toHaveValue("");
     await expect(reopened.getByPlaceholder("service")).toHaveValue("service");
   });
 

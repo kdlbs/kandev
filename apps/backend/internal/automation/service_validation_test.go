@@ -103,6 +103,7 @@ func TestAddTrigger_AcceptsValidWebhookFilters(t *testing.T) {
 	cfg, err := json.Marshal(WebhookTriggerConfig{Filters: []WebhookFilter{
 		{Path: "a", Op: WebhookFilterOpEq, Values: []string{"v"}},
 		{Path: "b", Op: WebhookFilterOpNe, Values: []string{"v"}},
+		{Path: "h", Op: WebhookFilterOpNe, Values: []string{""}},
 		{Path: "c", Op: WebhookFilterOpIn, Values: []string{"v1", "v2"}},
 		{Path: "d", Op: WebhookFilterOpNotIn, Values: nil},
 		{Path: "e", Op: WebhookFilterOpExists},

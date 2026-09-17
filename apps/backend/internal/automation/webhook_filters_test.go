@@ -72,6 +72,27 @@ func TestEvaluateFilters_Operators(t *testing.T) {
 	}
 }
 
+func TestEvaluateFilters_CrashlyticsIssueIDNotBlank(t *testing.T) {
+	filter := WebhookFilter{Path: "issue.id", Op: WebhookFilterOpNe, Values: []string{""}}
+	cases := []struct {
+		name string
+		data map[string]interface{}
+		want bool
+	}{
+		{"blank issue id is rejected", map[string]interface{}{"issue": map[string]interface{}{"id": ""}}, false},
+		{"nonblank issue id is accepted", map[string]interface{}{"issue": map[string]interface{}{"id": "crash-123"}}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := EvaluateFilters([]WebhookFilter{filter}, tc.data)
+			if ok != tc.want {
+				t.Errorf("got ok=%v, want %v", ok, tc.want)
+			}
+		})
+	}
+}
+
 func TestEvaluateFilters_NestedPath(t *testing.T) {
 	data := map[string]interface{}{
 		"alert": map[string]interface{}{"severity": "critical"},

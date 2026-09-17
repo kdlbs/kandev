@@ -167,7 +167,7 @@ function FilterValueCell({
     return (
       <FilterScalarValueInput
         value={filter.values?.[0] ?? ""}
-        onChange={(value) => onChange({ ...filter, values: value === "" ? [] : [value] })}
+        onChange={(value) => onChange({ ...filter, values: [value] })}
       />
     );
   }
@@ -189,7 +189,9 @@ function FilterValueCell({
 // dropped (so "critical, fatal ," commits as ["critical", "fatal"]), but an
 // otherwise-empty segment is kept — so typing "," commits an explicit single
 // empty-string value (values: [""]). A field that was never edited, or holds
-// only whitespace, commits as an empty array rather than [""].
+// only whitespace, commits as an empty array for list operators. Scalar
+// operators use FilterScalarValueInput and commit [""] for a blank value,
+// because they require exactly one value even when the payload value is blank.
 function commitFilterValues(text: string): string[] {
   if (text.trim() === "") {
     return [];
