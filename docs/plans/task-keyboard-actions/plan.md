@@ -201,3 +201,8 @@ desktop browser scenarios, and 4 phone browser scenarios passed. Browser coverag
 includes archived Rename/Link/Delete availability, move previews' existing controls,
 modified-Enter submission, retry retention, and native phone drawers.
 Remote CI and review completion remain pending until the remediation is pushed.
+
+CodeRabbit aggregate-review remediation excludes workflows with no destinations
+and labels Escape as Back in nested command menus. Both regressions failed before
+the fixes and passed afterward (7 focused tests); typecheck, lint, and the browser
+asset build also passed. These supplement the post-merge validation above.

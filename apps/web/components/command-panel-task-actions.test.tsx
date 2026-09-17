@@ -99,6 +99,7 @@ it("navigates into current child commands and back without executing the parent"
   );
   fireEvent.click(await screen.findByRole("option", { name: "Move to" }));
   expect(await screen.findByRole("option", { name: "Review" })).toBeTruthy();
+  expect(screen.getByText("esc").parentElement?.textContent).toContain("Back");
   expect(review).not.toHaveBeenCalled();
   fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
   expect(await screen.findByRole("option", { name: "Move to" })).toBeTruthy();

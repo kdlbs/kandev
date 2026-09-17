@@ -107,7 +107,7 @@ function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
       <KbdGroup>
         {/* A key name, not copy — it labels the physical key. */}
         <Kbd>esc</Kbd>
-        <span>{t("common:close")}</span>
+        <span>{t(mode === MODE_COMMAND_CHILDREN ? "common:back" : "common:close")}</span>
       </KbdGroup>
     </div>
   );

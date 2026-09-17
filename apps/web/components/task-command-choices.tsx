@@ -141,13 +141,13 @@ function useTaskNestChoices(task: TaskSwitcherItem): CommandItem[] {
   return items;
 }
 
-function useTaskMoveChoices({
+export function useTaskMoveChoices({
   task,
   workflows,
   stepsByWorkflowId,
   openMoveOptions,
   moveImmediately,
-}: ChoiceOptions) {
+}: Omit<ChoiceOptions, "linkHandlers">) {
   const { t } = useTranslation();
   const { currentSteps, targets } = taskMoveOptions(task.workflowId, workflows, stepsByWorkflowId);
   const group = t("task:moveTo");
@@ -170,13 +170,15 @@ function useTaskMoveChoices({
   const steps = currentSteps
     .filter((step) => step.id !== task.workflowStepId)
     .map((step) => choice(step, task.workflowId!, group));
-  const workflowChoices: CommandItem[] = targets.map((workflow) => ({
-    id: `task-workflow-${workflow.id}`,
-    label: workflow.name,
-    group: t("task:sendToWorkflow"),
-    children: (stepsByWorkflowId[workflow.id] ?? []).map((step) =>
-      choice(step, workflow.id, workflow.name),
-    ),
-  }));
+  const workflowChoices: CommandItem[] = targets
+    .filter((workflow) => (stepsByWorkflowId[workflow.id]?.length ?? 0) > 0)
+    .map((workflow) => ({
+      id: `task-workflow-${workflow.id}`,
+      label: workflow.name,
+      group: t("task:sendToWorkflow"),
+      children: (stepsByWorkflowId[workflow.id] ?? []).map((step) =>
+        choice(step, workflow.id, workflow.name),
+      ),
+    }));
   return { steps, workflows: workflowChoices };
 }
