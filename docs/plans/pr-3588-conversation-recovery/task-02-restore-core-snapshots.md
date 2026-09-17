@@ -13,7 +13,6 @@ acceptance_criteria:
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.5
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.6
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.9
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.15
   - AC-PLUGINS-PROMPT-HISTORY-HOST-005.3
 system_design:
   - "../../specs/plugins/system-design/conversation-recovery.md"
