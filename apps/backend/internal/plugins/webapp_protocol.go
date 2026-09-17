@@ -338,6 +338,8 @@ func webAppProtocolStatus(err error) int {
 		return http.StatusConflict
 	case codes.Unimplemented:
 		return http.StatusNotImplemented
+	case codes.ResourceExhausted:
+		return http.StatusInternalServerError
 	default:
 		if errors.Is(err, context.DeadlineExceeded) {
 			return http.StatusGatewayTimeout

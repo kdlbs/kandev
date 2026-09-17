@@ -85,6 +85,38 @@ type webAppPullRequest struct {
 	AuthorLogin             string  `json:"author_login"`
 }
 
+type webAppTaskDependencyRef struct {
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	State  string `json:"state,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// webAppTaskDependencyRefFromSDK redacts Title and State when ref falls
+// outside callerWorkspaceID (REQ-PLUGINS-TASK-DEPS-003): a canvas grant is
+// scoped to one workspace (or, for an instance-scoped canvas, none —
+// callerWorkspaceID empty means no redaction applies), and this decision
+// uses only WorkspaceID already carried on ref, never a further read.
+func webAppTaskDependencyRefFromSDK(ref pluginsdk.TaskDependencyRef, callerWorkspaceID string) webAppTaskDependencyRef {
+	out := webAppTaskDependencyRef{ID: ref.ID, Title: ref.Title, State: ref.State, Status: ref.Status}
+	if callerWorkspaceID != "" && ref.WorkspaceID != "" && ref.WorkspaceID != callerWorkspaceID {
+		out.Title = ""
+		out.State = ""
+	}
+	return out
+}
+
+// webAppTaskDependencyRefsFromSDK never returns nil, even for an empty or
+// nil input: depends_on/blocks always serialize as [], never as null or an
+// absent field.
+func webAppTaskDependencyRefsFromSDK(refs []pluginsdk.TaskDependencyRef, callerWorkspaceID string) []webAppTaskDependencyRef {
+	out := make([]webAppTaskDependencyRef, len(refs))
+	for i, ref := range refs {
+		out[i] = webAppTaskDependencyRefFromSDK(ref, callerWorkspaceID)
+	}
+	return out
+}
+
 type webAppTask struct {
 	ID                     string                 `json:"id"`
 	WorkspaceID            string                 `json:"workspace_id"`
@@ -115,9 +147,23 @@ type webAppTask struct {
 	QueuedAt               *string                `json:"queued_at,omitempty"`
 	ProjectID              string                 `json:"project_id,omitempty"`
 	ExternalID             string                 `json:"external_id,omitempty"`
+
+	Blocked       bool   `json:"blocked"`
+	BlockedReason string `json:"blocked_reason,omitempty"`
+	// DependsOn/Blocks never carry omitempty: an empty dependency graph still
+	// reports [], not an absent or null field.
+	DependsOn          []webAppTaskDependencyRef `json:"depends_on"`
+	Blocks             []webAppTaskDependencyRef `json:"blocks"`
+	DependsOnTruncated bool                      `json:"depends_on_truncated"`
+	BlocksTruncated    bool                      `json:"blocks_truncated"`
+	StartWhenUnblocked bool                      `json:"start_when_unblocked"`
 }
 
-func webAppTaskFromSDK(task pluginsdk.Task) webAppTask {
+// webAppTaskFromSDK converts task to its canvas wire form. callerWorkspaceID
+// is the requesting canvas's scoped workspace (binding.WorkspaceID; empty
+// for an instance-scoped canvas) and is used only to redact out-of-scope
+// dependency edge ends.
+func webAppTaskFromSDK(task pluginsdk.Task, callerWorkspaceID string) webAppTask {
 	result := webAppTask{
 		ID:                     task.ID,
 		WorkspaceID:            task.WorkspaceID,
@@ -146,6 +192,14 @@ func webAppTaskFromSDK(task pluginsdk.Task) webAppTask {
 		QueuedAt:               task.QueuedAt,
 		ProjectID:              task.ProjectID,
 		ExternalID:             task.ExternalID,
+
+		Blocked:            task.Blocked,
+		BlockedReason:      task.BlockedReason,
+		DependsOn:          webAppTaskDependencyRefsFromSDK(task.DependsOn, callerWorkspaceID),
+		Blocks:             webAppTaskDependencyRefsFromSDK(task.Blocks, callerWorkspaceID),
+		DependsOnTruncated: task.DependsOnTruncated,
+		BlocksTruncated:    task.BlocksTruncated,
+		StartWhenUnblocked: task.StartWhenUnblocked,
 	}
 	if len(task.Repositories) > 0 {
 		result.Repositories = make([]webAppTaskRepository, len(task.Repositories))

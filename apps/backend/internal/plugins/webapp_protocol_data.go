@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/webapp"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -49,21 +50,42 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 			writeWebAppJSON(w, r, http.StatusOK, webAppPage[webAppTask]{Items: []webAppTask{}, PageInfo: webAppPageInfo{}})
 			return
 		}
-		items, info := paginate([]webAppTask{webAppTaskFromSDK(*task)}, page)
+		items, info := paginate([]webAppTask{webAppTaskFromSDK(*task, binding.WorkspaceID)}, page)
 		writeWebAppJSON(w, r, http.StatusOK, webAppPageFromSDK(items, info))
 		return
 	}
 
-	items, info, err := host.Tasks().List(ctx, filter, page)
+	// Fetches without deriving dependencies: the binding scope (repository or
+	// session) narrows the fetched page further below, and deriving before
+	// that narrowing would both waste work on tasks the caller never sees and
+	// risk tripping the fan-out cap on a page the actual response never
+	// approaches.
+	if !host.capabilities.CanRead(resourceTasks) {
+		writeWebAppError(w, http.StatusForbidden, "plugin_permission_denied")
+		return
+	}
+	models, info, err := host.fetchTaskPage(ctx, filter, page)
 	if err != nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
-	filtered := make([]webAppTask, 0, len(items))
-	for _, item := range items {
-		if webAppTaskMatches(ctx, host, binding, item) {
-			filtered = append(filtered, webAppTaskFromSDK(item))
+	dtos := tasksToDTOs(models)
+	host.attachPullRequests(ctx, dtos)
+	survivingModels := make([]*taskmodels.Task, 0, len(dtos))
+	survivingDTOs := make([]pluginsdk.Task, 0, len(dtos))
+	for i, dto := range dtos {
+		if webAppTaskMatches(ctx, host, binding, dto) {
+			survivingDTOs = append(survivingDTOs, dto)
+			survivingModels = append(survivingModels, models[i])
 		}
+	}
+	if err := host.attachDependencies(ctx, survivingDTOs, survivingModels, true); err != nil {
+		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+		return
+	}
+	filtered := make([]webAppTask, len(survivingDTOs))
+	for i, dto := range survivingDTOs {
+		filtered[i] = webAppTaskFromSDK(dto, binding.WorkspaceID)
 	}
 	writeWebAppJSON(w, r, http.StatusOK, webAppPageFromSDK(filtered, info))
 }
@@ -82,7 +104,7 @@ func (s *Service) getWebAppTask(ctx context.Context, w http.ResponseWriter, r *h
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*task))
+	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*task, binding.WorkspaceID))
 }
 
 type webAppTaskPatch struct {
@@ -150,7 +172,7 @@ func (s *Service) updateWebAppTask(ctx context.Context, w http.ResponseWriter, r
 		writeWebAppError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*updated))
+	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*updated, binding.WorkspaceID))
 }
 
 type webAppMessageRequest struct {
@@ -403,6 +425,8 @@ func webAppErrorCode(err error) string {
 		return "plugin_state_conflict"
 	case codes.Unimplemented:
 		return webAppRuntimeUnavailable
+	case codes.ResourceExhausted:
+		return "response_too_large"
 	default:
 		return webAppRuntimeUnavailable
 	}
