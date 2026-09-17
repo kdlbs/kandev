@@ -72,6 +72,13 @@ export function usableConfigOptions(
   );
 }
 
+// Providers such as Copilot send description === name; showing it would
+// duplicate the label, so fall back to the id (when it differs) instead.
+function optionDescription(item: { value: string; name: string; description?: string }) {
+  if (item.description && item.description !== item.name) return item.description;
+  return item.value !== item.name ? item.value : undefined;
+}
+
 export function configOptionToModelOptions(
   option: SelectConfigOption | undefined,
 ): ModelSelectorOption[] {
@@ -84,7 +91,7 @@ export function configOptionToModelOptions(
       {
         id: item.value,
         name: item.name,
-        description: item.description ?? (item.value !== item.name ? item.value : undefined),
+        description: optionDescription(item),
       },
     ];
   });

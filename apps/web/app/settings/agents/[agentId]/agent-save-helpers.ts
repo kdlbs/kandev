@@ -15,6 +15,7 @@ import type {
   ProfileEnvVar,
 } from "@/lib/types/http";
 import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-permissions";
+import { isProviderConfigDirty } from "@/components/settings/agent-profile-dirty";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { areConfigOptionsEqual } from "@/lib/config-options";
 import { t } from "@/lib/i18n";
@@ -46,7 +47,22 @@ export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<Ag
   if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
   if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
   if (patch.command_prefix !== undefined) next.commandPrefix = patch.command_prefix;
+  if (patch.provider_kind !== undefined) next.providerKind = patch.provider_kind;
   return next;
+}
+
+/**
+ * OpenAI-compatible provider fields for a profile save payload. The backend
+ * normalizes them (clears everything when the kind is not
+ * `openai_compatible`), so sending the cleared triple is safe and lets a
+ * switch back to Native persist.
+ */
+function providerPayloadFields(profile: DraftProfile) {
+  return {
+    provider_kind: profile.providerKind ?? "",
+    provider_base_url: profile.providerBaseUrl ?? "",
+    provider_api_key_secret_id: profile.providerApiKeySecretId ?? "",
+  };
 }
 
 function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boolean {
@@ -228,6 +244,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       cli_passthrough: profile.cliPassthrough ?? false,
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
+      ...providerPayloadFields(profile),
       env_vars: profile.envVars ?? [],
       dynamic: dynamicProfilePayload(profile),
     })),
@@ -308,6 +325,7 @@ async function savePersistedProfile(
       cli_passthrough: profile.cliPassthrough ?? false,
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
+      ...providerPayloadFields(profile),
       env_vars: profile.envVars ?? [],
       dynamic: dynamicProfilePayload(profile),
     });
@@ -344,6 +362,7 @@ async function saveExistingProfiles(
           cli_passthrough: profile.cliPassthrough ?? false,
           cli_flags: profile.cliFlags ?? [],
           command_prefix: profile.commandPrefix ?? "",
+          ...providerPayloadFields(profile),
           env_vars: profile.envVars ?? [],
           dynamic: dynamicProfilePayload(profile),
         });
@@ -516,6 +535,7 @@ function isProfileCliConfigDirty(draft: DraftProfile, saved: AgentProfile): bool
     draft.cliPassthrough !== saved.cliPassthrough ||
     !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
     (draft.commandPrefix ?? "") !== (saved.commandPrefix ?? "") ||
+    isProviderConfigDirty(draft, saved) ||
     !areEnvVarsEqual(draft.envVars, saved.envVars)
   );
 }

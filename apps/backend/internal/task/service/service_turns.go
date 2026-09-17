@@ -671,6 +671,12 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutpu
 // events). A read failure defaults to true so a transient DB error never
 // produces a spurious "empty turn" notice.
 func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
+	// A turn terminated by a recoverable agent failure carries its error entry
+	// as the turn's outcome, so it counts as output even though the
+	// status/recovery message itself is not in the agent-output allowlist.
+	if errorTerminated, _ := turn.Metadata[models.TurnMetaKeyErrorTerminated].(bool); errorTerminated {
+		return true
+	}
 	msgs, err := s.messages.ListMessagesByTurnID(ctx, turn.ID)
 	if err != nil {
 		s.logger.Debug("failed to list messages for had_output; assuming output",

@@ -168,6 +168,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | CLI flags                    | Enabled entries are tokenized and appended to the ACP launch command.                                                                                            |
 | Command prefix               | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                             |
 | Environment                  | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                |
+| Provider                     | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                 |
 | CLI passthrough              | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                               |
 | Enabled                      | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                         |
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
@@ -182,6 +183,18 @@ return environment values or MCP credentials; use references or the existing
 interactive credential flow when a secret is required.
 
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
+
+### Use an OpenAI-compatible provider
+
+Open the **Provider** section in a profile that supports this feature. Select
+**OpenAI-compatible provider**, enter the absolute router base URL, and select
+an optional global API-key secret. Enter the model ID that the router accepts.
+The model field is free text because the router owns the model catalogue.
+
+Kandev sends the provider URL and optional bearer key through the ACP gateway
+authentication request when a new process starts. A running process keeps its
+existing provider settings until it restarts. CLI passthrough cannot use this
+provider because that path does not run the ACP authentication handshake.
 
 Configuration options are resolved for the model selected in the profile. An
 agent can therefore show a different option set for each model. If a model

@@ -14,6 +14,7 @@ type StepDisclosureRowActionsProps = {
   showOptions: boolean;
   buttonSizeClass: string;
   draft: WorkflowMoveOptionsDraft;
+  entryOptions?: WorkflowMoveEntryOptions;
   onToggleOptions: () => void;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 };
@@ -25,6 +26,7 @@ export function StepDisclosureRowActions({
   showOptions,
   buttonSizeClass,
   draft,
+  entryOptions,
   onToggleOptions,
   onMove,
 }: StepDisclosureRowActionsProps) {
@@ -55,7 +57,7 @@ export function StepDisclosureRowActions({
         variant="default"
         className={cn("shrink-0 cursor-pointer rounded-sm px-2.5 text-xs", buttonSizeClass)}
         disabled={movePending}
-        onClick={() => void onMove(stepId, workflowMoveOptionsPayload(draft))}
+        onClick={() => void onMove(stepId, entryOptions ?? workflowMoveOptionsPayload(draft))}
       >
         <IconArrowRight className="h-3 w-3" />
         {isMoving ? t("task:moving") : t("task:moveHere")}

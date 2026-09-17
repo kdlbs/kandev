@@ -209,6 +209,30 @@ func TestSetPluginToolsRejectsMalformedSnapshotAndPreservesRegistry(t *testing.T
 	require.Equal(t, uint64(1), s.pluginTools.Revision)
 }
 
+func TestSetPluginToolsRejectsRootCombinatorSchema(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition},
+	}))
+
+	invalid := definition
+	invalid.InputSchema = []byte(`{"type":"object","oneOf":[{"required":["a"]},{"required":["b"]}]}`)
+	err := s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 2, Tools: []plugintools.Definition{invalid},
+	})
+	require.ErrorContains(t, err, "oneOf")
+	require.Contains(t, s.mcpServer.ListTools(), definition.ExposedName)
+	require.Equal(t, uint64(1), s.pluginTools.Revision)
+}
+
 func TestSetPluginToolsPublishesDeclaredOutputSchema(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)

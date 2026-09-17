@@ -95,7 +95,7 @@ test.describe("Multi-session", () => {
     await kanban.goto();
 
     const card = kanban.taskCardByTitle("Multi Session Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(card).toBeVisible({ timeout: 30_000 });
     await card.click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 

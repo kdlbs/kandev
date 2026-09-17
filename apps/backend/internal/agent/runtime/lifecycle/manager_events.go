@@ -451,6 +451,7 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	flushedText := m.flushMessageBuffer(execution, event.PromptGeneration, event.AttemptID)
 	execution.messageMu.Lock()
 	execution.clearProtocolMessageCorrelationLocked()
+	execution.commitResponseAttemptLocked()
 	execution.messageMu.Unlock()
 	if flushedText != "" {
 		event.Text = flushedText
@@ -491,6 +492,9 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 		// flushMessageBuffer publishes any remaining buffered content through
 		// the streaming path itself and always returns "".
 		m.flushMessageBuffer(execution, promptGeneration, event.AttemptID)
+		execution.messageMu.Lock()
+		execution.commitResponseAttemptLocked()
+		execution.messageMu.Unlock()
 	}
 	m.flushAssistantHistory(execution)
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
@@ -833,6 +837,7 @@ func (m *Manager) handlePromptHandoffEvent(
 	m.flushMessageBuffer(execution, event.PromptGeneration, event.AttemptID)
 	execution.messageMu.Lock()
 	execution.clearProtocolMessageCorrelationLocked()
+	execution.commitResponseAttemptLocked()
 	execution.messageMu.Unlock()
 	m.flushAssistantHistory(execution)
 
@@ -953,6 +958,8 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 	case "reasoning":
 		m.handleReasoningEvent(execution, *event)
 		return true
+	case streams.EventTypeResponseAttemptReset:
+		return !m.handleResponseAttemptReset(execution, event)
 	case toolStatusError:
 		m.handleErrorEvent(execution, *event)
 		return true
@@ -1023,6 +1030,30 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 		m.handlePromptHandoffEvent(execution, event)
 	}
 	return event
+}
+
+func (m *Manager) handleResponseAttemptReset(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+) bool {
+	if event.PromptGeneration == 0 {
+		return false
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	if !m.executionStore.ownsActivePromptGeneration(
+		execution.SessionID,
+		execution.ID,
+		event.PromptGeneration,
+	) {
+		return false
+	}
+	m.flushStreamCoalescer(execution)
+	execution.messageMu.Lock()
+	event.RetractedMessageIDs = execution.detachResponseAttemptLocked()
+	execution.messageMu.Unlock()
+	return true
 }
 
 func (m *Manager) handleAgentEventWithStartupGeneration(

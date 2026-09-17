@@ -2808,6 +2808,13 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 		zap.String("session_id", data.SessionID),
 		zap.String("error", data.ErrorMessage))
 
+	// Capture the turn this failure terminates before completing it, and mark it
+	// so its completion reports had_output=true (its recovery/error entry is the
+	// turn's outcome). The captured ID also lets the recovery message attach to
+	// this same turn instead of lazily opening a second empty turn — otherwise
+	// both turns would emit a spurious empty-turn notice.
+	failedTurnID := s.markTurnErrorTerminated(ctx, data.SessionID)
+
 	// Complete the current turn.
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
@@ -2820,7 +2827,9 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// Office sessions. Only the current metadata record owns recovery controls;
 	// the persisted message remains as history after it is retired.
 	if s.messageCreator != nil {
-		s.createRecoveryStatusMessage(ctx, data)
+		// The failure is logged inside persistRecoveryStatusMessage; recovery
+		// continues so the session still transitions and surfaces its error.
+		_ = s.createRecoveryStatusMessage(ctx, data, failedTurnID)
 	}
 
 	// Set session state. Office-owned tasks
@@ -3166,7 +3175,33 @@ func providerRemediationURL(data watcher.AgentEventData) string {
 // createRecoveryStatusMessage builds and persists the ActionMessage shown in
 // the session transcript after a recoverable agent failure. Its stable message
 // identity keeps retries and bootstrap failures idempotent.
-func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) error {
+// markTurnErrorTerminated flags the session's active turn as ending in a
+// recoverable agent failure and returns its ID. The marker makes the turn's
+// completion report had_output=true (its recovery/error entry is the turn's
+// outcome), and the returned ID lets the recovery status message attach to that
+// same turn rather than lazily opening a second empty turn. Returns "" when no
+// turn is active — for example a bootstrap failure before any turn started — so
+// callers fall back to the existing lazy turn resolution.
+func (s *Service) markTurnErrorTerminated(ctx context.Context, sessionID string) string {
+	if s.turnService == nil {
+		return ""
+	}
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil || turnID == "" {
+		return ""
+	}
+	if err := s.turnService.PatchTurnMetadata(ctx, sessionID, turnID, map[string]interface{}{
+		models.TurnMetaKeyErrorTerminated: true,
+	}); err != nil {
+		s.logger.Warn("failed to mark turn error-terminated",
+			zap.String("session_id", sessionID),
+			zap.String("turn_id", turnID),
+			zap.Error(err))
+	}
+	return turnID
+}
+
+func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData, turnID string) error {
 	if s.messageCreator == nil {
 		return fmt.Errorf("recovery status message creator is unavailable")
 	}
@@ -3209,14 +3244,6 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	managedRuntimeNpmFailure := data.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution)
 	if managedRuntimeNpmFailure {
 		meta["failure_kind"] = string(routingerr.CodeManagedRuntimeNpmResolution)
-		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
-			meta["error_output"] = details
-		}
-	}
-	if data.Phase == models.LaunchErrorPhaseBootstrap {
-		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
-			meta["error_output"] = details
-		}
 	}
 	// The validated remediation URL is carried independently of quota
 	// classification so the generic recoverable card can still show the link.
@@ -3224,6 +3251,11 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		meta["remediation_url"] = remediationURL
 	}
 	applyProviderQuotaMetadata(meta, data)
+	// Quota classification sets error_output from its own provider diagnostic;
+	// every other class (bootstrap, managed-runtime-npm, and generic post-start
+	// recoverable failures) surfaces its sanitized failure detail in the same
+	// collapsed disclosure.
+	applyRecoverableFailureDetail(meta, data)
 
 	// Include cached auth methods so the frontend can show login options.
 	if authErr {
@@ -3248,7 +3280,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
 	}
 
-	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta)
+	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta, turnID)
 }
 
 func (s *Service) persistRecoveryStatusMessage(
@@ -3256,7 +3288,14 @@ func (s *Service) persistRecoveryStatusMessage(
 	data watcher.AgentEventData,
 	statusMsg string,
 	meta map[string]interface{},
+	turnID string,
 ) error {
+	// A captured failed-turn ID keeps the recovery entry on the turn that
+	// failed; when none was captured (e.g. a bootstrap failure with no active
+	// turn) fall back to the lazy active-turn resolution.
+	if turnID == "" {
+		turnID = s.getActiveTurnID(data.SessionID)
+	}
 	messageID := uuid.NewSHA1(
 		uuid.NameSpaceOID,
 		[]byte("session-recovery:"+data.SessionID+":"+agentFailureStamp(data)),
@@ -3268,7 +3307,7 @@ func (s *Service) persistRecoveryStatusMessage(
 		statusMsg,
 		data.SessionID,
 		string(v1.MessageTypeStatus),
-		s.getActiveTurnID(data.SessionID),
+		turnID,
 		meta,
 		false,
 	); err != nil {
@@ -3310,6 +3349,19 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		meta["error_output"] = details
 	}
 	return true
+}
+
+// applyRecoverableFailureDetail populates the collapsed technical-details
+// disclosure (error_output) from the sanitized failure detail. It never
+// overrides a more specific classification (quota) that already set the field,
+// and omits the disclosure when sanitization yields nothing.
+func applyRecoverableFailureDetail(meta map[string]interface{}, data watcher.AgentEventData) {
+	if _, ok := meta["error_output"]; ok {
+		return
+	}
+	if details := routingerr.Sanitize(data.FailureDetails); details != "" {
+		meta["error_output"] = details
+	}
 }
 
 // isOfficeSession resolves Office ownership through the session's task.

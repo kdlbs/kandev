@@ -1163,6 +1163,7 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			TaskID: taskID, SessionID: info.SessionID, RepositoryID: repository.RepositoryID,
 			TaskEnvironmentID: info.TaskEnvironmentID, ReuseRequired: info.TaskEnvironmentID != "",
 			RepositoryPath: repository.RepositoryPath, BaseBranch: repository.BaseBranch,
+			IntegrationRef:     repository.IntegrationRef,
 			FallbackBaseBranch: repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
 			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
 			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,

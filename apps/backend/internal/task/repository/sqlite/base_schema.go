@@ -54,6 +54,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.healBuiltinWorkflowStepOnAgentError,
 		r.normalizeTaskWorktreeOwnership,
 		r.ensureTaskEnvironmentRecoveryClaimsSchema,
+		r.ensureArchivedBranchCandidatesIndex,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
 		r.healSessionTaskEnvironmentIDs,
@@ -110,6 +111,23 @@ func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
 		return fmt.Errorf("required task recovery claim migration: %w", err)
 	}
 	return nil
+}
+
+// ensureArchivedBranchCandidatesIndex runs after ownership normalization so
+// every supported schema shape has the lifecycle columns the index requires.
+func (r *Repository) ensureArchivedBranchCandidatesIndex() error {
+	_, err := r.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_task_environment_repos_archived_branch_candidates
+		ON task_environment_repos(
+			worktree_branch_owner,
+			worktree_branch_compacted_at,
+			status,
+			deleted_at,
+			updated_at,
+			worktree_id,
+			task_environment_id
+		)`)
+	return err
 }
 
 func (r *Repository) initDynamicRoutingSchema() error {
@@ -1215,6 +1233,10 @@ const sessionWorktreeSchemaDDL = `
 		worktree_id TEXT DEFAULT '',
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
+		worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown',
+		worktree_integration_ref TEXT NOT NULL DEFAULT '',
+		worktree_recovery_head_sha TEXT NOT NULL DEFAULT '',
+		worktree_branch_compacted_at TIMESTAMP,
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'active',

@@ -853,7 +853,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     await pendingLoad;
   });
 
-  it("continues while the sentinel remains in preload even when the visible boundary changes", async () => {
+  it("continues while the sentinel remains in preload and the visible boundary is stable", async () => {
     const loadMore = vi.fn(async () => 20);
     const newest = transcriptMessage("newest");
     const { rerender } = render(
@@ -886,7 +886,7 @@ describe("useNativeScrollManagement transcript pagination", () => {
     options = sharedSentinelCalls.at(-1)?.[5] as {
       shouldContinueWhileIntersecting: () => boolean;
     };
-    expect(options.shouldContinueWhileIntersecting()).toBe(true);
+    expect(options.shouldContinueWhileIntersecting()).toBe(false);
   });
 
   it("anchors a prepend below a fixed task description row", () => {

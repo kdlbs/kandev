@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback } from "react";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
+import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
@@ -22,7 +22,11 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { t } from "@/lib/i18n";
-import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
+import {
+  shouldHideChatInputForLaunchError,
+  shouldRenderStoppedSessionBanner,
+  shouldShowCancelAgent,
+} from "./types";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -75,6 +79,9 @@ type ChatInputContainerProps = {
   mcpAttachmentHistory?: MCPAttachmentHistory;
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
+  isWorking: boolean;
+  /** False for surfaces whose cancel callback only dismisses the composer. */
+  showCancelAgent?: boolean;
   /** True when a send would be delivered into the running turn (mid-turn
    * steering) rather than queued. Defaults to false. */
   supportsSteering?: boolean;
@@ -164,15 +171,6 @@ type EnhancePromptExtras = {
   isUtilityConfigured?: boolean;
 };
 
-export function shouldShowCancelAgent(
-  isAgentBusy: boolean,
-  pendingClarification: Message | null | undefined,
-): boolean {
-  if (!pendingClarification) return isAgentBusy;
-  return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
-    ?.agent_disconnected;
-}
-
 function buildEditorAreaProps(
   s: ContainerState,
   p: NormalizedChatInputProps,
@@ -205,7 +203,9 @@ function buildEditorAreaProps(
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,
     isAgentBusy: p.isAgentBusy || !!(p.pendingClarification && p.onClarificationResolved),
-    canCancelAgent: shouldShowCancelAgent(p.isAgentBusy, p.pendingClarification),
+    canCancelAgent:
+      p.showCancelAgent !== false &&
+      shouldShowCancelAgent(p.isWorking, p.pendingClarification, p.sessionId),
     onPlanModeChange: p.onPlanModeChange,
     taskTitle: p.taskTitle,
     taskDescription: p.taskDescription,

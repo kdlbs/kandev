@@ -108,6 +108,8 @@ export function PassthroughComposerPanel({
         mcpAttachmentHistory={panelState.mcpAttachmentHistory}
         onPlanModeChange={panelState.handlePlanModeChange}
         isAgentBusy={false}
+        isWorking={panelState.isWorking}
+        showCancelAgent={false}
         isCompleted={panelState.isCompleted}
         isStarting={panelState.isStarting}
         isPreparingEnvironment={panelState.isPreparingEnvironment}

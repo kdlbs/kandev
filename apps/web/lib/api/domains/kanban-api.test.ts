@@ -6,6 +6,7 @@ import {
   getTaskDeletePreflight,
   listTasksByWorkspace,
   moveTask,
+  previewWorkflowMove,
   reorderStepTasks,
   updateTask,
   updateTaskPortForwarding,
@@ -356,5 +357,58 @@ describe("moveTask", () => {
     expect(init?.body).toBe(
       JSON.stringify({ workflow_id: workflowId, workflow_step_id: workflowStepId, position: 0 }),
     );
+  });
+});
+
+describe("previewWorkflowMove", () => {
+  it("posts normalized options with a no-store cache policy", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: "task-1",
+          workflow_step_id: "step-2",
+          evaluated_at: "2026-09-14T00:00:00Z",
+          outcome: "create_new",
+          model: {
+            before: { known: false },
+            after: { known: true, label: "gpt-5.6-luna" },
+          },
+          context_reset: false,
+          context_reset_state: "unchanged",
+          source_disposition: "park",
+          dispatch: "prompt",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await previewWorkflowMove(
+      "task-1",
+      {
+        workflow_id: "workflow-1",
+        workflow_step_id: "step-2",
+        entry_options: {
+          instructions: "  inspect the destination  ",
+          reset_context: true,
+        },
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1/move-preview`);
+    expect(init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: "workflow-1",
+        workflow_step_id: "step-2",
+        entry_options: {
+          reset_context: true,
+          instructions: "inspect the destination",
+        },
+      }),
+    });
+    expect((init as RequestInit).cache).toBe("no-store");
   });
 });

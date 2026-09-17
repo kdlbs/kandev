@@ -485,6 +485,14 @@ const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
 // turn authority, so every current-turn resolution site excludes it.
 const TurnMetaKeyLifecycleOnly = "lifecycle_only"
 
+// TurnMetaKeyErrorTerminated marks a turn that ended in a recoverable agent
+// failure. The failure's recovery/error entry is the turn's outcome, so a turn
+// carrying this marker reports had_output=true at completion even though a
+// status/recovery message does not otherwise count as agent output — this
+// keeps the frontend from showing a spurious empty-turn notice for the failed
+// turn.
+const TurnMetaKeyErrorTerminated = "error_terminated"
+
 // TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
 // acknowledges its prompt. Empty marked turns are not current-turn authority
 // unless dispatch ambiguity was recorded; publication clears the marker, while
@@ -2390,20 +2398,24 @@ func (te *TaskEnvironment) RepoFor(repositoryID string) *TaskEnvironmentRepo {
 // physical-worktree truth — identity, path, branch, status, and lifecycle
 // timestamps.
 type TaskEnvironmentRepo struct {
-	ID                string     `json:"id"`
-	TaskEnvironmentID string     `json:"task_environment_id"`
-	RepositoryID      string     `json:"repository_id"`
-	BranchSlug        string     `json:"branch_slug,omitempty"`
-	WorktreeID        string     `json:"worktree_id,omitempty"`
-	WorktreePath      string     `json:"worktree_path,omitempty"`
-	WorktreeBranch    string     `json:"worktree_branch,omitempty"`
-	Position          int        `json:"position"`
-	ErrorMessage      string     `json:"error_message,omitempty"`
-	Status            string     `json:"status,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	MergedAt          *time.Time `json:"merged_at,omitempty"`
-	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
+	ID                        string     `json:"id"`
+	TaskEnvironmentID         string     `json:"task_environment_id"`
+	RepositoryID              string     `json:"repository_id"`
+	BranchSlug                string     `json:"branch_slug,omitempty"`
+	WorktreeID                string     `json:"worktree_id,omitempty"`
+	WorktreePath              string     `json:"worktree_path,omitempty"`
+	WorktreeBranch            string     `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string     `json:"-"`
+	WorktreeIntegrationRef    string     `json:"-"`
+	WorktreeRecoveryHeadSHA   string     `json:"-"`
+	WorktreeBranchCompactedAt *time.Time `json:"-"`
+	Position                  int        `json:"position"`
+	ErrorMessage              string     `json:"error_message,omitempty"`
+	Status                    string     `json:"status,omitempty"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
+	MergedAt                  *time.Time `json:"merged_at,omitempty"`
+	DeletedAt                 *time.Time `json:"deleted_at,omitempty"`
 }
 
 // TaskEnvironmentRecoveryClaimRequest identifies the environment authority

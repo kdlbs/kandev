@@ -189,6 +189,9 @@ type SessionLauncher interface {
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
 	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
 	GetMessageQueue() *messagequeue.Service
+	// CheckQueueAdmissionReadiness rechecks automatic dispatch for the exact
+	// session incarnation admitted by a queue operation.
+	CheckQueueAdmissionReadiness(context.Context, messagequeue.QueueSessionIdentity)
 	// QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
 	// then interrupts the session's in-flight turn to dispatch it right
 	// away, bypassing FIFO order. Used only by queueThenInterruptTaskMessage
@@ -3411,6 +3414,7 @@ func (h *Handlers) queueTaskMessage(ctx context.Context, taskID string, session 
 		}
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue message: %w", err)
 	}
+	h.sessionLauncher.CheckQueueAdmissionReadiness(ctx, identity)
 	h.publishQueueStatusEvent(ctx, identity, queue)
 	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queued.ID}, nil
 }

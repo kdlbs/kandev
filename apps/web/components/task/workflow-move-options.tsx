@@ -25,6 +25,11 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
+import {
+  WorkflowMovePreviewFooter,
+  type WorkflowMovePreviewTarget,
+} from "./workflow-move-preview-footer";
+
 export type WorkflowMoveOptionsDraft = {
   resetContext: boolean;
   instructions: string;
@@ -149,6 +154,7 @@ export type WorkflowMoveOptionsSubmit = (
 ) => boolean | void | Promise<boolean | void>;
 
 type WorkflowMoveOptionsFormProps = {
+  previewTarget?: WorkflowMovePreviewTarget;
   isMoving: boolean;
   isTouchSurface: boolean;
   instructionsRows?: number;
@@ -231,6 +237,7 @@ function WorkflowMoveOptionsActions({
  * form open so nothing the user typed is lost.
  */
 export function WorkflowMoveOptionsForm({
+  previewTarget,
   isMoving,
   isTouchSurface,
   instructionsRows,
@@ -255,11 +262,19 @@ export function WorkflowMoveOptionsForm({
         onCancel={onCancel}
         onSubmit={() => void submit()}
       />
+      {previewTarget && (
+        <WorkflowMovePreviewFooter
+          target={previewTarget}
+          entryOptions={workflowMoveOptionsPayload(draft)}
+          isTouchSurface={isTouchSurface}
+        />
+      )}
     </div>
   );
 }
 
 type WorkflowMoveOptionsProps = {
+  previewTarget?: WorkflowMovePreviewTarget;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   targetStepName: string;
@@ -269,6 +284,7 @@ type WorkflowMoveOptionsProps = {
 
 /** Fine-pointer Dialog wrapper around the shared form. */
 export function WorkflowMoveDialog({
+  previewTarget,
   open,
   onOpenChange,
   targetStepName,
@@ -284,6 +300,7 @@ export function WorkflowMoveDialog({
           <DialogDescription>{t("task:workflowMoveOptionsDescription")}</DialogDescription>
         </DialogHeader>
         <WorkflowMoveOptionsForm
+          previewTarget={previewTarget}
           isMoving={isMoving}
           isTouchSurface={false}
           onSubmit={onSubmit}
@@ -296,6 +313,7 @@ export function WorkflowMoveDialog({
 
 /** Touch Drawer wrapper around the shared form. */
 export function WorkflowMoveOptions({
+  previewTarget,
   open,
   onOpenChange,
   targetStepName,
@@ -318,6 +336,7 @@ export function WorkflowMoveOptions({
           data-testid="workflow-move-options"
         >
           <WorkflowMoveOptionsForm
+            previewTarget={previewTarget}
             isMoving={isMoving}
             isTouchSurface
             onSubmit={onSubmit}

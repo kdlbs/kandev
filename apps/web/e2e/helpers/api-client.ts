@@ -3823,6 +3823,7 @@ type WorkspaceRoutingConfig = {
   provider_order: string[];
   default_tier: string;
   provider_profiles: Record<string, RoutingProviderProfile>;
+  role_tiers?: Record<string, string>;
   [key: string]: unknown;
 };
 
@@ -3847,7 +3848,7 @@ function routingWorkspaceIDs(body: string): string[] {
   }
 }
 
-function removeRoutingProfileReferences(
+export function removeRoutingProfileReferences(
   config: WorkspaceRoutingConfig,
   profileId: string,
 ): WorkspaceRoutingConfig | undefined {
@@ -3878,8 +3879,18 @@ function removeRoutingProfileReferences(
   if (!removed) return undefined;
 
   const updatedConfig = { ...config, provider_profiles: providerProfiles };
+  const roleTiers = config.role_tiers
+    ? Object.fromEntries(
+        Object.entries(config.role_tiers).filter(
+          ([, tier]) =>
+            tier === "" ||
+            tierMappedOnAnyProvider(tier, updatedConfig.provider_order, providerProfiles),
+        ),
+      )
+    : undefined;
   return {
     ...updatedConfig,
+    ...(roleTiers ? { role_tiers: roleTiers } : {}),
     enabled: config.enabled && routingConfigCanStayEnabled(updatedConfig),
   };
 }
@@ -3899,6 +3910,17 @@ function routingConfigCanStayEnabled(config: WorkspaceRoutingConfig): boolean {
       config.provider_profiles[providerID]?.execution_profile_ids?.[config.default_tier] !==
       undefined,
   );
+}
+
+function tierMappedOnAnyProvider(
+  tier: string,
+  providerOrder: string[],
+  providerProfiles: Record<string, RoutingProviderProfile>,
+): boolean {
+  return providerOrder.some((providerID) => {
+    const executionProfileID = providerProfiles[providerID]?.execution_profile_ids?.[tier];
+    return typeof executionProfileID === "string" && executionProfileID !== "";
+  });
 }
 
 // --- Jira / Linear mock payload types ---

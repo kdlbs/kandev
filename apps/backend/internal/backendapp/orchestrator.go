@@ -166,6 +166,7 @@ func provideOrchestrator(
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
 	orchestratorSvc.SetTransientRetryMessageService(taskSvc)
+	orchestratorSvc.SetStreamingMessageRetractionService(taskSvc)
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))

@@ -75,3 +75,12 @@ describe("toSheetItem remote executor projection", () => {
     expect(item.primarySessionId).toBe("session-1");
   });
 });
+
+describe("toSheetItem Office identity projection", () => {
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("carries Office identity into the phone task drawer row", () => {
+    const item = toSheetItem(task({ isFromOffice: true }), emptyCtx());
+
+    expect(item.isFromOffice).toBe(true);
+  });
+});

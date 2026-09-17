@@ -111,7 +111,11 @@ export function useNextWorkflowStep(taskId: string | null) {
 
   const proceedStepName = nextStep && !currentStepAutoTransitions ? nextStep.title : null;
 
-  return { proceedStepName, nextStepIsWorkStep, proceed, isMoving };
+  const proceedPreviewTarget =
+    taskId && workflowId && nextStep
+      ? { taskId, workflowId, workflowStepId: nextStep.id }
+      : undefined;
+  return { proceedStepName, proceedPreviewTarget, nextStepIsWorkStep, proceed, isMoving };
 }
 
 // i18n-exempt: system block sent verbatim to the agent.
@@ -287,6 +291,7 @@ export function usePlanActions(opts: {
   });
   const {
     proceedStepName,
+    proceedPreviewTarget,
     nextStepIsWorkStep,
     proceed: rawProceed,
     isMoving,
@@ -314,7 +319,7 @@ export function usePlanActions(opts: {
         return implementPlan(fresh);
       }
     : undefined;
-  return { implementPlanHandler, proceedStepName, proceed, isMoving };
+  return { implementPlanHandler, proceedStepName, proceedPreviewTarget, proceed, isMoving };
 }
 
 export function useImplementPlanRunner(opts: {

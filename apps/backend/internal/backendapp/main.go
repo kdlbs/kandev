@@ -1040,6 +1040,7 @@ func startGatewayAndServe(
 		return ok
 	})
 	hostUtilityMgr.SetProfileResolver(pluginProfileResolver)
+	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
@@ -1232,7 +1233,11 @@ func startGatewayAndServe(
 			log.Warn("profile reconciler error", zap.Error(err))
 		}
 		if migrated, err := services.Utility.MigrateLegacyBindings(hostUtilityCtx); err != nil {
-			log.Warn("utility profile migration failed", zap.Error(err))
+			if errors.Is(err, context.Canceled) {
+				log.Debug("utility profile migration failed (context canceled during shutdown)", zap.Error(err))
+			} else {
+				log.Warn("utility profile migration failed", zap.Error(err))
+			}
 		} else if migrated > 0 {
 			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
 		}
