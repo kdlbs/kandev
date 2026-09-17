@@ -1,10 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
   LARGE_FILE_TREE_COUNT,
   LARGE_FILE_TREE_FOLDER,
+  expectContiguousVisibleFileTreeRows,
+  expectVisibleFileTreePaths,
   largeFileTreePath,
   scrollToLastLargeFile,
   setupLargeFileTreeTask,
+  visibleFileTreePaths,
+  waitForFileTreeLayoutSettle,
 } from "./large-file-tree-virtualization-helpers";
 
 test.describe("Mobile large file tree virtualization", () => {
@@ -25,9 +30,25 @@ test.describe("Mobile large file tree virtualization", () => {
 
     await testPage.getByRole("button", { name: "Files" }).tap();
     const folder = session.fileTreeNode(LARGE_FILE_TREE_FOLDER);
+    const viewport = session.fileTreeScrollViewport();
     await expect(folder).toBeVisible({ timeout: 15_000 });
+    await expect(viewport).toBeVisible({ timeout: 15_000 });
+    await waitForFileTreeLayoutSettle(testPage);
+    await expectContiguousVisibleFileTreeRows(viewport);
+    const collapsedPaths = await visibleFileTreePaths(viewport);
+
+    await testPage.getByRole("button", { name: "Chat" }).tap();
+    await expect(viewport).toBeHidden();
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    await expect(folder).toBeVisible({ timeout: 15_000 });
+    await expectContiguousVisibleFileTreeRows(viewport, {
+      expectedPaths: collapsedPaths,
+    });
+    await expectVisibleFileTreePaths(viewport, collapsedPaths);
+
     await folder.tap();
     await expect(session.fileTreeNode(largeFileTreePath(0))).toBeVisible({ timeout: 15_000 });
+    await expectContiguousVisibleFileTreeRows(viewport);
     await expect
       .poll(() => session.visibleFileTreeNodes().count(), { timeout: 5_000 })
       .toBeLessThan(80);
@@ -39,8 +60,6 @@ test.describe("Mobile large file tree virtualization", () => {
     expect(firstActionsBox!.width).toBeGreaterThanOrEqual(44);
     expect(firstActionsBox!.height).toBeGreaterThanOrEqual(44);
 
-    const viewport = session.fileTreeScrollViewport();
-    await expect(viewport).toBeVisible();
     await scrollToLastLargeFile(
       session.fileTreeNode(largeFileTreePath(LARGE_FILE_TREE_COUNT - 1)),
       viewport,
@@ -54,6 +73,8 @@ test.describe("Mobile large file tree virtualization", () => {
     expect(lastActionsBox).not.toBeNull();
     expect(lastActionsBox!.width).toBeGreaterThanOrEqual(44);
     expect(lastActionsBox!.height).toBeGreaterThanOrEqual(44);
+    await expectContiguousVisibleFileTreeRows(viewport);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile large file tree");
 
     await session.fileTreeNode(lastFile).tap();
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
