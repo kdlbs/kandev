@@ -56,6 +56,7 @@ func TestHandleTransientFailure_CursorRetriableErrorReplaySchedulesRetry(t *test
 		TaskID:           "t1",
 		SessionID:        "s1",
 		AgentExecutionID: "execution-1",
+		AgentID:          "cursor-acp",
 		PromptGeneration: 7,
 		ErrorMessage:     cursorRetriableConnectionStalled,
 	})
