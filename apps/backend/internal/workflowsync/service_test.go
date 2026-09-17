@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,58 @@ import (
 
 type fakeGitHubClients struct {
 	client github.Client
+}
+
+type failingGitHubClients struct {
+	err error
+}
+
+func (f failingGitHubClients) ListRepoDirectoryForWorkspace(
+	context.Context, string, string, string, string, string,
+) ([]github.RepoContentEntry, error) {
+	return nil, f.err
+}
+
+type countingGitHubClients struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+}
+
+func (f *countingGitHubClients) ListRepoDirectoryForWorkspace(
+	context.Context, string, string, string, string, string,
+) ([]github.RepoContentEntry, error) {
+	f.mu.Lock()
+	f.calls++
+	err := f.err
+	f.mu.Unlock()
+	return nil, err
+}
+
+func (f *countingGitHubClients) GetRepoFileContentForWorkspace(
+	context.Context, string, string, string, string, string,
+) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return nil, f.err
+}
+
+func (f *countingGitHubClients) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *countingGitHubClients) setError(err error) {
+	f.mu.Lock()
+	f.err = err
+	f.mu.Unlock()
+}
+
+func (f failingGitHubClients) GetRepoFileContentForWorkspace(
+	context.Context, string, string, string, string, string,
+) ([]byte, error) {
+	return nil, f.err
 }
 
 func (f fakeGitHubClients) ListRepoDirectoryForWorkspace(
@@ -216,6 +269,8 @@ func TestSyncDueConfigs_HonorsInterval(t *testing.T) {
 	configureWorkspace(t, svc, "ws-1")
 
 	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool { return applier.callCount() == 1 }, time.Second, time.Millisecond,
+		"first sync runs immediately (never synced)")
 	require.Len(t, applier.calls, 1, "first sync runs immediately (never synced)")
 
 	svc.SyncDueConfigs(context.Background())
@@ -239,6 +294,173 @@ func TestSyncDueConfigs_SkipsPollingDisabled(t *testing.T) {
 	_, err = svc.SyncWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	assert.Len(t, applier.calls, 1)
+}
+
+func TestRunAutomaticJob_RechecksCurrentDueStateBeforeFetching(t *testing.T) {
+	svc, _ := setupTestService(t, seededMockClient())
+	disabled := false
+	_, err := svc.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
+		RepoOwner: "acme", RepoName: "flows", PollEnabled: &disabled,
+	})
+	require.NoError(t, err)
+
+	result := svc.runAutomaticJob(context.Background(), automaticJob{workspaceID: "ws-1"})
+	assert.Nil(t, result.wait)
+	assert.Nil(t, result.discard)
+}
+
+func TestIsSyncDueSkipsSuspendedAndFutureBackoff(t *testing.T) {
+	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
+	cfg := &Config{PollEnabled: true, IntervalSeconds: 60}
+	cfg.PollSuspended = true
+	assert.False(t, isSyncDue(cfg, now), "suspended polling must not issue a provider request")
+
+	cfg.PollSuspended = false
+	nextAttempt := now.Add(time.Minute)
+	cfg.NextAttemptAt = &nextAttempt
+	assert.False(t, isSyncDue(cfg, now), "backoff window must not issue a provider request")
+	assert.True(t, isSyncDue(cfg, nextAttempt), "the config should be eligible at next_attempt_at")
+}
+
+func TestSyncDueConfigsPersistsEqualJitterBackoff(t *testing.T) {
+	store := setupTestStore(t)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	svc := NewService(store, failingGitHubClients{err: &github.GitHubAPIError{
+		StatusCode: 500, Endpoint: "/repos/acme/flows/contents", FailureKind: github.FailureTransient,
+	}}, nil, &fakeApplier{}, log)
+	configureWorkspace(t, svc, "ws-1")
+	before := time.Now().UTC()
+
+	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool {
+		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+		return err == nil && cfg != nil && cfg.ConsecutiveFailures > 0
+	}, time.Second, time.Millisecond)
+
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.Equal(t, 1, cfg.ConsecutiveFailures)
+	if assert.NotNil(t, cfg.NextAttemptAt) {
+		assert.False(t, cfg.NextAttemptAt.Before(before.Add(150*time.Second)))
+		assert.False(t, cfg.NextAttemptAt.After(time.Now().UTC().Add(5*time.Minute)))
+	}
+	assert.Equal(t, string(github.FailureTransient), cfg.LastErrorClass)
+}
+
+func TestSyncDueConfigsSkipsProviderUntilNextAttempt(t *testing.T) {
+	store := setupTestStore(t)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	provider := &countingGitHubClients{err: &github.GitHubAPIError{
+		StatusCode: 500, Endpoint: "/repos/acme/flows/contents", FailureKind: github.FailureTransient,
+	}}
+	svc := NewService(store, provider, nil, &fakeApplier{}, log)
+	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	svc.jitter = func(time.Duration) time.Duration { return 0 }
+	configureWorkspace(t, svc, "ws-1")
+
+	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool { return provider.callCount() == 1 }, time.Second, time.Millisecond)
+	require.Equal(t, 1, provider.callCount())
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	require.NotNil(t, cfg.NextAttemptAt)
+	require.Equal(t, now.Add(150*time.Second), *cfg.NextAttemptAt)
+
+	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool { return provider.callCount() == 1 }, time.Second, time.Millisecond)
+	require.Equal(t, 1, provider.callCount(), "same-tick retry reached the provider")
+	now = *cfg.NextAttemptAt
+	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool { return provider.callCount() == 2 }, time.Second, time.Millisecond)
+	require.Equal(t, 2, provider.callCount(), "retry did not run at next_attempt_at")
+}
+
+func TestPermanentFailureSuspendsPollingUntilManualRecovery(t *testing.T) {
+	store := setupTestStore(t)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	provider := &countingGitHubClients{err: &github.GitHubAPIError{
+		StatusCode: 404, Endpoint: "/repos/acme/flows/contents", FailureKind: github.FailureMissingResource,
+	}}
+	svc := NewService(store, provider, nil, &fakeApplier{}, log)
+	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	configureWorkspace(t, svc, "ws-1")
+	suspendedLabel := workflowSyncMetricLabel(
+		"transition", "suspended", "provider", ProviderGitHub,
+		"failure_class", string(github.FailureMissingResource), "retry_source", "",
+	)
+	recoveredLabel := workflowSyncMetricLabel(
+		"transition", "recovered", "provider", ProviderGitHub,
+		"failure_class", string(github.FailureMissingResource), "retry_source", "",
+	)
+	suspendedBefore := workflowSyncCounterValue(t, suspendedLabel)
+	recoveredBefore := workflowSyncCounterValue(t, recoveredLabel)
+
+	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool {
+		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+		return err == nil && cfg != nil && cfg.PollSuspended
+	}, time.Second, time.Millisecond)
+	require.Equal(t, 1, provider.callCount())
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.True(t, cfg.PollSuspended)
+	assert.Equal(t, string(github.FailureMissingResource), cfg.LastErrorClass)
+	assert.NotEmpty(t, cfg.PollSuspensionReason)
+	assert.Equal(t, int64(1), workflowSyncCounterValue(t, suspendedLabel)-suspendedBefore)
+
+	now = now.Add(24 * time.Hour)
+	svc.SyncDueConfigs(context.Background())
+	require.Equal(t, 1, provider.callCount(), "suspended tick repeated the provider request")
+	assert.Equal(t, int64(1), workflowSyncCounterValue(t, suspendedLabel)-suspendedBefore,
+		"skipped suspended ticks must not repeat transition telemetry")
+
+	provider.setError(nil)
+	_, err = svc.SyncWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	require.Equal(t, 2, provider.callCount())
+	cfg, err = svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.False(t, cfg.PollSuspended)
+	assert.Zero(t, cfg.ConsecutiveFailures)
+	assert.Nil(t, cfg.NextAttemptAt)
+	assert.Empty(t, cfg.LastErrorClass)
+	assert.Equal(t, int64(1), workflowSyncCounterValue(t, recoveredLabel)-recoveredBefore)
+}
+
+func TestConfigSaveRearmsSuspendedPolling(t *testing.T) {
+	store := setupTestStore(t)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	require.NoError(t, err)
+	provider := &countingGitHubClients{err: &github.GitHubAPIError{
+		StatusCode: 404, Endpoint: "/repos/acme/flows/contents", FailureKind: github.FailureMissingResource,
+	}}
+	svc := NewService(store, provider, nil, &fakeApplier{}, log)
+	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	configureWorkspace(t, svc, "ws-1")
+
+	svc.SyncDueConfigs(context.Background())
+	assert.Eventually(t, func() bool {
+		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+		return err == nil && cfg != nil && cfg.PollSuspended
+	}, time.Second, time.Millisecond)
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	require.True(t, cfg.PollSuspended)
+
+	_, err = svc.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
+		RepoOwner: "acme", RepoName: "flows",
+	})
+	require.NoError(t, err)
+	cfg, err = svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.False(t, cfg.PollSuspended)
+	assert.Zero(t, cfg.ConsecutiveFailures)
 }
 
 func TestDeleteConfigForWorkspace_ReleasesSyncedWorkflows(t *testing.T) {
