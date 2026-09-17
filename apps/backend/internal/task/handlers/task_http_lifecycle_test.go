@@ -194,7 +194,7 @@ func TestHTTPListTasksByWorkspacePassesThroughFilters(t *testing.T) {
 func TestHTTPListTasksByWorkspaceDeniesForeignWorkspace(t *testing.T) {
 	repo := &httpTaskRepo{}
 	h := newHTTPTaskHandlers(t, repo)
-	c, rec := taskRequestAs(t, "user-a", http.MethodGet, "/api/v1/workspaces/ws-b/tasks", "ws-b")
+	c, rec := taskRequestAs(t, "user-a", http.MethodGet, "/api/v1/workspaces/ws-b/tasks?view=kanban", "ws-b")
 
 	h.httpListTasksByWorkspace(c)
 

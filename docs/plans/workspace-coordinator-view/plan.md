@@ -1,6 +1,6 @@
 ---
 created: 2026-09-17
-status: draft
+status: in_progress
 requirements:
   - REQ-ORCHESTRATION-COORDINATOR-VIEW-001
   - REQ-ORCHESTRATION-COORDINATOR-VIEW-002
@@ -29,7 +29,7 @@ features and unfinished personal-assistant extensions. This plan only delivers
 the new central view; it does not declare the assistant extension finished or
 authorize deployment, publishing, additional schedules or a plugin installation.
 
-All work orders are pending. The design turn ends with this complete package.
+Task 01 is implemented and verified. Page implementation and final evidence are in progress.
 
 ## Scope
 
@@ -105,7 +105,7 @@ feature flow and a native mobile browser project if required by the current
 
 ## Work orders
 
-- [ ] [Task 01: Scoped task observations](task-01-task-observations.md)
+- [x] [Task 01: Scoped task observations](task-01-task-observations.md)
 - [ ] [Task 02: Central Coordinator page](task-02-coordinator-page.md)
 - [ ] [Task 03: Feature evidence](task-03-feature-evidence.md)
 

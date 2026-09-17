@@ -2441,6 +2441,10 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 // used by the sidebar archive view. onlyArchived takes precedence over
 // includeArchived when both are true.
 func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return r.listWorkspaceTasks(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, false)
+}
+
+func (r *Repository) listWorkspaceTasks(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, kanbanOnly bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -2473,6 +2477,9 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 
 	if excludeConfig {
 		filter += " AND " + excludeConfigModePredicate(r.ro.DriverName(), "metadata")
+	}
+	if kanbanOnly {
+		filter += kanbanWorkflowFilter
 	}
 
 	var rows *sql.Rows

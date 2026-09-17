@@ -304,6 +304,8 @@ export async function getSubtaskCount(taskId: string, options?: ApiRequestOption
 export async function listTasksByWorkspace(
   workspaceId: string,
   params: {
+    view?: "kanban";
+    excludeConfig?: boolean;
     page?: number;
     pageSize?: number;
     query?: string;
@@ -317,6 +319,8 @@ export async function listTasksByWorkspace(
 ) {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
   const url = new URL(`${baseUrl}/api/v1/workspaces/${workspaceId}/tasks`);
+  if (params.view) url.searchParams.set("view", params.view);
+  if (params.excludeConfig) url.searchParams.set("exclude_config", "true");
   if (params.page) url.searchParams.set("page", String(params.page));
   if (params.pageSize) url.searchParams.set("page_size", String(params.pageSize));
   if (params.query) url.searchParams.set("query", params.query);

@@ -176,3 +176,15 @@ describe("listTasksByWorkspace", () => {
     );
   });
 });
+
+it("requests the canonical kanban view and configuration exclusions", async () => {
+  fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ tasks: [], total: 0 })));
+  await listTasksByWorkspace(
+    "ws",
+    { excludeConfig: true, view: "kanban" },
+    { baseUrl: API_BASE_URL },
+  );
+  const url = new URL(String(fetchSpy.mock.calls[0][0]));
+  expect(url.searchParams.get("exclude_config")).toBe("true");
+  expect(url.searchParams.get("view")).toBe("kanban");
+});

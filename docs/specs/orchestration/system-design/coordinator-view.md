@@ -45,7 +45,12 @@ Use `GET /api/v1/workspaces/:id/tasks` through
 `apps/web/lib/api/domains/kanban-api.ts:listTasksByWorkspace`. The handler already
 has bounded page/page_size (maximum 100), search, workflow/repository filters and
 batched session/status enrichment. Add the already-supported `exclude_config`
-parameter to the typed client. Keep `include_ephemeral` and `include_archived`
+parameter to the typed client. The implementation audit found that the existing
+list includes hidden and Office workflows. An explicit `view=kanban` option now
+selects a native task-repository query that excludes those workflows before
+counting, searching and paging. Existing list callers keep their current contract.
+This view performs text search without the separate command palette's best-effort
+PR-number augmentation. Keep `include_ephemeral` and `include_archived`
 false. Exclude native conversations and Office-owned workflow tasks from this
 Kanban overview; verify exclusion server-side before counts/data leave the task
 boundary when not already guaranteed by canonical task-list filtering.

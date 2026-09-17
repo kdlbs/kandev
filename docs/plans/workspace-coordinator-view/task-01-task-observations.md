@@ -1,7 +1,7 @@
 ---
 id: "01-task-observations"
 title: "Scoped task observations"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -105,4 +105,18 @@ authorization to calculate counts.
 
 ## Results
 
-Pending. No production or permanent test changes in the design turn.
+Implemented on 2026-09-17. The canonical list now accepts `view=kanban`;
+its query excludes hidden/Office workflows, configuration tasks, ephemeral
+conversations and automation delivery records before counts and paging. Ordinary
+list callers keep their previous behavior. The page observation loads windows of
+100 tasks, merges monotonic summaries from the shared WebSocket connection,
+coalesces lifecycle reads, aborts obsolete requests and clears denied scopes.
+Grouping uses native pending-input/error acknowledgement semantics.
+
+Validation: expected red failures demonstrated hidden workflow rows, missing
+client parameters and missing observation/group behavior. Frontend observation,
+group, client and summary suites passed (33 tests across four files), plus
+typecheck. The full task handler/service/status-summary/SQLite repository suites
+passed; the additional retained-private-conversation listing test passed. SQL
+guard and whitespace checks passed. No schema migration was introduced. Browser
+coverage and visible presentation continue in tasks 02/03.

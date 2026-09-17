@@ -177,9 +177,16 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	onlyEphemeral := c.Query("only_ephemeral") == queryValueTrue
 	excludeConfig := c.Query("exclude_config") == queryValueTrue
 
-	tasks, total, err := h.service.ListTasksByWorkspaceWithArchiveMode(
-		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived,
-	)
+	var tasks []*models.Task
+	var total int
+	var err error
+	if c.Query("view") == "kanban" {
+		tasks, total, err = h.service.ListKanbanTasksByWorkspace(c.Request.Context(), c.Param("id"), models.KanbanTaskQuery{WorkflowID: workflowID, RepositoryID: repositoryID, Query: query, Page: page, PageSize: pageSize, Sort: sort})
+	} else {
+		tasks, total, err = h.service.ListTasksByWorkspaceWithArchiveMode(
+			c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived,
+		)
+	}
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return

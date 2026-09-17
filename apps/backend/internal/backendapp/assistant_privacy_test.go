@@ -87,3 +87,14 @@ func TestAssistantPrivacyOfficeCompatibilityRetainsOwnership(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, allowed, "unregistering a private persona must not make it an Office execution target")
 }
+
+func TestCoordinatorListingRetainsPrivateConversationExclusion(t *testing.T) {
+	_, svc, _, taskID := privateConversationFixture(t)
+	for _, query := range []string{"", "Conversation"} {
+		rows, _, err := svc.ListKanbanTasksByWorkspace(context.Background(), "ws-1", models.KanbanTaskQuery{Query: query, Page: 1, PageSize: 100})
+		require.NoError(t, err)
+		for _, row := range rows {
+			require.NotEqual(t, taskID, row.ID)
+		}
+	}
+}
