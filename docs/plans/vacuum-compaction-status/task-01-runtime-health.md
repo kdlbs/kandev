@@ -1,7 +1,7 @@
 ---
 id: "01-runtime-health"
 title: "Coordinate runtime health with maintenance"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -109,4 +109,14 @@ The lease defers fault detection only while managed maintenance owns the pool.
 
 ## Results
 
-Pending.
+Implemented periodic SQLite health-probe admission through the shared
+maintenance guard. A busy guard now defers without changing tracker state or
+timestamps, while startup `Health.Check` remains strict and PostgreSQL keeps
+the existing path. Added real SQLite contention coverage for mixed state
+preservation, recovery, lease release, and middleware availability.
+
+Verification passed:
+
+- `go test -race ./internal/persistence/requiredstores ./internal/system/maintenance ./internal/system/database`
+- `go test -race ./internal/backendapp -run 'Test.*(Persistence|RequiredStore|Health|Ready)'`
+- `git diff --check`

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-17
-status: draft
+status: done
 requirements:
   - REQ-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007
   - REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003
@@ -17,7 +17,7 @@ legacy_specs: []
 Prevent false persistence failures during managed SQLite maintenance. Clear a
 recovered compaction status error without hiding a failed user action.
 Implement the runtime guard first, then the independent status recovery path.
-Both work orders require TDD. Implementation remains pending.
+Both work orders require TDD. Implementation is complete.
 
 ## Evidence and requirement conformance
 
@@ -64,7 +64,7 @@ diagnosed failure and preserves strict startup checks, real errors, and policy.
 - Database migrations, vacuum optimization, automatic vacuum, or payload changes.
 - New public APIs, timeouts, feature flags, settings, or translated copy.
 - General HTTP retry behavior or a new maintenance banner.
-- Production database operations, implementation, push, or PR creation in this turn.
+- Production database operations, push, or PR creation in this turn.
 
 ## Technical approach
 
@@ -146,8 +146,8 @@ maintenance cause without exposing production test controls.
 
 ## Work orders
 
-- [ ] [Task 01: Coordinate runtime health with maintenance](task-01-runtime-health.md)
-- [ ] [Task 02: Recover compaction status errors](task-02-status-recovery.md)
+- [x] [Task 01: Coordinate runtime health with maintenance](task-01-runtime-health.md)
+- [x] [Task 02: Recover compaction status errors](task-02-status-recovery.md)
 
 Execute sequentially. Task 02 does not technically depend on Task 01, but both
 must pass before delivery. No delegation is authorized.
@@ -157,22 +157,29 @@ must pass before delivery. No delegation is authorized.
 The completed [retention package](../tool-payload-retention/plan.md) and
 [store parity package](../postgres-domain-store-parity/plan.md) retain their
 historical results. This follow-up owns only the new criteria and regressions.
-Public docs need no change during planning. Implementation must check existing
-health/recovery guidance for claims affected by probe deferral. No labels change.
+Public docs need no change for this implementation. Existing health/recovery
+guidance was checked for claims affected by probe deferral. No labels change.
 
 ## Verification results
 
-Implementation: pending. No production code or permanent tests changed.
-Artifact validation on 2026-09-17:
+Implementation completed on 2026-09-17. Artifact validation on 2026-09-17:
 
 - `python3 scripts/list-docs.py validate`: passed (286 decisions, 986 specifications).
 - `python3 scripts/lint-spec-files.test.py`: passed (36 tests).
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check -- docs/specs docs/decisions docs/plans/vacuum-compaction-status`: passed.
-- `git status --short -- docs/plans/vacuum-compaction-status`: new package present.
+- Backend focused race tests passed for required-store health, maintenance,
+  database, and persistence middleware.
+- Frontend focused tests passed: 23 tests across the hook and card files.
+- `pnpm run typecheck`: passed.
+- Desktop retention E2E passed: 4 tests on `chromium`.
+- Phone retention E2E passed: 4 tests on `mobile-chrome`, including the
+  existing focused phone screenshot capture at 390px.
+- `git diff --check`: passed.
 
-Product tests and browser checks are scheduled in the work orders. They were
-not run because this turn changes planning artifacts only.
+Product tests and browser checks from both work orders passed. The worktree
+contains the implementation and its permanent regression coverage; no push or
+PR was created.
 
 ## Risks
 

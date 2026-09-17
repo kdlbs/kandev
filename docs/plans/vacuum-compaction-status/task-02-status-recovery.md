@@ -1,7 +1,7 @@
 ---
 id: "02-status-recovery"
 title: "Recover compaction status errors"
-status: pending
+status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
@@ -133,4 +133,24 @@ Task 01 supplies that independent evidence.
 
 ## Results
 
-Pending.
+Implemented separate status-read and action error ownership in
+`useToolPayloadRetention`. A successful background status poll now clears only
+the recovered read error. Mutation failures and persisted failed-operation
+states remain visible, while stale status responses continue to obey the
+existing generation and operation guards.
+
+Added hook and rendered-card regressions for read recovery, action-error
+preservation, and stale response ordering. Added controlled desktop and phone
+browser scenarios that fail one status read, recover on the next poll, and
+exercise touch actions on mobile. The existing phone cleanup test continues to
+capture the focused 390px card screenshot.
+
+Verification passed:
+
+- `pnpm exec vitest run hooks/domains/system/use-tool-payload-retention.test.ts components/settings/system/tool-payload-retention-card.test.tsx` (23 tests)
+- `pnpm run typecheck`
+- `pnpm e2e:run --project chromium tests/system/tool-payload-retention.spec.ts` (4 tests)
+- `pnpm e2e:run --project mobile-chrome tests/system/mobile-tool-payload-retention.spec.ts` (4 tests)
+- `python3 scripts/list-docs.py validate`
+- `python3 scripts/lint-spec-files.py --all`
+- `git diff --check`
