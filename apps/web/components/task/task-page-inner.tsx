@@ -18,6 +18,7 @@ import {
 import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
+import { TaskCommands } from "@/components/task-commands";
 import { SessionCommands } from "@/components/session-commands";
 import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
@@ -396,6 +397,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               isPassthrough={sessionPanel.isSessionPassthrough}
               isTaskArchived={archivedValue.isArchived}
             />
+            <TaskCommands />
             <TaskPRShortcut taskId={taskProps.taskId} />
             <TaskDebugOverlay entries={debugEntries} />
             {!isMobile && (

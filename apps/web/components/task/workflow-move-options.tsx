@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
+import { useWorkflowMoveSubmit, workflowMoveShortcutLabel } from "./use-workflow-move-submit";
+
 export type WorkflowMoveOptionsDraft = {
   resetContext: boolean;
   instructions: string;
@@ -71,6 +73,7 @@ type WorkflowMoveOptionsFieldsProps = {
   onDraftChange: (patch: Partial<WorkflowMoveOptionsDraft>) => void;
   isTouchSurface: boolean;
   instructionsRows?: number;
+  autoFocusInstructions?: boolean;
 };
 
 /**
@@ -82,6 +85,7 @@ export function WorkflowMoveOptionsFields({
   onDraftChange,
   isTouchSurface,
   instructionsRows = 4,
+  autoFocusInstructions,
 }: WorkflowMoveOptionsFieldsProps) {
   const { t } = useTranslation();
   const rowClass = isTouchSurface
@@ -132,6 +136,7 @@ export function WorkflowMoveOptionsFields({
       <label className="grid gap-1.5">
         <span className="font-medium">{t("task:workflowMoveInstructions")}</span>
         <Textarea
+          autoFocus={autoFocusInstructions}
           value={draft.instructions}
           onChange={(event) => onDraftChange({ instructions: event.target.value })}
           placeholder={t("task:workflowMoveInstructionsPlaceholder")}
@@ -152,6 +157,7 @@ type WorkflowMoveOptionsFormProps = {
   isMoving: boolean;
   isTouchSurface: boolean;
   instructionsRows?: number;
+  autoFocusInstructions?: boolean;
   onSubmit: WorkflowMoveOptionsSubmit;
   onCancel?: () => void;
 };
@@ -163,26 +169,11 @@ type WorkflowMoveOptionsStateProps = {
 
 function useWorkflowMoveOptionsFormState({ onSubmit, isMoving }: WorkflowMoveOptionsStateProps) {
   const { draft, patchDraft, resetDraft } = useWorkflowMoveOptionsForm();
-  const [submitting, setSubmitting] = useState(false);
-  const busy = isMoving || submitting;
-
-  const submit = async () => {
-    if (busy) return;
-    setSubmitting(true);
-    try {
-      const result = await onSubmit(workflowMoveOptionsPayload(draft));
-      if (result !== false) resetDraft();
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return {
-    draft,
-    patchDraft,
-    busy,
-    submit,
-  };
+  const submission = useWorkflowMoveSubmit(isMoving, async () => {
+    const result = await onSubmit(workflowMoveOptionsPayload(draft));
+    if (result !== false) resetDraft();
+  });
+  return { draft, patchDraft, ...submission };
 }
 
 function WorkflowMoveOptionsActions({
@@ -220,6 +211,11 @@ function WorkflowMoveOptionsActions({
         data-testid="workflow-move-submit"
       >
         {busy ? t("task:moving") : t("task:workflowMoveApply")}
+        {!isTouchSurface && (
+          <kbd className="ml-1 self-center font-sans text-[10px] leading-none opacity-60">
+            {workflowMoveShortcutLabel()}
+          </kbd>
+        )}
       </Button>
     </div>
   );
@@ -234,20 +230,22 @@ export function WorkflowMoveOptionsForm({
   isMoving,
   isTouchSurface,
   instructionsRows,
+  autoFocusInstructions,
   onSubmit,
   onCancel,
 }: WorkflowMoveOptionsFormProps) {
-  const { draft, patchDraft, busy, submit } = useWorkflowMoveOptionsFormState({
+  const { draft, patchDraft, busy, submit, onKeyDown } = useWorkflowMoveOptionsFormState({
     onSubmit,
     isMoving,
   });
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4" onKeyDown={onKeyDown}>
       <WorkflowMoveOptionsFields
         draft={draft}
         onDraftChange={patchDraft}
         isTouchSurface={isTouchSurface}
         instructionsRows={instructionsRows}
+        autoFocusInstructions={autoFocusInstructions}
       />
       <WorkflowMoveOptionsActions
         busy={busy}
@@ -263,6 +261,7 @@ type WorkflowMoveOptionsProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   targetStepName: string;
+  autoFocusInstructions?: boolean;
   isMoving?: boolean;
   onSubmit: WorkflowMoveOptionsSubmit;
 };
@@ -272,6 +271,7 @@ export function WorkflowMoveDialog({
   open,
   onOpenChange,
   targetStepName,
+  autoFocusInstructions,
   isMoving = false,
   onSubmit,
 }: WorkflowMoveOptionsProps) {
@@ -284,6 +284,7 @@ export function WorkflowMoveDialog({
           <DialogDescription>{t("task:workflowMoveOptionsDescription")}</DialogDescription>
         </DialogHeader>
         <WorkflowMoveOptionsForm
+          autoFocusInstructions={autoFocusInstructions}
           isMoving={isMoving}
           isTouchSurface={false}
           onSubmit={onSubmit}
@@ -299,6 +300,7 @@ export function WorkflowMoveOptions({
   open,
   onOpenChange,
   targetStepName,
+  autoFocusInstructions,
   isMoving = false,
   onSubmit,
 }: WorkflowMoveOptionsProps) {
@@ -318,6 +320,7 @@ export function WorkflowMoveOptions({
           data-testid="workflow-move-options"
         >
           <WorkflowMoveOptionsForm
+            autoFocusInstructions={autoFocusInstructions}
             isMoving={isMoving}
             isTouchSurface
             onSubmit={onSubmit}

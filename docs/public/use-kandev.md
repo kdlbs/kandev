@@ -229,3 +229,9 @@ Common corrections:
 For backup, update, log, database, and recovery details, see [Operations](operations.md). For release-specific disagreement, record the version from **Settings > System > About** and compare it with the matching GitHub tag.
 
 </details>
+
+## Use task actions by keyboard
+
+With a task open, press `Cmd/Ctrl+K` to find its sidebar actions. **Move to** lets you
+choose a step, add instructions, and submit with `Cmd/Ctrl+Enter`. See
+[task actions and move options](tasks-and-workflows.md#task-actions-from-the-command-palette).

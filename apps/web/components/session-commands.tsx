@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -195,8 +195,6 @@ type TaskCommandOptions = {
   openNewAgent: () => void;
   openSubtask: () => void;
   requestArchive: () => void;
-  archiveConfirmation?: ReactNode;
-  onArchiveConfirmationDismiss?: () => void;
 };
 
 export function buildTaskCommands({
@@ -206,8 +204,6 @@ export function buildTaskCommands({
   openNewAgent,
   openSubtask,
   requestArchive,
-  archiveConfirmation,
-  onArchiveConfirmationDismiss,
 }: TaskCommandOptions): CommandItem[] {
   if (!activeTaskId) return [];
   const items: CommandItem[] = [
@@ -238,9 +234,6 @@ export function buildTaskCommands({
       icon: <IconArchive className="size-3.5" />,
       keywords: searchKeywords(t, "common:commandArchiveTaskKeywords"),
       action: requestArchive,
-      keepOpen: true,
-      confirmation: archiveConfirmation,
-      onConfirmationDismiss: onArchiveConfirmationDismiss,
     });
   }
   return items;
@@ -347,7 +340,7 @@ function useArchiveCommandConfirmation(archive: ReturnType<typeof useTaskArchive
   return (
     <TaskArchiveConfirmation
       open
-      inline
+      forceDialog
       anchorRef={archiveAnchorRef}
       taskId={archive.target.id}
       taskTitle={archive.target.title}
@@ -431,8 +424,6 @@ export function SessionCommands({
         openNewAgent,
         openSubtask,
         requestArchive,
-        archiveConfirmation,
-        onArchiveConfirmationDismiss: archive.closeConfirm,
       }),
     ];
     return items.map((cmd) => ({ ...cmd, priority: 0 }));
@@ -454,8 +445,6 @@ export function SessionCommands({
     openNewAgent,
     openSubtask,
     requestArchive,
-    archiveConfirmation,
-    archive.closeConfirm,
   ]);
 
   useRegisterCommands(commands);
@@ -463,10 +452,13 @@ export function SessionCommands({
   if (!activeTaskId) return null;
 
   return (
-    <SessionCommandDialogs
-      activeTaskId={activeTaskId}
-      activeTaskTitle={activeTaskTitle}
-      dialogs={dialogs}
-    />
+    <>
+      <SessionCommandDialogs
+        activeTaskId={activeTaskId}
+        activeTaskTitle={activeTaskTitle}
+        dialogs={dialogs}
+      />
+      {archiveConfirmation}
+    </>
   );
 }

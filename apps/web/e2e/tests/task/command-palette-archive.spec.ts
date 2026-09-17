@@ -58,6 +58,7 @@ test.describe("Command palette archive", () => {
     await testPage.keyboard.press("Enter");
 
     // The shared confirmation dialog names the task being archived.
+    await expect(testPage.getByRole("combobox")).toHaveCount(0);
     const confirm = testPage.getByRole("alertdialog");
     await expect(confirm.getByText(/Palette Archive Target/)).toBeVisible({ timeout: 10_000 });
     await testPage.getByTestId("palette-archive-confirm").click();

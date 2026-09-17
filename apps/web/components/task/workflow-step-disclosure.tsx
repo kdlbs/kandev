@@ -22,7 +22,11 @@ import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
-import { WorkflowMoveOptionsFields, useWorkflowMoveOptionsForm } from "./workflow-move-options";
+import {
+  workflowMoveOptionsPayload,
+  WorkflowMoveOptionsFields,
+  useWorkflowMoveOptionsForm,
+} from "./workflow-move-options";
 import {
   useCompactWorkflowDisclosure,
   type CompactWorkflowDisclosureControls,
@@ -33,6 +37,7 @@ import {
   workflowStepProgressTranslationKey,
 } from "./workflow-step-progress-details";
 import { StepCircleIndicator } from "./workflow-step-marker";
+import { useWorkflowMoveSubmit } from "./use-workflow-move-submit";
 import { StepDisclosureRowActions } from "./workflow-step-disclosure-actions";
 import { useTranslation } from "react-i18next";
 
@@ -472,6 +477,19 @@ function StepDisclosureBody({
  * A successful move unmounts the row (the disclosure closes); a failed move
  * keeps the disclosure open so the draft the user typed is preserved.
  */
+type StepDisclosureRowProps = {
+  step: Step;
+  isCurrent: boolean;
+  isCompleted: boolean;
+  canMove: boolean;
+  isMoving: boolean;
+  movePending: boolean;
+  isTouchSurface: boolean;
+  progress?: WorkflowStepProgress;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
+  onMove: DisclosureMove;
+};
+
 function StepDisclosureRow({
   step,
   isCurrent,
@@ -483,23 +501,14 @@ function StepDisclosureRow({
   progress,
   agentLabelsByProfileId,
   onMove,
-}: {
-  step: Step;
-  isCurrent: boolean;
-  isCompleted: boolean;
-  canMove: boolean;
-  isMoving: boolean;
-  movePending: boolean;
-  isTouchSurface: boolean;
-  progress?: WorkflowStepProgress;
-  agentLabelsByProfileId: Readonly<Record<string, string>>;
-  onMove: DisclosureMove;
-}) {
+}: StepDisclosureRowProps) {
   const { t } = useTranslation();
   const [showOptions, setShowOptions] = useState(false);
   const { draft, patchDraft } = useWorkflowMoveOptionsForm();
+  const submission = useWorkflowMoveSubmit(movePending || !canMove || isCurrent, () =>
+    onMove(step.id, workflowMoveOptionsPayload(draft)),
+  );
   const buttonSizeClass = isTouchSurface ? "h-11" : "h-7 [@media(pointer:coarse)]:h-11";
-
   return (
     <div
       data-testid={`workflow-step-disclosure-row-${step.id}`}
@@ -534,12 +543,11 @@ function StepDisclosureRow({
             <StepDisclosureRowActions
               stepId={step.id}
               isMoving={isMoving}
-              movePending={movePending}
+              movePending={submission.busy}
               showOptions={showOptions}
               buttonSizeClass={buttonSizeClass}
-              draft={draft}
               onToggleOptions={() => setShowOptions((value) => !value)}
-              onMove={onMove}
+              onSubmit={submission.submit}
             />
           )
         )}
@@ -555,7 +563,10 @@ function StepDisclosureRow({
       {canMove && !isCurrent && showOptions && (
         <div
           className="pb-1 pl-4 pr-1"
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            submission.onKeyDown(event);
+            event.stopPropagation();
+          }}
           data-testid={`workflow-step-disclosure-options-panel-${step.id}`}
         >
           <WorkflowMoveOptionsFields

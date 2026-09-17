@@ -85,7 +85,7 @@ test("short-taps the existing mobile next-step button for a direct move", async 
   ).toBeVisible({ timeout: 30_000 });
 });
 
-test("long-presses the existing mobile next-step button for move options", async ({
+test("submits mobile move options with an attached keyboard", async ({
   testPage,
   apiClient,
   seedData,
@@ -103,7 +103,7 @@ test("long-presses the existing mobile next-step button for move options", async
   await expectMoveOptionsDrawer(testPage);
   await fillMoveOverrides(testPage);
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-submit").tap();
+  await testPage.getByTestId("workflow-move-instructions").press("Meta+Enter");
 
   expect((await moveRequest).postDataJSON()).toEqual({
     workflow_id: expect.any(String),
