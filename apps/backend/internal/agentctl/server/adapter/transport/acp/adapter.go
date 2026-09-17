@@ -501,6 +501,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.acpClient = acpclient.NewClient(
 		acpclient.WithLogger(a.logger.Zap()),
 		acpclient.WithWorkspaceRoot(a.cfg.WorkDir),
+		acpclient.WithRestrictedTools(a.assistantRestricted()),
 		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
 		acpclient.WithCursorTaskHandler(a.handleCursorTask),
@@ -529,7 +530,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion:    acp.ProtocolVersionNumber,
-		ClientCapabilities: clientCapabilitiesForAgent(a.agentID),
+		ClientCapabilities: a.clientCapabilities(),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",

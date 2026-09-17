@@ -1,6 +1,9 @@
 package sqlite
 
-import "github.com/kandev/kandev/internal/db/dialect"
+import (
+	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
+)
 
 func (r *Repository) migrateAssistantStorage() error {
 	for _, q := range []string{
@@ -32,5 +35,10 @@ func (r *Repository) migrateAssistantStorage() error {
 			return err
 		}
 	}
-	return nil
+	exists, err := db.ColumnExists(r.db, "orchestration_assistant_bindings", "execution_mode")
+	if err != nil || exists {
+		return err
+	}
+	_, err = r.db.Exec(`ALTER TABLE orchestration_assistant_bindings ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'inspect'`)
+	return err
 }

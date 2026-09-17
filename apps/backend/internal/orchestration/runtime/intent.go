@@ -30,6 +30,15 @@ func (s *Service) withIntentRevision(ctx context.Context, taskID string, payload
 		}
 		copy["binding_id"], copy["binding_version"] = id, version
 	}
+	if _, present := copy["assistant_authority"]; !present {
+		authority, err := s.assistantAuthority(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if authority != nil {
+			copy["assistant_authority"] = authority
+		}
+	}
 	return copy, nil
 }
 

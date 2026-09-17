@@ -60,14 +60,19 @@ func (m *assistantTaskManager) WorkspaceCatalog(context.Context, string) (any, e
 
 func assistantRuntimeCaller(t *testing.T, s *Service, task string) (*gin.Engine, string, string) {
 	t.Helper()
+	return assistantRuntimeCallerMode(t, s, task, "execute")
+}
+
+func assistantRuntimeCallerMode(t *testing.T, s *Service, task, mode string) (*gin.Engine, string, string) {
+	t.Helper()
 	ctx := context.Background()
 	require.Equal(t, 200, runtimeRequest(t, assistantRouter(s), "PUT", "/api/v1/orchestration/assistant",
-		"", "", map[string]any{"orchestrator_id": "chief"}).Code)
+		"", "", map[string]any{"orchestrator_id": "chief", "execution_mode": mode}).Code)
 	require.NoError(t, s.QueueTurn(ctx, "chief", task, "task_comment", "operation-run", nil))
 	run, err := s.Runs.ClaimNextEligibleRun(ctx)
 	require.NoError(t, err)
-	require.NoError(t, s.Runs.UpdateRunRuntimeSnapshot(ctx, run.ID, "workspace_coordinator", run.Payload, "session"))
-	token, err := s.Auth.MintRuntimeJWT("chief", task, "ws", run.ID, "session", "workspace_coordinator")
+	require.NoError(t, s.Runs.UpdateRunRuntimeSnapshot(ctx, run.ID, assistantBrokerAudience, run.Payload, "session"))
+	token, err := s.Auth.MintRuntimeJWT("chief", task, "ws", run.ID, "session", assistantBrokerAudience)
 	require.NoError(t, err)
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/orchestration", runtimeauth.Middleware(s.Auth, s.Personas)), &Handler{Service: s})
@@ -102,6 +107,10 @@ func TestAssistantOperationTimeoutDoesNotRepeatExternalAction(t *testing.T) {
 	result := runtimeRequest(t, router, "POST", path, token, runID, body)
 	require.Equal(t, 503, result.Code, result.Body.String())
 	retry := runtimeRequest(t, router, "POST", path, token, runID, body)
+	require.Equal(t, 409, retry.Code, retry.Body.String())
+	require.EqualValues(t, 1, manager.creates.Load())
+	body["operation_id"] = "fresh-id-cannot-hide-uncertain-delivery"
+	retry = runtimeRequest(t, router, "POST", path, token, runID, body)
 	require.Equal(t, 409, retry.Code, retry.Body.String())
 	require.EqualValues(t, 1, manager.creates.Load())
 }

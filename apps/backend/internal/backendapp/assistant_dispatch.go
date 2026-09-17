@@ -14,9 +14,18 @@ import (
 )
 
 func assistantDispatchGuard(s *orchestrationruntime.Service, owners *orchstore.Repository) executor.DispatchGuard {
-	return func(ctx context.Context, task *models.Task, _ *models.TaskSession, profile string) error {
+	return func(ctx context.Context, task *models.Task, session *models.TaskSession, profile string) error {
 		if err := checkAssistantConversationDispatch(ctx, s, owners, task.ID); err != nil {
 			return err
+		}
+		if owners != nil {
+			owner, err := owners.ConversationUserOwner(ctx, task.ID)
+			if err != nil {
+				return err
+			}
+			if owner != "" {
+				return s.CheckAssistantSession(ctx, task.ID, session, profile)
+			}
 		}
 		baseline, _ := task.Metadata[dispatchcontext.MetadataKey].(string)
 		ref, explicit := dispatchcontext.Reference(ctx)

@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestration/personas"
 	orchestrationruntime "github.com/kandev/kandev/internal/orchestration/runtime"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -30,10 +31,31 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 		Auth: runtimeauth.NewAgentAuth(""), Tasks: services.Task,
 		Credentials:  assistantCredentialReader{store: repos.Secrets},
 		Capabilities: newAssistantCapabilityReader(repos, services),
+		Authority:    assistantAuthorityReader{profiles: repos.AgentSettings, executors: repos.Task, versions: services.ManagedRuntimeSelections, authorize: services.Task.AuthorizeWorkspaceAccess},
 		Manager:      &taskCreatorAdapter{taskSvc: services.Task, profiles: repos.AgentSettings, orch: orch, taskRepo: repos.Task, workflow: repos.Workflow},
 		APIURL:       fmt.Sprintf("http://localhost:%d", apiPort), CLI: cli,
 		Start: func(ctx context.Context, launch orchestrationruntime.Launch) error {
-			return orch.StartTaskWithRoute(ctx, launch.TaskID, launch.PersonaID, orchexecutor.LaunchContext{ExecutorProfileID: launch.ExecutorID, Prompt: launch.Prompt, Env: launch.Env, OnSessionPrepared: launch.OnSessionPrepared}, orchexecutor.RouteOverride{ExecutionProfileID: launch.ProfileID})
+			var profile *mcpprofile.Context
+			prepared := launch.OnSessionPrepared
+			if launch.Authority != nil {
+				value := mcpprofile.New(mcpprofile.SurfaceAssistantBroker, nil, nil)
+				profile = &value
+				prepared = func(ctx context.Context, sessionID string) error {
+					if err := launch.OnSessionPrepared(ctx, sessionID); err != nil {
+						return err
+					}
+					session, err := repos.Task.GetTaskSession(ctx, sessionID)
+					if err != nil {
+						return err
+					}
+					if session.Metadata == nil {
+						session.Metadata = map[string]any{}
+					}
+					session.Metadata[orchestrationruntime.AssistantPolicyMetadata] = string(mcpprofile.SurfaceAssistantBroker)
+					return repos.Task.UpdateTaskSession(ctx, session)
+				}
+			}
+			return orch.StartTaskWithRoute(ctx, launch.TaskID, launch.PersonaID, orchexecutor.LaunchContext{McpProfile: profile, ExecutorProfileID: launch.ExecutorID, Prompt: launch.Prompt, Env: launch.Env, OnSessionPrepared: prepared}, orchexecutor.RouteOverride{ExecutionProfileID: launch.ProfileID})
 		},
 		UpdateStatus: func(ctx context.Context, ws, id, status string) error {
 			return updateOrchestratedStatus(ctx, services.Task, repos, ws, id, status)

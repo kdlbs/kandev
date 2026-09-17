@@ -18,6 +18,9 @@ const (
 	SurfaceConfiguration Surface = "configuration"
 	SurfaceExternal      Surface = "external"
 	SurfaceAutomation    Surface = "automation"
+	// SurfaceAssistantBroker has no general native or plugin tools. Its only
+	// attachment is the restricted assistant broker, authorized on every call.
+	SurfaceAssistantBroker Surface = "assistant-broker-v1"
 )
 
 type Capability string
@@ -104,7 +107,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceConversation, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation:
+	case SurfaceKanbanTask, SurfaceConversation, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceAssistantBroker:
 		return surface
 	default:
 		return SurfaceKanbanTask

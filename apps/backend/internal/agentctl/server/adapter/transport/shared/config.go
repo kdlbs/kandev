@@ -13,6 +13,7 @@ type Config struct {
 
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
+	ToolPolicy  string
 
 	// PermissionTimeout is the maximum time to wait for a permission response.
 	// After timeout, the request is auto-denied with interrupt. Defaults to DefaultPermissionTimeout.

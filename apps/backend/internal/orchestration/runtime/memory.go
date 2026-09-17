@@ -15,6 +15,10 @@ func (h *Handler) memory(c *gin.Context) {
 		c.AbortWithStatus(403)
 		return
 	}
+	if claims.Capabilities == assistantBrokerAudience {
+		h.runtimeMemory(c)
+		return
+	}
 	rows, err := h.Service.Repo.ListAgentMemory(c.Request.Context(), claims.AgentProfileID)
 	if err != nil {
 		fail(c, err)
@@ -34,6 +38,14 @@ func (h *Handler) memory(c *gin.Context) {
 		filtered = append(filtered, row)
 	}
 	c.JSON(200, gin.H{"entries": filtered, "memory": filtered, "count": len(filtered)})
+}
+
+func (h *Handler) runtimeMemory(c *gin.Context) {
+	_, binding, ok := h.runtimeAssistant(c)
+	if !ok {
+		return
+	}
+	h.assistantMemoryPage(c, binding)
 }
 func (h *Handler) setMemory(c *gin.Context) {
 	claims, ok := h.caller(c)

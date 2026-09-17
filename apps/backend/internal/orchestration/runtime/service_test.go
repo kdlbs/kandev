@@ -70,7 +70,7 @@ func newRuntime(t *testing.T) (*Service, *sqlx.DB, string) {
 	require.NoError(t, repo.RegisterOrchestrator(ctx, a.ID, "ws", "chief-of-staff"))
 	conversation, err := repo.EnsureAgentConversation(ctx, a)
 	require.NoError(t, err)
-	svc := &Service{AssistantEnabled: true, Repo: repo, Personas: &personas.Service{Profiles: profiles, Repo: repo}, Runs: runs, Queue: runservice.New(runs, nil, log, nil), Auth: runtimeauth.NewAgentAuth(""), Tasks: &testTasks{tasks: map[string]*taskmodels.Task{}}, APIURL: "http://localhost:1", CLI: "agentctl"}
+	svc := &Service{AssistantEnabled: true, Authority: &testAssistantAuthority{revision: "fixture"}, Repo: repo, Personas: &personas.Service{Profiles: profiles, Repo: repo}, Runs: runs, Queue: runservice.New(runs, nil, log, nil), Auth: runtimeauth.NewAgentAuth(""), Tasks: &testTasks{tasks: map[string]*taskmodels.Task{}}, APIURL: "http://localhost:1", CLI: "agentctl"}
 	return svc, db, conversation.TaskID
 }
 func TestConversationRunsWithoutOffice(t *testing.T) {

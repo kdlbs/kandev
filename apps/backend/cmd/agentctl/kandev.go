@@ -14,6 +14,14 @@ import (
 // added when the office costs CLI joined memory + task as `get`-style
 // readers.
 const (
+	subcmdMemory          = "memory"
+	subcmdWorkspace       = "workspace"
+	subcmdTask            = "task"
+	subcmdCapabilities    = "capabilities"
+	subcmdContext         = "context"
+	subcmdComment         = "comment"
+	assistantEnabledValue = "true"
+
 	subcmdList   = "list"
 	subcmdCreate = "create"
 	subcmdGet    = "get"
@@ -32,9 +40,9 @@ func runKandevCLI(args []string) int {
 		return runOrchestrationCLI(args)
 	}
 	switch args[0] {
-	case "workspace":
+	case subcmdWorkspace:
 		return workspaceCatalog()
-	case "task":
+	case subcmdTask:
 		// Singular `task` group (get/update/create) stays for back
 		// compat with skills authored before the plural rollout.
 		// New skills should prefer `tasks` which covers list/move/
@@ -42,11 +50,11 @@ func runKandevCLI(args []string) int {
 		return runTaskCmd(args[1:])
 	case "tasks":
 		return runTasksCmd(args[1:])
-	case "comment":
+	case subcmdComment:
 		return runCommentCmd(args[1:])
 	case "agents":
 		return runAgentsCmd(args[1:])
-	case "memory":
+	case subcmdMemory:
 		return runMemoryCmd(args[1:])
 	case "checkout":
 		return runCheckoutCmd(args[1:])
@@ -70,7 +78,7 @@ func runKandevCLI(args []string) int {
 
 func printUsage() {
 	if os.Getenv("KANDEV_RUNTIME_API_PREFIX") == orchestrationAPIPrefix {
-		if os.Getenv("KANDEV_PERSONAL_ASSISTANT_ENABLED") == "true" {
+		if os.Getenv("KANDEV_PERSONAL_ASSISTANT_ENABLED") == assistantEnabledValue {
 			fmt.Fprintln(os.Stderr, "Usage: agentctl kandev <workspace|objective|context|capabilities|task|comment|memory> [flags]")
 		} else {
 			fmt.Fprintln(os.Stderr, "Usage: agentctl kandev <workspace|task|comment|memory> [flags]")
@@ -142,24 +150,27 @@ func getWithParams(basePath, requiredEnvName, requiredEnvVal string, params map[
 }
 
 func runOrchestrationCLI(args []string) int {
-	if (args[0] == "objective" || args[0] == "context" || args[0] == "capabilities") && os.Getenv("KANDEV_PERSONAL_ASSISTANT_ENABLED") != "true" {
+	if args[0] == "assistant-mcp" {
+		return runAssistantMCP()
+	}
+	if (args[0] == "objective" || args[0] == subcmdContext || args[0] == subcmdCapabilities) && os.Getenv("KANDEV_PERSONAL_ASSISTANT_ENABLED") != assistantEnabledValue {
 		cliError("personal_assistant_disabled")
 		return 1
 	}
 	switch args[0] {
-	case "capabilities":
+	case subcmdCapabilities:
 		return runCapabilitiesCmd(args[1:])
-	case "context":
+	case subcmdContext:
 		return runContextCmd(args[1:])
 	case "objective":
 		return runObjectiveCmd(args[1:])
-	case "workspace":
+	case subcmdWorkspace:
 		return workspaceCatalog()
-	case "task":
+	case subcmdTask:
 		return runTaskCmd(args[1:])
-	case "comment":
+	case subcmdComment:
 		return runCommentCmd(args[1:])
-	case "memory":
+	case subcmdMemory:
 		return runMemoryCmd(args[1:])
 	case "--help", "help", "-h":
 		printUsage()

@@ -19,8 +19,8 @@ requirements:
 ## Boundary and current implementation
 
 This design completes the existing `internal/orchestration` assistant. Ownership,
-durable intake and objectives already exist; context/credential work is partial.
-Capability discovery, enforced inspect mode, attention, native resolution, the
+durable intake, objectives, context/credential metadata, capability discovery and
+enforced inspect mode are implemented. Attention, native resolution, the
 app-level shell, maintenance and workspace grants remain pending. The
 [workspace Coordinator view](coordinator-view.md) is a separate observation UI
 that may ship first. Its grouped task list is not an assistant attention ledger.
@@ -158,6 +158,17 @@ external-service, plugin-configuration and credential mutations are denied in
 inspect. Tests use native/plugin/MCP/provider stubs with mutation counters and
 untrusted text attempting to change mode or grant scope. Unknown tool effects
 are denied. Execute/design mode still follows native gates and operation receipts.
+
+The initial provider boundary is recorded in
+[ADR: restricted assistant broker](../../../decisions/2026-09-17-restricted-assistant-broker.md).
+Private bindings persist `execution_mode` (default `inspect`); a human changes
+mode through binding CAS. Runtime snapshots fingerprint the selected native
+profile, executor and exact managed version. `assistant_broker` tokens have their
+own audience. A typed MCP surface and immutable session metadata survive native
+resume/steer. Claude ACP 0.75.1 on a repository-free local executor receives only
+the managed broker, with built-ins/settings/hooks and other attachments disabled.
+Unsupported profiles fail admission. Read/receipt effects are the only inspect
+allowlist; no plugin annotation is accepted as enforcement evidence.
 
 ## Attention projection
 

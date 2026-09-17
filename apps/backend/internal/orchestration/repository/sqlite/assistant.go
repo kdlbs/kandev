@@ -20,6 +20,14 @@ func (r *Repository) AssistantBinding(ctx context.Context, owner string) (*model
 }
 
 func (r *Repository) SelectAssistant(ctx context.Context, row *models.AssistantBinding, expected int64) error {
+	if row.ExecutionMode == "" {
+		row.ExecutionMode = "inspect"
+	}
+	switch row.ExecutionMode {
+	case "answer", "inspect", "design", "execute":
+	default:
+		return models.ErrConflict
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -33,15 +41,15 @@ func (r *Repository) SelectAssistant(ctx context.Context, row *models.AssistantB
 	if expected == 0 {
 		row.ID, row.Version, row.CreatedAt, row.UpdatedAt = uuid.NewString(), 1, now, now
 		result, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO orchestration_assistant_bindings
-			(id,owner_user_id,orchestrator_id,workspace_id,conversation_id,version,created_at,updated_at)
-			VALUES(?,?,?,?,?,1,?,?) ON CONFLICT DO NOTHING`),
-			row.ID, row.OwnerUserID, row.OrchestratorID, row.WorkspaceID, row.ConversationID, now, now)
+			(id,owner_user_id,orchestrator_id,workspace_id,conversation_id,execution_mode,version,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,1,?,?) ON CONFLICT DO NOTHING`),
+			row.ID, row.OwnerUserID, row.OrchestratorID, row.WorkspaceID, row.ConversationID, row.ExecutionMode, now, now)
 	} else {
 		result, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE orchestration_assistant_bindings
-			SET orchestrator_id=?,workspace_id=?,conversation_id=?,version=version+1,updated_at=?
+			SET orchestrator_id=?,workspace_id=?,conversation_id=?,execution_mode=?,version=version+1,updated_at=?
 			WHERE owner_user_id=? AND version=?
 			AND NOT EXISTS (SELECT 1 FROM orchestration_assistant_bindings WHERE orchestrator_id=? AND owner_user_id<>?)`),
-			row.OrchestratorID, row.WorkspaceID, row.ConversationID, now,
+			row.OrchestratorID, row.WorkspaceID, row.ConversationID, row.ExecutionMode, now,
 			row.OwnerUserID, expected, row.OrchestratorID, row.OwnerUserID)
 	}
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/redaction"
 	"github.com/kandev/kandev/internal/orchestration/models"
 )
 
@@ -47,6 +48,14 @@ func (h *Handler) assistantMemoryPage(c *gin.Context, b *models.AssistantBinding
 		if h.Service.memoryVisible(c.Request.Context(), b, row) {
 			visible = append(visible, row)
 		}
+	}
+	if _, runtime := c.Get("agent_claims"); runtime {
+		projected := make([]models.ContextMemory, 0, len(visible))
+		for _, row := range visible {
+			projected = append(projected, models.ContextMemory{ID: row.ID, Revision: row.Revision, Scope: row.Scope, ScopeID: row.ScopeID, SourceCommentID: row.SourceCommentID, Confirmed: row.Confirmed, Content: redaction.NewRedactor().String(row.Content)})
+		}
+		c.JSON(200, gin.H{memoryResponseKey: projected, nextCursorKey: next})
+		return
 	}
 	c.JSON(200, gin.H{memoryResponseKey: visible, nextCursorKey: next, "forget_notice": "Forgetting affects future context, not text already sent to a provider or historical backups."})
 }

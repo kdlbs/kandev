@@ -20,7 +20,7 @@ func TestAssistantFeatureGateDefaultRoutes(t *testing.T) {
 	router := assistantRouter(defaultAssistantRuntime(s))
 	for _, methodPath := range [][2]string{
 		{"GET", "/assistant"}, {"PUT", "/assistant"},
-		{"GET", "/assistant/capabilities"}, {"GET", "/runtime/capabilities"},
+		{"GET", "/assistant/capabilities"}, {"GET", "/runtime/capabilities"}, {"GET", "/runtime/memory"},
 		{"GET", "/assistant/objectives"}, {"GET", "/assistant/memory"},
 		{"PUT", "/assistant/memory/example"}, {"DELETE", "/assistant/memory/example"},
 		{"GET", "/assistant/credentials"}, {"PUT", "/assistant/credentials/example"},

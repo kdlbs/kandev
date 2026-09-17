@@ -1,7 +1,7 @@
 ---
 id: "05-tool-authority"
 title: "Enforced read-only tool execution"
-status: pending
+status: done
 wave: 4
 depends_on: ["02-objectives-routing","04-capability-inventory"]
 plan: "plan.md"
@@ -115,4 +115,41 @@ remain human-only in task 07, including during a maintenance grant.
 
 ## Results
 
-Pending. Record red/green test evidence, exact commands and counts, relevant artifacts, owned changes and cleanup here; synchronize the plan checkbox only after acceptance is met.
+Implemented owner-selected mode (default inspect), immutable authority snapshots,
+live owner/profile/executor/intent rechecks, a dedicated audience-bound broker and
+prepared/dispatched/acknowledged/failed/unknown operation receipts. Unknown delivery
+also blocks rotating operation IDs at the same endpoint under the same intent.
+Private resume and steering require the current restricted session and run.
+
+The supported path is managed Claude ACP 0.75.1 / SDK 0.3.257 on a local,
+repository-free executor. Native tools, ambient MCP, settings, hooks, skills,
+ACP host filesystem/terminal and permission escalation are withheld or denied.
+The adapter validates the managed command and protocol version on every start.
+Other providers, remote/custom executors, custom profile flags/environment and
+unqualified versions fail admission. See the
+[boundary ADR](../../decisions/2026-09-17-restricted-assistant-broker.md).
+This qualifies the enforcement boundary; provider availability and live answer
+quality remain the separate task 11 trial.
+
+Red/green evidence: the new policy tests initially failed to compile because the
+admission/adapter policies did not exist; runtime, native MCP, ACP host operations
+and configured attachment mutation tests now pass. Test fixtures contain only
+synthetic data.
+
+Verification (local logs: `assistant-authority-*`, `assistant-provider-*`):
+
+- Exact first work-order filter: **10 top-level tests**; second: **23**.
+- Full orchestration, CLI, ACP client/adapter, agentctl config and MCP
+  profile/server packages pass with the race detector. Backend authority and
+  lifecycle admission negative tests also pass with the race detector.
+- Both-engine authority lifecycle tests pass, including binding CAS between
+  preparation and dispatch, unknown recovery and blocked fresh-ID retry.
+- Full required-store conformance and previous-stable v0.93 upgrade pass on
+  SQLite and disposable PostgreSQL. Additive mode migration replays successfully.
+- SQL guard, architecture lint and specification lint pass. Go lint: zero issues.
+  Public-doc validation: 61 tests and 48 pages pass.
+
+The restricted broker permits scoped reads and its own conversation/objective
+receipts in inspect; task effects require design/execute and native gates.
+Plugins and external MCP retain unknown effects regardless of read-only hints.
+No real provider request, production change, public post or public PR occurred.

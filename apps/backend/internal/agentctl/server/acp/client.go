@@ -32,9 +32,10 @@ type CursorTaskHandler func(params json.RawMessage)
 
 // Client implements acp.Client interface and handles all agent requests
 type Client struct {
-	logger        *zap.Logger
-	workspaceRoot string
-	terminals     *TerminalManager
+	logger          *zap.Logger
+	workspaceRoot   string
+	restrictedTools bool
+	terminals       *TerminalManager
 
 	mu                sync.RWMutex
 	updateHandler     UpdateHandler
@@ -57,6 +58,11 @@ func WithWorkspaceRoot(root string) ClientOption {
 	return func(c *Client) {
 		c.workspaceRoot = root
 	}
+}
+
+// WithRestrictedTools disables all ACP host filesystem and terminal operations.
+func WithRestrictedTools(restricted bool) ClientOption {
+	return func(c *Client) { c.restrictedTools = restricted }
 }
 
 // WithUpdateHandler sets the handler for session updates
@@ -332,6 +338,9 @@ func (c *Client) resolvePath(reqPath string) (string, error) {
 
 // ReadTextFile reads a text file
 func (c *Client) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
+	if c.restrictedTools {
+		return acp.ReadTextFileResponse{}, fmt.Errorf("assistant policy denies host operations")
+	}
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.read_file")
 	defer span.End()
 	span.SetAttributes(attribute.String("path", p.Path))
@@ -375,6 +384,9 @@ func (c *Client) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (a
 
 // WriteTextFile writes a text file
 func (c *Client) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
+	if c.restrictedTools {
+		return acp.WriteTextFileResponse{}, fmt.Errorf("assistant policy denies host operations")
+	}
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.write_file")
 	defer span.End()
 	span.SetAttributes(
@@ -407,6 +419,9 @@ func (c *Client) WriteTextFile(ctx context.Context, p acp.WriteTextFileRequest) 
 
 // CreateTerminal starts a command in a new terminal.
 func (c *Client) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest) (acp.CreateTerminalResponse, error) {
+	if c.restrictedTools {
+		return acp.CreateTerminalResponse{}, fmt.Errorf("assistant policy denies host operations")
+	}
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.create_terminal")
 	defer span.End()
 	span.SetAttributes(attribute.String("command", p.Command))
@@ -439,6 +454,9 @@ func (c *Client) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest
 
 // KillTerminal sends SIGTERM to a terminal's process.
 func (c *Client) KillTerminal(ctx context.Context, p acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
+	if c.restrictedTools {
+		return acp.KillTerminalResponse{}, fmt.Errorf("assistant policy denies host operations")
+	}
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.kill_terminal")
 	defer span.End()
 	terminalID := string(p.TerminalId)
@@ -453,6 +471,9 @@ func (c *Client) KillTerminal(ctx context.Context, p acp.KillTerminalRequest) (a
 
 // TerminalOutput returns the current output of a terminal.
 func (c *Client) TerminalOutput(ctx context.Context, p acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
+	if c.restrictedTools {
+		return acp.TerminalOutputResponse{}, fmt.Errorf("assistant policy denies host operations")
+	}
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.terminal_output")
 	defer span.End()
 	terminalID := string(p.TerminalId)
@@ -479,6 +500,9 @@ func (c *Client) TerminalOutput(ctx context.Context, p acp.TerminalOutputRequest
 
 // ReleaseTerminal kills (if running) and releases a terminal.
 func (c *Client) ReleaseTerminal(ctx context.Context, p acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
+	if c.restrictedTools {
+		return acp.ReleaseTerminalResponse{}, fmt.Errorf("assistant policy denies host operations")
+	}
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.release_terminal")
 	defer span.End()
 	terminalID := string(p.TerminalId)
@@ -490,6 +514,9 @@ func (c *Client) ReleaseTerminal(ctx context.Context, p acp.ReleaseTerminalReque
 
 // WaitForTerminalExit blocks until the terminal's command exits.
 func (c *Client) WaitForTerminalExit(ctx context.Context, p acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
+	if c.restrictedTools {
+		return acp.WaitForTerminalExitResponse{}, fmt.Errorf("assistant policy denies host operations")
+	}
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.wait_for_terminal_exit")
 	defer span.End()
 	terminalID := string(p.TerminalId)

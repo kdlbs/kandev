@@ -32,6 +32,7 @@ type Manager interface {
 	WorkspaceCatalog(context.Context, string) (any, error)
 }
 type Launch struct {
+	Authority                                        *models.AssistantAuthority
 	OnSessionPrepared                                func(context.Context, string) error
 	TaskID, PersonaID, ProfileID, ExecutorID, Prompt string
 	Env                                              map[string]string
@@ -47,6 +48,7 @@ type Service struct {
 	Manager          Manager
 	Credentials      CredentialHealthReader
 	Capabilities     CapabilityReader
+	Authority        AssistantAuthorityReader
 	Start            func(context.Context, Launch) error
 	UpdateStatus     func(context.Context, string, string, string) error
 	APIURL, CLI      string
@@ -131,8 +133,16 @@ func (s *Service) launch(ctx context.Context, run *runmodels.Run) error {
 	if err != nil {
 		return err
 	}
+	authority, err := s.validateAssistantAuthority(ctx, taskID, run.Payload)
+	if err != nil {
+		return err
+	}
+	audience := workspaceCoordinatorAudience
+	if authority != nil {
+		audience = assistantBrokerAudience
+	}
 
-	token, err := s.Auth.MintRuntimeJWT(a.ID, taskID, ws, run.ID, "", "workspace_coordinator")
+	token, err := s.Auth.MintRuntimeJWT(a.ID, taskID, ws, run.ID, "", audience)
 	if err != nil {
 		return err
 	}
@@ -147,15 +157,24 @@ func (s *Service) launch(ctx context.Context, run *runmodels.Run) error {
 	if err := s.Repo.SetRuntimeWorking(ctx, a.ID, true); err != nil {
 		return err
 	}
-	return s.Start(ctx, Launch{TaskID: taskID, PersonaID: a.ID, ProfileID: profile, ExecutorID: executorID, Prompt: prompt, Env: env, OnSessionPrepared: func(ctx context.Context, sessionID string) error {
-		token, err := s.Auth.MintRuntimeJWT(a.ID, taskID, ws, run.ID, sessionID, "workspace_coordinator")
+	return s.Start(ctx, Launch{Authority: authority, TaskID: taskID, PersonaID: a.ID, ProfileID: profile, ExecutorID: executorID, Prompt: prompt, Env: env,
+		OnSessionPrepared: s.bindRuntimeSession(run, a.ID, taskID, ws, audience, env)})
+}
+
+func (s *Service) bindRuntimeSession(run *runmodels.Run, persona, taskID, workspace, audience string, env map[string]string) func(context.Context, string) error {
+	return func(ctx context.Context, sessionID string) error {
+		if _, err := s.validateAssistantAuthority(ctx, taskID, run.Payload); err != nil {
+			return err
+		}
+		token, err := s.Auth.MintRuntimeJWT(persona, taskID, workspace, run.ID, sessionID, audience)
 		if err != nil {
 			return err
 		}
 		env["KANDEV_API_KEY"], env["KANDEV_RUN_TOKEN"] = token, token
-		return s.Runs.UpdateRunRuntimeSnapshot(ctx, run.ID, "workspace_coordinator", run.Payload, sessionID)
-	}})
+		return s.Runs.UpdateRunRuntimeSnapshot(ctx, run.ID, audience, run.Payload, sessionID)
+	}
 }
+
 func clip(value string, max int) string {
 	if len(value) <= max {
 		return value
@@ -214,8 +233,18 @@ func (s *Service) prompt(ctx context.Context, a *models.AgentInstance, taskID st
 		data, _ := json.Marshal(callback)
 		fmt.Fprintf(&text, "\nTask update: %s\nInspect this task's current state/result and post only new information in this chat. Review is not completion; do not repeat an answered question or restart work.\n", data)
 	}
-	text.WriteString("\nUse agentctl kandev (or $KANDEV_CLI kandev) for workspace, task, and memory commands. Your final reply appears in this conversation. Retrieve older comments only when needed.\n")
+	appendRuntimeToolGuidance(&text, payload)
 	return text.String(), nil
+}
+
+func appendRuntimeToolGuidance(text *strings.Builder, payload map[string]any) {
+	if authority, ok := payload["assistant_authority"]; ok {
+		data, _ := json.Marshal(authority)
+		fmt.Fprintf(text, "\nUse the supplied kandev_assistant MCP tools. Shell, built-in provider tools, plugins and other MCP servers are unavailable. Current server authority: %s. Every call rechecks live authority. An unknown operation outcome requires inspection of native evidence, never a fresh retry ID.\n", data)
+	} else {
+		text.WriteString("\nUse agentctl kandev (or $KANDEV_CLI kandev) for workspace, task, and memory commands.\n")
+	}
+	text.WriteString("Your final reply appears in this conversation. Retrieve older comments only when needed.\n")
 }
 
 func (s *Service) executionSelection(ctx context.Context, a *models.AgentInstance) (string, string, error) {

@@ -69,7 +69,13 @@ func replayOperation(c *gin.Context, operation *models.Operation) {
 }
 
 func (h *Handler) executeOperation(c *gin.Context, operation *models.Operation, status int, execute func() (any, error)) {
-	result, err := execute()
+	var result any
+	err := h.Service.Repo.DispatchOperation(c.Request.Context(), operation)
+	if err == nil {
+		result, err = execute()
+	} else {
+		err = rejectOperation(409, "operation_authority_superseded")
+	}
 	state := "acknowledged"
 	raw, marshalErr := json.Marshal(result)
 	if err != nil || marshalErr != nil || len(raw) > 32000 {

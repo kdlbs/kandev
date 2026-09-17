@@ -32,7 +32,8 @@ generic material; original local snapshot/backup refs are not published.
 | Assistant memory/context | Backend complete; scoped pagination, metadata validation and dispatch invalidation verified |
 | Central workspace task view beside chat | Implemented; scoped native observations, desktop/mobile flow and synthetic media verified |
 | Assistant capability directory | Implemented; scoped catalogs, bounded paging, metadata privacy and conversation opt-in verified |
-| Assistant capability enforcement, attention, resolution, UI and workspace grants | Fully planned; implementation pending |
+| Assistant tool enforcement | Implemented; restricted Claude ACP broker, live authority and unknown-delivery checks verified |
+| Assistant attention, resolution, UI and workspace grants | Fully planned; implementation pending |
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
 | Actual live-data rehearsal and deployment | Pending; live service unchanged |
 

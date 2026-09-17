@@ -69,6 +69,7 @@ func (h *Handler) selectAssistant(c *gin.Context) {
 	var req struct {
 		OrchestratorID string `json:"orchestrator_id"`
 		Expected       int64  `json:"expected_version"`
+		ExecutionMode  string `json:"execution_mode"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.OrchestratorID == "" || req.Expected < 0 {
 		c.AbortWithStatus(http.StatusBadRequest)
@@ -91,7 +92,7 @@ func (h *Handler) selectAssistant(c *gin.Context) {
 		return
 	}
 	row := &models.AssistantBinding{OwnerUserID: identity.UserID, OrchestratorID: persona.ID,
-		WorkspaceID: persona.WorkspaceID, ConversationID: conversation.TaskID}
+		WorkspaceID: persona.WorkspaceID, ConversationID: conversation.TaskID, ExecutionMode: req.ExecutionMode}
 	if err := h.Service.Repo.SelectAssistant(ctx, row, req.Expected); err != nil {
 		if errors.Is(err, models.ErrConflict) {
 			c.JSON(http.StatusConflict, gin.H{errorResponseKey: "assistant_binding_conflict"})

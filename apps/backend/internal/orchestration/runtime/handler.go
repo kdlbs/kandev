@@ -39,6 +39,7 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	assistant.GET("/assistant/objectives", h.objectives)
 	assistant.GET("/assistant/capabilities", h.capabilities)
 	assistant.GET("/runtime/capabilities", h.capabilities)
+	assistant.GET("/runtime/memory", h.runtimeMemory)
 	assistant.GET("/assistant/memory", h.assistantMemory)
 	assistant.GET("/assistant/memory/:id", h.assistantMemory)
 	assistant.PUT("/assistant/memory/:id", h.editAssistantMemory)
@@ -72,12 +73,12 @@ func fail(c *gin.Context, err error) {
 func (h *Handler) caller(c *gin.Context) (*runtimeauth.AgentClaims, bool) {
 	raw, ok := c.Get("agent_claims")
 	claims, valid := raw.(*runtimeauth.AgentClaims)
-	if !ok || !valid || claims.Capabilities != "workspace_coordinator" {
+	if !ok || !valid || (claims.Capabilities != workspaceCoordinatorAudience && claims.Capabilities != assistantBrokerAudience) {
 		c.AbortWithStatusJSON(403, gin.H{errorResponseKey: "coordinator token required"})
 		return nil, false
 	}
 	run, err := h.Service.Runs.GetRunByID(c.Request.Context(), claims.RunID)
-	if err != nil || run == nil || run.AgentProfileID != claims.AgentProfileID || run.Status != "claimed" || run.SessionID != claims.SessionID {
+	if err != nil || run == nil || run.AgentProfileID != claims.AgentProfileID || run.Status != statusClaimed || run.SessionID != claims.SessionID {
 		c.AbortWithStatusJSON(403, gin.H{errorResponseKey: "run is no longer active"})
 		return nil, false
 	}
@@ -89,11 +90,17 @@ func (h *Handler) caller(c *gin.Context) (*runtimeauth.AgentClaims, bool) {
 	if !h.currentRunAuthority(c, claims, run.Payload) {
 		return nil, false
 	}
+	if !h.assistantInvocation(c, claims, run.Payload) {
+		return nil, false
+	}
 	return claims, true
 }
 
 func (h *Handler) currentRunAuthority(c *gin.Context, claims *runtimeauth.AgentClaims, payload string) bool {
 	if c.Request.Method == http.MethodGet {
+		if claims.Capabilities == assistantBrokerAudience {
+			return h.currentIntent(c, claims.TaskID, payload)
+		}
 		return h.currentBinding(c, claims.TaskID, payload)
 	}
 	if c.GetHeader("X-Kandev-Run-Id") != claims.RunID {
@@ -296,6 +303,9 @@ func (h *Handler) createTask(c *gin.Context) {
 		if err != nil {
 			return nil, err
 		}
+		if err := h.authorizeTaskEffect(c, claims, req.ExecutionMode); err != nil {
+			return nil, err
+		}
 		id, err := h.Service.Manager.CreateWorkspaceTask(c.Request.Context(), models.WorkspaceTaskSpec{DelegationReference: ref, DirectProfile: true, WorkspaceID: claims.WorkspaceID, ChiefID: claims.AgentProfileID, WorkflowID: req.WorkflowID, WorkflowStepID: req.WorkflowStepID, ExecutionMode: req.ExecutionMode, RepositoryID: req.RepositoryID, AssigneeID: req.AssigneeID, Title: req.Title, Description: req.Description, ExternalID: req.ExternalID, ParentID: req.ParentID})
 		if err == nil && objective != nil {
 			err = h.Service.Repo.LinkObjectiveTask(c.Request.Context(), models.ObjectiveTask{ObjectiveID: objective.ID, TaskID: id, Role: "implementation", ContextRef: req.ContextRef, OperationID: req.OperationID})
@@ -328,6 +338,13 @@ func (h *Handler) manageTask(c *gin.Context) {
 				return nil, rejectOperation(422, err.Error())
 			}
 		}
+		mode := ""
+		if objective != nil {
+			mode = objective.Mode
+		}
+		if err := h.authorizeTaskEffect(c, claims, mode); err != nil {
+			return nil, err
+		}
 		err = h.Service.Manager.ManageWorkspaceTask(c.Request.Context(), req)
 		if err == nil && objective != nil {
 			err = h.Service.Repo.LinkObjectiveTask(c.Request.Context(), models.ObjectiveTask{ObjectiveID: objective.ID, TaskID: req.TaskID, SessionID: req.SessionID, Role: "implementation", ContextRef: req.ContextRef, OperationID: req.OperationID})
@@ -349,6 +366,9 @@ func (h *Handler) updateTask(c *gin.Context) {
 		return
 	}
 	h.performOperation(c, claims, req.OperationRequest, req, http.StatusOK, func() (any, error) {
+		if err := h.authorizeTaskEffect(c, claims, ""); err != nil {
+			return nil, err
+		}
 		return gin.H{"ok": true}, h.Service.UpdateStatus(c.Request.Context(), claims.WorkspaceID, c.Param("id"), req.Status)
 	})
 }
@@ -370,6 +390,10 @@ func (h *Handler) runtimeComment(c *gin.Context) {
 	}
 	if req.TaskID == "" {
 		req.TaskID = claims.TaskID
+	}
+	if claims.Capabilities == assistantBrokerAudience && req.TaskID != claims.TaskID {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
 	}
 	if !h.privateRuntimeAllowed(c, claims, req.TaskID) {
 		return

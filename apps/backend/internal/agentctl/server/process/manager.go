@@ -1391,6 +1391,10 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
+	if err := config.ValidateAssistantCommand(m.cfg, m.cfg.AgentArgs); err != nil {
+		return err
+	}
+	config.RefreshAssistantPolicy(m.cfg)
 	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
 	for i, mcp := range m.cfg.McpServers {
 		mcpServers[i] = adapter.McpServerConfig{
@@ -1412,6 +1416,9 @@ func (m *Manager) buildAdapterConfig() error {
 		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
 		RequiresProcessKill:       m.cfg.RequiresProcessKill,
 		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
+	}
+	if m.cfg.AssistantRestricted() {
+		m.adapterCfg.ToolPolicy = config.AssistantToolPolicy
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -1723,6 +1730,9 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 	if err := config.ValidateCommandArgs(args); err != nil {
 		return err
 	}
+	if err := config.ValidateAssistantCommand(m.cfg, args); err != nil {
+		return err
+	}
 	if continueArgsPresent {
 		if err := config.ValidateCommandArgs(continueArgs); err != nil {
 			return fmt.Errorf("invalid continue command: %w", err)
@@ -1757,6 +1767,7 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 			m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
 		}
 	}
+	config.RefreshAssistantPolicy(m.cfg)
 
 	m.logger.Info("agent configured",
 		zap.String("command", command),

@@ -11,6 +11,9 @@ import (
 // Since both acpclient and adapter now use the shared types package,
 // no conversion is needed - we just forward to the handler.
 func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
+	if a.assistantRestricted() {
+		return &PermissionResponse{Cancelled: true}, nil
+	}
 	a.mu.RLock()
 	handler := a.permissionHandler
 	fallbackSessionID := a.sessionID

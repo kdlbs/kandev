@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -610,6 +611,14 @@ func (m *Manager) buildAgentCommandWithContext(
 	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(ctx, runtime, agentConfig)
 	if err != nil {
 		return agentCommands{}, err
+	}
+	if err := validateAssistantCommand(req, profileInfo, agentConfig, managedRuntimeVersion, cliFlagTokens, commandPrefixTokens); err != nil {
+		return agentCommands{}, err
+	}
+	if assistantRestrictedLaunch(req) {
+		autoApprove = false
+		preferNative = false
+		permissionValues = map[string]bool{}
 	}
 	// Only pass SessionID (for --resume flag) if the agent supports recovery.
 	// Agents with CanRecover=false (e.g. Auggie) use history context injection instead.
@@ -1341,6 +1350,14 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+	if err := validateAssistantLaunch(req); err != nil {
+		return nil, err
+	}
+	if assistantRestrictedLaunch(req) && m.executionStore != nil {
+		if existing, ok := m.executionStore.GetBySessionID(req.SessionID); ok && existing.MetadataSnapshot()[assistantPolicyMetadata] != string(mcpprofile.SurfaceAssistantBroker) {
+			return nil, fmt.Errorf("assistant cannot reuse an unrestricted runtime")
+		}
+	}
 	if req.SessionID == "" {
 		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
 		if err != nil {

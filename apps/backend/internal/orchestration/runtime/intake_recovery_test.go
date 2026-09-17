@@ -29,7 +29,7 @@ func TestAssistantBindingRuntimeCannotReadAnotherPrivateConversation(t *testing.
 	for _, suffix := range []string{"", "/comments"} {
 		require.Equal(t, 404, runtimeRequest(t, router, "GET", path+suffix, token, runID, nil).Code)
 	}
-	require.Equal(t, 404, runtimeRequest(t, router, "POST", path+"/comments", token, runID, map[string]string{"body": "Unauthorized note"}).Code)
+	require.Equal(t, 403, runtimeRequest(t, router, "POST", path+"/comments", token, runID, map[string]string{"body": "Unauthorized note"}).Code)
 }
 
 func TestAssistantIntakeAtomicRollback(t *testing.T) {

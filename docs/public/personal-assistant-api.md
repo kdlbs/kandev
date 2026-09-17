@@ -8,7 +8,7 @@ status: experimental
 
 This reference describes the in-development backend for a user-owned assistant built on [workspace orchestration](orchestration-personas.md), independently of Office.
 
-It is **not ready for production use**. The central assistant UI, provider-enforced read-only execution and native attention/input handling are not implemented yet.
+It is **not ready for production use**. The central assistant UI and native attention/input handling are not implemented yet; combined qualification is still pending.
 
 Both `features.orchestration` (`KANDEV_FEATURES_ORCHESTRATION`) and
 `features.personalAssistant` (`KANDEV_FEATURES_PERSONAL_ASSISTANT`) must be enabled
@@ -23,15 +23,19 @@ queued/native launches are blocked. Pending intake, schemas and retained ownersh
 remain intact. Owners can still read protected conversation history. Re-enabling
 rechecks current ownership, intent and context before work can execute.
 
-Do not treat an `inspect` label as an enforced sandbox; the remaining authority
-work is required before using that mode with a provider.
+Inspection uses a restricted native broker on managed Claude ACP 0.75.1 with a
+local, repository-free executor. Profiles with custom CLI/environment/launcher
+overrides, fallback routing or executor scripts are unsupported. Other providers
+and versions are unsupported for this assistant path. These restrictions do not
+change ordinary coordinator or worker execution. Provider availability still
+depends on the selected profile's existing credentials.
 
 ## Ownership and intake
 
 Routes below use the `/api/v1/orchestration` prefix. Human endpoints use Kandev's authenticated identity; runtime credentials cannot configure the user's assistant, confirm memory or edit credential descriptors.
 
 - `GET /assistant` reads the owner's current binding.
-- `PUT /assistant` accepts `orchestrator_id` and `expected_version` (zero for initial selection).
+- `PUT /assistant` accepts `orchestrator_id`, `expected_version` (zero for initial selection), and `execution_mode` (`answer`, `inspect`, `design`, `execute`; default `inspect`). Changing mode revokes older binding versions.
 - `POST /tasks/:id/comments` accepts a stable `client_message_id` with `body`. Initial durable acceptance returns 201; an identical retry returns 200; a changed payload under the same ID returns 409.
 - `GET /tasks/:id/comments` uses `before` for cursor-based history. A receipt can be accepted before a run ID exists.
 
@@ -149,3 +153,19 @@ Text search in this view does not add command-palette pull-request-number search
 results. Native `task.status_summary.updated` events update only the matching
 workspace; lifecycle events and reconnects refresh the loaded window. No
 conversation history or worker transcript is fetched to classify task rows.
+
+## Execution authority
+
+Private assistant runtime tokens have a separate audience and are valid only
+for the active run/session, binding, intent and current profile/executor. A
+changed profile, unavailable workspace or stale queue requires fresh admission.
+The central assistant receives named tools through `agentctl kandev assistant-mcp`.
+It has no provider-native shell or file tools and no external MCP/plugin tools.
+
+Inspect permits authorized reads and internal objective/conversation receipts.
+Design and execute can manage native worker tasks under their existing workflow,
+context and approval gates. A runtime cannot change its owner's selected mode,
+confirm memory, edit credential descriptors or approve native permissions.
+Unknown operation outcomes remain unknown until native evidence resolves them.
+Use `GET /runtime/memory` for bounded, redacted, scoped runtime memory; its
+`next_cursor` is passed as `after`. Human memory editing remains separate.

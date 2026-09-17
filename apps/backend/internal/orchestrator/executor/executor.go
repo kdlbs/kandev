@@ -618,6 +618,7 @@ type RouteOverride struct {
 // preserve the Office-built prompt and configuration that the legacy
 // path receives via StartTaskWithEnv.
 type LaunchContext struct {
+	McpProfile *mcpprofile.Context
 	// OnSessionPrepared binds a durable run before any runtime events can arrive.
 	OnSessionPrepared func(context.Context, string) error
 	ExecutorID        string
