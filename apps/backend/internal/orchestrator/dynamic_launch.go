@@ -297,11 +297,12 @@ func (s *Service) mirrorDynamicRouteProjection(
 // process start succeeds. LaunchPreparedSession returns before this point.
 func (s *Service) handleAgentProcessStarted(
 	ctx context.Context,
-	_, sessionID, agentExecutionID string,
+	taskID, sessionID, agentExecutionID string,
 ) {
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}
+	s.retireWorkflowStartPromptAttempt(ctx, taskID, sessionID, agentExecutionID)
 	// AC-52's acceptance edge, composed first and unconditionally on
 	// sessionID alone (AC-56a): profileExecutionResolver is a dynamic-routing
 	// precondition, not a launch one, so an instance without it configured

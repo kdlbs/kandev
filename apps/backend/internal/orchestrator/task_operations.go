@@ -881,6 +881,7 @@ func (s *Service) startCreatedSession(
 		mcpMode = executor.McpModeOffice
 	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
+	ctx = bindWorkflowStartPromptAttemptTurn(ctx, initialTurnID)
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
