@@ -2443,10 +2443,10 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		return
 	}
 
-	s.taskRuntimeStateMu.Lock()
-	defer s.taskRuntimeStateMu.Unlock()
 	ctx, releaseCeilingEntry := s.lockCeilingEntryAdmission(ctx, taskID)
 	defer releaseCeilingEntry()
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
 
 	if completedSessionID != "" {
 		if session, err := s.repo.GetTaskSession(ctx, completedSessionID); err == nil && session != nil && isWorkingSessionState(session.State) {

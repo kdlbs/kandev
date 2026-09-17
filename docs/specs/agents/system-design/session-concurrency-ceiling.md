@@ -63,6 +63,16 @@ origins never become manual during replay. The sweep clears a record only after
 successful dispatch. A repeated refusal leaves the original timestamp and
 payload in place.
 
+The task admission lock protects bounded record and route operations. Replay
+releases this lock after validation, before session-guard waits and provider
+dispatch. The dispatch context retains the workflow binding, but not ownership
+of the released lock. The durable claim excludes competing replay consumers.
+Launch and prompt boundaries revalidate the binding before provider work.
+
+Task-state reconciliation acquires task admission before the global task-state
+mutex. A task-local admission wait cannot hold the global mutex. Provider
+callbacks can complete while replay waits for agent readiness.
+
 The task-owned [queued session ownership design](../../tasks/system-design/queued-session-ownership.md)
 plans explicit passive-inspection classification at the caller boundary. Opening
 a conversation is not a manual override. Actual explicit execution retains this
