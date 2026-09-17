@@ -101,6 +101,7 @@
   "step": "步骤",
   "subtaskOf": "子任务，父任务为",
   "taskList": "任务列表",
+  "tasksInStep": "{{step}}中的任务",
   "tasksOverWipLimit": "{{label}} 个任务，超出 WIP 限制",
   "theseOptionsAffectThisTaskList": "这些选项仅影响此任务列表。",
   "threads": "对话流",

@@ -6,7 +6,7 @@
 // Wired via thin wrappers around the server actions / WS payloads in
 // `app/actions/agents.ts` and `lib/ws/handlers/agents.ts`.
 
-import type { ProfileEnvVar } from "@/lib/types/http";
+import type { Agent, ProfileEnvVar } from "@/lib/types/http";
 import type {
   AgentProfile,
   DynamicAgentPolicy,
@@ -251,6 +251,16 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     createdAt: pickString(profile, "createdAt", "created_at"),
     updatedAt: pickString(profile, "updatedAt", "updated_at"),
     ...(dynamic ? { dynamic } : {}),
+  };
+}
+
+/** Normalize all profiles on an agent returned by a boot, HTTP, or WS boundary. */
+export function normalizeAgentProfiles(agent: Agent): Agent {
+  return {
+    ...agent,
+    profiles: Array.isArray(agent.profiles)
+      ? agent.profiles.map((profile) => normalizeAgentProfile(profile))
+      : [],
   };
 }
 

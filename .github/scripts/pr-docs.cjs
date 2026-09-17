@@ -232,6 +232,9 @@ function pathExemption(pathname) {
   if (pathname === 'docs' || pathname.startsWith('docs/')) {
     return 'documentation tree';
   }
+  if (pathname === 'plugin-registry/plugins.yaml') {
+    return 'canonical plugin registry source';
+  }
   if (/\.(?:md|mdx|markdown)$/i.test(pathname)) {
     return 'Markdown file';
   }

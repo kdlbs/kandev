@@ -41,6 +41,21 @@ var officeLegacyTransientBackoff = []time.Duration{
 	10 * time.Second,
 }
 
+// AgentFailureEvidence is the lifecycle snapshot for the invocation that
+// produced an agent failure. The legacy retry path requires this evidence to
+// prove that the failure happened before output or effects, and that the
+// event still belongs to the current invocation.
+type AgentFailureEvidence struct {
+	SessionID                   string
+	AgentExecutionID            string
+	PromptGeneration            uint64
+	EvidenceKnown               bool
+	OutputObserved              bool
+	EffectObserved              bool
+	ProviderDiagnosticCandidate bool
+	ProviderDiagnosticText      string
+}
+
 // HandleAgentFailure is the v1 office failure path: every agent error
 // is treated as terminal, except a classified-transient post-start
 // failure that still has retry budget, which is requeued instead (see
@@ -83,8 +98,13 @@ func (s *Service) HandleAgentFailure(
 	errorMessage string,
 	agentID string,
 	providerError *streams.ProviderError,
+	evidence ...AgentFailureEvidence,
 ) (bool, error) {
-	if s.tryLegacyTransientRetry(ctx, run, errorMessage, agentID, providerError) {
+	var failureEvidence AgentFailureEvidence
+	if len(evidence) > 0 {
+		failureEvidence = evidence[0]
+	}
+	if s.tryLegacyTransientRetry(ctx, run, errorMessage, agentID, providerError, failureEvidence) {
 		return false, nil
 	}
 
@@ -174,47 +194,17 @@ func (s *Service) HandleAgentFailure(
 // classifies as an unretryable agent_runtime_error instead.
 func (s *Service) tryLegacyTransientRetry(
 	ctx context.Context, run *models.Run, errorMessage string, agentID string,
-	providerError *streams.ProviderError,
+	providerError *streams.ProviderError, evidence AgentFailureEvidence,
 ) bool {
-	if run.RetryCount >= officeLegacyTransientMaxRetries {
+	if !legacyTransientRetryEvidenceSafe(run, evidence) {
 		return false
 	}
-	if stale, _ := isRetryStale(run); stale {
+	delay, ok := legacyTransientRetryDelay(run)
+	if !ok {
 		return false
 	}
-	delay := officeLegacyTransientBackoff[run.RetryCount]
-	// A requeued run is re-evaluated by evaluateRunStaleness the next time
-	// it is claimed, which cancels any run with retry_count > 0 once
-	// run.RequestedAt is older than staleRunThreshold — and scheduling this
-	// retry always leaves retry_count > 0. The run cannot be claimed before
-	// this attempt's backoff elapses, so the gate has to test the age it
-	// will have on arrival (RequestedAt age plus delay), not the age it has
-	// right now: testing now alone lets a run age into the cancellation
-	// window during the backoff itself, silently converting a retry that
-	// was just scheduled into an execution_too_old cancellation (no
-	// consecutive_failures increment, no inbox row). Refusing here when
-	// that cancellation is already certain lets the failure fall through to
-	// today's terminal accounting instead.
-	if !run.RequestedAt.IsZero() && time.Since(run.RequestedAt)+delay > staleRunThreshold {
-		return false
-	}
-	message := errorMessage
-	providerID := agentID
-	if providerError != nil {
-		if providerError.Message != "" {
-			message = providerError.Message
-		}
-		if id := providerError.ProviderID; id != "" &&
-			!routingerr.HasProviderRules(providerID) && routingerr.HasProviderRules(id) {
-			providerID = id
-		}
-	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseStreaming,
-		ProviderID: providerID,
-		Stderr:     message,
-	})
-	if !classified.ShouldShortRetry() {
+	classified, ok := classifyLegacyTransientFailure(errorMessage, agentID, providerError, evidence)
+	if !ok {
 		return false
 	}
 
@@ -246,6 +236,84 @@ func (s *Service) tryLegacyTransientRetry(
 		zap.Int("retry_count", newRetryCount),
 		zap.Duration("delay", delay))
 	return true
+}
+
+func legacyTransientRetryDelay(run *models.Run) (time.Duration, bool) {
+	if run == nil || run.RetryCount >= officeLegacyTransientMaxRetries {
+		return 0, false
+	}
+	if stale, _ := isRetryStale(run); stale {
+		return 0, false
+	}
+	delay := officeLegacyTransientBackoff[run.RetryCount]
+	// A requeued run is re-evaluated by evaluateRunStaleness the next time
+	// it is claimed, which cancels any run with retry_count > 0 once
+	// run.RequestedAt is older than staleRunThreshold. Test the age it will
+	// have on arrival so the backoff cannot move it into that cancellation
+	// window after this handler schedules the retry.
+	if !run.RequestedAt.IsZero() && time.Since(run.RequestedAt)+delay > staleRunThreshold {
+		return 0, false
+	}
+	return delay, true
+}
+
+func classifyLegacyTransientFailure(
+	errorMessage, agentID string,
+	providerError *streams.ProviderError,
+	evidence AgentFailureEvidence,
+) (*routingerr.Error, bool) {
+	message := errorMessage
+	providerID := agentID
+	if providerError != nil {
+		if providerError.Message != "" {
+			message = providerError.Message
+		}
+		if id := providerError.ProviderID; id != "" &&
+			!routingerr.HasProviderRules(providerID) && routingerr.HasProviderRules(id) {
+			providerID = id
+		}
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: providerID,
+		Stderr:     message,
+	})
+	if !classified.ShouldShortRetry() {
+		return nil, false
+	}
+	if !evidence.ProviderDiagnosticCandidate {
+		return classified, true
+	}
+	diagnostic := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     evidence.ProviderDiagnosticText,
+	})
+	diagnosticText := normalizeFailureText(evidence.ProviderDiagnosticText)
+	if diagnostic.Confidence != routingerr.ConfHigh || !diagnostic.ShouldShortRetry() ||
+		diagnostic.Code != classified.Code || diagnosticText == "" ||
+		!strings.Contains(normalizeFailureText(message), diagnosticText) {
+		return nil, false
+	}
+	return classified, true
+}
+
+func legacyTransientRetryEvidenceSafe(run *models.Run, evidence AgentFailureEvidence) bool {
+	if run == nil || evidence.SessionID == "" || evidence.AgentExecutionID == "" || evidence.PromptGeneration == 0 ||
+		!evidence.EvidenceKnown || evidence.OutputObserved || evidence.EffectObserved {
+		return false
+	}
+	if run.SessionID != "" && evidence.SessionID != "" && run.SessionID != evidence.SessionID {
+		return false
+	}
+	if evidence.ProviderDiagnosticCandidate && normalizeFailureText(evidence.ProviderDiagnosticText) == "" {
+		return false
+	}
+	return true
+}
+
+func normalizeFailureText(value string) string {
+	return streams.SanitizeProviderMessage(value)
 }
 
 // RecordAgentSuccess resets the consecutive-failure counter for the
@@ -314,11 +382,6 @@ func (s *Service) MarkAgentPausedFixed(
 		// Both the pause marker and its durable recovery work are gone.
 		return s.repo.DismissInboxItem(ctx, userID, InboxKindAgentPausedAfterFails, agentID)
 	}
-	if err := s.repo.DismissInboxItem(
-		ctx, userID, InboxKindAgentPausedAfterFails, agentID,
-	); err != nil {
-		return fmt.Errorf("dismiss: %w", err)
-	}
 
 	if autoPaused {
 		if err := s.clearAutoPause(ctx, agent); err != nil {
@@ -328,6 +391,15 @@ func (s *Service) MarkAgentPausedFixed(
 			s.logger.Warn("reset counter on unpause failed",
 				zap.String("agent", agentID), zap.Error(err))
 		}
+	}
+	// Dismissed only once the auto-pause this call observed is actually
+	// cleared (or there was none to clear): a refused clearAutoPause
+	// returns above, leaving the inbox entry for a still-active pause
+	// visible and this call retryable instead of silently swallowed.
+	if err := s.repo.DismissInboxItem(
+		ctx, userID, InboxKindAgentPausedAfterFails, agentID,
+	); err != nil {
+		return fmt.Errorf("dismiss: %w", err)
 	}
 	return s.recoverPausedTasks(ctx, agentID, recoveries)
 }
@@ -358,6 +430,7 @@ func (s *Service) loadPauseRecoveries(
 func (s *Service) clearAutoPause(
 	ctx context.Context, agent *models.AgentInstance,
 ) error {
+	originalReason := agent.PauseReason
 	for attempt := 0; attempt < 2; attempt++ {
 		changed, err := s.clearAutoPauseAttempt(ctx, agent)
 		if err != nil {
@@ -373,6 +446,15 @@ func (s *Service) clearAutoPause(
 		}
 		if !strings.HasPrefix(current.PauseReason, autoPauseReasonPrefix) {
 			return nil
+		}
+		// Still paused but with a reason this call never observed means a
+		// newer auto-pause landed between our read and the CAS above.
+		// Retrying against it would clear that newer pause and let the
+		// caller reset the counter and recover tasks from this call's
+		// stale snapshot instead. Abort so the newer pause stays intact
+		// and reachable by a fresh "Mark fixed".
+		if current.Status == models.AgentStatusPaused && current.PauseReason != originalReason {
+			return fmt.Errorf("clear pause reason: a newer auto-pause is in progress")
 		}
 		agent = current
 	}
@@ -391,9 +473,8 @@ func (s *Service) clearAutoPauseAttempt(
 func (s *Service) unpauseAgentIfCurrent(
 	ctx context.Context, agent *models.AgentInstance,
 ) (bool, error) {
-	changed, err := s.repo.UpdateAgentStatusFieldsIfCurrent(
-		ctx, agent.ID, string(models.AgentStatusPaused),
-		string(models.AgentStatusIdle), "",
+	changed, err := s.repo.UnpauseAgentIfCurrent(
+		ctx, agent.ID, agent.PauseReason, string(models.AgentStatusIdle),
 	)
 	if err != nil {
 		return false, fmt.Errorf("unpause agent: %w", err)

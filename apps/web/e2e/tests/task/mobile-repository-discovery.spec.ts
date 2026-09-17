@@ -2,6 +2,10 @@ import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import {
+  DISCOVERY_FAILURE_ROOT,
+  installRepositoryDiscoveryFailureRoute,
+} from "./repository-discovery-failure-helpers";
 import fs from "node:fs";
 
 useRegularMode();
@@ -45,6 +49,57 @@ test.describe("Mobile repository discovery consent", () => {
     expect(refreshBox!.height).toBeCloseTo(chooseBox!.height, 1);
     expect(chooseCssHeight).toBe(44);
     expect(refreshCssHeight).toBe(44);
+  });
+
+  test("keeps failed-root diagnostics out of the phone selector", async ({ testPage, backend }) => {
+    test.setTimeout(120_000);
+    await installRepositoryDiscoveryFailureRoute(testPage);
+    await backend.restart({ KANDEV_DESKTOP_RUNTIME: "false" });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await mobile.mobileFab.tap();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("repo-chip-trigger").first().tap();
+
+    await expect(testPage.getByTestId("discovery-root-controls")).toHaveCount(0);
+    await expect(testPage.getByTestId("discovery-failure")).toHaveCount(0);
+    await expect(testPage.getByText(DISCOVERY_FAILURE_ROOT, { exact: true })).toHaveCount(0);
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    const refresh = testPage.getByTestId("repo-refresh-button");
+    const refreshBox = await refresh.boundingBox();
+    expect(refreshBox).not.toBeNull();
+    expect(refreshBox!.y).toBeGreaterThanOrEqual(0);
+    expect(refreshBox!.y + refreshBox!.height).toBeLessThanOrEqual(viewport!.height);
+    const availableRepository = testPage.getByRole("option", { name: /healthy-project/ });
+    await expect(availableRepository).toBeEnabled();
+    const availableRepositoryBox = await availableRepository.boundingBox();
+    expect(availableRepositoryBox).not.toBeNull();
+    expect(availableRepositoryBox!.y).toBeGreaterThanOrEqual(0);
+    expect(availableRepositoryBox!.y + availableRepositoryBox!.height).toBeLessThanOrEqual(
+      viewport!.height,
+    );
+    await availableRepository.tap();
+    await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText("healthy-project");
+
+    await dialog.getByTestId("repo-chip-trigger").first().tap();
+    const refreshResponse = testPage.waitForResponse(
+      (response) =>
+        /\/api\/v1\/workspaces\/[^/]+\/repositories$/.test(new URL(response.url()).pathname) &&
+        response.request().method() === "GET" &&
+        response.ok(),
+    );
+    expect(refreshBox!.height).toBeGreaterThanOrEqual(44);
+    await refresh.tap();
+    await refreshResponse;
+    await expect(testPage.getByTestId("discovery-failure")).toHaveCount(0);
+    await expect(testPage.getByRole("option", { name: /healthy-project/ })).toBeVisible();
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
   });
 
   test("uses the HTTP picker on a mobile browser connected to a desktop backend", async ({

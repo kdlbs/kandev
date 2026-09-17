@@ -62,6 +62,9 @@ plugins:
   - id: kandev-plugin-redmine
     repo: yattdev/kandev-plugin-redmine
     categories: [integrations]
+  - id: kandev-plugin-prompt-history
+    repo: Fclem/kandev-plugin-prompt-history
+    categories: [tools]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:

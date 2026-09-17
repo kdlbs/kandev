@@ -8,7 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-OFFICE-RUNTIME-001
 acceptance_criteria:
-  - AC-OFFICE-RUNTIME-001.9
+  - AC-OFFICE-RUNTIME-001.11
 system_design:
   - ../../specs/office/system-design/runtime-01.md
 ---
@@ -32,6 +32,9 @@ longer counts as a full strike toward `consecutive_failures` and auto-pause.
 - `ScheduleRetryIfClaimed` (claimed-only guarded write) so the retry can never
   resurrect a run the claim path already cancelled for staleness.
 - Agent id / `providerError.ProviderID` substitution into the classifier.
+- Lifecycle execution and prompt evidence must prove a current, effect-safe
+  invocation before the retry is scheduled. Unknown or mismatched evidence
+  falls through to terminal accounting.
 - Regression tests for eligibility, the scheduled-arrival gate, and the
   `claimed -> failed -> queued` race.
 
@@ -48,7 +51,7 @@ policy, the `blocked_provider_action_required` park, and `apps/web`.
    handle it) is retried up to 2 times at 5s then 10s before
    `consecutive_failures` increments, observed by `consecutive_failures`
    staying unchanged on the first classified-transient failure
-   (AC-OFFICE-RUNTIME-001.9).
+   (AC-OFFICE-RUNTIME-001.11).
 2. The retry shares its attempt counter with the pre-launch tier (no new
    column) and is abandoned under the same 24h staleness rule, so a run that
    already exhausted pre-launch retries gets no additional post-start retry.
@@ -101,10 +104,10 @@ path again.
 
 ## Risks
 
-The retry re-drives the whole run from the top and may repeat any side
-effects the failed attempt already committed. No effect-safety gate applies —
-this matches the routing tier's own post-start requeue and is a documented,
-accepted residual, not a defect.
+The retry re-drives the whole run from the top only after the lifecycle event
+proves that no output or effect was observed for the current invocation. Events
+with unknown, stale, output-producing, or effectful evidence fall through to
+terminal accounting.
 
 ## Parallelism
 

@@ -454,6 +454,87 @@ func TestMarkAgentPausedFixed_DiscardsRecoveryForReassignedTask(t *testing.T) {
 	}
 }
 
+// Regression for card b250dfad: recoverPausedTask's stale-failed-run guard
+// (failure.go: discard when the latest run for the task is no longer the
+// recovery's recorded FailedRunID) was covered by nothing — neutering the
+// guard left `go test ./internal/office/...` green. If a newer run has
+// already superseded the one the pause snapshot points at (for example a
+// manual retry that landed and finished while the agent was still paused),
+// MarkAgentPausedFixed must discard that stale recovery instead of
+// re-queuing a duplicate run for a task that has already moved on.
+func TestMarkAgentPausedFixed_DiscardsRecoveryForStaleFailedRun(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-stale-run")
+	staleTaskID := "stale-task"
+	insertSyntheticTask(t, svc, staleTaskID, "ws-1", "agent-stale-run")
+	failedRun := queueAndReadRun(t, svc, "agent-stale-run", staleTaskID)
+	if _, err := svc.HandleAgentFailure(ctx, failedRun, "boom", "", nil); err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	// Two more failures (on other tasks) to cross the default threshold
+	// of 3 and auto-pause the agent, with the stale task's failed run
+	// captured in the pause snapshot.
+	autoPauseAgent(t, svc, "ws-1", "agent-stale-run", 2)
+
+	// Precondition: the pause snapshot must include the stale task,
+	// otherwise the negative assertions below would pass vacuously (there
+	// would be nothing to discard).
+	var preCount int
+	if err := svc.RepoForTest().ReaderDB().Get(&preCount,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ? AND task_id = ?`,
+		"agent-stale-run", staleTaskID,
+	); err != nil {
+		t.Fatalf("query pre-fix snapshot: %v", err)
+	}
+	if preCount != 1 {
+		t.Fatalf(
+			"test setup error: expected exactly one recovery row for stale task, found %d",
+			preCount,
+		)
+	}
+
+	// A newer run for the same task has already finished (e.g. a manual
+	// retry that landed while the agent was paused), superseding the
+	// failed run the recovery snapshot points at.
+	supersedingRunID := staleTaskID + "-superseding-run"
+	supersedingRequestedAt := time.Now().UTC().Add(time.Hour)
+	svc.ExecSQL(t,
+		`INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at, finished_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		supersedingRunID, "agent-stale-run", service.RunReasonTaskAssigned,
+		mustMarshalJSON(map[string]string{"task_id": staleTaskID}),
+		service.RunStatusFinished, supersedingRequestedAt, supersedingRequestedAt,
+	)
+
+	if err := svc.MarkAgentPausedFixed(ctx, "user-1", "agent-stale-run"); err != nil {
+		t.Fatalf("mark fixed: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.Reason == service.RunReasonManualResumeAfterFailure &&
+			taskIDFromPayload(t, run.Payload) == staleTaskID {
+			t.Fatalf("queued recovery run for stale task %s", staleTaskID)
+		}
+	}
+
+	var recoveryCount int
+	if err := svc.RepoForTest().ReaderDB().Get(&recoveryCount,
+		`SELECT COUNT(*) FROM office_agent_pause_recoveries WHERE agent_id = ? AND task_id = ?`,
+		"agent-stale-run", staleTaskID,
+	); err != nil {
+		t.Fatalf("query pause recoveries: %v", err)
+	}
+	if recoveryCount != 0 {
+		t.Fatalf("expected recovery row for stale task to be deleted, found %d", recoveryCount)
+	}
+}
+
 // Threshold-agnostic: the fix must not assume the default threshold
 // of 3. A per-agent override to a different value must still recover.
 func TestMarkAgentPausedFixed_ThresholdAgnostic(t *testing.T) {

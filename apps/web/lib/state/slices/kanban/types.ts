@@ -164,6 +164,8 @@ export type KanbanState = {
     primaryAgentName?: string | null;
     labels?: string[];
     isRemoteExecutor?: boolean;
+    /** Backend-owned discriminator for task hierarchy rules. Absent means non-Office. */
+    isFromOffice?: boolean;
     /** Human assignee (user id). Independent of any agent assignment. */
     assigneeUserId?: string;
     parentTaskId?: string | null;

@@ -172,7 +172,8 @@ const statusOverloaded = 529
 // Classify always returns a non-nil *Error, even for an unmatched or empty
 // input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
-	excerpt := Sanitize(in.Stderr + "\n" + in.Stdout)
+	rawText := in.Stderr + "\n" + in.Stdout
+	excerpt := Sanitize(rawText)
 	if e := classifyInjection(in, excerpt); e != nil {
 		return e
 	}
@@ -194,24 +195,24 @@ func Classify(in Input) *Error {
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchRuntimeEnvironmentRules(excerpt); ok {
+	if e, ok := matchRuntimeEnvironmentRulesForProvider(in.ProviderID, excerpt, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		if e.Code == CodeNpxCacheCorrupted {
 			// Preserve the legacy path for the path-aware remediation guard;
 			// the path is validated again before deletion.
-			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchLegacyRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
+	if e, ok := matchLegacyRuntimeEnvironmentRulesForProvider(in.ProviderID, rawText, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		if e.Code == CodeNpxCacheCorrupted {
-			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)

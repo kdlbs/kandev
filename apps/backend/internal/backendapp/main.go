@@ -1013,6 +1013,7 @@ func startGatewayAndServe(
 	}
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
+	gateway.Hub.SetConversationSourceReader(services.Task)
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
 	// WS gateway per-user scoping (opt-in auth): connection auth on upgrade
@@ -1233,7 +1234,11 @@ func startGatewayAndServe(
 			log.Warn("profile reconciler error", zap.Error(err))
 		}
 		if migrated, err := services.Utility.MigrateLegacyBindings(hostUtilityCtx); err != nil {
-			log.Warn("utility profile migration failed", zap.Error(err))
+			if errors.Is(err, context.Canceled) {
+				log.Debug("utility profile migration failed (context canceled during shutdown)", zap.Error(err))
+			} else {
+				log.Warn("utility profile migration failed", zap.Error(err))
+			}
 		} else if migrated > 0 {
 			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
 		}

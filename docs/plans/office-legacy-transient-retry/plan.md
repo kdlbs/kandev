@@ -125,15 +125,14 @@ for the full command list and receipts.
 
 ## Risks
 
-The retry re-drives the whole run from the top and may repeat any side
-effects the failed attempt already committed — no effect-safety gate applies
-to it, matching the routing tier's own post-start requeue. This is a known,
-accepted residual, not a defect: closing it is a larger effect-idempotency
-change outside this card's scope.
+The retry re-drives the whole run from the top only after the lifecycle event
+proves that no output or effect was observed for the current invocation.
+Unknown, stale, output-producing, effectful, or diagnostically mismatched
+events fall through to terminal accounting.
 
 ## Documentation impact
 
-`docs/specs/office/requirements/runtime.md` gained AC-OFFICE-RUNTIME-001.9;
+`docs/specs/office/requirements/runtime.md` gained AC-OFFICE-RUNTIME-001.11;
 `docs/specs/office/system-design/runtime-01.md` § Legacy post-start transient
 retry was rewritten to match the implementation. No public-docs or operator-
 facing surface changed.

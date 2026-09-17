@@ -25,6 +25,7 @@ export type SheetItemCtx = {
   repositoriesById?: ReadonlyMap<string, Repository>;
   stepColorById?: ReadonlyMap<string, string>;
   automaticColorSettings?: SidebarTaskColorAutomation;
+  pendingArchiveTaskIds?: ReadonlySet<string>;
 };
 
 const EMPTY_REPOSITORIES_BY_ID = new Map<string, Repository>();
@@ -51,6 +52,10 @@ function sheetPendingFlags(task: KanbanState["tasks"][number]) {
     clarification: action === "clarification",
     permission: action === "permission",
   };
+}
+
+function sheetLaunchQueue(task: KanbanState["tasks"][number]) {
+  return task.statusSummary?.launch_queue;
 }
 
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
@@ -114,6 +119,8 @@ export function toSheetItem(
     primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
     workflowStepColor: facts.workflowStepColor,
     isArchived: task.isArchived === true,
+    isPendingArchive: !task.isArchived && ctx.pendingArchiveTaskIds?.has(task.id) === true,
+    isFromOffice: task.isFromOffice,
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorId: task.primaryExecutorId ?? undefined,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
@@ -123,6 +130,7 @@ export function toSheetItem(
     automaticColor: automaticColor?.color,
     automaticColorSource: automaticColor?.source,
     queuedCount: task.statusSummary?.queued_prompt_count,
+    launchQueue: sheetLaunchQueue(task),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

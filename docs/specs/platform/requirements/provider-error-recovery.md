@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-08-08
-updated: 2026-09-15
+updated: 2026-09-17
 owners:
   - Kandev
 ---
@@ -10,7 +10,17 @@ owners:
 
 ## Overview
 
-Agent CLIs and providers report equivalent failures through different ACP frames, HTTP metadata, process exits, and diagnostic strings. Capacity, network, subscription, and quota failures need different recovery behavior, but orchestration code must not branch on provider names or raw prose.
+A provider can also abandon a partially streamed response and retry it inside
+the same prompt. That retry must replace the abandoned attempt without leaving
+duplicate transcript rows or stale recovery context.
+
+## Terminology
+
+- **Provider response attempt:** One provider generation attempt inside a
+  Kandev prompt. A provider can retry this attempt without ending the prompt.
+- **Response-attempt retry boundary:** Structured, current-prompt evidence that
+  the provider abandoned its active response attempt and will generate a
+  replacement.
 
 ## Requirements
 
@@ -31,10 +41,10 @@ Agent CLIs and providers report equivalent failures through different ACP frames
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.9:** While an eligible interactive transient retry is pending, desktop and mobile task chat shall show the retry reason, provider, attempt count, countdown, and Cancel action only while the backend owns that retry.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10:** When an interactive transient retry succeeds, is exhausted, reaches a terminal state, is stopped, or is cancelled, the system shall attempt to durably retire every outstanding retry notice for the session so that a successful cleanup prevents the notice from reappearing after the session becomes idle, the task changes, the page reloads, or another viewer observes the session. If listing or deletion fails, the system shall log and swallow the failure so a later authorized cleanup can retry the remaining notices.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.11:** After authorization, cancelling an interactive transient retry shall attempt to retire outstanding retry notices even when the retry loop has already ended. Cancelling an active loop shall also expose manual Resume and Start fresh recovery actions. Listing or deletion failures follow AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10. A denied or foreign task-session pair shall not expose whether retry state or retry notices exist.
-- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.12:** When Cursor reports a current-prompt `RetriableError` control frame and then settles without later provider progress, Kandev shall suppress the control frame. After Kandev processes all earlier prompt notifications, it shall publish exactly one structured provider failure. Similar prose, partial signatures, stale prompt evidence, and non-Cursor output shall remain ordinary agent output.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.12:** A current Cursor frame beginning, after trimming, with case-insensitive `Error: RetriableError:` and a non-empty suffix of at most 256 UTF-8 bytes shall be suppressed when no later progress occurs, then yield one structured failure after the barrier. `[unavailable] PING timed out` and `Connection stalled` are valid. Cancellation, deadline, and retry-escalation signatures remain ordinary output. Prose before the prefix, empty/partial markers, stale evidence, and non-Cursor output stay ordinary output.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.13:** When Cursor resumes generation before the prompt settles, Kandev shall treat the earlier matching frame as internal retry telemetry. Kandev shall not start a retry from the superseded frame. A later matching terminal frame for the same prompt can become new failure evidence.
-- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.14:** A terminal Cursor `RetriableError` HTTP/2 stream reset shall classify as the existing transient agent transport-loss cause. The bracketed word `canceled` alone shall not classify the failure as an operator or context cancellation.
-- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.15:** Kandev shall automatically recover a terminal Cursor stream reset only when current-turn evidence proves that the attempt had no output or tool activity. Eligible recovery shall retain the selected provider. It shall use the existing same-provider retry owner, attempt limit, and backoff. Missing evidence, output, or tool activity shall stop automatic replay and expose manual recovery.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.14:** A terminal Cursor diagnostic beginning with case-insensitive `Error: RetriableError:` and carrying a non-empty suffix of at most 256 UTF-8 bytes shall classify as transient `agent_transport_lost`. Both layers share Unicode trim and byte bound. `[canceled]` stays eligible; context cancellation, deadline, and retry escalation retain the veto.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.15:** Kandev shall automatically recover a terminal Cursor `RetriableError` only when current-turn evidence proves that the attempt had no output or tool activity. Eligible recovery shall retain the selected provider. It shall use the existing same-provider retry owner, attempt limit, and backoff. Missing evidence, output, or tool activity shall stop automatic replay and expose manual recovery.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.16:** When an ACP adapter emits a current-prompt diagnostic message and then returns a matching structured `session/prompt` provider error, Kandev shall retain the diagnostic for the transcript but treat it as pre-result evidence only when both messages classify to the same high-confidence, fallback-eligible semantic code and no later output or tool activity exists. A mismatch, stale generation, low-confidence classification, later output, or tool activity shall keep the diagnostic as ordinary output and stop automatic recovery.
 
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.17:** The catalogue shall carry a raw ACP replay fixture for every required cell of the replay matrix. The gateway enumeration is `claude-direct`, `teamclaude`, `openrouter`, `litellm`. The case enumeration is `matched`, `mismatched`, `later-output`, `queued`, `prose-matched`, `prose-tool`, `prose-output`. The first four cases are required for every gateway. The three `prose-` cases are required only for a gateway the matrix declares classifying, because a prose case asserts nothing when the terminal envelope does not classify. A required cell with no fixture shall fail the fixture test, and a test shall not skip a required cell. Two fixtures sharing a case shall not carry equivalent frames, compared as canonically re-encoded values rather than as raw file bytes.
@@ -47,6 +57,10 @@ Agent CLIs and providers report equivalent failures through different ACP frames
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.24:** When a terminal ACP prompt error carries its transient signature only in `RequestError.Data`, Kandev shall present the failure as terminal and expose manual recovery on every occurrence, including repeated failures in the same session, and shall neither show a transient retry notice nor start an automatic retry. This criterion applies to the terminal failure whether or not a diagnostic preceded it, and it does not outrank acceptance criteria `.16` and `.23`: when a diagnostic did precede, those criteria reach the same manual-recovery outcome, because a terminal message that classifies to nothing can match no recorded diagnostic code. The existing session end-to-end specification that drives the mock agent's `/transport-lost` command shall be the surface that observes this outcome: its automatic-retry assertions shall be retargeted to manual recovery, and its retry-cancellation sub-test shall be retired rather than rewritten, because no retry loop exists on this path to cancel. The mock command's envelope shall keep the SDK's own peer-disconnect shape, `Message` `Internal error` with the signature only in `Data`, so the specification keeps exercising a shape that occurs in production. Repository documentation describing that command, or the recovery timeout it drives, shall not state that this path enters the automatic retry ladder. Losing end-to-end coverage of the automatic retry ladder for the transport-loss cause is accepted in this version; the catalogue rule keeps its unit coverage and its remaining surfaces.
 
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.25:** During one interactive transient retry loop, desktop and mobile chat shall show at most one current retry banner. Each subsequent attempt shall update that banner's reason, provider, attempt count, deadline, and Cancel action. Reloading the session shall retain the latest persisted attempt. Existing duplicate retry notices shall consolidate on the next successful retry-notice write. Unrelated messages and other sessions shall remain unchanged. Storage failures shall remain non-fatal and shall not trigger creation of an additional notice when an existing notice cannot be read or updated.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.26:** When a supported adapter receives exact structured evidence that the active provider abandoned the current response attempt and will retry it internally, Kandev shall accept a response-attempt retry boundary within that prompt generation. One prompt generation may contain multiple sequential boundaries; each boundary applies only to assistant and thinking records created after the preceding boundary or commit boundary. Malformed evidence, a false retry flag, an unsupported adapter, a zero or stale prompt generation, and terminal provider errors shall not create that boundary or remove transcript content.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.27:** After Kandev accepts a response-attempt retry boundary, it shall durably remove assistant and thinking messages created by the abandoned attempt. Connected desktop and mobile chats shall remove those messages before later replacement output, and a reload or another viewer shall see only the replacement response.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.28:** Response-attempt cleanup shall preserve messages, tool activity, permission state, and turns committed before the active provider attempt. A repeated retry boundary with no new output shall be a no-op, and abandoned assistant text that has not crossed a history boundary shall not enter later fallback resume context. The boundary shall not erase prompt-level output or effect evidence used to decide whether a separate Kandev-owned replay is safe.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.29:** The primary launch prompt shall use credential-only, unbounded redaction on every attempt, including attempt 0. Provider output and `FailureReason` shall use the diagnostic tier.
 
 ## Out of scope
 
@@ -66,4 +80,6 @@ The migrated technical source is split into
 [part 2](../system-design/provider-error-recovery-02.md) (replay fixture matrix
 and harness) and
 [part 3](../system-design/provider-error-recovery-03.md) (marker propagation,
-diagnostic text correlation, allowlisted prompt-error metadata).
+diagnostic text correlation, allowlisted prompt-error metadata), and
+[part 4](../system-design/provider-response-attempt-recovery.md)
+(provider-owned response-attempt replacement and transcript retraction).
