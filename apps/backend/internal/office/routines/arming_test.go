@@ -2,6 +2,7 @@ package routines_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -286,6 +287,14 @@ func TestClassifyRoutine_ArmedTriggerNotInUnarmedList(t *testing.T) {
 	}
 	if len(unarmed) != 0 {
 		t.Fatalf("unarmed = %+v, want empty", unarmed)
+	}
+	if unarmed == nil {
+		t.Fatal("unarmed is nil, want a non-nil empty slice so JSON marshals it as [] not null")
+	}
+	if got, err := json.Marshal(unarmed); err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	} else if string(got) != "[]" {
+		t.Errorf("json.Marshal(unarmed) = %s, want []", got)
 	}
 }
 

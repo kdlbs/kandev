@@ -116,6 +116,17 @@ func (r *Reconciler) reconcileRoutineTriggers(ctx context.Context) error {
 	return nil
 }
 
+// createTriggersForNewRoutines backfills a "manual" trigger for any routine
+// this reconciler finds with no trigger row at all. Known residual: the
+// coordinator install (internal/office/repository/sqlite/coordinator_install.go)
+// commits its routine and canonical cron trigger in two separate
+// transactions. If a restart lands in that window — routine committed,
+// trigger not yet created — this method observes a routine with no trigger
+// and creates a spurious manual one. The coordinator's own next install call
+// still detects and creates the canonical cron trigger correctly
+// (hasAnyCronTrigger ignores manual-kind triggers), leaving the extra manual
+// trigger in place as a harmless one-time crash-recovery artifact, not a
+// misconfiguration to chase.
 func (r *Reconciler) createTriggersForNewRoutines(
 	ctx context.Context, routines []*models.Routine, dbIDs map[string]struct{},
 ) {

@@ -164,7 +164,7 @@ func withinDispatchGrace(t *RoutineTrigger, now time.Time) bool {
 // of whether the same trigger is also armed, so an armed-but-broken trigger
 // appears here too.
 func unarmedCronTriggers(states []cronTriggerState, now time.Time) []UnarmedCronTrigger {
-	var out []UnarmedCronTrigger
+	out := []UnarmedCronTrigger{}
 	for _, s := range states {
 		if !isUnarmedCron(s, now) {
 			continue
