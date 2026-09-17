@@ -101,6 +101,17 @@ image build loop, and lifecycle semantics of the Local Docker executor.
 - **AC-EXECUTORS-REMOTE-DOCKER-001.15:** Local Git repository sources and
   arbitrary host folders shall be rejected for `remote_docker` tasks, matching
   the existing Local Docker and remote-executor source rules.
+
+  **Not implemented.** Deferred to
+  [kdlbs/kandev#3778](https://github.com/kdlbs/kandev/issues/3778). The
+  combination is not refused anywhere: the task is created, an environment is
+  provisioned on the remote host, and the run fails in the prepare script
+  without naming the cause. The host checkout is correctly never forwarded
+  (`localCloneMountPathFor` returns empty for `remote_docker`, and
+  `launchResolveWorkspacePath` blanks the path for every clone-based runtime),
+  so nothing wrong is mounted; there is simply no gate. This is not specific to
+  this executor. `ssh`, `k8s` and `sprites` behave identically, and the fix
+  belongs at the shared `RequiresCloneURL` predicate rather than here.
 - **AC-EXECUTORS-REMOTE-DOCKER-001.17:** Creating, editing, testing, and
   building a `remote_docker` executor shall require an administrator. A saved
   profile grants effective root on the remote host, so it is not an ordinary
