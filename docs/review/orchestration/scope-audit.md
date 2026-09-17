@@ -147,3 +147,15 @@ This audit adds a full diff inventory, requirement-to-code/test crosswalk, pinne
 - Before live cutover, rehearse migration of a private copy of live data and follow the existing [deployment/rollback runbook](../../plans/orchestration-delivery/dogfood-runbook.md).
 
 No private conversations were exported for this audit; no issue reply, PR, deployment or recurring automation was created.
+
+## Subsequent implementation checkpoint: central view
+
+On 2026-09-17 the independent assistant rollout gate and all three central-view
+work orders were completed in the private integration branch. The central view
+uses native Kanban task queries/status summaries and persistent conversations,
+with paged coverage, filters, owner/workspace isolation, separate drafts and
+mobile touch tabs. It does not start work by observation. See the
+[work-order evidence](../../plans/workspace-coordinator-view/plan.md) and
+[synthetic media](media/coordinator-view/README.md). This supersedes earlier
+statements in this historical audit that the central page was only planned;
+it leaves the remaining assistant and live-delivery limits intact.

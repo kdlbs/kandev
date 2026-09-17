@@ -13,13 +13,44 @@ Orchestrators are conversational coordinators assigned to an existing workspace.
 2. Enable **Workspace orchestration** in **Settings > System > Feature toggles**, then restart Kandev. The experimental flag is `KANDEV_FEATURES_ORCHESTRATION`; it defaults off and is independent of Office.
 3. Configure the role's name, icon and instructions in **Settings > Orchestration**. Then open **Settings > Workspaces > your workspace > Orchestration**, or follow the Orchestration link on the workspace overview card or sidebar.
 4. Select **Add orchestrator**. Choose the global role, an existing agent profile and executor, and workspace context/delegation guidance. No separate worker personas or model-routing setup is required.
-5. Select the persona by name beneath **Orchestration** in the workspace sidebar or mobile navigation to open its existing conversation and delegate work. Configuration and conversation pages link back to the workspace; coordinated tasks link back to their coordinator.
+5. Open **Coordinator** from the workspace sidebar or overview card. Select an assignment to see its existing conversation beside the workspace tasks. On mobile, use **Tasks** and **Chat** to switch panes. Configuration and conversation pages link back to the workspace; coordinated tasks link back to their coordinator.
 
 **Settings > Orchestration** manages global roles. Administrators configure each role's name, icon and instructions once. Workspace assignments inherit that configuration; saved role edits apply to all assignments on their next turn. A running turn retains the instructions it started with. Roles in use cannot be deleted. The built-in Chief of staff role is editable but cannot be deleted.
 
 Choose **Persona icon** in the global role settings to use name initials or a built-in emoji icon. Initials use the first and last name words, so Chief of staff displays CS. The same identity appears in chat, workspace lists and sidebar navigation.
 
 Edit orchestrators with the shared **Save changes** and **Reset** controls. Pause blocks new turns; it does not interrupt a running turn. Delete removes the coordinator and terminates its associated runtime sessions, while delivery tasks remain on their board. Opening a conversation does not create another workspace or workflow.
+
+## Work from the Coordinator view
+
+Open `/workspaces/<workspace-id>/coordinator`. The task view includes ordinary,
+non-archived board tasks across the workspace's visible workflows. Office tasks,
+hidden system workflows and private coordinator conversations stay out of this
+list. Opening or refreshing the view starts no agent work.
+
+Select a coordinator to use its configured profile and persistent conversation.
+A workspace with one assignment selects it automatically; with several, choose
+one. The page remembers a valid choice during your browser session. A missing
+assignment or profile offers configuration instead of selecting another account.
+Drafts remain separate for each conversation while switching coordinators or
+mobile tabs. Drafts are held in browser memory and do not survive a full reload.
+
+Tasks are grouped by current native status: input needed, problems, running,
+review, done, queued and other. Follow a task to answer its native question or
+permission request, inspect execution, or review its changes. Review and an open
+or merged pull request do not imply that a task is completed. Unknown or idle
+activity is not classified as stalled.
+
+Use search, workflow and repository filters, or choose **Selected coordinator’s
+tasks**. Status groups and totals describe the loaded tasks; load additional
+pages for more coverage. The initial page contains up to 100 tasks. Pull request
+and changed-file totals show how many loaded tasks have known data. A stale
+notice means refresh failed; retry before relying on the displayed state.
+
+On desktop, hide or show chat without changing the task selection. On a touch
+device, Tasks and Chat share the same workspace and conversation. Expand
+**Filters** for workflow, repository and coordinator scope controls. Live task
+summaries update the groups, and reconnecting refreshes the loaded rows.
 
 ## Profiles and routing
 

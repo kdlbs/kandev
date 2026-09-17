@@ -1,3 +1,4 @@
+import { CoordinatorPage } from "@/app/coordinator/coordinator-page";
 import { OrchestrationConversationRoute } from "@/app/settings/orchestration/conversation-route";
 import { readTaskId } from "./spa-routing";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -42,6 +43,8 @@ import { PluginPageFrame } from "@/components/plugins/plugin-page";
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import {
   mapWorkspaceItem,
+  mapWorkflowItem,
+  firstKnownWorkspaceId,
   promoteLegacyWorkspaceSelection,
   readActiveWorkspaceCookie,
 } from "@/lib/routing/route-bootstrap";
@@ -108,6 +111,7 @@ type SpaRoute =
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
   | { kind: "orchestrationConversation"; taskId: string }
+  | { kind: "coordinator"; workspaceId: string }
   | { kind: "plugin"; path: string }
   | { kind: "login" }
   | { kind: "setup" }
@@ -262,6 +266,11 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
 }
 
 function resolveNestedRoute(normalized: string): SpaRoute | null {
+  const coordinator = normalized.match(/^\/workspaces\/([^/]+)\/coordinator$/);
+  if (coordinator) {
+    const workspaceId = safeDecodePathSegment(coordinator[1]);
+    if (workspaceId) return { kind: "coordinator", workspaceId };
+  }
   if (normalized === "/settings" || normalized.startsWith("/settings/")) {
     return { kind: "settings", pathname: normalized };
   }
@@ -347,6 +356,7 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
       </Suspense>
     );
   }
+  if (route.kind === "coordinator") return <CoordinatorPage workspaceId={route.workspaceId} />;
   if (route.kind === "orchestrationConversation")
     return <OrchestrationConversationRoute taskId={route.taskId} />;
   if (route.kind === "office") {
@@ -651,27 +661,6 @@ function listWorkspaceWorkflowSteps(workspaceId: string) {
   return fetchJson<ListWorkflowStepsResponse>(`/api/v1/workspaces/${workspaceId}/workflow-steps`, {
     cache: "no-store",
   });
-}
-
-function firstKnownWorkspaceId(...ids: (string | null | undefined)[]): string | null {
-  for (const id of ids) {
-    const value = id?.trim();
-    if (value) return value;
-  }
-  return null;
-}
-
-function mapWorkflowItem(workflow: Workflow) {
-  return {
-    id: workflow.id,
-    workspaceId: workflow.workspace_id,
-    name: workflow.name,
-    description: workflow.description ?? null,
-    sortOrder: workflow.sort_order ?? 0,
-    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
-    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
-    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
-  };
 }
 
 function normalizePath(pathname: string): string {

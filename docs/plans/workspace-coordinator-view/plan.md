@@ -1,6 +1,6 @@
 ---
 created: 2026-09-17
-status: in_progress
+status: done
 requirements:
   - REQ-ORCHESTRATION-COORDINATOR-VIEW-001
   - REQ-ORCHESTRATION-COORDINATOR-VIEW-002
@@ -106,16 +106,19 @@ feature flow and a native mobile browser project if required by the current
 ## Work orders
 
 - [x] [Task 01: Scoped task observations](task-01-task-observations.md)
-- [ ] [Task 02: Central Coordinator page](task-02-coordinator-page.md)
-- [ ] [Task 03: Feature evidence](task-03-feature-evidence.md)
+- [x] [Task 02: Central Coordinator page](task-02-coordinator-page.md)
+- [x] [Task 03: Feature evidence](task-03-feature-evidence.md)
 
 Dependency order: 01 → 02 → 03. Work stays in the primary session; waves do not
 authorize subagents. Exact commands and likely files are in each work order.
 
 ## Verification results
 
-Implementation checks: pending. Existing v0.94.0 coordinator regression results
-are baseline evidence only; they do not verify this unbuilt page.
+Implementation completed on 2026-09-17. Task 01 records backend/query and
+observation evidence; tasks 02/03 record 41 focused frontend tests, full typecheck
+and localization, the combined 3-spec desktop run, Pixel 5 touch/geometry coverage
+and inspected synthetic media. The assistant and delivery work orders remain
+separate and pending where indicated.
 
 Design-package validation on 2026-09-17: specification linter tests passed
 (30 tests), all specification files passed lint, and all six requirements / 19

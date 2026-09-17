@@ -411,6 +411,7 @@ export function primaryTaskRepository(
 
 export type Task = ActiveSubagentCountFields & {
   id: TaskId;
+  identifier?: string;
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
   workflow_step_id: string;

@@ -72,3 +72,6 @@ export function selectedExecutor(raw: string): string {
     return "";
   }
 }
+
+export const coordinatorHref = (workspaceId: string, orchestratorId?: string) =>
+  `/workspaces/${encodeURIComponent(workspaceId)}/coordinator${orchestratorId !== undefined ? `?orchestratorId=${encodeURIComponent(orchestratorId)}` : ""}`;

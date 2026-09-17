@@ -72,3 +72,18 @@ Forgetting affects future assembly and delivery. It cannot erase text already se
 `GET /assistant/credentials` and `GET/PUT/DELETE /assistant/credentials/:id` manage separately typed references. Writes use `expected_revision`; descriptors specify resolver, stable reference, purpose, execution profile, account/environment, scope, required field names and unlock policy. Unknown fields, including secret-value fields, are rejected.
 
 Only matching profile/scope context receives a descriptor. Kandev resolver health uses scoped metadata lookup without revealing a value. Bitwarden is reported unavailable until a supported resolver is attached; a descriptor alone does not install or unlock it. Locked/unavailable states carry the specified unblock action and never substitute another account or scan the user's vault.
+
+## Coordinator task observations
+
+`GET /api/v1/workspaces/:workspaceId/tasks?view=kanban` is the read-only task
+source for the Coordinator page. It requires the normal workspace read
+permission and applies ordinary-task, archive, ephemeral, configuration, hidden
+workflow and Office-workflow exclusions before totals, filtering and pagination.
+Existing callers that omit `view=kanban` retain their existing behavior.
+
+The page supplies `page_size=100`; `page`, `query`,
+`workflow_id` and `repository_id` use the existing task-list query contract.
+Text search in this view does not add command-palette pull-request-number search
+results. Native `task.status_summary.updated` events update only the matching
+workspace; lifecycle events and reconnects refresh the loaded window. No
+conversation history or worker transcript is fetched to classify task rows.

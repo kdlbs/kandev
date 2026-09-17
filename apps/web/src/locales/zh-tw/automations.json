@@ -257,11 +257,11 @@
   "scheduleUnparseable": "我們無法解析這個計劃。請嘗試 5 欄位的 cron，例如 0 9 * * 1-5。",
   "runTarget": "執行目標",
   "agentRunTarget": "代理設定",
-  "orchestratorUnavailable": "編排器無法使用",
-  "orchestratorTargetHint": "將此提示傳送給工作區編排器。它使用已設定的代理、執行環境和工作區上下文，並在現有對話中依序處理各輪請求。",
+  "orchestratorUnavailable": "編排器不可用",
+  "orchestratorTargetHint": "將此提示傳送給工作區編排器。它使用已設定的代理、執行環境和工作區上下文，並在現有對話中按順序處理各輪請求。",
   "manageOrchestrators": "管理工作區編排器",
   "runDispatched": "已傳送至編排器",
   "openOrchestratorChat": "開啟編排器對話",
-  "orchestratorDeliveryHint": "自動化已傳送提示。請在編排器對話中查看進度、結果或執行錯誤；傳送成功不代表所要求的工作已完成。",
+  "orchestratorDeliveryHint": "自動化已傳送提示。請在編排器對話中檢視進度、結果或執行錯誤；傳送成功並不表示所請求的工作已完成。",
   "thenOrchestratorDescription": "每次觸發自動化時，將提示傳送到此編排器的現有對話。"
 }

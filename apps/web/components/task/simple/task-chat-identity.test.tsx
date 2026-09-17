@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { ChatIdentityContext, PersonaIdentityContext } from "./persona-identity-context";
@@ -52,4 +52,29 @@ it("resolves feature-provided agent names and prefers the current persona identi
   rerender(view("Chief of staff"));
   expect(screen.getByText("Chief of staff")).not.toBeNull();
   expect(screen.queryByText("Office assistant")).toBeNull();
+});
+
+import { CommentDraftContext } from "./comment-draft-context";
+it("preserves memory-only drafts per conversation without transferring them", () => {
+  const drafts = new Map<string, string>();
+  const store = {
+    get: (id: string) => drafts.get(id) ?? "",
+    set: (id: string, value: string) => {
+      drafts.set(id, value);
+    },
+  };
+  const view = (id: string) =>
+    wrap(
+      <CommentDraftContext.Provider value={store}>
+        <TaskChat key={id} taskId={id} comments={[]} />
+      </CommentDraftContext.Provider>,
+    );
+  const { rerender } = render(view("first"));
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "Summarize example tasks." } });
+  rerender(view("second"));
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+  rerender(view("first"));
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "Summarize example tasks.",
+  );
 });

@@ -1,5 +1,6 @@
 "use client";
 /* eslint-disable max-lines -- this component owns the chat timeline and composer composition. */
+import { CommentDraftContext } from "./comment-draft-context";
 import { ChatIdentityContext, PersonaIdentityContext } from "./persona-identity-context";
 
 import { useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
@@ -348,14 +349,19 @@ function CommentComposerFooter({
 function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInputProps) {
   const createComment = useContext(CommentTransportContext);
   const { t } = useTranslation();
-  const [input, setInput] = useState("");
+  const drafts = useContext(CommentDraftContext);
+  const [input, setInput] = useState(() => drafts?.get(taskId) ?? "");
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputValueRef = useRef(input);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const setInputAndSync = useCallback((next: React.SetStateAction<string>) => {
-    synchronizeInputValue(inputValueRef, setInput, next);
-  }, []);
+  const setInputAndSync = useCallback(
+    (next: React.SetStateAction<string>) => {
+      synchronizeInputValue(inputValueRef, setInput, next);
+      drafts?.set(taskId, inputValueRef.current);
+    },
+    [drafts, taskId],
+  );
   const isUtilityConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,

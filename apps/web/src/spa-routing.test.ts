@@ -238,3 +238,10 @@ describe("officeRouteKey", () => {
     expect(resolveOfficeHomeSetupRedirect(OFFICE_HOME_PATH, false, true, [])).toBeNull();
   });
 });
+
+it("maps a workspace coordinator route without falling back to another workspace", () => {
+  expect(resolveSpaRoute("/workspaces/ws-example/coordinator", new URLSearchParams())).toEqual({
+    kind: "coordinator",
+    workspaceId: "ws-example",
+  });
+});

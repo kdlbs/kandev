@@ -30,7 +30,7 @@ generic material; original local snapshot/backup refs are not published.
 | Optional Automation delivery to a coordinator | Implemented; portable YAML/ZIP export of this destination explicitly unsupported |
 | Assistant ownership/intake/objectives | Backend implemented; retained privacy guards must remain active |
 | Assistant memory/context | Partial; validation metadata and dedicated pagination/scope coverage remain |
-| Central workspace task view beside chat | Fully planned; implementation pending |
+| Central workspace task view beside chat | Implemented; scoped native observations, desktop/mobile flow and synthetic media verified |
 | Assistant capability enforcement, attention, resolution, UI and workspace grants | Fully planned; implementation pending |
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
 | Actual live-data rehearsal and deployment | Pending; live service unchanged |

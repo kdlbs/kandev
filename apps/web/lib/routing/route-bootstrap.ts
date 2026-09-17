@@ -1,6 +1,6 @@
 import { getBackendConfig } from "@/lib/config";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
-import type { ListWorkspacesResponse } from "@/lib/types/http";
+import type { ListWorkspacesResponse, Workflow } from "@/lib/types/http";
 
 export const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 export const LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE = "office-active-workspace";
@@ -188,4 +188,25 @@ export function resolveSettingsActiveWorkspaceId(
     workspaceItems[0]?.id ??
     null
   );
+}
+
+export function firstKnownWorkspaceId(...ids: (string | null | undefined)[]): string | null {
+  for (const id of ids) {
+    const value = id?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+export function mapWorkflowItem(workflow: Workflow) {
+  return {
+    id: workflow.id,
+    workspaceId: workflow.workspace_id,
+    name: workflow.name,
+    description: workflow.description ?? null,
+    sortOrder: workflow.sort_order ?? 0,
+    ...(workflow.agent_profile_id ? { agent_profile_id: workflow.agent_profile_id } : {}),
+    ...(workflow.hidden !== undefined ? { hidden: workflow.hidden } : {}),
+    ...(workflow.style !== undefined ? { style: workflow.style } : {}),
+  };
 }

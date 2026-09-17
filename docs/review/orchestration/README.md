@@ -50,3 +50,12 @@ Those assets predate the release rebase and do not show the pending central task
 view. View task 03 requires fresh inspected screenshots/video after implementation.
 No public code PR, new issue comment or live deployment is performed by this
 private publication.
+
+## Central-view implementation checkpoint
+
+The central workspace task view is now implemented and verified. See its
+[completed work orders](../../plans/workspace-coordinator-view/plan.md),
+[focused PR draft](coordinator-pr-draft.md), and
+[fresh desktop/mobile screenshots and silent clip](media/coordinator-view/README.md).
+These are private review artifacts from synthetic fixtures. The assistant
+continuation and candidate/live delivery plan remain in progress.

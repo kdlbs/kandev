@@ -1,7 +1,11 @@
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import { IconSitemap } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { orchestratorsHref, type Orchestrator } from "@/lib/api/domains/orchestration-api";
+import {
+  coordinatorHref,
+  orchestratorsHref,
+  type Orchestrator,
+} from "@/lib/api/domains/orchestration-api";
 import { useSearchParams, useRouter } from "@/lib/routing/client-router";
 import { useKanbanOnboardingComplete } from "@/hooks/use-kanban-onboarding-complete";
 import {
@@ -19,6 +23,21 @@ export function OrchestrationNav({ workspaceId, collapsed, onNavigate }: NavProp
   if (!onboarded && !data?.orchestrators.length) return null;
   return (
     <div data-testid="workspace-orchestration-nav">
+      <AppSidebarNavItem
+        icon={IconSitemap}
+        label={t("orchestration:coordinator")}
+        href={coordinatorHref(workspaceId)}
+        collapsed={collapsed}
+        onClick={
+          onNavigate
+            ? () => {
+                router.push(coordinatorHref(workspaceId));
+                onNavigate();
+              }
+            : undefined
+        }
+        testId="workspace-coordinator-link"
+      />
       <AppSidebarNavItem
         icon={IconSitemap}
         label={t("orchestration:orchestration")}

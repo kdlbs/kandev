@@ -30,8 +30,9 @@ function hasProblem(
   );
 }
 function isRunning(task: Task) {
-  const activity = task.status_summary?.foreground_activity ?? task.foreground_activity;
-  const session = task.status_summary?.primary_session?.state ?? task.primary_session_state;
+  const summary = task.status_summary;
+  const activity = summary ? summary.foreground_activity : task.foreground_activity;
+  const session = summary ? summary.primary_session?.state : task.primary_session_state;
   return (
     activity === "generating" ||
     activity === "background" ||

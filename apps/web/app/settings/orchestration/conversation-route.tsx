@@ -36,7 +36,13 @@ async function loadConversation(id: string) {
   ]);
   return { task, comments, sessions: sessions.sessions ?? [] };
 }
-function ConversationContent({ taskId }: { taskId: string }) {
+export function ConversationContent({
+  taskId,
+  embedded = false,
+}: {
+  taskId: string;
+  embedded?: boolean;
+}) {
   const store = useAppStoreApi();
   const [data, setData] = useState<Awaited<ReturnType<typeof loadConversation>>>();
   const [error, setError] = useState<string>();
@@ -86,6 +92,7 @@ function ConversationContent({ taskId }: { taskId: string }) {
     <>
       {error && <p role="alert">{error}</p>}
       <OrchestratorConversationPane
+        embedded={embedded}
         task={{ id: data.task.id, title: data.task.title, workspaceId: data.task.workspace_id }}
         orchestratorId={typeof owner === "string" ? owner : ""}
         comments={data.comments}

@@ -25,6 +25,17 @@ describe("coordinatorTaskGroup", () => {
       coordinatorTaskGroup(task({ task_pending_action: "permission", status_summary: summary })),
     ).toBe("other");
   });
+  it("an authoritative idle summary clears stale running fields", () => {
+    expect(
+      coordinatorTaskGroup(
+        task({
+          primary_session_state: "RUNNING",
+          foreground_activity: "generating",
+          status_summary: summary,
+        }),
+      ),
+    ).toBe("other");
+  });
   it("idle is not stalled and waiting alone is not a question", () => {
     expect(coordinatorTaskGroup(task())).toBe("other");
     expect(coordinatorTaskGroup(task({ primary_session_state: "WAITING_FOR_INPUT" }))).toBe(

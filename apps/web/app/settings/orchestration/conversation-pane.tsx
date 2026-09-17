@@ -13,7 +13,11 @@ import {
 } from "@/lib/api/domains/orchestration-conversation-api";
 import { ActiveSessionRefProvider } from "@/components/task/simple/components/active-session-ref-context";
 import { TopbarWorkingIndicator } from "@/components/task/simple/components/topbar-working-indicator";
-import { orchestratorsHref, orchestratorHref } from "@/lib/api/domains/orchestration-api";
+import {
+  orchestratorsHref,
+  orchestratorHref,
+  coordinatorHref,
+} from "@/lib/api/domains/orchestration-api";
 import type {
   Task,
   TaskComment,
@@ -28,6 +32,7 @@ export function OrchestratorConversationPane({
   timeline,
   onCommentsChanged,
   orchestratorId,
+  embedded = false,
 }: {
   task: Pick<Task, "id" | "title" | "workspaceId">;
   comments: TaskComment[];
@@ -36,6 +41,7 @@ export function OrchestratorConversationPane({
   timeline: TimelineEvent[];
   onCommentsChanged: () => void;
   orchestratorId: string;
+  embedded?: boolean;
 }) {
   const { t } = useTranslation();
   const { data } = useWorkspaceOrchestrators(task.workspaceId);
@@ -50,17 +56,28 @@ export function OrchestratorConversationPane({
             className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6"
             data-testid="orchestrator-conversation"
           >
-            <nav className="flex flex-wrap gap-4 text-sm">
-              <Link className="underline" href={orchestratorsHref(task.workspaceId)}>
-                {t("orchestration:orchestration")}
-              </Link>
-              <Link className="underline" href={orchestratorHref(task.workspaceId, orchestratorId)}>
-                {t("orchestration:configureOrchestrator")}
-              </Link>
-              <Link className="underline" href={`/?workspaceId=${task.workspaceId}`}>
-                {t("orchestration:workspaceBoard")}
-              </Link>
-            </nav>
+            {!embedded && (
+              <nav className="flex flex-wrap gap-4 text-sm">
+                <Link
+                  className="underline max-md:min-h-11 inline-flex items-center"
+                  href={coordinatorHref(task.workspaceId, orchestratorId)}
+                >
+                  {t("orchestration:coordinator")}
+                </Link>
+                <Link className="underline" href={orchestratorsHref(task.workspaceId)}>
+                  {t("orchestration:orchestration")}
+                </Link>
+                <Link
+                  className="underline"
+                  href={orchestratorHref(task.workspaceId, orchestratorId)}
+                >
+                  {t("orchestration:configureOrchestrator")}
+                </Link>
+                <Link className="underline" href={`/?workspaceId=${task.workspaceId}`}>
+                  {t("orchestration:workspaceBoard")}
+                </Link>
+              </nav>
+            )}
             <h1 className="text-xl font-semibold my-4">{task.title}</h1>
             <TopbarWorkingIndicator taskId={task.id} />
             <RecoveryTransportContext.Provider value={retryConversation}>

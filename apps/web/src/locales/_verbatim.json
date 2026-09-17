@@ -81,7 +81,6 @@
   "lsp:elapsedMinutes_one": "Technical term kept in English across localized developer tooling.",
   "lsp:elapsedMinutes_other": "Technical term kept in English across localized developer tooling.",
   "lsp:progressPercentage": "Nothing but interpolated values and punctuation; there is no prose to translate.",
-  "office:branch": "Technical term kept in English across localized developer tooling.",
   "office:cron": "Name of a command-line tool or binary, typed verbatim by the user.",
   "office:discord": "Brand or product name, spelled the same in every language.",
   "office:executor": "Technical term kept in English across localized developer tooling.",
