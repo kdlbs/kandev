@@ -700,6 +700,7 @@ func (r *Repository) initPlansSchema() error {
 		created_by TEXT NOT NULL DEFAULT 'agent',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		write_version TEXT NOT NULL DEFAULT '',
 		comments_revision INTEGER NOT NULL DEFAULT 0,
 		implementation_started_at TIMESTAMP,
 		implementation_started_session_id TEXT,

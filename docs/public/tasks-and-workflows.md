@@ -723,7 +723,30 @@ and primary session are eligible, even if other feedback is still being
 restored. A recovered comment must finish its own browser-draft cleanup before
 it can be run.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+### Protect agent plan writes
+
+Every agent plan read returns an opaque `version`. The version changes after a
+title or content write. Comment and implementation-marker changes do not change
+the version.
+
+Use `expected_version` for a whole-document replacement. Kandev rejects the
+write when the stored version differs. The rejection happens before Kandev
+changes the title, content, history, or events.
+
+Kandev also rejects a replacement that looks like accidental truncation. Use
+`edit_task_plan_kandev` for a local text change. Set `allow_truncation` only
+when the reduction is intentional and the current version matches. Kandev
+keeps the previous snapshot in plan history.
+
+Use `update_task_plan_kandev` with `mode="append"` to add a section without
+reading the plan first. The server adds one blank line before the new section.
+Append is not idempotent, so a repeated call adds the section again.
+
+If an agent loses a write response, read the plan before retrying. Use the
+returned version as the next `expected_version`. Do not repeat a whole-document
+replacement with an old version.
 
 ## Arrange task panels
 

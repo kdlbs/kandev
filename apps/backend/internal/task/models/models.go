@@ -2504,11 +2504,14 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 
 // TaskPlan represents a plan associated with a task
 type TaskPlan struct {
-	ID                             string     `json:"id"`
-	TaskID                         string     `json:"task_id"`
-	Title                          string     `json:"title"`
-	Content                        string     `json:"content"`
-	CreatedBy                      string     `json:"created_by"` // "agent" or "user"
+	ID        string `json:"id"`
+	TaskID    string `json:"task_id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	CreatedBy string `json:"created_by"` // "agent" or "user"
+	// WriteVersion changes on every committed title/content write. It is an
+	// internal optimistic-concurrency token and is not part of browser DTOs.
+	WriteVersion                   string     `json:"-"`
 	CreatedAt                      time.Time  `json:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at"`
 	CommentsRevision               int64      `json:"comments_revision"`
@@ -2548,11 +2551,14 @@ type TaskPlanCommentRef struct {
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.
 // Revisions are the source of truth for history; TaskPlan stores the latest revision's content as HEAD.
 type TaskPlanRevision struct {
-	ID                 string  `json:"id"`
-	TaskID             string  `json:"task_id"`
-	RevisionNumber     int     `json:"revision_number"`
-	Title              string  `json:"title"`
-	Content            string  `json:"content"`
+	ID             string `json:"id"`
+	TaskID         string `json:"task_id"`
+	RevisionNumber int    `json:"revision_number"`
+	Title          string `json:"title"`
+	Content        string `json:"content"`
+	// ContentBytes is populated by bounded metadata reads. Full revision reads
+	// leave it zero because callers can derive the size from Content.
+	ContentBytes       int     `json:"-"`
 	AuthorKind         string  `json:"author_kind"` // "agent" | "user"
 	AuthorName         string  `json:"author_name"` // display snapshot (agent profile name or user identifier)
 	RevertOfRevisionID *string `json:"revert_of_revision_id,omitempty"`
