@@ -13,7 +13,6 @@ import { RepositoryDiscoveryRootControls } from "./repository-discovery-root-con
 const baseProps = {
   isLoading: false,
   discoveryRoots: [],
-  failedRoots: ["/Users/example/Library/Photo Booth Library"],
   homeConfirmationRequired: false,
   onChooseDiscoveryRoot: vi.fn(),
   onRefreshDiscovery: vi.fn(),
@@ -27,24 +26,14 @@ afterEach(() => {
 });
 
 describe("RepositoryDiscoveryRootControls", () => {
-  it("shows a failed server root and a touch-sized refresh action without folder controls", () => {
-    render(
-      <RepositoryDiscoveryRootControls
-        {...baseProps}
-        showRootActions={false}
-        presentation="picker"
-      />,
-    );
+  it("keeps the folder and refresh actions available", () => {
+    render(<RepositoryDiscoveryRootControls {...baseProps} presentation="picker" />);
 
-    expect(screen.getByTestId("discovery-failure")).toBeTruthy();
-    expect(screen.getByText("/Users/example/Library/Photo Booth Library")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "workspaces:refreshRepositories" }).className,
-    ).toContain("[@media(pointer:coarse)]:h-11");
-    expect(screen.queryByRole("button", { name: "Folder picker" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Folder picker" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "workspaces:refreshRepositories" })).toBeTruthy();
   });
 
-  it("leaves saved root recovery controls in place without a duplicate warning", () => {
+  it("leaves saved root recovery controls in place", () => {
     render(
       <RepositoryDiscoveryRootControls
         {...baseProps}
@@ -59,13 +48,12 @@ describe("RepositoryDiscoveryRootControls", () => {
       />,
     );
 
-    expect(screen.queryByTestId("discovery-failure")).toBeNull();
     expect(screen.getByRole("button", { name: "workspaces:refreshRepositories" })).toBeTruthy();
     expect(screen.getByText("workspaces:removeDiscoveryRoot")).toBeTruthy();
   });
 
-  it("disables the server recovery action while discovery is refreshing", () => {
-    render(<RepositoryDiscoveryRootControls {...baseProps} showRootActions={false} isLoading />);
+  it("disables refresh while discovery is refreshing", () => {
+    render(<RepositoryDiscoveryRootControls {...baseProps} isLoading />);
 
     expect(
       (screen.getByRole("button", { name: "workspaces:refreshRepositories" }) as HTMLButtonElement)

@@ -11,7 +11,6 @@ export function PillCommandList({
   onPointerSelect,
   setOpen,
   emptyMessage,
-  className,
 }: {
   options: PillOption[];
   value: string;
@@ -19,7 +18,6 @@ export function PillCommandList({
   onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
   emptyMessage: string;
-  className?: string;
 }) {
   const groups = new Map<string, { label?: string; options: PillOption[] }>();
   for (const option of options) {
@@ -39,7 +37,7 @@ export function PillCommandList({
   );
 
   return (
-    <CommandList className={className}>
+    <CommandList>
       <CommandEmpty>{emptyMessage}</CommandEmpty>
       {orderedGroups.map(([key, group]) => (
         <CommandGroup key={key || "ungrouped"} heading={group.label}>

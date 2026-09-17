@@ -195,7 +195,8 @@ Cache snapshots and responses copy their slices to prevent concurrent mutation.
 The public response keeps its existing fields. `failed_roots` lists current
 root failures. Descendant denials do not mark accessible roots as failed.
 An absent clone root remains a reported root failure, but never replaces fresh
-results from another root. Discovery does not create directories.
+results from another root. Discovery does not create directories. Failed-root
+paths are diagnostic data and are not rendered by repository selectors.
 
 The aggregate `scan_time` advances only after all roots succeed. During partial
 failure, it retains the previous complete-scan time, or remains absent.
@@ -242,27 +243,18 @@ browser on a desktop backend uses desktop policy and the HTTP folder browser.
 Temporary repository choices use the current phone-native picker or drawer
 composition. No native Tauri control appears in a browser or mobile viewport.
 
-`RepositoryDiscoveryControls` also shows root failures for server backends.
-The failure region consumes `failedRoots` from `useRepositoryDiscovery` and
-remains visible beside available repository choices. It identifies failed
-paths and provides manual Refresh through the same coordinator.
-It does not convert partial success into a rejected request or a toast-only error.
-Saved desktop roots retain existing recovery controls without duplicate warnings.
-Configured roots without saved identifiers receive the same failure region as
-server roots. They do not receive unsupported Reconnect or Remove actions.
+`RepositoryDiscoveryControls` remains the desktop root-management surface. It
+does not render failed-root warnings or paths for server, browser, or phone
+selectors. Those selectors keep their available repository choices and their
+normal manual Refresh action. The backend and coordinator retain failed-root
+data for structured diagnostics and automatic-retry suppression, but that data
+is logs-only from the selector's perspective.
 
-The region appears inside existing picker surfaces, including Create Task,
-Add Workspace Sources, Automations, Office, and Workspace Repositories.
-It uses localized copy, wrapping paths, and an accessible status region.
-During refresh, available choices stay visible and the action shows progress.
-After successful recovery, the warning disappears.
-Phone presentation reuses each existing selector and its scroll owner. The
-failure details list is bounded and scrolls inside the warning while its title
-and Refresh action remain fixed; the remaining command list keeps its own
-available-height scroll area. The Add Workspace Sources drawer supplies the
-reference for inline errors, safe-area clearance, and internal scrolling. No
-additional overlay is necessary. Desktop actions remain 28 pixels high. Phone
-and coarse-pointer actions have at least 44-pixel hit targets.
+Saved desktop roots retain their existing Reconnect and Remove actions. Those
+controls manage explicit saved roots and do not extend to operator-configured
+roots. Phone presentation reuses each existing selector and its scroll owner;
+no warning details or extra scroll owner is added. Desktop actions remain 28
+pixels high. Phone and coarse-pointer actions have at least 44-pixel hit targets.
 
 ## Workspace polling
 

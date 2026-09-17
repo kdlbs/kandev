@@ -145,8 +145,9 @@ and starts a fresh scan. Removal forgets that desktop discovery folder; it does
 not remove repositories or files.
 
 If one root fails while another succeeds, repository selectors keep the
-successful results and show the failed path. Select **Refresh repositories** to
-retry. An inaccessible descendant does not make its accessible root require
+successful results and their normal **Refresh repositories** action. Failed-root
+paths stay in structured backend logs and are not shown in selectors. An
+inaccessible descendant does not make its accessible root require
 reconnection. You can use **Add Local Repository** to validate an absolute path
 when automatic discovery cannot reach its root. Kandev does not create missing
 clone directories during recovery.

@@ -156,19 +156,15 @@ function PillPopoverContent({
   popoverHeader?: React.ReactNode;
   dropdownTestId?: string;
 }) {
-  const hasPopoverHeader = Boolean(popoverHeader);
   return (
     <PopoverContent
-      className={cn(
-        "w-[min(480px,calc(100vw-2rem))] p-0",
-        hasPopoverHeader && "max-h-[var(--radix-popover-content-available-height)] overflow-hidden",
-      )}
+      className="w-[min(480px,calc(100vw-2rem))] p-0"
       align="start"
       portalContainer={portalContainer}
       data-testid={dropdownTestId}
     >
       {popoverHeader}
-      <Command filter={filter} className={hasPopoverHeader ? "!h-auto min-h-0 flex-1" : undefined}>
+      <Command filter={filter}>
         <div className="flex min-h-11 items-center gap-1 px-2 pt-1">
           <div className="min-w-0 flex-1">
             <CommandInput placeholder={searchPlaceholder} className="h-9 w-full" />
@@ -209,7 +205,6 @@ function PillPopoverContent({
           onPointerSelect={onPointerSelect}
           setOpen={setOpen}
           emptyMessage={emptyMessage}
-          className={hasPopoverHeader ? "!max-h-none min-h-0 flex-1" : undefined}
         />
       </Command>
     </PopoverContent>

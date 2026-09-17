@@ -15,7 +15,8 @@ legacy_specs: []
 
 Keep accessible repositories visible when filesystem discovery encounters denied
 descendants or failed roots. First correct traversal and cache recovery. Then
-expose root failures in existing repository selectors and document recovery.
+keep failed-root diagnostics in structured logs while preserving existing
+repository choices and Refresh actions.
 
 ## Evidence and assumption check
 
@@ -32,7 +33,7 @@ was removed. This Linux run did not reproduce native macOS privacy enforcement.
 Commit `d796cf131d` introduced the fatal descendant-error branch.
 
 The user requested a fix after this diagnosis. Workspace discovery owns the
-contract. Existing AC-003.7 requires preservation and visible recovery.
+contract. Existing AC-003.7 requires preservation and recovery.
 New AC-003.9 through 003.12 clarify descendant failures and mixed root outcomes.
 No unresolved product choice blocks this package.
 
@@ -43,7 +44,8 @@ No unresolved product choice blocks this package.
 - Preserve accessible siblings after descendant EACCES or EPERM.
 - Retain root failures, cancellation, and structured diagnostics.
 - Merge fresh and cached results by exact scan root.
-- Show failed paths and Refresh in server and phone repository selectors.
+- Keep available choices and the normal Refresh action in server and phone
+  repository selectors. Failed-root diagnostics are logs-only.
 - Preserve saved desktop root recovery controls.
 - Update public recovery guidance during implementation.
 
@@ -63,37 +65,31 @@ and keeps independent per-root snapshots across aggregate cache invalidation.
 It deduplicates only the final response. Successful empty scans clear stale
 entries. Cancellation leaves the prior snapshot unchanged.
 
-`RepositoryDiscoveryControls` renders a localized failure region for roots
-without existing saved-root recovery controls. The region uses `failedRoots`
-and the existing refresh coordinator. It appears in all current consumers.
-It leaves available choices usable during failure and refresh.
+`RepositoryDiscoveryControls` keeps the existing desktop root-management
+surface. Server and phone selectors do not render `failedRoots`; they keep
+available choices and their normal Refresh action. The backend retains failed
+root details in structured logs and the coordinator retains its retry policy.
 
 ## ASCII UI preview
 
-UI-01: Create Task repository selector, failed scan.
-Current server behavior shows only `No repositories` and the refresh icon.
+UI-01: Create Task repository selector during a failed scan.
+Failed-root diagnostics remain in backend logs. The selector keeps its normal
+choices and Refresh action without adding a warning or path list.
 
 ```text
-Desktop picker                     Phone picker (existing surface)
-+--------------------------------+ +----------------------------+
-| Search repositories  [Refresh] | | Search repositories        |
-| Some folders could not be      | | Some folders could not be  |
-| scanned.                       | | scanned.                   |
-| /Users/name/.kandev/repos       | | /Users/name/.kandev/repos   |
-| [Refresh]                      | | [Refresh]                  |
-| project-a                      | | project-a                  |
-| project-b                      | | project-b                  |
-+--------------------------------+ +----------------------------+
+Desktop picker                   Phone picker (same surface)
++-------------------------------+ +-------------------------------+
+| Search repositories [Refresh] | | Search repositories [Refresh] |
+| project-a                     | | project-a                     |
+| project-b                     | | project-b                     |
++-------------------------------+ +-------------------------------+
 ```
 
-UI-01 structure is required, but copy and spacing are illustrative. Localized
-warning text precedes choices. Failed paths wrap inside a bounded warning list;
-the title and Refresh action remain reachable while the list scrolls. Existing
-picker search, selection, dismissal, and focus return remain intact. Avoid a
-second Refresh button when the existing action is clearly associated with the
-warning. The action is disabled during refresh and shows progress. Recovery
-removes the warning. With no choices, the warning remains above the normal
-empty message.
+UI-01 structure is required, but copy and spacing are illustrative. Existing
+picker search, selection, dismissal, focus return, and Refresh behavior remain
+intact. No failed-root warning or path list is rendered. Failed-root details
+remain available in structured backend logs. The existing action is disabled
+during refresh and shows progress where that surface already supports it.
 
 The phone entry point remains the repository selector. Reuse its current
 surface, with one scroll owner and existing safe-area clearance. The Add
@@ -107,25 +103,27 @@ All AC references below use the prefix `AC-WORKSPACES-LOCAL-REPOSITORIES`.
 
 | Criteria | Evidence |
 | --- | --- |
-| 003.9, 004.2 | New `repository_discovery_recovery_test.go`: descendant EACCES/EPERM, readable siblings before and after, root denial, exact warning target |
+| 003.9, 004.2 | New `repository_discovery_recovery_test.go`: descendant EACCES/EPERM, readable siblings before and after, root denial, and exact structured diagnostic target |
 | 003.7, 003.10, 003.12 | Same file: cold cache, warm cache, missing clone root across two refreshes, successful empty root, overlapping roots, all roots fail, recovery |
 | 003.6 | Existing discovery concurrency tests plus race-enabled recovery tests |
-| 003.11, 003.8 | `repository-discovery-controls.test.tsx`: mixed success, empty failure, manual refresh, progress, recovery, desktop controls |
+| 003.11, 003.8 | `repository-discovery-controls.test.tsx` and discovery E2E: failed-root paths are absent, available choices remain selectable, normal Refresh remains usable, and desktop root controls remain available |
 | 003.4, 003.5 | `use-repository-discovery.test.ts`: failed snapshots do not auto-retry, explicit refresh still runs |
 
 ## E2E tests
 
 - Extend `tests/task/repository-discovery-consent.spec.ts` in `chromium` with
-  server partial failure, usable choices, manual refresh, and recovery.
+  server partial failure, hidden failed-root diagnostics, usable choices, and
+  normal Refresh.
 - Extend `tests/task/mobile-repository-discovery.spec.ts` in `mobile-chrome`
-  with the same outcome, long paths, touch targets, and no horizontal overflow.
+  with the same outcome and touch-target coverage for the existing Refresh
+  action.
 - Use controlled discovery responses for deterministic UI failures. Backend
   tests prove filesystem behavior without relying on root-bypassed chmod.
 
 ## Work orders
 
 - [x] [Task 01: Preserve repositories across scan failures](task-01-scan-recovery.md) (done)
-- [x] [Task 02: Show discovery failures and recovery](task-02-picker-recovery.md) (done)
+- [x] [Task 02: Preserve selector recovery without visible failure paths](task-02-picker-recovery.md) (done)
 
 Task 02 followed Task 01. Work was completed sequentially in the primary session.
 The [original consent package](../desktop-repository-discovery-consent/plan.md)
@@ -133,9 +131,9 @@ retains its historical results. This package owns the additional regressions.
 
 ## Verification results
 
-Implementation completed on 2026-09-17. Backend recovery, frontend picker
-recovery, translations, E2E coverage, and public recovery guidance are in
-place.
+Implementation completed on 2026-09-17. Backend recovery, selector behavior,
+E2E coverage, and public recovery guidance are in place. Failed-root paths
+remain logs-only; no warning translations or selector path list are shipped.
 
 Passed checks:
 
@@ -158,6 +156,7 @@ Native macOS privacy enforcement was not available on this Linux host. The
 - Overlapping roots require exact scan provenance to avoid stale duplicates.
 - A successful root with a denied descendant cannot prove that missing cached
   repositories were deleted. Its fresh accessible results replace its cache.
-- A missing clone directory remains visible as a warning until it exists.
+- A missing clone directory remains a structured root failure until it exists.
 - Native macOS privacy dialogs require a Mac for final platform confirmation.
-- New warnings need complete translations and long-path containment.
+- Backend log access must be treated as sensitive because it can contain local
+  paths.

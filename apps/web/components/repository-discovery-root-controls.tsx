@@ -11,66 +11,12 @@ export type RepositoryDiscoveryRootControlsProps = {
   presentation?: "card" | "picker";
   isLoading: boolean;
   discoveryRoots: DesktopDiscoveryRoot[];
-  failedRoots?: string[];
-  showRootActions?: boolean;
-  showRefresh?: boolean;
   homeConfirmationRequired: boolean;
   onChooseDiscoveryRoot: (path: string) => void;
   onRefreshDiscovery: () => void;
   onReconnectDiscoveryRoot: (oldPath: string, newPath: string) => void;
   onRemoveDiscoveryRoot: (path: string) => void;
 };
-
-function DiscoveryFailureNotice({
-  failedRoots,
-  isLoading,
-  showRefresh,
-  showRootActions,
-  onRefreshDiscovery,
-}: {
-  failedRoots: string[];
-  isLoading: boolean;
-  showRefresh: boolean;
-  showRootActions: boolean;
-  onRefreshDiscovery: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="grid max-h-[min(16rem,calc(100dvh-2rem))] min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-2 overflow-hidden rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs"
-      role="status"
-      aria-live="polite"
-      data-testid="discovery-failure"
-    >
-      <div className="space-y-2">
-        <p className="font-medium">{t("workspaces:repositoryDiscoveryFailedTitle")}</p>
-        <p>{t("workspaces:repositoryDiscoveryFailedDescription")}</p>
-      </div>
-      <ul
-        className="min-h-0 min-w-0 max-h-[min(9rem,40dvh)] space-y-1 overflow-y-auto overscroll-contain"
-        aria-label={t("workspaces:repositoryDiscoveryFailedRoots")}
-      >
-        {failedRoots.map((path) => (
-          <li key={path} className="break-all font-mono" title={path}>
-            {path}
-          </li>
-        ))}
-      </ul>
-      {!showRootActions && showRefresh && (
-        <Button
-          type="button"
-          variant="outline"
-          className="[@media(pointer:coarse)]:h-11"
-          onClick={onRefreshDiscovery}
-          disabled={isLoading}
-          data-testid="discovery-failure-refresh"
-        >
-          {t("workspaces:refreshRepositories")}
-        </Button>
-      )}
-    </div>
-  );
-}
 
 function SavedDiscoveryRootList({
   discoveryRoots,
@@ -118,9 +64,6 @@ export function RepositoryDiscoveryRootControls({
   presentation = "card",
   isLoading,
   discoveryRoots,
-  failedRoots = [],
-  showRootActions = true,
-  showRefresh = true,
   homeConfirmationRequired,
   onChooseDiscoveryRoot,
   onRefreshDiscovery,
@@ -128,10 +71,6 @@ export function RepositoryDiscoveryRootControls({
   onRemoveDiscoveryRoot,
 }: RepositoryDiscoveryRootControlsProps) {
   const { t } = useTranslation();
-  const visibleFailedRoots = failedRoots.filter(
-    (path, index) =>
-      failedRoots.indexOf(path) === index && !discoveryRoots.some((root) => root.path === path),
-  );
   return (
     <div
       className={cn(
@@ -143,7 +82,7 @@ export function RepositoryDiscoveryRootControls({
       data-testid="discovery-root-controls"
       data-presentation={presentation}
     >
-      {presentation === "card" && showRootActions && (
+      {presentation === "card" && (
         <div>
           <p className="text-sm font-medium">
             {t("workspaces:chooseFoldersToDiscoverRepositories")}
@@ -153,36 +92,23 @@ export function RepositoryDiscoveryRootControls({
           </p>
         </div>
       )}
-      {showRootActions && (
-        <div className="flex flex-wrap items-center gap-2">
-          <FolderPicker
-            value=""
-            placeholder={t("workspaces:chooseFoldersToDiscoverRepositories")}
-            onChange={onChooseDiscoveryRoot}
-          />
-          {showRefresh && (
-            <Button
-              type="button"
-              variant="outline"
-              className="[@media(pointer:coarse)]:h-11"
-              onClick={onRefreshDiscovery}
-              disabled={isLoading}
-            >
-              {t("workspaces:refreshRepositories")}
-            </Button>
-          )}
-        </div>
-      )}
-      {visibleFailedRoots.length > 0 && (
-        <DiscoveryFailureNotice
-          failedRoots={visibleFailedRoots}
-          isLoading={isLoading}
-          showRefresh={showRefresh}
-          showRootActions={showRootActions}
-          onRefreshDiscovery={onRefreshDiscovery}
+      <div className="flex flex-wrap items-center gap-2">
+        <FolderPicker
+          value=""
+          placeholder={t("workspaces:chooseFoldersToDiscoverRepositories")}
+          onChange={onChooseDiscoveryRoot}
         />
-      )}
-      {showRootActions && homeConfirmationRequired && (
+        <Button
+          type="button"
+          variant="outline"
+          className="[@media(pointer:coarse)]:h-11"
+          onClick={onRefreshDiscovery}
+          disabled={isLoading}
+        >
+          {t("workspaces:refreshRepositories")}
+        </Button>
+      </div>
+      {homeConfirmationRequired && (
         <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
           <p>{t("workspaces:homeDiscoveryConfirmationDescription")}</p>
           <div className="mt-2">
@@ -194,13 +120,11 @@ export function RepositoryDiscoveryRootControls({
           </div>
         </div>
       )}
-      {showRootActions && (
-        <SavedDiscoveryRootList
-          discoveryRoots={discoveryRoots}
-          onReconnectDiscoveryRoot={onReconnectDiscoveryRoot}
-          onRemoveDiscoveryRoot={onRemoveDiscoveryRoot}
-        />
-      )}
+      <SavedDiscoveryRootList
+        discoveryRoots={discoveryRoots}
+        onReconnectDiscoveryRoot={onReconnectDiscoveryRoot}
+        onRemoveDiscoveryRoot={onRemoveDiscoveryRoot}
+      />
     </div>
   );
 }

@@ -12,29 +12,25 @@ type RepositoryDiscoveryControlsProps = {
   enabled?: boolean;
   className?: string;
   presentation?: "card" | "picker";
-  showRefresh?: boolean;
 };
 
 /**
- * The shared consent and recovery surface for every repository selector.
- * Keeping the discovery lease and root actions together prevents a picker
- * from showing an empty result without also offering the action that can
- * establish or repair its filesystem access.
+ * Renders desktop discovery-root consent and recovery controls. Browser and
+ * phone selectors keep their existing repository-list actions while discovery
+ * diagnostics remain outside the selector UI.
  */
 export function RepositoryDiscoveryControls({
   workspaceId,
   enabled = true,
   className,
   presentation = "card",
-  showRefresh = true,
 }: RepositoryDiscoveryControlsProps) {
   const discovery = useRepositoryDiscovery(workspaceId, enabled);
   const { toast } = useToast();
   const { t } = useTranslation();
   const actions = useDiscoveryRootActions(discovery, toast, t);
 
-  if (!enabled || !workspaceId || (!discovery.desktopRuntime && discovery.failedRoots.length === 0))
-    return null;
+  if (!enabled || !workspaceId || !discovery.desktopRuntime) return null;
 
   return (
     <RepositoryDiscoveryRootControls
@@ -42,9 +38,6 @@ export function RepositoryDiscoveryControls({
       presentation={presentation}
       isLoading={discovery.isLoading || discovery.isRefreshing}
       discoveryRoots={discovery.rootStates.filter((root) => Boolean(root.id))}
-      failedRoots={discovery.failedRoots}
-      showRootActions={discovery.desktopRuntime}
-      showRefresh={showRefresh}
       homeConfirmationRequired={discovery.homeConfirmationRequired}
       onChooseDiscoveryRoot={actions.handleChooseDiscoveryRoot}
       onRefreshDiscovery={actions.refreshDiscovery}

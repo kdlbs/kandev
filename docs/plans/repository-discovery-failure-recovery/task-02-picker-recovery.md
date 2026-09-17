@@ -1,6 +1,6 @@
 ---
 id: "02-picker-recovery"
-title: "Show discovery failures and recovery"
+title: "Preserve selector recovery without visible failure paths"
 status: done
 wave: 2
 depends_on: ["01-scan-recovery"]
@@ -17,24 +17,27 @@ system_design:
   - ../../specs/workspaces/system-design/local-repositories.md
 ---
 
-# Task 02: Show discovery failures and recovery
+# Task 02: Preserve selector recovery without visible failure paths
 
 ## Summary
 
-Show root failures inside existing selectors while preserving available choices.
-Provide manual recovery for browser and phone clients through shared discovery state.
+Keep failed-root diagnostics in structured backend logs while preserving
+available choices and the normal Refresh action in existing selectors.
 
 ## In scope
 
-- Add failing component tests for a server response with repositories and failed roots.
-- Add empty-failure, refresh-progress, successful-recovery, and long-path cases.
-- Render failures in `RepositoryDiscoveryControls` independently of desktop mode.
-- Keep saved desktop Reconnect/Remove controls without duplicate root warnings.
-- Reuse `failedRoots` and manual refresh from the existing discovery hook.
+- Add component and E2E coverage for a server response with repositories and
+  failed roots, asserting that failed paths are not rendered.
+- Keep existing normal Refresh behavior available during partial failure and
+  refresh the repository list without a background retry.
+- Keep saved desktop Reconnect/Remove controls unchanged.
+- Retain `failedRoots` for coordinator retry suppression and structured
+  diagnostics; preserve the existing repository-list Refresh in selectors.
 - Check all existing consumers: task creation, workspace sources, repository
   settings, automations, and Office project setup.
-- Add localized copy in all required catalogs and generate Traditional Chinese.
-- Extend desktop and mobile discovery E2E with failure and recovery flows.
+- Remove warning-only locale keys that no longer have a selector consumer.
+- Extend desktop and mobile discovery E2E with partial-failure and selection
+  flows.
 - Update recovery guidance in configuration and usage documentation.
 
 ## Out of scope
@@ -44,12 +47,13 @@ automatic retry changes are outside this work order.
 
 ## Acceptance
 
-- Server and desktop selectors show failed paths and recovery with empty or
-  nonempty results. Successful recovery clears the warning without reopening.
-- Available choices remain selectable during failure. Shared coordinator tests
-  prove manual recovery without new background retries or duplicate scans.
-- Desktop and phone E2E prove selection and recovery. Phone paths wrap, actions
-  have 44-pixel hit targets, and the document has no horizontal overflow.
+- Server and phone selectors do not show failed-root warnings or paths when a
+  discovery response contains `failed_roots`.
+- Available choices remain selectable during failure, and the existing normal
+  Refresh action remains reachable and refreshes the repository list without a
+  background retry.
+- Desktop E2E keeps explicit saved-root Reconnect/Remove management. Phone E2E
+  keeps the existing Refresh action at a 44-pixel touch target.
 
 ## ASCII UI preview
 
@@ -57,17 +61,15 @@ UI-01: Failed scan, excerpt from [the plan](plan.md#ascii-ui-preview).
 
 ```text
 Desktop selector                Phone selector
-Search + Refresh                Search
-Warning + failed paths          Warning + wrapped failed paths
-Refresh                         Refresh (44px target)
+Search + Refresh                Search + Refresh
 Available repository choices    Available repository choices
 ```
 
-Keep the existing selector surface and scroll owner. Use the Add Workspace
-Sources inline-error pattern. No new overlay is required. During refresh,
-show progress and disable the action. On success, remove the warning.
-An empty result retains the warning above the existing empty message.
-These structural requirements implement AC-003.11. Copy is illustrative and localized.
+Keep the existing selector surface and scroll owner. Do not add a failure
+warning, path list, or selector-specific containment for failed roots. During
+refresh, preserve the existing action state and available choices. Failed-root
+details remain in structured backend logs. These structural requirements
+implement AC-003.11.
 
 ## Verification
 
@@ -75,9 +77,8 @@ From the repository root, install workspace dependencies if this worktree has no
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run components/repository-discovery-controls.test.tsx hooks/domains/workspace/use-repository-discovery.test.ts components/task-create-dialog-effects.test.ts)
+(cd apps/web && pnpm exec vitest run components/repository-discovery-controls.test.tsx components/repository-discovery-root-controls.test.tsx hooks/domains/workspace/use-repository-discovery.test.ts)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm run i18n:zh-hant)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm exec eslint components/repository-discovery-controls.tsx)
 make build-web
@@ -92,15 +93,17 @@ git diff --check
 ```
 
 Run added component/helper tests explicitly if implementation creates separate files.
-Inspect the rendered phone failure state and compare it with UI-01. Keep E2E
-runs sequential under the existing worker limits. Use controlled API responses
-for UI errors. Task 01 supplies deterministic filesystem regression coverage.
+Inspect the rendered phone selector and compare it with UI-01. Keep E2E runs
+sequential under the existing worker limits. Use controlled API responses for
+partial discovery results. Task 01 supplies deterministic filesystem
+regression coverage.
 
 ## Files likely touched
 
 - `apps/web/components/repository-discovery-controls.tsx` and its test
 - `apps/web/hooks/domains/workspace/use-repository-discovery.test.ts`
-- `apps/web/components/task-create-dialog-effects.test.ts`
+- `apps/web/components/repository-discovery-root-controls.test.tsx`
+- `apps/web/components/task-create-dialog-pill.tsx`
 - `apps/web/e2e/tests/task/repository-discovery-consent.spec.ts`
 - `apps/web/e2e/tests/task/mobile-repository-discovery.spec.ts`
 - `apps/web/src/locales/` required catalogs
@@ -114,8 +117,8 @@ implementation, not draft behavior.
 
 ## Risks
 
-Some selectors already provide Refresh. Avoid duplicate actions where one
-existing action clearly supports the warning. Do not offer root mutations for
+Some selectors already provide Refresh. Preserve the existing action instead
+of adding a second recovery control. Do not offer root mutations for
 operator-configured paths. Preserve accessibility and existing desktop controls.
 
 ## Parallelism
@@ -131,28 +134,25 @@ operator-configured paths. Preserve accessibility and existing desktop controls.
 
 ## Results
 
-Implemented shared failed-root visibility and manual recovery for browser,
-phone, desktop, workspace settings, and existing repository-selector
-consumers. Available repositories remain selectable during partial failure.
-Saved desktop roots retain Reconnect and Remove controls without duplicate
-warnings. The localized failure notice wraps long paths in a bounded internal
-list, keeps its title and Refresh action reachable, uses a 44-pixel touch
-target, disables during refresh, and clears after a successful response.
+Kept failed-root details in structured backend logs and removed their selector
+warning/path list. Browser and phone selectors retain available repositories
+and the normal Refresh action during partial failure. Saved desktop roots retain
+Reconnect and Remove controls.
 
-Added component, hook, and Chromium/mobile-chrome E2E coverage. Updated all
-required locale catalogs and public configuration, desktop, and usage guidance.
+Updated component, hook, and Chromium/mobile-chrome E2E coverage. Removed the
+unused warning locale keys and updated public configuration, desktop, and usage
+guidance.
 
 Verification passed:
 
-- Focused Vitest run: 82 tests passed across 6 files
+- Correction-focused Vitest run: 29 tests passed across 4 files
 - `pnpm run typecheck`
 - `pnpm run i18n:check`
 - Targeted ESLint for discovery components and workspace repository settings
 - `pnpm e2e:run --project chromium tests/task/repository-discovery-consent.spec.ts` (3 passed)
 - `pnpm e2e:run --project mobile-chrome tests/task/mobile-repository-discovery.spec.ts` (3 passed)
-- Mobile E2E covers eight long failed roots, warning-list scrolling, selector
-  viewport containment, reachable Refresh, healthy repository selection, and
-  successful recovery.
+- Mobile E2E covers failed-root diagnostics staying out of the selector,
+  reachable Refresh, and healthy repository selection.
 - `make build-web`
 - `node --test scripts/validate-public-docs.test.mjs`
 - `node scripts/validate-public-docs.mjs`

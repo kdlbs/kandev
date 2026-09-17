@@ -158,11 +158,9 @@ export function DiscoverRepoDialog({
           <DialogDescription>{t("workspaces:discoverRepositoryDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <RepositoryDiscoveryControls
-            workspaceId={workspaceId}
-            enabled={open}
-            showRefresh={desktopRuntime}
-          />
+          {desktopRuntime && (
+            <RepositoryDiscoveryControls workspaceId={workspaceId} enabled={open} />
+          )}
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <Label>{t("workspaces:discoveredRepositories")}</Label>

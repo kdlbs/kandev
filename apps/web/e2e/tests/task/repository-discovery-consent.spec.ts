@@ -45,7 +45,7 @@ test.describe("Desktop repository discovery consent", () => {
     expect(refreshBox!.height).toBeLessThanOrEqual(32);
   });
 
-  test("keeps available repositories usable and recovers a failed server root", async ({
+  test("keeps failed-root diagnostics out of the server selector", async ({
     testPage,
     backend,
   }) => {
@@ -61,8 +61,9 @@ test.describe("Desktop repository discovery consent", () => {
     await expect(dialog).toBeVisible();
     await dialog.getByTestId("repo-chip-trigger").first().click();
 
-    const controls = testPage.getByTestId("discovery-root-controls");
-    await expect(controls.getByTestId("discovery-failure")).toContainText(DISCOVERY_FAILURE_ROOT);
+    await expect(testPage.getByTestId("discovery-root-controls")).toHaveCount(0);
+    await expect(testPage.getByTestId("discovery-failure")).toHaveCount(0);
+    await expect(testPage.getByText(DISCOVERY_FAILURE_ROOT, { exact: true })).toHaveCount(0);
     const availableRepository = testPage.getByRole("option", { name: /healthy-project/ });
     await expect(availableRepository).toBeEnabled();
     await availableRepository.click();
@@ -71,15 +72,14 @@ test.describe("Desktop repository discovery consent", () => {
     await dialog.getByTestId("repo-chip-trigger").first().click();
     const refreshResponse = testPage.waitForResponse(
       (response) =>
-        response.url().includes("/api/v1/workspaces/") &&
-        response.url().includes("/repositories/discovery/refresh") &&
-        response.request().method() === "POST" &&
+        /\/api\/v1\/workspaces\/[^/]+\/repositories$/.test(new URL(response.url()).pathname) &&
+        response.request().method() === "GET" &&
         response.ok(),
     );
-    await controls.getByTestId("discovery-failure-refresh").click();
+    await testPage.getByTestId("repo-refresh-button").click();
     await refreshResponse;
     await expect(testPage.getByTestId("discovery-failure")).toHaveCount(0);
-    await expect(testPage.getByRole("option", { name: /recovered-project/ })).toBeVisible();
+    await expect(testPage.getByRole("option", { name: /healthy-project/ })).toBeVisible();
   });
 
   test("uses the native picker and keeps the discovery root recoverable", async ({

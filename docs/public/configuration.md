@@ -334,11 +334,12 @@ details. A browser can connect to a desktop backend and use the HTTP folder
 picker; the browser's picker capability does not change the backend's
 discovery policy.
 
-If discovery cannot read a root, repository selectors show the failed path and
-keep repositories from successful roots available. Select **Refresh
-repositories** to retry the failed roots. A denied descendant does not require
-root reconnection. If a saved Desktop root itself fails, use **Reconnect** or
-**Remove**. Kandev does not create a missing clone directory during recovery.
+If discovery cannot read a root, repository selectors keep repositories from
+successful roots available and retain their normal **Refresh repositories**
+action. Failed-root paths stay in structured backend logs and are not shown in
+selectors. A denied descendant does not require root reconnection. If a saved
+Desktop root itself fails, use **Reconnect** or **Remove**. Kandev does not
+create a missing clone directory during recovery.
 You can also enter an absolute repository path in **Add Local Repository** and
 select **Validate**; this explicit check is independent of discovery roots.
 
