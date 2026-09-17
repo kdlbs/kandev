@@ -201,7 +201,9 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
       <DetailTriggerCard draft={draft} update={update} />
       <DetailReadOnlyCard
         lastFiredAt={lastFired}
-        nextRunAt={isRoutineFiring(draft.status ?? "") ? (cronTrigger?.nextRunAt ?? null) : null}
+        nextRunAt={
+          isRoutineFiring(draft.status ?? routine.status) ? (cronTrigger?.nextRunAt ?? null) : null
+        }
       />
     </div>
   );

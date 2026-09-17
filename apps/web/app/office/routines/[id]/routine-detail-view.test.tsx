@@ -72,6 +72,18 @@ const cronTrigger: RoutineTrigger = {
   updatedAt: TIMESTAMP,
 };
 
+const relistedCronTrigger: RoutineTrigger = {
+  id: "trigger-2",
+  routineId: "routine-1",
+  kind: "cron",
+  cronExpression: "*/10 * * * *",
+  timezone: "UTC",
+  nextRunAt: "2026-06-06T00:00:00Z",
+  enabled: true,
+  createdAt: TIMESTAMP,
+  updatedAt: TIMESTAMP,
+};
+
 const NO_TRIGGERS: RoutineTrigger[] = [];
 
 // Save/Run Now are contributed through useOfficeTopbar's actions slot (a
@@ -122,6 +134,12 @@ describe("RoutineDetailView next-fire display", () => {
   it("shows no next-fire countdown for a routine loaded as paused", () => {
     renderDetailView({ ...baseRoutine, status: "paused" }, [cronTrigger]);
     expect(screen.getByText("Next fire: -")).toBeTruthy();
+  });
+
+  it("shows no next-fire countdown for a routine loaded with an unrecognized status", () => {
+    renderDetailView({ ...baseRoutine, status: "draft" }, [cronTrigger]);
+    expect(screen.getByText("Next fire: -")).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 });
 
@@ -292,13 +310,13 @@ describe("RoutineDetailView save outcome mapping (AC-002.9, SRF-34)", () => {
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it("names the create failure and does not refresh when the re-list succeeds", async () => {
+  it("names the create failure, does not refresh, and renders the re-listed schedule when the re-list succeeds", async () => {
     reconcileCronTriggerMock.mockResolvedValue({
       kind: "create-failed",
       message: "invalid cron expression",
-      triggers: [],
+      triggers: [relistedCronTrigger],
     });
-    renderDetailView(baseRoutine, NO_TRIGGERS);
+    renderDetailView(baseRoutine, [cronTrigger]);
 
     clickSave();
 
@@ -308,15 +326,20 @@ describe("RoutineDetailView save outcome mapping (AC-002.9, SRF-34)", () => {
       ),
     );
     expect(refreshMock).not.toHaveBeenCalled();
+    // Proves setTriggers(outcome.triggers) actually reaches the DOM: the
+    // Schedule card must show the re-listed trigger's next fire, not the
+    // pre-save trigger it replaced.
+    expect(screen.getByText(/Next fire: 6\/6\/2026/)).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 
-  it("names the delete failure and the surviving cron count when the re-list succeeds", async () => {
+  it("names the delete failure, the surviving cron count, and renders the re-listed schedule when the re-list succeeds", async () => {
     reconcileCronTriggerMock.mockResolvedValue({
       kind: "delete-failed",
       message: "server error",
-      triggers: [cronTrigger],
+      triggers: [relistedCronTrigger],
     });
-    renderDetailView(baseRoutine, NO_TRIGGERS);
+    renderDetailView(baseRoutine, [cronTrigger]);
 
     clickSave();
 
@@ -326,5 +349,7 @@ describe("RoutineDetailView save outcome mapping (AC-002.9, SRF-34)", () => {
       ),
     );
     expect(refreshMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/Next fire: 6\/6\/2026/)).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 });

@@ -181,6 +181,12 @@ describe("normalizeRoutineRun", () => {
     expect(run.catchUpMissedTicks).toBeUndefined();
     expect(run.catchUpTruncated).toBeUndefined();
   });
+
+  it("normalizes an absent status and source to an empty string, not a cast", () => {
+    const run = normalizeRoutineRun({ id: "run1" });
+    expect(run.status).toBe("");
+    expect(run.source).toBe("");
+  });
 });
 
 describe("list normalizers", () => {
