@@ -65,7 +65,7 @@ The column area excludes the workflow header and the horizontal scrollbar. Pixel
 #### Acceptance criteria
 
 - **AC-UI-ADAPTIVE-KANBAN-003.1:** Expanded workflows shall remain vertically stacked with their existing separators and column order. Each lane shall retain independent horizontal scrolling.
-- **AC-UI-ADAPTIVE-KANBAN-003.2:** Overflowing columns shall show a bottom fade at the start, both vertical fades between boundaries, and a top fade at the end. Non-overflowing columns shall show neither fade.
+- **AC-UI-ADAPTIVE-KANBAN-003.2:** Overflowing columns shall show a bottom fade at the start, both vertical fades between boundaries, and a top fade at the end. Non-overflowing columns shall show neither fade. Each visible vertical fade shall include a neutral directional chevron that remains visible over empty background.
 - **AC-UI-ADAPTIVE-KANBAN-003.3:** Overflowing workflow lanes shall show equivalent left and right fades. Fades shall update after scrolling, resizing, filtering, and task changes.
 - **AC-UI-ADAPTIVE-KANBAN-003.4:** With a fine pointer, an overflowing column shall reveal its scrollbar on column hover, keyboard focus within the column, or active scrolling. An overflowing lane shall reveal its horizontal scrollbar on lane interaction. Idle scrollbars shall become transparent without moving cards or headers. The horizontal scrollbar shall remain hidden during a task drag.
 - **AC-UI-ADAPTIVE-KANBAN-003.5:** Fades shall not intercept pointer input or conceal headers, scrollbar controls, or the final card at the scroll boundary. Keyboard users shall reach and scroll each overflowing region without activating a card action.

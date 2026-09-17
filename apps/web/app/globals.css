@@ -546,17 +546,28 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 .kanban-overflow-fade-bottom {
   right: 10px;
   left: 0;
-  height: 16px;
+  height: 48px;
+  display: flex;
+  justify-content: center;
+  padding-block: 4px;
+}
+
+.kanban-overflow-chevron {
+  color: var(--foreground);
+  opacity: 0.75;
+  flex-shrink: 0;
 }
 
 .kanban-overflow-fade-top {
   top: 0;
-  background: linear-gradient(to bottom, var(--background), transparent);
+  align-items: flex-start;
+  background: linear-gradient(to bottom, var(--background) 25%, transparent);
 }
 
 .kanban-overflow-fade-bottom {
   bottom: 0;
-  background: linear-gradient(to top, var(--background), transparent);
+  align-items: flex-end;
+  background: linear-gradient(to top, var(--background) 25%, transparent);
 }
 
 .kanban-overflow-fade-left,

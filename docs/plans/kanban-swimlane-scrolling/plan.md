@@ -243,3 +243,32 @@ No public documentation changes were required because the affected contract is i
 - Transparent native scrollbars vary by browser and OS. Preserve native fallback behavior and report tested engines.
 - An intermediate overflow wrapper can absorb wheel input. Real boundary gestures must prove outer scroll chaining.
 - Fades can obscure content or capture drag input unless overlays remain shallow and pointer-transparent.
+
+## 2026-09-17: Vertical cue refinement
+
+The user requested implementation and push after reviewing the rendered board.
+UI-02 and UI-03 now show a neutral up/down chevron inside each visible vertical fade.
+The fade depth increases from 16px to 48px. Horizontal fades retain their size.
+The chevron stays visible over empty background and disappears at its scroll boundary.
+The overlay remains decorative, pointer-transparent, and hidden in forced-color mode.
+
+```text
+UI-02: Desktop column           UI-03: Focused phone column
+[fixed header]                  [Workflow / Step picker]
+       ^  when content above            ^
+[visible cards]                 [visible cards]
+       v  when content below            v
+48px background fade            48px background fade
+```
+
+This refinement uses the existing overflow state and changes markup and styling only.
+The existing desktop and phone overflow scenarios verify chevrons, fade depth, and pointer transparency.
+Desktop coverage also checks reduced motion. Phone coverage retains final-card navigation.
+Validation passed on 2026-09-17:
+
+- `pnpm e2e:run --project chromium tests/kanban/swimlane-scroll-affordances.spec.ts --grep 'shows directional vertical'`: 1 passed after a fresh managed build.
+- `pnpm e2e:run --no-build --project mobile-chrome tests/kanban/mobile-kanban-navigation.spec.ts --grep 'keeps phone overflow cues'`: 1 passed on the same build.
+- Web typecheck and targeted ESLint passed.
+- Catalog validation, full specification lint, and diff whitespace checks passed.
+
+The checks cover the markup/style refinement. Existing overflow-state logic is unchanged.

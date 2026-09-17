@@ -147,7 +147,9 @@ Place decorative fades in a stationary wrapper around the viewport, below the fi
 `AdaptiveDesktopKanban` uses equivalent stationary left/right overlays outside its horizontal scroll element.
 Tablet uses the same cues around its existing snap-scrolling viewport in `SwimlaneKanbanContent`.
 Fades use theme background tokens, `pointer-events: none`, and `aria-hidden`.
-Start with a 16px fade depth. Final depth is a visual token, not a card-sizing input.
+Vertical fades use a 48px depth and an 18px neutral directional chevron near the outer edge.
+Horizontal fades retain their 16px depth. Fade size never changes card sizing.
+Chevrons inherit the decorative overlay visibility and pointer transparency. They are not buttons.
 Keep native gutters and focus rings outside the fade area. Avoid masking the entire column or its header.
 
 Add scoped classes in `app/globals.css`. Do not alter global scrollbar rules or other application panels.

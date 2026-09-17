@@ -104,6 +104,11 @@ test.describe("Mobile Kanban navigation and scrolling", () => {
       "true",
     );
 
+    const bottomCue = column.getByTestId("kanban-overflow-bottom-fade");
+    await expect(bottomCue).toHaveCSS("height", "48px");
+    await expect(bottomCue).toHaveCSS("pointer-events", "none");
+    await expect(bottomCue.locator("svg")).toBeVisible();
+
     await scroll.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -116,6 +121,8 @@ test.describe("Mobile Kanban navigation and scrolling", () => {
       "data-visible",
       "false",
     );
+    await expect(bottomCue.locator("svg")).toBeHidden();
+    await expect(column.getByTestId("kanban-overflow-top-fade").locator("svg")).toBeVisible();
     await expect(mobile.taskCard(taskIds.at(-1)!)).toBeInViewport();
     await expectNoDocumentOverflow(testPage);
     await mobile.taskCard(taskIds.at(-1)!).tap();

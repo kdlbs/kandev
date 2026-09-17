@@ -44,10 +44,21 @@ test("shows directional vertical cues and chains wheel input at a column boundar
     await expect(topFade).toHaveAttribute("data-visible", "false");
     await expect(bottomFade).toHaveAttribute("data-visible", "true");
 
+    await expect(bottomFade).toHaveCSS("height", "48px");
+    await expect(bottomFade).toHaveCSS("pointer-events", "none");
+    await expect(bottomFade.locator("svg")).toBeVisible();
+    await expect(topFade.locator("svg")).toBeHidden();
+    // The cue stays visible even when its edge falls on empty column background.
+    await expect(bottomFade.locator("svg")).toHaveCSS("opacity", "0.75");
+
     await scroll.focus();
     await testPage.keyboard.press("End");
     await expect(topFade).toHaveAttribute("data-visible", "true");
     await expect(bottomFade).toHaveAttribute("data-visible", "false");
+    await expect(topFade.locator("svg")).toBeVisible();
+    await expect(bottomFade.locator("svg")).toBeHidden();
+    await testPage.emulateMedia({ reducedMotion: "reduce" });
+    await expect(topFade).toHaveCSS("transition-duration", "0s");
     await expect(kanban.taskCard(denseTasks.at(-1)!)).toBeInViewport();
 
     const board = testPage.getByTestId("swimlane-container");

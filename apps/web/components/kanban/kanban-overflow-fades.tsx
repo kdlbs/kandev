@@ -1,3 +1,4 @@
+import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import type {
   KanbanOverflowAxis,
@@ -26,7 +27,9 @@ export function KanbanOverflowFades({ axis, state }: KanbanOverflowFadesProps) {
           )}
           data-testid="kanban-overflow-top-fade"
           data-visible={state.canScrollTop}
-        />
+        >
+          <IconChevronUp className="kanban-overflow-chevron" size={18} stroke={2.5} />
+        </div>
       )}
       {showVertical && (
         <div
@@ -37,7 +40,9 @@ export function KanbanOverflowFades({ axis, state }: KanbanOverflowFadesProps) {
           )}
           data-testid="kanban-overflow-bottom-fade"
           data-visible={state.canScrollBottom}
-        />
+        >
+          <IconChevronDown className="kanban-overflow-chevron" size={18} stroke={2.5} />
+        </div>
       )}
       {showHorizontal && (
         <div
