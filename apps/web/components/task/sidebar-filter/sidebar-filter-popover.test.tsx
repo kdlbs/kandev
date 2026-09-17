@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
 
@@ -40,19 +40,33 @@ const state = {
     activeViewId: VIEW.id,
     draft: null,
   },
+  sidebarViewsByWorkspace: {
+    ws: {
+      views: [VIEW],
+      activeViewId: VIEW.id,
+      draft: null,
+    },
+  },
   updateSidebarDraft: vi.fn(),
   saveSidebarDraftAs: vi.fn(),
   saveSidebarDraftOverwrite: vi.fn(),
   discardSidebarDraft: vi.fn(),
   deleteSidebarView: vi.fn(),
   renameSidebarView: vi.fn(),
-  workspaces: { activeId: null },
+  workspaces: { activeId: "ws" },
   kanbanMulti: { snapshots: {} },
   workflows: { items: [] },
+  repositories: {
+    itemsByWorkspaceId: {},
+    loadingByWorkspaceId: {},
+    loadedByWorkspaceId: {},
+  },
   agentProfiles: { items: [] },
   executors: { items: [] },
   userSettings: { sidebarTaskColorAutomation: { enabled: false, rules: [] } },
   setUserSettings: vi.fn(),
+  setRepositories: vi.fn(),
+  setRepositoriesLoading: vi.fn(),
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -60,11 +74,16 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({ getState: () => state }),
 }));
 
+beforeEach(() => {
+  state.sidebarViewsByWorkspace.ws = state.sidebarViews;
+});
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   state.sidebarViews.views = [VIEW];
   state.sidebarViews.activeViewId = VIEW.id;
+  state.sidebarViewsByWorkspace.ws = state.sidebarViews;
   responsive.usesDesktopWorkbench = true;
   responsive.isFinePointer = true;
   responsive.isMobile = false;

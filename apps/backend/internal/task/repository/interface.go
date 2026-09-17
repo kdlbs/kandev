@@ -324,6 +324,32 @@ type MessageRepository interface {
 	DeleteMessage(ctx context.Context, id string) error
 }
 
+// ConversationSourceRepository provides the current-state conversation reads
+// used by the Host-only v2 transport. It is separate from MessageRepository
+// so existing repository fakes can continue to model the broader message
+// surface without also implementing the consistency boundary.
+type ConversationSourceRepository interface {
+	ReadConversationRevision(context.Context, string) (models.ConversationRevision, error)
+	ReadConversationMessagesPage(context.Context, models.ConversationMessagePageRequest) (models.ConversationMessagePage, error)
+	ReadConversationTurnsPage(context.Context, models.ConversationTurnPageRequest) (models.ConversationTurnPage, error)
+}
+
+// ConversationMutationWriter returns a transient receipt from the same
+// transaction as a source mutation. It is optional during the migration so
+// existing repository fakes and exceptional bulk writers remain operational.
+type ConversationMutationWriter interface {
+	CreateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
+	UpdateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
+	DeleteMessageWithConversationReceipt(context.Context, string) (*models.ConversationMutationReceipt, error)
+	CreateTurnWithConversationReceipt(context.Context, *models.Turn) (*models.ConversationMutationReceipt, error)
+	UpdateTurnWithConversationReceipt(context.Context, *models.Turn) (*models.ConversationMutationReceipt, error)
+	CompleteTurnWithConversationReceipt(context.Context, string) (*models.ConversationMutationReceipt, error)
+}
+
+type ConversationTurnStampWriter interface {
+	CreateTurnWithStepStampConversationReceipt(context.Context, *models.Turn) (bool, *models.ConversationMutationReceipt, error)
+}
+
 // AttachmentRepository stores file-backed prompt attachment descriptors.
 // Implementations must keep ownership and aggregate-claim checks in the same
 // transaction as state transitions so a retry cannot partially claim a batch.

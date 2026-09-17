@@ -1228,11 +1228,33 @@ func planWriteAck(action string, result map[string]interface{}, sentContent stri
 	if updatedAt := stringField(result, "updated_at"); updatedAt != "" {
 		ack += ", updated_at=" + updatedAt
 	}
+	if version := stringField(result, "version"); version != "" {
+		ack += ", version=" + version
+	}
 	ack += ". Plan content is omitted from this response; read it back with get_task_plan_kandev if needed."
 	if warning := stringField(result, "plan_write_warning"); warning != "" {
 		ack += "\n\n" + warning
 	}
 	return mcp.NewToolResultText(ack)
+}
+
+// planToolError preserves the structured correction data attached to a safe
+// plan-write rejection when the MCP bridge turns a backend error into text.
+func planToolError(err error) string {
+	var backendErr *BackendError
+	if !errors.As(err, &backendErr) || len(backendErr.Details) == 0 {
+		return err.Error()
+	}
+	parts := make([]string, 0, 5)
+	for _, key := range []string{"reason", "next_action", "current_version", "current_revision_version", "write_applied"} {
+		if value, ok := backendErr.Details[key]; ok {
+			parts = append(parts, fmt.Sprintf("%s=%v", key, value))
+		}
+	}
+	if len(parts) == 0 {
+		return err.Error()
+	}
+	return err.Error() + " " + strings.Join(parts, "; ")
 }
 
 func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
@@ -1273,9 +1295,15 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 			"title":      title,
 			"created_by": "agent",
 		}
+		if expectedVersion := req.GetString("expected_version", ""); expectedVersion != "" {
+			payload["expected_version"] = expectedVersion
+		}
+		if req.GetBool("allow_truncation", false) {
+			payload["allow_truncation"] = true
+		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTaskPlan, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 		return planWriteAck("created", result, content), nil
 	}
@@ -1291,7 +1319,7 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 		payload := map[string]string{"task_id": taskID}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 
 		// Check if plan exists
@@ -1299,9 +1327,25 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultText("No plan exists for this task yet."), nil
 		}
 
-		// Return the plan content for easy reading
+		// Keep metadata separate from the content block. This lets an agent read
+		// the exact stored document while still receiving the version needed for
+		// its next conditional write.
 		if content, ok := result["content"].(string); ok {
-			return mcp.NewToolResultText(content), nil
+			metadata := make(map[string]interface{}, len(result))
+			for key, value := range result {
+				if key != "content" {
+					metadata[key] = value
+				}
+			}
+			metadata["content_bytes"] = len(content)
+			data, marshalErr := json.MarshalIndent(metadata, "", "  ")
+			if marshalErr != nil {
+				return mcp.NewToolResultError("failed to format plan metadata"), nil
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{
+				mcp.NewTextContent("Plan metadata:\n" + string(data)),
+				mcp.NewTextContent(content),
+			}}, nil
 		}
 
 		data, _ := json.MarshalIndent(result, "", "  ")
@@ -1355,12 +1399,55 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		if mode != "" {
 			payload["mode"] = mode
 		}
+		if expectedVersion := req.GetString("expected_version", ""); expectedVersion != "" {
+			payload["expected_version"] = expectedVersion
+		}
+		if req.GetBool("allow_truncation", false) {
+			payload["allow_truncation"] = true
+		}
 
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPlan, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcp.NewToolResultError(planToolError(err)), nil
 		}
 		return planWriteAck("updated", result, content), nil
+	}
+}
+
+func (s *Server) editTaskPlanHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		oldText, err := req.RequireString("old_text")
+		if err != nil {
+			return mcp.NewToolResultError("old_text is required"), nil
+		}
+		newText, err := req.RequireString("new_text")
+		if err != nil {
+			return mcp.NewToolResultError("new_text is required; use an empty string to delete the match"), nil
+		}
+		expectedVersion, err := req.RequireString("expected_version")
+		if err != nil {
+			return mcp.NewToolResultError("expected_version is required"), nil
+		}
+
+		payload := map[string]interface{}{
+			"task_id":          taskID,
+			"old_text":         oldText,
+			"new_text":         newText,
+			"expected_version": expectedVersion,
+			"created_by":       "agent",
+		}
+		if req.GetBool("allow_truncation", false) {
+			payload["allow_truncation"] = true
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPEditTaskPlan, payload, &result); err != nil {
+			return mcp.NewToolResultError(planToolError(err)), nil
+		}
+		return planWriteAck("edited", result, newText), nil
 	}
 }
 

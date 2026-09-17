@@ -27,6 +27,12 @@ type ExpiredPluginSnapshotController = {
   pluginSubscribeCount: () => number;
 };
 
+type ConversationChangeDropController = {
+  dropChange: (content: string) => void;
+  droppedCount: () => number;
+  pluginSubscribeCount: () => number;
+};
+
 export type QueueAdmissionDropController = {
   dropNextQueueAddRequest: () => void;
   dropNextQueueAddResponse: (count?: number) => void;
@@ -41,9 +47,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function parseJSONFrames(message: string | Buffer): Array<Record<string, unknown>> {
-  if (typeof message !== "string") return [];
+  const text = typeof message === "string" ? message : message.toString("utf8");
   const frames: Array<Record<string, unknown>> = [];
-  for (const part of message.split("\n")) {
+  for (const part of text.split("\n")) {
     if (!part.trim()) continue;
     try {
       const parsed = asRecord(JSON.parse(part));
@@ -105,6 +111,11 @@ function filterServerFrame(
       if (isTargetUserMessageAdded(parsed, prompt)) {
         didDrop = true;
         dropped.push({ action: targetAction(parsed), content: parsed.payload.content });
+        continue;
+      }
+      if (hasConversationChangeContent(parsed, prompt)) {
+        didDrop = true;
+        dropped.push({ action: "session.conversation.changed", content: prompt });
         continue;
       }
     } catch {
@@ -549,6 +560,91 @@ export async function routeMainWebSocketWithExpiredPluginSnapshot(
       armed = true;
     },
     modifiedCount: () => modified,
+    pluginSubscribeCount: () => pluginSubscribeRequests,
+  };
+}
+
+function hasConversationChangeContent(message: unknown, content: string): boolean {
+  const envelope = asRecord(message);
+  if (envelope?.action !== "session.conversation.changed") {
+    return false;
+  }
+  return JSON.stringify(envelope).includes(content);
+}
+
+function filterConversationChange(
+  message: string | Buffer,
+  content: string | null,
+  state: { value: number },
+): string | Buffer {
+  if (content === null) return message;
+  const text = typeof message === "string" ? message : message.toString("utf8");
+  const kept: string[] = [];
+  let didDrop = false;
+  for (const part of text.split("\n")) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      kept.push(part);
+      continue;
+    }
+    let frame: unknown;
+    try {
+      frame = JSON.parse(trimmed);
+    } catch {
+      kept.push(part);
+      continue;
+    }
+    if (hasConversationChangeContent(frame, content)) {
+      state.value += 1;
+      didDrop = true;
+      continue;
+    }
+    kept.push(part);
+  }
+  if (!didDrop) return message;
+  const filtered = kept.join("\n");
+  return typeof message === "string" ? filtered : Buffer.from(filtered, "utf8");
+}
+
+/**
+ * Drops one durable plugin conversation change while preserving the socket.
+ * The following change creates a revision gap and exercises source recovery.
+ */
+export async function routeMainWebSocketWithConversationChangeDrop(
+  page: Page,
+): Promise<ConversationChangeDropController> {
+  let contentToDrop: string | null = null;
+  const dropped = { value: 0 };
+  let pluginSubscribeRequests = 0;
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      for (const frame of parseJSONFrames(message)) {
+        const payload = asRecord(frame.payload);
+        if (
+          frame.type === "request" &&
+          frame.action === "session.conversation.subscribe" &&
+          payload?.consumer_kind === "plugin"
+        ) {
+          pluginSubscribeRequests += 1;
+        }
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const filtered = filterConversationChange(message, contentToDrop, dropped);
+      if (dropped.value > 0 && filtered !== message) contentToDrop = null;
+      ws.send(filtered);
+    });
+  });
+
+  return {
+    dropChange: (content: string) => {
+      contentToDrop = content;
+      dropped.value = 0;
+    },
+    droppedCount: () => dropped.value,
     pluginSubscribeCount: () => pluginSubscribeRequests,
   };
 }

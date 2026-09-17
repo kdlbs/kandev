@@ -302,12 +302,16 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted,
 		ws.ActionSessionTurnStarted, ws.ActionSessionTurnCompleted, ws.ActionSessionTurnRemoved:
 		if sessionID != "" {
+			b.hub.BroadcastConversationMutation(data)
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
 	case ws.ActionSessionRemoved:
 		if sessionID != "" {
-			b.hub.appendAndBroadcastOrderedSessionEvent(sessionID, msg)
+			if _, hasReceipt := conversationReceiptFromData(data); hasReceipt {
+				b.hub.BroadcastConversationMutation(data)
+			}
+			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
 	case ws.ActionSessionWorkspaceSourcesUpdated:

@@ -82,6 +82,62 @@ func TestSetPluginsDirKeepsInstallRootWhenConversationStateFails(t *testing.T) {
 	}
 }
 
+func TestSetPluginsDirRemovesLegacyConversationFiles(t *testing.T) {
+	dir := t.TempDir()
+	hostDir := filepath.Join(dir, ".host")
+	if err := os.MkdirAll(hostDir, 0o700); err != nil {
+		t.Fatalf("create host directory: %v", err)
+	}
+	for _, name := range []string{"session-events.sqlite", "session-events.sqlite-wal", "session-events.sqlite-shm"} {
+		if err := os.WriteFile(filepath.Join(hostDir, name), []byte("legacy"), 0o600); err != nil {
+			t.Fatalf("write legacy file %s: %v", name, err)
+		}
+	}
+
+	svc := NewService(store.NewFSStore(filepath.Join(dir, "store")), NewRegistry(), nil, testLogger(t))
+	t.Cleanup(func() { _ = svc.Close() })
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir() unexpected error: %v", err)
+	}
+	for _, name := range []string{"session-events.sqlite", "session-events.sqlite-wal", "session-events.sqlite-shm"} {
+		if _, err := os.Stat(filepath.Join(hostDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("legacy file %s still exists: %v", name, err)
+		}
+	}
+}
+
+func TestSetPluginsDirRejectsLegacyConversationSymlink(t *testing.T) {
+	dir := t.TempDir()
+	hostDir := filepath.Join(dir, ".host")
+	if err := os.MkdirAll(hostDir, 0o700); err != nil {
+		t.Fatalf("create host directory: %v", err)
+	}
+	target := filepath.Join(dir, "outside.sqlite")
+	if err := os.WriteFile(target, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	legacy := filepath.Join(hostDir, "session-events.sqlite")
+	if err := os.Symlink(target, legacy); err != nil {
+		t.Fatalf("create legacy symlink: %v", err)
+	}
+
+	svc := NewService(store.NewFSStore(filepath.Join(dir, "store")), NewRegistry(), nil, testLogger(t))
+	t.Cleanup(func() { _ = svc.Close() })
+	if err := svc.SetPluginsDir(dir); err == nil {
+		t.Fatal("SetPluginsDir() accepted a legacy conversation symlink")
+	}
+	if _, err := os.Lstat(legacy); err != nil {
+		t.Fatalf("legacy symlink was removed: %v", err)
+	}
+	contents, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read symlink target: %v", err)
+	}
+	if string(contents) != "keep" {
+		t.Fatalf("symlink target changed to %q", contents)
+	}
+}
+
 func TestProvideLoadsExistingInstallationsFromDisk(t *testing.T) {
 	homeDir := t.TempDir()
 	cfg := &config.Config{HomeDir: homeDir}

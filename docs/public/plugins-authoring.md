@@ -325,11 +325,10 @@ of truth and must be updated together when the contract changes:
   [explicit plugin utility selection](../decisions/2026-09-14-explicit-plugin-utility-selection.md), and
   [Browser conversation facade ADR](../decisions/2026-09-06-browser-plugin-conversation-facade.md).
 
-The browser conversation facade ADR is still proposed while this prerequisite
-package is under review. Until that ADR is accepted, normative authority is
-split deliberately: requirements define observable behavior, the system design
-defines Host architecture, and `PLUGIN-API.md` defines the Host-only wire
-contract.
+The [source reconciliation design](../specs/plugins/system-design/conversation-source-reconciliation.md)
+defines the current storage and transport behavior. Requirements define
+observable behavior, and `PLUGIN-API.md` defines the browser API and Host-only
+v2 wire contract.
 
 ## Frontend contract
 
@@ -401,7 +400,11 @@ Panel handles are independently scoped and become inert on unmount, identity
 change, disable, or reload. `host.conversation` is the equivalent nearest-scope
 accessor; outside a panel it returns stable empty state. Use the canonical
 [PLUGIN-API contract](../plans/plugins/PLUGIN-API.md) for DTOs, pagination,
-ordered updates, lifecycle, and retryable errors.
+revision-bound updates, lifecycle, recovery, and retryable errors. A complete
+source mutation sends a transient revision receipt after commit. An incomplete
+or uninstrumented mutation sends a reset marker, and the Host reads current
+source rows to repair the panel. The transport does not retain a payload
+journal or provide a replay guarantee.
 Browser route errors use `unauthenticated`/non-retryable for `401`,
 `not_found`/non-retryable for `404`, `invalid_query`/non-retryable for `400`,
 and `upstream_failure`/retryable for every authorized `5xx`.
@@ -418,7 +421,7 @@ closing future reads.
 | --- | --- | --- |
 | Surface | `host.conversation` or `conversation.history` | `host.Messages().List` |
 | Runtime | Native UI bundle | Plugin server process |
-| Data | Sanitized browser DTOs and ordered live updates | Typed paginated reader |
+| Data | Sanitized browser DTOs and revision-bound updates | Typed paginated reader |
 | Forbidden shortcut | `host.store`, raw WS, `/api/v1` | Private application imports |
 
 ### Frontend hook/API matrix

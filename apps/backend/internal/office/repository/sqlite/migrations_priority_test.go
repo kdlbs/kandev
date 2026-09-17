@@ -131,9 +131,9 @@ func TestMigrate_PriorityIdempotent(t *testing.T) {
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL,
 			description TEXT DEFAULT '',
-			identifier TEXT,
 			priority TEXT NOT NULL DEFAULT 'medium'
 				CHECK (priority IN ('critical','high','medium','low')),
+			identifier TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);

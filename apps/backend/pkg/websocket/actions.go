@@ -174,12 +174,15 @@ const (
 	ActionWorkflowHistoryList  = "workflow.history.list"
 
 	// Subscription actions
-	ActionTaskSubscribe        = "task.subscribe"
-	ActionTaskUnsubscribe      = "task.unsubscribe"
-	ActionSessionSubscribe     = "session.subscribe"
-	ActionSessionUnsubscribe   = "session.unsubscribe"
-	ActionSessionAck           = "session.ack"
-	ActionSessionPoisonRequeue = "session.event.poison.requeue"
+	ActionTaskSubscribe      = "task.subscribe"
+	ActionTaskUnsubscribe    = "task.unsubscribe"
+	ActionSessionSubscribe   = "session.subscribe"
+	ActionSessionUnsubscribe = "session.unsubscribe"
+	// Host-only v2 conversation delivery. These actions use transient
+	// revision-covered change batches and never expose the legacy replay log.
+	ActionSessionConversationSubscribe   = "session.conversation.subscribe"
+	ActionSessionConversationUnsubscribe = "session.conversation.unsubscribe"
+	ActionSessionConversationChanged     = "session.conversation.changed"
 	// Focus signals are layered on top of subscriptions to indicate which
 	// session the user is actively viewing (task details page or task panel),
 	// vs merely subscribed (sidebar diff badges). Drives backend polling tier.
@@ -477,6 +480,10 @@ const (
 	ActionMCPCreateTaskPlan                        = "mcp.create_task_plan"
 	ActionMCPGetTaskPlan                           = "mcp.get_task_plan"
 	ActionMCPUpdateTaskPlan                        = "mcp.update_task_plan"
+	ActionMCPEditTaskPlan                          = "mcp.edit_task_plan"
+	ActionMCPListTaskPlanRevisions                 = "mcp.list_task_plan_revisions"
+	ActionMCPGetTaskPlanRevision                   = "mcp.get_task_plan_revision"
+	ActionMCPRestoreTaskPlanRevision               = "mcp.restore_task_plan_revision"
 	ActionMCPDeleteTaskPlan                        = "mcp.delete_task_plan"
 	ActionMCPShowWalkthrough                       = "mcp.show_walkthrough"
 	ActionMCPGetWalkthrough                        = "mcp.get_walkthrough"

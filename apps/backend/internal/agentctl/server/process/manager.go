@@ -2762,6 +2762,9 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	if m.cfg.AutoApprovePermissions {
 		return m.autoApprovePermission(req)
 	}
+	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+		return response, nil
+	}
 
 	// Create pending permission with response channel
 	createdAt := time.Now().UTC()

@@ -247,6 +247,7 @@ export type AppState = KanbanSlice & {
   updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
+  sidebarViewsByWorkspace: (typeof defaultUIState)["sidebarViewsByWorkspace"];
   threadViews: (typeof defaultUIState)["threadViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];

@@ -15,14 +15,19 @@ acceptance_criteria:
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.8
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.10
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.13
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.15
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.16
 system_design:
   - "../../specs/plugins/system-design/prompt-history-extraction-host.md"
 ---
 
 # Task 02: Add Plugin Conversation Read Routes
+
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
 
 ## Scope
 

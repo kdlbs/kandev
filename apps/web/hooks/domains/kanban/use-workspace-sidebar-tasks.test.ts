@@ -54,7 +54,12 @@ let mockState: MockState = {
 };
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
+  useAppStore: (selector: (s: MockState) => unknown) =>
+    selector({
+      ...mockState,
+      workspaces: { activeId: "ws-1" },
+      sidebarViewsByWorkspace: {},
+    } as MockState),
   useAppStoreApi: () => ({ getState: () => mockState }),
 }));
 
