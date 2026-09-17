@@ -32,6 +32,9 @@ type agentctlLauncherResult struct {
 	// left by an earlier launch, which cannot be judged against a server this
 	// backend started itself.
 	inheritedRecordScope agentruntime.InheritedRecordScope
+	// peerCapabilities is the authenticated capability set from an adopted
+	// control server. Fresh servers do not need recovery negotiation here.
+	peerCapabilities []string
 }
 
 // provideAgentctlLauncher starts or adopts the agentctl control server for
@@ -166,6 +169,7 @@ func adoptSurvivingAgentctl(
 		binaryPath:            launcher.FindAgentctlBinary(),
 		recoveryDeadlineStart: outcome.ContactedAt,
 		inheritedRecordScope:  agentruntime.InheritedRecordScopeAdopted,
+		peerCapabilities:      append([]string(nil), outcome.Capabilities...),
 	}, agentruntime.InheritedRecordScopeAdopted
 }
 

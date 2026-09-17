@@ -6,6 +6,9 @@ import type {
 } from "@/components/task/chat/chat-input-container";
 import type { ChatPanelState } from "./use-chat-panel-state";
 
+// i18n-exempt: stable backend failure code, not user-facing copy.
+const DURABLE_DELIVERY_UNCERTAIN = "DURABLE_DELIVERY_UNCERTAIN";
+
 type ComposerPropsArgs = {
   panelState: ChatPanelState;
   composerWorkspaceId: string | null;
@@ -95,6 +98,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     isFailed: panelState.isFailed,
     isCompleted: panelState.isCompleted,
     sessionErrorMessage: panelState.session?.error_message,
+    uncertainDelivery: panelState.lastAgentError?.code === DURABLE_DELIVERY_UNCERTAIN,
     needsRecovery,
     executorUnavailable: executor.unavailable,
     executorUnavailableReason: executor.reason,

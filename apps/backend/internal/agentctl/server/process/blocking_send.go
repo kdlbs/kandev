@@ -18,6 +18,14 @@ import "github.com/kandev/kandev/internal/agentctl/server/adapter"
 // forever with no lifecycle that could ever release it.
 func (m *Manager) sendUpdateBlocking(event adapter.AgentEvent) bool {
 	m.recordTerminalOutcome(&event)
+	return m.sendUpdateBlockingRecorded(event)
+}
+
+// sendUpdateBlockingRecorded delivers an event after its terminal outcome and
+// any durable journal record have already been written. Producers that need a
+// commit-before-publish barrier call recordTerminalOutcome and persist their
+// event before entering this helper.
+func (m *Manager) sendUpdateBlockingRecorded(event adapter.AgentEvent) bool {
 
 	select {
 	case m.updatesCh <- event:

@@ -24,6 +24,20 @@ const sessionTransitionPollInterval = 10 * time.Millisecond
 // results for the servers that survive its own capability filtering.
 func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
 
+// GetSessionRestoreCapabilities exposes the negotiated ACP load capability.
+// ACP session/load is the supported native restore operation today; resume
+// remains an optional protocol extension and is not assumed here.
+func (a *Adapter) GetSessionRestoreCapabilities() shared.SessionRestoreCapabilities {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return shared.SessionRestoreCapabilities{
+		SupportsNativeLoad:    a.capabilities.LoadSession,
+		SupportsNativeResume:  false,
+		SupportsDirectoryMove: true,
+		RequiresNativeState:   true,
+	}
+}
+
 // lockSessionTransition waits for the previous reset's cleanup to finish before
 // allowing another session transition. The reset response remains independent
 // from session/close, while this gate keeps a later load/reset from overtaking
@@ -464,7 +478,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	if !supportsLoad {
 		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
 			zap.String("session_id", sessionID))
-		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
+		return &SessionRestoreError{
+			Reason: SessionRestoreReasonNativeResumeUnsupported,
+			Cause:  fmt.Errorf("agent does not support session loading (LoadSession capability is false)"),
+		}
 	}
 	priorPromptTurn := a.currentPromptTurn()
 
@@ -531,7 +548,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			clearFailedLoad()
 		}
 		span.RecordError(err)
-		return fmt.Errorf("failed to load session: %w", err)
+		return &SessionRestoreError{Reason: sessionRestoreReason(err), Cause: err}
 	}
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")

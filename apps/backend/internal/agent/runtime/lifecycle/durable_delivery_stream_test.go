@@ -1,0 +1,456 @@
+package lifecycle
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"testing"
+	"time"
+
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+type recordingAgentDeliveryRepository struct {
+	cursor        *models.AgentDeliveryCursor
+	received      []*models.AgentDeliveryEvent
+	projected     []*models.AgentDeliveryEvent
+	projectErr    error
+	projectedHook func()
+}
+
+type immutableDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+}
+
+type effectReadFailureDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+	effectErr error
+}
+
+func (r *effectReadFailureDeliveryRepository) GetAgentDeliveryEffect(
+	context.Context, string,
+) (*models.AgentDeliveryEffect, error) {
+	return nil, r.effectErr
+}
+
+type canonicalProjectionFailureDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+	projectionErr error
+}
+
+func (r *canonicalProjectionFailureDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
+	context.Context, *models.AgentDeliveryEvent, *models.AgentDeliveryEffect,
+) (bool, error) {
+	return false, r.projectionErr
+}
+
+type canonicalProjectionDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+}
+
+type canonicalBatchProjectionDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+	batchCalls int
+}
+
+func (r *canonicalProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
+	_ context.Context, event *models.AgentDeliveryEvent, _ *models.AgentDeliveryEffect,
+) (bool, error) {
+	r.projected = append(r.projected, event)
+	return false, nil
+}
+
+func (r *canonicalBatchProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvents(
+	_ context.Context, events []*models.AgentDeliveryEvent, _ []*models.AgentDeliveryEffect,
+) ([]bool, error) {
+	r.batchCalls++
+	r.projected = append(r.projected, events...)
+	appendMessages := make([]bool, len(events))
+	for index := range events {
+		appendMessages[index] = index > 0
+	}
+	return appendMessages, nil
+}
+
+func (r *immutableDeliveryRepository) ReceiveAgentDeliveryEvent(
+	ctx context.Context,
+	event *models.AgentDeliveryEvent,
+	remoteHighWater int64,
+) (bool, error) {
+	copyEvent := *event
+	copyEvent.Payload = append([]byte(nil), event.Payload...)
+	return r.recordingAgentDeliveryRepository.ReceiveAgentDeliveryEvent(ctx, &copyEvent, remoteHighWater)
+}
+
+func (r *immutableDeliveryRepository) ProjectAgentDeliveryEvent(
+	ctx context.Context,
+	event *models.AgentDeliveryEvent,
+	effect *models.AgentDeliveryEffect,
+) (bool, error) {
+	if len(r.received) != 1 || !bytes.Equal(r.received[0].Payload, event.Payload) {
+		return false, errors.New("durable delivery payload changed between admission and projection")
+	}
+	return r.recordingAgentDeliveryRepository.ProjectAgentDeliveryEvent(ctx, event, effect)
+}
+
+func (r *recordingAgentDeliveryRepository) ReceiveAgentDeliveryEvent(_ context.Context, event *models.AgentDeliveryEvent, _ int64) (bool, error) {
+	for _, received := range r.received {
+		if received.StreamID == event.StreamID && received.Sequence == event.Sequence {
+			return false, nil
+		}
+	}
+	r.received = append(r.received, event)
+	return true, nil
+}
+
+func (r *recordingAgentDeliveryRepository) GetAgentDeliveryCursor(_ context.Context, _ string) (*models.AgentDeliveryCursor, error) {
+	if r.cursor == nil {
+		return &models.AgentDeliveryCursor{}, nil
+	}
+	return r.cursor, nil
+}
+
+func (r *recordingAgentDeliveryRepository) ProjectAgentDeliveryEvent(_ context.Context, event *models.AgentDeliveryEvent, _ *models.AgentDeliveryEffect) (bool, error) {
+	r.projected = append(r.projected, event)
+	if r.projectedHook != nil {
+		r.projectedHook()
+	}
+	if r.projectErr != nil {
+		return false, r.projectErr
+	}
+	if r.cursor == nil {
+		r.cursor = &models.AgentDeliveryCursor{}
+	}
+	r.cursor.ProjectedSequence = event.Sequence
+	return true, nil
+}
+
+type recordingAgentDeliveryAcknowledger struct {
+	acknowledged  []string
+	ackErr        error
+	onAcknowledge func()
+}
+
+func (r *recordingAgentDeliveryAcknowledger) AcknowledgeDelivery(_ context.Context, streamID string, sequence uint64) error {
+	if r.onAcknowledge != nil {
+		r.onAcknowledge()
+	}
+	r.acknowledged = append(r.acknowledged, streamID+":"+fmt.Sprint(sequence))
+	return r.ackErr
+}
+
+func TestDurableAgentEventAcknowledgesOnlyAfterInboxProjection(t *testing.T) {
+	order := make([]string, 0, 2)
+	repository := &recordingAgentDeliveryRepository{
+		projectedHook: func() { order = append(order, "project") },
+	}
+	acknowledger := &recordingAgentDeliveryAcknowledger{
+		onAcknowledge: func() { order = append(order, "ack") },
+	}
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	event := agentctl.AgentEvent{Type: "complete", DeliveryStreamID: "stream-1", DeliverySequence: 3}
+
+	if err := sm.projectAndAcknowledgeDurableAgentEvent(
+		context.Background(), &AgentExecution{SessionID: "session-1"}, event, repository, acknowledger,
+	); err != nil {
+		t.Fatalf("project and acknowledge durable event: %v", err)
+	}
+	if got, want := fmt.Sprint(order), "[project ack]"; got != want {
+		t.Fatalf("operation order = %s, want %s", got, want)
+	}
+	if got, want := acknowledger.acknowledged, []string{"stream-1:3"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("acknowledged = %v, want %v", got, want)
+	}
+}
+
+func TestDurableAgentEventProjectionFailureDoesNotAcknowledge(t *testing.T) {
+	projectionErr := errors.New("projection unavailable")
+	repository := &recordingAgentDeliveryRepository{projectErr: projectionErr}
+	acknowledger := &recordingAgentDeliveryAcknowledger{}
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	event := agentctl.AgentEvent{Type: "complete", DeliveryStreamID: "stream-1", DeliverySequence: 3}
+
+	err := sm.projectAndAcknowledgeDurableAgentEvent(
+		context.Background(), &AgentExecution{SessionID: "session-1"}, event, repository, acknowledger,
+	)
+	if !errors.Is(err, projectionErr) {
+		t.Fatalf("error = %v, want projection error", err)
+	}
+	if len(acknowledger.acknowledged) != 0 {
+		t.Fatalf("acknowledged = %v, want no acknowledgments", acknowledger.acknowledged)
+	}
+}
+
+func TestDurableAgentEventEffectReadFailureBlocksProcessing(t *testing.T) {
+	effectErr := errors.New("effect store unavailable")
+	repository := &effectReadFailureDeliveryRepository{
+		recordingAgentDeliveryRepository: recordingAgentDeliveryRepository{},
+		effectErr:                        effectErr,
+	}
+	callbackCalled := false
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(*AgentExecution, agentctl.AgentEvent) { callbackCalled = true },
+	}, nil, nil)
+	event := agentctl.AgentEvent{
+		Type:                      streams.EventTypeComplete,
+		DeliveryStreamID:          "stream-1",
+		DeliveryIncarnationID:     "incarnation-1",
+		DeliveryHarnessGeneration: 1,
+		DeliverySequence:          1,
+	}
+
+	err := sm.processAgentEvent(context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0)
+	if !errors.Is(err, effectErr) {
+		t.Fatalf("error = %v, want effect read error", err)
+	}
+	if callbackCalled {
+		t.Fatal("agent callback ran after effect read failed")
+	}
+	if len(repository.projected) != 0 {
+		t.Fatalf("projected events = %d, want none", len(repository.projected))
+	}
+}
+
+func TestDurableAgentEventCanonicalProjectionFailureBlocksProcessing(t *testing.T) {
+	projectionErr := errors.New("canonical projection unavailable")
+	repository := &canonicalProjectionFailureDeliveryRepository{
+		recordingAgentDeliveryRepository: recordingAgentDeliveryRepository{},
+		projectionErr:                    projectionErr,
+	}
+	callbackCalled := false
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(*AgentExecution, agentctl.AgentEvent) { callbackCalled = true },
+	}, nil, nil)
+	event := agentctl.AgentEvent{
+		Type:                      streams.EventTypeMessageChunk,
+		Text:                      "hello",
+		DeliveryStreamID:          "stream-1",
+		DeliveryIncarnationID:     "incarnation-1",
+		DeliveryHarnessGeneration: 1,
+		DeliverySequence:          1,
+	}
+
+	err := sm.processAgentEvent(context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0)
+	if !errors.Is(err, projectionErr) {
+		t.Fatalf("error = %v, want canonical projection error", err)
+	}
+	if callbackCalled {
+		t.Fatal("agent callback ran after canonical projection failed")
+	}
+}
+
+func TestCanonicalProjectionNotifiesWhenAckTransportFails(t *testing.T) {
+	repository := &canonicalProjectionDeliveryRepository{}
+	callbackCalled := false
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(_ *AgentExecution, event agentctl.AgentEvent) {
+			callbackCalled = event.CanonicalProjection
+		},
+	}, nil, nil)
+	event := agentctl.AgentEvent{
+		Type:                      streams.EventTypeMessageChunk,
+		Text:                      "already committed",
+		DeliveryStreamID:          "stream-ack-failure",
+		DeliveryIncarnationID:     "incarnation-ack-failure",
+		DeliveryHarnessGeneration: 1,
+		DeliverySequence:          1,
+	}
+
+	// A nil client models an ACK transport that is unavailable after the
+	// canonical repository commit. The callback must still observe the output.
+	if err := sm.processAgentEvent(
+		context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0,
+	); err != nil {
+		t.Fatalf("process canonical event: %v", err)
+	}
+	if !callbackCalled {
+		t.Fatal("canonical output callback did not run after ACK transport failure")
+	}
+	if len(repository.projected) != 1 {
+		t.Fatalf("projected events = %d, want 1", len(repository.projected))
+	}
+}
+
+func TestCanonicalProjectionBatchNotifiesOnceWithAccumulatedContent(t *testing.T) {
+	repository := &canonicalBatchProjectionDeliveryRepository{}
+	var callbacks []agentctl.AgentEvent
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(_ *AgentExecution, event agentctl.AgentEvent) {
+			callbacks = append(callbacks, event)
+		},
+	}, nil, nil)
+	execution := &AgentExecution{SessionID: "session-1", DeliveryStreamID: "stream-1"}
+	prepared := []preparedAgentEvent{
+		{
+			event: agentctl.AgentEvent{
+				Type:              streams.EventTypeMessageChunk,
+				Text:              "first",
+				ProtocolMessageID: "message-1",
+				DeliveryStreamID:  "stream-1",
+				DeliverySequence:  1,
+			},
+			durableEvent: &models.AgentDeliveryEvent{StreamID: "stream-1", Sequence: 1},
+		},
+		{
+			event: agentctl.AgentEvent{
+				Type:              streams.EventTypeMessageChunk,
+				Text:              "second",
+				ProtocolMessageID: "message-1",
+				DeliveryStreamID:  "stream-1",
+				DeliverySequence:  2,
+			},
+			durableEvent: &models.AgentDeliveryEvent{StreamID: "stream-1", Sequence: 2},
+		},
+	}
+
+	if err := sm.projectCanonicalAgentEvents(
+		context.Background(), execution, prepared, repository, nil, 0,
+	); err != nil {
+		t.Fatalf("project canonical batch: %v", err)
+	}
+	if repository.batchCalls != 1 {
+		t.Fatalf("batch projection calls = %d, want 1", repository.batchCalls)
+	}
+	if len(callbacks) != 1 {
+		t.Fatalf("callbacks = %d, want 1", len(callbacks))
+	}
+	callback := callbacks[0]
+	if callback.Text != "firstsecond" {
+		t.Fatalf("callback text = %q, want accumulated content", callback.Text)
+	}
+	if !callback.CanonicalProjection || callback.CanonicalMessageAppend {
+		t.Fatalf("callback projection metadata = projection:%t append:%t, want true:false", callback.CanonicalProjection, callback.CanonicalMessageAppend)
+	}
+}
+
+func TestDeliveryReplayCursorUsesProjectedSequence(t *testing.T) {
+	repository := &recordingAgentDeliveryRepository{
+		cursor: &models.AgentDeliveryCursor{StreamID: "session-1", ProjectedSequence: 7},
+	}
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+
+	got, err := sm.deliveryReplayCursor(context.Background(), repository, "session-1")
+	if err != nil {
+		t.Fatalf("replay cursor error = %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("replay cursor = %d, want 7", got)
+	}
+}
+
+func TestDurableAgentEventAdmissionProjectsOpaquePayload(t *testing.T) {
+	repository := &recordingAgentDeliveryRepository{}
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	execution := &AgentExecution{SessionID: "session-1"}
+	event := agentctl.AgentEvent{
+		Type:                 "message_chunk",
+		Text:                 "hello",
+		DeliveryStreamID:     "session-1",
+		DeliverySequence:     1,
+		DeliverySubmissionID: "submission-1",
+	}
+
+	process, err := sm.receiveDurableAgentEvent(context.Background(), execution, event, repository)
+	if err != nil {
+		t.Fatalf("receive durable event: %v", err)
+	}
+	if !process {
+		t.Fatal("first durable event was not admitted")
+	}
+	if err := sm.projectDurableAgentEvent(context.Background(), execution, event, repository); err != nil {
+		t.Fatalf("project durable event: %v", err)
+	}
+	if len(repository.received) != 1 || len(repository.projected) != 1 {
+		t.Fatalf("received/projected = %d/%d, want 1/1", len(repository.received), len(repository.projected))
+	}
+	projected := repository.projected[0]
+	if projected.SessionID != "session-1" || projected.StreamID != "session-1" || projected.Sequence != 1 {
+		t.Fatalf("projected identity = %+v", projected)
+	}
+	var payload agentctl.AgentEvent
+	if err := json.Unmarshal(projected.Payload, &payload); err != nil {
+		t.Fatalf("decode opaque payload: %v", err)
+	}
+	if payload.DeliverySequence != 0 || payload.DeliveryStreamID != "" {
+		t.Fatalf("payload contains transport cursor: %+v", payload)
+	}
+
+	repository.cursor.UpdatedAt = time.Now()
+	process, err = sm.receiveDurableAgentEvent(context.Background(), execution, event, repository)
+	if err != nil {
+		t.Fatalf("receive duplicate durable event: %v", err)
+	}
+	if process {
+		t.Fatal("projected duplicate was admitted for a second callback")
+	}
+}
+
+func TestDurableAgentEventProjectionUsesAdmissionSnapshot(t *testing.T) {
+	repository := &immutableDeliveryRepository{}
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	execution := &AgentExecution{SessionID: "session-1", promptTurnID: "turn-1"}
+	event := agentctl.AgentEvent{
+		Type:                 "error",
+		DeliveryStreamID:     "session-1",
+		DeliverySequence:     1,
+		DeliverySubmissionID: "submission-1",
+	}
+	durableEvent := durableAgentEvent(execution, event)
+	process, _, effect, err := sm.prepareDurableAgentDeliveryEvent(
+		context.Background(), execution, durableEvent, repository,
+	)
+	if err != nil {
+		t.Fatalf("prepare durable event: %v", err)
+	}
+	if !process {
+		t.Fatal("first durable event was not admitted")
+	}
+
+	// Lifecycle failure handling can clear or replace the prompt turn before
+	// the stream callback reaches the projection step. The admitted payload
+	// must remain the record that gets projected and acknowledged.
+	execution.setPromptTurnID("turn-2")
+	acknowledger := &recordingAgentDeliveryAcknowledger{}
+	if err := sm.projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
+		context.Background(), durableEvent, event, repository, acknowledger, effect,
+	); err != nil {
+		t.Fatalf("project and acknowledge durable event: %v", err)
+	}
+	if len(acknowledger.acknowledged) != 1 {
+		t.Fatalf("acknowledged = %v, want one acknowledgment", acknowledger.acknowledged)
+	}
+}
+
+func TestDeliveryEffectAllowsSuccessfulRetryAfterTerminalFailure(t *testing.T) {
+	streamID := "stream-managed-runtime-retry"
+	errorEvent := agentctl.AgentEvent{
+		Type:                 streams.EventTypeError,
+		TurnID:               "turn-managed-runtime-retry",
+		DeliveryStreamID:     streamID,
+		DeliverySequence:     1,
+		DeliverySubmissionID: "prompt-managed-runtime-retry",
+	}
+	completeEvent := errorEvent
+	completeEvent.Type = streams.EventTypeComplete
+	completeEvent.DeliverySequence = 2
+
+	failureEffect := deliveryEffectForEvent(errorEvent)
+	successEffect := deliveryEffectForEvent(completeEvent)
+	if failureEffect == nil || successEffect == nil {
+		t.Fatal("terminal events must produce delivery effects")
+	}
+	if failureEffect.EffectKey == successEffect.EffectKey {
+		t.Fatalf("failure and successful retry share effect key %q", failureEffect.EffectKey)
+	}
+	if got, want := failureEffect.EffectKey, "agent_delivery.event:"+streamID+":1"; got != want {
+		t.Fatalf("failure effect key = %q, want %q", got, want)
+	}
+	if got, want := successEffect.EffectKey, "workflow.on_turn_complete:turn-managed-runtime-retry"; got != want {
+		t.Fatalf("success effect key = %q, want %q", got, want)
+	}
+}

@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -38,6 +40,16 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 		return
 	}
 	m.appendAssistantHistoryChunk(execution, event.Text)
+	if event.CanonicalProjection {
+		m.publishCanonicalStreamingContent(
+			execution,
+			"message_streaming",
+			event.CanonicalMessageID,
+			event.Text,
+			event.CanonicalMessageAppend,
+		)
+		return
+	}
 	if event.ProtocolMessageID != "" {
 		m.flushPendingLegacyMessage(execution, execution.promptGenerationSnapshot(), event.AttemptID)
 		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text, event.ProviderDiagnosticCandidate, execution.promptGenerationSnapshot(), event.AttemptID)
@@ -105,6 +117,16 @@ func (m *Manager) flushMessageBufferOnDiagnosticChange(execution *AgentExecution
 // one value across the call.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ReasoningText == "" {
+		return
+	}
+	if event.CanonicalProjection {
+		m.publishCanonicalStreamingContent(
+			execution,
+			thinkingStreamingEventType,
+			event.CanonicalMessageID,
+			event.ReasoningText,
+			event.CanonicalMessageAppend,
+		)
 		return
 	}
 	if event.ProtocolMessageID != "" {
@@ -388,6 +410,9 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // lease is held by the event dispatcher. Direct test and legacy callers use
 // handleCompleteEvent, which acquires that lease before entering here.
 func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	if event.DeliverySubmissionID != "" {
+		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+	}
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -706,11 +731,17 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 
 		var claimed bool
 		var updated *AgentExecution
+		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		uncertain := uncertainSubmissionID != "" || errors.Is(err, ErrUncertainPromptDelivery)
 		statusErr := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 			if current != execution || current.promptGeneration != promptGeneration {
 				return
 			}
 			current.Status = v1.AgentStatusFailed
+			if uncertain {
+				current.FailureCode = "DURABLE_DELIVERY_UNCERTAIN"
+				current.FailureDetails = uncertainSubmissionID
+			}
 			updated = current
 			claimed = true
 		})
@@ -759,11 +790,23 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 	startupGeneration uint64,
 ) {
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		uncertain := uncertainSubmissionID != "" || errors.Is(err, ErrUncertainPromptDelivery)
+		signalError := "agent stream disconnected: " + err.Error()
+		if uncertain {
+			signalError = fmt.Sprintf(
+				"%s: %s; reconcile submission %q before retrying",
+				ErrUncertainPromptDelivery,
+				err,
+				uncertainSubmissionID,
+			)
+		}
 		if !execution.signalPromptCompletionForStartupGenerationLeased(
 			startupGeneration,
 			PromptCompletionSignal{
 				IsError:          true,
-				Error:            "agent stream disconnected: " + err.Error(),
+				Uncertain:        uncertain,
+				Error:            signalError,
 				PromptGeneration: promptGeneration,
 			},
 		) {
@@ -799,9 +842,17 @@ func (m *Manager) publishStreamDisconnectErrorWithAttempt(
 	err error,
 	attemptID string,
 ) {
+	message := "agent stream disconnected: " + err.Error()
+	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" || errors.Is(err, ErrUncertainPromptDelivery) {
+		message = fmt.Sprintf(
+			"%s: agent stream disconnected; reconcile submission %q before retrying",
+			ErrUncertainPromptDelivery,
+			submissionID,
+		)
+	}
 	m.eventPublisher.PublishAgentctlEvent(
 		WithResumeAttemptID(context.Background(), attemptID), events.AgentctlError, execution,
-		"agent stream disconnected: "+err.Error(),
+		message,
 	)
 }
 

@@ -79,6 +79,7 @@ type BannerProps = {
   action?: RecoveryAction;
   secondaryAction?: RecoveryAction;
   retryDisabled?: boolean;
+  showRetry?: boolean;
   recoveryFailure?: SessionRecoveryFailure | null;
   testId?: string;
   compact?: boolean;
@@ -166,6 +167,7 @@ export function EnsureSessionErrorBanner({
   action,
   secondaryAction,
   retryDisabled,
+  showRetry = true,
   recoveryFailure,
   testId = "ensure-session-error-banner",
   compact = false,
@@ -216,17 +218,19 @@ export function EnsureSessionErrorBanner({
                 {secondaryAction.label}
               </Button>
             ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11 cursor-pointer px-2 text-xs"
-              onClick={onRetry}
-              disabled={retryDisabled}
-              data-testid="ensure-session-error-retry"
-            >
-              <IconRefresh className="size-3" />
-              {t("task:retry")}
-            </Button>
+            {showRetry ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-h-11 cursor-pointer px-2 text-xs"
+                onClick={onRetry}
+                disabled={retryDisabled}
+                data-testid="ensure-session-error-retry"
+              >
+                <IconRefresh className="size-3" />
+                {t("task:retry")}
+              </Button>
+            ) : null}
           </span>
         </AlertDescription>
       </Alert>

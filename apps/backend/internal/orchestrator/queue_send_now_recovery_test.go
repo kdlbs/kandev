@@ -111,6 +111,99 @@ func TestSendNowAcceptedClaimIsAcknowledgedAfterProcessRestart(t *testing.T) {
 	}
 }
 
+func TestUnknownSendNowOutcomeParksWithRecoveryBlock(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-unknown-send-now", "session-unknown-send-now", "step-1")
+	queue, db := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
+	t.Cleanup(func() { _ = db.Close() })
+	source, err := queue.QueueMessage(
+		ctx, "session-unknown-send-now", "task-unknown-send-now", "unknown Send Now prompt", "", messagequeue.QueuedByUser, false, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.ClaimSendNow(ctx, source.SessionID, []messagequeue.QueuedMessage{*source}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &Service{logger: testLogger(), repo: repo, messageQueue: queue}
+	if err := svc.reconcilePendingSendNowClaimsOnStartup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := queue.GetStatus(ctx, source.SessionID); status.Count != 0 {
+		t.Fatalf("unknown Send Now claim was restored at startup: %#v", status.Entries)
+	}
+	claims, err := queue.ListPendingSendNowClaims(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claims) != 1 || claims[0].Claim.Dispatch.ID == "" {
+		t.Fatalf("pending Send Now claims = %#v, want one parked claim", claims)
+	}
+	block, err := svc.GetOpenSessionRecoveryBlock(ctx, source.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if block == nil || block.Reason != "unknown_send_now_outcome" {
+		t.Fatalf("recovery block = %#v, want unknown_send_now_outcome", block)
+	}
+}
+
+func TestSessionRecoveryResolutionRestoresPendingSendNowClaim(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-send-now-recovery", "session-send-now-recovery", "step-1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	queue, db := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
+	t.Cleanup(func() { _ = db.Close() })
+	svc.messageQueue = queue
+
+	session, err := repo.GetTaskSession(ctx, "session-send-now-recovery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	if err := repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+		ID:                 "block-send-now-recovery",
+		SessionID:          session.ID,
+		IncarnationID:      incarnationID,
+		ExpectedGeneration: 0,
+		Reason:             "unknown_send_now_outcome",
+		State:              models.RecoveryBlockOpen,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	source, err := svc.messageQueue.QueueMessage(
+		ctx, session.ID, session.TaskID, "pending Send Now prompt", "", messagequeue.QueuedByUser, false, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.messageQueue.ClaimSendNow(ctx, session.ID, []messagequeue.QueuedMessage{*source}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.resolveSessionRecoveryBlock(ctx, session.ID, "continue_from_history"); err != nil {
+		t.Fatal(err)
+	}
+	status := svc.messageQueue.GetStatus(ctx, session.ID)
+	if len(status.Entries) != 1 || status.Entries[0].ID != source.ID {
+		t.Fatalf("queue after session recovery = %#v, want source %s", status.Entries, source.ID)
+	}
+	claims, err := svc.messageQueue.ListPendingSendNowClaims(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claims) != 0 {
+		t.Fatalf("pending Send Now claim was not settled after recovery: %#v", claims)
+	}
+}
+
 type transientAcceptedMarkerRepository struct {
 	messagequeue.Repository
 	pending interface {

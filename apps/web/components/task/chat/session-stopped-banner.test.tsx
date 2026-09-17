@@ -7,6 +7,7 @@ import { WebSocketRequestError } from "@/lib/ws/client";
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
+  stop: vi.fn(),
   agentProfiles: [{ id: "profile-1" }],
 }));
 
@@ -24,6 +25,10 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mocks.request }),
+}));
+
+vi.mock("@/hooks/domains/session/use-session-actions", () => ({
+  useSessionActions: () => ({ stop: mocks.stop }),
 }));
 
 vi.mock("@/components/task/new-session-dialog", () => ({
@@ -44,6 +49,10 @@ vi.mock("react-i18next", () => ({
         "task:sessionCompleted": "This session is complete.",
         "task:newAgent": "New Agent",
         "task:agentHasStopped": "This agent has stopped.",
+        "task:durableDeliveryUncertain":
+          "Delivery was interrupted. The prompt outcome is uncertain.",
+        "task:retryConnection": "Retry connection",
+        "task:retryingConnection": "Retrying connection...",
         "task:resume": "Resume",
         "task:resuming": "Resuming...",
         "task:starting": "Starting...",
@@ -52,6 +61,8 @@ vi.mock("react-i18next", () => ({
         "task:continueOnNewBranch": "Continue on a new branch",
         "task:restoreReadOnlyWorkspace": "Restore read-only workspace",
         "task:retry": "Retry",
+        "task:stop": "Stop",
+        "task:stopping": "Stopping…",
         "task:couldnTStartASession": "Session recovery failed",
       })[key] ?? key,
   }),
@@ -90,6 +101,7 @@ function BannerHarness({
 
 beforeEach(() => {
   mocks.request.mockReset().mockResolvedValue(undefined);
+  mocks.stop.mockReset().mockResolvedValue(true);
   mocks.agentProfiles.splice(0, mocks.agentProfiles.length, { id: "profile-1" });
 });
 
@@ -189,6 +201,30 @@ describe("SessionStoppedBanner basics", () => {
     expect(screen.getByText("(Docker is offline)")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Start fresh session" })).toBeTruthy();
+  });
+
+  it("offers state-only connection retry and Stop for uncertain delivery", async () => {
+    render(<BannerHarness mode="recoverable" uncertainDelivery />);
+
+    expect(
+      screen.getByText("Delivery was interrupted. The prompt outcome is uncertain."),
+    ).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.getByTestId("recovery-retry-connection-button")).toBeTruthy();
+    expect(screen.getByTestId("recovery-stop-button")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("recovery-retry-connection-button"));
+    await waitFor(() =>
+      expect(mocks.request).toHaveBeenCalledWith(
+        SESSION_RECOVER_ACTION,
+        { task_id: TASK_ID, session_id: SESSION_ID, action: "retry_connection" },
+        30000,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("recovery-stop-button"));
+    await waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(1));
   });
 });
 
