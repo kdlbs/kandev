@@ -80,6 +80,16 @@ describe("reconcileCronTrigger: no-op branches", () => {
     );
     expect(outcome).toEqual({ kind: "unchanged" });
   });
+
+  it("treats a stored UTC timezone and an unset draft timezone as the same effective timezone", async () => {
+    const outcome = await reconcileCronTrigger(
+      "routine-1",
+      { triggerKind: "cron", cronExpression: CRON_EXPR, timezone: "" },
+      [makeTrigger({ timezone: "UTC" })],
+    );
+    expect(outcome).toEqual({ kind: "unchanged" });
+    expect(createRoutineTriggerMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("reconcileCronTrigger: create/delete orchestration", () => {

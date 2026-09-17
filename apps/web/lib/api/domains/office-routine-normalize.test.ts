@@ -235,16 +235,18 @@ describe("buildUpdateRoutineBody", () => {
     expect(body).toEqual({ name: "renamed" });
   });
 
-  it("transmits an empty string for name, description, assigneeAgentProfileId, and variables to clear them", () => {
+  it("transmits an empty string for name, description, taskTemplate, assigneeAgentProfileId, and variables to clear them", () => {
     const body = buildUpdateRoutineBody({
       name: "",
       description: "",
+      taskTemplate: "",
       assigneeAgentProfileId: "",
       variables: "",
     });
     expect(body).toEqual({
       name: "",
       description: "",
+      task_template: "",
       assignee_agent_profile_id: "",
       variables: "",
     });

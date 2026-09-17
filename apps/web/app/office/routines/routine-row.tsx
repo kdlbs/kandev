@@ -34,6 +34,16 @@ function concurrencyLabel(t: TFunction, policy: string): string {
   return key ? t(key) : policy;
 }
 
+/** A declared variable's wire value is `{ default: string }`; a bare string passes through unchanged. */
+export function formatVariableValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "default" in value) {
+    const declaredDefault = (value as { default?: unknown }).default;
+    if (typeof declaredDefault === "string") return declaredDefault;
+  }
+  return "";
+}
+
 type RoutineRowProps = {
   routine: Routine;
   agents: AgentProfile[];
@@ -226,7 +236,7 @@ function RoutineExpandedDetail({
           <div className="mt-1 space-y-0.5">
             {Object.entries(routine.variables).map(([key, val]) => (
               <div key={key} className="text-xs font-mono text-muted-foreground">
-                {key}: {String(val)}
+                {key}: {formatVariableValue(val)}
               </div>
             ))}
           </div>
