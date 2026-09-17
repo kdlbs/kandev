@@ -232,9 +232,19 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 		return nil, err
 	}
 
+	// An ordinary stop keeps the session registered, so a later launch for the
+	// same instance finds a live entry here. Overwriting it would strand that
+	// session's SSH client, Docker client, forwards, and watchdog.
 	r.mu.Lock()
+	replaced := r.sessions[req.InstanceID]
 	r.sessions[req.InstanceID] = session
 	r.mu.Unlock()
+	if replaced != nil && replaced != session {
+		if err := replaced.close(); err != nil {
+			r.logger.Warn("failed to close the replaced remote docker session",
+				zap.String("instance_id", req.InstanceID), zap.Error(err))
+		}
+	}
 
 	r.watchTransport(req.InstanceID, session)
 

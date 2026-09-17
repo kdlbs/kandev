@@ -62,8 +62,17 @@ type remoteEndpointResolver struct {
 	forwarder portForwarder
 
 	mu       sync.Mutex
-	forwards map[int]remoteForward
+	forwards map[forwardKey]remoteForward
 	closed   bool
+}
+
+// forwardKey scopes a forward to the container that published the port. One
+// session resolver can serve more than one container -- a failed reconnect is
+// followed by a fresh launch on the same session -- and a port-only key would
+// hand the replacement the abandoned container's forward.
+type forwardKey struct {
+	containerID   string
+	containerPort int
 }
 
 type remoteForward struct {
@@ -75,7 +84,7 @@ func newRemoteEndpointResolver(ports containerPublishedPorts, forwarder portForw
 	return &remoteEndpointResolver{
 		ports:     ports,
 		forwarder: forwarder,
-		forwards:  map[int]remoteForward{},
+		forwards:  map[forwardKey]remoteForward{},
 	}
 }
 
@@ -86,12 +95,14 @@ const remoteLoopbackHost = "127.0.0.1"
 func (r *remoteEndpointResolver) Resolve(
 	ctx context.Context, containerID string, containerPort int, _ string,
 ) (string, int, error) {
+	key := forwardKey{containerID: containerID, containerPort: containerPort}
+
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
 		return "", 0, fmt.Errorf("remote docker: endpoint resolver is closed")
 	}
-	if existing, ok := r.forwards[containerPort]; ok {
+	if existing, ok := r.forwards[key]; ok {
 		r.mu.Unlock()
 		return remoteLoopbackHost, existing.localPort, nil
 	}
@@ -118,11 +129,11 @@ func (r *remoteEndpointResolver) Resolve(
 	}
 	// A concurrent Resolve for the same port may have won the race; keep the
 	// established forward and discard this one rather than leaking it.
-	if existing, ok := r.forwards[containerPort]; ok {
+	if existing, ok := r.forwards[key]; ok {
 		_ = closeFn()
 		return remoteLoopbackHost, existing.localPort, nil
 	}
-	r.forwards[containerPort] = remoteForward{localPort: localPort, closeFn: closeFn}
+	r.forwards[key] = remoteForward{localPort: localPort, closeFn: closeFn}
 	return remoteLoopbackHost, localPort, nil
 }
 
@@ -137,7 +148,7 @@ func (r *remoteEndpointResolver) Close() error {
 	}
 	r.closed = true
 	forwards := r.forwards
-	r.forwards = map[int]remoteForward{}
+	r.forwards = map[forwardKey]remoteForward{}
 	r.mu.Unlock()
 
 	var firstErr error

@@ -1,4 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
+import { getBackendConfig } from "@/lib/config";
 import type { SSHTestRequest, SSHTestResult } from "@/lib/types/http-ssh";
 
 /**
@@ -36,11 +37,19 @@ export async function testRemoteDockerConnection(
 export function buildRemoteDockerImage(
   executorId: string,
   payload: { dockerfile: string; tag: string; build_args?: Record<string, string | null> },
+  options?: ApiRequestOptions,
 ): Promise<Response> {
-  return fetch(`/api/v1/remote-docker/executors/${encodeURIComponent(executorId)}/build`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(payload),
-  });
+  // Resolve against the configured backend origin, as buildDockerImage does. A
+  // relative URL posts to the web origin, which is correct only while the
+  // backend also serves the SPA.
+  const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
+  return fetch(
+    `${baseUrl}/api/v1/remote-docker/executors/${encodeURIComponent(executorId)}/build`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    },
+  );
 }
