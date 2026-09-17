@@ -81,12 +81,36 @@ func RegisterRoutes(api *gin.RouterGroup, h *Handler) {
 }
 
 func (h *Handler) listRoutines(c *gin.Context) {
-	routines, err := h.svc.ListRoutinesFromConfig(c.Request.Context(), c.Param("wsId"))
+	ctx := c.Request.Context()
+	routines, err := h.svc.ListRoutinesFromConfig(ctx, c.Param("wsId"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, RoutineListResponse{Routines: routines})
+	withSchedule, err := h.svc.AttachScheduleState(ctx, routines)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineListResponse{Routines: withSchedule})
+}
+
+// withScheduleState classifies a single routine's schedule state, for the
+// single-routine response shapes (create/get/update).
+func (h *Handler) withScheduleState(c *gin.Context, routine *Routine) (*RoutineWithSchedule, error) {
+	withSchedule, err := h.svc.AttachScheduleState(c.Request.Context(), []*Routine{routine})
+	if err != nil {
+		return nil, err
+	}
+	return withSchedule[0], nil
+}
+
+// jsonErrorKey is the JSON body key used for error responses in this package.
+const jsonErrorKey = "error"
+
+// respondInternalError writes a 500 response carrying err's message.
+func respondInternalError(c *gin.Context, err error) {
+	c.JSON(http.StatusInternalServerError, gin.H{jsonErrorKey: err.Error()})
 }
 
 func (h *Handler) createRoutine(c *gin.Context) {
@@ -127,10 +151,15 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		Variables:              req.Variables,
 	}
 	if err := h.svc.CreateRoutine(c.Request.Context(), routine); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) getRoutine(c *gin.Context) {
@@ -139,7 +168,12 @@ func (h *Handler) getRoutine(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) updateRoutine(c *gin.Context) {
@@ -148,7 +182,12 @@ func (h *Handler) updateRoutine(c *gin.Context) {
 		c.JSON(statusCode, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, RoutineResponse{Routine: routine})
+	withSchedule, err := h.withScheduleState(c, routine)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, RoutineResponse{Routine: withSchedule})
 }
 
 func (h *Handler) doUpdateRoutine(c *gin.Context) (*Routine, int, error) {

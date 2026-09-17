@@ -24,6 +24,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { CONCURRENCY_POLICY_LABEL_KEYS } from "../lib/label-keys";
 import { isRoutineFiring } from "../lib/routine-status";
+import { ScheduleStateBadge, UnarmedScheduleHint } from "./schedule-state-badge";
 
 /**
  * A routine's concurrency policy is a wire value; only its label is copy.
@@ -119,6 +120,8 @@ export function RoutineRow({
         <Badge variant={isActive ? "default" : "secondary"}>
           {isActive ? t("office:on") : t("office:off")}
         </Badge>
+        <ScheduleStateBadge routine={routine} />
+        <UnarmedScheduleHint routine={routine} />
         <Switch
           checked={isActive}
           onCheckedChange={(checked) => {

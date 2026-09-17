@@ -23,6 +23,7 @@ import { timeAgo } from "@/lib/utils/time";
 import { useOfficeTopbar } from "../../components/office-topbar-context";
 import { isRoutineFiring } from "../../lib/routine-status";
 import { routineNotFiringMessage } from "../../lib/routine-not-firing";
+import { ScheduleStateBadge, UnarmedScheduleHint } from "../schedule-state-badge";
 import { useTranslation } from "react-i18next";
 
 // Lift the form state out of the component so the file stays under the
@@ -142,6 +143,7 @@ export function RoutineDetailView({ initialRoutine, initialTriggers }: RoutineDe
       <DetailGeneralCard draft={draft} update={update} agents={agents} />
       <DetailTriggerCard draft={draft} update={update} />
       <DetailReadOnlyCard
+        routine={routine}
         lastFiredAt={lastFired}
         nextRunAt={isRoutineFiring(draft.status) ? (cronTrigger?.nextRunAt ?? null) : null}
       />
@@ -369,9 +371,11 @@ function DetailTriggerCard({
 }
 
 function DetailReadOnlyCard({
+  routine,
   lastFiredAt,
   nextRunAt,
 }: {
+  routine: Routine;
   lastFiredAt: string | null;
   nextRunAt: string | null;
 }) {
@@ -381,7 +385,11 @@ function DetailReadOnlyCard({
       <CardHeader>
         <CardTitle className="text-sm font-medium">{t("office:schedule")}</CardTitle>
       </CardHeader>
-      <CardContent className="text-sm text-muted-foreground space-y-1">
+      <CardContent className="text-sm text-muted-foreground space-y-3">
+        <div className="flex items-center gap-2">
+          <ScheduleStateBadge routine={routine} />
+          <UnarmedScheduleHint routine={routine} />
+        </div>
         {/* `{{when}}` carries a formatted timestamp, not a translated label. */}
         <div>
           {t("office:lastFired", { when: lastFiredAt ? timeAgo(lastFiredAt) : t("office:never") })}

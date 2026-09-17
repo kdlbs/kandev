@@ -1468,8 +1468,15 @@ func initOfficeServices(
 
 	// Reconcile using the new infra package.
 	reconciler := officeinfra.NewReconciler(repos.Office, log)
-	reconciler.ReconcileAll(ctx)
+	reconcileSignal := reconciler.ReconcileAll(ctx)
 	log.Info("Office reconciliation complete")
+
+	// Startup scan (REQ-OFFICE-ROUTINE-ARMING-003): a read-only pass over
+	// every routine's schedule state, logged and counted for an unattended
+	// install. Launched after reconciliation so a trigger-less routine
+	// reconciliation would have fixed is not reported prematurely; does not
+	// block startup and cannot affect its result.
+	go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC())
 
 	// System skill sync. Upserts every embedded SKILL.md (the ones written
 	// to disk by EnsureBundledSkills above) into office_skills as
