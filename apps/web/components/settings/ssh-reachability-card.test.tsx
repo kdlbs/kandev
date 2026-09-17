@@ -123,7 +123,15 @@ describe("SSHReachabilityCard rendering", () => {
   });
 
   it("does not mark a fresh record as stale", async () => {
-    getSSHExecutorReachability.mockResolvedValue(record({ probe_interval_seconds: 60 }));
+    const fresh = new Date().toISOString();
+    getSSHExecutorReachability.mockResolvedValue(
+      record({
+        probe_interval_seconds: 60,
+        checked_at: fresh,
+        last_success_at: fresh,
+        updated_at: fresh,
+      }),
+    );
     renderCard();
     await waitFor(() => expect(screen.getByTestId(STATE_TESTID)).toBeTruthy());
     expect(screen.queryByTestId("ssh-reachability-stale")).toBeNull();
