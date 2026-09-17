@@ -248,6 +248,64 @@ test.describe("Routines UI", () => {
     await expect(comboboxNear(testPage, "Catch-up policy")).toHaveText("Skip missed");
   });
 
+  // Review round 1 (Codex-2): handleCreate's post-create refetch used to be
+  // unguarded, so a refetch failure became an unhandled rejection that
+  // swallowed the create outcome toast instead of surfacing its own. Build
+  // round 2 wrapped it in `refreshRoutinesOrReportFailure`; this proves the
+  // fix end to end against the real component, not just the unit mock.
+  test("a post-create refetch failure reports its own toast and still closes the dialog", async ({
+    testPage,
+  }) => {
+    const name = "E2E Refetch Failure Routine";
+    // React StrictMode double-invokes the page-mount effect in dev, so the
+    // list endpoint sees two GET calls before any user interaction. Rather
+    // than count calls, arm the failure right before the action whose
+    // refetch this test targets, so it lands on that call regardless of how
+    // many preceded it.
+    let failNextList = false;
+    await testPage.route("**/api/v1/office/workspaces/*/routines", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET" && failNextList) {
+        failNextList = false;
+        await route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+        return;
+      }
+      await route.continue();
+    });
+
+    await testPage.goto("/office/routines");
+    await testPage.getByRole("button", { name: "New Routine" }).click();
+
+    await testPage.getByLabel("Name").fill(name);
+    await testPage
+      .getByText("Assignee", { exact: true })
+      .locator("..")
+      .getByRole("combobox")
+      .click();
+    await testPage.getByRole("option", { name: "CEO" }).click();
+    await testPage.getByRole("button", { name: "Next" }).click();
+    await testPage.getByRole("button", { name: "Next" }).click();
+
+    // Webhook has no required fields at this step, so the create call carries
+    // no trigger and this test isolates the routine-list refetch alone.
+    await comboboxNear(testPage, "Trigger Type").click();
+    await testPage.getByRole("option", { name: "Webhook" }).click();
+
+    const routineCreated = waitForHttp(testPage, "POST", /\/workspaces\/[^/]+\/routines$/);
+    failNextList = true;
+    const listFailed = waitForHttp(testPage, "GET", /\/workspaces\/[^/]+\/routines$/, {
+      predicate: (r) => r.status() === 500,
+    });
+    await testPage.getByRole("button", { name: "Create" }).click();
+    await routineCreated;
+    await listFailed;
+
+    await expect(testPage.getByText("Routine created")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("Failed to load")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByRole("dialog")).toHaveCount(0);
+    expect(failNextList).toBe(false);
+  });
+
   test("manual fire renders the real creation time in the Runs tab", async ({
     testPage,
     officeApi,
