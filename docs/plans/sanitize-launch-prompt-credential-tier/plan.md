@@ -100,4 +100,10 @@ Mutation check: reverting the tier swap in `conductor.go` fails
 
 ## Open questions
 
-None.
+The primary launch prompt is intentionally unbounded after credential
+redaction. A future change must define a provider-neutral token or byte budget
+for the complete composed prompt, including server-injected context, and an
+explicit compaction or user-visible rejection path when that budget is
+exceeded. The budget must come from provider capability metadata, not a
+provider-name branch in the routing conductor. Until that contract exists,
+provider context-window errors remain the downstream safety boundary.

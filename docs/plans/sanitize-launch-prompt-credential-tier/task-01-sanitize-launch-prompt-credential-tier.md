@@ -56,6 +56,10 @@ only makes sense for provider output.
 (cd apps/backend && go test ./internal/agent/runtime/routingerr/... -run TestSanitizeCredentialsUnbounded -v)
 ```
 
+The provider-aware prompt-size budget is a deferred follow-up. This PR keeps
+the primary prompt unbounded because the conductor does not own provider
+context-window capacity or an overflow user experience.
+
 ## Files likely touched
 
 - `apps/backend/internal/agent/runtime/routingerr/sanitize.go`
@@ -75,6 +79,9 @@ None.
   would repeat the original defect for a different field.
 - Reusing the bounded `SanitizeCredentials` entry point instead of an
   unbounded variant would keep truncating the primary prompt.
+- The complete composed prompt has no provider-aware size budget yet. Adding
+  an arbitrary byte cap here could silently remove instructions or identifiers.
+  Define the budget and its overflow behavior in a separate contract change.
 
 ## Parallelism
 

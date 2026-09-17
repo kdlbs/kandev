@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-09-11
-updated: 2026-09-11
+updated: 2026-09-17
 owners:
   - Kandev
 ---
@@ -88,6 +88,20 @@ diagnostic tier's 32-plus-character catch-all would mangle the injected
 task/session UUIDs and break the fallback provider's MCP tool calls, which
 address the task by that UUID. Diagnostic-tier redaction (`routingerr.Sanitize`)
 is reserved for provider output and `FailureReason`, never for this field.
+
+#### Deferred provider prompt budget
+
+This contract intentionally does not set a byte cap for `ConductorLaunch.Prompt`.
+The direct message API limits one message to `MaxRenderedPromptBytes`, but the
+orchestrator adds workflow, plan, repository, configuration, and
+`<kandev-system>` context. Other launch paths can also provide a prompt. A
+future change must define an explicit token or byte budget for the complete
+composed prompt and the behavior when that budget is exceeded, such as
+compaction or a user-visible rejection. The budget must come from provider
+capability metadata, not from a provider-name branch in the routing conductor.
+Until that contract exists, provider context-window errors remain the
+downstream safety boundary. An arbitrary cap here could silently remove
+instructions or identifiers and would reintroduce the defect this design fixes.
 
 The key match is a substring match, not exact-name, so it also matches a key
 merely containing a keyword without naming a credential (`max_tokens`,
