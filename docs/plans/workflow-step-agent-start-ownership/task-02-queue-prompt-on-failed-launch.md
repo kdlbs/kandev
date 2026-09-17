@@ -3,6 +3,7 @@ id: "02-queue-prompt-on-failed-launch"
 title: "Queue the auto-start prompt when a CREATED launch fails"
 status: done
 wave: 2
+parallelism: sequential
 depends_on: ["01-reset-skips-created"]
 plan: "plan.md"
 spec: "../../specs/tasks/requirements/workflow-step-agent-start-ownership.md"
@@ -10,18 +11,14 @@ spec: "../../specs/tasks/requirements/workflow-step-agent-start-ownership.md"
 
 # Task 02: Queue the auto-start prompt when a CREATED launch fails
 
-The excluded asynchronous path is implemented in the
-[issue #3753 package](../workflow-async-start-prompt-preservation/plan.md).
-This completed work order retains its synchronous scope.
-
 > **Scope corrected during implementation.** The incident's failure is
 > *asynchronous* — `startAgentOnExistingWorkspace` calls
 > `startAgentProcessAsync` and returns `nil`, so `StartCreatedSession` returned
 > no error and this branch was never reached in production. The synchronous
 > branch is still reachable and still drops prompts, but only when there is no
 > in-memory execution (the post-restart shape) and the full `LaunchAgent` path
-> runs. This task closes that case; the asynchronous post-return case is
-> delivered by the linked issue #3753 follow-up package.
+> runs. This task closes that case; the async gap is recorded under the spec's
+> **Known gap** and needs its own cycle.
 
 ## Acceptance
 
