@@ -5,7 +5,26 @@ status: done
 wave: 2
 depends_on: ["01-classify-schedule-state"]
 plan: "plan.md"
-spec: "../../specs/office/requirements/coordinator-install-idempotency.md"
+requirements:
+  - REQ-OFFICE-COORDINATOR-INSTALL-001
+acceptance_criteria:
+  - AC-OFFICE-COORDINATOR-INSTALL-001.1
+  - AC-OFFICE-COORDINATOR-INSTALL-001.2
+  - AC-OFFICE-COORDINATOR-INSTALL-001.3
+  - AC-OFFICE-COORDINATOR-INSTALL-001.4
+  - AC-OFFICE-COORDINATOR-INSTALL-001.5
+  - AC-OFFICE-COORDINATOR-INSTALL-001.6
+  - AC-OFFICE-COORDINATOR-INSTALL-001.7
+  - AC-OFFICE-COORDINATOR-INSTALL-001.8
+  - AC-OFFICE-COORDINATOR-INSTALL-001.9
+  - AC-OFFICE-COORDINATOR-INSTALL-001.10
+  - AC-OFFICE-COORDINATOR-INSTALL-001.11
+  - AC-OFFICE-COORDINATOR-INSTALL-001.12
+  - AC-OFFICE-COORDINATOR-INSTALL-001.13
+  - AC-OFFICE-COORDINATOR-INSTALL-001.14
+  - AC-OFFICE-COORDINATOR-INSTALL-001.15
+system_design:
+  - ../../specs/office/system-design/coordinator-install-idempotency.md
 ---
 
 # Task 05: Match the coordinator routine on identity, not mutable trigger state

@@ -1,9 +1,12 @@
 ---
-spec:
-  - docs/specs/office/requirements/routine-arming-visibility.md
-  - docs/specs/office/requirements/routine-arming-startup-scan.md
-  - docs/specs/office/requirements/coordinator-install-idempotency.md
-design: null
+requirements:
+  - REQ-OFFICE-ROUTINE-ARMING-001
+  - REQ-OFFICE-ROUTINE-ARMING-002
+  - REQ-OFFICE-ROUTINE-ARMING-003
+  - REQ-OFFICE-COORDINATOR-INSTALL-001
+system_design:
+  - ../../specs/office/system-design/routine-schedule-state.md
+  - ../../specs/office/system-design/coordinator-install-idempotency.md
 created: 2026-09-17
 status: done
 ---
@@ -22,14 +25,20 @@ requirement documents enables, disables, creates, or deletes a trigger, and none
 makes intent gate dispatch. That repair is deferred to task
 `b0382916-da13-44a5-85be-064ae6a9533c` and must not be pulled forward here.
 
-No system-design document exists for this capability (a deliberate call made
-during spec review, recorded in the requirements themselves): the three
-requirement documents already pin every table, column, function, and endpoint
-this plan touches, at file-and-line precision, in their own text. Re-deriving
-that into a fourth document would either duplicate it or drift from it. This
-plan carries the remaining architecture decisions — package placement, response
-shape, verification boundaries — that the requirements deliberately left to
-Build.
+Two system-design documents back this plan:
+[Routine Schedule State](../../specs/office/system-design/routine-schedule-state.md)
+covers REQ-OFFICE-ROUTINE-ARMING-001/002/003 (classification, the read-path
+report, and the startup scan — one vertical feature contract split across two
+requirement documents by scope), and
+[Coordinator Install Idempotency](../../specs/office/system-design/coordinator-install-idempotency.md)
+covers REQ-OFFICE-COORDINATOR-INSTALL-001. Both were written after Build,
+grounded directly in the merged implementation, rather than before it — the
+three requirement documents already pinned every table, column, function, and
+endpoint this plan touches at file-and-line precision, so drafting the designs
+speculatively ahead of code would have either duplicated that text or drifted
+from it. This plan itself still carries the remaining architecture decisions —
+package placement, response shape, verification boundaries — that the
+requirements deliberately left to Build.
 
 Work lands in three waves: classification is the foundation everything else
 reads (Wave 1); the read-path report, the startup scan, and the coordinator

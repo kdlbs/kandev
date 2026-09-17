@@ -5,7 +5,20 @@ status: done
 wave: 3
 depends_on: ["02-report-schedule-state-api"]
 plan: "plan.md"
-spec: "../../specs/office/requirements/routine-arming-visibility.md"
+requirements:
+  - REQ-OFFICE-ROUTINE-ARMING-002
+acceptance_criteria:
+  - AC-OFFICE-ROUTINE-ARMING-002.2
+  - AC-OFFICE-ROUTINE-ARMING-002.3
+  - AC-OFFICE-ROUTINE-ARMING-002.4
+  - AC-OFFICE-ROUTINE-ARMING-002.5
+  - AC-OFFICE-ROUTINE-ARMING-002.6
+  - AC-OFFICE-ROUTINE-ARMING-002.8
+  - AC-OFFICE-ROUTINE-ARMING-002.9
+  - AC-OFFICE-ROUTINE-ARMING-002.10
+  - AC-OFFICE-ROUTINE-ARMING-002.11
+system_design:
+  - ../../specs/office/system-design/routine-schedule-state.md
 ---
 
 # Task 03: Render the intent/schedule-state distinction in the routines UI

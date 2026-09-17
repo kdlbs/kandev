@@ -5,7 +5,25 @@ status: done
 wave: 2
 depends_on: ["01-classify-schedule-state"]
 plan: "plan.md"
-spec: "../../specs/office/requirements/routine-arming-startup-scan.md"
+requirements:
+  - REQ-OFFICE-ROUTINE-ARMING-003
+acceptance_criteria:
+  - AC-OFFICE-ROUTINE-ARMING-003.1
+  - AC-OFFICE-ROUTINE-ARMING-003.2
+  - AC-OFFICE-ROUTINE-ARMING-003.3
+  - AC-OFFICE-ROUTINE-ARMING-003.4
+  - AC-OFFICE-ROUTINE-ARMING-003.5
+  - AC-OFFICE-ROUTINE-ARMING-003.6
+  - AC-OFFICE-ROUTINE-ARMING-003.7
+  - AC-OFFICE-ROUTINE-ARMING-003.8
+  - AC-OFFICE-ROUTINE-ARMING-003.9
+  - AC-OFFICE-ROUTINE-ARMING-003.10
+  - AC-OFFICE-ROUTINE-ARMING-003.11
+  - AC-OFFICE-ROUTINE-ARMING-003.12
+  - AC-OFFICE-ROUTINE-ARMING-003.13
+  - AC-OFFICE-ROUTINE-ARMING-003.14
+system_design:
+  - ../../specs/office/system-design/routine-schedule-state.md
 ---
 
 # Task 04: Surface unarmed routines at startup

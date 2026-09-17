@@ -5,7 +5,18 @@ status: done
 wave: 2
 depends_on: ["01-classify-schedule-state"]
 plan: "plan.md"
-spec: "../../specs/office/requirements/routine-arming-visibility.md"
+requirements:
+  - REQ-OFFICE-ROUTINE-ARMING-002
+acceptance_criteria:
+  - AC-OFFICE-ROUTINE-ARMING-002.1
+  - AC-OFFICE-ROUTINE-ARMING-002.4
+  - AC-OFFICE-ROUTINE-ARMING-002.5
+  - AC-OFFICE-ROUTINE-ARMING-002.6
+  - AC-OFFICE-ROUTINE-ARMING-002.7
+  - AC-OFFICE-ROUTINE-ARMING-002.11
+  - AC-OFFICE-ROUTINE-ARMING-002.12
+system_design:
+  - ../../specs/office/system-design/routine-schedule-state.md
 ---
 
 # Task 02: Report intent and schedule state on routine reads (API)

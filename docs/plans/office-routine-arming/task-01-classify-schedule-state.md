@@ -5,7 +5,24 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/requirements/routine-arming-visibility.md"
+requirements:
+  - REQ-OFFICE-ROUTINE-ARMING-001
+acceptance_criteria:
+  - AC-OFFICE-ROUTINE-ARMING-001.1
+  - AC-OFFICE-ROUTINE-ARMING-001.2
+  - AC-OFFICE-ROUTINE-ARMING-001.3
+  - AC-OFFICE-ROUTINE-ARMING-001.4
+  - AC-OFFICE-ROUTINE-ARMING-001.5
+  - AC-OFFICE-ROUTINE-ARMING-001.6
+  - AC-OFFICE-ROUTINE-ARMING-001.7
+  - AC-OFFICE-ROUTINE-ARMING-001.8
+  - AC-OFFICE-ROUTINE-ARMING-001.9
+  - AC-OFFICE-ROUTINE-ARMING-001.10
+  - AC-OFFICE-ROUTINE-ARMING-001.11
+  - AC-OFFICE-ROUTINE-ARMING-001.12
+  - AC-OFFICE-ROUTINE-ARMING-001.13
+system_design:
+  - ../../specs/office/system-design/routine-schedule-state.md
 ---
 
 # Task 01: Classify a routine's schedule state
