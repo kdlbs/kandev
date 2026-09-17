@@ -2,8 +2,40 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import type { Page } from "@playwright/test";
 
 const COMPACT_DESKTOP_VIEWPORT = { width: 900, height: 800 };
+
+type E2EStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      kanbanMulti: {
+        snapshots: Record<string, { isPlaceholder?: boolean; steps: Array<{ id: string }> }>;
+      };
+      workflows: { activeId: string | null };
+    };
+  };
+};
+
+/** Wait for the workflow snapshot that provides the board's lane identities. */
+async function waitForKanbanWorkflowSteps(
+  page: Page,
+  workflowId: string,
+  stepIds: string[],
+): Promise<void> {
+  await page.waitForFunction(
+    ({ expectedWorkflowId, expectedStepIds }) => {
+      const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
+      if (!state || state.workflows.activeId !== expectedWorkflowId) return false;
+      const snapshot = state.kanbanMulti.snapshots[expectedWorkflowId];
+      if (!snapshot || snapshot.isPlaceholder === true) return false;
+      const hydratedStepIds = new Set(snapshot.steps.map((step) => step.id));
+      return expectedStepIds.every((stepId) => hydratedStepIds.has(stepId));
+    },
+    { expectedWorkflowId: workflowId, expectedStepIds: stepIds },
+    { timeout: 30_000 },
+  );
+}
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
@@ -97,6 +129,11 @@ test.describe("compact desktop responsive layout", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await waitForKanbanWorkflowSteps(
+      testPage,
+      seedData.workflowId,
+      seedData.steps.map((step) => step.id),
+    );
 
     const desktopLayout = testPage.getByTestId("desktop-kanban-layout");
     await expect(desktopLayout).toHaveCount(1);

@@ -25,13 +25,14 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 	if root == "" {
 		return fmt.Errorf("workspace root is required for durable folders")
 	}
+	if err := validateWorkspaceFolderTargets(root, folders); err != nil {
+		return err
+	}
 	for _, folder := range folders {
-		if !isWorkspaceEntryName(folder.Name) || folder.LocalPath == "" {
-			return fmt.Errorf("invalid durable workspace folder")
-		}
-		info, err := os.Stat(folder.LocalPath)
-		if err != nil || !info.IsDir() {
-			return fmt.Errorf("workspace folder %q target is missing: %s", folder.Name, folder.LocalPath)
+		// A single folder is itself the workspace CWD. It is already visible to
+		// the agent and cannot be linked below itself without creating a cycle.
+		if sameDirectory(root, folder.LocalPath) {
+			continue
 		}
 		if _, err := worktree.EnsureOwnedDirectoryLink(root, folder.Name, folder.LocalPath, owner); err != nil {
 			return fmt.Errorf("link workspace folder %q: %w", folder.Name, err)

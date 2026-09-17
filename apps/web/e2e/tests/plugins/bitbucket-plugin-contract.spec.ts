@@ -5,8 +5,10 @@ import type { ApiClient } from "../../helpers/api-client";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
+const FIXTURE_PROVIDER = "fixture-source-control";
 const PACKAGE_PATH = path.resolve(
   __dirname,
   "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
@@ -18,7 +20,9 @@ async function installFixture(page: Page): Promise<void> {
   await page.getByTestId("install-plugin-tab-upload").click();
   await page.getByTestId("install-plugin-file-input").setInputFiles(PACKAGE_PATH);
   await page.getByTestId("install-plugin-upload-submit").click();
-  await expect(page.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+  const row = page.getByTestId(`plugin-row-${PLUGIN_ID}`);
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await expect(row.getByText("Active", { exact: true })).toBeVisible({ timeout: 30_000 });
 }
 
 function visibleEditor(scope: Locator | Page): Locator {
@@ -83,9 +87,11 @@ test.describe("Bitbucket plugin contract", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     await kanban.createTaskButton.first().click();
-    await testPage.getByTestId("source-mode-remote").click();
-    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-    await testPage.getByTestId("remote-repo-option").filter({ hasText: "TEAM/fixture" }).click();
+    await openTaskRepositoryPicker(testPage, { provider: FIXTURE_PROVIDER });
+    await testPage
+      .getByTestId("task-repository-remote-option")
+      .filter({ hasText: "TEAM/fixture" })
+      .click();
     await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
       "TEAM/fixture",
     );
@@ -107,6 +113,16 @@ test.describe("Bitbucket plugin contract", () => {
 
     // Native Link submenu action invokes the declared task-scoped action.
     await kanban.goto();
+    const taskCard = kanban.taskCard(task.id);
+    try {
+      await expect(taskCard).toBeVisible({ timeout: 10_000 });
+    } catch {
+      // The task can finish between the create response and the first board
+      // snapshot. Reload once after the turn settles so the board fetch sees
+      // the durable task row instead of relying on a missed task.updated event.
+      await kanban.goto();
+      await expect(taskCard).toBeVisible({ timeout: 30_000 });
+    }
     await kanban.openTaskContextMenu(task.id);
     const linkSubmenu = testPage.getByTestId("task-context-link");
     await linkSubmenu.focus();

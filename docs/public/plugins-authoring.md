@@ -556,9 +556,30 @@ registry.registerRepositoryProvider({
   id: "acme",
   label: "Acme",
   icon: AcmeIcon,
+  getAvailability: async ({ workspaceId, signal }) => {
+    const response = await host.api.invokeAction(
+      "connection-status",
+      { workspaceId },
+      { signal },
+    );
+    return {
+      configured: true,
+      enabled: true,
+      tested: response.connected === true,
+    };
+  },
   // listRepositories, listBranches, and inspectURL omitted here
 });
 ```
+
+The native repository picker calls `getAvailability` before it calls
+`listRepositories`. The callback is workspace-scoped and must not return
+credentials. Set all three fields to `true` only after a current connection
+check succeeds. A missing callback, a disabled provider, an unconfigured
+workspace, or a failed check keeps the provider out of the browse tabs. The
+host does not use an empty or successful repository list as an authentication
+test. When the host aborts the supplied `AbortSignal`, stop or cancel the
+provider request.
 
 Kandev accepts only supported host locale IDs, at most 1,000 messages per
 locale, safe flat keys, and messages up to 4,096 characters. An invalid

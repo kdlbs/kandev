@@ -1541,7 +1541,7 @@ func (e *Executor) applyResumeWorkspaceFolders(
 			})
 		}
 	}
-	return nil
+	return validateWorkspaceFoldersForExecutor(req.ExecutorType, req.WorkspaceFolders)
 }
 
 func (e *Executor) configureResumeGitHubCredentials(

@@ -41,6 +41,7 @@ type fakeOrchestrator struct {
 	turnStartResult         orchestrator.ProcessOnTurnStartResult
 	interruptCalls          []interruptCall
 	readinessCalls          []messagequeue.QueueSessionIdentity
+	readinessQueueSizes     []int
 	launchCalls             []*orchestrator.LaunchSessionRequest
 	launchErr               error
 	launchFunc              func(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error)
@@ -215,10 +216,12 @@ func (f *fakeOrchestrator) QueueUserPrompt(ctx context.Context, taskID, sessionI
 
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
 
-func (f *fakeOrchestrator) CheckQueueAdmissionReadiness(_ context.Context, identity messagequeue.QueueSessionIdentity) {
+func (f *fakeOrchestrator) CheckQueueAdmissionReadiness(ctx context.Context, identity messagequeue.QueueSessionIdentity) {
+	queueSize := f.queue.GetStatus(ctx, identity.SessionID).Count
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.readinessCalls = append(f.readinessCalls, identity)
+	f.readinessQueueSizes = append(f.readinessQueueSizes, queueSize)
 }
 
 // QueueAndInterruptForPeerMessage inserts prompt into the fake's real
@@ -917,6 +920,33 @@ func TestHandleMessageTask_ParentToChildRunningSession_ExplicitQueued_DoesNotInt
 	status := orch.queue.GetStatus(context.Background(), sess.ID)
 	require.Equal(t, 1, status.Count)
 	assert.Empty(t, orch.interruptCalls, `explicit delivery_mode="queued" from a parent sender must not interrupt`)
+}
+
+// TestHandleMessageTask_QueuedMessage_RechecksAdmissionAfterEnqueue covers
+// the race where a target finishes its turn after dispatchTaskMessage reads a
+// RUNNING snapshot but before the peer message reaches the durable queue. The
+// readiness check must run after insertion so a newly promptable session can
+// drain that entry without waiting for another lifecycle event.
+func TestHandleMessageTask_QueuedMessage_RechecksAdmissionAfterEnqueue(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "deliver when ready", parent.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	require.Len(t, orch.readinessCalls, 1)
+	assert.Equal(t, messagequeue.QueueSessionIdentity{
+		TaskID:               child.ID,
+		SessionID:            sess.ID,
+		SessionIncarnationID: sess.QueueIncarnationID,
+	}, orch.readinessCalls[0])
+	assert.Equal(t, 1, orch.readinessQueueSizes[0])
 }
 
 // TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected pins

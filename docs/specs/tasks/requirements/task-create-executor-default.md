@@ -100,3 +100,6 @@ within the executor selected by policy, not a portable override of that policy.
 - Preventing users from manually choosing Local for an ordinary task.
 - Changing workspace executor settings or their explicit precedence.
 - Changing task-create dialog layout or mobile interaction patterns.
+## Folder-only draft transitions
+
+[Mixed repository selection](mixed-repository-selection.md), requirement 006, defines the visible Worktree-to-Local folder-only adjustment and its reversal inside an edited draft. It does not change executor-default precedence for the next fresh task dialog.

@@ -3,6 +3,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 const FIXTURE_PROVIDER = "fixture-source-control";
 const FIXTURE_REPOSITORY_ID = "fixture-repository";
@@ -42,17 +43,23 @@ async function removeFixtureRepositories(apiClient: ApiClient, workspaceId: stri
 }
 
 async function selectFixtureRepository(page: Page): Promise<void> {
-  await page.getByTestId("source-mode-remote").click();
-  const repositoryTrigger = page.getByTestId("remote-repo-chip-trigger");
-  await expect(repositoryTrigger).toHaveCount(1);
-  await repositoryTrigger.click();
+  const removeButtons = page.getByTestId("remove-repo-chip");
+  while ((await removeButtons.count()) > 0) {
+    await removeButtons.first().click();
+  }
+  const remoteRemoveButtons = page.getByTestId("remote-chip-remove");
+  while ((await remoteRemoveButtons.count()) > 0) {
+    await remoteRemoveButtons.first().click();
+  }
+  await openTaskRepositoryPicker(page, { provider: FIXTURE_PROVIDER });
   const repositoryOption = page
-    .getByTestId("remote-repo-option")
+    .getByTestId("task-repository-remote-option")
     .filter({ hasText: "TEAM/fixture" });
   await expect(repositoryOption).toHaveCount(1);
   await expect(repositoryOption).toBeVisible({ timeout: 15_000 });
   await repositoryOption.click();
-  await expect(repositoryTrigger).toContainText("TEAM/fixture");
+  await expect(page.getByTestId("remote-repo-chip-trigger")).toHaveCount(1);
+  await expect(page.getByTestId("remote-repo-chip-trigger")).toContainText("TEAM/fixture");
 }
 
 async function selectFixtureBranch(page: Page): Promise<void> {

@@ -4,6 +4,31 @@ import type { ReactNode } from "react";
 import type { Branch } from "@/lib/types/http";
 
 const TOOLTIP_ROOT_TEST_ID = "tooltip-root";
+const touchDrawer = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => touchDrawer.enabled,
+}));
+
+vi.mock("@/components/task/mobile/mobile-picker-sheet", () => ({
+  MobilePickerSheet: ({
+    open,
+    title,
+    contentTestId,
+    children,
+  }: {
+    open: boolean;
+    title: string;
+    contentTestId?: string;
+    children: ReactNode;
+  }) =>
+    open ? (
+      <div data-testid="mobile-picker-sheet">
+        <h2>{title}</h2>
+        <div data-testid={contentTestId}>{children}</div>
+      </div>
+    ) : null,
+}));
 
 vi.mock("@kandev/ui/tooltip", async () => {
   const React = await import("react");
@@ -92,6 +117,7 @@ const CREATE_REPOSITORY = "Create new repository";
 
 afterEach(() => {
   cleanup();
+  touchDrawer.enabled = false;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -456,5 +482,35 @@ describe("Pill popover", () => {
     expect(screen.getByRole("button", { name: CREATE_REPOSITORY })).toBeTruthy();
     expect(screen.queryByRole("option", { name: CREATE_REPOSITORY })).toBeNull();
     expect(onAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("Pill mobile picker", () => {
+  it("uses a touch-sized trigger and opens the picker in a mobile sheet", () => {
+    touchDrawer.enabled = true;
+    const onSelect = vi.fn();
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value="Current label"
+        placeholder="branch"
+        options={[{ value: "develop", label: "develop" }]}
+        onSelect={onSelect}
+        searchPlaceholder="Search branches..."
+        emptyMessage="No branches"
+        mobileTitle="Branch"
+        dropdownTestId="mobile-pill-content"
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Current label" });
+    expect(trigger.className).toContain("min-h-11");
+    fireEvent.click(trigger);
+
+    expect(screen.getByTestId("mobile-picker-sheet")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Branch" })).toBeTruthy();
+    expect(screen.getByTestId("mobile-pill-content")).toBeTruthy();
+    fireEvent.click(screen.getByRole("option", { name: "develop" }));
+    expect(onSelect).toHaveBeenCalledWith("develop");
   });
 });

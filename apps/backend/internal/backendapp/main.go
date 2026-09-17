@@ -691,6 +691,7 @@ func startAgentInfrastructure(
 			newRepositoryCloneCredentialProvider(services.GitHub, services.Plugins),
 		)
 	}
+	services.Task.SetRemoteOriginBranchLister(repoCloner)
 	log.Info("Repository cloner configured",
 		zap.String("base_path", cfg.RepoClone.BasePath))
 

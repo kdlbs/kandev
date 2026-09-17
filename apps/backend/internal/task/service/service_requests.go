@@ -30,6 +30,8 @@ type TaskRepositoryInput struct {
 	ProviderRepoID string `json:"provider_repo_id,omitempty"`
 	ProviderOwner  string `json:"provider_owner,omitempty"`
 	ProviderName   string `json:"provider_name,omitempty"`
+	CheckoutSource string `json:"checkout_source,omitempty"`
+	ExpectedOrigin string `json:"expected_origin,omitempty"`
 
 	// PreserveBaseBranch keeps an effective branch produced after policy
 	// resolution (for example, the branch created by the local fresh-branch
@@ -72,18 +74,22 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	WorkspaceID    string                 `json:"workspace_id"`
-	WorkflowID     string                 `json:"workflow_id"`
-	WorkflowStepID string                 `json:"workflow_step_id"`
-	Title          string                 `json:"title"`
-	Description    string                 `json:"description"`
-	AutoTitle      bool                   `json:"auto_title,omitempty"`
-	Priority       string                 `json:"priority"`
-	State          *v1.TaskState          `json:"state,omitempty"`
-	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
+	WorkspaceID    string                `json:"workspace_id"`
+	WorkflowID     string                `json:"workflow_id"`
+	WorkflowStepID string                `json:"workflow_step_id"`
+	Title          string                `json:"title"`
+	Description    string                `json:"description"`
+	AutoTitle      bool                  `json:"auto_title,omitempty"`
+	Priority       string                `json:"priority"`
+	State          *v1.TaskState         `json:"state,omitempty"`
+	Repositories   []TaskRepositoryInput `json:"repositories,omitempty"`
+	// WorkspaceSources is presence-aware. A nil pointer preserves legacy
+	// repository/workspace-path behavior; a non-nil pointer, including an empty
+	// slice, is the complete ordered workspace contents selected by the caller.
+	WorkspaceSources *[]WorkspaceSourceInput `json:"workspace_sources,omitempty"`
+	Position         int                     `json:"position"`
+	Metadata         map[string]interface{}  `json:"metadata,omitempty"`
+	DeferredLaunch   map[string]interface{}  `json:"deferred_launch,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.

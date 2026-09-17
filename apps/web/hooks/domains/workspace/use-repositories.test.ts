@@ -61,6 +61,13 @@ describe("useRepositories", () => {
     expect(mockListRepositories).not.toHaveBeenCalled();
   });
 
+  it("exposes whether the workspace repository catalog has settled", () => {
+    setup(/* loaded */ true);
+    const { result } = renderHook(() => useRepositories("ws-1", true, false));
+
+    expect(result.current.isLoaded).toBe(true);
+  });
+
   it("fetches on the lazy path when not yet loaded", async () => {
     setup(/* loaded */ false);
     renderHook(() => useRepositories("ws-1", true, false));

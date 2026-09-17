@@ -33,6 +33,7 @@ import type {
 } from "@/lib/agent-profile-recent-use";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskColor } from "@/lib/task-colors";
+import type { TaskCreateLastUsedSourceApi } from "@/lib/types/http-user-settings";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -497,6 +498,7 @@ export type TaskCreateLastUsedState = {
   agentProfileId: string | null;
   executorProfileId: string | null;
   workflowIdsByWorkspace: Record<string, string>;
+  workspaceSourcesByWorkspace?: Record<string, TaskCreateLastUsedSourceApi[]>;
   synced?: boolean;
 };
 

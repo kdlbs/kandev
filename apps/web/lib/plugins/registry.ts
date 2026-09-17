@@ -13,6 +13,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { i18n } from "@/lib/i18n";
+import { invalidateIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 import type {
   NavItem,
   IntegrationSettingsRegistration,
@@ -290,6 +291,7 @@ class PluginRegistryStore {
     if (byWorkspace.get(workspaceId) === enabled) return;
     byWorkspace.set(workspaceId, enabled);
     this.notify();
+    invalidateIntegrationAvailability();
   }
 
   getIntegrationEnabled(integrationId: string, workspaceId: string): boolean | undefined {

@@ -1,16 +1,26 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import type { LocalRepository } from "@/lib/types/http";
 import type {
   DialogFormState,
   StepType,
+  TaskLocalRepositorySelection,
+  TaskRemoteRepositorySelection,
+  TaskRepositorySelection,
   TaskFormInputsHandle,
 } from "@/components/task-create-dialog-types";
+import type { TaskRemoteProviderReadinessMap } from "@/components/task-create-dialog-remote-provider-readiness";
 import {
   useRemoteReposSeedEffect,
-  useRemoteReposState,
-  useRepositoriesState,
+  useRepositorySelectionState,
 } from "@/components/task-create-dialog-repositories-state";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
@@ -22,6 +32,17 @@ import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
  * new_workspace toggle (handoffs phase 5).
  */
 export type SubtaskWorkspaceMode = "inherit_parent" | "new_workspace";
+
+type CanonicalSubtaskFormState = DialogFormState & {
+  repositorySelections: TaskRepositorySelection[];
+  repositorySelectionsTouched: boolean;
+  appendRepositorySelection: (
+    selection:
+      | Omit<TaskLocalRepositorySelection, "key">
+      | Omit<TaskRemoteRepositorySelection, "key">,
+  ) => string;
+  resetRepositorySelections: (selections: TaskRepositorySelection[]) => void;
+};
 
 /**
  * Default workspace mode for the New Subtask dialog. When the parent
@@ -47,17 +68,24 @@ export function defaultSubtaskWorkspaceMode(
  * draft, and discovered repos) are kept as inert stubs because the subtask
  * dialog renders its own title input and inherits the parent's workflow.
  */
-export function useSubtaskFormState(workspaceId: string | null): DialogFormState {
-  const repos = useRepositoriesState();
-  const remoteRepos = useRemoteReposState();
+export function useSubtaskFormState(workspaceId: string | null): CanonicalSubtaskFormState {
+  const repos = useRepositorySelectionState();
   const branchesByUrl = useBranchesByURL(workspaceId);
   const prInfoByUrl = usePRInfoByURL(workspaceId);
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
+  const [executorChoiceTouched, setExecutorChoiceTouched] = useState(false);
+  const [automaticExecutorRestore, setAutomaticExecutorRestore] = useState<{
+    executorId: string;
+    executorProfileId: string;
+  } | null>(null);
+  const [folderOnlyExecutorNotice, setFolderOnlyExecutorNotice] = useState(false);
   const [autopilot, setAutopilot] = useState(false);
   const [freshBranchEnabled, setFreshBranchEnabled] = useState(false);
   const [useRemote, setUseRemote] = useState(false);
   const [githubUrlError, setGitHubUrlError] = useState<string | null>(null);
+  const [remoteProviderReadiness, setRemoteProviderReadiness] =
+    useState<TaskRemoteProviderReadinessMap>({});
   // Discovered (on-disk) repos — populated by useDiscoverReposEffect when the
   // dialog opens, same as the create-task flow. This lets users target
   // not-yet-imported on-machine git folders for the subtask.
@@ -69,94 +97,224 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
   // Mirror the create-task dialog: when the user flips Remote mode on and
   // the chip list is empty, seed a single empty paste row so the URL input
   // has somewhere to land. Non-destructive on toggle-off.
-  useRemoteReposSeedEffect(useRemote, remoteRepos.remoteRepos, remoteRepos.setRemoteRepos);
+  useRemoteReposSeedEffect(useRemote, repos.remoteRepos, repos.setRemoteRepos);
 
-  return useMemo<DialogFormState>(
-    () => ({
-      ...INERT_TITLE_DRAFT,
-      hasPendingAttachmentUploads: false,
-      setHasPendingAttachmentUploads: NOOP,
-      currentDefaults: EMPTY_DEFAULTS,
-      descriptionInputRef,
-      // Repo chip row — what RepoChipsRow + useDialogHandlers actually drive.
-      repositories: repos.repositories,
-      repositoriesDirty: repos.repositoriesDirty,
-      setRepositories: repos.setRepositories,
-      setRepositoriesDirty: repos.setRepositoriesDirty,
-      addRepository: repos.addRepository,
-      removeRepository: repos.removeRepository,
-      updateRepository: repos.updateRepository,
-      remoteRepos: remoteRepos.remoteRepos,
-      setRemoteRepos: remoteRepos.setRemoteRepos,
-      addRemoteRepo: remoteRepos.addRemoteRepo,
-      removeRemoteRepo: remoteRepos.removeRemoteRepo,
-      updateRemoteRepo: remoteRepos.updateRemoteRepo,
-      branchesByUrl,
-      prInfoByUrl,
-      agentProfileId,
-      setAgentProfileId,
-      executorId: "",
-      setExecutorId: NOOP,
-      executorProfileId,
-      setExecutorProfileId,
-      // The New Subtask dialog is create-only — there is no editing task to
-      // seed a stored profile from, so nothing is ever "seeded" here.
-      setExecutorProfileIdFromSeed: NOOP,
-      seededExecutorProfileId: null,
-      autopilot,
-      setAutopilot,
-      discoveredRepositories,
-      setDiscoveredRepositories,
-      discoverReposLoading,
-      setDiscoverReposLoading,
-      discoverReposLoaded,
-      setDiscoverReposLoaded,
-      // Subtasks inherit the parent's workflow; no selector is rendered.
-      selectedWorkflowId: null,
-      setSelectedWorkflowId: NOOP,
-      fetchedSteps: EMPTY_STEPS,
-      setFetchedSteps: NOOP,
-      isCreatingSession: false,
-      setIsCreatingSession: NOOP,
-      isCreatingTask: false,
-      setIsCreatingTask: NOOP,
-      useRemote,
-      setUseRemote,
-      githubUrlError,
-      setGitHubUrlError,
-      workflowAgentProfileId: "",
-      setWorkflowAgentProfileId: NOOP,
-      clearDraft: NOOP,
-      ...INERT_FRESH_BRANCH_AND_NOREPO,
-      freshBranchEnabled,
-      setFreshBranchEnabled,
-    }),
+  return useMemo(
+    () =>
+      buildSubtaskFormState({
+        repos,
+        branchesByUrl,
+        prInfoByUrl,
+        descriptionInputRef,
+        agentProfileId,
+        setAgentProfileId,
+        executorProfileId,
+        setExecutorProfileId,
+        executorChoiceTouched,
+        setExecutorChoiceTouched,
+        automaticExecutorRestore,
+        setAutomaticExecutorRestore,
+        folderOnlyExecutorNotice,
+        setFolderOnlyExecutorNotice,
+        autopilot,
+        setAutopilot,
+        discoveredRepositories,
+        setDiscoveredRepositories,
+        discoverReposLoading,
+        setDiscoverReposLoading,
+        discoverReposLoaded,
+        setDiscoverReposLoaded,
+        useRemote,
+        setUseRemote,
+        githubUrlError,
+        setGitHubUrlError,
+        remoteProviderReadiness,
+        setRemoteProviderReadiness,
+        freshBranchEnabled,
+        setFreshBranchEnabled,
+      }),
     [
       repos.repositories,
       repos.repositoriesDirty,
       repos.setRepositories,
+      repos.hydrateRepositories,
       repos.setRepositoriesDirty,
       repos.addRepository,
       repos.removeRepository,
       repos.updateRepository,
-      remoteRepos.remoteRepos,
-      remoteRepos.setRemoteRepos,
-      remoteRepos.addRemoteRepo,
-      remoteRepos.removeRemoteRepo,
-      remoteRepos.updateRemoteRepo,
+      repos.repositorySelections,
+      repos.repositorySelectionsTouched,
+      repos.appendRepositorySelection,
+      repos.remoteRepos,
+      repos.setRemoteRepos,
+      repos.addRemoteRepo,
+      repos.removeRemoteRepo,
+      repos.updateRemoteRepo,
+      repos.resetRepositorySelections,
       branchesByUrl,
       prInfoByUrl,
       agentProfileId,
       executorProfileId,
+      executorChoiceTouched,
+      automaticExecutorRestore,
+      folderOnlyExecutorNotice,
       autopilot,
       freshBranchEnabled,
       useRemote,
       githubUrlError,
+      remoteProviderReadiness,
+      setRemoteProviderReadiness,
       discoveredRepositories,
       discoverReposLoading,
       discoverReposLoaded,
     ],
   );
+}
+
+type StateSetter<T> = Dispatch<SetStateAction<T>>;
+
+type SubtaskFormStateValues = {
+  repos: ReturnType<typeof useRepositorySelectionState>;
+  branchesByUrl: ReturnType<typeof useBranchesByURL>;
+  prInfoByUrl: ReturnType<typeof usePRInfoByURL>;
+  descriptionInputRef: MutableRefObject<TaskFormInputsHandle | null>;
+  agentProfileId: string;
+  setAgentProfileId: StateSetter<string>;
+  executorProfileId: string;
+  setExecutorProfileId: StateSetter<string>;
+  executorChoiceTouched: boolean;
+  setExecutorChoiceTouched: StateSetter<boolean>;
+  automaticExecutorRestore: { executorId: string; executorProfileId: string } | null;
+  setAutomaticExecutorRestore: StateSetter<{
+    executorId: string;
+    executorProfileId: string;
+  } | null>;
+  folderOnlyExecutorNotice: boolean;
+  setFolderOnlyExecutorNotice: StateSetter<boolean>;
+  autopilot: boolean;
+  setAutopilot: StateSetter<boolean>;
+  discoveredRepositories: LocalRepository[];
+  setDiscoveredRepositories: StateSetter<LocalRepository[]>;
+  discoverReposLoading: boolean;
+  setDiscoverReposLoading: StateSetter<boolean>;
+  discoverReposLoaded: boolean;
+  setDiscoverReposLoaded: StateSetter<boolean>;
+  useRemote: boolean;
+  setUseRemote: StateSetter<boolean>;
+  githubUrlError: string | null;
+  setGitHubUrlError: StateSetter<string | null>;
+  remoteProviderReadiness: TaskRemoteProviderReadinessMap;
+  setRemoteProviderReadiness: (value: TaskRemoteProviderReadinessMap) => void;
+  freshBranchEnabled: boolean;
+  setFreshBranchEnabled: StateSetter<boolean>;
+};
+
+function buildSubtaskRepositoryState(repos: SubtaskFormStateValues["repos"]) {
+  return {
+    repositorySelections: repos.repositorySelections,
+    repositorySelectionsTouched: repos.repositorySelectionsTouched,
+    appendRepositorySelection: repos.appendRepositorySelection,
+    repositories: repos.repositories,
+    repositoriesDirty: repos.repositoriesDirty,
+    setRepositories: repos.setRepositories,
+    hydrateRepositories: repos.hydrateRepositories,
+    setRepositoriesDirty: repos.setRepositoriesDirty,
+    addRepository: repos.addRepository,
+    removeRepository: repos.removeRepository,
+    updateRepository: repos.updateRepository,
+    remoteRepos: repos.remoteRepos,
+    setRemoteRepos: repos.setRemoteRepos,
+    addRemoteRepo: repos.addRemoteRepo,
+    removeRemoteRepo: repos.removeRemoteRepo,
+    updateRemoteRepo: repos.updateRemoteRepo,
+    resetRepositorySelections: repos.resetRepositorySelections,
+  };
+}
+
+function buildSubtaskFormState({
+  repos,
+  branchesByUrl,
+  prInfoByUrl,
+  descriptionInputRef,
+  agentProfileId,
+  setAgentProfileId,
+  executorProfileId,
+  setExecutorProfileId,
+  executorChoiceTouched,
+  setExecutorChoiceTouched,
+  automaticExecutorRestore,
+  setAutomaticExecutorRestore,
+  folderOnlyExecutorNotice,
+  setFolderOnlyExecutorNotice,
+  autopilot,
+  setAutopilot,
+  discoveredRepositories,
+  setDiscoveredRepositories,
+  discoverReposLoading,
+  setDiscoverReposLoading,
+  discoverReposLoaded,
+  setDiscoverReposLoaded,
+  useRemote,
+  setUseRemote,
+  githubUrlError,
+  setGitHubUrlError,
+  remoteProviderReadiness,
+  setRemoteProviderReadiness,
+  freshBranchEnabled,
+  setFreshBranchEnabled,
+}: SubtaskFormStateValues): CanonicalSubtaskFormState {
+  return {
+    ...INERT_TITLE_DRAFT,
+    hasPendingAttachmentUploads: false,
+    setHasPendingAttachmentUploads: NOOP,
+    currentDefaults: EMPTY_DEFAULTS,
+    descriptionInputRef,
+    ...buildSubtaskRepositoryState(repos),
+    branchesByUrl,
+    prInfoByUrl,
+    agentProfileId,
+    setAgentProfileId,
+    executorId: "",
+    setExecutorId: NOOP,
+    executorProfileId,
+    setExecutorProfileId,
+    executorChoiceTouched,
+    setExecutorChoiceTouched,
+    automaticExecutorRestore,
+    setAutomaticExecutorRestore,
+    folderOnlyExecutorNotice,
+    setFolderOnlyExecutorNotice,
+    setExecutorProfileIdFromSeed: NOOP,
+    seededExecutorProfileId: null,
+    autopilot,
+    setAutopilot,
+    discoveredRepositories,
+    setDiscoveredRepositories,
+    discoverReposLoading,
+    setDiscoverReposLoading,
+    discoverReposLoaded,
+    setDiscoverReposLoaded,
+    selectedWorkflowId: null,
+    setSelectedWorkflowId: NOOP,
+    fetchedSteps: EMPTY_STEPS,
+    setFetchedSteps: NOOP,
+    isCreatingSession: false,
+    setIsCreatingSession: NOOP,
+    isCreatingTask: false,
+    setIsCreatingTask: NOOP,
+    useRemote,
+    setUseRemote,
+    githubUrlError,
+    setGitHubUrlError,
+    remoteProviderReadiness,
+    setRemoteProviderReadiness,
+    workflowAgentProfileId: "",
+    setWorkflowAgentProfileId: NOOP,
+    clearDraft: NOOP,
+    ...INERT_FRESH_BRANCH_AND_NOREPO,
+    freshBranchEnabled,
+    setFreshBranchEnabled,
+  };
 }
 
 const NOOP = () => undefined;

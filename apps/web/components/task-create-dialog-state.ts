@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import type { LocalRepository, TaskPriority } from "@/lib/types/http";
-import type {
-  TaskFormInputsHandle,
-  TaskRemoteRepoRow,
-} from "@/components/task-create-dialog-types";
-import { resetTaskForm, type FormResetters } from "@/components/task-create-dialog-form-reset";
+import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
+import {
+  repositorySelectionsFromInitialValues,
+  resetTaskForm,
+  seededRemoteRepositories,
+  type FormResetters,
+} from "@/components/task-create-dialog-form-reset";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
@@ -19,10 +21,10 @@ import type {
   TaskCreateDialogInitialValues,
   DialogFormState,
 } from "@/components/task-create-dialog-types";
+import type { TaskRemoteProviderReadinessMap } from "@/components/task-create-dialog-remote-provider-readiness";
 import {
   useRemoteReposSeedEffect,
-  useRemoteReposState,
-  useRepositoriesState,
+  useRepositorySelectionState,
 } from "@/components/task-create-dialog-repositories-state";
 import { useDialogComputed } from "@/components/task-create-dialog-computed";
 import { createDebugLogger } from "@/lib/debug/log";
@@ -143,65 +145,21 @@ function resolveDefaultsSource(
   return "empty";
 }
 
-function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
-  return values.find((value) => value !== undefined);
-}
-
-function definedOr<T>(fallback: T, ...values: Array<T | undefined>): T {
-  return firstDefined(...values) ?? fallback;
-}
-
-function remoteRepositoryFullName(
-  inspection: TaskCreateDialogInitialValues["remoteRepository"],
-): string | undefined {
-  return inspection ? `${inspection.ownerOrProject}/${inspection.repositoryName}` : undefined;
-}
-
-function seededRemoteRepositories(iv?: TaskCreateDialogInitialValues): TaskRemoteRepoRow[] {
-  const initial: Partial<TaskCreateDialogInitialValues> = iv ?? {};
-  const inspection = initial.remoteRepository;
-  const repository: Partial<NonNullable<TaskCreateDialogInitialValues["remoteRepository"]>> =
-    inspection ?? {};
-  const remoteUrl = definedOr("", initial.remoteUrl, initial.githubUrl, repository.cloneUrl);
-  if (!remoteUrl) return [];
-  // Seed a pre-filled URL and preserve its PR head when one is provided.
-  const seededBranch = definedOr(
-    "",
-    initial.checkoutBranch,
-    initial.branch,
-    repository.headBranch,
-    repository.defaultBranch,
-  );
-  return [
-    {
-      key: "remote-0",
-      url: remoteUrl,
-      branch: seededBranch,
-      source: "paste",
-      prNumber: firstDefined(initial.prNumber, repository.pullRequest?.number),
-      prBaseBranch: firstDefined(initial.prBaseBranch, repository.baseBranch),
-      prHeadBranch: firstDefined(initial.checkoutBranch, repository.headBranch),
-      remoteUrl: repository.cloneUrl,
-      provider: repository.providerId,
-      providerHost: repository.providerHost,
-      providerScope: repository.providerScope,
-      providerRepoId: repository.repositoryId,
-      providerOwner: repository.ownerOrProject,
-      providerName: repository.repositoryName,
-      fullName: remoteRepositoryFullName(inspection),
-    },
-  ];
-}
-
 function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
   const remoteRepositories = seededRemoteRepositories(iv);
   resetters.setDiscoveredRepositories([]);
   resetters.setDiscoverReposLoaded(false);
+  if (resetters.resetRepositorySelections) {
+    resetters.resetRepositorySelections(repositorySelectionsFromInitialValues(iv));
+  } else {
+    resetters.setUseRemote(remoteRepositories.length > 0);
+    resetters.setRemoteRepos(remoteRepositories);
+  }
   resetters.setUseRemote(remoteRepositories.length > 0);
-  resetters.setRemoteRepos(remoteRepositories);
   resetters.setGitHubUrlError(null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
+  resetters.setRemoteProviderReadiness?.({});
   // The dialog stays mounted between opens, so without this the previous
   // create's predecessor selection reappears on the next one.
   resetters.setBlockedBy([]);
@@ -314,6 +272,12 @@ function useFormStateValues(workflowId: string | null) {
   const [agentProfileId, setAgentProfileId] = useState("");
   const [executorId, setExecutorId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
+  const [executorChoiceTouched, setExecutorChoiceTouched] = useState(false);
+  const [automaticExecutorRestore, setAutomaticExecutorRestore] = useState<{
+    executorId: string;
+    executorProfileId: string;
+  } | null>(null);
+  const [folderOnlyExecutorNotice, setFolderOnlyExecutorNotice] = useState(false);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId);
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
@@ -326,6 +290,8 @@ function useFormStateValues(workflowId: string | null) {
   const [workspacePath, setWorkspacePath] = useState("");
   const [autopilot, setAutopilot] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [remoteProviderReadiness, setRemoteProviderReadiness] =
+    useState<TaskRemoteProviderReadinessMap>({});
   return {
     taskName,
     setTaskName,
@@ -344,6 +310,12 @@ function useFormStateValues(workflowId: string | null) {
     setExecutorId,
     executorProfileId,
     setExecutorProfileId,
+    executorChoiceTouched,
+    setExecutorChoiceTouched,
+    automaticExecutorRestore,
+    setAutomaticExecutorRestore,
+    folderOnlyExecutorNotice,
+    setFolderOnlyExecutorNotice,
     selectedWorkflowId,
     setSelectedWorkflowId,
     fetchedSteps,
@@ -367,6 +339,8 @@ function useFormStateValues(workflowId: string | null) {
     setAutopilot,
     priority,
     setPriority,
+    remoteProviderReadiness,
+    setRemoteProviderReadiness,
   };
 }
 
@@ -399,8 +373,8 @@ export function useDialogFormState(
   const discovery = useDiscoveryState();
   const ghUrl = useGitHubUrlState();
   const wfAgent = useWorkflowAgentProfileState();
-  const repos = useRepositoriesState();
-  const remoteRepos = useRemoteReposState();
+  const repos = useRepositorySelectionState();
+  useRemoteReposSeedEffect(ghUrl.useRemote, repos.remoteRepos, repos.setRemoteRepos);
   const freshBranch = useFreshBranchState();
   const dependencies = useTaskDependencyState();
   const branchesByUrl = useBranchesByURL(workspaceId);
@@ -424,10 +398,14 @@ export function useDialogFormState(
       setHasPendingAttachmentUploads: form.setHasPendingAttachmentUploads,
       setRepositories: repos.setRepositories,
       setRepositoriesDirty: repos.setRepositoriesDirty,
-      setRemoteRepos: remoteRepos.setRemoteRepos,
+      setRemoteRepos: repos.setRemoteRepos,
+      resetRepositorySelections: repos.resetRepositorySelections,
       setAgentProfileId: form.setAgentProfileId,
       setExecutorId: form.setExecutorId,
       setExecutorProfileId: form.setExecutorProfileId,
+      setExecutorChoiceTouched: form.setExecutorChoiceTouched,
+      setAutomaticExecutorRestore: form.setAutomaticExecutorRestore,
+      setFolderOnlyExecutorNotice: form.setFolderOnlyExecutorNotice,
       setSelectedWorkflowId: form.setSelectedWorkflowId,
       setFetchedSteps: form.setFetchedSteps,
       setDiscoveredRepositories: discovery.setDiscoveredRepositories,
@@ -441,17 +419,16 @@ export function useDialogFormState(
       setWorkspacePath: form.setWorkspacePath,
       setAutopilot: form.setAutopilot,
       setPriority: form.setPriority,
+      setRemoteProviderReadiness: form.setRemoteProviderReadiness,
     },
   });
-
-  useRemoteReposSeedEffect(ghUrl.useRemote, remoteRepos.remoteRepos, remoteRepos.setRemoteRepos);
 
   // Title autofill follows the first populated remote-repo row. Empty
   // placeholders do not prevent a later pasted PR or issue from suggesting
   // its title.
-  const primaryRemoteUrl = remoteRepos.remoteRepos.find((row) => row.url.trim())?.url ?? "";
+  const primaryRemoteUrl = repos.remoteRepos.find((row) => row.url.trim())?.url ?? "";
   useTitleAutofillFromPrimaryGitHubInfo({
-    open: open && ghUrl.useRemote,
+    open: open && primaryRemoteUrl.length > 0,
     primaryRemoteUrl,
     prInfoByUrl,
     taskName: form.taskName,
@@ -478,7 +455,6 @@ export function useDialogFormState(
     ...ghUrl,
     ...wfAgent,
     ...repos,
-    ...remoteRepos,
     ...freshBranch,
     ...dependencies,
     branchesByUrl,
@@ -660,6 +636,7 @@ export function useTaskCreateDialogData({
   const {
     repositories,
     isLoading: repositoriesLoading,
+    isLoaded: repositoriesLoaded,
     refresh: refreshRepositories,
   } = useRepositories(workspaceId, open);
   // Per-repo branch loading lives in each chip now (RepoChipsRow). No
@@ -697,6 +674,7 @@ export function useTaskCreateDialogData({
     snapshots,
     repositories,
     repositoriesLoading,
+    repositoriesLoaded,
     refreshRepositories,
     branchesLoading,
     taskCreateLastUsed: taskCreateUserSettings.userSettings.taskCreateLastUsed,

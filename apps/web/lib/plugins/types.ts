@@ -207,6 +207,9 @@ export interface PluginActionOptions {
 /** A provider-neutral repository/pull-request description returned by URL inspection. */
 export type RepositoryInspection = PluginSDK.RepositoryInspection;
 
+/** Credential-free readiness returned by a workspace-scoped repository provider. */
+export type RepositoryProviderAvailability = PluginSDK.RepositoryProviderAvailability;
+
 /** Provider-neutral branch descriptor consumed by Kandev's branch picker. */
 export type RepositoryProviderBranch = Awaited<
   ReturnType<PluginSDK.RepositoryProviderRegistration["listBranches"]>

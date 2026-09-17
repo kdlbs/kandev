@@ -145,6 +145,28 @@ export type TaskCreateLastUsedApi = {
   agent_profile_id?: string;
   executor_profile_id?: string;
   workflow_ids_by_workspace?: Record<string, string>;
+  workspace_sources_by_workspace?: Record<string, TaskCreateLastUsedSourceApi[]>;
+};
+
+export type TaskCreateLastUsedSourceApi = {
+  kind: "repository" | "folder" | string;
+  repository_id?: string;
+  local_path?: string;
+  github_url?: string;
+  remote_url?: string;
+  provider?: string;
+  provider_host?: string;
+  provider_scope?: string;
+  provider_repo_id?: string;
+  provider_owner?: string;
+  provider_name?: string;
+  checkout_source?: "remote_origin";
+  expected_origin?: string;
+  base_branch?: string;
+  checkout_branch?: string;
+  branch_policy_id?: string;
+  pr_number?: number;
+  display_name?: string;
 };
 
 export type AppStatusBarOrderApi = {

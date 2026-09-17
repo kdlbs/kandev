@@ -128,17 +128,21 @@ describe("RemoteRepoChip provider tabs", () => {
     expect(screen.getByText("PLATFORM/web")).toBeTruthy();
   });
 
-  it("shows bottom tabs and filters repositories when multiple providers are available", () => {
+  it("shows named tabs above search and filters repositories when multiple providers are available", () => {
     renderPicker(
       accessibleRepos([GITHUB_REPO, GITLAB_REPO, AZURE_REPO], ["github", "gitlab", AZURE_PROVIDER]),
     );
 
     expect(screen.getAllByRole("tab")).toHaveLength(3);
     expect(screen.getByRole("tab", { name: "GitHub" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.queryByText("GitHub")).toBeNull();
-    expect(screen.queryByText("GitLab")).toBeNull();
-    expect(screen.queryByText(AZURE_PROVIDER_LABEL)).toBeNull();
-    expect(screen.getByTestId("remote-repo-provider-tabs").className).toContain("overflow-hidden");
+    expect(screen.getByText("GitHub")).toBeTruthy();
+    expect(screen.getByText("GitLab")).toBeTruthy();
+    expect(screen.getByText(AZURE_PROVIDER_LABEL)).toBeTruthy();
+    const tabs = screen.getByTestId("remote-repo-provider-tabs");
+    const input = screen.getByTestId("remote-repo-input");
+    expect(Boolean(tabs.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+      true,
+    );
     expect(screen.getByText("acme/site")).toBeTruthy();
     expect(screen.queryByText(GITLAB_REPO_NAME)).toBeNull();
     expect(screen.queryByText(AZURE_REPO_NAME)).toBeNull();

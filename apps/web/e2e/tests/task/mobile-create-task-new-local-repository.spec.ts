@@ -12,6 +12,28 @@ useRegularMode();
 
 type RepositoryRecord = { id: string; local_path: string; default_branch: string };
 
+async function restoreSingleRepositoryLastUsed(
+  apiClient: ApiClient,
+  workspaceId: string,
+  repositoryId: string,
+): Promise<void> {
+  await apiClient.saveUserSettings({
+    workspace_id: workspaceId,
+    task_create_last_used: {
+      workspace_sources_by_workspace: {
+        [workspaceId]: [
+          {
+            kind: "repository",
+            repository_id: repositoryId,
+            base_branch: "main",
+            checkout_branch: "main",
+          },
+        ],
+      },
+    },
+  });
+}
+
 async function persistedRepository(
   apiClient: ApiClient,
   workspaceId: string,
@@ -34,7 +56,13 @@ async function openCreateTask(page: Page): Promise<void> {
 }
 
 async function openCreationDrawer(page: Page): Promise<Locator> {
-  const trigger = page.getByTestId("repo-chip-trigger");
+  const sheet = page.getByTestId("mobile-repository-sheet-content");
+  if (!(await sheet.isVisible().catch(() => false))) {
+    await page.getByTestId("mobile-repository-manager").tap();
+    await expect(sheet).toBeVisible();
+  }
+  const trigger = page.getByTestId("repo-chip-trigger").first();
+  await expect(trigger).toBeVisible();
   await trigger.click();
   const search = page.getByPlaceholder("Search repositories...");
   const refresh = page.getByTestId("repo-refresh-button");
@@ -93,6 +121,7 @@ async function openCreationDrawer(page: Page): Promise<Locator> {
   await action.click();
   const drawer = page.getByTestId("create-local-repository-drawer");
   await expect(drawer).toBeVisible();
+  await expect(page.getByTestId("mobile-repository-sheet-content")).toBeVisible();
   return drawer;
 }
 
@@ -215,6 +244,7 @@ test.describe("Create task with a new local repository on mobile", () => {
       "a direct local executor profile is required by the fixture",
     ).toBeDefined();
 
+    await restoreSingleRepositoryLastUsed(apiClient, seedData.workspaceId, seedData.repositoryId);
     await openCreateTask(testPage);
     await testPage.getByTestId("task-title-input").fill("Mobile task on a new repository");
     await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
@@ -223,7 +253,8 @@ test.describe("Create task with a new local repository on mobile", () => {
     await testPage.getByRole("textbox", { name: "Repository name" }).fill("dismissed-name");
     await testPage.keyboard.press("Escape");
     await expect(drawer).not.toBeVisible();
-    await expect(testPage.getByTestId("repo-chip-trigger")).toBeFocused();
+    await expect(testPage.getByTestId("mobile-repository-sheet-content")).toBeVisible();
+    await expect(testPage.getByTestId("repo-chip-trigger").first()).toBeFocused();
     expect(fs.existsSync(path.join(backend.tmpDir, "dismissed-name"))).toBe(false);
     await expect(testPage.getByTestId("task-title-input")).toHaveValue(
       "Mobile task on a new repository",
@@ -244,7 +275,9 @@ test.describe("Create task with a new local repository on mobile", () => {
     await drawer.getByRole("button", { name: "Create repository" }).click();
     await expect(drawer).not.toBeVisible();
 
-    await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(repositoryName);
+    await expect(
+      testPage.getByTestId("repo-chip-trigger").filter({ hasText: repositoryName }),
+    ).toBeVisible();
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
     await branchSelector.tap();
@@ -252,6 +285,7 @@ test.describe("Create task with a new local repository on mobile", () => {
     await expect(mainOption).toBeVisible();
     await mainOption.tap();
     await expect(branchSelector).toContainText("main");
+    await testPage.getByTestId("mobile-repository-done").tap();
     await expect(testPage.getByTestId("executor-profile-selector")).toContainText(
       directExecutor!.name,
     );

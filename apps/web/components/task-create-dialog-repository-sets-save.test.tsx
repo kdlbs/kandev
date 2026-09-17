@@ -3,13 +3,15 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 import type { RepositorySet } from "@/lib/types/http";
 import { repositoryId, workspaceId } from "@/lib/types/ids";
-import type { TaskRepoRow } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
 
 const NAME_INPUT = "repository-set-name";
 const SUBMIT = "repository-set-save-submit";
 const REPO_WEB = "repo-web";
 const REPO_GATEWAY = "repo-gateway";
 const SET_NAME = "Full-stack";
+const EXCLUDED_ROW_MESSAGE = "1 row is not a saved workspace repository";
+const EXCLUDED_TEST_ID = "repository-set-save-excluded";
 
 const mockCreateRepositorySet = vi.fn();
 const mockUpsertRepositorySet = vi.fn();
@@ -43,7 +45,13 @@ const ROWS: TaskRepoRow[] = [
   { key: "row-1", repositoryId: REPO_GATEWAY, branch: "develop" },
 ];
 
-function renderDialog(overrides: { rows?: TaskRepoRow[]; onOpenChange?: () => void } = {}) {
+function renderDialog(
+  overrides: {
+    rows?: TaskRepoRow[];
+    selections?: TaskRepositorySelection[];
+    onOpenChange?: () => void;
+  } = {},
+) {
   const onOpenChange = overrides.onOpenChange ?? vi.fn();
   render(
     <SaveRepositorySetDialog
@@ -51,6 +59,7 @@ function renderDialog(overrides: { rows?: TaskRepoRow[]; onOpenChange?: () => vo
       onOpenChange={onOpenChange}
       workspaceId="ws-1"
       rows={overrides.rows ?? ROWS}
+      selections={overrides.selections}
     />,
   );
   return { onOpenChange };
@@ -80,8 +89,8 @@ describe("SaveRepositorySetDialog duplicate rows", () => {
     expect(screen.getByTestId("repository-set-save-duplicates").textContent).toBe(
       `${count} additional ${count === 1 ? "row is" : "rows are"} not included. Only the first row for each repository is saved, including its base choice.`,
     );
-    expect(screen.getByTestId("repository-set-save-excluded").textContent).toBe(
-      "1 row is not a saved workspace repository and will not be included",
+    expect(screen.getByTestId(EXCLUDED_TEST_ID).textContent).toBe(
+      `${EXCLUDED_ROW_MESSAGE} and will not be included`,
     );
     expect(screen.getByText("Saves 2 repositories")).toBeTruthy();
   });
@@ -96,7 +105,7 @@ describe("SaveRepositorySetDialog duplicate rows", () => {
     const originalRows = structuredClone(rows);
     renderDialog({ rows });
     expect(screen.getByTestId("repository-set-save-duplicates")).toBeTruthy();
-    expect(screen.queryByTestId("repository-set-save-excluded")).toBeNull();
+    expect(screen.queryByTestId(EXCLUDED_TEST_ID)).toBeNull();
     fireEvent.change(screen.getByTestId(NAME_INPUT), { target: { value: SET_NAME } });
     fireEvent.click(screen.getByTestId(SUBMIT));
 
@@ -205,6 +214,24 @@ describe("SaveRepositorySetDialog", () => {
       { repositoryId: REPO_GATEWAY, baseBranch: "main" },
     ]);
     // The user is told which rows could not be included.
-    expect(screen.queryByTestId("repository-set-save-excluded")).not.toBeNull();
+    expect(screen.queryByTestId(EXCLUDED_TEST_ID)).not.toBeNull();
+  });
+
+  it("explains that remote rows are excluded while saving registered members", () => {
+    renderDialog({
+      rows: [{ key: "row-0", repositoryId: REPO_WEB, branch: "main" }],
+      selections: [
+        { kind: "local", key: "row-0", repositoryId: REPO_WEB, branch: "main" },
+        {
+          kind: "remote",
+          key: "remote-0",
+          url: "https://github.com/acme/remote",
+          branch: "main",
+          source: "paste",
+        },
+      ],
+    });
+
+    expect(screen.getByTestId(EXCLUDED_TEST_ID).textContent).toContain(EXCLUDED_ROW_MESSAGE);
   });
 });

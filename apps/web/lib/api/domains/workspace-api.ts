@@ -11,7 +11,17 @@ import type {
   Workspace,
   Repository,
   TaskSession,
+  Branch,
 } from "@/lib/types/http";
+
+export type RepositoryCloneSourceResponse = {
+  ready: boolean;
+  origin?: string;
+  reason?: string;
+  current_branch?: string;
+  default_branch?: string;
+  branches: Branch[];
+};
 
 // Workspace operations
 export async function createWorkspace(
@@ -41,6 +51,28 @@ export async function listRepositories(
   const queryString = searchParams.toString();
   const url = `/api/v1/workspaces/${workspaceId}/repositories${queryString ? `?${queryString}` : ""}`;
   return fetchJson<ListRepositoriesResponse>(url, options);
+}
+
+/** Reads a host checkout origin and its remote refs without mutating the checkout. */
+export async function inspectRepositoryCloneSource(
+  workspaceId: string,
+  payload: { repositoryId?: string; localPath?: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<RepositoryCloneSourceResponse>(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/repository-clone-source`,
+    {
+      ...options,
+      init: {
+        method: "POST",
+        body: JSON.stringify({
+          ...(payload.repositoryId ? { repository_id: payload.repositoryId } : {}),
+          ...(payload.localPath ? { local_path: payload.localPath } : {}),
+        }),
+        ...(options?.init ?? {}),
+      },
+    },
+  );
 }
 
 // Repository set operations

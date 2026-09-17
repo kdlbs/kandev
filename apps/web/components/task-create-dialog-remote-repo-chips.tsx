@@ -106,7 +106,7 @@ export function RemoteRepoChipsRow({
   );
 }
 
-function inspectedRemoteRepositoryUpdate(
+export function inspectedRemoteRepositoryUpdate(
   inspection: RepositoryInspection,
   row: TaskRemoteRepoRow,
 ): Partial<TaskRemoteRepoRow> {
@@ -128,7 +128,7 @@ function inspectedRemoteRepositoryUpdate(
   };
 }
 
-function remoteRepositoryUpdateNeeded(
+export function remoteRepositoryUpdateNeeded(
   row: TaskRemoteRepoRow,
   update: Partial<TaskRemoteRepoRow>,
 ): boolean {
@@ -137,7 +137,7 @@ function remoteRepositoryUpdateNeeded(
   );
 }
 
-function retryRemoteResolution(fs: DialogFormState, url: string): void {
+export function retryRemoteResolution(fs: DialogFormState, url: string): void {
   fs.branchesByUrl.clear(url);
   fs.prInfoByUrl.clear(url);
   fs.branchesByUrl.ensure(url);
@@ -152,7 +152,7 @@ function retryRemoteResolution(fs: DialogFormState, url: string): void {
  * dropdown once it populates). Extracted so the JSX above stays compact and
  * the metadata-clearing rule lives in one obvious spot.
  */
-function makeURLChange(
+export function makeURLChange(
   onUpdateRow: (key: string, update: Partial<TaskRemoteRepoRow>) => void,
   key: string,
 ): RemoteRepoChipProps["onURLChange"] {

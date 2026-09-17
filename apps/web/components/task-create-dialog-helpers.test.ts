@@ -247,6 +247,7 @@ describe("findUnresolvedProviderRemote", () => {
 
 describe("auto-title creation helpers", () => {
   const base = {
+    trimmedTitle: "Task",
     workspaceId: "ws-1",
     effectiveWorkflowId: "wf-1",
     repositories: [{ key: "repo-1", repositoryId: "repo-1", branch: "main" }],
@@ -264,6 +265,43 @@ describe("auto-title creation helpers", () => {
         trimmedTitle: "",
         trimmedDescription: "Describe the work",
         autoTitle: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("blocks provider-owned rows while allowing anonymous pasted remote URLs", () => {
+    const pickerRow = {
+      key: "remote-1",
+      url: "https://bitbucket.example.test/acme/app",
+      branch: "main",
+      source: "picker" as const,
+      provider: "bitbucket",
+    } as TaskRemoteRepoRow;
+    const pastedRow = { ...pickerRow, source: "paste" as const };
+    const anonymousPastedRow = { ...pastedRow, provider: undefined };
+
+    expect(
+      validateCreateInputs({
+        ...base,
+        repositories: [],
+        selections: [{ kind: "remote", ...pickerRow }],
+        remoteProviderReadiness: { bitbucket: "unavailable" },
+      }),
+    ).toBe(false);
+    expect(
+      validateCreateInputs({
+        ...base,
+        repositories: [],
+        selections: [{ kind: "remote", ...pastedRow }],
+        remoteProviderReadiness: { bitbucket: "unavailable" },
+      }),
+    ).toBe(false);
+    expect(
+      validateCreateInputs({
+        ...base,
+        repositories: [],
+        selections: [{ kind: "remote", ...anonymousPastedRow }],
+        remoteProviderReadiness: { bitbucket: "unavailable" },
       }),
     ).toBe(true);
   });

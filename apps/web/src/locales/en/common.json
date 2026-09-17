@@ -179,6 +179,7 @@
   "files": "Files",
   "folderName": "Folder name",
   "folders": "Folders",
+  "go": "Go",
   "forwardStdinStdoutStraightToThe": "Forward stdin/stdout straight to the CLI subprocess. Disables ACP.",
   "getStarted": "Get Started",
   "githubCliNotAuthenticated": "GitHub CLI not authenticated",

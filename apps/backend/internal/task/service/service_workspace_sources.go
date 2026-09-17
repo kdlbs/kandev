@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,7 +31,11 @@ const (
 type WorkspaceSourceInput struct {
 	Kind                                                                                                                              WorkspaceSourceKind
 	RepositoryID, LocalPath, GitHubURL, RemoteURL, Provider, ProviderHost, ProviderScope, ProviderRepoID, ProviderOwner, ProviderName string
-	BaseBranch, CheckoutBranch, DisplayName                                                                                           string
+	BaseBranch, CheckoutBranch, BranchPolicyID, DisplayName, CheckoutSource, ExpectedOrigin                                           string
+	PRNumber                                                                                                                          int
+	FreshBranch, ConfirmDiscard                                                                                                       bool
+	NewBranchName                                                                                                                     string
+	ConsentedDirtyFiles                                                                                                               []string
 }
 
 type AttachWorkspaceSourcesRequest struct {
@@ -357,7 +362,14 @@ func (s *Service) prepareRepositoryWorkspaceSource(ctx context.Context, task *mo
 	if _, duplicate := scanForBranchAddDuplicate(existing, id, base, checkout, repo); duplicate != nil {
 		return nil, createdID, false, fmt.Errorf("%w: %v", ErrWorkspaceSourceConflict, duplicate)
 	}
-	return &models.TaskRepository{RepositoryID: id, BaseBranch: base, CheckoutBranch: checkout, Metadata: map[string]interface{}{}}, createdID, false, nil
+	metadata, err := buildTaskRepositoryMetadata(TaskRepositoryInput{
+		CheckoutSource: input.CheckoutSource,
+		ExpectedOrigin: input.ExpectedOrigin,
+	})
+	if err != nil {
+		return nil, createdID, false, err
+	}
+	return &models.TaskRepository{RepositoryID: id, BaseBranch: base, CheckoutBranch: checkout, Metadata: metadata}, createdID, false, nil
 }
 
 func hasExactWorkspaceSourceRepository(existing []*models.TaskRepository, repositoryID, baseBranch, checkoutBranch string) bool {
@@ -372,6 +384,21 @@ func hasExactWorkspaceSourceRepository(existing []*models.TaskRepository, reposi
 func (s *Service) validateRepositoryWorkspaceSourceInput(ctx context.Context, task *models.Task, input WorkspaceSourceInput) error {
 	if repositoryLocatorCount(input) != 1 {
 		return fmt.Errorf("%w: repository source requires exactly one locator", ErrInvalidWorkspaceSource)
+	}
+	if input.CheckoutSource != "" && input.CheckoutSource != checkoutSourceRemoteOrigin {
+		return fmt.Errorf("%w: unsupported checkout_source %q", ErrInvalidWorkspaceSource, input.CheckoutSource)
+	}
+	if input.CheckoutSource == "" && input.ExpectedOrigin != "" {
+		return fmt.Errorf("%w: expected_origin requires checkout_source", ErrInvalidWorkspaceSource)
+	}
+	if input.CheckoutSource == checkoutSourceRemoteOrigin {
+		if input.GitHubURL != "" || input.RemoteURL != "" || input.Provider != "" || input.ProviderHost != "" ||
+			input.ProviderScope != "" || input.ProviderRepoID != "" || input.ProviderOwner != "" || input.ProviderName != "" {
+			return fmt.Errorf("%w: remote_origin cannot include a client-supplied remote descriptor", ErrInvalidWorkspaceSource)
+		}
+		if strings.TrimSpace(input.ExpectedOrigin) == "" {
+			return fmt.Errorf("%w: remote_origin requires expected_origin", ErrInvalidWorkspaceSource)
+		}
 	}
 	// base_branch may be omitted when the resolved repository has a default
 	// branch. Validate a supplied value here and the effective value after
@@ -392,7 +419,23 @@ func (s *Service) validateRepositoryWorkspaceSourceInput(ctx context.Context, ta
 }
 
 func (s *Service) resolveRepositoryWorkspaceSource(ctx context.Context, task *models.Task, input WorkspaceSourceInput) (string, string, string, error) {
-	id, base, created, err := s.ResolveRepositoryRef(ctx, task.WorkspaceID, TaskRepositoryInput{RepositoryID: input.RepositoryID, LocalPath: input.LocalPath, GitHubURL: input.GitHubURL, RemoteURL: input.RemoteURL, Provider: input.Provider, ProviderHost: input.ProviderHost, ProviderScope: input.ProviderScope, ProviderRepoID: input.ProviderRepoID, ProviderOwner: input.ProviderOwner, ProviderName: input.ProviderName, BaseBranch: input.BaseBranch, ResolveProviderDefaults: true})
+	repositoryInput := TaskRepositoryInput{
+		RepositoryID: input.RepositoryID, LocalPath: input.LocalPath, GitHubURL: input.GitHubURL,
+		RemoteURL: input.RemoteURL, Provider: input.Provider, ProviderHost: input.ProviderHost,
+		ProviderScope: input.ProviderScope, ProviderRepoID: input.ProviderRepoID,
+		ProviderOwner: input.ProviderOwner, ProviderName: input.ProviderName,
+		BaseBranch: input.BaseBranch, CheckoutBranch: input.CheckoutBranch,
+		CheckoutSource: input.CheckoutSource, ExpectedOrigin: input.ExpectedOrigin,
+		ResolveProviderDefaults: true,
+	}
+	var err error
+	if input.CheckoutSource != "" {
+		repositoryInput, err = s.resolveRemoteOriginInput(ctx, task.WorkspaceID, repositoryInput)
+		if err != nil {
+			return "", "", "", err
+		}
+	}
+	id, base, created, err := s.ResolveRepositoryRef(ctx, task.WorkspaceID, repositoryInput)
 	if err != nil {
 		return "", "", "", classifyWorkspaceRepositoryError(err)
 	}
@@ -401,7 +444,7 @@ func (s *Service) resolveRepositoryWorkspaceSource(ctx context.Context, task *mo
 		createdID = id
 	}
 	if base == "" {
-		base = input.BaseBranch
+		base = repositoryInput.BaseBranch
 	}
 	return id, base, createdID, nil
 }

@@ -179,6 +179,7 @@
   "files": "文件",
   "folderName": "文件夹名称",
   "folders": "文件夹",
+  "go": "前往",
   "forwardStdinStdoutStraightToThe": "将 stdin/stdout 直接转发到 CLI 子进程。会禁用 ACP。",
   "getStarted": "开始使用",
   "githubCliNotAuthenticated": "GitHub CLI 未通过身份验证",

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -464,6 +465,7 @@ type Service struct {
 	orphanReapSignaler          orphanReapSignaler
 	sessionRunningChecker       SessionRunningChecker
 	remoteBranchLister          RemoteBranchLister
+	remoteOriginBranchLister    RemoteOriginBranchLister
 	repositorySelectionResolver RepositorySelectionResolver
 	repoCloneLocation           RepoCloneLocation
 	blockers                    BlockerRepository
@@ -903,6 +905,22 @@ type RemoteBranchLister interface {
 // SetRemoteBranchLister wires the provider-neutral remote branch source.
 func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
 	s.remoteBranchLister = lister
+}
+
+// RemoteOriginBranchLister lists heads from a host checkout's configured
+// origin using the workspace-scoped Git credential boundary.
+type RemoteOriginBranchLister interface {
+	ListLocalOriginBranches(
+		ctx context.Context,
+		repositoryPath string,
+		request repoclone.GitCredentialRequest,
+	) ([]string, error)
+}
+
+// SetRemoteOriginBranchLister wires authenticated origin inspection for local
+// repositories selected by clone-capable executors.
+func (s *Service) SetRemoteOriginBranchLister(lister RemoteOriginBranchLister) {
+	s.remoteOriginBranchLister = lister
 }
 
 // SetRepositorySelectionResolver wires server-side inspection for first-use

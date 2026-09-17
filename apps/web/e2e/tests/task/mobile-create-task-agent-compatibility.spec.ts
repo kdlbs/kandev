@@ -115,6 +115,19 @@ test.describe("Task creation agent compatibility on mobile", () => {
       await dialog.getByTestId("task-title-input").fill("Mobile replacement task");
       await dialog.getByTestId("task-description-input").fill("executor switch on a phone");
 
+      // This scenario verifies agent replacement. Remove the workspace's local
+      // fixture repository so the remote Docker source policy does not add an
+      // unrelated origin-eligibility constraint to the assertion.
+      const repositoryManager = dialog.getByTestId("mobile-repository-manager");
+      if (await repositoryManager.count()) {
+        await repositoryManager.tap();
+        await expect(testPage.getByTestId("mobile-repository-management")).toBeVisible();
+      }
+      const removeRepository = testPage.getByTestId("remove-repo-chip").first();
+      await expect(removeRepository).toBeVisible();
+      await removeRepository.tap();
+      await testPage.getByTestId("mobile-repository-done").tap();
+
       const agentSelector = dialog.getByTestId("agent-profile-selector");
       if (!(await agentSelector.textContent())?.includes(scenario.seedProfileName)) {
         await agentSelector.tap();

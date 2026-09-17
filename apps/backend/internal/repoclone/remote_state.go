@@ -57,6 +57,61 @@ func (c *Cloner) InspectLocalRepositoryRemoteRefState(
 	return parseRemoteRefState(string(output))
 }
 
+// ListLocalOriginBranches reads the origin configured in a host checkout and
+// lists its heads through the same workspace credential boundary used by
+// managed clones. HTTPS origins use the provider credential broker; SSH
+// origins retain Git's supported SSH transport and host agent behavior.
+func (c *Cloner) ListLocalOriginBranches(
+	ctx context.Context, repositoryPath string, request GitCredentialRequest,
+) ([]string, error) {
+	if strings.TrimSpace(repositoryPath) == "" {
+		return nil, fmt.Errorf("repository path is required")
+	}
+	origin, err := c.originURLLocked(ctx, repositoryPath)
+	if err != nil {
+		return nil, err
+	}
+	request.CloneURL = origin
+	var auth *cloneAuth
+	if isHTTPCloneURL(origin) {
+		_, auth, err = c.workspaceCloneAuthRequest(ctx, request, "", "")
+		if err != nil {
+			return nil, err
+		}
+	}
+	output, stderr, err := runConfiguredGitOutput(ctx, gitFetchTimeout,
+		[]string{"-C", repositoryPath, "ls-remote", "--heads", "origin"},
+		func(cmd *exec.Cmd) (func(), error) { return configureGitCommand(cmd, auth) },
+	)
+	if err != nil {
+		diagnostic := redactCloneOutput(stderr, authToken(auth))
+		return nil, fmt.Errorf("inspect local repository branches: %s: %w",
+			strings.TrimSpace(diagnostic), err)
+	}
+	return parseRemoteBranchNames(string(output))
+}
+
+func parseRemoteBranchNames(output string) ([]string, error) {
+	branches := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "refs/heads/") {
+			continue
+		}
+		name := strings.TrimPrefix(fields[1], "refs/heads/")
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		branches = append(branches, name)
+	}
+	return branches, nil
+}
+
 func (c *Cloner) remoteRefState(ctx context.Context, cloneURL string, auth *cloneAuth) (RemoteRefState, error) {
 	output, stderr, err := runConfiguredGitOutput(ctx, gitFetchTimeout,
 		[]string{"ls-remote", "--refs", "--", cloneURL},

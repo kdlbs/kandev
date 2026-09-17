@@ -417,8 +417,8 @@ test.describe("Improve Kandev dialog", () => {
     await expect(createDialog.getByText("/commit", { exact: true })).toBeVisible();
     await expect(createDialog.getByText("/pr-fixup", { exact: true })).toBeVisible();
 
-    // Remote-tab toggle is hidden because the repository is locked to kandev
-    await expect(createDialog.getByTestId("source-mode-remote")).toHaveCount(0);
+    // The shared repository picker is hidden because the repository is locked to kandev.
+    await expect(createDialog.getByTestId("add-repository")).toHaveCount(0);
   });
 
   test("contributor banner shows direct-push copy when user has write access", async ({
@@ -545,12 +545,11 @@ test.describe("Improve Kandev dialog", () => {
     // probe already locked in.
     await expect(createDialog.getByTestId("workflow-selector-trigger")).toHaveCount(0);
 
-    // Source-mode switch must be hidden entirely when the repo is locked:
-    // neither the Remote nor the None ("scratch") modes can be reached, so
-    // the dialog can only ever submit against the bootstrapped kandev repo.
-    await expect(createDialog.getByTestId("source-mode-remote")).toHaveCount(0);
-    await expect(createDialog.getByTestId("source-mode-scratch")).toHaveCount(0);
-    await expect(createDialog.getByTestId("source-mode-workspace")).toHaveCount(0);
+    // The repository picker and row-management controls stay hidden when the
+    // repository is locked, so the dialog can only submit against the
+    // bootstrapped kandev repo.
+    await expect(createDialog.getByTestId("add-repository")).toHaveCount(0);
+    await expect(createDialog.getByTestId("remove-repo-chip")).toHaveCount(0);
   });
 
   test("submit button stays disabled with bootstrap reason while bootstrap is in flight", async ({
