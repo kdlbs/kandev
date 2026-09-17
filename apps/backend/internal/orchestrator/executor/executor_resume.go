@@ -68,6 +68,7 @@ type repoInfo struct {
 	RepositoryID               string
 	RepositoryPath             string
 	BaseBranch                 string
+	IntegrationRef             string
 	CheckoutBranch             string
 	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
 	RemoteContribution         *models.RemoteContribution
@@ -170,6 +171,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		TaskRepositoryID: tr.ID,
 		RepositoryID:     tr.RepositoryID,
 		BaseBranch:       tr.BaseBranch,
+		IntegrationRef:   tr.BranchPolicyPullRequestTarget,
 		CheckoutBranch:   tr.CheckoutBranch,
 		PRNumber:         prNumberFromMetadata(tr.Metadata),
 		Position:         tr.Position,
@@ -238,6 +240,9 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
+	}
+	if info.IntegrationRef == "" {
+		info.IntegrationRef = info.BaseBranch
 	}
 	if info.PullBeforeWorktree {
 		refreshRequired, refreshErr := e.shouldRefreshRepositoryForSession(ctx, repo)
@@ -748,6 +753,14 @@ type ResumeOptions struct {
 	// or a pinned follow-up dispatch. It does not change the global terminal
 	// session predicate or permit implicit resume paths.
 	AllowCompletedSessionResume bool
+	// Origin carries the session ceiling's explicit automatic/manual launch
+	// classification ("automatic" or "manual") from the caller into
+	// ResumeTaskSessionWithOptions's admission gate. A plain string rather
+	// than the orchestrator package's own type, since this package must not
+	// import orchestrator. Left empty, the gate classifies the resume as
+	// automatic and logs the omission — it is never silently treated as a
+	// manual override.
+	Origin string
 }
 
 type cancellableResumeContextKey struct{}
@@ -808,6 +821,9 @@ func (e *Executor) ResumeSessionWithOptions(
 	startAgent bool,
 	options ResumeOptions,
 ) (*TaskExecution, error) {
+	if session != nil {
+		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
+	}
 	return e.resumeSession(ctx, session, startAgent, options)
 }
 
@@ -1073,6 +1089,14 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	resumeErr error,
 	credentialSnapshot *resumeCredentialSnapshotBackup,
 ) {
+	// This rollback always leaves STARTING (successfully, or a no-op if the
+	// session had already left it), so the ceiling reservation is released
+	// unconditionally (AC-51a). Safe even when onSessionStateTransition
+	// already routes the write through the orchestrator's own funnel, since
+	// releasing a session that holds no reservation is a defined no-op.
+	if e.onCeilingReservationRelease != nil {
+		defer e.onCeilingReservationRelease(sessionID)
+	}
 	e.restoreResumeCredentialSnapshotIfStarting(ctx, sessionID, credentialSnapshot)
 	if e.onSessionStateTransition != nil {
 		current, err := e.repo.GetTaskSession(ctx, sessionID)

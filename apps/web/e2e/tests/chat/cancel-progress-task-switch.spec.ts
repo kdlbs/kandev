@@ -39,7 +39,7 @@ test.describe("Cancel progress across task switches", () => {
     await activeCancel.click();
     await waitForActiveSessionCancellationPending(testPage, true);
     await expect(activeCancel).toBeDisabled();
-    await expect(activeCancel.getByRole("status", { name: "Loading" })).toBeVisible();
+    await expect(activeCancel.getByRole("status", { name: "Cancelling..." })).toBeVisible();
 
     await expect(session.sidebar.getByText("Cancel progress B", { exact: true })).toBeVisible({
       timeout: 15_000,
@@ -56,7 +56,7 @@ test.describe("Cancel progress across task switches", () => {
     const remountedCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(remountedCancel).toBeVisible({ timeout: 15_000 });
     await expect(remountedCancel).toBeDisabled();
-    await expect(remountedCancel.getByRole("status", { name: "Loading" })).toBeVisible();
+    await expect(remountedCancel.getByRole("status", { name: "Cancelling..." })).toBeVisible();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await waitForActiveSessionCancellationPending(testPage, false);

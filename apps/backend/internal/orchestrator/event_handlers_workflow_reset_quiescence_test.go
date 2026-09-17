@@ -371,7 +371,7 @@ func TestResetAgentContext_ResetMarkerPrecedesCancellationWait(t *testing.T) {
 
 	cancelledCtx, cancel := context.WithCancel(ctx)
 	cancel()
-	_, _, _, _, _, err := svc.claimSessionRunningForPrompt(
+	_, _, _, _, _, _, err := svc.claimSessionRunningForPrompt(
 		cancelledCtx, session.TaskID, session.ID, "", false, nil, nil, "", false, nil,
 	)
 	if !errors.Is(err, ErrSessionResetInProgress) {
@@ -444,7 +444,7 @@ func TestResetAgentContext_SerializesPromptAdmission(t *testing.T) {
 	promptDone := make(chan error, 1)
 	go func() {
 		close(promptStarted)
-		_, _, _, _, _, err := svc.claimSessionRunningForPrompt(
+		_, _, _, _, _, _, err := svc.claimSessionRunningForPrompt(
 			ctx, session.TaskID, session.ID, "", false, nil, nil, "", false, nil,
 		)
 		promptDone <- err

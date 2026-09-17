@@ -143,7 +143,7 @@ func TestRouteActionClaimBlocksPromptAdmission(t *testing.T) {
 		t.Fatal("route action handler did not start")
 	}
 
-	_, _, _, _, _, err := svc.claimSessionRunningForPrompt(
+	_, _, _, _, _, _, err := svc.claimSessionRunningForPrompt(
 		ctx, "task1", sessionID, "", false, nil, nil, "", false,
 	)
 	close(releaseHandler)

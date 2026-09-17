@@ -558,6 +558,38 @@ func TestPrepareWorkflowStepSession_ClearsCompletionFollowUpWithoutProfile(t *te
 	}
 }
 
+func TestPrepareWorkflowStepSession_PreservesNewerCompletionFollowUpWithoutProfile(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	// Model the asynchronous workflow-entry path: it loads its session before
+	// the conversational turn records the completion follow-up marker.
+	staleSession, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get stale session: %v", err)
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyCompletionFollowUp, true); err != nil {
+		t.Fatalf("mark completion follow-up: %v", err)
+	}
+
+	step := &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	if _, switched, err := svc.prepareWorkflowStepSession(ctx, "t1", staleSession, step, nil); err != nil {
+		t.Fatalf("prepareWorkflowStepSession returned error: %v", err)
+	} else if switched {
+		t.Fatal("step without a profile must not switch sessions")
+	}
+
+	updated, err := repo.GetTaskSession(ctx, staleSession.ID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if !models.IsCompletionFollowUpSession(updated.Metadata) {
+		t.Fatal("stale workflow entry cleared a newer completion follow-up marker")
+	}
+}
+
 func TestSwitchWorkflowDispatcherRoutesOnEnterToDestinationProfileSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

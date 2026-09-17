@@ -129,7 +129,7 @@ function SendSubmitButton({
 
 export function SubmitButton({
   isAgentBusy,
-  canCancelAgent = isAgentBusy,
+  canCancelAgent = false,
   sessionId,
   taskId,
   taskTitle,
@@ -187,10 +187,11 @@ export function SubmitButton({
               )}
               onClick={handleCancelClick}
               disabled={isCancelling}
+              aria-label={t("task:cancelAgent")}
               data-testid="cancel-agent-button"
             >
               {isCancelling ? (
-                <GridSpinner className="text-destructive" />
+                <GridSpinner className="text-destructive" ariaLabel={t("task:cancelling")} />
               ) : (
                 <IconPlayerPauseFilled className="h-3.5 w-3.5" />
               )}

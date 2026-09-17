@@ -37,7 +37,7 @@ test.describe("System Backups page", () => {
     expect(path.isAbsolute(backupDirectory!)).toBe(true);
     expect(backupDirectory).toBe(path.resolve(path.dirname(database.path!), "backups"));
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=database");
     await expect(
       testPage.getByText(`VACUUM INTO snapshots stored under ${backupDirectory}.`),
     ).toBeVisible();
@@ -46,7 +46,7 @@ test.describe("System Backups page", () => {
   test("explains each backup row action on hover", async ({ testPage }) => {
     test.setTimeout(60_000);
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=database");
     await testPage.getByTestId("system-backups-create").click();
     await expect(testPage.getByTestId("system-backups-table")).toBeVisible({ timeout: 15_000 });
 
@@ -72,7 +72,7 @@ test.describe("System Backups page", () => {
   }) => {
     test.setTimeout(60_000);
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/data-storage?tab=database");
     await expect(testPage.getByTestId("system-page-title")).toHaveText("Data & Logs");
     await expect(testPage.getByTestId("system-backups-card")).toBeVisible();
 

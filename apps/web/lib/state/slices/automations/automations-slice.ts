@@ -2,7 +2,7 @@ import type { StateCreator } from "zustand";
 import type { AutomationsSlice, AutomationsSliceState } from "./types";
 
 export const defaultAutomationsState: AutomationsSliceState = {
-  automations: { items: [], loaded: false, loading: false },
+  automations: { items: [], loaded: false, loading: false, triggerTypes: {} },
   automationRuns: { byAutomationId: {}, loading: {}, mutationEpoch: {}, deleting: {} },
 };
 
@@ -133,4 +133,19 @@ export const createAutomationsSlice: StateCreator<
   ...defaultAutomationsState,
   ...createAutomationsActions(set),
   ...createRunsActions(set, get),
+  beginTriggerTypes: (workspaceId) => {
+    const current = get().automations.triggerTypes[workspaceId];
+    if (current?.loading) return null;
+    const generation = (current?.generation ?? 0) + 1;
+    set((draft) => {
+      draft.automations.triggerTypes[workspaceId] = { items: [], loading: true, generation };
+    });
+    return generation;
+  },
+  finishTriggerTypes: (workspaceId, generation, items) =>
+    set((draft) => {
+      if (draft.automations.triggerTypes[workspaceId]?.generation === generation) {
+        draft.automations.triggerTypes[workspaceId] = { items, loading: false, generation };
+      }
+    }),
 });

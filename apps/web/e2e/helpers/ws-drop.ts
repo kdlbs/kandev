@@ -16,6 +16,12 @@ type MessageAddResponseDropController = {
   droppedCount: () => number;
 };
 
+type ConversationChangeDropController = {
+  dropChange: (content: string) => void;
+  droppedCount: () => number;
+  pluginSubscribeCount: () => number;
+};
+
 export type QueueAdmissionDropController = {
   dropNextQueueAddRequest: () => void;
   dropNextQueueAddResponse: (count?: number) => void;
@@ -30,9 +36,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function parseJSONFrames(message: string | Buffer): Array<Record<string, unknown>> {
-  if (typeof message !== "string") return [];
+  const text = typeof message === "string" ? message : message.toString("utf8");
   const frames: Array<Record<string, unknown>> = [];
-  for (const part of message.split("\n")) {
+  for (const part of text.split("\n")) {
     if (!part.trim()) continue;
     try {
       const parsed = asRecord(JSON.parse(part));
@@ -44,18 +50,34 @@ function parseJSONFrames(message: string | Buffer): Array<Record<string, unknown
   return frames;
 }
 
+function targetMessagePayload(message: unknown, prompt: string): Record<string, unknown> | null {
+  const envelope = asRecord(message);
+  const payload = asRecord(envelope?.payload);
+  const isLegacy = envelope?.action === "session.message.added" && payload?.author_type === "user";
+  const isOrdered =
+    envelope?.type === "session.event" &&
+    envelope?.event_type === "message.added" &&
+    payload?.author_type === "user";
+  if (
+    (!isLegacy && !isOrdered) ||
+    typeof payload?.content !== "string" ||
+    !payload.content.includes(prompt)
+  ) {
+    return null;
+  }
+  return payload;
+}
+
 function isTargetUserMessageAdded(
   message: unknown,
   prompt: string,
 ): message is { payload: { content: string } } {
+  return targetMessagePayload(message, prompt) !== null;
+}
+
+function targetAction(message: unknown): string {
   const envelope = asRecord(message);
-  const payload = asRecord(envelope?.payload);
-  return (
-    envelope?.action === "session.message.added" &&
-    payload?.author_type === "user" &&
-    typeof payload.content === "string" &&
-    payload.content.includes(prompt)
-  );
+  return envelope?.type === "session.event" ? "session.event" : "session.message.added";
 }
 
 function filterServerFrame(
@@ -77,7 +99,12 @@ function filterServerFrame(
       const parsed = JSON.parse(trimmed) as unknown;
       if (isTargetUserMessageAdded(parsed, prompt)) {
         didDrop = true;
-        dropped.push({ action: "session.message.added", content: parsed.payload.content });
+        dropped.push({ action: targetAction(parsed), content: parsed.payload.content });
+        continue;
+      }
+      if (hasConversationChangeContent(parsed, prompt)) {
+        didDrop = true;
+        dropped.push({ action: "session.conversation.changed", content: prompt });
         continue;
       }
     } catch {
@@ -95,12 +122,14 @@ export async function routeMainWebSocketWithPromptDrop(page: Page): Promise<Prom
   let promptToDrop: string | null = null;
   const dropped: DroppedMessage[] = [];
   const recoveryRequestIDs = new Set<string>();
+  const orderedRecoveryRequestIDs = new Set<string>();
   let recoveryResponses = 0;
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
     const server = ws.connectToServer();
     ws.onMessage((message) => {
       for (const frame of parseJSONFrames(message)) {
+        const payload = asRecord(frame.payload);
         if (
           promptToDrop !== null &&
           frame.type === "request" &&
@@ -108,6 +137,16 @@ export async function routeMainWebSocketWithPromptDrop(page: Page): Promise<Prom
           typeof frame.id === "string"
         ) {
           recoveryRequestIDs.add(frame.id);
+        }
+        if (
+          promptToDrop !== null &&
+          frame.type === "request" &&
+          frame.action === "session.subscribe" &&
+          payload?.consumer_kind === "core" &&
+          payload.replace_cursor === true &&
+          typeof frame.id === "string"
+        ) {
+          orderedRecoveryRequestIDs.add(frame.id);
         }
       }
       server.send(message);
@@ -124,6 +163,14 @@ export async function routeMainWebSocketWithPromptDrop(page: Page): Promise<Prom
             recoveryResponses += 1;
           }
         }
+        if (
+          frame.type === "response" &&
+          frame.action === "session.subscribe" &&
+          typeof frame.id === "string" &&
+          orderedRecoveryRequestIDs.delete(frame.id)
+        ) {
+          recoveryResponses += 1;
+        }
       }
       const filtered = filterServerFrame(message, promptToDrop, dropped);
       if (filtered !== null) ws.send(filtered);
@@ -135,6 +182,7 @@ export async function routeMainWebSocketWithPromptDrop(page: Page): Promise<Prom
       promptToDrop = prompt;
       dropped.length = 0;
       recoveryRequestIDs.clear();
+      orderedRecoveryRequestIDs.clear();
       recoveryResponses = 0;
     },
     droppedCount: () => dropped.length,
@@ -362,5 +410,90 @@ export async function routeMainWebSocketWithQueueAdmissionDrops(
     queueAddRequestCount: () => state.queueAddRequests.value,
     droppedRequestCount: () => state.droppedRequests.value,
     droppedResponseCount: () => state.droppedResponses.value,
+  };
+}
+
+function hasConversationChangeContent(message: unknown, content: string): boolean {
+  const envelope = asRecord(message);
+  if (envelope?.action !== "session.conversation.changed") {
+    return false;
+  }
+  return JSON.stringify(envelope).includes(content);
+}
+
+function filterConversationChange(
+  message: string | Buffer,
+  content: string | null,
+  state: { value: number },
+): string | Buffer {
+  if (content === null) return message;
+  const text = typeof message === "string" ? message : message.toString("utf8");
+  const kept: string[] = [];
+  let didDrop = false;
+  for (const part of text.split("\n")) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      kept.push(part);
+      continue;
+    }
+    let frame: unknown;
+    try {
+      frame = JSON.parse(trimmed);
+    } catch {
+      kept.push(part);
+      continue;
+    }
+    if (hasConversationChangeContent(frame, content)) {
+      state.value += 1;
+      didDrop = true;
+      continue;
+    }
+    kept.push(part);
+  }
+  if (!didDrop) return message;
+  const filtered = kept.join("\n");
+  return typeof message === "string" ? filtered : Buffer.from(filtered, "utf8");
+}
+
+/**
+ * Drops one durable plugin conversation change while preserving the socket.
+ * The following change creates a revision gap and exercises source recovery.
+ */
+export async function routeMainWebSocketWithConversationChangeDrop(
+  page: Page,
+): Promise<ConversationChangeDropController> {
+  let contentToDrop: string | null = null;
+  const dropped = { value: 0 };
+  let pluginSubscribeRequests = 0;
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      for (const frame of parseJSONFrames(message)) {
+        const payload = asRecord(frame.payload);
+        if (
+          frame.type === "request" &&
+          frame.action === "session.conversation.subscribe" &&
+          payload?.consumer_kind === "plugin"
+        ) {
+          pluginSubscribeRequests += 1;
+        }
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const filtered = filterConversationChange(message, contentToDrop, dropped);
+      if (dropped.value > 0 && filtered !== message) contentToDrop = null;
+      ws.send(filtered);
+    });
+  });
+
+  return {
+    dropChange: (content: string) => {
+      contentToDrop = content;
+      dropped.value = 0;
+    },
+    droppedCount: () => dropped.value,
+    pluginSubscribeCount: () => pluginSubscribeRequests,
   };
 }

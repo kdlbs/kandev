@@ -7,6 +7,27 @@ import {
   WorkflowMoveProceedButton,
 } from "./workflow-move-proceed-button";
 
+const previewMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    outcome: "reuse_current",
+    model: {
+      before: { known: true, label: "mock-fast" },
+      after: { known: true, label: "mock-fast" },
+    },
+    changes: [],
+    context_reset: false,
+    source_disposition: "keep",
+    dispatch: "prompt",
+  }),
+);
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  previewWorkflowMove: previewMock,
+}));
+vi.mock("@/hooks/domains/kanban/use-workflow-move-preview-revision", () => ({
+  useWorkflowMovePreviewRevision: () => "revision-1",
+}));
+
 const touchMocks = vi.hoisted(() => ({ enabled: false }));
 
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
@@ -201,6 +222,8 @@ describe("WorkflowMoveProceedButton label interaction", () => {
 
     const proceed = screen.getByTestId(PROCEED_TEST_ID);
     const skipCheckbox = screen.getByTestId("workflow-move-skip-step-prompt");
+    const skipLabel = screen.getByText("Skip the step prompt").closest("label");
+    expect(skipLabel?.htmlFor).toBe(skipCheckbox.id);
     fireEvent.blur(proceed, { relatedTarget: skipCheckbox });
     fireEvent.focus(skipCheckbox);
     fireEvent.click(screen.getByText("Skip the step prompt"));
@@ -379,5 +402,43 @@ describe("useWorkflowMoveLongPress", () => {
     expect(onLongPress).toHaveBeenCalledOnce();
     expect(result.current.consumePendingClick()).toBe(true);
     expect(result.current.consumePendingClick()).toBe(false);
+  });
+});
+
+describe("proceed preview footer", () => {
+  it.each([false, true])("previews the current options on touch=%s", async (touch) => {
+    touchMocks.enabled = touch;
+    previewMock.mockClear();
+    render(
+      <TooltipProvider>
+        <WorkflowMoveProceedButton
+          nextStepName="Review"
+          onProceed={vi.fn()}
+          isMoving={false}
+          testId={PROCEED_TEST_ID}
+          previewTarget={{ taskId: "task-1", workflowId: "workflow-1", workflowStepId: "review" }}
+        />
+      </TooltipProvider>,
+    );
+    expect(previewMock).not.toHaveBeenCalled();
+    if (touch) {
+      fireEvent.pointerDown(screen.getByTestId(PROCEED_TEST_ID), touchPointer());
+      act(() => vi.advanceTimersByTime(WORKFLOW_MOVE_LONG_PRESS_MS));
+      fireEvent.pointerUp(screen.getByTestId(PROCEED_TEST_ID), touchPointer());
+      fireEvent.click(screen.getByTestId(PROCEED_TEST_ID));
+    } else openHoverForm();
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(screen.getByTestId("workflow-move-preview").textContent).toContain("mock-fast");
+    fireEvent.click(screen.getByTestId("workflow-move-skip-step-prompt"));
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(previewMock).toHaveBeenLastCalledWith(
+      "task-1",
+      {
+        workflow_id: "workflow-1",
+        workflow_step_id: "review",
+        entry_options: { skip_step_prompt: true },
+      },
+      expect.anything(),
+    );
   });
 });

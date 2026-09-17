@@ -14,6 +14,7 @@ import { ClarificationPanelSection } from "@/components/task/chat/clarification-
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
+import { QuickChatCancelCommands } from "./quick-chat-cancel-commands";
 
 type QuickChatContentProps = {
   sessionId: string;
@@ -95,6 +96,12 @@ export const QuickChatContent = memo(function QuickChatContent({
       onMouseDown={handleShortcutScopeMouseDown}
       className="flex flex-col flex-1 min-h-0 outline-none"
     >
+      <QuickChatCancelCommands
+        sessionId={sessionId}
+        isWorking={panelState.isWorking}
+        pendingClarification={pendingClarification}
+        onCancel={handleCancelTurn}
+      />
       <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
         <MessageList
           items={panelState.groupedItems}
@@ -114,6 +121,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         key={sessionId}
         pending={Boolean(pendingClarification)}
         messages={pendingClarificationGroup}
+        agentDisconnected={panelState.session?.pending_action === null}
         onResolved={handleClarificationResolved}
         shortcutScopeRef={shortcutScopeRef}
         maxHeightVh={35}

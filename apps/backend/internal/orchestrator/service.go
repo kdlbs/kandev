@@ -143,12 +143,34 @@ type MessageCreator interface {
 	InvalidateModelCache(sessionID string)
 }
 
-// TransientRetryMessageService is the narrow task-service seam used to retire
-// persisted retry status messages. The task service owns authorization and
-// event-bus publication for both operations.
+// TransientRetryMessageService is the narrow task-service seam used to write
+// and retire persisted retry status messages. The task service owns
+// authorization and event-bus publication for all operations.
 type TransientRetryMessageService interface {
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	UpdateMessage(ctx context.Context, message *models.Message) error
 	DeleteMessage(ctx context.Context, id string) error
+}
+
+// StreamingMessageRetractionService removes transcript records abandoned by a
+// provider response retry. The task service owns durable deletion and client
+// notification publication.
+type StreamingMessageRetractionService interface {
+	DeleteMessage(ctx context.Context, id string) error
+}
+
+// transientRetryNoticeState serializes retry-notice storage with the in-memory
+// retry lifecycle for one session. refs and fenceTimer are owned by
+// Service.transientRetryNoticeStatesMu. The bounded retirement fence keeps a
+// stale provider event from creating a new retry while terminal cleanup is in
+// flight, then allows the session entry to be reclaimed.
+type transientRetryNoticeState struct {
+	mu           sync.Mutex
+	retired      atomic.Bool
+	owned        atomic.Bool
+	retiredUntil atomic.Int64
+	refs         int
+	fenceTimer   *time.Timer
 }
 
 // SessionAttachmentCleaner removes file-backed prompt attachments after a
@@ -438,6 +460,14 @@ type sessionExecutorStore interface {
 	// than an idempotent same-owner observation.
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (owned bool, newlyClaimed bool, err error)
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// UpdateTaskPreservingDeferredLaunch is UpdateTask for a caller holding a
+	// task snapshot old enough to have missed a concurrent write to
+	// deferred_launch (any read-modify-write over a task fetched earlier in the
+	// same handler). It performs the same write as UpdateTask, except
+	// deferred_launch in the payload is replaced by the row's own current
+	// value at write time, so the stale snapshot can never resurrect or
+	// clobber a concurrent ceiling CAS write.
+	UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error
 	// SetTaskMetadataKey / RemoveTaskMetadataKey are concurrent-key-safe JSON
 	// patch helpers on tasks.metadata (implemented by the sqlite/Postgres
 	// repository). Used by startup reconciliation to mark interrupted tasks
@@ -448,7 +478,23 @@ type sessionExecutorStore interface {
 	// check and the write cannot be separated by a concurrent archive).
 	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error)
+	// TakeTaskDeferredLaunchWIPKeys / RestoreTaskDeferredLaunchWIPKeys claim and
+	// release the launch-intent half of the shared deferred_launch record
+	// without touching the keys another writer owns.
+	TakeTaskDeferredLaunchWIPKeys(ctx context.Context, taskID string) (map[string]interface{}, bool, error)
+	RestoreTaskDeferredLaunchWIPKeys(ctx context.Context, taskID string, wip map[string]interface{}) error
+	// GetTaskDeferredLaunch / SetTaskDeferredLaunchIfUnchanged provide the
+	// row-locked compare-and-set the session ceiling uses to write a
+	// ceiling_deferred record without losing a concurrent refusal's payload.
+	// The prior-state token is threaded as interface{}, opaque to this package,
+	// because it is produced by the repository from the stored row's own bytes.
+	GetTaskDeferredLaunch(ctx context.Context, taskID string) (map[string]interface{}, interface{}, error)
+	SetTaskDeferredLaunchIfUnchanged(ctx context.Context, taskID string, prior interface{}, value map[string]interface{}) (stored bool, lostCompare bool, err error)
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
+	// CountStepEntries returns the number of committed task_step_transitions
+	// rows for (taskID, workflowStepID) — the recorded entry count that backs
+	// the {step_entry_number} prompt placeholder (REQ-TWS-001).
+	CountStepEntries(ctx context.Context, taskID, workflowStepID string) (int, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
@@ -661,6 +707,14 @@ type Service struct {
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
 	transientRetryMessages TransientRetryMessageService
+	streamingRetractions   StreamingMessageRetractionService
+	// transientRetryNoticeStates serializes notice writes and cleanup by
+	// session. Entries are reference counted while callers use the mutex,
+	// retained while a prompt/retry is active, and retained for a bounded fence
+	// interval after retirement.
+	transientRetryNoticeStatesMu sync.Mutex
+	transientRetryNoticeStates   map[string]*transientRetryNoticeState
+	transientRetryNoticeFenceTTL time.Duration
 	// sessionQueuePurgeNotifierRegistered means the task repository owns
 	// queue cleanup and status publication after DeleteTaskSession commits.
 	// DeleteSession keeps its fallback cleanup for focused compositions that
@@ -1065,6 +1119,22 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
+	// sessionCeiling is the instance-wide admission controller for agent
+	// session launches. Its ceiling is resolved once here, at construction,
+	// and is constant for the lifetime of the process.
+	sessionCeiling *sessionCeilingController
+
+	// ceilingSweeper is the single background goroutine that expires stale
+	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
+	// Nil-safe like idleReaper: callers that don't need it leave it nil and
+	// startCeilingSweeper / stopCeilingSweeper no-op. See ceiling_sweep.go.
+	ceilingSweeper *ceilingSweeper
+
+	// ceilingCredentialReminter re-mints short-lived Office runtime
+	// credentials immediately before a ceiling-deferred "start" replay. Nil
+	// is the common case; see CeilingLaunchCredentialReminter.
+	ceilingCredentialReminter CeilingLaunchCredentialReminter
+
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
 	// reconcileDependencyLaunchesOnStartup after the watcher and scheduler
@@ -1118,9 +1188,10 @@ type Service struct {
 	// dispatchingQueued tracks the pre-acceptance reservation for the exact
 	// queued message handed to an async worker. acceptedQueuedDispatch keeps
 	// the same ownership visible after the worker claims RUNNING until its turn
-	// settles, so Send Now cannot cancel or duplicate a successor that FIFO has
-	// already accepted. The two maps are managed by queued_dispatch.go and are
-	// arbitrated through cancelInFlight.
+	// settles, so late predecessor events cannot cancel or duplicate the FIFO
+	// successor. The live phase still allows Send Now to replace that successor
+	// after provider acceptance. The two maps are managed by
+	// queued_dispatch.go and are arbitrated through cancelInFlight.
 	dispatchingQueued      sync.Map
 	acceptedQueuedDispatch sync.Map
 	// queuedDispatchDrainPending records a boot-ready event that arrived while
@@ -1635,6 +1706,8 @@ func NewService(
 		dynamicSuccessorCtx:          dynamicSuccessorCtx,
 		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
+		ceilingSweeper:               newCeilingSweeper(),
+		sessionCeiling:               newSessionCeilingForRepo(repo, svcLogger.Zap()),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
 		taskParkedStates:             make(map[string]*taskParkedState),
@@ -1740,6 +1813,8 @@ func NewService(
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
 	exec.SetOnAgentProcessStarted(s.handleAgentProcessStarted)
 	exec.SetOnAgentProcessStartFailed(s.handleAgentProcessStartFailed)
+	exec.SetOnCeilingReservationRelease(s.releaseCeilingReservation)
+	exec.SetCeilingBackingChecker(s)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
 	}
@@ -1828,10 +1903,16 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
-// SetTransientRetryMessageService wires the task service used to retire
-// persisted transient-retry status messages.
+// SetTransientRetryMessageService wires the task service used to write and
+// retire persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
 	s.transientRetryMessages = service
+}
+
+// SetStreamingMessageRetractionService wires durable cleanup for provider
+// response attempts that were abandoned before the prompt completed.
+func (s *Service) SetStreamingMessageRetractionService(service StreamingMessageRetractionService) {
+	s.streamingRetractions = service
 }
 
 // SetSubagentContextRecorder wires the optional subagent-context writer.
@@ -3166,6 +3247,7 @@ func (s *Service) Start(ctx context.Context) error {
 	// background goroutine owns the reclaim tick; Service.Stop joins it
 	// before tearing down repo / agentManager.
 	s.startIdleSessionReaper(ctx)
+	s.startCeilingSweeper(ctx)
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil
@@ -3216,6 +3298,7 @@ func (s *Service) Stop() error {
 	// Stop components in reverse order
 	var errs []error
 	s.stopIdleSessionReaper()
+	s.stopCeilingSweeper()
 	s.stopReservedPromptCallbacks()
 
 	if err := s.scheduler.Stop(); err != nil {

@@ -162,6 +162,7 @@ export const defaultUIState: UISliceState = {
   updateAvailableNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: createDefaultSidebarState(),
+  sidebarViewsByWorkspace: {},
   threadViews: createDefaultThreadViewState(),
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,

@@ -462,6 +462,20 @@ function useLazyLoadSentinel(params: {
   const shouldContinueWhileIntersecting = useCallback(() => {
     const scrollRoot = scrollRef.current;
     const sentinel = sentinelNodeRef.current;
+    const request = requestRef.current;
+    const visibleBoundaryChanged =
+      request !== null && getOldestVisibleBoundaryKey(itemsRef.current) !== request.boundaryBefore;
+    return Boolean(
+      hasMoreRef.current &&
+      scrollRoot &&
+      sentinel &&
+      !visibleBoundaryChanged &&
+      isElementInPreloadRegion(scrollRoot, sentinel, TRANSCRIPT_SENTINEL_ROOT_MARGIN),
+    );
+  }, [scrollRef]);
+  const isCurrentGeometryEligible = useCallback(() => {
+    const scrollRoot = scrollRef.current;
+    const sentinel = sentinelNodeRef.current;
     return Boolean(
       hasMoreRef.current &&
       scrollRoot &&
@@ -482,7 +496,10 @@ function useLazyLoadSentinel(params: {
       shouldContinueWhileIntersecting,
       // Continuation and lifecycle/input eligibility both require the
       // sentinel to remain inside the transcript's current preload region.
-      isCurrentGeometryEligible: shouldContinueWhileIntersecting,
+      // The continuation predicate additionally stops after a visible row is
+      // added; fresh upward input must still be allowed to start the next
+      // request from the new boundary.
+      isCurrentGeometryEligible,
       onLoadSettled: reportSettle,
       isRequestCurrent,
     },
