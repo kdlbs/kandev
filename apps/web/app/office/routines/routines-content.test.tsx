@@ -130,6 +130,29 @@ describe("RoutinesContent create-routine trigger failure (AC-002.8)", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  it("still shows the required error toast when the post-failure refresh itself fails", async () => {
+    createRoutineMock.mockResolvedValue({ id: "routine-1" });
+    createRoutineTriggerMock.mockRejectedValue(
+      new Error("cron trigger requires a cron_expression"),
+    );
+    // First call is the initial mount fetch; the second is the refresh
+    // handleCreate's catch block issues after the trigger create fails.
+    listRoutinesMock.mockResolvedValueOnce({ routines: [] });
+    listRoutinesMock.mockRejectedValueOnce(new Error("network down"));
+    renderContent();
+
+    fireEvent.click(screen.getByRole("button", { name: /new routine/i }));
+    goToScheduleStepAndSetCron("0 9 * * *");
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Routine created, but its schedule could not be saved",
+      ),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("reports the generic create failure, not the AC-002.8 message, when the routine itself fails to create", async () => {
     createRoutineMock.mockRejectedValue(new Error("workspace not found"));
     renderContent();

@@ -65,6 +65,8 @@ const baseRoutine: Routine = {
 
 const DEFAULT_CRON_EXPRESSION = "*/5 * * * *";
 const CHANGED_CRON_EXPRESSION = "0 9 * * *";
+const NEXT_FIRE_NONE = "Next fire: -";
+const AMERICA_NEW_YORK = "America/New_York";
 
 const cronTrigger: RoutineTrigger = {
   id: "trigger-1",
@@ -113,6 +115,13 @@ function setTimezone(value: string) {
   fireEvent.change(screen.getByPlaceholderText("UTC"), { target: { value } });
 }
 
+function setTriggerKindWebhook() {
+  const kindField = screen.getByText("Kind").closest("div") as HTMLElement;
+  fireEvent.click(within(kindField).getByRole("combobox"));
+  const listbox = screen.getByRole("listbox");
+  fireEvent.click(within(listbox).getByRole("option", { name: "Webhook" }));
+}
+
 describe("RoutineDetailView next-fire display", () => {
   it("hides the next-fire countdown as soon as status is changed to paused, before saving", async () => {
     renderDetailView(baseRoutine, [cronTrigger]);
@@ -124,7 +133,7 @@ describe("RoutineDetailView next-fire display", () => {
     const listbox = await screen.findByRole("listbox");
     fireEvent.click(within(listbox).getByRole("option", { name: "Paused" }));
 
-    expect(screen.getByText("Next fire: -")).toBeTruthy();
+    expect(screen.getByText(NEXT_FIRE_NONE)).toBeTruthy();
     expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 
@@ -135,7 +144,7 @@ describe("RoutineDetailView next-fire display", () => {
 
   it("shows no next-fire countdown for a routine loaded as paused", () => {
     renderDetailView({ ...baseRoutine, status: "paused" }, [cronTrigger]);
-    expect(screen.getByText("Next fire: -")).toBeTruthy();
+    expect(screen.getByText(NEXT_FIRE_NONE)).toBeTruthy();
   });
 });
 
@@ -198,12 +207,12 @@ describe("RoutineDetailView editable field seeding (AC-003.5, AC-003.7)", () => 
       ...cronTrigger,
       id: "a",
       cronExpression: CHANGED_CRON_EXPRESSION,
-      timezone: "America/New_York",
+      timezone: AMERICA_NEW_YORK,
     };
     // Primary is listed second: seeding must not pick by array position.
     renderDetailView(baseRoutine, [other, primary]);
     expect(screen.getByDisplayValue(CHANGED_CRON_EXPRESSION)).toBeTruthy();
-    expect(screen.getByDisplayValue("America/New_York")).toBeTruthy();
+    expect(screen.getByDisplayValue(AMERICA_NEW_YORK)).toBeTruthy();
   });
 
   it("seeds an empty cron expression and the default timezone when there is no cron trigger", () => {
@@ -212,6 +221,32 @@ describe("RoutineDetailView editable field seeding (AC-003.5, AC-003.7)", () => 
       "",
     );
     expect(screen.getByDisplayValue("UTC")).toBeTruthy();
+  });
+});
+
+describe("RoutineDetailView last-fired display (AC-003.5, AC-003.6)", () => {
+  it("shows the primary cron trigger's lastFiredAt, not the placeholder, when one is set", () => {
+    renderDetailView(baseRoutine, [{ ...cronTrigger, lastFiredAt: "2026-05-01T00:00:00Z" }]);
+    expect(screen.queryByText("Last fired: never")).toBeNull();
+    expect(screen.getByText(/^Last fired: (?!never)/)).toBeTruthy();
+  });
+
+  it("shows the never placeholder when there is no cron trigger to report a last-fired time", () => {
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+    expect(screen.getByText("Last fired: never")).toBeTruthy();
+  });
+});
+
+describe("RoutineDetailView next-fire isPrimary gate (AC-003.5)", () => {
+  it("hides a fallback (non-primary) cron trigger's stale nextRunAt, even though the routine is active", () => {
+    const fallbackOnly: RoutineTrigger = {
+      ...cronTrigger,
+      enabled: false,
+      nextRunAt: "2020-01-01T00:00:00Z",
+    };
+    renderDetailView(baseRoutine, [fallbackOnly]);
+    expect(screen.getByText(NEXT_FIRE_NONE)).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 1\/1\/2020/)).toBeNull();
   });
 });
 
@@ -266,7 +301,7 @@ describe("RoutineDetailView trigger sync (REQ-004)", () => {
     );
     // The deleted trigger's next-fire value is actually gone from displayed
     // state, not just the delete call having been issued.
-    expect(screen.getByText("Next fire: -")).toBeTruthy();
+    expect(screen.getByText(NEXT_FIRE_NONE)).toBeTruthy();
     expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 
@@ -363,6 +398,9 @@ describe("RoutineDetailView trigger sync: no target, trimming, timezone (AC-004.
       "routine-1",
       expect.objectContaining({ kind: "cron", cronExpression: DEFAULT_CRON_EXPRESSION }),
     );
+    // The newly created trigger's nextRunAt is actually rendered, not just
+    // requested from the API.
+    expect(screen.getByText(/Next fire: 5\/5\/2026/)).toBeTruthy();
   });
 
   it("reports the generic save failure, not an AC-004.2 message, when arming the first schedule fails (AC-004.10)", async () => {
@@ -402,5 +440,52 @@ describe("RoutineDetailView trigger sync: no target, trimming, timezone (AC-004.
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
     expect(deleteRoutineTriggerMock).not.toHaveBeenCalled();
     expect(createRoutineTriggerMock).not.toHaveBeenCalled();
+  });
+
+  it("does not sync when the drafted kind is webhook, even though the drafted expression differs from the trigger's (AC-004.11)", async () => {
+    renderDetailView(baseRoutine, [cronTrigger]);
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    setTriggerKindWebhook();
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).not.toHaveBeenCalled();
+    expect(createRoutineTriggerMock).not.toHaveBeenCalled();
+  });
+
+  it("does not default an empty stored timezone before comparing, so a real difference still triggers sync (AC-004.4)", async () => {
+    const NEW_NEXT_RUN_AT = "2026-06-06T00:00:00Z";
+    createRoutineTriggerMock.mockResolvedValue({
+      trigger: {
+        ...cronTrigger,
+        id: "trigger-2",
+        timezone: AMERICA_NEW_YORK,
+        nextRunAt: NEW_NEXT_RUN_AT,
+      },
+    });
+    renderDetailView(baseRoutine, [{ ...cronTrigger, timezone: "" }]);
+    setTimezone(AMERICA_NEW_YORK);
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(deleteRoutineTriggerMock).toHaveBeenCalledWith("trigger-1");
+    expect(createRoutineTriggerMock).toHaveBeenCalledWith(
+      "routine-1",
+      expect.objectContaining({ timezone: AMERICA_NEW_YORK }),
+    );
+  });
+});
+
+describe("RoutineDetailView draft seeding stability across saves (AC-003.7)", () => {
+  it("does not re-seed other draft fields when a save changes the triggers array", async () => {
+    createRoutineTriggerMock.mockResolvedValue({
+      trigger: { ...cronTrigger, id: "trigger-2", cronExpression: CHANGED_CRON_EXPRESSION },
+    });
+    renderDetailView(baseRoutine, [cronTrigger]);
+    fireEvent.change(screen.getByDisplayValue(baseRoutine.name), {
+      target: { value: "Renamed nightly sync" },
+    });
+    setCronExpression(CHANGED_CRON_EXPRESSION);
+    clickSave();
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(screen.getByDisplayValue("Renamed nightly sync")).toBeTruthy();
   });
 });

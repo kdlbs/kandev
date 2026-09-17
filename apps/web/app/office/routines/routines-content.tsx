@@ -112,8 +112,8 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
           });
         } catch {
           onDone();
-          await fetchRoutines();
           toast.error(t("office:routineCreatedNoSchedule"));
+          await fetchRoutines().catch(() => {});
           return;
         }
       }
