@@ -120,6 +120,68 @@ func TestAgentAppendKeepsOptionalVersion(t *testing.T) {
 	}
 }
 
+func TestAgentAppendRejectsTruncationAcknowledgementWithoutReductionDetails(t *testing.T) {
+	svc, eventBus, repo := createTestPlanService(t)
+	ctx := context.Background()
+	const taskID = "task-plan-safe-append-truncation-flag"
+	seedTask(t, ctx, repo, taskID)
+	created, err := svc.CreatePlan(ctx, CreatePlanRequest{TaskID: taskID, Content: "before"})
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	beforePlan, err := repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTaskPlan before rejected append: %v", err)
+	}
+	beforeHistory, err := repo.ListTaskPlanRevisions(ctx, taskID, 0)
+	if err != nil {
+		t.Fatalf("ListTaskPlanRevisions before rejected append: %v", err)
+	}
+
+	_, err = svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: taskID, Content: "after", CreatedBy: createdByAgent,
+		AgentWrite: true, Mode: PlanWriteModeAppend,
+		ExpectedVersion: created.Plan.WriteVersion, AllowTruncation: true,
+	})
+	if err == nil {
+		t.Fatal("append accepted allow_truncation, which is not applicable to append")
+	}
+	var safety *PlanSafetyError
+	if !errors.As(err, &safety) {
+		t.Fatalf("error = %T %v, want PlanSafetyError", err, err)
+	}
+	if !errors.Is(err, ErrPlanAppendTruncationFlag) || safety.Code != PlanErrorAppendTruncationFlag {
+		t.Fatalf("error = %v/code %q, want %v/%q", err, safety.Code, ErrPlanAppendTruncationFlag, PlanErrorAppendTruncationFlag)
+	}
+	if safety.ReplacedRunes != 0 || safety.NewRunes != 0 {
+		t.Fatalf("reduction details = %d/%d, want zero for append validation", safety.ReplacedRunes, safety.NewRunes)
+	}
+	message := strings.ToLower(safety.Message + " " + safety.NextAction)
+	if strings.Contains(message, "allow_truncation=true") || strings.Contains(message, "replacement removes") {
+		t.Fatalf("append-specific error contains replacement guidance: %q", message)
+	}
+
+	afterPlan, err := repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTaskPlan after rejected append: %v", err)
+	}
+	if afterPlan.Content != beforePlan.Content || afterPlan.WriteVersion != beforePlan.WriteVersion {
+		t.Fatalf("plan after rejected append = %q/%q, want %q/%q", afterPlan.Content, afterPlan.WriteVersion, beforePlan.Content, beforePlan.WriteVersion)
+	}
+	afterHistory, err := repo.ListTaskPlanRevisions(ctx, taskID, 0)
+	if err != nil {
+		t.Fatalf("ListTaskPlanRevisions after rejected append: %v", err)
+	}
+	if len(afterHistory) != len(beforeHistory) {
+		t.Fatalf("history length after rejected append = %d, want %d", len(afterHistory), len(beforeHistory))
+	}
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("rejected append published %d event(s), want none", len(eventBus.GetPublishedEvents()))
+	}
+}
+
 func TestAgentInitialCreationRaceGuardsSecondWriter(t *testing.T) {
 	svc, _, repo := createTestPlanService(t)
 	ctx := context.Background()

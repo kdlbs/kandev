@@ -171,6 +171,7 @@ Never include plan content in an error or a successful write acknowledgement.
 | `plan_version_required` | Read the current plan, then submit the intended edit with its version. |
 | `plan_version_conflict` | Read and reconcile current content. Do not retry the old body with a new token. |
 | `plan_truncation_rejected` | Plan unchanged. Use exact edit or append. Acknowledge only a deliberate reduction within the user's request. |
+| `plan_append_truncation_not_applicable` | Plan unchanged. Retry append without `allow_truncation`; use exact edit for a local change that removes content. |
 | `plan_edit_not_found` / `plan_edit_ambiguous` | Read current content and select a unique exact fragment. |
 | `plan_revision_changed` | Fetch the selected revision again before deciding whether to restore it. |
 | `plan_history_unavailable` / read failure | Do not invent recovery data or recreate the plan. Report the unresolved storage condition if it persists. |

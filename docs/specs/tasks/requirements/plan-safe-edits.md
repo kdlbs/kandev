@@ -52,7 +52,7 @@ The contract applies to agent plan tools. Browser editing retains its current in
 - **AC-TASKS-PLAN-SAFE-003.2:** A successful exact edit shall change only that fragment. It shall preserve every other byte and the title.
 - **AC-TASKS-PLAN-SAFE-003.3:** Missing, ambiguous, or stale matches shall reject the edit without mutation. No fuzzy matching or whole-document fallback shall occur.
 - **AC-TASKS-PLAN-SAFE-003.4:** Exact edits shall obey the composed-content size limit and suspicious-reduction protection. An empty replacement fragment shall permit deletion.
-- **AC-TASKS-PLAN-SAFE-003.5:** Append shall retain its existing composition and retry rules. An optional edit version shall reject a stale append when supplied.
+- **AC-TASKS-PLAN-SAFE-003.5:** Append shall retain its existing composition and retry rules. An optional edit version shall reject a stale append when supplied. `allow_truncation=true` shall be rejected as inapplicable without reduction details.
 
 ### REQ-TASKS-PLAN-SAFE-004: Read and restore exact revisions through agent tools
 

@@ -13,6 +13,7 @@ const (
 	PlanErrorVersionConflict         = "plan_version_conflict"
 	PlanErrorHeadUnavailable         = "plan_head_unavailable"
 	PlanErrorTruncationRejected      = "plan_truncation_rejected"
+	PlanErrorAppendTruncationFlag    = "plan_append_truncation_not_applicable"
 	PlanErrorHistoryUnavailable      = "plan_history_unavailable"
 	PlanErrorContentRequired         = "plan_content_required"
 	PlanErrorEditTextRequired        = "plan_edit_text_required"
@@ -29,6 +30,7 @@ var (
 	ErrPlanVersionConflict         = errors.New("plan write version is stale")
 	ErrPlanHeadUnavailable         = errors.New("current task plan could not be read")
 	ErrPlanTruncationRejected      = errors.New("suspicious plan reduction was rejected")
+	ErrPlanAppendTruncationFlag    = errors.New("allow_truncation is not applicable to append")
 	ErrPlanHistoryUnavailable      = errors.New("plan revision history could not be verified")
 	ErrPlanEditTextRequired        = errors.New("old plan edit text is required")
 	ErrPlanEditNotFound            = errors.New("plan edit text was not found")
@@ -113,7 +115,7 @@ func (s *PlanService) guardAgentPlanWrite(
 	if !req.AllowTruncation {
 		return req, s.truncationError(req.TaskID, head, req.Content)
 	}
-	if err := verifyPlanHistory(head, latest, latestState, latestErr); err != nil {
+	if err := s.verifyPlanHistory(head, latest, latestState, latestErr); err != nil {
 		return req, err
 	}
 	// An acknowledged reduction must be a new revision, so it cannot merge
@@ -125,7 +127,7 @@ func (s *PlanService) guardAgentPlanWrite(
 
 func (s *PlanService) guardAgentAppend(req CreatePlanRequest, head *models.TaskPlan) error {
 	if req.AllowTruncation {
-		return s.truncationError(req.TaskID, head, req.Content)
+		return s.appendTruncationFlagError(req.TaskID, head.WriteVersion)
 	}
 	if req.ExpectedVersion == "" {
 		return nil
@@ -188,14 +190,27 @@ func (s *PlanService) truncationError(taskID string, head *models.TaskPlan, cont
 	return err
 }
 
-func verifyPlanHistory(
+func (s *PlanService) appendTruncationFlagError(taskID, currentVersion string) error {
+	err := newPlanSafetyError(
+		PlanErrorAppendTruncationFlag, ErrPlanAppendTruncationFlag, taskID,
+		"Plan was not changed because allow_truncation applies only to replacement and exact-edit operations.",
+		"Retry the append without allow_truncation, or use edit_task_plan_kandev for a local change that removes content.",
+	)
+	err.CurrentVersion = currentVersion
+	return err
+}
+
+func (s *PlanService) verifyPlanHistory(
 	head *models.TaskPlan,
 	latest *models.TaskPlanRevision,
 	state planRevisionState,
 	readErr error,
 ) error {
 	if state != planRevisionFound || latest == nil || latest.Title != head.Title || latest.Content != head.Content {
-		_ = readErr
+		if readErr != nil {
+			s.logger.Warn("agent plan history read failed",
+				zap.String("task_id", head.TaskID), zap.Error(readErr))
+		}
 		return newPlanSafetyError(
 			PlanErrorHistoryUnavailable, ErrPlanHistoryUnavailable, head.TaskID,
 			"Plan was not changed because its previous content could not be verified in revision history.",

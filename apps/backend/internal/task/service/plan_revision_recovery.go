@@ -224,7 +224,7 @@ func (s *PlanService) prepareRestore(
 	}
 
 	latest, latestState, latestErr := s.readLatestRevisionDetailed(ctx, req.TaskID)
-	if err := verifyPlanHistory(head, latest, latestState, latestErr); err != nil {
+	if err := s.verifyPlanHistory(head, latest, latestState, latestErr); err != nil {
 		if safety, ok := err.(*PlanSafetyError); ok {
 			safety.CurrentVersion = head.WriteVersion
 		}

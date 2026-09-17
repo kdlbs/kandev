@@ -136,3 +136,6 @@ version, history, and events unchanged. It also covers oversized historical
 restore with comment and implementation-marker preservation, raw MCP omission
 and `null` handling for `new_text`, and authorized, cross-task, and
 unauthorized history reads and restores without foreign revision disclosure.
+The MCP journey also covers an explicit empty `new_text` deletion, while the
+agent write guard has dedicated append-flag validation and logs underlying
+revision-history read failures before returning its no-write safety error.

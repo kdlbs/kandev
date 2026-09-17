@@ -46,6 +46,7 @@ func safePlanErrorResponse(msg *ws.Message, err error) (*ws.Message, bool, error
 	code := ws.ErrorCodeInternalError
 	switch safety.Code {
 	case service.PlanErrorVersionRequired, service.PlanErrorTruncationRejected,
+		service.PlanErrorAppendTruncationFlag,
 		service.PlanErrorContentRequired, service.PlanErrorEditTextRequired, service.PlanErrorEditNotFound,
 		service.PlanErrorEditAmbiguous, service.PlanErrorRevisionVersionRequired:
 		code = ws.ErrorCodeValidation

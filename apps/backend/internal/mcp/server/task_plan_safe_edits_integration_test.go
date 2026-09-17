@@ -93,6 +93,16 @@ func TestPlanSafeEditsMCPJourney(t *testing.T) {
 	readAfterEdit := callTool(t, server, "get_task_plan_kandev", nil)
 	require.Equal(t, original[:len(original)-1]+"\n\n## Checklist\n\n- [x] checkbox", planContentFromRead(t, readAfterEdit))
 
+	deleted := callTool(t, server, "edit_task_plan_kandev", map[string]interface{}{
+		"expected_version": currentVersion,
+		"old_text":         "- [x] checkbox",
+		"new_text":         "",
+	})
+	require.False(t, deleted.IsError)
+	currentVersion = planVersionFromRead(t, callTool(t, server, "get_task_plan_kandev", nil))
+	readAfterDelete := callTool(t, server, "get_task_plan_kandev", nil)
+	require.NotContains(t, planContentFromRead(t, readAfterDelete), "- [x] checkbox")
+
 	listed := callTool(t, server, "list_task_plan_revisions_kandev", map[string]interface{}{"limit": 10})
 	require.False(t, listed.IsError)
 	var listPayload struct {
