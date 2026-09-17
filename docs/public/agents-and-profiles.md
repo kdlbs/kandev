@@ -7,6 +7,8 @@ description: "Install agent CLIs and create profiles for models, modes, flags, s
 
 An **agent** is Kandev's integration with a coding-agent CLI. A **profile** is its reusable launch configuration. Create separate profiles when model, credentials, or permissions need different trust boundaries.
 
+The composer model picker shows the session's agent CLI logo beside the selected model and beside **Model** in the open popover. This identifies the CLI running the session, even when it supports models from several vendors.
+
 Agent authentication is separate from repository and integration credentials.
 
 ## Quick path

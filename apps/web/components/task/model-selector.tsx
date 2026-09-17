@@ -3,6 +3,8 @@
 import { memo, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { AgentLogo } from "@/components/agent-logo";
+import { resolveModelSelectorAgentName } from "./model-selector-provider";
 
 import {
   configOptionToModelOptions,
@@ -36,6 +38,7 @@ type SessionModelsEntry = {
 type ModelSelectorProps = {
   sessionId: string | null;
   triggerClassName?: string;
+  showAgentIcon?: boolean;
 };
 
 const debug = createDebugLogger("model-selector:gate");
@@ -504,6 +507,7 @@ function useModelSelectorState(sessionId: string | null) {
 export const ModelSelector = memo(function ModelSelector({
   sessionId,
   triggerClassName,
+  showAgentIcon = false,
 }: ModelSelectorProps) {
   const { t } = useTranslation();
   const {
@@ -518,6 +522,14 @@ export const ModelSelector = memo(function ModelSelector({
     handleModelChange,
     handleConfigChange,
   } = useModelSelectorState(sessionId);
+  const agentName = useAppStore((state) =>
+    showAgentIcon
+      ? resolveModelSelectorAgentName(
+          sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
+          state.agentProfiles.items,
+        )
+      : null,
+  );
   const modelConfig = configOptions.find(isModelConfigOption);
   // Explicit "using fallback" signal: annotate the trigger so the user sees
   // the session is not on the configured start model.
@@ -556,6 +568,13 @@ export const ModelSelector = memo(function ModelSelector({
 
   return (
     <ModelConfigSelector
+      providerIcon={
+        agentName ? (
+          <span aria-hidden="true" className="flex shrink-0" data-testid="model-provider-icon">
+            <AgentLogo agentName={agentName} size={14} className="size-3.5 shrink-0" />
+          </span>
+        ) : undefined
+      }
       modelOptions={modelOptions}
       currentModel={currentModel}
       configOptions={configOptions}
