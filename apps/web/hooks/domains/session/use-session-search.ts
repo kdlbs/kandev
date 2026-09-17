@@ -56,12 +56,10 @@ function useDebouncedSearch(
 }
 
 /** Focus a hit in the DOM with scroll + flash animation. */
-function focusMessageElement(id: string, navigate?: (id: string) => boolean): boolean {
-  const el = document.getElementById(`msg-${id}`);
+function focusMessageElement(id: string, navigate?: (id: string) => HTMLElement | null): boolean {
+  const el = navigate ? navigate(id) : document.getElementById(`msg-${id}`);
   if (!el) return false;
-  if (navigate) {
-    if (!navigate(id)) return false;
-  } else {
+  if (!navigate) {
     // Without a navigation callback there is no guard against competing chat scrolling.
     el.scrollIntoView({ block: "center", behavior: "auto" });
   }
@@ -78,7 +76,7 @@ function useSetActiveHit(
   loadOlder: (() => Promise<number>) | undefined,
   setActiveHitIdState: (id: string | null) => void,
   genRef: React.RefObject<number>,
-  navigate?: (id: string) => boolean,
+  navigate?: (id: string) => HTMLElement | null,
 ) {
   return useCallback(
     async (id: string | null) => {
@@ -102,7 +100,7 @@ function useSetActiveHit(
 export function useSessionSearch(
   sessionId: string | null | undefined,
   loadOlder?: () => Promise<number>,
-  navigate?: (id: string) => boolean,
+  navigate?: (id: string) => HTMLElement | null,
 ): SessionSearchHook {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQueryState] = useState("");

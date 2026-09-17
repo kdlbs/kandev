@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useContext, useMemo } from "react";
+import { createElement, memo, useContext, useMemo, type ComponentProps } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import {
   MarkdownFileLinkContext,
@@ -55,13 +55,23 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   );
   const normalized = normalizeCached(content);
   const motionPlugins = useChatMarkdownMotion(normalized, animateText);
-  const resolvedComponents = useMemo(
-    () =>
-      animateText
-        ? { ...(components ?? markdownComponents), span: ChatMotionSpan }
-        : (components ?? markdownComponents),
-    [animateText, components],
-  );
+  const resolvedComponents = useMemo(() => {
+    const base: Components = components ?? markdownComponents;
+    if (!animateText) return base;
+    const Span = base.span ?? "span";
+    return {
+      ...base,
+      span: (props: ComponentProps<typeof ChatMotionSpan>) => {
+        const { node, ...attributes } = props;
+        if (
+          node?.properties?.["data-chat-text-motion"] !== undefined ||
+          attributes["data-chat-text-motion"] !== undefined
+        )
+          return <ChatMotionSpan {...props} />;
+        return typeof Span === "string" ? createElement(Span, attributes) : <Span {...props} />;
+      },
+    };
+  }, [animateText, components]);
 
   return (
     <MarkdownTaskContext.Provider value={taskId}>

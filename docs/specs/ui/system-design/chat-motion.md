@@ -86,7 +86,9 @@ runs without replay. While text is selected, retain existing spans and render
 additional text statically; compact after the selection is released. Coalesce rapid arrivals to at most one new run per rendered frame. Preserve Unicode, links, inline emphasis, whitespace, and textContent.
 Changing Markdown structure can reconcile nodes; source rewrites use the static
 fallback. Do not mutate React-owned DOM or add live-region copies. Existing
-comment-selection tests must prove span boundaries do not change offsets.
+comment-selection tests must prove span boundaries do not change offsets. Only
+marked motion spans use the motion renderer; unmarked spans retain the caller
+renderer.
 
 ## Scroll integration
 
@@ -105,10 +107,13 @@ Follow intent is distinct from instantaneous distance to bottom while the driver
 runs: its own intermediate scroll events must not incorrectly clear intent.
 Actual wheel/touch/keyboard/scrollbar input cancels it and returns control to
 existing near-bottom logic. Ordinary content clicks do not clear follow intent;
-pointer presses interrupt only in the native scrollbar gutter. Explicit scroll-to-message navigation cancels the
+pointer presses interrupt only in the native scrollbar gutter. Keys handled by
+interactive or editable descendants do not cancel following. Explicit scroll-to-message navigation cancels the
 follow driver and retains `useProgrammaticScrollGuard`. Thread effective motion
 through `handleScrollToMessage`, transcript search, and chat controls in
 `simple/task-chat.tsx`, avoiding application-wide `scroll-behavior: smooth`.
+Search highlighting uses the row returned by its panel-scoped navigation owner,
+so duplicate message IDs in another mounted panel cannot receive the flash.
 
 Initial placement, pagination compensation, unread positioning, and Dockview
 restoration continue using immediate writes. Retain native scroll anchoring while

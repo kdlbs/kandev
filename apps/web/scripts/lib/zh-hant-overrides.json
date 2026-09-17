@@ -6,7 +6,8 @@
       },
       "settings": {
         "preventAutoStartAgentOnOpen": "開啟任務時不自動啟動代理程式",
-        "preventAutoStartAgentOnOpenHelp": "重新啟動後，或從工作流程最後一步開啟任務時，不會自動啟動代理程式，改為顯示「啟動代理程式」按鈕。"
+        "preventAutoStartAgentOnOpenHelp": "重新啟動後，或從工作流程最後一步開啟任務時，不會自動啟動代理程式，改為顯示「啟動代理程式」按鈕。",
+        "chatAnimationsDescription": "在此裝置上為新文字、新聊天項目和滾動新增動畫。遵循減少動態效果的偏好設定。"
       },
       "common": {
         "nativeFolderPickerUnavailable": "原生資料夾選擇器無法使用。請重新載入 Kandev 後再試。",

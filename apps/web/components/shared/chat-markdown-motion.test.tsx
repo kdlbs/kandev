@@ -1,18 +1,28 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createContext } from "react";
+const customSpanFixture = vi.hoisted(() => ({ enabled: false }));
+
 import { MemoizedMarkdown } from "./memoized-markdown";
 vi.mock("@/components/shared/markdown-components", () => ({
   MarkdownFileLinkContext: createContext({}),
   MarkdownTaskContext: createContext(null),
   markdownComponents: {},
-  remarkPlugins: [],
+  remarkPlugins: [
+    () => (tree: { children: { data?: object }[] }) => {
+      if (customSpanFixture.enabled) tree.children[0].data = { hName: "span" };
+    },
+  ],
 }));
+const originalAnimate = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
 const motionSelector = "[data-chat-text-motion]";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  customSpanFixture.enabled = false;
+  if (originalAnimate) Object.defineProperty(Element.prototype, "animate", originalAnimate);
+  else Reflect.deleteProperty(Element.prototype, "animate");
 });
 
 // @covers AC-UI-CHAT-MOTION-001.1, AC-UI-CHAT-MOTION-001.4
@@ -85,4 +95,18 @@ it("retains the selected text while a reveal finishes and more text arrives", ()
   expect(view.container.querySelector(motionSelector)).toBeNull();
   view.unmount();
   vi.useRealTimers();
+});
+
+it("preserves the caller's renderer for unmarked spans during text motion", () => {
+  customSpanFixture.enabled = true;
+  const components = {
+    span: ({ children }: { children?: import("react").ReactNode }) => (
+      <span data-custom-span>{children}</span>
+    ),
+  };
+  const view = render(<MemoizedMarkdown content="old" components={components} animateText />);
+  expect(view.container.querySelector("[data-custom-span]")?.textContent).toBe("old");
+  view.rerender(<MemoizedMarkdown content="old new" components={components} animateText />);
+  expect(view.container.querySelector("[data-custom-span]")?.textContent).toBe("old new");
+  expect(view.container.querySelector("[data-custom-span] [data-chat-text-motion]")).not.toBeNull();
 });

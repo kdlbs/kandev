@@ -185,3 +185,19 @@ linter also passed.
 Commands: `pnpm exec vitest run hooks/use-lazy-load-sentinel.test.ts` and
 `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-message-pagination.spec.ts -- --retries=0` from `apps/web`.
 Desktop command: `pnpm e2e:run --host --no-build e2e/tests/chat/message-pagination.spec.ts -- --retries=0`.
+
+## Consolidated review interaction fixes
+
+Scroll keys consumed by interactive/editable descendants retain follow intent.
+Transcript-owned scroll keys still interrupt. Search now flashes the row
+returned by the owning panel's navigation callback, never a duplicate global ID.
+
+Validation: control-key and duplicate-panel regressions failed before the fixes;
+all 29 focused Markdown/scroll/search tests passed, including prevented keys and
+missing owner rows.
+
+Validation commands from `apps/web`: `pnpm exec vitest run components/task/chat/chat-scroll-motion.test.ts hooks/domains/session/use-session-search.test.ts components/shared/chat-markdown-motion.test.tsx` (29 passed); `pnpm run typecheck`, `pnpm run i18n:check`, and changed-file ESLint passed.
+The browser fixture creates its active turn before loading history, so the
+observed delivery is a live append rather than a history refresh. Desktop
+chat-motion passed 2/2 and session-search C4 passed 1/1 on rebuilt assets.
+Phone chat-motion also passed 2/2. Browser runs used `pnpm e2e:run --host --no-build` with `e2e/tests/chat/chat-motion.spec.ts`, `e2e/tests/search/session-search.spec.ts -- --grep "C4 clicking"`, and `--project mobile-chrome e2e/tests/chat/mobile-chat-motion.spec.ts`, with retries disabled.

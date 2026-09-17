@@ -809,6 +809,6 @@
   "autoFocusNewTasks": "自動聚焦新任務",
   "autoFocusNewTasksHelp": "自動開啟新建立的任務。關閉此選項可保留目前檢視。任務和代理仍會按要求啟動。",
   "chatAnimations": "聊天動畫",
-  "chatAnimationsDescription": "在此裝置上為新文字、新聊天專案和滾動新增動畫。遵循減少動態效果的偏好設定。",
+  "chatAnimationsDescription": "在此裝置上為新文字、新聊天項目和滾動新增動畫。遵循減少動態效果的偏好設定。",
   "discoveryAliasesChatMotion": "聊天 動畫 平滑滾動 文字 動態效果"
 }

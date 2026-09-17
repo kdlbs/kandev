@@ -176,3 +176,43 @@ describe("touch scroll intent", () => {
     expect(interrupt).toHaveBeenCalledOnce();
   });
 });
+
+describe("keyboard control ownership", () => {
+  it.each(["button", "input", "select", "textarea", "a", "editable", "role-button"])(
+    "keeps following when a %s handles a scroll key",
+    (kind) => {
+      const { el } = fixture();
+      const control = document.createElement(
+        kind === "editable" || kind === "role-button" ? "div" : kind,
+      );
+      if (kind === "editable") control.setAttribute("contenteditable", "true");
+      if (kind === "role-button") control.setAttribute("role", "button");
+      if (kind === "a") control.setAttribute("href", "#target");
+      const target = document.createElement("span");
+      control.append(target);
+      el.append(control);
+      const interrupt = vi.fn();
+      const motion = createChatScrollMotion(el, () => true, interrupt);
+      motion.request();
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+      expect(interrupt).not.toHaveBeenCalled();
+      expect(motion.isRunning()).toBe(true);
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp" }));
+      expect(interrupt).toHaveBeenCalledOnce();
+      motion.dispose();
+    },
+  );
+});
+
+it("leaves a prevented scroll key with its existing handler", () => {
+  const { el } = fixture();
+  const interrupt = vi.fn();
+  const motion = createChatScrollMotion(el, () => true, interrupt);
+  motion.request();
+  const event = new KeyboardEvent("keydown", { key: "PageUp", cancelable: true });
+  event.preventDefault();
+  el.dispatchEvent(event);
+  expect(interrupt).not.toHaveBeenCalled();
+  expect(motion.isRunning()).toBe(true);
+  motion.dispose();
+});

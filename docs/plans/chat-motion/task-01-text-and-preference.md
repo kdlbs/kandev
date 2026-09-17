@@ -147,3 +147,15 @@ Validation completed on 2026-09-15:
   wheel/touch interruption, and disabled/reduced-motion behavior. History readiness
   and finite entrance completion are causal waits; no fixed sleeps were added.
 - No commit or push performed.
+
+## Consolidated review remediation
+
+Unmarked Markdown spans retain the caller's renderer; only marked spans enter
+the reveal wrapper. The motion test fixture restores the original Web Animations
+API descriptor after each test. The Traditional Chinese description uses
+「項目」 for chat items, with a conversion override preserving that wording.
+
+Validation: the custom-renderer regression failed before the fix. The combined
+Markdown/scroll/search unit run passed 29 tests.
+
+Validation commands from `apps/web`: `pnpm exec vitest run components/task/chat/chat-scroll-motion.test.ts hooks/domains/session/use-session-search.test.ts components/shared/chat-markdown-motion.test.tsx` (29 passed); `pnpm run typecheck`, `pnpm run i18n:check`, and changed-file ESLint passed.

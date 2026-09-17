@@ -132,7 +132,7 @@ it("delegates search navigation to the transcript scroll owner", async () => {
   const row = document.createElement("div");
   row.id = "msg-owned";
   document.body.append(row);
-  const navigate = vi.fn(() => true);
+  const navigate = vi.fn(() => row);
   const { result, unmount } = renderHook(() => useSessionSearch("sess-1", undefined, navigate));
   await act(async () => {
     result.current.setActiveHit("owned");
@@ -140,4 +140,38 @@ it("delegates search navigation to the transcript scroll owner", async () => {
   expect(navigate).toHaveBeenCalledWith("owned");
   unmount();
   row.remove();
+});
+
+it("flashes the navigation owner's row when another mounted panel has the same ID", async () => {
+  const other = document.createElement("div");
+  const owned = document.createElement("div");
+  other.id = owned.id = "msg-duplicate";
+  document.body.append(other, owned);
+  const navigate = vi.fn(() => owned);
+  const { result, unmount } = renderHook(() => useSessionSearch("sess-1", undefined, navigate));
+  try {
+    await act(async () => result.current.setActiveHit("duplicate"));
+    expect(owned.classList.contains("search-flash")).toBe(true);
+    expect(other.classList.contains("search-flash")).toBe(false);
+  } finally {
+    unmount();
+    other.remove();
+    owned.remove();
+  }
+});
+
+it("does not fall back to another panel when the navigation owner has no row", async () => {
+  const other = document.createElement("div");
+  other.id = "msg-other-panel";
+  document.body.append(other);
+  const loadOlder = vi.fn(async () => 0);
+  const { result, unmount } = renderHook(() => useSessionSearch("sess-1", loadOlder, () => null));
+  try {
+    await act(async () => result.current.setActiveHit("other-panel"));
+    expect(loadOlder).toHaveBeenCalledOnce();
+    expect(other.classList.contains("search-flash")).toBe(false);
+  } finally {
+    unmount();
+    other.remove();
+  }
 });

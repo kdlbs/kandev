@@ -1143,7 +1143,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   }, [hasMore, firstMessageId]);
   // Search can target backend rows before the visible transcript boundary.
   const navigateSearchHit = useCallback(
-    (id: string) => messageListRef.current?.scrollToMessage(id, { align: "center" }) ?? false,
+    (id: string) => {
+      if (!messageListRef.current?.scrollToMessage(id, { align: "center" })) return null;
+      return (
+        panelRef.current?.querySelector<HTMLElement>(
+          `.chat-message-list [id="msg-${CSS.escape(id)}"]`,
+        ) ?? null
+      );
+    },
     [messageListRef],
   );
   const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);

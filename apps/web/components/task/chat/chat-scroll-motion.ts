@@ -14,6 +14,16 @@ export function cancelChatScrollMotion(element: HTMLElement): void {
 
 function listenForScrollIntent(element: HTMLElement, interrupt: () => void): () => void {
   const onKey = (event: KeyboardEvent) => {
+    const target = event.target;
+    if (
+      event.defaultPrevented ||
+      (target instanceof Element &&
+        target !== element &&
+        target.closest(
+          'button, input, select, textarea, a[href], [role="button"], [contenteditable]:not([contenteditable="false"])',
+        ))
+    )
+      return;
     if (SCROLL_KEYS.has(event.key)) interrupt();
   };
   const onPointer = (event: PointerEvent) => {

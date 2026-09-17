@@ -90,6 +90,9 @@ export function chatMotionScenarios(mobile: boolean) {
     );
     if (!task.session_id) throw new Error("Missing session");
     await waitForSessionDone(apiClient, task.id, task.session_id, "motion seed should finish");
+    // Establish the active turn before opening history. Creating a turn in the
+    // observed viewport triggers a history refresh, which intentionally stays static.
+    await apiClient.seedAgentMessages(task.session_id, 1, "Existing turn");
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
