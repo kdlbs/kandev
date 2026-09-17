@@ -1296,63 +1296,10 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID, sess
 	if task.State != v1.TaskStateReview {
 		return task, nil
 	}
-	if sessionID != "" {
-		deferral, queued, queueErr := h.service.ReadCeilingDeferredLaunch(ctx, taskID)
-		if queueErr != nil {
-			return nil, queueErr
-		}
-		queuedSessionID := models.CeilingDeferralSessionID(task, deferral)
-		var session *models.TaskSession
-		if queued {
-			session, err = h.service.GetTaskSession(ctx, sessionID)
-			if err != nil {
-				h.logger.Warn("could not inspect deferred launch session before task state transition",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-				return nil, err
-			}
-		}
-		if queued && queuedSessionID == sessionID && session != nil && session.TaskID == taskID && session.State == models.TaskSessionStateCreated {
-			// The queue record can change independently of task state. Re-read
-			// it immediately before the state CAS so a successor workflow entry
-			// cannot make this message path preserve REVIEW/Scheduling for an old
-			// destination.
-			latestDeferral, latestQueued, latestErr := h.service.ReadCeilingDeferredLaunch(ctx, taskID)
-			if latestErr != nil {
-				return nil, latestErr
-			}
-			sameEntry, compareErr := models.CeilingDeferralsEquivalentForAdmission(deferral, latestDeferral)
-			if !latestQueued || compareErr != nil || !sameEntry {
-				queued = false
-			}
-			if queued {
-				// Re-read the task-owned route as well as the queue record. A
-				// sessionless workflow start is bound to the committed route, so
-				// the first task snapshot is not sufficient to preserve Scheduling.
-				latestTask, latestTaskErr := h.service.GetTask(ctx, taskID)
-				if latestTaskErr != nil {
-					return nil, latestTaskErr
-				}
-				if !models.CeilingDeferralTargetsSession(latestTask, latestDeferral, sessionID) {
-					queued = false
-				} else {
-					task = latestTask
-				}
-			}
-		}
-		if queued && queuedSessionID == sessionID && session != nil && session.TaskID == taskID && session.State == models.TaskSessionStateCreated {
-			h.logger.Info("keeping task in Scheduling while message targets a capacity-deferred session",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID))
-			updated, updateErr := h.service.UpdateTaskStateIfCurrentIn(
-				ctx, taskID, v1.TaskStateScheduling, []v1.TaskState{v1.TaskStateReview},
-			)
-			if updateErr != nil {
-				return nil, updateErr
-			}
-			if updated {
-				task.State = v1.TaskStateScheduling
-			}
-			return task, nil
-		}
+	if task, keptQueued, err := h.reconcileQueuedMessageTask(ctx, task, taskID, sessionID); err != nil {
+		return nil, err
+	} else if keptQueued {
+		return task, nil
 	}
 	if _, err := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		h.logger.Error("failed to transition task from REVIEW to IN_PROGRESS",
@@ -1363,6 +1310,94 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID, sess
 			zap.String("task_id", taskID))
 	}
 	return task, nil
+}
+
+//nolint:cyclop,gocognit,nestif // Queue reconciliation keeps the read/compare/CAS fence in one transaction-shaped helper.
+func (h *MessageHandlers) reconcileQueuedMessageTask(
+	ctx context.Context,
+	task *models.Task,
+	taskID, sessionID string,
+) (*models.Task, bool, error) {
+	// A REVIEW task can still own an automatic launch that is waiting for
+	// capacity. Read that queue for every message path, including callers that
+	// do not provide a session id. A repository failure is uncertainty, not an
+	// absence, so state must remain unchanged and the error must be returned.
+	deferral, queued, err := h.service.ReadCeilingDeferredLaunch(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !queued {
+		return task, false, nil
+	}
+	queuedSessionID := models.CeilingDeferralSessionID(task, deferral)
+	if queuedSessionID == "" {
+		return task, true, nil
+	}
+	// A caller targeting another session is an explicit message to that
+	// session. It must not claim or preserve a different queued destination.
+	if sessionID != "" && sessionID != queuedSessionID {
+		return task, false, nil
+	}
+	if !models.CeilingDeferralTargetsSession(task, deferral, queuedSessionID) {
+		return task, true, nil
+	}
+	queuedSession, err := h.service.GetTaskSession(ctx, queuedSessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if queuedSession == nil || queuedSession.TaskID != taskID {
+		return task, true, nil
+	}
+	if queuedSession.State != models.TaskSessionStateCreated {
+		return task, false, nil
+	}
+
+	// Re-read the queue and route immediately before the state CAS. A successor
+	// entry must not inherit the old destination's repair.
+	latestDeferral, latestQueued, err := h.service.ReadCeilingDeferredLaunch(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !latestQueued {
+		return task, false, nil
+	}
+	sameEntry, err := models.CeilingDeferralsEquivalentForAdmission(deferral, latestDeferral)
+	if err != nil {
+		return task, true, nil
+	}
+	latestTask, err := h.service.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	latestSessionID := models.CeilingDeferralSessionID(latestTask, latestDeferral)
+	if !sameEntry || latestSessionID != queuedSessionID ||
+		!models.CeilingDeferralTargetsSession(latestTask, latestDeferral, queuedSessionID) {
+		return task, true, nil
+	}
+	task = latestTask
+	latestSession, err := h.service.GetTaskSession(ctx, queuedSessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	if latestSession == nil || latestSession.TaskID != taskID {
+		return task, true, nil
+	}
+	if latestSession.State != models.TaskSessionStateCreated {
+		return task, false, nil
+	}
+
+	h.logger.Info("keeping task in Scheduling while message targets a capacity-deferred session",
+		zap.String("task_id", taskID), zap.String("session_id", queuedSessionID))
+	updated, err := h.service.UpdateTaskStateIfCurrentIn(
+		ctx, taskID, v1.TaskStateScheduling, []v1.TaskState{v1.TaskStateReview},
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	if updated {
+		task.State = v1.TaskStateScheduling
+	}
+	return task, true, nil
 }
 
 // dispatchPromptAsync forwards the message to the agent as a prompt in a

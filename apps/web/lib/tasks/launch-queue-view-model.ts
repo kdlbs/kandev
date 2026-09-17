@@ -60,7 +60,10 @@ export function buildLaunchQueueViewModel(
       !isConnected || age >= LAUNCH_QUEUE_CAPACITY_STALE_AFTER_MS ? "stale" : "current";
   }
   return {
-    destinationId: queue.agent_profile_id?.trim() || queue.session_id?.trim() || null,
+    // Session IDs are ownership keys, not user-facing destination labels. A
+    // missing profile projection must fall back to the translated generic
+    // label instead of exposing an opaque UUID.
+    destinationId: queue.agent_profile_id?.trim() || null,
     queuedAt: queue.queued_at,
     reason: queue.reason,
     retrying: queue.retrying,

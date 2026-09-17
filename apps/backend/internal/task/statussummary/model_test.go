@@ -250,6 +250,60 @@ func TestLaunchQueueSummaryFromTaskWithCapacityUsesLatestObservation(t *testing.
 	}
 }
 
+func TestLaunchQueueSummaryFromTaskResolvesSeamOneDestinationFromRoute(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-implement",
+		Metadata: map[string]interface{}{
+			models.MetaKeyWorkflowSessionRoute: models.WorkflowSessionRoute{
+				OperationID:       "route-1",
+				DestinationStepID: "step-implement",
+				EntryIdentity:     "entry:1",
+				TargetKind:        "new_session",
+				DestinationID:     "session-luna",
+				Phase:             "committed",
+			},
+			models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+				Kind: models.CeilingLaunchStart,
+				Payload: map[string]interface{}{
+					"workflow_step_id": "step-implement",
+				},
+				Origin: "automatic", ReasonCode: "session_capacity", QueuedAt: queuedAt,
+			}),
+		},
+	}
+	got := LaunchQueueSummaryFromTask(task)
+	if got == nil || got.SessionID != "session-luna" {
+		t.Fatalf("seam-one launch queue = %+v, want route destination session-luna", got)
+	}
+}
+
+func TestLaunchQueueSummaryFromTaskMarksInvalidWorkflowOwnership(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC)
+	task := &models.Task{Metadata: map[string]interface{}{
+		models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+			Kind: models.CeilingLaunchStartCreated,
+			Payload: map[string]interface{}{
+				"session_id":       "session-luna",
+				"workflow_step_id": "step-implement",
+				models.CeilingLaunchEntryBindingKey: map[string]interface{}{
+					"workflow_id":            "workflow-1",
+					"destination_step_id":    "step-implement",
+					"route_operation_id":     "route-old",
+					"entry_identity":         "entry:old",
+					"destination_session_id": "session-luna",
+				},
+			},
+			Origin: "automatic", ReasonCode: "session_capacity", QueuedAt: queuedAt,
+		}),
+	}}
+	got := LaunchQueueSummaryFromTask(task)
+	if got == nil || got.Reason != LaunchQueueReasonOwnershipUnavailable || got.Retrying {
+		t.Fatalf("invalid workflow queue = %+v, want ownership_unavailable without retry", got)
+	}
+}
+
 func TestTaskStatusSummaryValidateBoundsErrorPreview(t *testing.T) {
 	valid := TaskStatusSummary{ActiveError: &ActiveErrorSummary{Preview: strings.Repeat("é", MaxActiveErrorPreviewBytes/2)}}
 	if err := valid.Validate(); err != nil {

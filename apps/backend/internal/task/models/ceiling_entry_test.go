@@ -79,3 +79,27 @@ func TestCeilingDeferralTargetsSessionRejectsSuccessorRoute(t *testing.T) {
 		t.Fatal("old workflow entry must not target the successor route")
 	}
 }
+
+func TestCeilingDeferralTargetsSessionRejectsBoundRecordWithoutCommittedRoute(t *testing.T) {
+	task := &Task{
+		WorkflowID:     "workflow-1",
+		WorkflowStepID: "step-new",
+		Metadata:       map[string]interface{}{},
+	}
+	deferral := CeilingDeferral{
+		Kind: CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			"session_id": "session-new",
+			CeilingLaunchEntryBindingKey: map[string]interface{}{
+				"workflow_id":            "workflow-1",
+				"destination_step_id":    "step-new",
+				"route_operation_id":     "route-old",
+				"entry_identity":         "entry:old",
+				"destination_session_id": "session-new",
+			},
+		},
+	}
+	if CeilingDeferralTargetsSession(task, deferral, "session-new") {
+		t.Fatal("a bound deferred entry without a committed route must be unavailable")
+	}
+}

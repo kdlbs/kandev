@@ -36,6 +36,11 @@ const (
 	// their own halves of the shared record independently.
 	CeilingLaunchClaimKey = "ceiling_launch_claim"
 
+	// CeilingLaunchClaimExpiresAtKey records the UTC lease deadline for an
+	// in-flight ceiling launch claim. A process that exits while holding a
+	// claim can therefore be recovered by a later dispatcher.
+	CeilingLaunchClaimExpiresAtKey = "expires_at"
+
 	// CeilingLaunchEntryBindingKey nests the exact workflow entry identity in
 	// a workflow-origin replay payload.
 	CeilingLaunchEntryBindingKey = "workflow_entry_binding"

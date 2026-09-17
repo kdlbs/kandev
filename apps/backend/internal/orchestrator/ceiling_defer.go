@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // deferredLaunchCASRetryBudget bounds the read-compare-write retry AC-40a
@@ -50,6 +51,8 @@ func (s *Service) deferCeilingRefusal(
 	ctx context.Context, taskID, sessionID string, kind models.CeilingLaunchKind, payload map[string]interface{},
 	reasonCode string, population int, populationKnown bool, ceiling int,
 ) error {
+	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
 	// Capture the route/entry identity that is already committed at the
 	// admission boundary. The payload remains the first launch description;
 	// this only adds the durable binding needed to reject stale replay.
@@ -91,6 +94,7 @@ func (s *Service) deferCeilingRefusal(
 				// AC-12a/AC-49e: the same launch, refused for the same reason,
 				// already recorded. Leave it exactly as stored, including its
 				// queued_at (AC-32) and its card-surface bookkeeping.
+				s.reconcileQueuedTaskState(ctx, taskID)
 				return nil
 			}
 			// AC-49f: the same pending launch, but the reason changed (for
@@ -104,6 +108,7 @@ func (s *Service) deferCeilingRefusal(
 			updated.PopulationKnown = populationKnown
 			updated.Ceiling = ceiling
 			if s.writeCeilingDeferralUpdate(ctx, taskID, existingRaw, prior, updated) {
+				s.reconcileQueuedTaskState(ctx, taskID)
 				s.attemptCeilingSurfaceWrite(ctx, taskID)
 				s.publishTaskUpdatedByID(ctx, taskID)
 			}
@@ -121,6 +126,7 @@ func (s *Service) deferCeilingRefusal(
 			return fmt.Errorf("writing deferred launch for task %s: %w", taskID, err)
 		}
 		if stored {
+			s.reconcileQueuedTaskState(ctx, taskID)
 			s.attemptCeilingSurfaceWrite(ctx, taskID)
 			s.publishTaskUpdatedByID(ctx, taskID)
 			return nil
@@ -132,6 +138,50 @@ func (s *Service) deferCeilingRefusal(
 	}
 	return fmt.Errorf("%s: could not persist deferred launch for task %s after %d attempts",
 		ceilingReasonDeferWriteFailed, taskID, deferredLaunchCASRetryBudget)
+}
+
+// reconcileQueuedTaskState repairs legacy task rows as soon as the durable
+// ceiling entry is known to exist. It only changes an authoritative queued
+// destination with no working session, so a message or turn that legitimately
+// made the task active remains the owner of IN_PROGRESS.
+func (s *Service) reconcileQueuedTaskState(ctx context.Context, taskID string) {
+	if s == nil || s.repo == nil || s.taskRepo == nil || taskID == "" {
+		return
+	}
+	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		if err != nil {
+			s.logger.Zap().Warn("could not load task before repairing state after ceiling deferral",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+		return
+	}
+	deferral, queued, err := s.readValidCeilingDeferredLaunch(ctx, task)
+	if err != nil || !queued {
+		if err != nil {
+			s.logger.Zap().Warn("could not validate deferred launch before repairing task state",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+		return
+	}
+	if blockingSessionID, readable := s.otherWorkingSessionID(ctx, taskID, ""); !readable || blockingSessionID != "" {
+		return
+	}
+	allowedStates := []v1.TaskState{v1.TaskStateReview, v1.TaskStateInProgress}
+	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
+		ctx, taskID, v1.TaskStateScheduling, allowedStates,
+	)
+	if err != nil {
+		s.logger.Zap().Warn("could not repair task state after ceiling deferral",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if updated {
+		s.logger.Zap().Info("repaired task state after ceiling deferral",
+			zap.String("task_id", taskID), zap.String("kind", string(deferral.Kind)))
+	}
 }
 
 // writeCeilingDeferralUpdate writes an updated deferral over the record that

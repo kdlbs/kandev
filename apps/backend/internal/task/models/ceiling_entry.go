@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // CeilingWorkflowEntryBinding identifies the workflow entry that owns a
@@ -53,29 +54,58 @@ func ReadCeilingWorkflowEntryBinding(payload map[string]interface{}) (CeilingWor
 	return binding, true, nil
 }
 
-// ReadCeilingLaunchClaim reads the short-lived CAS claim from a ceiling
-// record. Unknown or malformed values are treated as absent so a damaged
-// claim cannot make an otherwise valid launch permanently undispatchable.
-func ReadCeilingLaunchClaim(record map[string]interface{}) (claimID, owner string, ok bool) {
+// CeilingLaunchClaim is the short-lived ownership lease for one ceiling
+// launch. A zero deadline is treated as expired so records written before
+// leases were introduced remain recoverable.
+type CeilingLaunchClaim struct {
+	ID        string
+	Owner     string
+	ExpiresAt time.Time
+}
+
+func (c CeilingLaunchClaim) Expired(now time.Time) bool {
+	return c.ExpiresAt.IsZero() || !c.ExpiresAt.After(now)
+}
+
+// ReadCeilingLaunchClaimDetails reads the short-lived CAS claim and its lease
+// deadline from a ceiling record. Unknown or malformed values are treated as
+// absent so a damaged claim cannot make an otherwise valid launch permanently
+// undispatchable.
+func ReadCeilingLaunchClaimDetails(record map[string]interface{}) (CeilingLaunchClaim, bool) {
 	if record == nil {
-		return "", "", false
+		return CeilingLaunchClaim{}, false
 	}
 	raw, ok := record[CeilingLaunchClaimKey]
 	if !ok || raw == nil {
-		return "", "", false
+		return CeilingLaunchClaim{}, false
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
-		return "", "", false
+		return CeilingLaunchClaim{}, false
 	}
 	var claim struct {
-		ID    string `json:"id"`
-		Owner string `json:"owner"`
+		ID        string `json:"id"`
+		Owner     string `json:"owner"`
+		ExpiresAt string `json:"expires_at"`
 	}
 	if err := json.Unmarshal(encoded, &claim); err != nil {
-		return "", "", false
+		return CeilingLaunchClaim{}, false
 	}
 	if claim.ID == "" || claim.Owner == "" {
+		return CeilingLaunchClaim{}, false
+	}
+	var expiresAt time.Time
+	if claim.ExpiresAt != "" {
+		expiresAt, _ = time.Parse(time.RFC3339Nano, claim.ExpiresAt)
+	}
+	return CeilingLaunchClaim{ID: claim.ID, Owner: claim.Owner, ExpiresAt: expiresAt}, true
+}
+
+// ReadCeilingLaunchClaim preserves the compact claim reader used by callers
+// that only need the owner identity.
+func ReadCeilingLaunchClaim(record map[string]interface{}) (claimID, owner string, ok bool) {
+	claim, ok := ReadCeilingLaunchClaimDetails(record)
+	if !ok {
 		return "", "", false
 	}
 	return claim.ID, claim.Owner, true
@@ -120,8 +150,10 @@ func CeilingDeferralTargetsSession(task *Task, deferral CeilingDeferral, session
 	}
 	route, routePresent := LoadWorkflowSessionRoute(task.Metadata)
 	if !routePresent {
-		return task.WorkflowStepID == binding.DestinationStepID &&
-			(task.WorkflowID == "" || task.WorkflowID == binding.WorkflowID)
+		// A bound record must be compared with the committed route. The task's
+		// step fields are not an entry identity and can already describe a
+		// successor after the original route was replaced.
+		return false
 	}
 	return route.OperationID == binding.RouteOperationID &&
 		route.DestinationStepID == binding.DestinationStepID &&

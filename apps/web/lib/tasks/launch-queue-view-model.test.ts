@@ -83,7 +83,7 @@ describe("buildLaunchQueueViewModel", () => {
         retrying: true,
       }),
     ).toMatchObject({
-      destinationId: "luna-session",
+      destinationId: null,
       capacityFreshness: "unavailable",
       capacity: null,
     });

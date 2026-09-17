@@ -77,6 +77,8 @@ func (s *Service) reconcileDeferredCeilingTaskState(
 	if task == nil || task.State != v1.TaskStateReview {
 		return
 	}
+	ctx, release := s.lockCeilingEntryAdmission(ctx, task.ID)
+	defer release()
 	observedDeferral, valid, err := s.readValidCeilingDeferredLaunch(ctx, task)
 	if err != nil || !valid {
 		return
@@ -324,6 +326,8 @@ func (s *Service) dropCeilingDeferral(
 // deferral is supplied, the clear is also bound to that exact record. A stale
 // replay must not remove a newer successor that won the intervening CAS.
 func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string, expected ...models.CeilingDeferral) {
+	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
 	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
 		existingRaw, prior, err := s.repo.GetTaskDeferredLaunch(ctx, taskID)
 		if err != nil {
@@ -404,6 +408,11 @@ func stripCeilingRecordKeys(existing interface{}) map[string]interface{} {
 // deferral's kind. The closed set is exhaustive; a kind outside it was
 // already rejected as unreplayable by ReadCeilingDeferral before this point.
 func (s *Service) replayCeilingDeferral(ctx context.Context, task *models.Task, deferral models.CeilingDeferral) ceilingReplayOutcome {
+	if task == nil || task.ID == "" {
+		return ceilingReplayFailed
+	}
+	ctx, release := s.lockCeilingEntryAdmission(ctx, task.ID)
+	defer release()
 	current, err := s.repo.GetTask(ctx, task.ID)
 	if err != nil || current == nil {
 		return ceilingReplayFailed

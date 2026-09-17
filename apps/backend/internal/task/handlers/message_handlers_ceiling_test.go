@@ -149,3 +149,32 @@ func TestEnsureTaskInProgressRepairsLegacyReviewQueuedCreatedSession(t *testing.
 	require.Equal(t, v1.TaskStateScheduling, repo.task.State)
 	require.Equal(t, 1, repo.stateWrites)
 }
+
+func TestEnsureTaskInProgressRepairsLegacyReviewWithoutSessionArgument(t *testing.T) {
+	queuedAt := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	repo := &ceilingReconcileRepo{
+		task: &models.Task{
+			ID: "message-legacy-review-no-session", State: v1.TaskStateReview,
+			CreatedAt: queuedAt, UpdatedAt: queuedAt,
+		},
+		session: &models.TaskSession{
+			ID: "message-legacy-session-no-arg", TaskID: "message-legacy-review-no-session",
+			State: models.TaskSessionStateCreated,
+		},
+		deferred: models.CeilingRecordKeys(models.CeilingDeferral{
+			Kind:    models.CeilingLaunchStartCreated,
+			Payload: map[string]interface{}{"session_id": "message-legacy-session-no-arg"},
+			Origin:  "automatic", ReasonCode: "session_capacity", QueuedAt: queuedAt,
+		}),
+	}
+	handlers := newCeilingReconcileHandlers(t, repo)
+
+	task, err := handlers.ensureTaskInProgress(context.Background(), repo.task.ID, "")
+	require.NoError(t, err)
+	require.Equal(t, v1.TaskStateScheduling, task.State)
+
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	require.Equal(t, v1.TaskStateScheduling, repo.task.State)
+	require.Equal(t, 1, repo.stateWrites)
+}

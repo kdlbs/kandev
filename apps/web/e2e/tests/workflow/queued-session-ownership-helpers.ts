@@ -107,12 +107,29 @@ export async function expectSessionMessagesUnchanged(
   expectedMessageIds: string[],
   timeoutMs = 5_000,
 ): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let unexpectedMessageIds: string[] | null = null;
   await expect
-    .poll(() => sessionMessageIds(apiClient, sessionId), {
-      timeout: timeoutMs,
-      message: `session ${sessionId} received an unexpected message`,
-    })
-    .toEqual(expectedMessageIds);
+    .poll(
+      async () => {
+        const actualMessageIds = await sessionMessageIds(apiClient, sessionId);
+        if (JSON.stringify(actualMessageIds) !== JSON.stringify(expectedMessageIds)) {
+          unexpectedMessageIds = actualMessageIds;
+          return true;
+        }
+        return Date.now() >= deadline;
+      },
+      {
+        timeout: timeoutMs,
+        message: `session ${sessionId} received an unexpected message`,
+      },
+    )
+    .toBe(true);
+  if (unexpectedMessageIds) {
+    throw new Error(
+      `session ${sessionId} received unexpected messages: ${JSON.stringify(unexpectedMessageIds)}`,
+    );
+  }
 }
 
 /**

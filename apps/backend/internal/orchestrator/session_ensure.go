@@ -175,57 +175,90 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 // session when ownership cannot be established.
 func (s *Service) queuedEnsureResponse(ctx context.Context, taskID string) (*EnsureSessionResponse, bool) {
 	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || !models.HasCeilingDeferredIntent(task) {
+	if err != nil || task == nil {
+		return queuedEnsureOwnershipUnavailableResponse(taskID, "", ""), true
+	}
+	if !models.HasCeilingDeferredIntent(task) {
 		return nil, false
 	}
 	record, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	deferral, err := models.ReadCeilingDeferral(record)
 	if err != nil {
-		return &EnsureSessionResponse{
-			Success:               true,
-			TaskID:                taskID,
-			State:                 string(models.TaskSessionStateCreated),
-			Source:                "queued",
-			NewlyCreated:          false,
-			ActivationDisposition: activationDispositionSuppressed,
-			ActivationReason:      autoResumeBlockedOwnershipUnavailable,
-		}, true
+		return queuedEnsureOwnershipUnavailableResponse(taskID, "", ""), true
 	}
+	return s.queuedEnsureResponseForDeferral(ctx, taskID, task, deferral), true
+}
 
-	sessionID := sessionIDFromCeilingPayload(deferral)
+func (s *Service) queuedEnsureResponseForDeferral(
+	ctx context.Context,
+	taskID string,
+	task *models.Task,
+	deferral models.CeilingDeferral,
+) *EnsureSessionResponse {
+	sessionID := models.CeilingDeferralSessionID(task, deferral)
 	agentProfileID := stringField(deferral.Payload, metaKeyAgentProfileID)
+	if queuedEnsureOwnershipUnavailable(task, deferral, sessionID) {
+		return queuedEnsureOwnershipUnavailableResponse(taskID, sessionID, agentProfileID)
+	}
 	if sessionID == "" {
-		return &EnsureSessionResponse{
-			Success:               true,
-			TaskID:                taskID,
-			State:                 string(models.TaskSessionStateCreated),
-			AgentProfileID:        agentProfileID,
-			Source:                "queued",
-			NewlyCreated:          false,
-			ActivationDisposition: activationDispositionQueued,
-			ActivationReason:      "session_capacity",
-		}, true
+		return queuedEnsureCapacityResponse(taskID, agentProfileID)
 	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil || session.TaskID != taskID {
-		return &EnsureSessionResponse{
-			Success:               true,
-			TaskID:                taskID,
-			SessionID:             sessionID,
-			State:                 string(models.TaskSessionStateCreated),
-			AgentProfileID:        agentProfileID,
-			Source:                "queued",
-			NewlyCreated:          false,
-			ActivationDisposition: activationDispositionSuppressed,
-			ActivationReason:      autoResumeBlockedOwnershipUnavailable,
-		}, true
+		return queuedEnsureOwnershipUnavailableResponse(taskID, sessionID, agentProfileID)
 	}
 
 	response := s.existingResponse(ctx, taskID, session, "existing_queued")
 	response.ActivationDisposition = activationDispositionQueued
 	response.ActivationReason = "session_capacity"
-	return response, true
+	return response
+}
+
+func queuedEnsureOwnershipUnavailable(
+	task *models.Task,
+	deferral models.CeilingDeferral,
+	sessionID string,
+) bool {
+	_, bindingPresent, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
+	workflowOrigin := bindingPresent || stringField(deferral.Payload, metaKeyWorkflowStepID) != "" ||
+		int64Field(deferral.Payload, "workflow_entry_id") > 0
+	if deferral.Kind == models.CeilingLaunchStart {
+		if _, routePresent := models.LoadWorkflowSessionRoute(task.Metadata); routePresent {
+			workflowOrigin = true
+		}
+	}
+	return bindingErr != nil || (workflowOrigin && (sessionID == "" ||
+		(bindingPresent && !models.CeilingDeferralTargetsSession(task, deferral, sessionID))))
+}
+
+func queuedEnsureOwnershipUnavailableResponse(
+	taskID, sessionID, agentProfileID string,
+) *EnsureSessionResponse {
+	return &EnsureSessionResponse{
+		Success:               true,
+		TaskID:                taskID,
+		SessionID:             sessionID,
+		AgentProfileID:        agentProfileID,
+		State:                 string(models.TaskSessionStateCreated),
+		Source:                "queued",
+		NewlyCreated:          false,
+		ActivationDisposition: activationDispositionSuppressed,
+		ActivationReason:      autoResumeBlockedOwnershipUnavailable,
+	}
+}
+
+func queuedEnsureCapacityResponse(taskID, agentProfileID string) *EnsureSessionResponse {
+	return &EnsureSessionResponse{
+		Success:               true,
+		TaskID:                taskID,
+		State:                 string(models.TaskSessionStateCreated),
+		AgentProfileID:        agentProfileID,
+		Source:                "queued",
+		NewlyCreated:          false,
+		ActivationDisposition: activationDispositionQueued,
+		ActivationReason:      "session_capacity",
+	}
 }
 
 // findExistingSession returns the task's existing session for advanced-mode

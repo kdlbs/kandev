@@ -646,6 +646,11 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 			}
 			if bindingPresent {
 				startOptions.ceilingEntryBinding = &binding
+				// Mark this as a durable ceiling replay that Send Now has
+				// explicitly claimed. startCreatedSession must keep the strict
+				// committed-route validation; it must not use the prepared
+				// callback compatibility path for this exact record.
+				ctx = withCeilingEntryKind(ctx, ceilingClaim.deferral.Kind)
 			}
 			if deferredLaunch != nil {
 				input := sendNowCreatedLaunchInput(

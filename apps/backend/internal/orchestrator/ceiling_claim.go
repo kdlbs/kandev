@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -19,6 +20,9 @@ var ErrCeilingLaunchClaimed = errors.New("ceiling deferred launch is already cla
 const (
 	ceilingClaimOwnerSendNow = "send_now"
 	ceilingClaimOwnerReplay  = "ceiling_replay"
+	// The lease is long enough for a normal launch, but finite so a process
+	// exit cannot make a durable queue entry undispatchable forever.
+	ceilingClaimLeaseDuration = 5 * time.Minute
 )
 
 // ceilingDeferredLaunchClaim is the ownership token for one exact ceiling
@@ -44,6 +48,8 @@ func (s *Service) claimCeilingDeferredLaunch(
 	if s == nil || s.repo == nil || taskID == "" || owner == "" {
 		return nil, false, nil
 	}
+	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
 	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
 		record, prior, err := s.repo.GetTaskDeferredLaunch(ctx, taskID)
 		if err != nil {
@@ -63,7 +69,8 @@ func (s *Service) claimCeilingDeferredLaunch(
 			return nil, false, nil
 		}
 
-		if _, _, claimed := models.ReadCeilingLaunchClaim(record); claimed {
+		if existingClaim, claimed := models.ReadCeilingLaunchClaimDetails(record); claimed &&
+			!existingClaim.Expired(time.Now().UTC()) {
 			// The owner label describes the dispatcher class, not a re-entrant
 			// invocation. Two replay ticks (or two Send Now requests) can use the
 			// same label concurrently, so adopting a same-owner claim would let
@@ -74,7 +81,9 @@ func (s *Service) claimCeilingDeferredLaunch(
 		updated := cloneCeilingRecord(record)
 		claimID := uuid.NewString()
 		updated[models.CeilingLaunchClaimKey] = map[string]interface{}{
-			"id": claimID, "owner": owner,
+			"id":                                  claimID,
+			"owner":                               owner,
+			models.CeilingLaunchClaimExpiresAtKey: time.Now().UTC().Add(ceilingClaimLeaseDuration).Format(time.RFC3339Nano),
 		}
 		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, updated)
 		if err != nil {
@@ -110,11 +119,12 @@ func (c *ceilingDeferredLaunchClaim) releaseIfHeld(ctx context.Context) {
 	if c == nil || !c.held || c.svc == nil {
 		return
 	}
-	c.held = false
-	if err := c.svc.mutateCeilingClaim(ctx, c, false); err != nil {
+	if err := c.svc.mutateCeilingClaim(context.WithoutCancel(ctx), c, false); err != nil {
 		c.svc.logger.Zap().Warn("could not release ceiling launch claim",
 			zap.String("task_id", c.taskID), zap.Error(err))
+		return
 	}
+	c.held = false
 }
 
 // settle consumes the exact deferred record after dispatch was accepted. WIP
@@ -123,11 +133,16 @@ func (c *ceilingDeferredLaunchClaim) settle(ctx context.Context) {
 	if c == nil || !c.held || c.svc == nil {
 		return
 	}
-	c.held = false
-	if err := c.svc.mutateCeilingClaim(ctx, c, true); err != nil {
+	if err := c.svc.mutateCeilingClaim(context.WithoutCancel(ctx), c, true); err != nil {
 		c.svc.logger.Zap().Warn("could not settle ceiling launch claim",
 			zap.String("task_id", c.taskID), zap.Error(err))
+		// The dispatch was accepted. Keep the marker until its lease expires so
+		// a retry cannot immediately replay the same prompt. A later dispatcher
+		// can reclaim the marker and settle the exact record if the CAS failed.
+		c.held = false
+		return
 	}
+	c.held = false
 }
 
 // mutateCeilingClaim performs the compare-and-set settlement for one claim.

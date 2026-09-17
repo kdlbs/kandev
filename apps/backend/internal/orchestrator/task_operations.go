@@ -4151,8 +4151,8 @@ func (s *Service) autoResumeEligibility(
 		}
 		return true, ""
 	}
-	destinationID := sessionIDFromCeilingPayload(deferral)
-	if destinationID == "" {
+	destinationID := models.CeilingDeferralSessionID(task, deferral)
+	if destinationID == "" || !models.CeilingDeferralTargetsSession(task, deferral, destinationID) {
 		return false, autoResumeBlockedOwnershipUnavailable
 	}
 	if destinationID == session.ID {

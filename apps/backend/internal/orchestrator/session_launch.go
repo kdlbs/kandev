@@ -537,26 +537,39 @@ func (s *Service) deferredLaunchResponseIfPresent(
 		return nil
 	}
 	task, err := s.repo.GetTask(ctx, req.TaskID)
-	if err != nil || !models.HasCeilingDeferredIntent(task) {
+	if err != nil || task == nil {
+		return deferredLaunchSuppressedForInspection(req, sessionID, autoResumeBlockedOwnershipUnavailable)
+	}
+	if !models.HasCeilingDeferredIntent(task) {
 		return nil
 	}
 	record, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	deferral, err := models.ReadCeilingDeferral(record)
 	if err != nil {
-		return &LaunchSessionResponse{
-			Success:               true,
-			TaskID:                req.TaskID,
-			SessionID:             sessionID,
-			ActivationDisposition: activationDispositionSuppressed,
-			ActivationReason:      "ownership_unavailable",
-		}
+		return deferredLaunchOwnershipUnavailableResponse(req, sessionID)
 	}
+	return s.deferredLaunchResponseForDeferral(req, task, deferral, sessionID)
+}
+
+func (s *Service) deferredLaunchResponseForDeferral(
+	req *LaunchSessionRequest,
+	task *models.Task,
+	deferral models.CeilingDeferral,
+	sessionID string,
+) *LaunchSessionResponse {
 	// Seam-1 workflow starts do not have a session id in their payload. Resolve
 	// that destination from the task-owned route so opening the task reports the
 	// exact queued session instead of falling back to the request's empty id.
 	deferredSessionID := models.CeilingDeferralSessionID(task, deferral)
 	if sessionID != "" && deferredSessionID != "" && sessionID != deferredSessionID {
-		return nil
+		return deferredLaunchSuppressedForInspection(req, sessionID, autoResumeBlockedOwnershipUnavailable)
+	}
+	_, bindingPresent, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
+	workflowOrigin := deferredLaunchIsWorkflowOrigin(task, deferral, bindingPresent)
+	if req.ActivationSource == LaunchActivationSourceSessionOpen &&
+		(bindingErr != nil || (workflowOrigin && (deferredSessionID == "" ||
+			(bindingPresent && !models.CeilingDeferralTargetsSession(task, deferral, deferredSessionID))))) {
+		return deferredLaunchSuppressedForInspection(req, sessionID, autoResumeBlockedOwnershipUnavailable)
 	}
 	if sessionID == "" {
 		sessionID = deferredSessionID
@@ -577,6 +590,49 @@ func (s *Service) deferredLaunchResponseIfPresent(
 		ActivationDisposition: activationDispositionQueued,
 		ActivationReason:      "session_capacity",
 	}
+}
+
+func deferredLaunchSuppressedForInspection(
+	req *LaunchSessionRequest,
+	sessionID, reason string,
+) *LaunchSessionResponse {
+	if req == nil || req.ActivationSource != LaunchActivationSourceSessionOpen {
+		return nil
+	}
+	return &LaunchSessionResponse{
+		Success:               true,
+		TaskID:                req.TaskID,
+		SessionID:             sessionID,
+		ActivationDisposition: activationDispositionSuppressed,
+		ActivationReason:      reason,
+	}
+}
+
+func deferredLaunchOwnershipUnavailableResponse(
+	req *LaunchSessionRequest,
+	sessionID string,
+) *LaunchSessionResponse {
+	return &LaunchSessionResponse{
+		Success:               true,
+		TaskID:                req.TaskID,
+		SessionID:             sessionID,
+		ActivationDisposition: activationDispositionSuppressed,
+		ActivationReason:      "ownership_unavailable",
+	}
+}
+
+func deferredLaunchIsWorkflowOrigin(
+	task *models.Task,
+	deferral models.CeilingDeferral,
+	bindingPresent bool,
+) bool {
+	workflowOrigin := bindingPresent || stringField(deferral.Payload, metaKeyWorkflowStepID) != "" ||
+		int64Field(deferral.Payload, "workflow_entry_id") > 0
+	if deferral.Kind != models.CeilingLaunchStart {
+		return workflowOrigin
+	}
+	_, routePresent := models.LoadWorkflowSessionRoute(task.Metadata)
+	return workflowOrigin || routePresent
 }
 
 func (s *Service) captureWorkflowParkingStamp(ctx context.Context, sessionID string) string {

@@ -4152,6 +4152,9 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	ctx = context.WithoutCancel(ctx)
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, entryID) {
+		return
+	}
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID
@@ -4239,7 +4242,13 @@ func (s *Service) launchAfterOnEnterDispatch(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
 	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool, entryIDs ...int64,
 ) {
+	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, entryIDs...) {
+		return
+	}
 	sessionID := session.ID
+	if binding, bound := s.workflowEntryBindingForStep(ctx, taskID, step, sessionID, entryIDs...); bound {
+		ctx = withCeilingEntryBinding(ctx, binding)
+	}
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
 	// One claim for this whole step entry: every branch and replacement
 	// launch below shares it, so a successful claim's text is reused rather
@@ -4354,15 +4363,16 @@ func (s *Service) launchAfterOnEnterDispatch(
 							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
 						return
 					}
+					replacementCtx := withCeilingEntryBindingForSession(asyncCtx, replacement.ID)
 					replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
-						asyncCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+						replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 					)
 					if promptErr != nil {
-						s.handleWorkflowEntryPromptError(asyncCtx, taskID, replacement, step, promptErr)
+						s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 						return
 					}
 					if replacementErr = s.autoStartStepPrompt(
-						asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
+						replacementCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
 					); replacementErr != nil {
 						s.logger.Error("failed to auto-start replacement after terminalized profile switch",
 							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -4392,15 +4402,16 @@ func (s *Service) launchAfterOnEnterDispatch(
 								zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
 							return
 						}
+						replacementCtx := withCeilingEntryBindingForSession(asyncCtx, replacement.ID)
 						replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
-							asyncCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+							replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 						)
 						if promptErr != nil {
-							s.handleWorkflowEntryPromptError(asyncCtx, taskID, replacement, step, promptErr)
+							s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 							return
 						}
 						if replacementErr = s.autoStartStepPrompt(
-							asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
+							replacementCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
 						); replacementErr != nil {
 							s.logger.Error("failed to auto-start replacement after terminalized dispatch",
 								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -4465,15 +4476,16 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
 		return
 	}
+	replacementCtx := withCeilingEntryBindingForSession(ctx, replacement.ID)
 	replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
-		ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+		replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 	)
 	if promptErr != nil {
-		s.handleWorkflowEntryPromptError(ctx, taskID, replacement, step, promptErr)
+		s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 		return
 	}
 	if replacementErr = s.autoStartStepPrompt(
-		ctx, taskID, replacement, step, replacementPrompt, hasPlanMode, true, handoffOnce,
+		replacementCtx, taskID, replacement, step, replacementPrompt, hasPlanMode, true, handoffOnce,
 	); replacementErr != nil {
 		s.logger.Error("failed to auto-start replacement after reused session terminalized",
 			zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))

@@ -254,7 +254,10 @@ func statussummaryLaunchQueueEqual(left, right *statussummary.LaunchQueueSummary
 	if left.Capacity == nil || right.Capacity == nil {
 		return left.Capacity == right.Capacity
 	}
-	return *left.Capacity == *right.Capacity
+	// The sample time is an in-memory freshness overlay. Persist only changes
+	// to the queue's identity or capacity values.
+	return left.Capacity.InUse == right.Capacity.InUse &&
+		left.Capacity.Limit == right.Capacity.Limit
 }
 
 func (s *Service) rebuildMissingSummary(
@@ -320,7 +323,7 @@ func (s *Service) reconcileExistingSummary(
 	}
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
 		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved) {
-			return current, nil
+			return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 		}
 		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
 			return nil, err
@@ -357,10 +360,32 @@ func (s *Service) reconcileExistingSummary(
 		}
 	}
 	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved) {
-		return current, nil
+		return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 	}
 	s.logSummaryReconcileExhaustion(task.ID, current)
 	return nil, errors.New("exhausted compare-and-set retries")
+}
+
+// overlayLaunchQueueObservation returns a response-only copy when the live
+// queue has only a newer capacity sample. Observation time is intentionally
+// excluded from the durable equality contract, but task-list consumers still
+// need the fresh timestamp to render age and connectivity state accurately.
+func overlayLaunchQueueObservation(
+	current *statussummary.TaskStatusSummary,
+	observed *statussummary.LaunchQueueSummary,
+	observedEnabled bool,
+) *statussummary.TaskStatusSummary {
+	if !observedEnabled || current == nil || observed == nil || current.LaunchQueue == nil ||
+		!statussummaryLaunchQueueEqual(current.LaunchQueue, observed) {
+		return current
+	}
+	if current.LaunchQueue.Capacity == nil || observed.Capacity == nil ||
+		current.LaunchQueue.Capacity.ObservedAt.Equal(observed.Capacity.ObservedAt) {
+		return current
+	}
+	copy := *current
+	copy.LaunchQueue = cloneLaunchQueueForService(observed)
+	return &copy
 }
 
 func summaryNeedsReconcile(

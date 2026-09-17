@@ -11,14 +11,18 @@ import {
   type LaunchQueueViewModel,
 } from "@/lib/tasks/launch-queue-view-model";
 
-function reasonLabel(reason: LaunchQueueViewModel["reason"], t: (key: string) => string): string {
+function reasonLabel(
+  reason: LaunchQueueViewModel["reason"],
+  retrying: boolean,
+  t: (key: string) => string,
+): string {
   switch (reason) {
     case "session_capacity":
       return t("task:launchQueueWaitingCapacity");
     case "ownership_unavailable":
       return t("task:launchQueueOwnershipUnavailable");
     case "replay_error":
-      return t("task:launchQueueReplayError");
+      return t(retrying ? "task:launchQueueReplayError" : "task:launchQueueReplayErrorStopped");
   }
 }
 
@@ -33,7 +37,13 @@ function capacityLabel(
   isConnected: boolean,
   t: (key: string, values?: Record<string, unknown>) => string,
 ): string {
-  if (!view.capacity) return t("task:launchQueueCapacityUnavailable");
+  if (!view.capacity) {
+    return t(
+      view.retrying
+        ? "task:launchQueueCapacityUnavailable"
+        : "task:launchQueueCapacityUnavailableStopped",
+    );
+  }
 
   let key = "task:launchQueueCapacityStale";
   if (view.capacityFreshness === "current") {
@@ -90,17 +100,22 @@ function LaunchQueueStatusContent({
     );
   }, "");
 
-  const destination =
-    destinationLabel || view.destinationId || t("task:launchQueueUnknownDestination");
+  const destination = destinationLabel || t("task:launchQueueUnknownDestination");
   const retryLabel = retryStatusLabel(view, t);
 
   return (
     <section
       data-testid="task-launch-queue-status"
-      role="status"
-      aria-live="polite"
       className="min-w-0 shrink-0 border-b border-border/70 bg-muted/20 px-3 py-2"
     >
+      <span
+        data-testid="task-launch-queue-live-status"
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+      >
+        {t("task:launchQueueIndicator")}
+      </span>
       <div className="flex min-w-0 items-start gap-2">
         <IconClockHour4
           className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
@@ -116,7 +131,9 @@ function LaunchQueueStatusContent({
           <p className="min-w-0 break-words text-foreground">
             {t("task:launchQueueDestination", { destination })}
           </p>
-          <p className="min-w-0 break-words text-muted-foreground">{reasonLabel(view.reason, t)}</p>
+          <p className="min-w-0 break-words text-muted-foreground">
+            {reasonLabel(view.reason, view.retrying, t)}
+          </p>
           <p className="min-w-0 break-words tabular-nums text-muted-foreground">
             {capacityLabel(view, isConnected, t)}
           </p>

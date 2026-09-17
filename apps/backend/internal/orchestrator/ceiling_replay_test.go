@@ -206,6 +206,64 @@ func TestClaimCeilingDeferredLaunchReleasesAfterCapacityBookkeepingChanges(t *te
 	require.Equal(t, "capacity_changed", decoded.ReasonCode)
 }
 
+func TestClaimCeilingDeferredLaunchReclaimsExpiredClaim(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "claim-expired", Title: "t", State: v1.TaskStateScheduling,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	deferral := models.CeilingDeferral{
+		Kind:    models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{metaKeySessionID: "claim-expired-session"},
+		Origin:  string(launchOriginAutomatic), ReasonCode: ceilingReasonRefused,
+		QueuedAt: now, Ceiling: 5, Population: 5, PopulationKnown: true,
+	}
+	record := models.CeilingRecordKeys(deferral)
+	record[models.CeilingLaunchClaimKey] = map[string]interface{}{
+		"id": "abandoned-claim", "owner": ceilingClaimOwnerReplay,
+		"expires_at": now.Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	_, _, err := repo.SetTaskDeferredLaunchIfUnchanged(ctx, "claim-expired", tasksqlite.AbsentDeferredLaunch(), record)
+	require.NoError(t, err)
+
+	claim, found, err := svc.claimCeilingDeferredLaunch(ctx, "claim-expired", "claim-expired-session", ceilingClaimOwnerSendNow)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, claim)
+	claimID, owner, ok := models.ReadCeilingLaunchClaim(deferredLaunchOf(t, svc, "claim-expired"))
+	require.True(t, ok)
+	require.NotEqual(t, "abandoned-claim", claimID)
+	require.Equal(t, ceilingClaimOwnerSendNow, owner)
+}
+
+func TestCeilingClaimReleaseUsesDetachedContext(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "claim-cancelled", Title: "t", State: v1.TaskStateScheduling,
+		CreatedAt: now, UpdatedAt: now,
+	}))
+	deferral := models.CeilingDeferral{
+		Kind:    models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{metaKeySessionID: "claim-cancelled-session"},
+		Origin:  string(launchOriginAutomatic), ReasonCode: ceilingReasonRefused, QueuedAt: now,
+	}
+	_, _, err := repo.SetTaskDeferredLaunchIfUnchanged(ctx, "claim-cancelled", tasksqlite.AbsentDeferredLaunch(), models.CeilingRecordKeys(deferral))
+	require.NoError(t, err)
+	claim, found, err := svc.claimCeilingDeferredLaunch(ctx, "claim-cancelled", "claim-cancelled-session", ceilingClaimOwnerReplay)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, claim)
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	claim.releaseIfHeld(cancelledCtx)
+	_, _, claimed := models.ReadCeilingLaunchClaim(deferredLaunchOf(t, svc, "claim-cancelled"))
+	require.False(t, claimed, "a cancelled caller must not strand its durable claim")
+}
+
 func TestReplayCeilingDeferralRejectsStaleWorkflowEntryBeforeDispatch(t *testing.T) {
 	svc, repo := newServiceWithRealRepo(t)
 	ctx := context.Background()
@@ -333,11 +391,56 @@ func TestReplayCeilingDeferralRejectsRouteChangedAfterInitialValidation(t *testi
 	require.Equal(t, newRoute.OperationID, route.OperationID)
 }
 
+func TestWorkflowEntryDispatchRejectsStaleCommittedRoute(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "workflow-dispatch-stale", "workflow-dispatch-session", "step-current")
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "workflow-dispatch-stale", models.MetaKeyWorkflowSessionRoute,
+		models.WorkflowSessionRoute{
+			OperationID:       "route-current",
+			DestinationStepID: "step-current",
+			EntryIdentity:     "entry:00000000000000000042",
+			TargetKind:        "new_session",
+			DestinationID:     "workflow-dispatch-session",
+			Phase:             "committed",
+		}))
+
+	step := &wfmodels.WorkflowStep{ID: "step-current", WorkflowID: "wf1", Name: "Current"}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	require.False(t, svc.workflowEntryDispatchIsCurrent(ctx, "workflow-dispatch-stale", step, int64(41)),
+		"a late callback for an older entry must not dispatch against the committed successor route")
+	require.True(t, svc.workflowEntryDispatchIsCurrent(ctx, "workflow-dispatch-stale", step, int64(42)))
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "workflow-dispatch-stale", models.MetaKeyWorkflowSessionRoute,
+		models.WorkflowSessionRoute{
+			OperationID:       "route-current",
+			DestinationStepID: "step-current",
+			EntryIdentity:     "entry:00000000000000000042",
+			TargetKind:        "new_session",
+			DestinationID:     "successor-session",
+			Phase:             "committed",
+		}))
+	require.False(t, svc.workflowEntryDispatchIsCurrentForSession(
+		ctx, "workflow-dispatch-stale", "workflow-dispatch-session", step, int64(42),
+	), "a callback for a replaced destination must not dispatch the old session")
+}
+
 func TestValidateCeilingEntryAllowsPendingWorkflowStepEnsureOnlyForCurrentEntry(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSessionWithStep(t, repo, "workflow-step-pending", "workflow-step-session", "step-source")
 	task, err := repo.GetTask(ctx, "workflow-step-pending")
+	require.NoError(t, err)
+	entryIdentity := (&Service{repo: repo}).workflowEntryIdentity(ctx, task.ID)
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
+		OperationID:       "route-target",
+		DestinationStepID: "step-target",
+		EntryIdentity:     entryIdentity,
+		TargetKind:        "new_session",
+		DestinationID:     "workflow-step-session",
+		Phase:             "committed",
+	}))
+	task, err = repo.GetTask(ctx, task.ID)
 	require.NoError(t, err)
 
 	stepGetter := newMockStepGetter()
@@ -366,6 +469,14 @@ func TestValidateCeilingEntryAllowsPendingWorkflowStepEnsureOnlyForCurrentEntry(
 	// being retargeted to the new step.
 	task.WorkflowStepID = "step-successor"
 	task.UpdatedAt = time.Now().UTC()
+	task.Metadata[models.MetaKeyWorkflowSessionRoute] = models.WorkflowSessionRoute{
+		OperationID:       "route-successor",
+		DestinationStepID: "step-successor",
+		EntryIdentity:     "entry:successor",
+		TargetKind:        "new_session",
+		DestinationID:     "workflow-step-session",
+		Phase:             "committed",
+	}
 	require.NoError(t, repo.UpdateTaskPreservingDeferredLaunch(ctx, task))
 
 	latest, err := repo.GetTask(ctx, task.ID)

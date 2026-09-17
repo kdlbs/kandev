@@ -141,6 +141,8 @@ function LaunchQueueIndicator({
           tabIndex={0}
           aria-label={label}
           title={label}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
           className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground/70 outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           <IconClockHour4 className="h-3.5 w-3.5" aria-hidden="true" />
