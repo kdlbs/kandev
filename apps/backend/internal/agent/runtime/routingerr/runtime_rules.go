@@ -99,10 +99,12 @@ var runtimeEnvironmentRules = []runtimeRule{
 		// control frame and bounded so user-authored prose cannot turn into an
 		// automatic retry. The custom matcher shares the adapter's byte and
 		// Unicode-whitespace contract.
-		id:    cursorRetriableStreamResetRuleID,
-		match: matchCursorRetriableStreamReset,
+		id:         cursorRetriableStreamResetRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorRetriableStreamReset,
+		rawMatch:   matchCursorRetriableStreamReset,
 		build: func(text string) *Error {
-			if cancellationOrDeadlineRe.MatchString(text) {
+			if IsCursorRetriableCancellation(text) {
 				return nil
 			}
 			return &Error{
@@ -172,6 +174,7 @@ var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection close
 const (
 	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
 	cursorRetriableStreamResetMaxTail = 256
+	cursorRetriableProviderID         = "cursor-acp"
 )
 
 // matchCursorRetriableStreamReset matches Cursor's complete bounded control
@@ -186,10 +189,20 @@ func matchCursorRetriableStreamReset(text string) bool {
 		return false
 	}
 	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
-	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || cancellationOrDeadlineRe.MatchString(suffix) {
+	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || IsCursorRetriableCancellation(suffix) {
 		return false
 	}
 	return true
+}
+
+// IsCursorRetriableCancellation reports whether Cursor's RetriableError
+// suffix carries cancellation or deadline evidence that must not be retried.
+// The adapter uses this same predicate before it suppresses diagnostic output.
+func IsCursorRetriableCancellation(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "context canceled") ||
+		strings.Contains(lower, "context deadline exceeded") ||
+		strings.Contains(lower, "cancel escalated")
 }
 
 // overloadedRe matches the transient 529 Overloaded signature: either the
@@ -204,15 +217,28 @@ var overloadedRe = regexp.MustCompile(`(?i)\b529\b[^\n]*overloaded|overloaded[^\
 // bare 5xx numbers and generic "internal error" prose.
 var gatewayServerFailureRe = regexp.MustCompile(`(?i)\bAPI\s+Error:\s*(?:500\s+Internal(?:\s+Server)?\s+Error|502\s+Bad\s+Gateway|504\s+Gateway\s+Timeout)\b`)
 
-// IsTransientProviderError reports whether a provider error is eligible for a
-// short same-provider retry. It is intentionally backed by Classify so new
-// provider-neutral fingerprints (capacity and network failures) become
-// available to callers outside the adapter without another allow-list.
+// IsTransientProviderError reports whether a provider-neutral error is eligible
+// for a short same-provider retry. Provider-specific callers must use
+// IsTransientProviderErrorForProvider so a signature cannot cross adapters.
 func IsTransientProviderError(message string) bool {
+	return isTransientProviderError(Classify(Input{Phase: PhasePromptSend, Stderr: message}))
+}
+
+// IsTransientProviderErrorForProvider reports whether a provider error is
+// eligible for a short same-provider retry while preserving provider-specific
+// catalogue scope.
+func IsTransientProviderErrorForProvider(providerID, message string) bool {
 	if message == "" {
 		return false
 	}
-	e := Classify(Input{Phase: PhasePromptSend, Stderr: message})
+	return isTransientProviderError(Classify(Input{
+		Phase:      PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
+	}))
+}
+
+func isTransientProviderError(e *Error) bool {
 	if e == nil || !e.AutoRetryable || e.UserAction {
 		return false
 	}
@@ -241,8 +267,10 @@ func IsResumeCorrupted(message string) bool {
 
 type runtimeRule struct {
 	id            string
+	providerID    string
 	pattern       *regexp.Regexp
 	match         func(text string) bool
+	rawMatch      func(text string) bool
 	build         func(text string) *Error
 	sanitizedOnly bool
 }
@@ -265,14 +293,22 @@ func extractNpxCachePath(text string) string {
 }
 
 func matchRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, false)
+	return matchRuntimeRules(text, text, "", false)
 }
 
 func matchLegacyRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, true)
+	return matchRuntimeRules(text, text, "", true)
 }
 
-func matchRuntimeRules(text string, legacyOnly bool) (*Error, bool) {
+func matchRuntimeEnvironmentRulesForProvider(providerID, text, rawText string) (*Error, bool) {
+	return matchRuntimeRules(text, rawText, providerID, false)
+}
+
+func matchLegacyRuntimeEnvironmentRulesForProvider(providerID, text, rawText string) (*Error, bool) {
+	return matchRuntimeRules(text, rawText, providerID, true)
+}
+
+func matchRuntimeRules(text, rawText, providerID string, legacyOnly bool) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
@@ -280,8 +316,16 @@ func matchRuntimeRules(text string, legacyOnly bool) (*Error, bool) {
 		if legacyOnly && r.sanitizedOnly {
 			continue
 		}
-		matched := r.match != nil && r.match(text)
-		if r.match == nil {
+		if r.providerID != "" && r.providerID != providerID {
+			continue
+		}
+		if r.rawMatch != nil && !r.rawMatch(rawText) {
+			continue
+		}
+		var matched bool
+		if r.match != nil {
+			matched = r.match(text)
+		} else {
 			matched = r.pattern != nil && r.pattern.MatchString(text)
 		}
 		if !matched {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -24,17 +25,10 @@ func isCursorRetriableStreamReset(text string) bool {
 		return false
 	}
 	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
-	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || isCursorRetriableCancellation(suffix) {
+	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || routingerr.IsCursorRetriableCancellation(suffix) {
 		return false
 	}
 	return true
-}
-
-func isCursorRetriableCancellation(suffix string) bool {
-	lower := strings.ToLower(suffix)
-	return strings.Contains(lower, "context canceled") ||
-		strings.Contains(lower, "context deadline exceeded") ||
-		strings.Contains(lower, "cancel escalated")
 }
 
 type cursorTaskMeta struct {

@@ -16,8 +16,12 @@ const cursorRetriableConnectionStalled = "Error: RetriableError: Connection stal
 
 const wantCursorRetriableStreamResetRuleID = "cursor.retriable_stream_reset.v1"
 
+func matchCursorRuntimeEnvironmentRules(text string) (*Error, bool) {
+	return matchRuntimeEnvironmentRulesForProvider(cursorRetriableProviderID, text, text)
+}
+
 func TestMatchRuntimeEnvironmentRules_CursorRetriable(t *testing.T) {
-	got, ok := matchRuntimeEnvironmentRules(realCursorRetriableStreamReset)
+	got, ok := matchCursorRuntimeEnvironmentRules(realCursorRetriableStreamReset)
 	if !ok {
 		t.Fatal("expected Cursor stream-reset match")
 	}
@@ -32,7 +36,7 @@ func TestMatchRuntimeEnvironmentRules_CursorRetriable(t *testing.T) {
 	}
 	for _, message := range []string{cursorRetriablePingTimeout, cursorRetriableConnectionStalled} {
 		t.Run(message, func(t *testing.T) {
-			got, ok := matchRuntimeEnvironmentRules(message)
+			got, ok := matchCursorRuntimeEnvironmentRules(message)
 			if !ok {
 				t.Fatalf("expected Cursor RetriableError match for %q", message)
 			}
@@ -62,16 +66,28 @@ func TestMatchRuntimeEnvironmentRules_CursorRetriable(t *testing.T) {
 			name: "context cancellation",
 			text: "context canceled: " + realCursorRetriableStreamReset,
 		},
+		{
+			name: "underscore-delimited context cancellation",
+			text: "Error: RetriableError: context canceled_by_client",
+		},
+		{
+			name: "context deadline exceeded",
+			text: "Error: RetriableError: context deadline exceeded",
+		},
+		{
+			name: "cancel escalation",
+			text: "Error: RetriableError: cancel escalated",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, ok := matchRuntimeEnvironmentRules(tc.text); ok {
+			if got, ok := matchCursorRuntimeEnvironmentRules(tc.text); ok {
 				t.Fatalf("unexpected match: %+v", got)
 			}
 		})
 	}
 
 	withCursorCancellationToken := realCursorRetriableStreamReset + " [canceled]"
-	got, ok = matchRuntimeEnvironmentRules(withCursorCancellationToken)
+	got, ok = matchCursorRuntimeEnvironmentRules(withCursorCancellationToken)
 	if !ok || got.Code != CodeAgentTransportLost {
 		t.Fatalf("bracketed cancellation token classified as ok=%v err=%v, want transport loss", ok, got)
 	}
@@ -90,7 +106,7 @@ func TestMatchRuntimeEnvironmentRules_CursorRetriableUsesAdapterBounds(t *testin
 		{name: "unicode whitespace only", suffix: "\u2003\u2003", want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, ok := matchRuntimeEnvironmentRules("Error: RetriableError: " + tc.suffix)
+			_, ok := matchCursorRuntimeEnvironmentRules("Error: RetriableError: " + tc.suffix)
 			if ok != tc.want {
 				t.Fatalf("matchRuntimeEnvironmentRules(%q) = %v, want %v", tc.suffix, ok, tc.want)
 			}
@@ -192,6 +208,35 @@ func TestClassifyCursorRetriableVariants(t *testing.T) {
 	}
 }
 
+func TestClassifyCursorRetriableDoesNotCrossProviders(t *testing.T) {
+	for _, providerID := range []string{"claude-acp", "codex-acp", "opencode-acp", "unknown-provider"} {
+		t.Run(providerID, func(t *testing.T) {
+			resetInjection()
+			e := Classify(Input{
+				Phase:      PhasePromptSend,
+				ProviderID: providerID,
+				Stderr:     cursorRetriablePingTimeout,
+			})
+			if e.Code == CodeAgentTransportLost || e.ClassifierRule == wantCursorRetriableStreamResetRuleID {
+				t.Fatalf("Classify(%q) = %+v, want no Cursor transport-loss match", providerID, e)
+			}
+		})
+	}
+}
+
+func TestClassifyCursorRetriableRejectsOversizedSanitizedSuffix(t *testing.T) {
+	resetInjection()
+	message := "Error: RetriableError: " + strings.Repeat("x", 257)
+	e := Classify(Input{
+		Phase:      PhasePromptSend,
+		ProviderID: "cursor-acp",
+		Stderr:     message,
+	})
+	if e.Code == CodeAgentTransportLost || e.ClassifierRule == wantCursorRetriableStreamResetRuleID {
+		t.Fatalf("Classify(oversized redacted suffix) = %+v, want no Cursor transport-loss match", e)
+	}
+}
+
 func TestClassifyCursorRetriableCancellationRemainsManual(t *testing.T) {
 	resetInjection()
 
@@ -199,11 +244,12 @@ func TestClassifyCursorRetriableCancellationRemainsManual(t *testing.T) {
 		"context canceled: " + leadingCanceledCursorRetriableStreamReset,
 		"cancel escalated: " + leadingCanceledCursorRetriableStreamReset,
 		"Error: RetriableError: context canceled",
+		"Error: RetriableError: context canceled_by_client",
 		"Error: RetriableError: context deadline exceeded",
 		"Error: RetriableError: cancel escalated",
 	} {
 		t.Run(message, func(t *testing.T) {
-			e := Classify(Input{Phase: PhasePromptSend, Stderr: message})
+			e := Classify(Input{Phase: PhasePromptSend, ProviderID: cursorRetriableProviderID, Stderr: message})
 			if e != nil && e.AutoRetryable {
 				t.Fatalf("Classify(%q) = %+v, want non-auto-retryable cancellation", message, e)
 			}
@@ -252,8 +298,8 @@ func TestIsTransientProviderError_Cursor(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := IsTransientProviderError(tc.text); got != tc.want {
-				t.Errorf("IsTransientProviderError(%q) = %v, want %v", tc.text, got, tc.want)
+			if got := IsTransientProviderErrorForProvider(cursorRetriableProviderID, tc.text); got != tc.want {
+				t.Errorf("IsTransientProviderErrorForProvider(%q, %q) = %v, want %v", cursorRetriableProviderID, tc.text, got, tc.want)
 			}
 		})
 	}
