@@ -89,17 +89,17 @@ func TestAppendCommittedBatchFallsBackToPerEventOnApplyFailure(t *testing.T) {
 	require.Len(t, eventsC, 1)
 }
 
-// TestMirrorSyncBatchSkipsRemainingEventsOfAFailedSessionInFlushEach is the
-// regression test for review round 1's R1-F1: previously, once flushEach's
-// per-event fallback failed one event, it moved on to that SAME session's
-// next queued event. Applied against the freshly-undone (and so, again,
-// brand-new) partition, that next event satisfies mirrorGapHealable's
-// newPartition case and "heals" straight over the failed sequence — jumping
-// the watermark past it for good, so the failed event is never re-queried
-// on a later sweep. This reproduces it with no fault injection: occupy the
-// globally-unique session_events.event_id on an unrelated session, then feed
-// the target session seq 1 with that same id (applies fine in-memory,
-// UNIQUE-constraint-fails on persist) followed by seq 2 in the same flush.
+// TestMirrorSyncBatchSkipsRemainingEventsOfAFailedSessionInFlushEach pins
+// that flushEach's per-event fallback must not continue to a failed
+// session's next queued event. Applied against the freshly-undone (and so,
+// again, brand-new) partition, that next event would satisfy
+// mirrorGapHealable's newPartition case and "heal" straight over the failed
+// sequence — jumping the watermark past it for good, so the failed event
+// would never be re-queried on a later sweep. This reproduces the scenario
+// with no fault injection: occupy the globally-unique session_events.event_id
+// on an unrelated session, then feed the target session seq 1 with that same
+// id (applies fine in-memory, UNIQUE-constraint-fails on persist) followed by
+// seq 2 in the same flush.
 func TestMirrorSyncBatchSkipsRemainingEventsOfAFailedSessionInFlushEach(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session-events.db")
 	log, err := NewSessionEventLog(path)
@@ -155,7 +155,7 @@ func TestMirrorSyncBatchSkipsRemainingEventsOfAFailedSessionInFlushEach(t *testi
 	t.Cleanup(func() { require.NoError(t, reopened.Close()) })
 	eventsZ, _ := reopened.EventsAfter("session-z", 0)
 	// Not []SessionEvent{zSeq2}: that would mean zSeq1 was silently dropped
-	// and the watermark advanced over it, exactly the R1-F1 regression.
+	// and the watermark advanced past it without ever re-querying it.
 	require.Empty(t, eventsZ)
 }
 

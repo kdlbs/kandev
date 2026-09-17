@@ -364,12 +364,9 @@ func (s *Service) sweepCommittedSessionEvents(ctx context.Context, collect bool)
 }
 
 // finishSweep logs the outcome of one sweepCommittedSessionEvents pass and
-// turns it into the pass's return value. A cancelled sweep is reported and
-// returned as distinct from a completed one — see sweepCommittedSessionEvents
-// for why silently reporting a cancelled, partial sweep as "completed" is
-// the R1-F1-adjacent bug this guards against: an operator (or the boot log)
-// needs to be able to tell "everything was mirrored" from "shutdown cut this
-// short, and the rest resumes next sweep" instead of treating both as success.
+// turns it into the pass's return value. A cancelled sweep is partial: the
+// caller must be able to distinguish it from a completed one, since the
+// unswept remainder resumes on the next sweep rather than being lost.
 func (s *Service) finishSweep(ctx context.Context, batch *mirrorSyncBatch, swept, totalSessions int) ([]SessionEvent, error) {
 	cancelled := ctx.Err() != nil
 	if s.log != nil {
