@@ -45,6 +45,12 @@ var metricReasons = map[string]struct{}{
 var (
 	runDedupTotal        = expvar.NewMap("office_run_dedup_total")
 	runDedupKeylessTotal = expvar.NewMap("office_run_dedup_keyless_total")
+	// assignmentRateLimitTotal counts REQ-OFFICE-ASSIGN-RATE-003 refusals
+	// and degraded admissions by a closed three-value "reason" label
+	// (allowance_exhausted, count_read_failed, task_unattributed) — never a
+	// task, agent, workspace, session or run identifier
+	// (AC-OFFICE-ASSIGN-RATE-003.2).
+	assignmentRateLimitTotal = expvar.NewMap("office_assignment_rate_limit_total")
 )
 
 // ParentWakeDedupedTotal counts a task_children_completed insert rejected by
@@ -80,6 +86,14 @@ func incRunDedup(q QueueSource, reason, kind string) {
 
 func incRunDedupKeyless(reason string, cause KeylessCause) {
 	runDedupKeylessTotal.Add(metricLabel("reason", metricReason(reason), "cause", string(cause)), 1)
+}
+
+// incAssignmentRateLimit increments office_assignment_rate_limit_total for
+// one of the three fixed reason values dedup.go's Report* helpers pass —
+// never run through metricReason, since this label set is closed by this
+// capability itself rather than driven by agent-supplied input.
+func incAssignmentRateLimit(reason string) {
+	assignmentRateLimitTotal.Add(metricLabel("reason", reason), 1)
 }
 
 func metricReason(reason string) string {
