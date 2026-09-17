@@ -41,9 +41,11 @@ function response(scanTime = oldScan): RepositoryDiscoveryResponse {
   };
 }
 
-function failedResponse(): RepositoryDiscoveryResponse {
+function failedResponse(
+  scanTime = new Date(currentTime).toISOString(),
+): RepositoryDiscoveryResponse {
   return {
-    ...response(new Date(currentTime).toISOString()),
+    ...response(scanTime),
     failed_roots: ["/missing"],
   };
 }
@@ -148,7 +150,7 @@ describe("RepositoryDiscoveryCoordinator", () => {
 
   it("does not auto-refresh a snapshot with failed roots", async () => {
     const api = client({
-      getSnapshot: vi.fn(async () => failedResponse()),
+      getSnapshot: vi.fn(async () => failedResponse(oldScan)),
     });
     const coordinator = new RepositoryDiscoveryCoordinator(api, {
       now: () => currentTime,

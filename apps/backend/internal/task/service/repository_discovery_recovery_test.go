@@ -53,6 +53,7 @@ func TestDiscoveryRecoveryMixedRootsReplaceOnlySuccessfulRoot(t *testing.T) {
 		t.Fatalf("initial discovery refresh: %v", err)
 	}
 	assertRepositoryPaths(t, first.Repositories, oldA.Path, oldB.Path)
+	scanTime := first.ScanTime
 
 	scanNumber++
 	second, err := svc.RefreshLocalRepositoryDiscovery(context.Background(), "")
@@ -60,6 +61,12 @@ func TestDiscoveryRecoveryMixedRootsReplaceOnlySuccessfulRoot(t *testing.T) {
 		t.Fatalf("partial discovery refresh: %v", err)
 	}
 	assertRepositoryPaths(t, second.Repositories, newA.Path, oldB.Path)
+	if !second.Cached {
+		t.Fatal("partial failure should retain the warm cache marker")
+	}
+	if second.ScanTime == nil || scanTime == nil || !second.ScanTime.Equal(*scanTime) {
+		t.Fatalf("scan time = %v, want previous scan time %v", second.ScanTime, scanTime)
+	}
 	if len(second.FailedRoots) != 1 || second.FailedRoots[0] != rootB {
 		t.Fatalf("partial failed roots = %v, want [%q]", second.FailedRoots, rootB)
 	}
@@ -73,6 +80,89 @@ func TestDiscoveryRecoveryMixedRootsReplaceOnlySuccessfulRoot(t *testing.T) {
 	if len(third.FailedRoots) != 0 {
 		t.Fatalf("recovered failed roots = %v, want none", third.FailedRoots)
 	}
+}
+
+// @covers AC-WORKSPACES-LOCAL-REPOSITORIES-003.10, AC-WORKSPACES-LOCAL-REPOSITORIES-003.11
+func TestDiscoveryRecoveryRootSetChangesRetainUnchangedRootSnapshots(t *testing.T) {
+	t.Run("add root", func(t *testing.T) {
+		rootA := t.TempDir()
+		rootB := t.TempDir()
+		svc := newDiscoveryService(t, rootA)
+		svc.discoveryConfig = RepositoryDiscoveryConfig{DesktopRuntime: true, MaxDepth: 6}
+		oldA := LocalRepository{Path: filepath.Join(rootA, "old-a"), Name: "old-a"}
+		newB := LocalRepository{Path: filepath.Join(rootB, "new-b"), Name: "new-b"}
+		failA := false
+		svc.discoveryScanRoot = func(_ context.Context, root string, _ int) (repositoryDiscoveryScanResult, error) {
+			if root == rootA {
+				if failA {
+					return repositoryDiscoveryScanResult{}, os.ErrPermission
+				}
+				return repositoryDiscoveryScanResult{repositories: []LocalRepository{oldA}}, nil
+			}
+			return repositoryDiscoveryScanResult{repositories: []LocalRepository{newB}}, nil
+		}
+
+		if _, err := svc.AddDesktopDiscoveryRoot(context.Background(), rootA); err != nil {
+			t.Fatalf("add initial root: %v", err)
+		}
+		failA = true
+		if _, err := svc.AddDesktopDiscoveryRoot(context.Background(), rootB); err != nil {
+			t.Fatalf("add second root: %v", err)
+		}
+
+		snapshot, err := svc.GetLocalRepositoryDiscovery(context.Background(), "")
+		if err != nil {
+			t.Fatalf("get discovery snapshot: %v", err)
+		}
+		assertRepositoryPaths(t, snapshot.Repositories, oldA.Path, newB.Path)
+		if len(snapshot.FailedRoots) != 1 || snapshot.FailedRoots[0] != rootA {
+			t.Fatalf("failed roots = %v, want [%q]", snapshot.FailedRoots, rootA)
+		}
+	})
+
+	t.Run("reconnect root", func(t *testing.T) {
+		rootA := t.TempDir()
+		rootB := t.TempDir()
+		newA := t.TempDir()
+		svc := newDiscoveryService(t, rootA)
+		svc.discoveryConfig = RepositoryDiscoveryConfig{DesktopRuntime: true, MaxDepth: 6}
+		oldA := LocalRepository{Path: filepath.Join(rootA, "old-a"), Name: "old-a"}
+		oldB := LocalRepository{Path: filepath.Join(rootB, "old-b"), Name: "old-b"}
+		newARepo := LocalRepository{Path: filepath.Join(newA, "new-a"), Name: "new-a"}
+		failB := false
+		svc.discoveryScanRoot = func(_ context.Context, root string, _ int) (repositoryDiscoveryScanResult, error) {
+			if root == rootB {
+				if failB {
+					return repositoryDiscoveryScanResult{}, os.ErrPermission
+				}
+				return repositoryDiscoveryScanResult{repositories: []LocalRepository{oldB}}, nil
+			}
+			if root == newA {
+				return repositoryDiscoveryScanResult{repositories: []LocalRepository{newARepo}}, nil
+			}
+			return repositoryDiscoveryScanResult{repositories: []LocalRepository{oldA}}, nil
+		}
+
+		if _, err := svc.AddDesktopDiscoveryRoot(context.Background(), rootA); err != nil {
+			t.Fatalf("add initial root: %v", err)
+		}
+		if _, err := svc.AddDesktopDiscoveryRoot(context.Background(), rootB); err != nil {
+			t.Fatalf("add second root: %v", err)
+		}
+		failB = true
+		if _, err := svc.ReconnectDesktopDiscoveryRoot(context.Background(), rootA, newA); err != nil {
+			t.Fatalf("reconnect root: %v", err)
+		}
+
+		snapshot, err := svc.GetLocalRepositoryDiscovery(context.Background(), "")
+		if err != nil {
+			t.Fatalf("get discovery snapshot: %v", err)
+		}
+		assertRepositoryPaths(t, snapshot.Repositories, oldB.Path, newARepo.Path)
+		if len(snapshot.FailedRoots) != 1 || snapshot.FailedRoots[0] != rootB {
+			t.Fatalf("failed roots = %v, want [%q]", snapshot.FailedRoots, rootB)
+		}
+	})
 }
 
 func TestDiscoveryRecoveryAllFailedRootsRetainWarmSnapshot(t *testing.T) {

@@ -422,6 +422,7 @@ type Service struct {
 	discoveryConfig                 RepositoryDiscoveryConfig
 	discoveryCacheMu                sync.Mutex
 	discoveryCache                  map[string]discoveryCacheEntry
+	discoveryRootCache              map[string]discoveryRootCacheEntry
 	discoveryFlights                map[string]*discoveryFlight
 	discoveryNow                    func() time.Time
 	discoveryScanRoot               func(context.Context, string, int) (repositoryDiscoveryScanResult, error)
@@ -698,6 +699,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
 		discoveryCache:        make(map[string]discoveryCacheEntry),
+		discoveryRootCache:    make(map[string]discoveryRootCacheEntry),
 		discoveryFlights:      make(map[string]*discoveryFlight),
 		discoveryNow:          time.Now,
 		discoveryScanRoot:     scanRootForRepos,

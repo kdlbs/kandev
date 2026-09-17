@@ -103,12 +103,14 @@ unchanged until all roots succeed.
 Implemented descendant-permission recovery and per-root cache replacement.
 Inaccessible descendants now produce bounded structured warnings while root
 failures remain visible. Successful roots replace their own cached results,
-failed roots retain prior results, successful empty scans clear stale entries,
-and cancellation does not publish a partial snapshot.
+failed roots retain prior results, and independent exact-root snapshots survive
+aggregate invalidation during Add and Reconnect. Successful empty scans clear
+stale entries, and cancellation does not publish a partial snapshot.
 
 Verification passed:
 
 - `go test -tags fts5 ./internal/task/service -run 'TestDiscoveryRecovery|TestScanRootForReposRootAccessFailureRemainsFatal|TestRepoWalkerPropagatesRootAccessDeniedButSkipsChild' -count=1 -v`
+- `go test -tags fts5 ./internal/task/service -run 'TestDiscoveryRecoveryRootSetChangesRetainUnchangedRootSnapshots' -count=1`
 - `go test -tags fts5 -race ./internal/task/service -run 'Discovery|DiscoverLocal|RepoWalker|ScanRoot|MacOSHome' -count=1`
 - `go test -tags fts5 ./internal/common/fsdiagnostics -count=1`
 - `git diff --check`

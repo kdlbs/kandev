@@ -133,8 +133,11 @@ does not copy these roots into SQLite.
 The workspace-scoped discovery endpoint returns repositories for one workspace.
 It does not give workspace scope to the desktop root records.
 
-The repository-discovery cache is keyed by the normalized root set and maximum
-depth. It stores the last successful repositories, scan time, and root state.
+The aggregate repository-discovery cache is keyed by the normalized root set
+and maximum depth. It stores the last successful repositories, scan time, and
+root state. A secondary snapshot cache is keyed by each exact normalized root
+and maximum depth. It survives aggregate invalidation so an unchanged root can
+retain its last successful repositories while a changed root set is scanned.
 One single-flight scan serves concurrent workspace requests for the same key.
 
 ## Upgrade behavior
@@ -178,9 +181,13 @@ diagnostics. Warnings identify the denied descendant, not just its root.
 The walker emits at most one warning per denied path during one scan.
 It does not retry denied paths within that scan.
 
-`discoveryCacheEntry` retains results by exact normalized scan root internally.
-`scanDiscoveryRoots` replaces successful root entries and retains failed root
-entries. A root without previous results contributes an empty list on failure.
+The aggregate `discoveryCacheEntry` retains results by exact normalized scan
+root internally. A secondary per-root snapshot retains each root's last
+successful result independently of the aggregate root-set key. This preserves
+unchanged roots across Add or Reconnect invalidation without borrowing results
+from a different normalized path or maximum depth. `scanDiscoveryRoots`
+replaces successful root entries and retains failed root entries. A root
+without previous results contributes an empty list on failure.
 The response deduplicates the union by repository path. Root membership comes
 from scan provenance, not a path-prefix guess, because effective roots can overlap.
 Cache snapshots and responses copy their slices to prevent concurrent mutation.

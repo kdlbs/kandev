@@ -58,9 +58,10 @@ No unresolved product choice blocks this package.
 
 `repository_discovery.go` skips inaccessible descendants while retaining root
 errors. The scan forwards trigger and runtime context to existing diagnostics.
-`repository_discovery_state.go` retains internal result slices by root and
-deduplicates only the final response. Successful empty scans clear stale entries.
-Cancellation leaves the prior snapshot unchanged.
+`repository_discovery_state.go` retains internal result slices by exact root
+and keeps independent per-root snapshots across aggregate cache invalidation.
+It deduplicates only the final response. Successful empty scans clear stale
+entries. Cancellation leaves the prior snapshot unchanged.
 
 `RepositoryDiscoveryControls` renders a localized failure region for roots
 without existing saved-root recovery controls. The region uses `failedRoots`
