@@ -54,12 +54,23 @@ func patchRoutineCreatedAt(t *testing.T, repo *sqlite.Repository, id string, cre
 // inside it fails instead.
 type coordinatorInstallRepoFailures struct {
 	*sqlite.Repository
-	failLookup         error
-	failTriggerRead    bool
-	failCreateRoutine  bool
-	failCreateTrigger  bool
-	installDecideCalls int
-	triggerDecideCalls int
+	failLookup error
+	// createRoutineErr, when set, is what CreateRoutine returns instead of
+	// the generic "forced routine create failure" text — lets a test
+	// control decide's own error text (e.g. to collide with the SQLite
+	// busy-text heuristic).
+	createRoutineErr  error
+	failTriggerRead   bool
+	failCreateRoutine bool
+	failCreateTrigger bool
+	// failCommitAfterDecide, when set, is returned instead of nil once the
+	// wrapped InstallCoordinatorRoutine call has already succeeded —
+	// simulating WithCoordinatorInstallLock's own tx.Commit() failing after
+	// decide returned nil, a failure point CoordinatorInstallTx has no way
+	// to trigger directly since it never exposes Commit to decide.
+	failCommitAfterDecide error
+	installDecideCalls    int
+	triggerDecideCalls    int
 }
 
 func (f *coordinatorInstallRepoFailures) InstallCoordinatorRoutine(
@@ -70,14 +81,19 @@ func (f *coordinatorInstallRepoFailures) InstallCoordinatorRoutine(
 	if f.failLookup != nil {
 		return f.failLookup
 	}
-	return f.Repository.InstallCoordinatorRoutine(ctx, workspaceID, agentID, canonicalName,
+	err := f.Repository.InstallCoordinatorRoutine(ctx, workspaceID, agentID, canonicalName,
 		func(ctx context.Context, matches []*Routine, tx models.CoordinatorInstallTx) error {
 			f.installDecideCalls++
 			return decide(ctx, matches, &coordinatorInstallTxFailures{
 				CoordinatorInstallTx: tx,
 				failCreateRoutine:    f.failCreateRoutine,
+				createRoutineErr:     f.createRoutineErr,
 			})
 		})
+	if err == nil && f.failCommitAfterDecide != nil {
+		return f.failCommitAfterDecide
+	}
+	return err
 }
 
 func (f *coordinatorInstallRepoFailures) EnsureCoordinatorTrigger(
@@ -101,10 +117,14 @@ func (f *coordinatorInstallRepoFailures) EnsureCoordinatorTrigger(
 type coordinatorInstallTxFailures struct {
 	models.CoordinatorInstallTx
 	failCreateRoutine bool
+	createRoutineErr  error
 	failCreateTrigger bool
 }
 
 func (w *coordinatorInstallTxFailures) CreateRoutine(ctx context.Context, routine *models.Routine) error {
+	if w.createRoutineErr != nil {
+		return w.createRoutineErr
+	}
 	if w.failCreateRoutine {
 		return errors.New("forced routine create failure")
 	}
@@ -684,6 +704,97 @@ func TestCreateDefaultCoordinatorRoutine_ContextCancelledReportedDistinctFromCon
 	}
 	if afterContention != beforeContention {
 		t.Errorf("contention counter changed to %d, want unchanged %d", afterContention, beforeContention)
+	}
+}
+
+// AC-OFFICE-COORDINATOR-INSTALL-001.13: decision.errored must gate before
+// the Contention case in reportCoordinatorLockFailure. decide's own
+// CreateRoutine failure is reported once, at its own failure site, as
+// routine_create_failed; classifyCoordinatorInstallWaitErr's busy-text
+// heuristic reclassifies the returned error as ErrCoordinatorInstallContention
+// purely because the error text happens to contain "database is locked" —
+// but since decide already reported, that must not also increment the
+// contention counter a second time.
+func TestCreateDefaultCoordinatorRoutine_DecideOwnErrorMatchingBusyTextNotDoubleReported(t *testing.T) {
+	repo := newCoordinatorInstallRepo(t)
+	failing := &coordinatorInstallRepoFailures{
+		Repository:       repo,
+		createRoutineErr: errors.New("routine insert failed: database is locked"),
+	}
+	svc := newCoordinatorInstallService(t, failing)
+
+	beforeContention := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionContention, "workspace", "ws-1", "assignee", "agent-1")))
+	beforeRoutineCreateFailed := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionRoutineCreateFailed, "workspace", "ws-1", "assignee", "agent-1")))
+
+	_, err := svc.CreateDefaultCoordinatorRoutine(context.Background(), "ws-1", "agent-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	afterContention := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionContention, "workspace", "ws-1", "assignee", "agent-1")))
+	afterRoutineCreateFailed := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionRoutineCreateFailed, "workspace", "ws-1", "assignee", "agent-1")))
+	if afterContention != beforeContention {
+		t.Errorf("contention counter = %d, want unchanged at %d (decide already reported its own failure; no double report)", afterContention, beforeContention)
+	}
+	if afterRoutineCreateFailed != beforeRoutineCreateFailed+1 {
+		t.Errorf("routine_create_failed counter = %d, want %d", afterRoutineCreateFailed, beforeRoutineCreateFailed+1)
+	}
+}
+
+// AC-OFFICE-COORDINATOR-INSTALL-001.12/.13: a failure surfacing after decide
+// itself already ran and returned nil (the enclosing transaction failing to
+// commit) is reported as commit_failed, not silently dropped and not folded
+// into contention or cancelled. failCommitAfterDecide lets the real decide
+// callback run to completion (a real commit happens underneath), then
+// substitutes a synthetic, unclassified error for InstallCoordinatorRoutine's
+// return value — reproducing the exact decision shape
+// (ran=true, errored=false, created=true) a genuine post-decide commit
+// failure leaves behind, which is what reportCoordinatorLockFailure's
+// default case must classify. It does not exercise the real
+// WithCoordinatorInstallLock rollback path; that is covered separately at
+// the repository layer (coordinator_install_test.go's
+// TestWithCoordinatorInstallLock_FnContentionIsClassified and friends).
+func TestCreateDefaultCoordinatorRoutine_CommitFailureAfterDecideSucceedsReportsCommitFailed(t *testing.T) {
+	repo := newCoordinatorInstallRepo(t)
+	failing := &coordinatorInstallRepoFailures{
+		Repository:            repo,
+		failCommitAfterDecide: errors.New("forced commit failure: disk I/O error"),
+	}
+	svc := newCoordinatorInstallService(t, failing)
+
+	beforeCommitFailed := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionCommitFailed, "workspace", "ws-1", "assignee", "agent-1")))
+	beforeContention := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionContention, "workspace", "ws-1", "assignee", "agent-1")))
+	beforeCreated := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionRoutineCreated, "workspace", "ws-1", "assignee", "agent-1")))
+
+	_, err := svc.CreateDefaultCoordinatorRoutine(context.Background(), "ws-1", "agent-1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if errors.Is(err, models.ErrCoordinatorInstallContention) {
+		t.Fatalf("a plain synthetic commit error must not be misclassified as contention, got %v", err)
+	}
+
+	afterCommitFailed := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionCommitFailed, "workspace", "ws-1", "assignee", "agent-1")))
+	afterContention := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionContention, "workspace", "ws-1", "assignee", "agent-1")))
+	afterCreated := counterValue(coordinatorInstallConditionsTotal.Get(
+		coordinatorInstallLabel("condition", coordinatorInstallConditionRoutineCreated, "workspace", "ws-1", "assignee", "agent-1")))
+	if afterCommitFailed != beforeCommitFailed+1 {
+		t.Errorf("commit_failed counter = %d, want %d", afterCommitFailed, beforeCommitFailed+1)
+	}
+	if afterContention != beforeContention {
+		t.Errorf("contention counter changed to %d, want unchanged %d", afterContention, beforeContention)
+	}
+	if afterCreated != beforeCreated {
+		t.Errorf("routine_created counter changed to %d, want unchanged %d (err != nil, so the created report must not fire)", afterCreated, beforeCreated)
 	}
 }
 
