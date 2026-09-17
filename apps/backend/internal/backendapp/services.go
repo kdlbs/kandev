@@ -261,6 +261,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		buildAgentProfileResolver(repos),
 		buildAgentProfileMatcher(repos, log),
 	)
+	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
 
 	githubSvc, _, githubErr := initGitHubServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(storeTracker, "github", githubErr); recordErr != nil {

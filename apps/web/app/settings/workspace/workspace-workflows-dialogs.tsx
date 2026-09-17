@@ -9,7 +9,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
-import type { WorkflowTemplate } from "@/lib/types/http";
+import type {
+  WorkflowImportPreview,
+  WorkflowImportProfileConflict,
+  WorkflowImportProfileStep,
+  WorkflowTemplate,
+} from "@/lib/types/http";
+import { WorkflowImportProfileSelection } from "./workflow-import-profile-selection";
+import type { WorkflowImportPhase, WorkflowImportSelections } from "./use-workflow-import";
 
 const YAML_PLACEHOLDER =
   "version: 2\ntype: kandev_workflow\nworkflows:\n  - name: My Workflow\n    steps: [...]";
@@ -21,8 +28,17 @@ type ImportWorkflowsDialogProps = {
   onImportYamlChange: (value: string) => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
-  onImport: () => void;
+  onImport: () => void | Promise<void>;
   importLoading: boolean;
+  importPhase: WorkflowImportPhase;
+  preview: WorkflowImportPreview | null;
+  selections: WorkflowImportSelections;
+  missingSteps: WorkflowImportProfileStep[];
+  profileConflicts: WorkflowImportProfileConflict[];
+  activeStepKey: string | null;
+  setActiveStepKey: (key: string | null) => void;
+  selectProfile: (stepKey: string, profileId: string) => void;
+  retryPreview: () => void | Promise<void>;
 };
 
 export function ImportWorkflowsDialog({
@@ -34,8 +50,35 @@ export function ImportWorkflowsDialog({
   fileInputRef,
   onImport,
   importLoading,
+  importPhase,
+  preview,
+  selections,
+  missingSteps,
+  profileConflicts,
+  activeStepKey,
+  setActiveStepKey,
+  selectProfile,
+  retryPreview,
 }: ImportWorkflowsDialogProps) {
   const { t } = useTranslation();
+  if (preview && importPhase !== "editing") {
+    return (
+      <WorkflowImportProfileSelection
+        open={open}
+        onOpenChange={onOpenChange}
+        preview={preview}
+        selections={selections}
+        missingSteps={missingSteps}
+        profileConflicts={profileConflicts}
+        activeStepKey={activeStepKey}
+        onActiveStepKeyChange={setActiveStepKey}
+        onSelectProfile={selectProfile}
+        onImport={onImport}
+        onRetryPreview={retryPreview}
+        importLoading={importLoading}
+      />
+    );
+  }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -50,6 +93,7 @@ export function ImportWorkflowsDialog({
               type="file"
               accept=".yml,.yaml"
               onChange={onFileUpload}
+              disabled={importLoading}
               className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground file:cursor-pointer cursor-pointer"
             />
           </div>
@@ -61,11 +105,17 @@ export function ImportWorkflowsDialog({
               placeholder={YAML_PLACEHOLDER}
               value={importYaml}
               onChange={(e) => onImportYamlChange(e.target.value)}
+              disabled={importLoading}
               className="font-mono text-xs max-h-96 overflow-y-auto"
             />
           </div>
         </div>
         <DialogFooter>
+          {importLoading && (
+            <span className="sr-only" role="status" aria-live="polite">
+              {t("workflows:importing")}
+            </span>
+          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             {t("common:cancel")}
           </Button>
@@ -246,6 +296,15 @@ export function WorkflowDialogs({
     fileInputRef: React.RefObject<HTMLInputElement | null>;
     handleImport: () => Promise<void>;
     importLoading: boolean;
+    importPhase: WorkflowImportPhase;
+    preview: WorkflowImportPreview | null;
+    selections: WorkflowImportSelections;
+    missingSteps: WorkflowImportProfileStep[];
+    profileConflicts: WorkflowImportProfileConflict[];
+    activeStepKey: string | null;
+    setActiveStepKey: (key: string | null) => void;
+    selectProfile: (stepKey: string, profileId: string) => void;
+    retryPreview: () => void | Promise<void>;
     isAddWorkflowDialogOpen: boolean;
     setIsAddWorkflowDialogOpen: (open: boolean) => void;
     newWorkflowName: string;
@@ -275,6 +334,15 @@ export function WorkflowDialogs({
         fileInputRef={page.fileInputRef}
         onImport={page.handleImport}
         importLoading={page.importLoading}
+        importPhase={page.importPhase}
+        preview={page.preview}
+        selections={page.selections}
+        missingSteps={page.missingSteps}
+        profileConflicts={page.profileConflicts}
+        activeStepKey={page.activeStepKey}
+        setActiveStepKey={page.setActiveStepKey}
+        selectProfile={page.selectProfile}
+        retryPreview={page.retryPreview}
       />
       <CreateWorkflowDialog
         open={page.isAddWorkflowDialogOpen}

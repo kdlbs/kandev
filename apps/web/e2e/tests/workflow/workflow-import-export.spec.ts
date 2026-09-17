@@ -144,6 +144,103 @@ workflows:
     await expect(testPage.getByText("Skipped", { exact: false })).toBeVisible({ timeout: 5000 });
   });
 
+  test("import resolves a missing step profile and preserves a later session target", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const replacement = await apiClient.getAgentProfile(seedData.agentProfileId);
+    const workflowName = `Profile import ${Date.now()}`;
+    const yamlContent = `version: 2
+type: kandev_workflow
+workflows:
+  - name: ${workflowName}
+    steps:
+      - name: Start
+        position: 0
+        color: bg-neutral-400
+        events: {}
+        is_start_step: true
+        show_in_command_panel: true
+        allow_manual_move: true
+        complete_task_on_enter: false
+        auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
+      - name: Implement
+        position: 1
+        color: bg-blue-500
+        events: {}
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        agent_profile:
+          agent_name: Missing import agent
+          model: missing-import-model
+          mode: missing-import-mode
+        complete_task_on_enter: false
+        auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
+      - name: Review
+        position: 2
+        color: bg-yellow-500
+        events: {}
+        is_start_step: false
+        show_in_command_panel: true
+        allow_manual_move: true
+        session_target:
+          kind: step
+          step_position: 1
+        complete_task_on_enter: false
+        auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false`;
+
+    try {
+      const page = new WorkflowSettingsPage(testPage);
+      await page.goto(seedData.workspaceId);
+      await testPage.getByRole("button", { name: "Import", exact: true }).click();
+      const dialog = testPage.getByRole("dialog");
+      await dialog.locator("textarea").fill(yamlContent);
+      await dialog.getByRole("button", { name: "Import", exact: true }).click();
+
+      const selection = testPage.getByTestId("workflow-import-profile-selection");
+      await expect(selection).toBeVisible();
+      await expect(selection.getByText("Implement", { exact: true })).toBeVisible();
+
+      await selection.getByTestId("workflow-import-profile-select-0:1").click();
+      await testPage
+        .getByTestId(`workflow-import-profile-option-${replacement.id}`)
+        .click({ force: true });
+      await selection.getByTestId("workflow-import-profile-submit").click();
+      await expect(selection).not.toBeVisible();
+
+      let importedId: string | undefined;
+      await expect
+        .poll(
+          async () => {
+            const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+            importedId = workflows.find((workflow) => workflow.name === workflowName)?.id;
+            return importedId;
+          },
+          { timeout: 10_000 },
+        )
+        .toBeDefined();
+
+      const { steps } = await apiClient.listWorkflowSteps(importedId!);
+      const implement = steps.find((step) => step.name === "Implement");
+      const review = steps.find((step) => step.name === "Review");
+      expect(implement?.agent_profile_id).toBe(replacement.id);
+      expect(review?.session_target).toEqual({ kind: "step", step_id: implement?.id });
+
+      await page.goto(seedData.workspaceId);
+      const importedCard = await page.findWorkflowCard(workflowName);
+      await expect(importedCard).toBeVisible();
+    } finally {
+      const { workflows } = await apiClient.listWorkflows(seedData.workspaceId);
+      const imported = workflows.find((workflow) => workflow.name === workflowName);
+      if (imported) await apiClient.deleteWorkflow(imported.id).catch(() => {});
+    }
+  });
+
   test("round-trip: export workflow, delete, re-import preserves structure", async ({
     testPage,
     apiClient,
