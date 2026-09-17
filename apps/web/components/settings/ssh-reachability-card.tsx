@@ -7,7 +7,10 @@ import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { IconLoader2 } from "@tabler/icons-react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { getSSHExecutorReachability, probeSSHExecutorReachability } from "@/lib/api/domains/ssh-api";
+import {
+  getSSHExecutorReachability,
+  probeSSHExecutorReachability,
+} from "@/lib/api/domains/ssh-api";
 import type { SSHReachabilityRecord, SSHReachabilityReason } from "@/lib/types/http-ssh";
 import { formatRelative } from "@/lib/i18n/formats";
 import { SettingsCard } from "@/components/settings/settings-card";

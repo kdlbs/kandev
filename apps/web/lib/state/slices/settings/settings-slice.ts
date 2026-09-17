@@ -430,7 +430,10 @@ function createSSHReachabilityActions(set: ImmerSet): Pick<SettingsSlice, "setSS
     setSSHReachability: (record) =>
       set((draft) => {
         const current = draft.sshReachability.byExecutorId[record.executor_id];
-        if (current && reachabilityUpdatedAtMs(current.updated_at) > reachabilityUpdatedAtMs(record.updated_at)) {
+        if (
+          current &&
+          reachabilityUpdatedAtMs(current.updated_at) > reachabilityUpdatedAtMs(record.updated_at)
+        ) {
           return;
         }
         draft.sshReachability.byExecutorId[record.executor_id] = record;
