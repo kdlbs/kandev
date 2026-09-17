@@ -32,7 +32,7 @@ generic material; original local snapshot/backup refs are not published.
 | Assistant memory/context | Partial; validation metadata and dedicated pagination/scope coverage remain |
 | Central workspace task view beside chat | Fully planned; implementation pending |
 | Assistant capability enforcement, attention, resolution, UI and workspace grants | Fully planned; implementation pending |
-| Independent assistant toggle | Planned prerequisite for coordinator-only dogfooding |
+| Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
 | Actual live-data rehearsal and deployment | Pending; live service unchanged |
 
 ## Development and contribution

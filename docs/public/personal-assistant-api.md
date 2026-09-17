@@ -10,7 +10,21 @@ This reference describes the in-development backend for a user-owned assistant b
 
 It is **not ready for production use**. The central assistant UI, provider-enforced read-only execution and native attention/input handling are not implemented yet.
 
-The existing orchestration flag remains off by default. Do not enable these development changes against production data or treat an `inspect` label as an enforced sandbox.
+Both `features.orchestration` (`KANDEV_FEATURES_ORCHESTRATION`) and
+`features.personalAssistant` (`KANDEV_FEATURES_PERSONAL_ASSISTANT`) must be enabled
+for the assistant. Both default off in every shipped profile and require a restart
+after a change through Settings > System > Feature Toggles. An explicit environment
+value overrides and locks the corresponding setting. Enabling orchestration alone
+keeps ordinary workspace coordinators available without enabling the assistant.
+
+With the assistant disabled, assistant routes return 404 with
+`personal_assistant_disabled`; new private conversation turns, runtime tools and
+queued/native launches are blocked. Pending intake, schemas and retained ownership
+remain intact. Owners can still read protected conversation history. Re-enabling
+rechecks current ownership, intent and context before work can execute.
+
+Do not treat an `inspect` label as an enforced sandbox; the remaining authority
+work is required before using that mode with a provider.
 
 ## Ownership and intake
 

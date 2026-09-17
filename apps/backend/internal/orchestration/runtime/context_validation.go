@@ -52,6 +52,9 @@ func (h *Handler) attachDelegationContext(c *gin.Context, claims *runtimeauth.Ag
 // ValidateDispatchContext is invoked by the native executor, including queue
 // drains, resumes and steers. A packet is not a grant; native gates still apply.
 func (s *Service) ValidateDispatchContext(ctx context.Context, ref string, task *taskmodels.Task, profile string) error {
+	if !s.AssistantEnabled {
+		return ErrAssistantDisabled
+	}
 	b, err := s.Repo.ContextBinding(ctx, ref)
 	if err != nil {
 		return fmt.Errorf("assistant context unavailable")

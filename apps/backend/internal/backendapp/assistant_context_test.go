@@ -35,7 +35,7 @@ func TestAssistantContextIdleRefreshReplacesOldPacket(t *testing.T) {
 }
 
 func TestAssistantContextDisabledRuntimeDoesNotBypassGuard(t *testing.T) {
-	guard := assistantDispatchGuard(nil)
+	guard := assistantDispatchGuard(nil, nil)
 	task := &models.Task{ID: "task", Metadata: map[string]interface{}{dispatchcontext.MetadataKey: "packet"}}
 	require.ErrorIs(t, guard(context.Background(), task, nil, "personal"), dispatchcontext.ErrStale)
 	require.ErrorIs(t, guard(dispatchcontext.WithReference(context.Background(), "new"), task, nil, "personal"), dispatchcontext.ErrStale)

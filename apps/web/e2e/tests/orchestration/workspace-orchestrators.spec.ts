@@ -7,7 +7,11 @@ test("orchestrators connect workspace navigation, profiles, roles and clean conv
   seedData,
   apiClient,
 }) => {
-  await backend.restart({ KANDEV_FEATURES_ORCHESTRATION: "true", KANDEV_FEATURES_OFFICE: "false" });
+  await backend.restart({
+    KANDEV_FEATURES_ORCHESTRATION: "true",
+    KANDEV_FEATURES_PERSONAL_ASSISTANT: "false",
+    KANDEV_FEATURES_OFFICE: "false",
+  });
   await resetWorkspaceOrchestrators(testPage.request, backend.baseUrl, seedData.workspaceId);
   await testPage.setViewportSize({ width: 393, height: 852 });
   const officeRequests: string[] = [];
@@ -207,11 +211,44 @@ test("orchestrators connect workspace navigation, profiles, roles and clean conv
       .getByRole("link", { name: "Orchestration", exact: true }),
   ).toHaveAttribute("href", `/settings/workspaces/${otherWorkspace.id}/orchestration`);
   await expect(testPage.getByTestId(`orchestrator-chat-${firstId}`)).toHaveCount(0);
-  for (const enabled of [true, false]) {
+  await backend.restart({
+    KANDEV_FEATURES_ORCHESTRATION: "true",
+    KANDEV_FEATURES_PERSONAL_ASSISTANT: "true",
+    KANDEV_FEATURES_OFFICE: "true",
+  });
+  const binding = await testPage.request.put(`${base}/assistant`, {
+    data: { orchestrator_id: firstId, expected_version: 0 },
+  });
+  expect(binding.status()).toBe(200);
+  expect((await binding.json()).conversation_id).toBe(conversationTask);
+  const retainedComments = (await (await testPage.request.get(commentsUrl)).json()).comments;
+  // A retained private conversation never becomes an ordinary coordinator when disabled.
+  for (const [enabled, assistantEnabled] of [
+    [true, false],
+    [false, true],
+    [false, false],
+    [true, true],
+  ]) {
     await backend.restart({
       KANDEV_FEATURES_ORCHESTRATION: String(enabled),
+      KANDEV_FEATURES_PERSONAL_ASSISTANT: String(assistantEnabled),
       KANDEV_FEATURES_OFFICE: "true",
     });
+    expect((await testPage.request.get(`${base}/assistant`)).status()).toBe(
+      enabled && assistantEnabled ? 200 : 404,
+    );
+    if (!enabled || !assistantEnabled) {
+      expect(
+        (
+          await testPage.request.post(commentsUrl, { data: { body: "Summarize example tasks." } })
+        ).status(),
+      ).toBe(404);
+    }
+    if (enabled) {
+      const history = await testPage.request.get(commentsUrl);
+      expect(history.status()).toBe(200);
+      expect((await history.json()).comments).toEqual(retainedComments);
+    }
     expect((await testPage.request.get(`${base}/workspaces/${ws}/orchestrators`)).status()).toBe(
       enabled ? 200 : 404,
     );
@@ -230,6 +267,7 @@ test("orchestrators connect workspace navigation, profiles, roles and clean conv
   }
   await backend.restart({
     KANDEV_FEATURES_ORCHESTRATION: "false",
+    KANDEV_FEATURES_PERSONAL_ASSISTANT: "false",
     KANDEV_FEATURES_OFFICE: "false",
   });
   const disabled = await testPage.request.get(`${base}/workspaces/${ws}/orchestrators`);

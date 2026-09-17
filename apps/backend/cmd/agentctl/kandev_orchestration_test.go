@@ -29,6 +29,7 @@ func TestOrchestrationCreateCarriesRouteAndOperationIdentity(t *testing.T) {
 }
 
 func TestOrchestrationObjectiveUsesBoundedTypedPayload(t *testing.T) {
+	t.Setenv("KANDEV_PERSONAL_ASSISTANT_ENABLED", "true")
 	var request map[string]any
 	var path string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

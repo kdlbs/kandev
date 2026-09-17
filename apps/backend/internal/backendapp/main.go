@@ -1090,7 +1090,7 @@ func startGatewayAndServe(
 		}
 		addCleanup(func() error { cleanup(); return nil })
 	}
-	wireAssistantDispatch(orchestratorSvc, services.Orchestration, services.Task)
+	wireAssistantDispatch(orchestratorSvc, services.Orchestration, services.Task, repos.Orchestration)
 	scheduling := startSchedulingRuntime(
 		ctx, repos, services, eventBus, orchestratorSvc, runProcessorSvc, log,
 		runsscheduler.TickIntervalFromConfig(cfg.Office.SchedulerTickMs),

@@ -58,7 +58,7 @@ func (s *Service) DispatchIntake(ctx context.Context) error {
 	}
 	var problems []error
 	for _, row := range rows {
-		if err := s.dispatchIntake(ctx, row); err != nil {
+		if err := s.dispatchIntake(ctx, row); err != nil && !errors.Is(err, ErrAssistantDisabled) {
 			problems = append(problems, err)
 		}
 	}

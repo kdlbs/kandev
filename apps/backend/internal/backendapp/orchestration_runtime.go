@@ -25,7 +25,8 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 		return orch.PersonaSessionTerminator().TerminateAllForAgent(ctx, id, "orchestrator_deleted")
 	}}
 	return &orchestrationruntime.Service{
-		Repo: repos.Orchestration, Personas: personasSvc, Runs: repos.Runs,
+		AssistantEnabled: cfg.Features.Orchestration && cfg.Features.PersonalAssistant,
+		Repo:             repos.Orchestration, Personas: personasSvc, Runs: repos.Runs,
 		Auth: runtimeauth.NewAgentAuth(""), Tasks: services.Task,
 		Credentials: assistantCredentialReader{store: repos.Secrets},
 		Manager:     &taskCreatorAdapter{taskSvc: services.Task, profiles: repos.AgentSettings, orch: orch, taskRepo: repos.Task, workflow: repos.Workflow},

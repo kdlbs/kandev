@@ -249,6 +249,17 @@ func TestFeatures_OfficeEnabledByEnv(t *testing.T) {
 	}
 }
 
+func TestFeatures_PersonalAssistantEnabledByEnv(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_PERSONAL_ASSISTANT", "true")
+	cfg, err := LoadWithPath(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Features.PersonalAssistant {
+		t.Fatal("personal assistant environment override was not applied")
+	}
+}
+
 func TestFeatures_ClaudeBackgroundPromptHandoffEnabledByEnv(t *testing.T) {
 	t.Setenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", "true")
 

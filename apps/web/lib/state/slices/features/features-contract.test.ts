@@ -16,6 +16,10 @@ function backendFeatureKeys(source: string): string[] {
 }
 
 describe("feature flag repository contract", () => {
+  it("keeps the personal assistant separate and disabled by default", () => {
+    expect(defaultFeatureFlags.personalAssistant).toBe(false);
+    expect(defaultFeatureFlags.orchestration).toBe(false);
+  });
   it("keeps dynamic agent routing disabled by default", () => {
     expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
   });

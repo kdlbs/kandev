@@ -7,6 +7,7 @@ import (
 )
 
 func TestOrchestrationContextFetchesScopedPacket(t *testing.T) {
+	t.Setenv("KANDEV_PERSONAL_ASSISTANT_ENABLED", "true")
 	captured := setupMockTransport(t, 200, `{"id":"packet"}`)
 	t.Setenv("KANDEV_RUNTIME_API_PREFIX", orchestrationAPIPrefix)
 	t.Setenv("KANDEV_API_URL", "http://kandev.test")

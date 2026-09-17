@@ -70,7 +70,7 @@ func newRuntime(t *testing.T) (*Service, *sqlx.DB, string) {
 	require.NoError(t, repo.RegisterOrchestrator(ctx, a.ID, "ws", "chief-of-staff"))
 	conversation, err := repo.EnsureAgentConversation(ctx, a)
 	require.NoError(t, err)
-	svc := &Service{Repo: repo, Personas: &personas.Service{Profiles: profiles, Repo: repo}, Runs: runs, Queue: runservice.New(runs, nil, log, nil), Auth: runtimeauth.NewAgentAuth(""), Tasks: &testTasks{tasks: map[string]*taskmodels.Task{}}, APIURL: "http://localhost:1", CLI: "agentctl"}
+	svc := &Service{AssistantEnabled: true, Repo: repo, Personas: &personas.Service{Profiles: profiles, Repo: repo}, Runs: runs, Queue: runservice.New(runs, nil, log, nil), Auth: runtimeauth.NewAgentAuth(""), Tasks: &testTasks{tasks: map[string]*taskmodels.Task{}}, APIURL: "http://localhost:1", CLI: "agentctl"}
 	return svc, db, conversation.TaskID
 }
 func TestConversationRunsWithoutOffice(t *testing.T) {
@@ -82,6 +82,7 @@ func TestConversationRunsWithoutOffice(t *testing.T) {
 	s.Start = func(ctx context.Context, l Launch) error {
 		require.Equal(t, "personal", l.ProfileID)
 		require.Equal(t, "/api/v1/orchestration", l.Env["KANDEV_RUNTIME_API_PREFIX"])
+		require.Equal(t, "true", l.Env["KANDEV_PERSONAL_ASSISTANT_ENABLED"])
 		return l.OnSessionPrepared(ctx, "session")
 	}
 	for _, key := range []string{"first", "second"} {

@@ -31,6 +31,18 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 }
 
 var registrations = []runtimeFlagRegistration{
+	{
+		definition: RuntimeFlagDefinition{
+			Key: "features.personalAssistant", EnvVar: "KANDEV_FEATURES_PERSONAL_ASSISTANT",
+			Kind: KindFeature, Label: "Personal assistant",
+			Description: "Enables the owner-selected assistant, scoped context and managed work. Requires Workspace orchestration.",
+			Stability:   StabilityExperimental, RiskLevel: RiskHigh,
+			RiskDescription: "Assistant execution uses explicitly selected accounts and permissions. Disabling preserves private history and blocks new assistant work. Inspection requires a supported restricted profile.",
+			RestartRequired: true, Mutable: true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.PersonalAssistant },
+		apply: func(cfg *config.Config, v bool) { cfg.Features.PersonalAssistant = v },
+	},
 	{definition: RuntimeFlagDefinition{Key: "features.orchestration", EnvVar: "KANDEV_FEATURES_ORCHESTRATION", Kind: KindFeature, Label: "Workspace orchestration", Description: "Workspace orchestrators coordinate existing task agents and conversations.", Stability: StabilityExperimental, RiskLevel: RiskMedium, RiskDescription: "Experimental orchestration can create and manage tasks. Review profile assignments and instructions.", RestartRequired: true, Mutable: true}, read: func(cfg *config.Config) bool { return cfg.Features.Orchestration }, apply: func(cfg *config.Config, v bool) { cfg.Features.Orchestration = v }},
 	{
 		definition: RuntimeFlagDefinition{

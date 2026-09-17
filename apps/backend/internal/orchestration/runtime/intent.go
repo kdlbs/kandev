@@ -38,6 +38,9 @@ func (s *Service) bindingSnapshot(ctx context.Context, taskID string) (string, i
 	if err != nil {
 		return "", 0, err
 	}
+	if owner != "" && !s.AssistantEnabled {
+		return "", 0, ErrAssistantDisabled
+	}
 	row, err := s.Repo.AssistantForConversation(ctx, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		if owner != "" {
@@ -98,6 +101,10 @@ func (h *Handler) currentBinding(c *gin.Context, taskID, payload string) bool {
 }
 
 func bindingCheck(c *gin.Context, err error) bool {
+	if errors.Is(err, ErrAssistantDisabled) {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{errorResponseKey: err.Error()})
+		return false
+	}
 	if errors.Is(err, models.ErrConflict) {
 		c.AbortWithStatusJSON(http.StatusConflict, gin.H{errorResponseKey: "assistant_binding_superseded"})
 		return false

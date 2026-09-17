@@ -37,21 +37,25 @@ type Launch struct {
 	Env                                              map[string]string
 }
 type Service struct {
-	Repo         *store.Repository
-	Personas     *personas.Service
-	Runs         *runstore.Repository
-	Queue        *runservice.Service
-	Auth         *runtimeauth.AgentAuth
-	Tasks        Tasks
-	Manager      Manager
-	Credentials  CredentialHealthReader
-	Start        func(context.Context, Launch) error
-	UpdateStatus func(context.Context, string, string, string) error
-	APIURL, CLI  string
-	mu           sync.Mutex
+	AssistantEnabled bool
+	Repo             *store.Repository
+	Personas         *personas.Service
+	Runs             *runstore.Repository
+	Queue            *runservice.Service
+	Auth             *runtimeauth.AgentAuth
+	Tasks            Tasks
+	Manager          Manager
+	Credentials      CredentialHealthReader
+	Start            func(context.Context, Launch) error
+	UpdateStatus     func(context.Context, string, string, string) error
+	APIURL, CLI      string
+	mu               sync.Mutex
 }
 
 func (s *Service) QueueTurn(ctx context.Context, id, taskID, reason, key string, payload map[string]any) error {
+	if err := s.CheckConversationExecution(ctx, taskID); err != nil {
+		return err
+	}
 	if _, human := authn.IdentityFromContext(ctx); human {
 		if err := s.Repo.AuthorizePersona(ctx, id); err != nil {
 			return err
@@ -137,6 +141,7 @@ func (s *Service) launch(ctx context.Context, run *runmodels.Run) error {
 	}
 	env := map[string]string{"KANDEV_API_URL": s.APIURL, "KANDEV_API_KEY": token, "KANDEV_RUN_TOKEN": token, "KANDEV_AGENT_ID": a.ID, "KANDEV_AGENT_NAME": a.Name, "KANDEV_WORKSPACE_ID": ws, "KANDEV_RUN_ID": run.ID, "KANDEV_TASK_ID": taskID, "KANDEV_WAKE_REASON": run.Reason, "KANDEV_CLI": s.CLI, "KANDEV_RUNTIME_API_PREFIX": "/api/v1/orchestration"}
 	env["KANDEV_INTENT_REVISION"] = fmt.Sprint(payload["intent_revision"])
+	env["KANDEV_PERSONAL_ASSISTANT_ENABLED"] = fmt.Sprint(s.AssistantEnabled)
 	_ = s.Runs.UpdateRunPromptArtifacts(ctx, run.ID, prompt, "")
 	if err := s.Repo.SetRuntimeWorking(ctx, a.ID, true); err != nil {
 		return err

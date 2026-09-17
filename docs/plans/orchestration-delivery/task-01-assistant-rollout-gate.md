@@ -1,7 +1,7 @@
 ---
 id: "01-assistant-rollout-gate"
 title: "Independent assistant rollout gate"
-status: pending
+status: done
 wave: 2
 depends_on: ["00-private-publication"]
 plan: "plan.md"
@@ -106,4 +106,20 @@ Assistant design: Rollout isolation and Existing invariants; existing
 
 ## Results
 
-Pending. No flag implementation or live configuration change in the planning turn.
+Implemented on 2026-09-17. Assistant admission now requires both flags; native
+launch, queued dispatch, runtime tokens, context validation, intake and CLI
+exposure enforce the gate. Retained owners, schemas and authorized history remain
+available. The root profile is a symlink to the embedded profile; one default
+entry supplies all three environments.
+
+Validation: focused admission tests passed after the expected red failures;
+all tests in runtime, runtimeflags, config, profiles and agentctl passed. The
+race command above exercised backend composition, runtime admission and native
+executor ownership tests (the other selected packages contain no matching test
+names and are not counted as coverage). Three frontend files passed all 12 tests,
+and typecheck, specification lint and whitespace checks passed. A fresh managed
+host browser build ran both orchestration specs together: 2 passed, one worker,
+zero retries. The workspace spec includes all four flag combinations across
+restarts, unchanged private history, rejected disabled comments, ordinary chat,
+automation delivery and mobile navigation. Local logs are retained in the
+implementation evidence directory; no live configuration was changed.
