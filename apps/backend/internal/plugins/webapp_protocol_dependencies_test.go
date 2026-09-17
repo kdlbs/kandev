@@ -281,6 +281,37 @@ func TestUpdateWebAppTask_ScopeCheckPreflightDoesNotDeriveDependencies(t *testin
 		"derivation runs once, for the updated task actually serialized -- not a second time for the discarded scope-check preflight")
 }
 
+// TestUpdateWebAppTask_CombinedTitleAndStepPatchDerivesOnce covers the design's
+// Placement section ("the PATCH route derives once ... one response, one
+// derivation, on the object serialized") for a body that takes both the
+// Update and the Move write branch: only Move's result is ever serialized, so
+// the Update branch's write must not derive on the intermediate result nobody
+// sees.
+func TestUpdateWebAppTask_CombinedTitleAndStepPatchDerivesOnce(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}, APIWrite: []string{"tasks"}})
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", WorkspaceID: "ws-1"}}
+	d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "new title", WorkspaceID: "ws-1"}
+	d.taskWriter.moveResult = &TaskMoveResult{
+		Task: &taskmodels.Task{ID: "task-1", WorkflowStepID: "step-2", WorkspaceID: "ws-1"}, Transitioned: true,
+	}
+
+	svc := &Service{}
+	binding := webapp.CapabilityBinding{
+		ScopeKind: instances.ScopeWorkspace, WorkspaceID: "ws-1",
+		Permissions: []string{"api_read:tasks", "api_write:tasks"},
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/", strings.NewReader(`{"title":"new title","workflow_step_id":"step-2"}`))
+	recorder := httptest.NewRecorder()
+
+	svc.updateWebAppTask(context.Background(), recorder, req, d.host, binding, "task-1")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 1, d.taskWriter.updateCalls, "the update branch still writes the task fields")
+	require.Equal(t, 1, d.taskWriter.moveCalls, "the move branch still writes the step transition")
+	require.Equal(t, 1, d.tasks.dependencyViewsCalls,
+		"a body naming both a title and a workflow step takes both write branches, but only Move's result is serialized -- derivation must run exactly once, not once per write")
+}
+
 func TestSendWebAppMessage_ScopeCheckPreflightDoesNotDeriveDependencies(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}, APIWrite: []string{"messages"}})
 	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": {ID: "task-1", WorkspaceID: "ws-1"}}

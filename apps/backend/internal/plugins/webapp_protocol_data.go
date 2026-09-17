@@ -155,12 +155,25 @@ func (s *Service) updateWebAppTask(ctx context.Context, w http.ResponseWriter, r
 	}
 	var updated *pluginsdk.Task
 	if patch.hasTaskFields() {
-		updated, err = host.Tasks().Update(ctx, pluginsdk.UpdateTaskInput{
+		updateInput := pluginsdk.UpdateTaskInput{
 			ID: taskID, Title: patch.Title, Description: patch.Description, State: patch.State,
-		})
-		if err != nil {
-			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
-			return
+		}
+		if patch.WorkflowStepID != nil {
+			// A body naming both a task field and workflow_step_id takes both
+			// this branch and the Move branch below, but only Move's result is
+			// serialized -- so this write must not attach dependencies on a
+			// result nobody sees. The one derivation the response makes runs
+			// on Move's result, below.
+			if _, err = host.writeTaskUpdate(ctx, updateInput); err != nil {
+				writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+				return
+			}
+		} else {
+			updated, err = host.Tasks().Update(ctx, updateInput)
+			if err != nil {
+				writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+				return
+			}
 		}
 	}
 	if patch.WorkflowStepID != nil {
