@@ -615,6 +615,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 			return false, fmt.Errorf("%w: deferred launch changed before Send Now", ErrCeilingLaunchSuperseded)
 		}
 		ceilingClaim.deferral = boundDeferral
+		ctx = withCeilingDispatchClaim(ctx, ceilingClaim)
 		if disposition, detail, validationErr := s.validateCeilingEntry(ctx, currentTask, ceilingClaim.deferral); validationErr != nil {
 			return false, validationErr
 		} else if disposition != ceilingEntryValid {

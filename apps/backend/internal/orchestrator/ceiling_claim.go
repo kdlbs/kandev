@@ -148,49 +148,67 @@ func (c *ceilingDeferredLaunchClaim) settle(ctx context.Context) {
 // mutateCeilingClaim performs the compare-and-set settlement for one claim.
 // A changed deferral or claim is never modified by this older owner.
 func (s *Service) mutateCeilingClaim(ctx context.Context, claim *ceilingDeferredLaunchClaim, settle bool) error {
-	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
-		record, prior, err := s.repo.GetTaskDeferredLaunch(ctx, claim.taskID)
-		if err != nil {
-			return err
-		}
-		current, err := models.ReadCeilingDeferral(record)
-		if err != nil {
-			return nil
-		}
-		equivalent, err := sameCeilingDeferralIdentity(current, claim.deferral)
-		if err != nil {
-			return err
-		}
-		if !equivalent {
-			// Capacity observations are mutable bookkeeping. The claim id below
-			// still binds the mutation to this exact in-flight owner, while the
-			// stable deferral identity prevents a successor from being touched.
-			return nil
-		}
-		claimID, _, ok := models.ReadCeilingLaunchClaim(record)
-		if !ok || claimID != claim.id {
-			return nil
-		}
-
-		updated := cloneCeilingRecord(record)
-		if settle {
-			updated = stripCeilingRecordKeys(updated)
-		} else {
-			delete(updated, models.CeilingLaunchClaimKey)
-		}
-		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, claim.taskID, prior, updated)
-		if err != nil {
-			return err
-		}
-		if stored {
-			if settle {
-				s.publishTaskUpdatedByID(ctx, claim.taskID)
+	// Claim mutation is another task-admission operation. Keep the lock around
+	// the compare-and-set only; settling publishes after release because task
+	// event subscribers may re-enter runtime reconciliation.
+	admissionCtx, release := s.lockCeilingEntryAdmission(ctx, claim.taskID)
+	var publish bool
+	var result error
+	func() {
+		defer release()
+		for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
+			record, prior, err := s.repo.GetTaskDeferredLaunch(admissionCtx, claim.taskID)
+			if err != nil {
+				result = err
+				return
 			}
-			return nil
+			current, err := models.ReadCeilingDeferral(record)
+			if err != nil {
+				return
+			}
+			equivalent, err := sameCeilingDeferralIdentity(current, claim.deferral)
+			if err != nil {
+				result = err
+				return
+			}
+			if !equivalent {
+				// Capacity observations are mutable bookkeeping. The claim id below
+				// still binds the mutation to this exact in-flight owner, while the
+				// stable deferral identity prevents a successor from being touched.
+				return
+			}
+			claimID, _, ok := models.ReadCeilingLaunchClaim(record)
+			if !ok || claimID != claim.id {
+				return
+			}
+
+			updated := cloneCeilingRecord(record)
+			if settle {
+				updated = stripCeilingRecordKeys(updated)
+			} else {
+				delete(updated, models.CeilingLaunchClaimKey)
+			}
+			stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(admissionCtx, claim.taskID, prior, updated)
+			if err != nil {
+				result = err
+				return
+			}
+			if stored {
+				publish = settle
+				return
+			}
+			if !lostCompare {
+				result = fmt.Errorf("repository reported no claim settlement")
+				return
+			}
 		}
-		if !lostCompare {
-			return fmt.Errorf("repository reported no claim settlement")
-		}
+		result = fmt.Errorf("claim settlement compare-and-set retries exhausted")
+	}()
+	if result != nil {
+		return result
 	}
-	return fmt.Errorf("claim settlement compare-and-set retries exhausted")
+	if publish {
+		s.publishTaskUpdatedByID(context.WithoutCancel(ctx), claim.taskID)
+	}
+	return nil
 }

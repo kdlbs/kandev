@@ -108,6 +108,10 @@ Read existing `ceiling_replay_test.go`, `ceiling_defer_test.go`,
 
 ## Results
 
+Follow-up: the [replay deadlock work order](../ceiling-replay-cancellation-deadlock/task-01-remove-replay-lock-cycle.md)
+owns the later runtime deadlock. The results below do not cover that lock cycle.
+Its correction must preserve this task's queued-entry and stale-writer guarantees.
+
 Implementation is present. Deferred entries retain the exact workflow route,
 step, destination session, prompt, and queue time. Review-state reconciliation,
 replay clearing, and Send Now admission use the destination identity and

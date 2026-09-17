@@ -51,93 +51,122 @@ func (s *Service) deferCeilingRefusal(
 	ctx context.Context, taskID, sessionID string, kind models.CeilingLaunchKind, payload map[string]interface{},
 	reasonCode string, population int, populationKnown bool, ceiling int,
 ) error {
-	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
-	defer release()
-	// Capture the route/entry identity that is already committed at the
-	// admission boundary. The payload remains the first launch description;
-	// this only adds the durable binding needed to reject stale replay.
-	payload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, payload)
-	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
-		existingRaw, prior, err := s.repo.GetTaskDeferredLaunch(ctx, taskID)
-		if err != nil {
-			return fmt.Errorf("reading deferred launch for task %s: %w", taskID, err)
-		}
-
-		deferral := models.CeilingDeferral{
-			Kind:            kind,
-			Payload:         payload,
-			Origin:          string(launchOriginAutomatic),
-			ReasonCode:      reasonCode,
-			QueuedAt:        time.Now(),
-			Population:      population,
-			PopulationKnown: populationKnown,
-			Ceiling:         ceiling,
-		}
-
-		if existingCeiling, readErr := models.ReadCeilingDeferral(existingRaw); readErr == nil {
-			// A ceiling_deferred record already exists for this task (AC-12d).
-			equivalent, cmpErr := ceilingDeferralsEquivalentForAdmission(existingCeiling, deferral)
-			if cmpErr != nil {
-				return fmt.Errorf("comparing deferred launch payloads for task %s: %w", taskID, cmpErr)
+	// The admission lock protects only the read/merge/CAS sequence. State
+	// repair, card surfacing, and task publication can invoke other runtime
+	// paths, so they run after the durable record is released.
+	admissionCtx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	var (
+		result    error
+		reconcile bool
+		surface   bool
+		publish   bool
+	)
+	func() {
+		defer release()
+		// Capture the route/entry identity that is already committed at the
+		// admission boundary. The payload remains the first launch description;
+		// this only adds the durable binding needed to reject stale replay.
+		payload = s.enrichCeilingLaunchPayload(admissionCtx, taskID, sessionID, payload)
+		for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
+			existingRaw, prior, err := s.repo.GetTaskDeferredLaunch(admissionCtx, taskID)
+			if err != nil {
+				result = fmt.Errorf("reading deferred launch for task %s: %w", taskID, err)
+				return
 			}
-			if !equivalent {
-				// A different launch: retain the one already stored and report
-				// the collision rather than losing either payload silently.
-				s.logger.Zap().Warn("ceiling refusal superseded by an earlier pending deferral for the same task",
-					zap.String("task_id", taskID),
-					zap.String("stored_kind", string(existingCeiling.Kind)),
-					zap.String("superseded_kind", string(kind)),
-					zap.String(ceilingFieldReasonCode, ceilingReasonSuperseded))
-				return fmt.Errorf("%w: task %s already holds %s", ErrCeilingLaunchConflict, taskID, existingCeiling.Kind)
-			}
-			if existingCeiling.ReasonCode == reasonCode {
-				// AC-12a/AC-49e: the same launch, refused for the same reason,
-				// already recorded. Leave it exactly as stored, including its
-				// queued_at (AC-32) and its card-surface bookkeeping.
-				s.reconcileQueuedTaskState(ctx, taskID)
-				return nil
-			}
-			// AC-49f: the same pending launch, but the reason changed (for
-			// example a transient population read failure resolved into an
-			// ordinary refusal). Update the stored reason and this refusal's
-			// population/ceiling reading, preserve queued_at, and reset the
-			// surface stamps so the new reason gets its own note (AC-49g1).
-			updated := existingCeiling
-			updated.ReasonCode = reasonCode
-			updated.Population = population
-			updated.PopulationKnown = populationKnown
-			updated.Ceiling = ceiling
-			if s.writeCeilingDeferralUpdate(ctx, taskID, existingRaw, prior, updated) {
-				s.reconcileQueuedTaskState(ctx, taskID)
-				s.attemptCeilingSurfaceWrite(ctx, taskID)
-				s.publishTaskUpdatedByID(ctx, taskID)
-			}
-			return nil
-		}
 
-		record, discarded, replaced := models.MergeCeilingRecord(existingRaw, deferral)
-		if replaced {
-			s.logger.Zap().Warn("deferred_launch held a non-object value; the ceiling refusal replaced it",
-				zap.String("task_id", taskID), zap.Any("discarded_value", discarded))
-		}
+			deferral := models.CeilingDeferral{
+				Kind:            kind,
+				Payload:         payload,
+				Origin:          string(launchOriginAutomatic),
+				ReasonCode:      reasonCode,
+				QueuedAt:        time.Now(),
+				Population:      population,
+				PopulationKnown: populationKnown,
+				Ceiling:         ceiling,
+			}
 
-		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, record)
-		if err != nil {
-			return fmt.Errorf("writing deferred launch for task %s: %w", taskID, err)
+			if existingCeiling, readErr := models.ReadCeilingDeferral(existingRaw); readErr == nil {
+				// A ceiling_deferred record already exists for this task (AC-12d).
+				equivalent, cmpErr := ceilingDeferralsEquivalentForAdmission(existingCeiling, deferral)
+				if cmpErr != nil {
+					result = fmt.Errorf("comparing deferred launch payloads for task %s: %w", taskID, cmpErr)
+					return
+				}
+				if !equivalent {
+					// A different launch: retain the one already stored and report
+					// the collision rather than losing either payload silently.
+					s.logger.Zap().Warn("ceiling refusal superseded by an earlier pending deferral for the same task",
+						zap.String("task_id", taskID),
+						zap.String("stored_kind", string(existingCeiling.Kind)),
+						zap.String("superseded_kind", string(kind)),
+						zap.String(ceilingFieldReasonCode, ceilingReasonSuperseded))
+					result = fmt.Errorf("%w: task %s already holds %s", ErrCeilingLaunchConflict, taskID, existingCeiling.Kind)
+					return
+				}
+				if existingCeiling.ReasonCode == reasonCode {
+					// AC-12a/AC-49e: the same launch, refused for the same reason,
+					// already recorded. Leave it exactly as stored, including its
+					// queued_at (AC-32) and its card-surface bookkeeping.
+					reconcile = true
+					return
+				}
+				// AC-49f: the same pending launch, but the reason changed (for
+				// example a transient population read failure resolved into an
+				// ordinary refusal). Update the stored reason and this refusal's
+				// population/ceiling reading, preserve queued_at, and reset the
+				// surface stamps so the new reason gets its own note (AC-49g1).
+				updated := existingCeiling
+				updated.ReasonCode = reasonCode
+				updated.Population = population
+				updated.PopulationKnown = populationKnown
+				updated.Ceiling = ceiling
+				if s.writeCeilingDeferralUpdate(admissionCtx, taskID, existingRaw, prior, updated) {
+					reconcile = true
+					surface = true
+					publish = true
+				}
+				return
+			}
+
+			record, discarded, replaced := models.MergeCeilingRecord(existingRaw, deferral)
+			if replaced {
+				s.logger.Zap().Warn("deferred_launch held a non-object value; the ceiling refusal replaced it",
+					zap.String("task_id", taskID), zap.Any("discarded_value", discarded))
+			}
+
+			stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(admissionCtx, taskID, prior, record)
+			if err != nil {
+				result = fmt.Errorf("writing deferred launch for task %s: %w", taskID, err)
+				return
+			}
+			if stored {
+				reconcile = true
+				surface = true
+				publish = true
+				return
+			}
+			if lostCompare {
+				continue
+			}
+			result = fmt.Errorf("writing deferred launch for task %s: repository reported neither stored nor a lost compare", taskID)
+			return
 		}
-		if stored {
-			s.reconcileQueuedTaskState(ctx, taskID)
-			s.attemptCeilingSurfaceWrite(ctx, taskID)
-			s.publishTaskUpdatedByID(ctx, taskID)
-			return nil
-		}
-		if lostCompare {
-			continue
-		}
-		return fmt.Errorf("writing deferred launch for task %s: repository reported neither stored nor a lost compare", taskID)
+		result = fmt.Errorf("%s: could not persist deferred launch for task %s after %d attempts",
+			ceilingReasonDeferWriteFailed, taskID, deferredLaunchCASRetryBudget)
+	}()
+	if result != nil {
+		return result
 	}
-	return fmt.Errorf("%s: could not persist deferred launch for task %s after %d attempts",
-		ceilingReasonDeferWriteFailed, taskID, deferredLaunchCASRetryBudget)
+	if reconcile {
+		s.reconcileQueuedTaskState(ctx, taskID)
+	}
+	if surface {
+		s.attemptCeilingSurfaceWrite(ctx, taskID)
+	}
+	if publish {
+		s.publishTaskUpdatedByID(ctx, taskID)
+	}
+	return nil
 }
 
 // reconcileQueuedTaskState repairs legacy task rows as soon as the durable

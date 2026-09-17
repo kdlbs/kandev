@@ -216,6 +216,12 @@ subagents are authorized by this plan.
 
 ## Related delivery records
 
+The [replay and cancellation deadlock repair](../ceiling-replay-cancellation-deadlock/plan.md)
+owns the concurrency regression observed on 2026-09-17. It narrows Task 02's
+lock scope while preserving its entry and state contracts. Its regression
+matrix is complete. Historical results and outstanding PostgreSQL checks in
+this package remain unchanged.
+
 [Workflow lifecycle](../workflow-profile-session-reuse/plan.md),
 [explicit targeting](../workflow-session-targeting/plan.md),
 [same-profile fresh sessions](../workflow-same-profile-new-session/plan.md), and

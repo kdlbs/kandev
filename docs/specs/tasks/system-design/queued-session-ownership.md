@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003
+  - REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001
 ---
 
 # Queued session ownership system design
@@ -23,6 +24,7 @@ and task-owned deferred record. It does not replace either queue or change WIP a
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Durable workflow parking |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002 | Deferred entry ownership; Task reconciliation |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003 | Queue projection; Desktop and mobile surfaces; Failure and observability |
+| REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001 | Replay and reconciliation locking |
 
 ## Existing components
 
@@ -154,6 +156,77 @@ Office, cancellation, and runtime-publication ordering protections.
 The sweep also repairs legacy REVIEW+valid-deferral tasks to SCHEDULING when no
 session is working. This repair requires authoritative task and entry evidence;
 the browser never writes task state based on a badge.
+
+## Replay and reconciliation locking
+
+This correction is implemented by the
+[replay deadlock fix package](../../../plans/ceiling-replay-cancellation-deadlock/plan.md).
+The implementation and regression results are recorded in that completed
+package.
+
+`replayCeilingDeferral` must not retain the task admission lock across a launch,
+resume, prompt, runtime wait, or callback publication. The existing
+`ceilingDeferredLaunchClaim` owns one accepted record while dispatch is in flight.
+Its claim ID and deferral identity protect settlement from successor records.
+The claim does not replace workflow-entry validation.
+
+Replay has three boundaries:
+
+1. Under the task admission lock, read and validate the exact record and its
+   committed entry. Retain its existing claim and immutable entry binding.
+2. Release the task admission lock before the concrete launch seam. Acquire
+   existing session lifecycle and cancellation guards in their established order.
+   Revalidate entry and recipient at the final admission boundary.
+3. Settle or release only the matching claim through existing conditional writes.
+   A superseded entry cannot dispatch or clear a successor record.
+
+Final entry validation and its local dispatch claim must serialize with route
+mutation. A read before runtime preparation is insufficient. Inspect every replay
+kind and its concrete admission seam, including sessionless starts and Send Now.
+After preparation, a changed route fails before prompt admission. A route change
+after accepted admission follows the existing lifecycle cancellation contract.
+No database transaction spans runtime I/O.
+
+`admitCeilingDispatch` validates the entry and renews the existing claim through
+one task-admission critical section. The renewal retains the claim ID and uses
+the existing conditional write and lease duration. A missing, replaced, or
+expired claim rejects dispatch. Claim loss leaves the current record available
+to its owner instead of dropping it as a superseded route.
+
+Replay and Send Now carry the claim through preparation in the context. Concrete
+launch, resume, prompt, and model-switch boundaries perform final admission.
+Prompt admission follows the caller's dispatch-receipt callback. The admission
+context never reaches the runtime. Superseded replay cleanup also checks the
+claim ID before it removes a deferred record.
+
+Where local critical sections require multiple locks, the order is session
+lifecycle, session cancellation guard, task admission, then `taskRuntimeStateMu`.
+Acquire only the locks that the operation needs. Never acquire an earlier lock
+while holding a later lock. In particular, `writeTaskReviewState` acquires task
+admission before the global runtime-state mutex. Task admission holders must not
+wait for session guards, runtime callbacks, or event subscribers.
+
+Keep entry validation and task-state writes in a short critical section.
+Preserve the existing conditional state write and task-event publication contract.
+If a helper publishes synchronously, audit its subscribers before retaining a
+lock across that call. Move reentrant publication outside the section while
+preserving event order when necessary.
+
+The context marker from `lockCeilingEntryAdmission` represents actual ownership
+within that section only. Never pass it to dispatch after release or to another
+goroutine. Carry immutable entry identity separately. Do not simulate reentrancy
+by attaching the marker to boot-ready callbacks.
+
+Cancellation retains its separate intent marker, shared operation, and bounded
+service-owned context. It releases session serialization during provider waits.
+Its final task reconciliation must complete after terminal frames settle.
+Cancellation policy controls workflow movement, not whether runtime state settles.
+
+Use barrier-controlled service tests for replay, boot-ready, stream activity,
+cancellation, and a second queued task. Verify both current task states and
+published events. Include mixed sibling states and stale route/claim replacement.
+The single ceiling sweep remains sequential and must continue after each settled
+attempt. No detached replay workers or new queue mechanism are required.
 
 ## Queue projection
 

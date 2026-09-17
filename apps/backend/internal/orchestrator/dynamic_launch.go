@@ -52,6 +52,9 @@ func (d *dynamicTaskDownstream) Launch(
 	options.AgentProfileID = launch.ExecutionProfileID
 	options.Prompt = launch.Prompt
 	options.PriorACPSession = launch.PriorACPSession
+	if err := d.service.admitCeilingDispatch(ctx, d.task.ID); err != nil {
+		return dynamicruntime.DownstreamExecution{}, err
+	}
 	d.service.beginDynamicAttempt(d.sessionID)
 	taskID := ""
 	if d.task != nil {
@@ -478,7 +481,7 @@ func (s *Service) launchConcretePreparedSession(
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
 	if task != nil {
-		if err := s.validateContextCeilingEntry(ctx, task.ID); err != nil {
+		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
 			return nil, err
 		}
 	}

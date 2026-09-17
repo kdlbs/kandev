@@ -3744,7 +3744,7 @@ func (s *Service) attemptColdResume(
 	if executor.IsCancellableResumeContext(ctx) {
 		resumeCtx = ctx
 	}
-	if err := s.validateContextCeilingEntry(resumeCtx, session.TaskID); err != nil {
+	if err := s.admitCeilingDispatch(resumeCtx, session.TaskID); err != nil {
 		return false, err
 	}
 	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
@@ -6259,7 +6259,11 @@ func (s *Service) validateAndRunDispatchBoundary(
 		s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
 		return promptCtx, nil, nil, bindingErr
 	}
-	if boundaryErr := runBeforeDispatch(); boundaryErr != nil {
+	boundaryErr := runBeforeDispatch()
+	if boundaryErr == nil {
+		boundaryErr = s.admitCeilingDispatch(promptCtx, taskID)
+	}
+	if boundaryErr != nil {
 		if releaseDispatchGuard != nil {
 			releaseDispatchGuard()
 		}
@@ -6759,10 +6763,14 @@ func (s *Service) attemptModelSwitchForPrompt(
 ) (result *PromptResult, handled bool, err error) {
 	if modelSwitchRequired(session, model) {
 		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
-		if err := runBeforeDispatch(); err != nil {
+		admissionErr := runBeforeDispatch()
+		if admissionErr == nil {
+			admissionErr = s.admitCeilingDispatch(ctx, taskID)
+		}
+		if admissionErr != nil {
 			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 			s.clearPromptAttemptEvidence(sessionID, "", 0)
-			return nil, true, err
+			return nil, true, admissionErr
 		}
 	}
 	result, handled, switchErr := s.trySwitchModelForPrompt(ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch)
