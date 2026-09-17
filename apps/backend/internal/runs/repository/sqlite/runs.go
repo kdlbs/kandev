@@ -460,27 +460,33 @@ func (r *Repository) GetClaimedTasklessRunForAgent(
 	return &req, nil
 }
 
-// GetClaimedRunForAgent returns the most recently claimed run for
-// agentProfileID, across every task (or none). Used to resolve the live
-// causing run for a wake whose actor is an agent profile but which
-// carries no explicit CausingRunID or task-boundary carrier — a
-// reactivity-pipeline wake, not a workflow-engine action inside a known
-// task boundary. Returns sql.ErrNoRows when the agent has no claimed
-// run; the caller then resolves the wake as its own root cause, exactly
-// as if this lookup had never run.
+// GetClaimedRunForAgent returns the agent's sole claimed run, across every
+// task (or none). Used to resolve the live causing run for a wake whose
+// actor is an agent profile but which carries no explicit CausingRunID or
+// task-boundary carrier — a reactivity-pipeline wake, not a workflow-engine
+// action inside a known task boundary. Returns sql.ErrNoRows both when the
+// agent has no claimed run and when it has more than one (an agent whose
+// max_concurrent_sessions ceiling is above 1 can hold several at once):
+// with no way to tell which claim actually caused this wake, ordering by
+// claimed_at and guessing the newest would misattribute causation, so
+// multiple claims fail closed exactly like no claim — the caller then
+// resolves the wake as its own root cause, exactly as if this lookup had
+// never run.
 func (r *Repository) GetClaimedRunForAgent(ctx context.Context, agentProfileID string) (*models.Run, error) {
-	var run models.Run
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	var runs []models.Run
+	if err := r.ro.SelectContext(ctx, &runs, r.ro.Rebind(`
 		SELECT * FROM runs
 		WHERE agent_profile_id = ?
 		  AND status = 'claimed'
 		ORDER BY claimed_at DESC
-		LIMIT 1
-	`), agentProfileID).StructScan(&run)
-	if err != nil {
+		LIMIT 2
+	`), agentProfileID); err != nil {
 		return nil, err
 	}
-	return &run, nil
+	if len(runs) != 1 {
+		return nil, sql.ErrNoRows
+	}
+	return &runs[0], nil
 }
 
 // GetClaimedRunByTaskID returns the claimed run associated with a task payload.

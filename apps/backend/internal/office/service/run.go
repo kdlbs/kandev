@@ -196,8 +196,13 @@ func (s *Service) QueueRunFromTaskBoundary(
 // causationID is copied verbatim onto the created run's own CausationID
 // column (AC-OFFICE-LOOP-LIVENESS-002.3) — the wakeup-request's own
 // causation id, not this package's causation-chain resolution.
+//
+// idempotencyKey is set on the QueueRunRequest so a duplicate call for
+// the same wakeup-request (concurrent dispatch, or the dispatcher
+// retrying createFreshRun after its own claim-marking write fails)
+// dedupes onto the run already created instead of minting a second one.
 func (s *Service) QueueRunFromWakeup(
-	ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID string,
+	ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID, idempotencyKey string,
 ) (string, error) {
 	// An agent the dispatcher can no longer find must not block this
 	// enqueue: the wakeup dispatcher's own pause-gate check
@@ -212,7 +217,7 @@ func (s *Service) QueueRunFromWakeup(
 	if s.runsService == nil {
 		return "", fmt.Errorf("queue run from wakeup: runs service not configured")
 	}
-	_, row, err := s.runsService.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
+	outcome, row, err := s.runsService.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
 		Reason:          reason,
 		Payload:         PayloadWithAgent("{}", agentProfileID),
 		ActorKind:       models.ActorKindSystem,
@@ -220,12 +225,13 @@ func (s *Service) QueueRunFromWakeup(
 		ContextSnapshot: contextSnapshot,
 		SkipCoalesce:    true,
 		CausationID:     causationID,
+		IdempotencyKey:  idempotencyKey,
 	})
 	if err != nil {
 		return "", err
 	}
 	if row == nil {
-		return "", fmt.Errorf("queue run from wakeup: no row returned for agent %s", agentProfileID)
+		return "", fmt.Errorf("queue run from wakeup: no row returned for agent %s (outcome %s)", agentProfileID, outcome)
 	}
 	return row.ID, nil
 }

@@ -11,6 +11,7 @@ package service
 // run_causation_from_task_test.go.
 
 import (
+	"math"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -94,8 +95,12 @@ func TestCarrierFromTaskMetadata_MissingCreatingRunIDKeyRootsTriple(t *testing.T
 
 func TestCarrierFromTaskMetadata_MalformedDepthRootsTriple(t *testing.T) {
 	for name, badDepth := range map[string]interface{}{
-		"non_numeric": "not-a-number",
-		"negative":    float64(-1),
+		"non_numeric":  "not-a-number",
+		"negative":     float64(-1),
+		"fractional":   float64(1.9),
+		"out_of_range": math.MaxFloat64,
+		"nan":          math.NaN(),
+		"inf":          math.Inf(1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			metadata := fullCarrierMetadata()

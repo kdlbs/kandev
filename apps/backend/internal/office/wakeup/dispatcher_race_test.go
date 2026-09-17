@@ -2,6 +2,7 @@ package wakeup
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -28,9 +29,9 @@ type raceTestRunQueuer struct {
 }
 
 func (q *raceTestRunQueuer) QueueRunFromWakeup(
-	ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID string,
+	ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID, idempotencyKey string,
 ) (string, error) {
-	_, row, err := q.svc.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
+	outcome, row, err := q.svc.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
 		Reason:          reason,
 		Payload:         map[string]any{"agent_profile_id": agentProfileID},
 		ActorKind:       officemodels.ActorKindSystem,
@@ -38,9 +39,13 @@ func (q *raceTestRunQueuer) QueueRunFromWakeup(
 		ContextSnapshot: contextSnapshot,
 		SkipCoalesce:    true,
 		CausationID:     causationID,
+		IdempotencyKey:  idempotencyKey,
 	})
 	if err != nil {
 		return "", err
+	}
+	if row == nil {
+		return "", fmt.Errorf("queue run from wakeup: no row returned for agent %s (outcome %s)", agentProfileID, outcome)
 	}
 	return row.ID, nil
 }
@@ -153,5 +158,79 @@ func TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote(t *testing.T) {
 	if claimedRun.Reason != shared.RunReasonRoutineDispatchCron {
 		t.Errorf("claimed run.Reason = %q, want unchanged %q — promoting it here would race "+
 			"the idle-skip decision the scheduler already started", claimedRun.Reason, shared.RunReasonRoutineDispatchCron)
+	}
+}
+
+// TestCreateFreshRun_RetryDedupesOntoTheSameRunInsteadOfOrphaning pins the
+// fix for the enqueue-then-claim gap: createFreshRun's QueueRunFromWakeup
+// call and its MarkWakeupRequestClaimed call are two separate writes with
+// no shared transaction. If MarkWakeupRequestClaimed fails (or two
+// dispatchers race the same request), a naive retry of createFreshRun
+// would call QueueRunFromWakeup a second time and mint a second, orphaned
+// run for the same wakeup-request. wakeupRunIdempotencyKey(req.ID) closes
+// that: the second call's IdempotencyKey collides with the first run's,
+// so runs/service dedupes it (QueueOutcomeDeduped, no new row) instead of
+// creating a duplicate.
+func TestCreateFreshRun_RetryDedupesOntoTheSameRunInsteadOfOrphaning(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("settings store: %v", err)
+	}
+	repo, err := officesqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	agent := &officemodels.AgentInstance{
+		ID:               "agent-1",
+		WorkspaceID:      "ws-1",
+		Name:             "ceo",
+		AgentDisplayName: "CEO",
+		Role:             officemodels.AgentRoleCEO,
+		Status:           officemodels.AgentStatusIdle,
+	}
+	if err := repo.CreateAgentInstance(context.Background(), agent); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+
+	req := &officesqlite.WakeupRequest{
+		ID: "w-retry", AgentProfileID: agent.ID, Source: SourceSelf,
+	}
+	if err := repo.CreateWakeupRequest(context.Background(), req); err != nil {
+		t.Fatalf("seed wakeup: %v", err)
+	}
+
+	log := logger.Default()
+	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
+	d := NewDispatcher(repo, repo, log)
+	d.SetRunQueuer(&raceTestRunQueuer{svc: runsSvc})
+
+	if err := d.createFreshRun(context.Background(), req); err != nil {
+		t.Fatalf("first createFreshRun: %v", err)
+	}
+	firstReq, err := repo.GetWakeupRequest(context.Background(), req.ID)
+	if err != nil {
+		t.Fatalf("get wakeup request after first call: %v", err)
+	}
+	if firstReq.RunID == "" {
+		t.Fatalf("expected a run id after the first call")
+	}
+
+	// A retry against the still-queued request (as if the first call's
+	// MarkWakeupRequestClaimed had failed after QueueRunFromWakeup
+	// succeeded) must not mint a second run.
+	if err := d.createFreshRun(context.Background(), req); err == nil {
+		t.Fatalf("expected the retried createFreshRun to fail (deduped enqueue, no row to claim against), got nil error")
+	}
+
+	var runCount int
+	if err := db.Get(&runCount, "SELECT COUNT(*) FROM runs WHERE agent_profile_id = ?", agent.ID); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if runCount != 1 {
+		t.Fatalf("run count = %d, want 1 (retry must dedupe onto the existing run, not orphan a second one)", runCount)
 	}
 }

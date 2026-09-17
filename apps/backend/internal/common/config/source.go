@@ -525,8 +525,14 @@ func applyBoundedIntEnv(key string, target *int, fallback, minimum, maximum int,
 		return
 	}
 	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || parsed < minimum || parsed > maximum {
-		log.Printf("environment override for %s (%q) is out of range [%d,%d]; using default %d", key, raw, minimum, maximum, fallback)
+	if err != nil {
+		log.Printf("environment override for %s (%q) is not a valid integer; using default %d", key, raw, fallback)
+		*target = fallback
+		sources[key] = SourceDefault
+		return
+	}
+	if parsed < minimum || parsed > maximum {
+		log.Printf("environment override for %s (%d) is out of range [%d,%d]; using default %d", key, parsed, minimum, maximum, fallback)
 		*target = fallback
 		sources[key] = SourceDefault
 		return

@@ -397,9 +397,7 @@ func (s *Service) enqueueLocked(
 			return "", nil, fmt.Errorf("idempotency check: %w", err)
 		}
 		if dup {
-			s.log.Debug("run skipped (idempotent)",
-				zap.String("key", req.IdempotencyKey))
-			return QueueOutcomeDeduped, nil, nil
+			return ReportWindowedDedup(QueueSourceRuns, req.Reason, req.IdempotencyKey), nil, nil
 		}
 	}
 

@@ -50,7 +50,7 @@ type AgentReader interface {
 // office/service construction cycle: office/service's TaskCreator/other
 // dependencies are wired before the wakeup dispatcher exists).
 type RunQueuer interface {
-	QueueRunFromWakeup(ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID string) (runID string, err error)
+	QueueRunFromWakeup(ctx context.Context, agentProfileID, reason, routineID, contextSnapshot, causationID, idempotencyKey string) (runID string, err error)
 }
 
 // RoutineLookup is the slim interface the dispatcher uses to look up
@@ -350,14 +350,24 @@ func (d *Dispatcher) createFreshRun(
 	// created run's own CausationID column, including on the lost-CAS
 	// fresh-run path — that run still carries the requesting wake's id,
 	// not a new one.
-	runID, err := d.runQueuer.QueueRunFromWakeup(ctx, req.AgentProfileID, reason, routineIDFromPayload(req), payload, req.CausationID)
+	//
+	// wakeupRunIdempotencyKey(req.ID) makes this enqueue idempotent per
+	// wakeup-request: enqueue and claim are two separate writes (no
+	// shared transaction spans office/wakeup and runs/service), so a
+	// second createFreshRun call for the same request — concurrent
+	// dispatch, or a retry after MarkWakeupRequestClaimed below fails —
+	// hits the runs table's idempotency-key uniqueness and is deduped
+	// rather than creating a second, orphaned run.
+	runID, err := d.runQueuer.QueueRunFromWakeup(ctx, req.AgentProfileID, reason, routineIDFromPayload(req), payload, req.CausationID, wakeupRunIdempotencyKey(req.ID))
 	if err != nil {
 		return fmt.Errorf("create run for wakeup %s: %w", req.ID, err)
 	}
 	if err := d.repo.MarkWakeupRequestClaimed(ctx, req.ID, runID); err != nil {
 		// Best-effort cleanup: the run already exists; the caller will
 		// see a queued run without a corresponding wakeup-request claim,
-		// which is harmless but logged for visibility.
+		// which is harmless but logged for visibility. A retry of this
+		// same request now dedupes onto that same run instead of
+		// minting another one, so the orphan stays singular.
 		d.log.Warn("mark wakeup claimed failed (run already created)",
 			zap.String("wakeup_id", req.ID),
 			zap.String("run_id", runID),
@@ -371,6 +381,14 @@ func (d *Dispatcher) createFreshRun(
 		zap.String("source", req.Source),
 		zap.String("reason", reason))
 	return nil
+}
+
+// wakeupRunIdempotencyKey derives the enqueue-side idempotency key for
+// the run createFreshRun creates on behalf of requestID, matching the
+// "<prefix>:<id>" convention other one-run-per-source-event keys use
+// (e.g. office/approvals' "approval:"+approval.ID).
+func wakeupRunIdempotencyKey(requestID string) string {
+	return "wakeup:" + requestID
 }
 
 // wakeupPauseSkipReason is the skip reason MarkWakeupRequestSkipped

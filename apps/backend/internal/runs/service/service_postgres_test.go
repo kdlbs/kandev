@@ -108,6 +108,12 @@ func TestPostgresQueueRun_DedupesOnIdempotencyIndexRace(t *testing.T) {
 // reaches the unique index. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
 func TestPostgresQueueRun_DedupesOnWakeWaveKeyIndexRace(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	// agent_profiles must exist before the office repo's schema init, since
+	// resolveCausation's workspace lookup (AC-OFFICE-RUN-CAUSATION-001.20)
+	// queries it during QueueRun below.
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
 	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init task repo: %v", err)
 	}
@@ -115,6 +121,7 @@ func TestPostgresQueueRun_DedupesOnWakeWaveKeyIndexRace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init office repo: %v", err)
 	}
+	seedAgentProfile(t, db, "a1")
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	eb := bus.NewMemoryEventBus(log)

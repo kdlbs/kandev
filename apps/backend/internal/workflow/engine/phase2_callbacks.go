@@ -585,14 +585,15 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 	var errs []error
 	for _, p := range seats {
 		req := QueueRunRequest{
-			AgentProfileID: p.AgentProfileID,
-			WaveKey:        waveKey,
-			WaveString:     waveString,
-			TaskID:         taskID,
-			WorkflowStepID: in.Step.ID,
-			Reason:         reason,
-			IdempotencyKey: idempotencyKey(in, p.AgentProfileID, taskID),
-			Payload:        queueRunPayload(in, cfg.Payload, taskID),
+			AgentProfileID:        p.AgentProfileID,
+			WaveKey:               waveKey,
+			WaveString:            waveString,
+			TaskID:                taskID,
+			WorkflowStepID:        in.Step.ID,
+			Reason:                reason,
+			IdempotencyKey:        idempotencyKey(in, p.AgentProfileID, taskID),
+			Payload:               queueRunPayload(in, cfg.Payload, taskID),
+			CausingAgentProfileID: in.State.AgentProfileID,
 		}
 		// Merge note (local/integration): #3011 gave QueueRun a second return
 		// value; #2907's fan-out collects errors rather than aborting (AC-C1,

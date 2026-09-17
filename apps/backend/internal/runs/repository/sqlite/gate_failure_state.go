@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -73,9 +72,24 @@ func (r *Repository) RecordGateOutcome(ctx context.Context, workspaceID, gate st
 // On Postgres the read takes FOR UPDATE to hold the row against a
 // concurrent caller for the duration of the caller's transaction; SQLite
 // needs no such lock because its writer connection already serializes
-// every transaction.
+// every transaction. FOR UPDATE locks nothing when the row does not yet
+// exist, so the row is created (a no-op via ON CONFLICT DO NOTHING when it
+// already exists) before the locking read — otherwise two concurrent
+// first-failures for the same pair could both read no row, both compute
+// consecutive_failures=1, and the second upsert would silently overwrite
+// (lose) the first failure.
 func (r *Repository) RecordGateOutcomeTx(ctx context.Context, tx *sqlx.Tx, workspaceID, gate string, success bool) error {
 	driver := r.db.DriverName()
+	now := time.Now().UTC()
+
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO office_gate_failure_state (workspace_id, gate, consecutive_failures, last_escalation_at, updated_at)
+		VALUES (?, ?, 0, NULL, ?)
+		ON CONFLICT (workspace_id, gate) DO NOTHING
+	`), workspaceID, gate, now); err != nil {
+		return err
+	}
+
 	query := `SELECT consecutive_failures, last_escalation_at FROM office_gate_failure_state WHERE workspace_id = ? AND gate = ?`
 	if dialect.IsPostgres(driver) {
 		query += " FOR UPDATE"
@@ -83,12 +97,10 @@ func (r *Repository) RecordGateOutcomeTx(ctx context.Context, tx *sqlx.Tx, works
 
 	var consecutiveFailures int
 	var lastEscalationAt sql.NullTime
-	err := tx.QueryRowContext(ctx, tx.Rebind(query), workspaceID, gate).Scan(&consecutiveFailures, &lastEscalationAt)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, tx.Rebind(query), workspaceID, gate).Scan(&consecutiveFailures, &lastEscalationAt); err != nil {
 		return err
 	}
 
-	now := time.Now().UTC()
 	if success {
 		consecutiveFailures = 0
 	} else {
@@ -99,14 +111,11 @@ func (r *Repository) RecordGateOutcomeTx(ctx context.Context, tx *sqlx.Tx, works
 		}
 	}
 
-	_, err = tx.ExecContext(ctx, tx.Rebind(`
-		INSERT INTO office_gate_failure_state (workspace_id, gate, consecutive_failures, last_escalation_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (workspace_id, gate) DO UPDATE SET
-			consecutive_failures = excluded.consecutive_failures,
-			last_escalation_at = excluded.last_escalation_at,
-			updated_at = excluded.updated_at
-	`), workspaceID, gate, consecutiveFailures, lastEscalationAt, now)
+	_, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE office_gate_failure_state
+		SET consecutive_failures = ?, last_escalation_at = ?, updated_at = ?
+		WHERE workspace_id = ? AND gate = ?
+	`), consecutiveFailures, lastEscalationAt, now, workspaceID, gate)
 	return err
 }
 

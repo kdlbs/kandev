@@ -33,13 +33,15 @@ import (
 	"testing"
 )
 
-// runInsertAllowlist names the only files permitted to call
-// CreateRun/CreateRunTx on a runs-table-backed repository, relative to
-// the apps/backend module root.
+// runInsertAllowlist names the only (file, function) pairs permitted to
+// call CreateRun/CreateRunTx on a runs-table-backed repository, file paths
+// relative to the apps/backend module root. This is function-scoped, not
+// file-scoped: a file appearing below is not exempted wholesale, so a new
+// direct-insert function added later to an already-allowlisted file still
+// fails this test unless it is reviewed and added by name.
 //
-//   - internal/runs/repository/sqlite/runs.go: CreateRun's own
-//     definition, a thin non-transactional wrapper around CreateRunTx.
-//     This is the implementation, not a bypass of it.
+//   - internal/runs/repository/sqlite/runs.go: CreateRun/CreateRunTx's own
+//     definitions. This is the implementation, not a bypass of it.
 //   - internal/runs/service/service.go: insertRun, the authoritative
 //     seam every other caller in the tree is required to route through.
 //   - internal/office/service/run.go: queueRunInline, reached only when
@@ -48,18 +50,28 @@ import (
 //     causation, never production). AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6's
 //     full removal is tracked separately; not attempted this round (see
 //     the task plan's "Investigated: enqueue consolidation" note).
-//   - internal/office/scheduler/run.go: the scheduler's own equivalent
-//     legacy fallback, same nil-runsService-only condition.
+//     internal/office/scheduler/run.go's equivalent legacy fallback was
+//     removed entirely (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6), so it no
+//     longer needs an entry here.
 //   - internal/office/testharness/routes_office.go: shared test-support
 //     scaffolding (package testharness, imported only by _test.go files
 //     across the office tree) — not production code, despite lacking the
 //     _test.go filename suffix this walk otherwise excludes by.
-var runInsertAllowlist = map[string]bool{
-	"internal/runs/repository/sqlite/runs.go":      true,
-	"internal/runs/service/service.go":             true,
-	"internal/office/service/run.go":               true,
-	"internal/office/scheduler/run.go":             true,
-	"internal/office/testharness/routes_office.go": true,
+var runInsertAllowlist = map[string]map[string]bool{
+	"internal/runs/repository/sqlite/runs.go": {
+		"CreateRunTx": true,
+		"CreateRun":   true,
+	},
+	"internal/runs/service/service.go": {
+		"insertRun": true,
+	},
+	"internal/office/service/run.go": {
+		"queueRunInline": true,
+	},
+	"internal/office/testharness/routes_office.go": {
+		"seedAgentFailureHandler": true,
+		"createSeededRun":         true,
+	},
 }
 
 func TestEveryRunInsertGoesThroughTheAuthoritativeSeamOrAKnownFallback(t *testing.T) {
@@ -88,12 +100,7 @@ func TestEveryRunInsertGoesThroughTheAuthoritativeSeamOrAKnownFallback(t *testin
 				return relErr
 			}
 			rel = filepath.ToSlash(rel)
-			if runInsertAllowlist[rel] {
-				return nil
-			}
-			if findsRunInsertCalls(file) {
-				violations = append(violations, rel)
-			}
+			violations = append(violations, runInsertViolationsInFile(rel, file, runInsertAllowlist[rel])...)
 			return nil
 		})
 		if walkErr != nil {
@@ -111,11 +118,33 @@ func TestEveryRunInsertGoesThroughTheAuthoritativeSeamOrAKnownFallback(t *testin
 	}
 }
 
-// findsRunInsertCalls reports whether file contains any call expression
-// whose selector method name is exactly CreateRun or CreateRunTx.
-func findsRunInsertCalls(file *ast.File) bool {
+// runInsertViolationsInFile returns one "path: func Name" entry for every
+// top-level function declaration in file whose body calls CreateRun or
+// CreateRunTx, unless that function's name is in allowed. Checking per
+// function (rather than once for the whole file) is what makes the
+// allowlist function-scoped: an already-allowlisted file gets no blanket
+// pass, so a new direct-insert function added there later still fails
+// this test unless it is reviewed and named explicitly.
+func runInsertViolationsInFile(path string, file *ast.File, allowed map[string]bool) []string {
+	var violations []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil || !callsRunInsert(fn.Body) {
+			continue
+		}
+		if allowed[fn.Name.Name] {
+			continue
+		}
+		violations = append(violations, fmt.Sprintf("%s: func %s", path, fn.Name.Name))
+	}
+	return violations
+}
+
+// callsRunInsert reports whether body contains any call expression whose
+// selector method name is exactly CreateRun or CreateRunTx.
+func callsRunInsert(body *ast.BlockStmt) bool {
 	found := false
-	ast.Inspect(file, func(n ast.Node) bool {
+	ast.Inspect(body, func(n ast.Node) bool {
 		if found {
 			return false
 		}
@@ -134,4 +163,37 @@ func findsRunInsertCalls(file *ast.File) bool {
 		return true
 	})
 	return found
+}
+
+// TestRunInsertViolationsInFile_ScopesToFunctionNotWholeFile is the
+// regression this file's allowlist switched from map[string]bool to
+// map[string]map[string]bool to guard against: an already-allowlisted
+// file no longer gets a blanket pass, so a second, unreviewed function in
+// the same file that also calls CreateRun must still be reported.
+func TestRunInsertViolationsInFile_ScopesToFunctionNotWholeFile(t *testing.T) {
+	src := `package example
+
+func allowedCaller(r repo) {
+	r.CreateRun(nil)
+}
+
+func unreviewedCaller(r repo) {
+	r.CreateRunTx(nil, nil)
+}
+
+func noCallAtAll() {}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "example.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	violations := runInsertViolationsInFile("example.go", file, map[string]bool{"allowedCaller": true})
+	if len(violations) != 1 {
+		t.Fatalf("violations = %v, want exactly 1 (unreviewedCaller)", violations)
+	}
+	if violations[0] != "example.go: func unreviewedCaller" {
+		t.Fatalf("violation = %q, want %q", violations[0], "example.go: func unreviewedCaller")
+	}
 }

@@ -4,12 +4,11 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -20,7 +19,6 @@ import (
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
-	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -356,98 +354,34 @@ func (ss *SchedulerService) queueRunAsActor(
 		return runsservice.QueueOutcomeNone, err
 	}
 
-	if ss.runsService != nil {
-		return ss.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
-			Reason:         reason,
-			IdempotencyKey: idempotencyKey,
-			Payload:        service.PayloadWithAgent(payload, agentInstanceID),
-			ActorKind:      actorKind,
-			ActorID:        actorID,
-			CausingRunID:   ss.resolveCausingRunID(ctx, actorKind, actorID),
-			WakeWaveKey:    waveKey,
-			WakeWaveString: waveString,
-		})
+	if ss.runsService == nil {
+		// AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6: a delegating caller
+		// without the authoritative API available fails its enqueue and
+		// surfaces the error, rather than falling back to an insert of
+		// its own. A fallback insert would bypass causation resolution
+		// and the causation-depth/self-trigger refusal gates entirely —
+		// precisely the ungated path this requirement removes. Production
+		// always wires a runs service alongside the scheduler
+		// (backendapp.startSchedulingRuntime), so this is reachable only
+		// from a test that constructs a SchedulerService without calling
+		// SetRunsService.
+		return runsservice.QueueOutcomeNone, fmt.Errorf("queue run: no runs service configured")
 	}
 
-	return ss.queueRunAsActorLegacy(ctx, agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString, actorKind)
-}
-
-// queueRunAsActorLegacy is queueRunAsActor's fallback path for a
-// SchedulerService constructed without a runsService, bypassing
-// runs/service.resolveCausation entirely (see the package doc comment
-// and AC-CONSOLIDATION-001.6's deferred-gap note).
-func (ss *SchedulerService) queueRunAsActorLegacy(
-	ctx context.Context,
-	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
-	actorKind models.ActorKind,
-) (runsservice.QueueOutcome, error) {
-	if idempotencyKey != "" {
-		dup, err := ss.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
-		if err != nil {
-			return runsservice.QueueOutcomeNone, fmt.Errorf("idempotency check: %w", err)
-		}
-		if dup {
-			return runsservice.ReportWindowedDedup(runsservice.QueueSourceRuns, reason, idempotencyKey), nil
-		}
+	causingRunID, err := ss.resolveCausingRunID(ctx, actorKind, actorID)
+	if err != nil {
+		return runsservice.QueueOutcomeNone, err
 	}
-
-	if waveKey == "" {
-		coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
-		if err != nil {
-			return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
-		}
-		if coalesced {
-			ss.logger.Debug("run coalesced",
-				zap.String("agent", agentInstanceID),
-				zap.String("reason", reason))
-			return runsservice.QueueOutcomeCoalesced, nil
-		}
-	}
-
-	var idemKeyPtr *string
-	if idempotencyKey != "" {
-		idemKeyPtr = &idempotencyKey
-	}
-	req := &models.Run{
-		ID:             uuid.New().String(),
-		AgentProfileID: agentInstanceID,
+	return ss.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 		Reason:         reason,
-		Payload:        payload,
-		Status:         RunStatusQueued,
-		CoalescedCount: 1,
-		IdempotencyKey: idemKeyPtr,
+		IdempotencyKey: idempotencyKey,
+		Payload:        service.PayloadWithAgent(payload, agentInstanceID),
+		ActorKind:      actorKind,
+		ActorID:        actorID,
+		CausingRunID:   causingRunID,
 		WakeWaveKey:    waveKey,
 		WakeWaveString: waveString,
-		RequestedAt:    time.Now().UTC(),
-		// PriorityClass must be stamped here or it silently ships as
-		// models.PriorityClass's Go zero value — which is
-		// PriorityClassHuman (0), not PriorityClassEvent (2) — falsely
-		// promoting every run enqueued through this path to the highest
-		// claim-order preference (AC-OFFICE-BACKPRESSURE-001.1/.3).
-		// ClassifyPriority keeps this in one place with the reason-registry
-		// mapping instead of hardcoding a value that could drift from it.
-		PriorityClass: shared.ClassifyPriority(actorKind, reason, false),
-	}
-	insertErr := ss.repo.CreateRun(ctx, req)
-	if waveKey != "" && runssqlite.IsWakeWaveUniqueViolation(insertErr) {
-		runsservice.ParentWakeDedupedTotal.Add(1)
-		ss.logger.Debug("run skipped (wave already woken)",
-			zap.String("wave_key", waveKey))
-		return runsservice.QueueOutcomeDeduped, nil
-	}
-	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, idempotencyKey, agentInstanceID, insertErr)
-	if err != nil {
-		return runsservice.QueueOutcomeNone, fmt.Errorf("enqueue run: %w", err)
-	}
-	if outcome == runsservice.QueueOutcomeDeduped {
-		return outcome, nil
-	}
-
-	ss.logger.Info("run queued",
-		zap.String("id", req.ID),
-		zap.String("agent", agentInstanceID),
-		zap.String("reason", reason))
-	return runsservice.QueueOutcomeQueued, nil
+	})
 }
 
 // resolveCausingRunID looks up the acting agent's own live claimed run,
@@ -458,15 +392,18 @@ func (ss *SchedulerService) queueRunAsActorLegacy(
 // cause. Returns "" for a non-agent actor or an agent with no live
 // claimed run, in which case causation resolution roots the new run
 // exactly as it did before this lookup existed.
-func (ss *SchedulerService) resolveCausingRunID(ctx context.Context, actorKind models.ActorKind, actorID string) string {
+func (ss *SchedulerService) resolveCausingRunID(ctx context.Context, actorKind models.ActorKind, actorID string) (string, error) {
 	if actorKind != models.ActorKindAgent || actorID == "" {
-		return ""
+		return "", nil
 	}
 	run, err := ss.repo.RunsRepository().GetClaimedRunForAgent(ctx, actorID)
 	if err != nil {
-		return ""
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("resolve causing run: %w", err)
 	}
-	return run.ID
+	return run.ID, nil
 }
 
 // QueueRunCtx is the typed variant of QueueRun that takes a structured

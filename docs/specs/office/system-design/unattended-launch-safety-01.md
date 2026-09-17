@@ -404,13 +404,16 @@ per-reason value is honored as configured and logged once at resolution, per tha
 criterion, rather than being corrected.
 
 A resolved value below the minimum stated in its AC is replaced by the default and
-logged at warn level. Per AC-OFFICE-LAUNCH-SAFETY-001.5 the clamp is applied wherever
-the value is **resolved**, not only during startup validation: ADR 0018 lets an
-operator override any of these keys in SQLite on a running instance, so a clamp that
-ran only at boot would let a runtime `0` reach a gate that its own AC says can never
-be `0`. Each key's restart requirement is declared with it in the catalog. This is the reason `0` cannot
-express "unlimited": the catalog has no sentinel for it and inventing one would make
-the most dangerous configuration the easiest typo.
+logged at warn level. Per AC-OFFICE-LAUNCH-SAFETY-001.5 every key in this table is a
+boot-time-only startup setting: `yamlOnlyStartupKeys` (source.go) resolves it once
+from YAML/environment via `clampOfficeLaunchSafetyConfig`, and the resolved
+`OfficeConfig` value is handed to the owning repository/service's `SetXxx` method at
+construction. None of these keys is registered with ADR 0018's runtime
+settings-override tier, so there is no running-instance override path and no second
+read site to clamp — unlike a `runtimeflags` registry entry, changing one of these
+keys always requires a restart. This is the reason `0` cannot express "unlimited":
+the catalog has no sentinel for it and inventing one would make the most dangerous
+configuration the easiest typo.
 
 ### Priority class
 

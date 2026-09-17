@@ -138,11 +138,13 @@ machine while I am away.
 - **AC-OFFICE-LAUNCH-SAFETY-001.5:** When a configured instance or workspace
   ceiling resolves to a value less than `1`, the system shall use the documented
   default for that ceiling, log the rejected value at warn level, and start
-  normally. A configured `0` shall not mean unlimited. Every below-minimum clamp
-  defined by this document and its siblings shall be applied wherever the value is
-  **resolved**, not only during startup validation, so an override applied to a running
-  instance is clamped identically. A setting that can be changed without a restart
-  shall not thereby be able to bypass its own minimum.
+  normally. A configured `0` shall not mean unlimited. Every ceiling and budget
+  this document and its siblings define is a boot-time-only startup setting,
+  like `office.schedulerTickMs`: resolved once at startup from YAML/environment
+  and clamped there, not read from ADR 0018's runtime settings-override tier and
+  not re-resolved without a restart. This clamp requirement therefore applies at
+  that single resolution point, not "wherever the value is read" — there is no
+  other read site to clamp.
 - **AC-OFFICE-LAUNCH-SAFETY-001.6:** The ceiling evaluation and the `queued` to
   `claimed` transition shall be serialized against every other concurrent claim
   attempt, on every supported database engine, so that two claim attempts can never

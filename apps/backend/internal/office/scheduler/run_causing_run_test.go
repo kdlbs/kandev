@@ -139,3 +139,45 @@ func TestQueueRunCtx_AgentActorWithNoLiveClaimedRunResolvesAsRoot(t *testing.T) 
 		t.Errorf("causation_id = %q, want self-rooted %q", woken.ChainCausationID, woken.ID)
 	}
 }
+
+// TestQueueRunCtx_CausingRunLookupErrorPropagatesRatherThanSilentlyRooting
+// pins that a genuine repository error resolving the actor's live claimed
+// run (anything other than "no such row") fails the queue attempt instead
+// of silently treating it like "no live claimed run" and minting the new
+// run as a fresh causation root — which would let a transient lookup
+// failure evade the causation-depth ceiling it exists to enforce.
+func TestQueueRunCtx_CausingRunLookupErrorPropagatesRatherThanSilentlyRooting(t *testing.T) {
+	repo := newTestRepoSched(t)
+	ss := buildSchedulerForQueueRun(t, repo)
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID: testAgentID, WorkspaceID: testWorkspaceID, Name: testAgentID,
+		Role: models.AgentRoleWorker, Status: models.AgentStatusIdle, MaxConcurrentSessions: 1,
+	}
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	runsSvc := runsservice.New(repo.RunsRepository(), nil, log, nil)
+	ss.SetRunsService(runsSvc)
+
+	// Drop the runs table so GetClaimedRunForAgent's SELECT fails with a
+	// real error rather than sql.ErrNoRows.
+	if _, err := repo.RunsRepository().Writer().Exec(`DROP TABLE runs`); err != nil {
+		t.Fatalf("drop runs table: %v", err)
+	}
+
+	if _, err := ss.QueueRunCtx(ctx, testAgentID, scheduler.RunContext{
+		Reason:    scheduler.RunReasonTaskComment,
+		TaskID:    "task-1",
+		ActorID:   "actor-agent",
+		ActorType: "agent",
+	}); err == nil {
+		t.Fatal("expected queue run ctx to fail when the causing-run lookup errors, not silently root the new run")
+	}
+}

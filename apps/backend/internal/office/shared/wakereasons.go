@@ -69,7 +69,7 @@ var WakeReasonRegistry = map[string]models.PriorityClass{
 // not lose them entirely), but PriorityClassForRun consults this set
 // first, before the registry.
 var ReasonOnlyHumanCanCause = map[string]struct{}{
-	"manual_resume_after_failure": {},
+	RunReasonManualResumeAfterFailure: {},
 }
 
 // PriorityClassForReason maps a wake reason to a priority class using only

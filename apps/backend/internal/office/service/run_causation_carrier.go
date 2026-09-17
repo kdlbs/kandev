@@ -1,6 +1,8 @@
 package service
 
 import (
+	"math"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -206,8 +208,20 @@ func carrierNonNegativeInt(metadata map[string]interface{}, key string) (int, bo
 		carrierInvalid(key, "non_numeric")
 		return 0, false
 	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		carrierInvalid(key, "non_finite")
+		return 0, false
+	}
 	if f < 0 {
 		carrierInvalid(key, "negative")
+		return 0, false
+	}
+	if f != math.Trunc(f) {
+		carrierInvalid(key, "fractional")
+		return 0, false
+	}
+	if f > float64(math.MaxInt) {
+		carrierInvalid(key, "out_of_range")
 		return 0, false
 	}
 	return int(f), true

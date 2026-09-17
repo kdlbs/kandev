@@ -287,16 +287,17 @@ func TestQueueRunCtx_ExtraPayloadTaskID_CannotRedirectRun(t *testing.T) {
 	}
 }
 
-// TestQueueRunCtx_ExtraPayloadAgentProfileID_PassesThroughUnfiltered pins a
-// documented non-guarantee: unlike task_id/workspace_id/child_task_id/
-// workflow_step_id, encodeRunContext does not re-assert agent_profile_id
-// from a typed field, because RunContext carries none to re-assert from.
-// A workflow-authored payload.agent_profile_id therefore survives into the
-// persisted payload as-is. This is harmless today — dispatch and routing
-// read the run's AgentProfileID column, never this payload key — but a
-// future consumer of payload["agent_profile_id"] must not assume the same
-// override-protection the other four envelope fields get.
-func TestQueueRunCtx_ExtraPayloadAgentProfileID_PassesThroughUnfiltered(t *testing.T) {
+// TestQueueRunCtx_ExtraPayloadAgentProfileID_AlwaysOverwritten covers the
+// flip side of the other Extra*_CannotRedirectRun tests above:
+// QueueRunCtx always delegates to runs/service (AC-OFFICE-ENQUEUE-
+// CONSOLIDATION-001.6), and every delegated enqueue passes its payload
+// through service.PayloadWithAgent, which unconditionally sets
+// payload["agent_profile_id"] to the real agentInstanceID. A
+// workflow-authored payload.agent_profile_id can therefore never survive
+// into the persisted payload — unlike task_id/workspace_id/child_task_id/
+// workflow_step_id, this isn't a typed-field re-assertion in
+// encodeRunContext, it's a property of every delegated enqueue.
+func TestQueueRunCtx_ExtraPayloadAgentProfileID_AlwaysOverwritten(t *testing.T) {
 	repo := newReactivityTestRepo(t)
 	ss := newChildrenCompletedTestScheduler(t, repo)
 	createChildrenCompletedAgent(t, repo, "agent-1")
@@ -315,7 +316,7 @@ func TestQueueRunCtx_ExtraPayloadAgentProfileID_PassesThroughUnfiltered(t *testi
 	}
 
 	payload := runPayloadForReason(t, ss, RunReasonTaskChildrenCompleted)
-	if got := payload["agent_profile_id"]; got != "foreign-agent-99" {
-		t.Fatalf("payload agent_profile_id = %v, want %q (documented non-guarantee: this key is not re-asserted)", got, "foreign-agent-99")
+	if got := payload["agent_profile_id"]; got != "agent-1" {
+		t.Fatalf("payload agent_profile_id = %v, want %q (every delegated enqueue overwrites this via PayloadWithAgent)", got, "agent-1")
 	}
 }

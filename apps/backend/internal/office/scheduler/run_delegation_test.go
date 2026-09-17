@@ -100,7 +100,14 @@ func TestQueueRun_DelegatesToRunsServiceWhenWired(t *testing.T) {
 	}
 }
 
-func TestQueueRun_UsesLegacyInlinePathWhenNoRunsServiceWired(t *testing.T) {
+// TestQueueRun_FailsClosedWhenNoRunsServiceWired covers
+// AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6: a delegating caller without the
+// authoritative runs/service API available must fail its enqueue and
+// surface the error, not fall back to an insert of its own — a fallback
+// insert would bypass causation resolution and the causation-depth/
+// self-trigger refusal gates entirely, which is exactly the ungated path
+// this requirement removes. No run is queued as a result.
+func TestQueueRun_FailsClosedWhenNoRunsServiceWired(t *testing.T) {
 	repo := newTestRepoSched(t)
 	ss := buildSchedulerForQueueRun(t, repo)
 	ctx := context.Background()
@@ -117,21 +124,16 @@ func TestQueueRun_UsesLegacyInlinePathWhenNoRunsServiceWired(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if _, err := ss.QueueRun(ctx, testAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err != nil {
-		t.Fatalf("queue run: %v", err)
+	if _, err := ss.QueueRun(ctx, testAgentID, scheduler.RunReasonTaskAssigned, `{}`, ""); err == nil {
+		t.Fatal("expected QueueRun to fail closed with no runs service wired, got nil error")
 	}
 
-	got := onlyQueuedRun(t, repo, testWorkspaceID)
-	// The legacy inline path never resolves causation, so these stay at
-	// their Go zero values even though the agent has a workspace.
-	if got.WorkspaceID != "" {
-		t.Errorf("workspace_id = %q, want empty (legacy path does not resolve causation)", got.WorkspaceID)
+	reqs, err := repo.ListRuns(ctx, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
 	}
-	if got.ChainCausationID != "" {
-		t.Errorf("causation_id = %q, want empty (legacy path does not resolve causation)", got.ChainCausationID)
-	}
-	if got.PriorityClass != models.PriorityClassEvent {
-		t.Errorf("priority_class = %d, want %d (PriorityClassEvent, via the PriorityClass fix)", got.PriorityClass, models.PriorityClassEvent)
+	if len(reqs) != 0 {
+		t.Fatalf("want 0 runs queued, got %d (a failed enqueue must not leave a row behind)", len(reqs))
 	}
 }
 
