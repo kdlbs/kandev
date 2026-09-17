@@ -57,6 +57,8 @@ A task canvas belongs to one task. A workspace canvas appears in workspace navig
 
 The app uses relative requests such as `./_kandev/v1/data/tasks` and `./_kandev/v1/state`. Kandev remains the source of truth for task, workflow, and message data. Canvas state stores app-specific shared state. It does not replace Kandev domain data.
 
+A task read includes a read-only summary of that task's dependencies: whether it is blocked, and which tasks it depends on or blocks. Events never carry this summary, so a canvas that displays it refetches the task after a related event rather than reading the summary out of the event stream. Kandev refuses an oversized read rather than truncating it silently; the authoring reference has the exact fields and limits.
+
 The host shows canvas controls outside the app frame. The app runs in a sandboxed iframe with an opaque browser origin:
 
 - The frame allows packaged scripts and forms.

@@ -921,6 +921,65 @@ next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
 `Session`, `Message`, and filter/page types.
 
+#### Task dependencies
+
+Every `Task` returned by `host.Tasks().Get`/`.List` carries a read-only
+dependency projection: `Blocked`, `BlockedReason`, `DependsOn`, `Blocks`,
+`DependsOnTruncated`, `BlocksTruncated`, and `StartWhenUnblocked`. `DependsOn`
+and `Blocks` are `[]TaskDependencyRef` (`ID`, `Title`, `State`, `Status`;
+`Status` is only ever set on a `DependsOn` entry, since a task cannot be
+"pending" or "resolved" against a task it blocks). Each list is capped at 512
+entries; the matching `*Truncated` flag reports whether more edges exist than
+were returned. A gRPC plugin sees no redaction: every edge end's `Title` and
+`State` are populated regardless of which workspace it belongs to, unlike the
+canvas surface described in [`canvases.md`](canvases.md), which blanks both
+fields for an edge end outside the caller's scoped workspace.
+
+If dependency derivation cannot produce a verdict for a task (most often
+because deriving it would need to read more distinct task IDs than the host
+will resolve for one response), the host returns the withheld verdict instead
+of failing the surrounding read: `Blocked: true`, `BlockedReason: "unknown"`,
+empty `DependsOn`/`Blocks`, both truncation flags `false`, and
+`StartWhenUnblocked: false`. Treat this shape as "no answer," not as "task is
+actually blocked."
+
+Reading dependencies adds no extra query per task; the host derives them for
+the whole page in one batched pass. That batch is bounded by a fixed limit on
+the number of distinct task IDs it will read across all edges on the page:
+whether an edge is expressed once or shared by many tasks, each distinct ID
+only counts once toward the limit. `ListTasks` and the plugin-owned
+task-tree preview RPC (`PreviewPluginOwnedTaskTree`) are both bound by this
+limit and fail the call with a `ResourceExhausted` error when a page (or, for
+the preview RPC, the tree itself) would cross it; the preview RPC accepts no
+page `limit` at all, so the only remedy is asking for a smaller tree. Flows
+that always return exactly one task, `GetTask` and the task-write RPCs
+(`CreateTask`, `UpdateTask`, `MoveTask`), can never exceed the limit and are
+exempt. A `ResourceExhausted` response is about the cost of deriving the
+answer, not about the size of the reply; it is never folded into the withheld
+verdict.
+
+`ListTasks`'s `Page.Limit` clamps only its upper bound: a limit above the
+host's page ceiling is lowered to that ceiling, and a limit at or below zero
+(including an unset, proto3-default zero) falls back to the host's default
+page size. That default is the largest page the endpoint will return on its
+own, so retrying a rejected call with a smaller explicit `Limit` (not with a
+zero or negative one) is the way to shrink a page that tripped the fan-out
+limit above.
+
+Declare a `min_kandev_version` manifest floor for the first Kandev release
+your plugin expects to carry these seven fields; a host older than that floor
+omits them from the wire message entirely (the SDK reports them as their zero
+values, indistinguishable from "not blocked, no edges"). This floor is a
+single host-wide capability check performed once at install time: it does
+not name `task-dependencies` or any other capability, unlike the
+capability-keyed `min_kandev_version` requirement on `api_read:messages`
+described above, which the host re-validates per declared capability. A dev
+or otherwise non-release build of the host always satisfies the floor check
+regardless of its actual age, so a plugin installed on such a build can still
+receive the same ambiguous zero-value bytes; do not rely on the floor check
+alone as proof the fields are populated when running against a non-release
+host.
+
 `host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
 conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
 `TaskIDs`, a `Since`/`Until` `created_at` window (RFC3339; `Since` inclusive,
