@@ -414,6 +414,73 @@ func TestRunsServiceEngineAdapter_QueueRunScopesToCausingAgentWhenTwoAgentsHoldC
 	}
 }
 
+// TestRunsServiceEngineAdapter_QueueRunUsesSourceTaskForCrossTaskAction pins
+// the source/target split: a workflow action may queue work for another task,
+// but its causation must come from the task whose turn executed the action.
+func TestRunsServiceEngineAdapter_QueueRunUsesSourceTaskForCrossTaskAction(t *testing.T) {
+	adapter, taskSvc, officeRepo, officeSvc := newRunsEngineAdapterActorTestHarness(t)
+	ctx := context.Background()
+
+	turnAgent := &officemodels.AgentInstance{
+		WorkspaceID: "ws-1", Name: "turn-agent-cross-task",
+		Role: officemodels.AgentRoleWorker, Status: officemodels.AgentStatusIdle,
+	}
+	targetAgent := &officemodels.AgentInstance{
+		WorkspaceID: "ws-1", Name: "target-agent-cross-task",
+		Role: officemodels.AgentRoleWorker, Status: officemodels.AgentStatusIdle,
+	}
+	for _, agent := range []*officemodels.AgentInstance{turnAgent, targetAgent} {
+		if err := officeRepo.CreateAgentInstance(ctx, agent); err != nil {
+			t.Fatalf("create agent %s: %v", agent.Name, err)
+		}
+	}
+
+	sourceTaskID := seedTaskWithCarrier(t, taskSvc, nil)
+	targetTaskID := seedTaskWithCarrier(t, taskSvc, nil)
+	if _, err := officeSvc.QueueRunWithActor(ctx, turnAgent.ID, "task_assigned",
+		`{"task_id":"`+sourceTaskID+`"}`, "", officemodels.ActorKindUser, "user-1", ""); err != nil {
+		t.Fatalf("queue source run: %v", err)
+	}
+	sourceRun, err := officeSvc.ClaimNextRun(ctx)
+	if err != nil || sourceRun == nil {
+		t.Fatalf("claim source run: %v (run=%v)", err, sourceRun)
+	}
+
+	if _, err := adapter.QueueRun(ctx, workflowengine.QueueRunRequest{
+		AgentProfileID:        targetAgent.ID,
+		TaskID:                targetTaskID,
+		CausingTaskID:         sourceTaskID,
+		Reason:                "on_enter",
+		CausingAgentProfileID: turnAgent.ID,
+	}); err != nil {
+		t.Fatalf("queue cross-task run: %v", err)
+	}
+
+	runs, err := officeRepo.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var queued *officemodels.Run
+	for _, run := range runs {
+		if run.AgentProfileID == targetAgent.ID {
+			queued = run
+			break
+		}
+	}
+	if queued == nil {
+		t.Fatal("expected a queued run for the target agent")
+	}
+	if queued.ParentRunID != sourceRun.ID {
+		t.Fatalf("parent_run_id = %q, want source run %q", queued.ParentRunID, sourceRun.ID)
+	}
+	if queued.CausationDepth != sourceRun.CausationDepth+1 {
+		t.Fatalf("causation_depth = %d, want %d", queued.CausationDepth, sourceRun.CausationDepth+1)
+	}
+	if queued.ActorKind != officemodels.ActorKindAgent || queued.ActorID != turnAgent.ID {
+		t.Fatalf("actor = %s/%s, want acting agent %s", queued.ActorKind, queued.ActorID, turnAgent.ID)
+	}
+}
+
 // TestRunsServiceEngineAdapter_QueueRunNoCarrierDeclaresSystemActorExplicitly
 // pins AC-OFFICE-RUN-CAUSATION-001.23 for the one case
 // TestRunsServiceEngineAdapter_QueueRunNoCarrierRootsAsSystemActor doesn't

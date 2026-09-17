@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 const runtimeInternalErrorMessage = "internal runtime error"
@@ -488,6 +489,25 @@ func (h *Handler) respondRuntimeError(
 	if errors.As(err, &decisionValidation) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var refusal *runsservice.RefusalError
+	if errors.As(err, &refusal) {
+		// A refusal is an expected admission result. Do not expose its
+		// reason because it can contain repository diagnostics, while still
+		// giving the caller a stable gate it can handle.
+		h.appendDeniedRunEvent(
+			c.Request.Context(),
+			runCtx,
+			action,
+			targetType,
+			targetID,
+			errors.New("run enqueue refused"),
+		)
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "run enqueue refused",
+			"gate":  string(refusal.Gate),
+		})
 		return
 	}
 	if errors.Is(err, shared.ErrForbidden) {

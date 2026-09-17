@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 type handlerHarness struct {
@@ -292,6 +293,36 @@ func TestRuntimeHandler_SpawnAgentRunRejectsReasonOutsideRegistryAndLogsRunEvent
 			}
 			assertDeniedRunEvent(t, h.runEvents, "spawn_agent_run", "agent", "agent-1")
 		})
+	}
+}
+
+func TestRuntimeHandler_SpawnAgentRunReturnsPolicyRefusal(t *testing.T) {
+	h := newRuntimeHandlerHarness(t, Capabilities{CanSpawnAgentRun: true})
+	h.runs.err = &runsservice.RefusalError{
+		Gate:   runsservice.RefusalCausationDepth,
+		Reason: "causation depth exceeds configured limit",
+	}
+
+	resp := h.request(t, http.MethodPost, "/runtime/agents/agent-1/runs", map[string]interface{}{
+		"reason": string(shared.RunReasonHeartbeat),
+	})
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusConflict, resp.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+		Gate  string `json:"gate"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != "run enqueue refused" || body.Gate != string(runsservice.RefusalCausationDepth) {
+		t.Fatalf("response = %#v, want a safe policy refusal", body)
+	}
+	assertDeniedRunEvent(t, h.runEvents, "spawn_agent_run", "agent", "agent-1")
+	if got := h.runEvents.events[0].payload["error"]; got != "run enqueue refused" {
+		t.Fatalf("denied event error = %#v, want sanitized refusal", got)
 	}
 }
 

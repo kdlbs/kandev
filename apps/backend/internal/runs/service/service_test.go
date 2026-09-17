@@ -52,6 +52,39 @@ func seedAgentProfile(t *testing.T, db *sqlx.DB, id string) {
 	}
 }
 
+func seedGlobalProfileTask(t *testing.T, repo *runssqlite.Repository, profileID, taskID, workspaceID string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := repo.Writer().ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT ''
+		)
+	`); err != nil {
+		t.Fatalf("create task table: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := repo.Writer().ExecContext(ctx, repo.Writer().Rebind(`
+		INSERT INTO agents (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING
+	`), "global-test-agent", "global-test-agent", now, now); err != nil {
+		t.Fatalf("seed global agent: %v", err)
+	}
+	if _, err := repo.Writer().ExecContext(ctx, repo.Writer().Rebind(`
+		INSERT INTO agent_profiles (
+			id, agent_id, name, agent_display_name, created_at, updated_at, workspace_id
+		) VALUES (?, ?, ?, ?, ?, ?, '')
+	`), profileID, "global-test-agent", profileID, profileID, now, now); err != nil {
+		t.Fatalf("seed global profile: %v", err)
+	}
+	if _, err := repo.Writer().ExecContext(ctx, repo.Writer().Rebind(`
+		INSERT INTO tasks (id, workspace_id) VALUES (?, ?)
+	`), taskID, workspaceID); err != nil {
+		t.Fatalf("seed global profile task: %v", err)
+	}
+}
+
 // newTestService spins up an in-memory SQLite, builds the office repo
 // (which creates the runs / run_events tables under the new names),
 // and wraps a fresh runs Service around the embedded runs repo. The
@@ -117,6 +150,24 @@ func TestQueueRun_InsertsRow(t *testing.T) {
 		Payload: agentInPayload("a1"),
 	}); err != nil {
 		t.Fatalf("queue: %v", err)
+	}
+}
+
+func TestQueueRun_GlobalProfileUsesTaskWorkspace(t *testing.T) {
+	svc, _, repo := newTestServiceWithRepo(t)
+	seedGlobalProfileTask(t, repo, "global-profile", "global-task", "ws-global")
+
+	if _, err := svc.QueueRun(context.Background(), runsservice.QueueRunRequest{
+		AgentProfileID: "global-profile",
+		TaskID:         "global-task",
+		Reason:         "task_assigned",
+		ActorKind:      models.ActorKindSystem,
+	}); err != nil {
+		t.Fatalf("queue global profile task: %v", err)
+	}
+	run := getRun(t, repo, "global-profile", "task_assigned")
+	if run.WorkspaceID != "ws-global" {
+		t.Fatalf("workspace_id = %q, want ws-global", run.WorkspaceID)
 	}
 }
 

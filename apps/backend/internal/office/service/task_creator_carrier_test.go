@@ -62,7 +62,7 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 		t.Fatalf("create agent: %v", err)
 	}
 	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
-		models.ActorKindAgent, agent.ID, ""); err != nil {
+		models.ActorKindUser, "user-1", ""); err != nil {
 		t.Fatalf("queue causing run: %v", err)
 	}
 	runs, err := repo.ListRuns(ctx, "ws-1")
@@ -75,7 +75,7 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 	causingRun := runs[0]
 
 	taskID, err := svc.CreateOfficeTaskAsAgent(
-		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", causingRun.ID,
+		ctx, agent.ID, "ws-1", "project-1", "agent-assignee", "Build widget", "A description", causingRun.ID,
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)
@@ -110,13 +110,13 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 		t.Errorf("carrier routine_id = %v, want %q",
 			metadata[taskmodels.MetaKeyOfficeCarrierRoutineID], causingRun.RoutineID)
 	}
-	if metadata[taskmodels.MetaKeyOfficeCarrierActorKind] != string(causingRun.ActorKind) {
+	if metadata[taskmodels.MetaKeyOfficeCarrierActorKind] != string(models.ActorKindAgent) {
 		t.Errorf("carrier actor_kind = %v, want %q",
-			metadata[taskmodels.MetaKeyOfficeCarrierActorKind], causingRun.ActorKind)
+			metadata[taskmodels.MetaKeyOfficeCarrierActorKind], models.ActorKindAgent)
 	}
-	if metadata[taskmodels.MetaKeyOfficeCarrierActorID] != causingRun.ActorID {
+	if metadata[taskmodels.MetaKeyOfficeCarrierActorID] != agent.ID {
 		t.Errorf("carrier actor_id = %v, want %q",
-			metadata[taskmodels.MetaKeyOfficeCarrierActorID], causingRun.ActorID)
+			metadata[taskmodels.MetaKeyOfficeCarrierActorID], agent.ID)
 	}
 }
 

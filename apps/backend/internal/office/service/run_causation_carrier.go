@@ -14,30 +14,59 @@ import (
 // system writes this itself from the server-side run record, never from
 // creating-agent input.
 func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
+	return carrierMetadataFromRunWithActor(run, run.ActorKind, run.ActorID)
+}
+
+// carrierMetadataFromRunForAgent preserves the run lineage while recording
+// the agent that performs the task action. The run actor can be a user or a
+// system actor that started the session, which is different from the agent
+// executing the current turn.
+func carrierMetadataFromRunForAgent(run *models.Run, agentID string) map[string]interface{} {
+	if agentID == "" {
+		return carrierMetadataFromRun(run)
+	}
+	return carrierMetadataFromRunWithActor(run, models.ActorKindAgent, agentID)
+}
+
+func carrierMetadataFromRunWithActor(run *models.Run, actorKind models.ActorKind, actorID string) map[string]interface{} {
 	return map[string]interface{}{
 		taskmodels.MetaKeyOfficeCarrierCausationID:    run.ChainCausationID,
 		taskmodels.MetaKeyOfficeCarrierCausationDepth: run.CausationDepth,
 		taskmodels.MetaKeyOfficeCarrierCreatingRunID:  run.ID,
 		taskmodels.MetaKeyOfficeCarrierHumanRooted:    run.HumanRooted,
 		taskmodels.MetaKeyOfficeCarrierRoutineID:      run.RoutineID,
-		taskmodels.MetaKeyOfficeCarrierActorKind:      string(run.ActorKind),
-		taskmodels.MetaKeyOfficeCarrierActorID:        run.ActorID,
+		taskmodels.MetaKeyOfficeCarrierActorKind:      string(actorKind),
+		taskmodels.MetaKeyOfficeCarrierActorID:        actorID,
 	}
 }
 
 // carrierFromRun builds the TaskBoundaryCarrier struct form of the same
 // lineage carrierMetadataFromRun encodes as metadata, for callers that
 // queue a run directly (runsservice.QueueRunRequest's Carrier* fields)
-// rather than writing it onto a child task.
+// rather than writing it onto a child task. Its actor is the actor persisted
+// on the source run; callers that know an agent is performing the action use
+// carrierFromRunForAgent so the acting agent is recorded separately from the
+// source run's original actor.
 func carrierFromRun(run *models.Run) TaskBoundaryCarrier {
+	return carrierFromRunWithActor(run, run.ActorKind, run.ActorID)
+}
+
+func carrierFromRunForAgent(run *models.Run, agentID string) TaskBoundaryCarrier {
+	if agentID == "" {
+		return carrierFromRun(run)
+	}
+	return carrierFromRunWithActor(run, models.ActorKindAgent, agentID)
+}
+
+func carrierFromRunWithActor(run *models.Run, actorKind models.ActorKind, actorID string) TaskBoundaryCarrier {
 	return TaskBoundaryCarrier{
 		CausationID:    run.ChainCausationID,
 		CausationDepth: run.CausationDepth,
 		CreatingRunID:  run.ID,
 		HumanRooted:    run.HumanRooted,
 		RoutineID:      run.RoutineID,
-		ActorKind:      run.ActorKind,
-		ActorID:        run.ActorID,
+		ActorKind:      actorKind,
+		ActorID:        actorID,
 	}
 }
 

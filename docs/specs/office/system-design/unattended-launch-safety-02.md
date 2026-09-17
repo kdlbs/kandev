@@ -47,8 +47,10 @@ parallel.
    run, merge and return: the merge is counted once against the surviving run, which
    keeps its own actor, routine and priority class
    (AC-OFFICE-RUN-CAUSATION-001.22), and **no gate below is applied to it**.
-3. Resolve the workspace from the woken agent's profile. Empty refuses
-   (AC-OFFICE-RUN-CAUSATION-001.20).
+3. Resolve the workspace from the woken agent's profile. When that profile is a
+   global Kanban profile with no workspace, use the trusted workspace of the
+   task-bound enqueue target. A taskless global profile, an unknown task, or any
+   remaining empty workspace refuses (AC-OFFICE-RUN-CAUSATION-001.20).
 4. Resolve causation. A human actor roots a new chain regardless of what the
    originating task or comment carried. Otherwise, if `CausingRunID` is set, read
    that run: **if it cannot be read, refuse** per AC-OFFICE-RUN-CAUSATION-001.21 —

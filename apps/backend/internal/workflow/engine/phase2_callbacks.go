@@ -115,6 +115,7 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 		req := QueueRunRequest{
 			AgentProfileID:        agentID,
 			TaskID:                taskID,
+			CausingTaskID:         in.State.TaskID,
 			WorkflowStepID:        workflowStepID,
 			Reason:                reason,
 			IdempotencyKey:        idempotencyKey(in, agentID, taskID),
@@ -589,6 +590,7 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 			WaveKey:               waveKey,
 			WaveString:            waveString,
 			TaskID:                taskID,
+			CausingTaskID:         in.State.TaskID,
 			WorkflowStepID:        in.Step.ID,
 			Reason:                reason,
 			IdempotencyKey:        idempotencyKey(in, p.AgentProfileID, taskID),

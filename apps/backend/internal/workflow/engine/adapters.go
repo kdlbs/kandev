@@ -51,6 +51,11 @@ const (
 type QueueRunRequest struct {
 	AgentProfileID string
 	TaskID         string
+	// CausingTaskID identifies the task whose workflow turn caused this
+	// enqueue. It differs from TaskID when queue_run targets another task.
+	// Keeping the source separate prevents cross-task actions from losing
+	// their causation chain at the target boundary.
+	CausingTaskID  string
 	WorkflowStepID string
 	Reason         string
 	IdempotencyKey string

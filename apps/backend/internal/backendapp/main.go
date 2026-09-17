@@ -2013,17 +2013,18 @@ func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context
 
 // runsServiceEngineAdapter bridges runs/service.Service.QueueRun (which
 // takes runs/service.QueueRunRequest) to engine.RunQueueAdapter (which
-// takes engine.QueueRunRequest). The two structs have identical fields
-// — they are intentionally duplicated so neither package imports the
-// other — so this adapter is a field-by-field copy.
+// takes engine.QueueRunRequest). The queue fields are intentionally duplicated
+// so neither package imports the other. The engine request also carries the
+// source task for cross-task actions; the adapter consumes that field while
+// translating the request and does not pass it to the runs service.
 type runsServiceEngineAdapter struct {
 	svc *runsservice.Service
 	// officeSvc sources the actor and causation lineage for every
-	// request: req.TaskID is always populated (the engine resolves it
-	// before calling QueueRun), so this path resolves the task-boundary
-	// carrier off it, preferring the run currently claimed against that
-	// task by req.CausingAgentProfileID over the task's own
-	// already-resolved carrier — the same live-run preference
+	// request. The target task is req.TaskID; the source task is
+	// req.CausingTaskID when a queue_run action targets another task.
+	// The carrier is resolved from the source task, preferring the run
+	// currently claimed against that task by req.CausingAgentProfileID over
+	// the task's own already-resolved carrier — the same live-run preference
 	// office/service.TaskBoundaryCarrierMetadata applies for
 	// create_child_task, needed here so a chain of queue_run actions also
 	// advances the causation depth hop by hop. Nil only in tests that
@@ -2037,8 +2038,12 @@ func (a *runsServiceEngineAdapter) QueueRun(
 	ctx context.Context, req workflowengine.QueueRunRequest,
 ) (workflowengine.QueueOutcome, error) {
 	var carrier officeservice.TaskBoundaryCarrier
-	if a.officeSvc != nil && req.TaskID != "" {
-		carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, req.TaskID, req.CausingAgentProfileID)
+	causingTaskID := strings.TrimSpace(req.CausingTaskID)
+	if causingTaskID == "" {
+		causingTaskID = req.TaskID
+	}
+	if a.officeSvc != nil && causingTaskID != "" {
+		carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, causingTaskID, req.CausingAgentProfileID)
 	}
 	if carrier.ActorKind == "" {
 		carrier.ActorKind = officemodels.ActorKindSystem

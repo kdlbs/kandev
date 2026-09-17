@@ -177,12 +177,12 @@ the only source that answers the question the AC actually asks.
 `workspace_id` is persisted rather than joined from `agent_profiles` at claim time.
 `runs` carries no workspace today, yet the workspace ceiling, the workspace budget
 and the ledger row all need one; resolving it through a join would put a second
-table inside the claim statement's counting subqueries. It also lets the enqueue
-refuse the one case the join would have swallowed: `agent_profiles` permits
-`workspace_id = ''` for shallow kanban profiles (`agentInstanceFilter` selects
-`workspace_id != ''`), and an empty workspace would otherwise become a single shared
-budget bucket rather than an error. AC-OFFICE-RUN-CAUSATION-001.20 refuses it at
-enqueue instead.
+table inside the claim statement's counting subqueries. A normal profile supplies
+its own workspace. A global Kanban profile has `workspace_id = ''` because
+`agentInstanceFilter` selects only profiles with a workspace; for a task-bound
+enqueue, the trusted task row supplies the workspace instead. A taskless global
+enqueue, an unknown task, or any other empty workspace refuses rather than putting
+rows into one shared budget bucket, per AC-OFFICE-RUN-CAUSATION-001.20.
 
 An empty `chain_causation_id` is the legacy marker required by
 AC-OFFICE-RUN-CAUSATION-001.6: a reader treats such a row as its own root at depth
@@ -255,8 +255,9 @@ conventions:
 value that means "unspecified", so a path that does not set it does not compile rather
 than silently resolving to `system`. There is deliberately **no** `WorkspaceID` field
 (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.8). The workspace is derived from the woken
-agent's profile; accepting it would let a caller aim a workspace ceiling or budget at a
-workspace the woken agent does not belong to.
+agent's profile, or from the target task when the profile is a global Kanban profile;
+accepting a caller-supplied workspace would let a caller aim a ceiling or budget at a
+workspace unrelated to the trusted profile or task.
 
 **Every enqueue path declares where its actor comes from**, per
 AC-OFFICE-RUN-CAUSATION-001.23, in one table beside the request type rather than at

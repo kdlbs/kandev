@@ -258,7 +258,7 @@ func (s *Service) TaskBoundaryCarrier(ctx context.Context, taskID string) TaskBo
 // depth ceiling never engages. The run currently claimed against taskID
 // by causingAgentProfileID (the agent executing this action's turn) is
 // that hop: its own lineage is carried forward directly via
-// carrierMetadataFromRun, the same way CreateOfficeSubtaskAsAgent resolves
+// carrierMetadataFromRunForAgent, the same way CreateOfficeSubtaskAsAgent resolves
 // a live causing run. Scoping the claimed-run lookup to
 // causingAgentProfileID (rather than taking whichever run was claimed
 // most recently against the task) matters because more than one agent can
@@ -269,7 +269,7 @@ func (s *Service) TaskBoundaryCarrier(ctx context.Context, taskID string) TaskBo
 func (s *Service) TaskBoundaryCarrierMetadata(ctx context.Context, taskID, causingAgentProfileID string) map[string]interface{} {
 	if causingAgentProfileID != "" {
 		if run, err := s.repo.GetClaimedRunByTaskAndAgent(ctx, taskID, causingAgentProfileID); err == nil && run != nil {
-			return carrierMetadataFromRun(run)
+			return carrierMetadataFromRunForAgent(run, causingAgentProfileID)
 		}
 	}
 	return carrierMetadataFromCarrier(s.TaskBoundaryCarrier(ctx, taskID))
@@ -282,14 +282,16 @@ func (s *Service) TaskBoundaryCarrierMetadata(ctx context.Context, taskID, causi
 // run, e.g. the workflow engine's queue_run action) wins over taskID's
 // own already-resolved carrier, so depth keeps advancing hop by hop
 // across a chain instead of freezing at the task's original creating-run
-// carrier. Scoping to causingAgentProfileID keeps this unambiguous when
-// more than one agent holds a claimed run on the same task. When
+// carrier. The acting agent is written as the carrier actor, even when the
+// source run was started by a user or system wake. Scoping to
+// causingAgentProfileID keeps this unambiguous when more than one agent holds
+// a claimed run on the same task. When
 // causingAgentProfileID is empty, or holds no claimed run on taskID, this
 // falls back to taskID's own carrier.
 func (s *Service) TaskBoundaryCarrierForRunQueue(ctx context.Context, taskID, causingAgentProfileID string) TaskBoundaryCarrier {
 	if causingAgentProfileID != "" {
 		if run, err := s.repo.GetClaimedRunByTaskAndAgent(ctx, taskID, causingAgentProfileID); err == nil && run != nil {
-			return carrierFromRun(run)
+			return carrierFromRunForAgent(run, causingAgentProfileID)
 		}
 	}
 	return s.TaskBoundaryCarrier(ctx, taskID)

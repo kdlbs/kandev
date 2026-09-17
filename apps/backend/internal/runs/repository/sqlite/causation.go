@@ -36,6 +36,24 @@ func resolveAgentProfileWorkspaceID(ctx context.Context, exec sqlExecutor, agent
 	return workspaceID, nil
 }
 
+// ResolveTaskWorkspaceIDTx returns the trusted workspace that owns a task.
+// Global Kanban profiles have no workspace of their own, so a task-bound run
+// for one of those profiles uses this value as its launch-safety scope.
+func (r *Repository) ResolveTaskWorkspaceIDTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+) (string, error) {
+	var workspaceID string
+	err := tx.QueryRowxContext(ctx, tx.Rebind(`
+		SELECT workspace_id FROM tasks WHERE id = ?
+	`), taskID).Scan(&workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return workspaceID, nil
+}
+
 // CountSelfTriggeredRuns counts runs queued for agentProfileID with the
 // given reason, whose persisted actor kind is `agent` and actor id equals
 // agentProfileID, requested strictly after since

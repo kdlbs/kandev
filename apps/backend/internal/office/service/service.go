@@ -596,7 +596,7 @@ func (s *Service) CreateOfficeTaskAsAgent(
 	var metadata map[string]interface{}
 	if causingRunID != "" {
 		if run, err := s.repo.GetRun(ctx, causingRunID); err == nil {
-			metadata = carrierMetadataFromRun(run)
+			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
 		}
 	}
 	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description, metadata)
@@ -627,7 +627,7 @@ func (s *Service) CreateOfficeSubtaskAsAgent(
 	var metadata map[string]interface{}
 	if causingRunID != "" {
 		if run, err := s.repo.GetRun(ctx, causingRunID); err == nil {
-			metadata = carrierMetadataFromRun(run)
+			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
 		}
 	}
 	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description, metadata)

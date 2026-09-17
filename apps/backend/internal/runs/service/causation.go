@@ -143,6 +143,12 @@ func (s *Service) resolveCausation(
 	actorKind, actorID := normalizeActor(req)
 
 	workspaceID, err := s.repo.ResolveAgentProfileWorkspaceIDTx(ctx, tx, agentInstanceID)
+	if err == nil && workspaceID == "" && req.TaskID != "" {
+		// Global Kanban profiles do not own a workspace. For a task-bound
+		// request, the task's persisted workspace is the trusted scope for
+		// launch ceilings and budgets.
+		workspaceID, err = s.repo.ResolveTaskWorkspaceIDTx(ctx, tx, req.TaskID)
+	}
 	if err != nil || workspaceID == "" {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalWorkspaceMissing)), 1)
 		s.logRefusal(RefusalWorkspaceMissing, agentInstanceID, req, "")

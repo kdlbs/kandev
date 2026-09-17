@@ -1445,6 +1445,7 @@ func (r *recordingApprovalRequester) CreateApprovalWithActivity(
 
 type recordingRunSpawner struct {
 	calls []spawnRunCall
+	err   error
 }
 
 type spawnRunCall struct {
@@ -1472,6 +1473,9 @@ func (r *recordingRunSpawner) QueueRunWithActor(
 		ActorID:        actorID,
 		CausingRunID:   causingRunID,
 	})
+	if r.err != nil {
+		return runsservice.QueueOutcomeNone, r.err
+	}
 	return runsservice.QueueOutcomeQueued, nil
 }
 

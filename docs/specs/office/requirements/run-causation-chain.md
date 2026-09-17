@@ -179,12 +179,15 @@ chain without correlating log lines by timestamp.
   persisted actor rather than a payload document or a parent-run join, so that a rule
   counting past wakes by actor has a source that does not depend on any other run row
   surviving.
-- **AC-OFFICE-RUN-CAUSATION-001.20:** Every run shall carry a persisted workspace,
-  set at enqueue to the workspace of the run's agent profile. When that workspace is
-  absent or empty, the system shall refuse the enqueue with a distinguishable error
-  and increment a counter, rather than queueing a run that no workspace-scoped ceiling
-  or budget can be counted against. An empty workspace shall never be used as a
-  countable scope value.
+- **AC-OFFICE-RUN-CAUSATION-001.20:** Every run shall carry a persisted workspace.
+  For a profile with a workspace, enqueue shall use that profile workspace. A global
+  Kanban profile may have no workspace of its own; when its enqueue is task-bound,
+  enqueue shall use the owning task's persisted workspace as the trusted scope. A
+  taskless global profile, an unknown task, or an otherwise absent or empty workspace
+  shall refuse the enqueue with a distinguishable error and increment a counter,
+  rather than queueing a run that no workspace-scoped ceiling or budget can be
+  counted against. An empty workspace shall never be used as a countable scope value,
+  and callers shall not supply the workspace as an override.
 - **AC-OFFICE-RUN-CAUSATION-001.21:** When an enqueue supplies a causing run
   identifier that is well-formed but names a run the system cannot read, the system
   shall refuse the enqueue with a distinguishable error and increment a counter naming
