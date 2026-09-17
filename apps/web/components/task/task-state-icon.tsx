@@ -34,6 +34,8 @@ export type TaskStateIconProps = {
    * foregroundActivity (AC-34).
    */
   parkedOnBackgroundWork?: boolean;
+  /** True while an accepted archive request is still in flight. */
+  isPendingArchive?: boolean;
   accessibleLabel?: string;
   showBackgroundTooltip?: boolean;
 };
@@ -133,7 +135,24 @@ function TaskReviewIcon({
   );
 }
 
-export function TaskStateIcon({
+function PendingArchiveTaskIcon() {
+  return (
+    <CompositorSpin
+      aria-hidden="true"
+      data-testid="task-state-archive-pending"
+      className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
+    >
+      <IconCircleDashed className="size-full" />
+    </CompositorSpin>
+  );
+}
+
+export function TaskStateIcon(props: TaskStateIconProps) {
+  if (props.isPendingArchive) return <PendingArchiveTaskIcon />;
+  return <TaskStateIconContent {...props} />;
+}
+
+function TaskStateIconContent({
   sessionState,
   state,
   foregroundActivity,

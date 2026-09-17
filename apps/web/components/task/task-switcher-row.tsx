@@ -172,6 +172,7 @@ function TaskRowItem({
       interrupted={task.interrupted}
       parkedOnBackgroundWork={task.parkedOnBackgroundWork}
       isArchived={task.isArchived}
+      isPendingArchive={task.isPendingArchive}
       isSelected={isSelected}
       diffStats={task.diffStats}
       comparisonUnavailable={task.comparisonUnavailable}
