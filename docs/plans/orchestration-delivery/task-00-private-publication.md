@@ -1,7 +1,7 @@
 ---
 id: "00-private-publication"
 title: "Private review publication"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -108,6 +108,10 @@ GitHub repository visibility documentation.
 
 ## Results
 
-Private repository created and visibility verified; Actions disabled. Clean
-publication checkout prepared from the release ancestry. Commit/push receipt
-pending completion of this design package and checks.
+Completed 2026-09-17. Private repository and default review branch are published;
+`main` is exact v0.94.0. Code commit `3536e04c` and documentation payload
+`bb71b193` passed normal hooks and match GitHub's refs. Source preservation,
+fixture tests, documentation checks, secret-scan triage and excluded local
+history are recorded in the [publication receipt](../../review/orchestration/publication.md).
+Actions remain disabled and live Kandev is unchanged. A final receipt/status
+commit follows those payload commits and is verified after push.

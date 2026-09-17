@@ -141,7 +141,7 @@ session unless the user explicitly chooses another arrangement.
 
 ### Private repository, candidate and live rollout
 
-- [ ] [00 Private review publication](task-00-private-publication.md)
+- [x] [00 Private review publication](task-00-private-publication.md)
 - [ ] [01 Independent assistant rollout gate](task-01-assistant-rollout-gate.md)
 - [ ] [02 Candidate qualification](task-02-candidate-qualification.md)
 - [ ] [03 Private migration rehearsal](task-03-migration-rehearsal.md)
@@ -243,7 +243,11 @@ quality is observed separately from deterministic test success.
 
 ## Results
 
-Planning and private publication are in progress. Implementation work orders are
-pending except historical assistant tasks 01/02 and the partial task 03. Live
-Kandev has not been changed. Publication/validation receipts are linked from
-[the review entry point](../../review/orchestration/README.md).
+The complete design package and existing implementation are committed and
+published privately; delivery 00 is done. Product implementation work orders
+remain pending except historical assistant tasks 01/02 and partial task 03.
+Private CI is optional and disabled. Live Kandev has not been changed.
+[The publication receipt](../../review/orchestration/publication.md) records source
+preservation, checks, normal hooks and verified remote refs. Begin new production
+implementation in a subsequent explicit implementation turn, starting with delivery
+01 and then the central-view package.
