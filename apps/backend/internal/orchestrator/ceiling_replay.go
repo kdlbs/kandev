@@ -186,6 +186,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 		return
 	}
 	deferral = claim.deferral
+	ctx = withCeilingDispatchClaim(ctx, claim)
 
 	defer claim.releaseIfHeld(ctx)
 	currentTask, currentErr := s.repo.GetTask(ctx, task.ID)

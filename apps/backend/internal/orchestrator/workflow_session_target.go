@@ -167,6 +167,9 @@ func (s *Service) resolveBoundSourceWorkflowSession(
 func (s *Service) persistWorkflowSessionRoute(ctx context.Context, taskID string, route models.WorkflowSessionRoute) error {
 	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
 	defer release()
+	if err := s.workflowRouteMutationAllowed(ctx, taskID); err != nil {
+		return err
+	}
 	setter, ok := s.repo.(taskMetadataKeySetter)
 	if !ok {
 		return nil
