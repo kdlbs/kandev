@@ -100,15 +100,20 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
     [fetchRoutines],
   );
 
+  // Returns whether the routine itself was created, which is also whether
+  // the create dialog should close and reset its form: true covers both the
+  // full-success and trigger-create-failed cases (a real routine now
+  // exists), false only when createRoutine itself rejected (nothing to
+  // close or reset — the user's input needs to stay for a retry).
   const handleCreate = useCallback(
-    async (data: RoutineFormData, onDone: () => void) => {
-      if (!workspaceId) return;
+    async (data: RoutineFormData): Promise<boolean> => {
+      if (!workspaceId) return false;
       let routine: Routine;
       try {
         routine = await createRoutine(workspaceId, buildCreateRoutineInput(data));
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("office:failedToCreateRoutine"));
-        return;
+        return false;
       }
 
       const cronExpression = data.cronExpression.trim();
@@ -120,20 +125,19 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
             timezone: data.timezone,
           });
         } catch (err) {
-          onDone();
           await refreshRoutinesOrReportFailure(fetchRoutines, t);
           toast.error(
             t("office:routineCreatedWithoutSchedule", {
               error: err instanceof Error ? err.message : t("office:failedToCreateRoutine"),
             }),
           );
-          return;
+          return true;
         }
       }
 
-      onDone();
       await refreshRoutinesOrReportFailure(fetchRoutines, t);
       toast.success(t("office:routineCreated"));
+      return true;
     },
     [workspaceId, fetchRoutines],
   );
@@ -274,7 +278,7 @@ export function RoutinesContent() {
         open={showCreate}
         onOpenChange={setShowCreate}
         agents={agents}
-        onSubmit={(data) => handleCreate(data, () => setShowCreate(false))}
+        onSubmit={handleCreate}
       />
     </div>
   );

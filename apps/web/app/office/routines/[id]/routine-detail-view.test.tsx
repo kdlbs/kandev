@@ -228,6 +228,26 @@ describe("RoutineDetailView draft status normalization (AC-003.17)", () => {
   });
 });
 
+// TS-005: a rejected updateRoutine must not fall through into a cron
+// reconcile attempt against a routine whose own field save just failed, and
+// must re-enable the Save button so the operator can retry.
+describe("RoutineDetailView save failure (TS-005)", () => {
+  it("shows the server error and does not attempt a cron reconcile when updateRoutine rejects", async () => {
+    const { updateRoutine } = await import("@/lib/api/domains/office-api");
+    vi.mocked(updateRoutine).mockRejectedValueOnce(new Error("name already exists"));
+    renderDetailView(baseRoutine, NO_TRIGGERS);
+
+    const saveButton = screen.getByRole("button", { name: /save/i });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("name already exists"));
+    expect(reconcileCronTriggerMock).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: /save/i }).textContent).not.toMatch(/saving/i);
+  });
+});
+
 // AC-002.9 / SRF-34: describeCronOutcome (through handleSave) must map every
 // CronReconcileOutcome branch to the correct toast kind, message, and
 // refresh decision — including the SRF-34 uncovered cell (a failed trigger

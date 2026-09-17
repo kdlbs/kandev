@@ -28,7 +28,7 @@ type CreateRoutineDialogProps = {
     triggerKind: string;
     cronExpression: string;
     timezone: string;
-  }) => void;
+  }) => Promise<boolean>;
 };
 
 type RoutineFormState = {
@@ -377,8 +377,8 @@ export function CreateRoutineDialog({
     onOpenChange(next);
   }
 
-  function handleSubmit() {
-    onSubmit({
+  async function handleSubmit() {
+    const succeeded = await onSubmit({
       name: state.name,
       description: state.description,
       taskTitle: state.taskTitle,
@@ -391,7 +391,10 @@ export function CreateRoutineDialog({
       cronExpression: state.cronExpr,
       timezone: state.timezone,
     });
-    reset();
+    // A rejected create leaves the dialog open (per onSubmit's contract) for
+    // the user to correct and retry; resetting the form on that path would
+    // silently discard what they just typed.
+    if (succeeded) handleOpenChange(false);
   }
 
   const isLast = step === STEP_COUNT - 1;

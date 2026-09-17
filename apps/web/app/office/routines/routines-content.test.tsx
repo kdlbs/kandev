@@ -180,6 +180,32 @@ describe("RoutinesContent create-routine cron arm (AC-002.2, AC-002.10)", () => 
   });
 });
 
+// TS-006: a rejected createRoutine call must leave the dialog open for the
+// user to correct and retry, and must not attempt to arm a trigger or
+// refetch the routine list for a routine that was never created.
+describe("RoutinesContent create failure (TS-006)", () => {
+  it("keeps the dialog open and shows the create error without calling fetchRoutines or arming a trigger when createRoutine rejects", async () => {
+    listRoutinesMock.mockResolvedValue({ routines: [] });
+    listAllRoutineRunsMock.mockResolvedValue({ runs: [] });
+    listRoutineTriggersMock.mockResolvedValue({ triggers: [] });
+    createRoutineMock.mockRejectedValue(new Error("duplicate name"));
+
+    renderContent();
+    await openCreateDialogToScheduleStep();
+    fireEvent.change(screen.getByLabelText(CRON_EXPRESSION_LABEL), {
+      target: { value: "0 9 * * *" },
+    });
+    const callsBeforeCreate = listRoutinesMock.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("duplicate name"));
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(createRoutineTriggerMock).not.toHaveBeenCalled();
+    expect(listRoutinesMock.mock.calls.length).toBe(callsBeforeCreate);
+    expect(screen.getByRole("button", { name: /^create$/i })).toBeTruthy();
+  });
+});
+
 // Regression coverage: handleCreate's refactor into two try/catch blocks
 // (create, then optional cron-arm) left the post-mutation `fetchRoutines()`
 // calls unguarded. A refetch failure there must not swallow the toast

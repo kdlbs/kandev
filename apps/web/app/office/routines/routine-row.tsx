@@ -44,6 +44,15 @@ export function formatVariableValue(value: unknown): string {
   return "";
 }
 
+/**
+ * `task_template` is an unvalidated wire string decoded to `Record<string, unknown>`
+ * (`parseOptionalJSONObject`); a non-string `title`/`description` must not reach a JSX
+ * text node, so this coerces anything else to "" instead of casting.
+ */
+export function templateText(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 type RoutineRowProps = {
   routine: Routine;
   agents: AgentProfile[];
@@ -87,7 +96,11 @@ export function RoutineRow({
   const { t } = useTranslation();
   const assignee = agents.find((a) => a.id === routine.assigneeAgentProfileId);
   const isActive = isRoutineFiring(routine.status);
-  const template = routine.taskTemplate as { title?: string; description?: string } | undefined;
+  const rawTemplate = routine.taskTemplate as Record<string, unknown> | undefined;
+  const template = {
+    title: templateText(rawTemplate?.title),
+    description: templateText(rawTemplate?.description),
+  };
   const cronTrigger = triggers.find((t) => t.kind === "cron");
   const nextFire = isActive ? nextFireText(t, triggers) : "";
 
@@ -209,7 +222,7 @@ function RoutineExpandedDetail({
 }: {
   routine: Routine;
   assignee: AgentProfile | undefined;
-  template: { title?: string; description?: string } | undefined;
+  template: { title: string; description: string };
 }) {
   const { t } = useTranslation();
   return (
@@ -217,8 +230,8 @@ function RoutineExpandedDetail({
       {routine.description && (
         <DetailField label={t("office:description")} value={routine.description} />
       )}
-      {template?.title && <DetailField label={t("office:taskTitle")} value={template.title} />}
-      {template?.description && (
+      {template.title && <DetailField label={t("office:taskTitle")} value={template.title} />}
+      {template.description && (
         <DetailField label={t("office:taskDescription")} value={template.description} />
       )}
       <DetailField label={t("office:assignee")} value={assignee?.name ?? t("office:unassigned")} />
