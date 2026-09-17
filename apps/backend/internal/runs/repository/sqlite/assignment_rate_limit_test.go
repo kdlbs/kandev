@@ -36,7 +36,7 @@ func TestCountAgentInitiatedAssignmentWakes_BasicCount(t *testing.T) {
 	})
 	setRequestedAt(t, repo, other.ID, now)
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t1", "task_assigned", windowStart)
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t1", "task_assigned", windowStart, now)
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -66,12 +66,44 @@ func TestCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenExclusiveStart(t *te
 	})
 	setRequestedAt(t, repo, insideWindow.ID, windowStart.Add(time.Millisecond))
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t1", "task_assigned", windowStart)
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t1", "task_assigned", windowStart, windowStart.Add(time.Millisecond))
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("count = %d, want 1 (only the row strictly after windowStart)", count)
+	}
+}
+
+// TestCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenInclusiveEnd covers
+// AC-OFFICE-ASSIGN-RATE-001.11's other edge: a row whose requested_at is
+// exactly the evaluation instant is inside the window and must count; a row
+// strictly after the evaluation instant (a future timestamp, reachable under
+// clock skew) is outside it and must not.
+func TestCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenInclusiveEnd(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	evaluationInstant := time.Now().UTC()
+	windowStart := evaluationInstant.Add(-10 * time.Minute)
+
+	atBoundary := mustCreateRun(t, repo, &models.Run{
+		ID: "win-end-at-boundary", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t-end","actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, atBoundary.ID, evaluationInstant)
+
+	future := mustCreateRun(t, repo, &models.Run{
+		ID: "win-end-future", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t-end","actor_type":"agent"}`, Status: models.RunStatusQueued, CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, future.ID, evaluationInstant.Add(time.Millisecond))
+
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t-end", "task_assigned", windowStart, evaluationInstant)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1 (the at-boundary row counts, the future row does not)", count)
 	}
 }
 
@@ -90,7 +122,7 @@ func TestCountAgentInitiatedAssignmentWakes_GuardsNonStringTaskID(t *testing.T) 
 	})
 	setRequestedAt(t, repo, r.ID, now)
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "42", "task_assigned", now.Add(-time.Minute))
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "42", "task_assigned", now.Add(-time.Minute), now)
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -125,7 +157,7 @@ func TestCountAgentInitiatedAssignmentWakes_NoStatusFilter(t *testing.T) {
 		setRequestedAt(t, repo, r.ID, now)
 	}
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t-status", "task_assigned", now.Add(-time.Minute))
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t-status", "task_assigned", now.Add(-time.Minute), now)
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -154,7 +186,7 @@ func TestCountAgentInitiatedAssignmentWakes_TasklessAndAbsentActorDoNotMatch(t *
 	})
 	setRequestedAt(t, repo, noActor.ID, now)
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t1", "task_assigned", now.Add(-time.Minute))
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "t1", "task_assigned", now.Add(-time.Minute), now)
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}

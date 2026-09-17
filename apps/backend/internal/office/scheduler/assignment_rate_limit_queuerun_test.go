@@ -304,7 +304,7 @@ func TestQueueRun_AssignmentRateLimit_KeylessRedeliveryConsumesAllowanceAgain(t 
 		t.Fatalf("redelivery outcome = %q, want queued (keyless redelivery has no identity to dedup on)", second)
 	}
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, taskID, RunReasonTaskAssigned, time.Now().UTC().Add(-AssignmentWakeAllowanceWindow))
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, taskID, RunReasonTaskAssigned, time.Now().UTC().Add(-AssignmentWakeAllowanceWindow), time.Now().UTC())
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestQueueRun_AssignmentRateLimit_MixedActorCoalesce_AgentOverwritesUser(t *
 		t.Fatalf("second outcome = %q, want coalesced", second)
 	}
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, taskID, RunReasonTaskAssigned, time.Now().UTC().Add(-time.Minute))
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, taskID, RunReasonTaskAssigned, time.Now().UTC().Add(-time.Minute), time.Now().UTC())
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestQueueRun_AssignmentRateLimit_MixedActorCoalesce_UserOverwritesAgent(t *
 		t.Fatalf("second outcome = %q, want coalesced", second)
 	}
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, taskID, RunReasonTaskAssigned, time.Now().UTC().Add(-time.Minute))
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, taskID, RunReasonTaskAssigned, time.Now().UTC().Add(-time.Minute), time.Now().UTC())
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}

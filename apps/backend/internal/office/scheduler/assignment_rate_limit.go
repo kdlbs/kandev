@@ -86,8 +86,9 @@ func (ss *SchedulerService) checkAssignmentWakeAllowance(
 		return false
 	}
 
-	windowStart := time.Now().UTC().Add(-AssignmentWakeAllowanceWindow)
-	count, err := ss.repo.CountAgentInitiatedAssignmentWakes(ctx, pred.taskID, reason, windowStart)
+	evaluationInstant := time.Now().UTC()
+	windowStart := evaluationInstant.Add(-AssignmentWakeAllowanceWindow)
+	count, err := ss.repo.CountAgentInitiatedAssignmentWakes(ctx, pred.taskID, reason, windowStart, evaluationInstant)
 	if err != nil {
 		runsservice.ReportAssignmentRateLimitCountReadFailed(
 			pred.taskID, agentInstanceID, pred.actorID, AssignmentWakeAllowanceN, err)

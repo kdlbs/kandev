@@ -613,15 +613,18 @@ func taskIDFromPayload(payload string) (taskID string, invalidTaskID bool) {
 
 // CountAgentInitiatedAssignmentWakes counts runs for taskID with the given
 // reason whose stored payload carries actor_type "agent" and whose
-// requested_at falls strictly after windowStart — the half-open window
-// AC-OFFICE-ASSIGN-RATE-001.11 defines. Deliberately carries no status
-// filter: "admitted" is defined as "a runs row was inserted", so a run
-// that has since completed still holds its allowance slot until the
-// window passes (AC-OFFICE-ASSIGN-RATE-001.4). taskID must already be
-// known non-empty; callers with an unattributable task must not reach
-// this method.
+// requested_at falls in the half-open interval (windowStart,
+// evaluationInstant] — AC-OFFICE-ASSIGN-RATE-001.11's window, exclusive of
+// its old edge and inclusive of its new one. The inclusive upper bound
+// keeps a future-dated row (clock skew across writers under Postgres)
+// from counting indefinitely instead of aging out with the window it
+// actually belongs to. Deliberately carries no status filter: "admitted"
+// is defined as "a runs row was inserted", so a run that has since
+// completed still holds its allowance slot until the window passes
+// (AC-OFFICE-ASSIGN-RATE-001.4). taskID must already be known non-empty;
+// callers with an unattributable task must not reach this method.
 func (r *Repository) CountAgentInitiatedAssignmentWakes(
-	ctx context.Context, taskID, reason string, windowStart time.Time,
+	ctx context.Context, taskID, reason string, windowStart, evaluationInstant time.Time,
 ) (int, error) {
 	driver := r.ro.DriverName()
 	taskExtract := dialect.JSONExtract(driver, "payload", "task_id")
@@ -637,10 +640,11 @@ func (r *Repository) CountAgentInitiatedAssignmentWakes(
 		  AND %s = ?
 		  AND %s = ?
 		  AND requested_at > ?
+		  AND requested_at <= ?
 	`, dialect.JSONTypeIsString(driver, "payload", "task_id"), taskExtract, actorExtract)
 	var count int
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query),
-		reason, taskID, "agent", windowStart).Scan(&count)
+		reason, taskID, "agent", windowStart, evaluationInstant).Scan(&count)
 	if err != nil {
 		return 0, err
 	}

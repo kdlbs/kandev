@@ -34,7 +34,7 @@ func TestPostgresCountAgentInitiatedAssignmentWakes_BasicCount(t *testing.T) {
 	inWindow("pg-cnt-user", `{"task_id":"pg-t1","actor_type":"user"}`)
 	inWindow("pg-cnt-other-task", `{"task_id":"pg-t2","actor_type":"agent"}`)
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "pg-t1", "task_assigned", windowStart)
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "pg-t1", "task_assigned", windowStart, now)
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestPostgresCountAgentInitiatedAssignmentWakes_GuardsNonStringTaskID(t *tes
 	})
 	setRequestedAt(t, repo, r.ID, now)
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "42", "task_assigned", now.Add(-time.Minute))
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "42", "task_assigned", now.Add(-time.Minute), now)
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -89,11 +89,41 @@ func TestPostgresCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenExclusiveSta
 	})
 	setRequestedAt(t, repo, insideWindow.ID, windowStart.Add(time.Millisecond))
 
-	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "pg-t3", "task_assigned", windowStart)
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "pg-t3", "task_assigned", windowStart, windowStart.Add(time.Millisecond))
 	if err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("count = %d, want 1 (only the row strictly after windowStart)", count)
+	}
+}
+
+// TestPostgresCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenInclusiveEnd
+// is the Postgres twin of the window's upper-bound test: a row at the
+// evaluation instant counts, a row strictly after it does not.
+func TestPostgresCountAgentInitiatedAssignmentWakes_WindowIsHalfOpenInclusiveEnd(t *testing.T) {
+	repo := newTestRepoPostgres(t)
+	ctx := context.Background()
+	evaluationInstant := time.Now().UTC()
+	windowStart := evaluationInstant.Add(-10 * time.Minute)
+
+	atBoundary := mustCreateRun(t, repo, &models.Run{
+		ID: "pg-win-end-at-boundary", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"pg-t4","actor_type":"agent"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, atBoundary.ID, evaluationInstant)
+
+	future := mustCreateRun(t, repo, &models.Run{
+		ID: "pg-win-end-future", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"pg-t4","actor_type":"agent"}`, Status: "queued", CoalescedCount: 1,
+	})
+	setRequestedAt(t, repo, future.ID, evaluationInstant.Add(time.Millisecond))
+
+	count, err := repo.CountAgentInitiatedAssignmentWakes(ctx, "pg-t4", "task_assigned", windowStart, evaluationInstant)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1 (the at-boundary row counts, the future row does not)", count)
 	}
 }
