@@ -10,7 +10,7 @@ import (
 
 func (h *Handler) delegationObjective(c *gin.Context, claims *runtimeauth.AgentClaims, id, mode string) (*models.Objective, error) {
 	if id == "" {
-		if mode != "" {
+		if mode != "" || claims.Capabilities == assistantBrokerAudience {
 			return nil, fmt.Errorf("explicit delivery requires an objective")
 		}
 		return nil, nil // legacy workspace coordinators retain their existing contract

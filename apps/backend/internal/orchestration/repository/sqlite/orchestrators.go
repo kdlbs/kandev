@@ -29,6 +29,9 @@ func (r *Repository) Migrate() error {
 	if err := r.migrateObjectives(); err != nil {
 		return err
 	}
+	if err := r.migrateAttention(); err != nil {
+		return err
+	}
 	if err := r.ImportLegacyState(); err != nil {
 		return err
 	}

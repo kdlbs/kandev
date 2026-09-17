@@ -20,7 +20,7 @@ requirements:
 
 This design completes the existing `internal/orchestration` assistant. Ownership,
 durable intake, objectives, context/credential metadata, capability discovery and
-enforced inspect mode are implemented. Attention, native resolution, the
+enforced inspect mode and attention are implemented. Native resolution, the
 app-level shell, maintenance and workspace grants remain pending. The
 [workspace Coordinator view](coordinator-view.md) is a separate observation UI
 that may ship first. Its grouped task list is not an assistant attention ledger.

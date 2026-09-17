@@ -26,6 +26,7 @@ func RegisterUserNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 		return b
 	}
 
+	b.subscribe(eventBus, events.AssistantUpdated, events.AssistantUpdated)
 	b.subscribe(eventBus, events.UserSettingsUpdated, ws.ActionUserSettingsUpdated)
 	b.subscribe(eventBus, events.UserAgentProfileRecentUseUpdated, ws.ActionUserAgentProfileRecentUseUpdated)
 	b.subscribe(eventBus, events.AuthSessionHostnameResolved, ws.ActionSessionHostnameResolved)

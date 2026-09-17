@@ -169,3 +169,29 @@ confirm memory, edit credential descriptors or approve native permissions.
 Unknown operation outcomes remain unknown until native evidence resolves them.
 Use `GET /runtime/memory` for bounded, redacted, scoped runtime memory; its
 `next_cursor` is passed as `after`. Human memory editing remains separate.
+
+
+## Attention
+
+`GET /assistant/attention` and `GET /runtime/attention` return owner-authorized
+cards for managed objective/task links. Lists default to 50, cap at 100, and
+accept `next_cursor` as `after`. Cursors bind owner, binding and binding version.
+Every page rechecks task access and current management links.
+
+A card identifies the native task, session and request, with bounded redacted
+summary, source revision, projection revision and state. `pending`, `resolved`,
+`expired`, `unknown` and `inactive` are distinct. A waiting session alone is not
+a question. All sessions are inspected; newer work cannot hide an older request.
+Permission cards require a matching live provider handle. Lost handles expire;
+the card does not recreate a permission or restart a worker.
+
+Native events refresh attention without a model request. The existing run
+scheduler repairs missed events every 60 seconds in batches of 100 managed task
+links. Duplicate observations and unchanged scans do not wake the model. Each
+new native occurrence commits a wake outbox with its projection; retries keep
+the same queue identity. Pause/disable preserves cards and prevents dispatch.
+Before launching a queued wake, the server re-reads its native source and scope.
+
+The `orchestration.assistant.updated` WebSocket notification reaches only the
+owner and contains `binding_id` and `revision`. Re-fetch the authorized page on
+notification or reconnect. Native resolution controls are added separately.

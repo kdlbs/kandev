@@ -764,6 +764,10 @@ func registerRoutes(p routeParams) {
 		p.log,
 	)
 
+	if p.services.Orchestration != nil {
+		p.services.Orchestration.SetAttentionReader(&assistantAttentionReader{tasks: p.taskSvc, permissions: p.orchestratorSvc, questions: clarificationStore})
+	}
+
 	// Wire pending clarification requests into the office inbox.
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Dashboard != nil {
 		p.services.OfficeSvcs.Dashboard.SetPermissionLister(clarificationStore)

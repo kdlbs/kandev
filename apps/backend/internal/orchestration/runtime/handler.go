@@ -12,6 +12,7 @@ import (
 
 const (
 	executionModeExecute = "execute"
+	taskIDKey            = "task_id"
 )
 
 const (
@@ -37,6 +38,8 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	assistant.GET("/assistant", h.assistant)
 	assistant.PUT("/assistant", h.selectAssistant)
 	assistant.GET("/assistant/objectives", h.objectives)
+	assistant.GET("/assistant/attention", h.attention)
+	assistant.GET("/runtime/attention", h.attention)
 	assistant.GET("/assistant/capabilities", h.capabilities)
 	assistant.GET("/runtime/capabilities", h.capabilities)
 	assistant.GET("/runtime/memory", h.runtimeMemory)

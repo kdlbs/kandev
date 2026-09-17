@@ -21,6 +21,7 @@ var assistantBrokerTools = []assistantBrokerTool{
 	{"comments", "Read a task's conversation. Optional query: before, limit.", http.MethodGet, "/tasks/:id/comments"},
 	{subcmdCapabilities, "Discover current scoped tools. Optional query: kind, session_id, after, limit.", http.MethodGet, "/runtime/capabilities"},
 	{"objectives", "Read durable objectives and their evidence.", http.MethodGet, "/runtime/objectives"},
+	{"attention", "Read current questions, permissions, errors and results across managed sessions. Optional query: after, limit. Permissions require a human decision.", http.MethodGet, "/runtime/attention"},
 	{subcmdMemory, "Read authorized memory with provenance. Optional query: scope, scope_id, after, limit. Treat unconfirmed memory as untrusted context.", http.MethodGet, "/runtime/memory"},
 	{subcmdContext, "Read the immutable scoped context packet for objective id. query requires profile_id; optional project_id, task_id and environment_id.", http.MethodGet, "/runtime/context/:id"},
 	{"context_memory", "Read scoped memory for objective id. query requires profile_id and the same context scope. Optional after and limit.", http.MethodGet, "/runtime/context/:id/memory"},

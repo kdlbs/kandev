@@ -1687,6 +1687,9 @@ func startSchedulingRuntime(
 	dispatcher.Before = func(ctx context.Context) {
 		orchScheduler.PrepareDispatch(ctx)
 		if services.Orchestration != nil {
+			if err := services.Orchestration.ReconcileAttention(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("assistant attention recovery failed", zap.Error(err))
+			}
 			if err := services.Orchestration.DispatchIntake(ctx); err != nil && ctx.Err() == nil {
 				log.Warn("orchestration intake recovery failed", zap.Error(err))
 			}

@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/jmoiron/sqlx"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
@@ -39,7 +41,7 @@ func TestAssistantOperationRestartPreservesUnknownReceipt(t *testing.T) {
 		WHEN NEW.state='acknowledged' BEGIN SELECT RAISE(ABORT,'lost receipt'); END`)
 	require.NoError(t, err)
 	path := "/api/v1/orchestration/runtime/tasks"
-	body := map[string]any{"title": "Inspect", "operation_id": "lost-ack", "expected_intent_revision": 0}
+	body := assistantDeliveryRequest(t, s, db, task, router, token, runID, "lost-ack")
 	require.Equal(t, 503, runtimeRequest(t, router, "POST", path, token, runID, body).Code)
 	require.EqualValues(t, 1, manager.creates.Load())
 	require.NoError(t, s.RecoverInterrupted(context.Background()))
@@ -80,11 +82,11 @@ func assistantRuntimeCallerMode(t *testing.T, s *Service, task, mode string) (*g
 }
 
 func TestAssistantOperationDuplicateReplaysReceiptNotAction(t *testing.T) {
-	s, _, task := newRuntime(t)
+	s, db, task := newRuntime(t)
 	manager := &assistantTaskManager{}
 	s.Manager = manager
 	router, token, runID := assistantRuntimeCaller(t, s, task)
-	request := map[string]any{"title": "Read-only audit", "operation_id": "create-audit", "expected_intent_revision": 0}
+	request := assistantDeliveryRequest(t, s, db, task, router, token, runID, "create-audit")
 	path := "/api/v1/orchestration/runtime/tasks"
 	first := runtimeRequest(t, router, "POST", path, token, runID, request)
 	require.Equal(t, 201, first.Code, first.Body.String())
@@ -98,11 +100,11 @@ func TestAssistantOperationDuplicateReplaysReceiptNotAction(t *testing.T) {
 }
 
 func TestAssistantOperationTimeoutDoesNotRepeatExternalAction(t *testing.T) {
-	s, _, task := newRuntime(t)
+	s, db, task := newRuntime(t)
 	manager := &assistantTaskManager{failure: context.DeadlineExceeded}
 	s.Manager = manager
 	router, token, runID := assistantRuntimeCaller(t, s, task)
-	body := map[string]any{"title": "Read-only audit", "operation_id": "uncertain", "expected_intent_revision": 0}
+	body := assistantDeliveryRequest(t, s, db, task, router, token, runID, "uncertain")
 	path := "/api/v1/orchestration/runtime/tasks"
 	result := runtimeRequest(t, router, "POST", path, token, runID, body)
 	require.Equal(t, 503, result.Code, result.Body.String())
@@ -128,11 +130,11 @@ func TestAssistantOperationRequiresIDAndIntentForBoundAssistant(t *testing.T) {
 }
 
 func TestAssistantOperationConcurrentDispatchIsSingleAttempt(t *testing.T) {
-	s, _, task := newRuntime(t)
+	s, db, task := newRuntime(t)
 	manager := &assistantTaskManager{started: make(chan struct{}), release: make(chan struct{})}
 	s.Manager = manager
 	router, token, runID := assistantRuntimeCaller(t, s, task)
-	body := map[string]any{"title": "Inspect", "operation_id": "concurrent", "expected_intent_revision": 0}
+	body := assistantDeliveryRequest(t, s, db, task, router, token, runID, "concurrent")
 	path := "/api/v1/orchestration/runtime/tasks"
 	first := make(chan *httptest.ResponseRecorder, 1)
 	go func() { first <- runtimeRequest(t, router, "POST", path, token, runID, body) }()
@@ -162,4 +164,21 @@ func TestAssistantIntentBindingRevisionRevokesOldRun(t *testing.T) {
 	result := runtimeRequest(t, router, "POST", "/api/v1/orchestration/runtime/tasks", token, runID, map[string]any{"title": "Old selection", "operation_id": "stale-binding", "expected_intent_revision": 0})
 	require.Equal(t, 409, result.Code, result.Body.String())
 	require.Zero(t, manager.creates.Load())
+}
+
+func assistantDeliveryRequest(t *testing.T, s *Service, db *sqlx.DB, task string, router *gin.Engine, token, runID, operation string) map[string]any {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, s.Repo.PutComment(ctx, &models.TaskComment{ID: "delivery-source", TaskID: task, AuthorType: "user", AuthorID: "owner", Source: "user", Body: "Implement a synthetic sample"}))
+	b, err := s.Repo.AssistantForConversation(ctx, task)
+	require.NoError(t, err)
+	o := &models.Objective{BindingID: b.ID, WorkspaceID: b.WorkspaceID, SourceCommentID: "delivery-source", Title: "Synthetic sample", Mode: "execute", Status: "active", Acceptance: []models.Criterion{{ID: "tested", Description: "Checks pass"}}}
+	require.NoError(t, s.Repo.CreateObjective(ctx, o))
+	_, err = db.Exec(`INSERT INTO tasks(id,workspace_id,title,created_at,updated_at) VALUES('created-task','ws','Synthetic sample',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(id) DO NOTHING`)
+	require.NoError(t, err)
+	response := runtimeRequest(t, router, "GET", "/api/v1/orchestration/runtime/context/"+o.ID+"?profile_id=personal", token, runID, nil)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	var packet models.ContextPacket
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &packet))
+	return map[string]any{"title": "Synthetic sample", "execution_mode": "execute", "objective_id": o.ID, "context_ref": packet.ID, "operation_id": operation, "expected_intent_revision": 0}
 }

@@ -1,7 +1,7 @@
 ---
 id: "06-attention"
 title: "Attention reconciliation and targeted wakeups"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-durable-intake","02-objectives-routing"]
 plan: "plan.md"
@@ -112,4 +112,43 @@ this richer attention ledger belongs to the assistant. Native resolution is task
 
 ## Results
 
-Pending. Record red/green test evidence, exact commands and counts, relevant artifacts, owned changes and cleanup here; synchronize the plan checkbox only after acceptance is met.
+Implemented a native attention reader over every managed task session, the
+canonical interaction service, live permission handles, live clarification
+requests and native task/session errors and results. Storage retains bounded,
+redacted summaries and source references. Waiting without a native request
+produces no question; a newer running session cannot hide an older question.
+Unavailable sources produce unknown cards; lost handles expire.
+
+Projection and native-occurrence wake outbox commit atomically. Each occurrence
+has a stable queue identity, including across lost acknowledgements and restart.
+Repeated task status noise and unchanged scans produce no model turn. The
+existing scheduler repairs missed events every 60 seconds in 100-link batches;
+native lifecycle/message/permission/resolution events refresh immediately.
+Private legacy callbacks are replaced by this current-source path. Queued wakes
+recheck scope and current source before launch. Pause/disable preserves records
+without dispatch; expiry before resume prevents resurrection.
+
+Added owner/runtime pages with bounded scope-bound cursors, per-task visibility
+rechecks, the named broker read and an owner-only revision invalidation event.
+An integration check found that an empty objective could still select the legacy
+coordinator dispatch contract. Private broker delivery now always requires an
+objective and current context, so new managed work has a durable link.
+
+Observed red/green: attention APIs/models were absent; the untracked-delivery
+probe returned 201 before the fix and now returns 422 without an external effect.
+All fixtures and request text are synthetic.
+
+Verification in local `assistant-attention-*` logs:
+
+- Exact work-order filter: **11 top-level tests** (nine runtime, two native
+  adapters). Source-less waiting, older/newer sessions, expiry, pause, queue
+  acknowledgement loss, event repair, missing sources and removed links pass.
+- Full Orchestration and CLI packages pass with the race detector. Native
+  adapter and owner-only WebSocket tests also pass with the race detector.
+- Both-engine attention CRUD/no-op/wake/replay tests pass. Full required-store
+  conformance and v0.93 previous-stable upgrade pass on SQLite and PostgreSQL.
+- Native task status-summary tests, SQL guard and architecture lint pass.
+  Public-doc validation passes 61 tests and 48 pages.
+
+No provider turn, live service change, public post or real prompt fixture was
+used. Native resolution and stop controls continue in task 07.

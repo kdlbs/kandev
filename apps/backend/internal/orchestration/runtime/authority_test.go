@@ -87,6 +87,7 @@ func TestAssistantAuthorityRevocationAtDispatch(t *testing.T) {
 	router, token, runID := assistantRuntimeCallerMode(t, s, task, "execute")
 	manager := &assistantTaskManager{}
 	s.Manager = manager
+	request := assistantDeliveryRequest(t, s, db, task, router, token, runID, "race")
 	reads := 0
 	authority.beforeRead = func() {
 		reads++
@@ -95,7 +96,7 @@ func TestAssistantAuthorityRevocationAtDispatch(t *testing.T) {
 		}
 	}
 	response := runtimeRequest(t, router, "POST", "/api/v1/orchestration/runtime/tasks", token, runID,
-		map[string]any{"title": "Dispatch after revocation", "operation_id": "race", "expected_intent_revision": 0})
+		request)
 	require.Equal(t, 409, response.Code, response.Body.String())
 	require.Zero(t, manager.creates.Load())
 	var state string

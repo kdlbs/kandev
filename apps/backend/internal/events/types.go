@@ -107,6 +107,9 @@ const (
 // when they only need sidebar/task-switcher status.
 const TaskStatusSummaryUpdated = "task.status_summary.updated"
 
+// AssistantUpdated invalidates only the owner-scoped attention view.
+const AssistantUpdated = "orchestration.assistant.updated"
+
 // Event types for task plans
 const (
 	TaskPlanCreated         = "task_plan.created"

@@ -9,6 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestration/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"time"
 )
 
 func decode(event *bus.Event) (map[string]any, error) {
@@ -21,13 +23,20 @@ func decode(event *bus.Event) (map[string]any, error) {
 	return data, err
 }
 func (s *Service) Subscribe(eb bus.EventBus) (func(), error) {
+	s.AttentionUpdated = func(ctx context.Context, id string, now time.Time) {
+		b, err := s.Repo.AssistantBindingByID(ctx, id)
+		if err != nil {
+			return
+		}
+		_ = eb.Publish(ctx, events.AssistantUpdated, bus.NewEvent(events.AssistantUpdated, "orchestration", map[string]any{"user_id": b.OwnerUserID, "binding_id": id, "revision": now.Format(time.RFC3339Nano)}))
+	}
 	ids := []bus.Subscription{}
 	cleanup := func() {
 		for _, id := range ids {
 			_ = id.Unsubscribe()
 		}
 	}
-	for _, subject := range []string{events.TaskStateChanged, events.TaskMoved, events.AgentTurnMessageSaved, events.AgentCompleted, events.AgentStopped, events.AgentFailed} {
+	for _, subject := range []string{events.TaskStateChanged, events.TaskMoved, events.AgentTurnMessageSaved, events.AgentCompleted, events.AgentStopped, events.AgentFailed, events.TaskSessionStateChanged, events.TaskSessionErrorChanged, events.TaskStatusSummaryUpdated, events.MessageAdded, events.MessageUpdated, events.ClarificationAnswered, events.ClarificationPrimaryAnswered, events.ClarificationCancelled, events.ClarificationStaleDismissed, events.BuildPermissionRequestWildcardSubject()} {
 		id, err := eb.Subscribe(subject, s.onEvent)
 		if err != nil {
 			cleanup()
@@ -42,9 +51,12 @@ func (s *Service) onEvent(ctx context.Context, event *bus.Event) error {
 	if err != nil {
 		return err
 	}
-	taskID, _ := data["task_id"].(string)
+	taskID := s.attentionEventTask(ctx, data)
 	if taskID == "" {
 		return nil
+	}
+	if err := s.ReconcileAttentionTask(ctx, taskID); err != nil {
+		return err
 	}
 	if event.Type == events.TaskStateChanged || event.Type == events.TaskMoved {
 		return s.taskCallback(ctx, taskID)
@@ -114,7 +126,10 @@ func (s *Service) taskCallback(ctx context.Context, taskID string) error {
 	if conversation.TaskID == taskID {
 		return nil
 	}
-	payload := map[string]any{"callback": map[string]string{"task_id": taskID, "title": clip(task.Title, 300), "state": string(task.State)}}
+	if owner, err := s.Repo.ConversationUserOwner(ctx, conversation.TaskID); err != nil || owner != "" {
+		return err
+	}
+	payload := map[string]any{"callback": map[string]string{taskIDKey: taskID, "title": clip(task.Title, 300), "state": string(task.State)}}
 	key := fmt.Sprintf("workspace-task-callback:%s:%s:%s:%s", id, taskID, task.State, task.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"))
 	return s.QueueTurn(ctx, id, conversation.TaskID, "workspace_task_callback", key, payload)
 }
@@ -148,4 +163,22 @@ func (s *Service) bridgeReply(ctx context.Context, event *bus.Event, data map[st
 	id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s:%x", identity, sha256.Sum256([]byte(body))))).String()
 	return s.Repo.PutComment(ctx, &models.TaskComment{ID: id, TaskID: taskID, AuthorID: owner, AuthorType: authorTypeAgent, Body: body, Source: "session"})
 
+}
+
+func (s *Service) attentionEventTask(ctx context.Context, data map[string]any) string {
+	if task, _ := data[taskIDKey].(string); task != "" {
+		return task
+	}
+	session, _ := data["session_id"].(string)
+	reader, ok := s.Tasks.(interface {
+		GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error)
+	})
+	if !ok || session == "" {
+		return ""
+	}
+	row, err := reader.GetTaskSession(ctx, session)
+	if err != nil || row == nil {
+		return ""
+	}
+	return row.TaskID
 }

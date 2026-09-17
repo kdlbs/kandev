@@ -16,6 +16,7 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -39,6 +40,12 @@ type Launch struct {
 }
 type Service struct {
 	AssistantEnabled bool
+	Attention        AttentionReader
+	AttentionUpdated func(context.Context, string, time.Time)
+	Now              func() time.Time
+	attentionMu      sync.Mutex
+	attentionAfter   string
+	attentionNext    time.Time
 	Repo             *store.Repository
 	Personas         *personas.Service
 	Runs             *runstore.Repository
@@ -125,6 +132,9 @@ func (s *Service) launch(ctx context.Context, run *runmodels.Run) error {
 	owner, ws, err := s.Repo.ConversationOwner(ctx, taskID)
 	if err != nil || owner != a.ID || ws != a.WorkspaceID {
 		return fmt.Errorf("run must belong to the coordinator conversation")
+	}
+	if err := s.validateAttentionWake(ctx, payload); err != nil {
+		return err
 	}
 	if err := s.validateBindingSnapshot(ctx, taskID, run.Payload); err != nil {
 		return fmt.Errorf("conversation binding is no longer current: %w", err)

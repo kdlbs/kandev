@@ -112,3 +112,13 @@ func TestAssistantObjectiveDeliveryLinksAndReplaysOriginalReceipt(t *testing.T) 
 	require.JSONEq(t, first.Body.String(), retry.Body.String())
 	require.EqualValues(t, 1, manager.creates.Load())
 }
+
+func TestAssistantObjectiveRequiredForEveryDelivery(t *testing.T) {
+	s, _, task := newRuntime(t)
+	manager := &assistantTaskManager{}
+	s.Manager = manager
+	router, token, runID := assistantRuntimeCaller(t, s, task)
+	response := runtimeRequest(t, router, "POST", "/api/v1/orchestration/runtime/tasks", token, runID, map[string]any{"title": "Untracked delivery", "operation_id": "untracked", "expected_intent_revision": 0})
+	require.Equal(t, 422, response.Code, response.Body.String())
+	require.Zero(t, manager.creates.Load())
+}

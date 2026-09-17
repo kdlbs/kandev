@@ -10,12 +10,12 @@ import (
 )
 
 func contextScopeQuery(c *gin.Context) models.ContextScope {
-	return models.ContextScope{ProfileID: c.Query("profile_id"), ProjectID: c.Query("project_id"), EnvironmentID: c.Query("environment_id"), TaskID: c.Query("task_id")}
+	return models.ContextScope{ProfileID: c.Query("profile_id"), ProjectID: c.Query("project_id"), EnvironmentID: c.Query("environment_id"), TaskID: c.Query(taskIDKey)}
 }
 
 func contextMemoryReference(objective string, scope models.ContextScope) string {
 	values := url.Values{"profile_id": {scope.ProfileID}}
-	for key, value := range map[string]string{"project_id": scope.ProjectID, "environment_id": scope.EnvironmentID, "task_id": scope.TaskID} {
+	for key, value := range map[string]string{"project_id": scope.ProjectID, "environment_id": scope.EnvironmentID, taskIDKey: scope.TaskID} {
 		if value != "" {
 			values.Set(key, value)
 		}
