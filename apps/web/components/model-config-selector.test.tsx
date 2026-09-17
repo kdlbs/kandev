@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -580,5 +581,41 @@ describe("ModelConfigSelector disabled (gone) models", () => {
     expect(screen.getByRole("button", { name: modelSettingsButtonName }).textContent).toContain(
       "Claude Gone",
     );
+  });
+});
+
+describe("ModelConfigSelector modal containment", () => {
+  const selector = (
+    <ModelConfigSelector
+      modelOptions={makeModelOptions(12)}
+      currentModel="model-1"
+      onModelChange={() => {}}
+    />
+  );
+
+  it("keeps the model list in its dialog scroll boundary after reopening", () => {
+    render(
+      <Dialog open>
+        <DialogContent aria-describedby={undefined}>
+          <DialogTitle>Quick Chat</DialogTitle>
+          {selector}
+        </DialogContent>
+      </Dialog>,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Quick Chat" });
+    const trigger = within(dialog).getByRole("button", { name: modelSettingsButtonName });
+    fireEvent.click(trigger);
+    expect(dialog.contains(screen.getByRole("listbox"))).toBe(true);
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    fireEvent.click(trigger);
+    expect(dialog.contains(screen.getByRole("listbox"))).toBe(true);
+  });
+
+  it("keeps the body portal outside a dialog", () => {
+    const { container } = render(selector);
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    const list = screen.getByRole("listbox");
+    expect(document.body.contains(list)).toBe(true);
+    expect(container.contains(list)).toBe(false);
   });
 });

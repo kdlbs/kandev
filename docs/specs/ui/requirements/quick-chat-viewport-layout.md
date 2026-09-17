@@ -53,6 +53,15 @@ dialog, so that the chat composer remains visible.
   both a new conversation and a long conversation shall keep the composer
   inside the dialog. The long transcript shall have scrollable overflow.
 
+- **AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.7:** When the composer model selector
+  contains more models than fit, wheel, trackpad, and touch scrolling shall
+  reveal the remaining models without scrolling the background page or moving
+  the composer. Users shall be able to select a revealed model.
+- **AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.8:** On desktop and phone viewports,
+  the model picker shall remain within the viewport, support search and keyboard
+  selection, and dismiss back to its trigger without closing Quick Chat when
+  Escape dismisses the picker.
+
 ## Out of scope
 
 - Changes to the size or internal resize behavior of the chat composer.

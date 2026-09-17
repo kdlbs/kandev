@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useRef, useState, type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { IconChevronDown } from "@tabler/icons-react";
@@ -214,6 +214,7 @@ type ModelConfigSelectorTriggerProps = Pick<
 > & {
   label: string;
   details?: TriggerDetail[];
+  triggerRef: Ref<HTMLButtonElement>;
 };
 
 function ModelConfigSelectorTrigger({
@@ -224,6 +225,7 @@ function ModelConfigSelectorTrigger({
   placeholder,
   triggerClassName,
   triggerTitle,
+  triggerRef,
   variant,
 }: ModelConfigSelectorTriggerProps) {
   const compact = variant === "compact";
@@ -233,6 +235,7 @@ function ModelConfigSelectorTrigger({
   const trigger = (
     <PopoverTrigger asChild>
       <Button
+        ref={triggerRef}
         type="button"
         variant={compact ? "ghost" : "outline"}
         size={compact ? "sm" : "default"}
@@ -294,6 +297,8 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
 }: ModelConfigSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
   const selectConfigOptions = usableConfigOptions(configOptions);
   const modelConfig = selectConfigOptions.find(isModelConfigOption);
@@ -324,6 +329,12 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   };
 
   const onOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      // Keep the picker inside its dialog's permitted scroll and focus region.
+      setPortalContainer(
+        triggerRef.current?.closest<HTMLElement>('[data-slot="dialog-content"]') ?? null,
+      );
+    }
     setOpen(nextOpen);
     if (!nextOpen) {
       setActiveConfigId(null);
@@ -333,6 +344,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <ModelConfigSelectorTrigger
+        triggerRef={triggerRef}
         ariaLabel={ariaLabel ?? t("agents:modelSettings")}
         details={details}
         disabled={disabled}
@@ -343,6 +355,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         variant={variant}
       />
       <PopoverContent
+        portalContainer={portalContainer}
         align={popoverAlign}
         side={popoverSide}
         className="w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100vh-1rem))] gap-2 overflow-hidden p-2"

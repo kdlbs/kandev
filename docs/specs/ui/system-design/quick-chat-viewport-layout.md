@@ -12,14 +12,14 @@ requirements:
 The UI system owns the height and scroll contract for the Quick Chat dialog.
 The task system supplies conversation data but does not own this layout.
 
-The correction changes one flex boundary in the conversation view. It does not
-change state, APIs, persistence, or the shared dialog primitive.
+The layout owns the conversation flex boundary and composer popup containment.
+It does not change state, APIs, persistence, or shared dialog defaults.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001` | [Components and responsibilities](#components-and-responsibilities), [Height and scroll contract](#height-and-scroll-contract), [Responsive behavior](#responsive-behavior), [Verification](#verification) |
+| `REQ-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001` | [Components and responsibilities](#components-and-responsibilities), [Height and scroll contract](#height-and-scroll-contract), [Responsive behavior](#responsive-behavior), [Verification](#verification), [Composer model popup containment](#composer-model-popup-containment) |
 
 ## Components and responsibilities
 
@@ -59,7 +59,8 @@ The nearest mobile exemplar is
 The phone surface remains a full-height dialog. This correction does not add a
 new mobile composition.
 
-The transcript remains the single vertical scroll owner on all viewports. The
+The transcript retains its scroll owner on all viewports. Composer popups own
+their separate option-list scrolling. The
 dialog keeps its existing dynamic viewport units and safe-area padding. The
 composer keeps the existing shared state, toolbar, input behavior, and actions.
 
@@ -90,3 +91,35 @@ not change.
 ## Related decisions
 
 None. This correction completes an existing local flex layout.
+
+## Composer model popup containment
+
+For AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.7 and .8, the shared
+`ModelConfigSelector` resolves its trigger's nearest `[data-slot="dialog-content"]`
+when opening. Pass that element to the existing `PopoverContent.portalContainer`.
+Outside a dialog, retain the default body portal. Resolve from the actual trigger
+on each opening so a closed or replaced dialog cannot leave a stale container.
+
+`ModelConfigSelectorTrigger` exposes its button reference to the selector.
+`ModelConfigSelectorContent` retains `CommandList` as the model scroll owner and
+its existing search and selection handlers. The popup remains portaled, avoiding
+clipping by composer ancestors, but is a DOM descendant of the dialog's permitted
+scroll and focus region. Do not disable modal scroll locking or cancel wheel
+handlers globally. Provider-option subviews inherit the same portal containment.
+
+Desktop retains the anchored picker. Phone retains the existing touch-capable
+picker inside the full-height Quick Chat dialog, as exercised by
+`mobile-model-selector.spec.ts` on the task surface. This is a brief searchable
+choice with existing coarse-pointer targets, so a new drawer is unnecessary.
+Entry is the composer model button; hierarchy is search, model list, then
+provider options. The list scrolls; the composer and background remain stable.
+Selecting a model is the primary action. Preserve viewport containment and
+existing safe-area clearance, keyboard focus, and dismissal behavior.
+
+Behavioral browser tests must send real wheel/touch input to an overflowing list,
+assert increasing scrollTop, and select a newly revealed supported model.
+Programmatically setting scrollTop does not prove scroll-lock compatibility.
+Cover modal Quick Chat and the non-modal task selector; verify search focus,
+Escape focus return, phone containment, and no document horizontal overflow.
+Desktop wheel, mobile touch, selection, search, Escape focus return, and
+non-modal fallback are covered by the focused model-scroll E2E scenarios.
