@@ -182,12 +182,15 @@ func TestPluginHost_Tasks_ListTranslatesFanOutRefusalToResourceExhausted(t *test
 	require.Equal(t, codes.ResourceExhausted, status.Code(err))
 }
 
-func TestAttachDependencies_NoopWhenTaskDataSourceNil(t *testing.T) {
+func TestAttachDependencies_WithholdsWhenTaskDataSourceNil(t *testing.T) {
 	host := &pluginHost{capabilities: manifest.Capabilities{APIRead: []string{"tasks"}}}
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 	err := host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, true)
 	require.NoError(t, err)
-	require.False(t, tasks[0].Blocked)
+	require.True(t, tasks[0].Blocked, "a nil task-data source must fail closed to the withheld verdict, not report not-blocked")
+	require.Equal(t, taskservice.BlockedReasonUnknown, tasks[0].BlockedReason)
+	require.Equal(t, []pluginsdk.TaskDependencyRef{}, tasks[0].DependsOn)
+	require.Equal(t, []pluginsdk.TaskDependencyRef{}, tasks[0].Blocks)
 }
 
 func TestAttachDependencies_WithholdsWhenCallerLacksReadCapability(t *testing.T) {

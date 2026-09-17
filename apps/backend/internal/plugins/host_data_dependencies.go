@@ -40,6 +40,7 @@ func (h *pluginHost) attachDependencies(ctx context.Context, tasks []pluginsdk.T
 		return nil
 	}
 	if h.taskData == nil {
+		withholdDependencies(tasks)
 		return nil
 	}
 	var views map[string]taskservice.DependencyView
