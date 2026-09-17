@@ -36,30 +36,17 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 	if err != nil {
 		return time.Time{}, err
 	}
-	trimmed := strings.TrimSpace(expression)
-	if len(strings.Fields(trimmed)) != 5 {
-		return time.Time{}, fmt.Errorf("parse cron expression: %q: must be exactly 5 whitespace-separated fields (minute hour day-of-month month day-of-week); descriptors and TZ/CRON_TZ prefixes are not supported", expression)
-	}
-	schedule, err := cronParser.Parse(trimmed)
+	specSchedule, err := parseCronExpression(expression)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("parse cron expression: %w", err)
-	}
-	specSchedule, ok := schedule.(*cron.SpecSchedule)
-	if !ok {
-		// cronParser is configured with only the 5 standard fields (no
-		// descriptors), so Parse always returns *SpecSchedule for a
-		// well-formed 5-field expression. This would only trip if
-		// robfig/cron's internal type changed — fail loudly rather than
-		// silently degrading matchesWallClock to "everything matches".
-		return time.Time{}, fmt.Errorf("internal: unexpected schedule type %T", schedule)
+		return time.Time{}, err
 	}
 	start := after.In(loc)
-	candidate := schedule.Next(start)
+	candidate := specSchedule.Next(start)
 	if candidate.IsZero() {
 		return time.Time{}, fmt.Errorf("%w: %q", ErrUnsatisfiableCron, expression)
 	}
 	for isAmbiguousFallBack(candidate) || !matchesWallClock(specSchedule, candidate) {
-		candidate = schedule.Next(candidate)
+		candidate = specSchedule.Next(candidate)
 		if candidate.IsZero() {
 			return time.Time{}, fmt.Errorf("%w: %q", ErrUnsatisfiableCron, expression)
 		}
@@ -68,6 +55,46 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 		candidate = earlier
 	}
 	return candidate.UTC(), nil
+}
+
+// parseCronExpression parses a 5-field cron expression into a
+// *cron.SpecSchedule, without computing an occurrence. Shared by
+// NextCronTime and ValidateCronSchedule so the two never drift on what
+// counts as valid.
+func parseCronExpression(expression string) (*cron.SpecSchedule, error) {
+	trimmed := strings.TrimSpace(expression)
+	if len(strings.Fields(trimmed)) != 5 {
+		return nil, fmt.Errorf("parse cron expression: %q: must be exactly 5 whitespace-separated fields (minute hour day-of-month month day-of-week); descriptors and TZ/CRON_TZ prefixes are not supported", expression)
+	}
+	schedule, err := cronParser.Parse(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("parse cron expression: %w", err)
+	}
+	specSchedule, ok := schedule.(*cron.SpecSchedule)
+	if !ok {
+		// cronParser is configured with only the 5 standard fields (no
+		// descriptors), so Parse always returns *SpecSchedule for a
+		// well-formed 5-field expression. This would only trip if
+		// robfig/cron's internal type changed — fail loudly rather than
+		// silently degrading matchesWallClock to "everything matches".
+		return nil, fmt.Errorf("internal: unexpected schedule type %T", schedule)
+	}
+	return specSchedule, nil
+}
+
+// ValidateCronSchedule reports whether a cron expression parses and its
+// timezone loads: the "schedulable" definition in
+// docs/specs/office/requirements/routine-arming-visibility.md. It
+// deliberately does not search for a next occurrence — a DOM-and-DOW
+// combination this cron's AND semantics rarely or never satisfies would
+// otherwise cost a linear scan of up to 366*24*60 minutes to learn nothing
+// "schedulable" doesn't already need.
+func ValidateCronSchedule(expression, timezone string) error {
+	if _, err := resolveLocation(timezone); err != nil {
+		return err
+	}
+	_, err := parseCronExpression(expression)
+	return err
 }
 
 // findEarlierMatchAcrossSubHourTransition recovers a fire that

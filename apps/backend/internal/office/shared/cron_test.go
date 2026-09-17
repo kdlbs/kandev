@@ -539,6 +539,24 @@ func TestNextCronTime_InvalidTimezone(t *testing.T) {
 	}
 }
 
+func TestValidateCronSchedule_ValidExpression(t *testing.T) {
+	if err := ValidateCronSchedule("0 9 * * *", "America/New_York"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateCronSchedule_InvalidExpression(t *testing.T) {
+	if err := ValidateCronSchedule("invalid", ""); err == nil {
+		t.Fatal("expected error for invalid expression")
+	}
+}
+
+func TestValidateCronSchedule_InvalidTimezone(t *testing.T) {
+	if err := ValidateCronSchedule("0 9 * * *", "Not/A_Zone"); err == nil {
+		t.Fatal("expected error for invalid timezone")
+	}
+}
+
 // TestNextCronTime_RejectsCronTZPrefix verifies that a caller-supplied
 // TZ=/CRON_TZ= prefix is rejected rather than silently accepted. robfig/cron
 // strips the prefix in Parse() before any field-mask check, so without this
@@ -558,5 +576,22 @@ func TestNextCronTime_RejectsCronTZPrefix(t *testing.T) {
 				t.Fatalf("expected error for prefixed expression %q, got none", expr)
 			}
 		})
+	}
+}
+
+// TestValidateCronSchedule_DoesNotSearchForOccurrence guards against
+// isSchedulable regressing back into computing a next occurrence: a
+// DOM-and-DOW combination this cron's AND semantics rarely or never
+// satisfies would cost a linear scan of up to 366*24*60 minutes
+// (NextCronTime's occurrence search) if this reused that path. Schedulable
+// per the spec only means the expression parses and the timezone loads.
+func TestValidateCronSchedule_DoesNotSearchForOccurrence(t *testing.T) {
+	start := time.Now()
+	if err := ValidateCronSchedule("0 0 30 2 *", "UTC"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Errorf("ValidateCronSchedule took %v, want well under the ~250-500ms a full "+
+			"366-day occurrence search costs for this expression", elapsed)
 	}
 }

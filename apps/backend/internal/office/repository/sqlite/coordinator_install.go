@@ -220,7 +220,7 @@ func (r *Repository) WithCoordinatorInstallLock(
 	}
 
 	if err := fn(boundCtx, tx); err != nil {
-		return err
+		return classifyCoordinatorInstallWaitErr(ctx, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return err

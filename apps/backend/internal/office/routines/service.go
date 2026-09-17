@@ -617,8 +617,7 @@ func (s *RoutineService) ListAllRoutineRuns(ctx context.Context, wsID string, li
 // pair, not in the time argument: re-arming to the original due time
 // instead would make the trigger due again on the very next 30-second
 // scheduler tick, retrying (and failing) forever with no backoff. 24 hours
-// caps the trigger at one dispatch a day until it is deleted and
-// recreated, matching shared.findNextMatch's own give-up interval.
+// caps the trigger at one dispatch a day until it is deleted and recreated.
 const catchUpFallbackInterval = 24 * time.Hour
 
 // catchUpReclaimAfter is how stale a claimed-but-never-armed trigger's

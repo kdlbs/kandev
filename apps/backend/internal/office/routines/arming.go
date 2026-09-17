@@ -148,8 +148,7 @@ func isArmed(t *RoutineTrigger, now time.Time) bool {
 }
 
 func isSchedulable(t *RoutineTrigger) bool {
-	_, err := shared.NextCronTime(t.CronExpression, t.Timezone, time.Time{})
-	return err == nil
+	return shared.ValidateCronSchedule(t.CronExpression, t.Timezone) == nil
 }
 
 func withinDispatchGrace(t *RoutineTrigger, now time.Time) bool {
