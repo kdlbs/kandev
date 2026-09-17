@@ -225,8 +225,14 @@ describe("RoutineDetailView trigger sync (REQ-004)", () => {
   });
 
   it("deletes then creates when the drafted expression changes, replacing the trigger (AC-004.3)", async () => {
+    const NEW_NEXT_RUN_AT = "2026-06-06T00:00:00Z";
     createRoutineTriggerMock.mockResolvedValue({
-      trigger: { ...cronTrigger, id: "trigger-2", cronExpression: CHANGED_CRON_EXPRESSION },
+      trigger: {
+        ...cronTrigger,
+        id: "trigger-2",
+        cronExpression: CHANGED_CRON_EXPRESSION,
+        nextRunAt: NEW_NEXT_RUN_AT,
+      },
     });
     renderDetailView(baseRoutine, [cronTrigger]);
     setCronExpression(CHANGED_CRON_EXPRESSION);
@@ -241,6 +247,10 @@ describe("RoutineDetailView trigger sync (REQ-004)", () => {
         timezone: "UTC",
       }),
     );
+    // The card renders the newly created trigger's nextRunAt, not the
+    // deleted trigger's, proving displayed state was actually replaced.
+    expect(screen.getByText(/Next fire: 6\/6\/2026/)).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 
   it("reports the no-schedule error and drops the deleted trigger when create fails and no cron trigger remains (AC-004.1, AC-004.2)", async () => {
@@ -254,6 +264,10 @@ describe("RoutineDetailView trigger sync (REQ-004)", () => {
     expect(toastError).toHaveBeenCalledWith(
       "Schedule not saved. This routine now has no cron schedule",
     );
+    // The deleted trigger's next-fire value is actually gone from displayed
+    // state, not just the delete call having been issued.
+    expect(screen.getByText("Next fire: -")).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 
   it("reports the kept-previous error when create fails but another cron trigger remains (AC-004.2, AC-004.7)", async () => {
@@ -267,6 +281,10 @@ describe("RoutineDetailView trigger sync (REQ-004)", () => {
     expect(toastError).toHaveBeenCalledWith(
       "New schedule not saved. The routine is still on its previous schedule",
     );
+    // Sync targets exactly one cron trigger (AC-004.8): the other cron
+    // trigger was never touched.
+    expect(deleteRoutineTriggerMock).toHaveBeenCalledTimes(1);
+    expect(deleteRoutineTriggerMock).toHaveBeenCalledWith("trigger-1");
   });
 
   it("does not call create and reports the generic save failure when the delete itself fails (AC-004.5)", async () => {
@@ -282,10 +300,18 @@ describe("RoutineDetailView trigger sync (REQ-004)", () => {
 
 describe("RoutineDetailView trigger sync: unusable create and refetch (AC-004.6, AC-004.9)", () => {
   it("refetches and uses the refetched cron trigger when create succeeds but returns no usable trigger (AC-004.6)", async () => {
+    const REFETCHED_NEXT_RUN_AT = "2026-07-07T00:00:00Z";
     deleteRoutineTriggerMock.mockResolvedValue(undefined);
     createRoutineTriggerMock.mockResolvedValue({ trigger: null });
     listRoutineTriggersMock.mockResolvedValue({
-      triggers: [{ ...cronTrigger, id: "trigger-3", cronExpression: CHANGED_CRON_EXPRESSION }],
+      triggers: [
+        {
+          ...cronTrigger,
+          id: "trigger-3",
+          cronExpression: CHANGED_CRON_EXPRESSION,
+          nextRunAt: REFETCHED_NEXT_RUN_AT,
+        },
+      ],
     });
     renderDetailView(baseRoutine, [cronTrigger]);
     setCronExpression(CHANGED_CRON_EXPRESSION);
@@ -293,6 +319,9 @@ describe("RoutineDetailView trigger sync: unusable create and refetch (AC-004.6,
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
     expect(listRoutineTriggersMock).toHaveBeenCalledWith("routine-1");
     expect(toastError).not.toHaveBeenCalled();
+    // The refetched trigger is actually used to render, not just fetched.
+    expect(screen.getByText(/Next fire: 7\/7\/2026/)).toBeTruthy();
+    expect(screen.queryByText(/Next fire: 5\/5\/2026/)).toBeNull();
   });
 
   it("treats an empty refetch as a failed read-back rather than an authoritative empty result (AC-004.6, AC-004.9)", async () => {

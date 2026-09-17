@@ -46,6 +46,16 @@ describe("selectPrimaryCronTrigger", () => {
     expect(result).toEqual({ trigger: malformed, isPrimary: false });
   });
 
+  it("excludes a cron trigger whose nextRunAt Date.parse would silently accept, pinning parseTurnTimestamp over Date.parse (AC-003.1)", () => {
+    // "2026-02-30" is not a real calendar date, but `Date.parse` normalizes
+    // it to March 2 rather than rejecting it. Only `parseTurnTimestamp`
+    // rejects this input; a selector using `Date.parse` would wrongly treat
+    // this trigger as primary.
+    const calendarInvalid = trigger({ id: "a", nextRunAt: "2026-02-30T00:00:00Z" });
+    const result = selectPrimaryCronTrigger([calendarInvalid]);
+    expect(result).toEqual({ trigger: calendarInvalid, isPrimary: false });
+  });
+
   it("falls back to the lowest-id cron trigger, enabled or not, when no primary exists (AC-003.3)", () => {
     const noPrimaryA = trigger({ id: "b", enabled: false });
     const noPrimaryB = trigger({ id: "a", enabled: true }); // no nextRunAt at all
