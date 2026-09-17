@@ -414,7 +414,7 @@ func (r *Repository) runMigrations() error {
 	// user-controlled status switch. No foreign key: deletion is explicit
 	// (DeleteExecutor deletes the row in the same transaction as the soft
 	// delete), not a cascade.
-	r.migrate.Apply("executor_reachability.table", `
+	_ = r.migrate.Apply("executor_reachability.table", `
 		CREATE TABLE IF NOT EXISTS executor_reachability (
 			executor_id          TEXT PRIMARY KEY,
 			state                TEXT NOT NULL DEFAULT 'unknown',
