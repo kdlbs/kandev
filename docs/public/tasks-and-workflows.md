@@ -55,8 +55,13 @@ the task idle without a recipient when the destination has no launch turn. The
 second line shows the current model or an expected model change and counts
 additional settings changes. Use the info button for the session, profile, model,
 context reset, source-session disposition, and prompt dispatch information.
-The preview sits in a centered footer below the move controls. The next-step
-button above chat shows the same footer in its options popover or touch drawer.
+In the condensed topbar workflow, each eligible step has a **Move here** button
+beside its name. A single line below summarizes the session and model. Expand
+the row's chevron for full transition details and one-time move options. Moving
+does not require expanding the row. The current step has a highlighted background.
+On touch devices, the same controls appear in the bottom drawer.
+The full stepper and the next-step button above chat retain the centered preview
+footer in their options popover or touch drawer.
 Changing the options refreshes that preview.
 The preview is advisory. **Move here** checks routing, permissions, WIP, and
 current session state again when the move runs. A preview can therefore change

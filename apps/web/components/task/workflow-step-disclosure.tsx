@@ -313,7 +313,7 @@ function CompactWorkflowDisclosureSurface({
         aria-label={t("task:moveTo")}
         side="bottom"
         align="center"
-        className="w-[28rem] max-w-[calc(100vw-1rem)] p-2"
+        className="w-[25rem] max-w-[calc(100vw-1rem)] p-2"
         onOpenAutoFocus={controls.handleOpenAutoFocus}
         onCloseAutoFocus={controls.handleCloseAutoFocus}
         onEscapeKeyDown={(event) => event.stopPropagation()}
@@ -422,7 +422,10 @@ function StepDisclosureBody({
   return (
     <div
       data-testid="workflow-step-disclosure"
-      className="min-h-0 max-h-[70dvh] overflow-y-auto px-2 pb-[calc(1rem+env(safe-area-inset-bottom))]"
+      className={cn(
+        "min-h-0 max-h-[70dvh] space-y-1 overflow-y-auto overscroll-contain",
+        isTouchSurface && "px-2 pb-[calc(1rem+env(safe-area-inset-bottom))]",
+      )}
     >
       {sortedSteps.map((step, index) => {
         const isCurrent = index === currentIndex;
@@ -498,40 +501,32 @@ function StepDisclosureRow({
   onMove: DisclosureMove;
 }) {
   const { t } = useTranslation();
+  const heading = (
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <StepCircleIndicator
+        isCurrent={isCurrent}
+        isCompleted={isCompleted}
+        isPending={progress?.isPending}
+        pendingLabel={
+          progress?.isPending ? t(workflowStepProgressTranslationKey(progress.status)) : undefined
+        }
+      />
+      <span className={cn("min-w-0 truncate text-xs text-foreground", isCurrent && "font-medium")}>
+        {step.name}
+      </span>
+      <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
+    </div>
+  );
 
   return (
     <div
       data-testid={`workflow-step-disclosure-row-${step.id}`}
       aria-current={isCurrent ? "step" : undefined}
-      className="flex flex-col gap-1.5 rounded-md px-2 py-1.5"
+      className={cn("flex flex-col gap-1 rounded-md px-2 py-2", isCurrent && "bg-primary/10")}
     >
-      <div className="flex min-h-11 items-center gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <StepCircleIndicator
-            isCurrent={isCurrent}
-            isCompleted={isCompleted}
-            isPending={progress?.isPending}
-            pendingLabel={
-              progress?.isPending
-                ? t(workflowStepProgressTranslationKey(progress.status))
-                : undefined
-            }
-          />
-          <span
-            className={cn("min-w-0 truncate text-xs", getStepLabelClass(isCurrent, isCompleted))}
-          >
-            {step.name}
-          </span>
-          <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
-        </div>
-        {isCurrent ? (
-          <span className="shrink-0 text-[11px] text-muted-foreground">
-            {t("task:currentStep")}
-          </span>
-        ) : null}
-      </div>
-      {canMove && !isCurrent && (
+      {canMove && !isCurrent ? (
         <StepDisclosureMoveControls
+          heading={heading}
           stepId={step.id}
           taskId={taskId}
           workflowId={workflowId}
@@ -541,6 +536,15 @@ function StepDisclosureRow({
           previewEnabled={previewEnabled}
           onMove={onMove}
         />
+      ) : (
+        <div className={cn("flex min-h-7 items-center gap-2", isTouchSurface && "min-h-11")}>
+          {heading}
+          {isCurrent && (
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              {t("task:currentStep")}
+            </span>
+          )}
+        </div>
       )}
       {progress && (
         <StepProgressDetails
