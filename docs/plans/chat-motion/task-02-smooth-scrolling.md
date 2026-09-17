@@ -170,3 +170,18 @@ focused scroll, lifecycle, and search unit run passed all 77 tests.
 
 Final rebuilt browser suites: desktop chat-motion 2/2 and phone chat-motion 2/2
 passed with click/tap follow preservation and wheel/touch interruption.
+
+## CI pagination remediation
+
+A delayed upward scroll from prepend anchoring could retry a stale sentinel
+intersection after the sentinel had already left preload. Gesture retries now
+use the same current-geometry eligibility check as observer/lifecycle retries.
+This preserves the existing pagination contract; no user setting changes.
+
+Validation: the new stale-gesture regression failed before the fix; all 36
+shared-sentinel tests, all 8 mobile pagination cases, and all 8 desktop
+pagination cases passed after it. Typecheck, changed-file lint, and the spec
+linter also passed.
+Commands: `pnpm exec vitest run hooks/use-lazy-load-sentinel.test.ts` and
+`pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-message-pagination.spec.ts -- --retries=0` from `apps/web`.
+Desktop command: `pnpm e2e:run --host --no-build e2e/tests/chat/message-pagination.spec.ts -- --retries=0`.

@@ -669,6 +669,35 @@ describe("useLazyLoadSentinel — re-arm, disarm, and stale completions", () => 
   });
 });
 
+describe("useLazyLoadSentinel — gesture geometry", () => {
+  it("rejects a gesture retry after prepend moves a stale intersection outside preload", async () => {
+    const scrollRef = makeScrollRef();
+    let geometryEligible = true;
+    const loadMore = vi.fn(async () => 0);
+    const { result } = renderHook(() =>
+      useLazyLoadSentinel(scrollRef, true, false, false, loadMore, {
+        rearmWhileIntersecting: true,
+        isCurrentGeometryEligible: () => geometryEligible,
+      }),
+    );
+    const node = document.createElement("div");
+    act(() => result.current.sentinelRef(node));
+    fire(records[0], true, node);
+    await act(async () => {});
+    expect(loadMore).toHaveBeenCalledTimes(1);
+
+    geometryEligible = false;
+    act(() => result.current.onUserGesture());
+    await act(async () => {});
+    expect(loadMore).toHaveBeenCalledTimes(1);
+
+    geometryEligible = true;
+    act(() => result.current.onUserGesture());
+    await act(async () => {});
+    expect(loadMore).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("useLazyLoadSentinel — failure recovery and stale completions", () => {
   it("permits an onUserGesture retry while disarmed and still intersecting", async () => {
     const scrollRef = makeScrollRef();

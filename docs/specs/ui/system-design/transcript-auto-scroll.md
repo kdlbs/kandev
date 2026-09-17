@@ -152,7 +152,9 @@ replaying an intersection observed while blocked, `useLazyLoadSentinel` invokes
 the consumer's current-geometry predicate. The transcript starts pagination
 only if the current sentinel and scroll root remain inside the preload region.
 The same current-geometry rule applies when a stale request hands an observed
-intersection to a replacement view.
+intersection to a replacement view or a scroll gesture retries a disarmed
+sentinel. Prepend anchoring can emit an upward scroll before the observer
+reports its exit, so a cached intersection alone cannot authorize a retry.
 
 Same-environment session switches return before arming this lifecycle.
 Maximize, un-maximize, preset, and custom-layout rebuilds retain the existing
