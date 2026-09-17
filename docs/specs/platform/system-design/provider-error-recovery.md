@@ -74,9 +74,8 @@ workspace modes.
 
 #### Cursor normal-completion failure projection
 
-`cursor-agent` can report an upstream HTTP/2 stream reset as an ordinary
-`agent_message_chunk`. It can later return a successful `session/prompt`
-response. The ACP transport therefore owns a Cursor-specific evidence
+`cursor-agent` can report an upstream transient failure as an ordinary
+`agent_message_chunk`; the ACP transport therefore owns a Cursor-specific evidence
 projection that mirrors the existing Codex capacity projection. It does not add
 generic content scanning to orchestration.
 
@@ -86,16 +85,17 @@ checks in order:
 1. The adapter identity is `cursor-acp`.
 2. The normalized event is a non-empty assistant message chunk for a non-zero
    prompt generation that matches the active turn.
-3. After trimming leading and trailing whitespace, the chunk begins with
-   `Error: RetriableError:`.
-4. A case-insensitive bounded match finds `RetriableError` and either
-   `http/2 stream closed` or `CANCEL (0x8)`.
+3. After trimming leading and trailing whitespace, the chunk begins with the
+   case-insensitive prefix `Error: RetriableError:`.
+4. The text after that prefix contains a non-empty suffix of at most 256 bytes
+   after Unicode whitespace trimming. It need not describe an HTTP/2 reset;
+   `[unavailable] PING timed out` and `Connection stalled` are valid examples.
+   Context cancellation, deadline, and retry escalation are vetoed.
 
-The identity, event-type, and prefix checks precede the full fingerprint. The
-prefix check uses `strings.HasPrefix(strings.TrimSpace(text), ...)`, so ordinary
-per-token traffic does not allocate a normalized copy. Prose that mentions the
-error after other text, a partial `RetriableError`, a stale generation, and the
-same text from another adapter do not match.
+Identity, event type, and prefix checks precede the suffix check. Both layers
+share the case-insensitive prefix, Unicode trim, and byte bound. Prose before
+the prefix, an empty suffix, cancellation signatures, stale generations, and
+other adapters do not match.
 
 A match sets pending evidence on the active `promptTurnState` under its existing
 evidence mutex. The observer suppresses the control chunk. A later non-empty
@@ -114,17 +114,15 @@ The valid `ProviderError` uses source `cursor_acp`, provider ID `cursor-acp`, an
 a UTC occurrence time. The adapter does not copy raw assistant text into the
 structured diagnostic.
 
-The deterministic catalogue adds the dedicated rule
-`cursor.retriable_stream_reset.v1` before the generic transport-loss rule. The
-rule requires the complete normalized Cursor diagnostic
-`Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)`
-(with the existing bracketed `canceled` decoration allowed). It maps to
-`agent_transport_lost` with high confidence and class `transient`.
-It retains the existing `AutoRetryable` invariant. The rule applies the shared
-context-cancellation veto. Cursor's `[canceled]` token does not satisfy that
-veto. It lacks `context canceled`, `context deadline exceeded`, or
-`cancel escalated`. The deliberately narrow `transportLostRe` remains
-unchanged.
+The existing `cursor.retriable_stream_reset.v1` rule keeps its position before
+generic transport loss and now accepts any complete normalized Cursor
+diagnostic with the `Error: RetriableError:` prefix and bounded, non-empty
+suffix, including the adapter's safe diagnostic and the observed `PING timed
+out` and `Connection stalled` variants. Its stable ID preserves history. It
+maps to high-confidence transient `agent_transport_lost`, retains
+`AutoRetryable`, and applies the existing cancellation veto: Cursor's
+`[canceled]` does not satisfy it, while context cancellation, deadline, and
+retry escalation do. The narrow `transportLostRe` remains unchanged.
 
 ### Error classes
 

@@ -1,6 +1,9 @@
 package routingerr
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // runtimeEnvironmentRules match failures caused by the local execution
 // environment (npm/npx cache state, missing binaries' install steps,
@@ -9,8 +12,10 @@ import "regexp"
 // fallback, so a specific environment fingerprint wins over the
 // low-confidence "phase.prestart.unknown" verdict.
 //
-// Each entry pairs a regex matcher with a builder that can extract
-// signal-specific metadata (e.g. RemediationPath) from the raw text.
+// Each entry pairs a matcher with a builder that can extract signal-specific
+// metadata (e.g. RemediationPath) from the raw text. Most matchers are regular
+// expressions; rules that share an adapter's byte-level contract can provide a
+// custom matcher instead.
 var runtimeEnvironmentRules = []runtimeRule{
 	{
 		// npm 9 and npm 10 use different casing for the error prefix. Require
@@ -89,12 +94,13 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 	{
-		// Cursor emits this exact control prefix as an assistant message chunk
-		// when its upstream HTTP/2 stream resets. Keep the fingerprint anchored
-		// to the control frame and bounded so user-authored prose cannot turn
-		// into an automatic retry.
-		id:      cursorRetriableStreamResetRuleID,
-		pattern: cursorRetriableStreamResetRe,
+		// Cursor emits this control prefix as an assistant message chunk for
+		// transient provider failures. Keep the fingerprint anchored to the
+		// control frame and bounded so user-authored prose cannot turn into an
+		// automatic retry. The custom matcher shares the adapter's byte and
+		// Unicode-whitespace contract.
+		id:    cursorRetriableStreamResetRuleID,
+		match: matchCursorRetriableStreamReset,
 		build: func(text string) *Error {
 			if cancellationOrDeadlineRe.MatchString(text) {
 				return nil
@@ -163,12 +169,28 @@ const transportLostRuleID = "acp.transport_lost.v1"
 // carries the signature.
 var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection closed`)
 
-// cursorRetriableStreamResetRe matches Cursor's complete control diagnostic.
-// Requiring the whole normalized message prevents ordinary provider prose from
-// combining the control prefix with an unrelated transport fragment.
-var cursorRetriableStreamResetRe = regexp.MustCompile(
-	`(?i)^\s*Error:\s*RetriableError:\s*(?:\[canceled\]\s+)?HTTP/2 stream closed with error code CANCEL \(0x8\)(?:\s+\[canceled\])?\s*$`,
+const (
+	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
+	cursorRetriableStreamResetMaxTail = 256
 )
+
+// matchCursorRetriableStreamReset matches Cursor's complete bounded control
+// diagnostic using the same trim, prefix, byte-limit, and cancellation-veto
+// rules as the ACP adapter. The byte limit prevents the classifier from
+// accepting a diagnostic that the adapter would reject after multibyte text is
+// measured.
+func matchCursorRetriableStreamReset(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) < len(cursorRetriableStreamResetPrefix) ||
+		!strings.EqualFold(trimmed[:len(cursorRetriableStreamResetPrefix)], cursorRetriableStreamResetPrefix) {
+		return false
+	}
+	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
+	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || cancellationOrDeadlineRe.MatchString(suffix) {
+		return false
+	}
+	return true
+}
 
 // overloadedRe matches the transient 529 Overloaded signature: either the
 // numeric code adjacent to "overloaded" on a single line (in either order), or
@@ -220,6 +242,7 @@ func IsResumeCorrupted(message string) bool {
 type runtimeRule struct {
 	id            string
 	pattern       *regexp.Regexp
+	match         func(text string) bool
 	build         func(text string) *Error
 	sanitizedOnly bool
 }
@@ -257,7 +280,11 @@ func matchRuntimeRules(text string, legacyOnly bool) (*Error, bool) {
 		if legacyOnly && r.sanitizedOnly {
 			continue
 		}
-		if !r.pattern.MatchString(text) {
+		matched := r.match != nil && r.match(text)
+		if r.match == nil {
+			matched = r.pattern != nil && r.pattern.MatchString(text)
+		}
+		if !matched {
 			continue
 		}
 		if e := r.build(text); e != nil {
