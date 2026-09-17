@@ -337,4 +337,46 @@ test.describe("Routines UI", () => {
     // the "--" placeholder it showed for every run before this capability.
     await expect(runsList).toContainText(new Date(fired.run.created_at).toLocaleString());
   });
+
+  // Review round 3 (Codex-1): before Build round 4's fix,
+  // `isRoutineFiring(draft.status ?? "")` treated any unrecognized
+  // persisted status the same as the backend's genuinely empty "no writer
+  // set one" default, showing a next-fire countdown the routine can never
+  // reach. `UpdateRoutineRequest.Status` has no enum validation
+  // (`handler.go:353-354`: `routine.Status = *req.Status`), so an
+  // unrecognized value is reachable through the real API, not just a
+  // hand-built object.
+  test("an unrecognized persisted status hides the next-fire countdown", async ({
+    testPage,
+    officeApi,
+    officeSeed,
+  }) => {
+    const name = "E2E Wire Contract Unrecognized Status";
+    const routine = (await officeApi.createRoutine(officeSeed.workspaceId, { name })) as {
+      id: string;
+    };
+    expect(routine.id).toBeTruthy();
+
+    const triggerCreated = await officeApi.rawRequest("POST", `/routines/${routine.id}/triggers`, {
+      kind: "cron",
+      cron_expression: "*/5 * * * *",
+      timezone: "UTC",
+    });
+    expect(triggerCreated.ok).toBe(true);
+    const triggers = await officeApi.listRoutineTriggers(routine.id);
+    const cron = triggers.find((t) => t.kind === "cron") as { next_run_at?: string } | undefined;
+    expect(cron?.next_run_at).toBeTruthy();
+
+    const statusUpdated = await officeApi.rawRequest("PATCH", `/routines/${routine.id}`, {
+      status: "draft",
+    });
+    expect(statusUpdated.ok).toBe(true);
+
+    await testPage.goto(`/office/routines/${routine.id}`);
+    await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("Next fire: -")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByText(new Date(cron!.next_run_at as string).toLocaleString()),
+    ).toHaveCount(0);
+  });
 });
