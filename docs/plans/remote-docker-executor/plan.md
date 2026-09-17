@@ -43,7 +43,7 @@ third remote runtime.
 wave 1: task-01 (client)  task-02 (host files)  task-03 (endpoints)
 wave 2: task-04 (runtime)
 wave 3: task-05 (profile UI + test endpoint)
-wave 4: task-06 (E2E + docs)
+wave 4: task-06 (E2E + docs)  task-07 (environment dispatch)
 ```
 
 Tasks 01, 02, and 03 touch disjoint files and are parallel-safe. Task 04
@@ -54,12 +54,13 @@ probe surface task 04 exposes. Task 06 validates the whole.
 
 | Task | Title | Wave | Depends on |
 | --- | --- | --- | --- |
-| 01 | SSH-dialed Docker client | 1 | none |
-| 02 | Container host-file provider | 1 | none |
-| 03 | Container endpoint resolver | 1 | none |
-| 04 | Remote Docker runtime | 2 | 01, 02, 03 |
-| 05 | Profile create flow and connection test | 3 | 04 |
-| 06 | E2E scenario and public documentation | 4 | 05 |
+| 01 | [SSH-dialed Docker client](task-01-ssh-dialed-docker-client.md) | 1 | none |
+| 02 | [Container host-file provider](task-02-container-host-file-provider.md) | 1 | none |
+| 03 | [Container endpoint resolver](task-03-container-endpoint-resolver.md) | 1 | none |
+| 04 | [Remote Docker runtime](task-04-remote-docker-runtime.md) | 2 | 01, 02, 03 |
+| 05 | [Profile create flow and connection test](task-05-profile-create-and-test.md) | 3 | 04 |
+| 06 | [E2E scenario and public documentation](task-06-e2e-and-docs.md) | 4 | 05 |
+| 07 | [Route environment status and teardown to the owning executor](task-07-environment-layer-executor-dispatch.md) | 4 | 04 |
 
 ## Verification
 

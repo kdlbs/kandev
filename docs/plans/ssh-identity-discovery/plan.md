@@ -44,8 +44,8 @@ Out of scope:
 
 | Wave | Work order | Depends on |
 |------|-----------|------------|
-| 1 | `task-01-identity-discovery-endpoint.md` | — |
-| 2 | `task-02-identity-file-picker.md` | task-01 |
+| 1 | [Identity discovery endpoint](task-01-identity-discovery-endpoint.md) | — |
+| 2 | [Identity file picker with custom path](task-02-identity-file-picker.md) | task-01 |
 
 ## ASCII UI previews
 
