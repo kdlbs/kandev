@@ -92,6 +92,7 @@ test.describe("Routines UI", () => {
     testPage,
     officeApi,
     officeSeed,
+    prCapture,
   }) => {
     const name = "E2E Wire Contract Create";
     await testPage.goto("/office/routines");
@@ -116,6 +117,11 @@ test.describe("Routines UI", () => {
     await testPage.getByRole("option", { name: "Skip missed" }).click();
     await testPage.getByLabel("Cron Expression").fill("*/5 * * * *");
     await testPage.getByLabel("Timezone").fill("America/New_York");
+
+    await prCapture.screenshot("create-dialog-policies-and-cron", {
+      caption:
+        "Create Routine dialog with assignee, concurrency/catch-up policy, task template and cron schedule filled in",
+    });
 
     // AC-OFFICE-ROUTINE-WIRE-002.1/.2: before this capability, the trigger
     // create call this arms was rejected outright (`cronExpression` bound to
@@ -155,6 +161,7 @@ test.describe("Routines UI", () => {
     testPage,
     officeApi,
     officeSeed,
+    prCapture,
   }) => {
     const name = "E2E Wire Contract Detail Save";
     const routine = (await officeApi.createRoutine(officeSeed.workspaceId, { name })) as {
@@ -194,6 +201,11 @@ test.describe("Routines UI", () => {
     await expect(textboxNear(testPage, "Cron expression")).toHaveValue("15 3 * * *");
     await expect(textboxNear(testPage, "Timezone")).toHaveValue("Europe/London");
 
+    await prCapture.screenshot("detail-view-persisted-schedule", {
+      caption:
+        "Routine detail view after save, showing the persisted assignee, policies and armed cron schedule",
+    });
+
     // AC-OFFICE-ROUTINE-WIRE-001.4: an update sends exactly the caller's
     // patch fields under their wire spelling, and the server stores them.
     const stored = await officeApi.getRoutine(routine.id);
@@ -216,6 +228,7 @@ test.describe("Routines UI", () => {
     testPage,
     officeApi,
     officeSeed,
+    prCapture,
   }) => {
     const name = "E2E Wire Contract Read";
     const routine = (await officeApi.createRoutine(officeSeed.workspaceId, {
@@ -246,6 +259,10 @@ test.describe("Routines UI", () => {
     await expect(testPage.getByText("region: us-east")).toBeVisible();
     await expect(testPage.getByText("tier: gold")).toBeVisible();
     await expect(testPage.getByText("[object Object]")).toHaveCount(0);
+    await prCapture.screenshot("list-row-expanded-variables", {
+      caption:
+        "Routines list with an expanded row rendering the persisted assignee, policy and declared variables",
+    });
 
     await testPage.goto(`/office/routines/${routine.id}`);
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
