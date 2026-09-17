@@ -87,10 +87,13 @@ type webAppPullRequest struct {
 	AuthorLogin             string  `json:"author_login"`
 }
 
+// Title and State are never omitempty: a redacted entry blanks them to ""
+// rather than dropping the key, per AC-PLUGINS-TASK-DEPS-003.2. Status stays
+// omitempty because a blocks entry legitimately carries none.
 type webAppTaskDependencyRef struct {
 	ID     string `json:"id"`
-	Title  string `json:"title,omitempty"`
-	State  string `json:"state,omitempty"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
 	Status string `json:"status,omitempty"`
 }
 

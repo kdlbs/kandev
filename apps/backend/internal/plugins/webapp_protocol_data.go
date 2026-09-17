@@ -41,17 +41,30 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 		IncludeEphemeral: true,
 	}
 	if binding.ScopeKind == instances.ScopeTask {
-		task, err := host.Tasks().Get(ctx, binding.TaskID)
-		if err != nil || task == nil {
+		// Resolved via the non-attaching fetchTask, and dependencies attached
+		// only below, after the discard checks: matching the attachment rule
+		// the non-task-scope branch below already documents for itself.
+		dto, model, err := host.fetchTask(ctx, binding.TaskID)
+		if err != nil || dto == nil {
 			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 			return
 		}
-		if !webAppTaskMatches(ctx, host, binding, *task) || !webAppTaskMatchesFilter(*task, filter) || (!includeArchived && task.ArchivedAt != nil) {
+		if !webAppTaskMatches(ctx, host, binding, *dto) || !webAppTaskMatchesFilter(*dto, filter) || (!includeArchived && dto.ArchivedAt != nil) {
 			writeWebAppJSON(w, r, http.StatusOK, webAppPage[webAppTask]{Items: []webAppTask{}, PageInfo: webAppPageInfo{}})
 			return
 		}
+		fetched := []pluginsdk.Task{*dto}
+		host.attachPullRequests(ctx, fetched)
+		var models []*taskmodels.Task
+		if model != nil {
+			models = []*taskmodels.Task{model}
+		}
+		if err := host.attachDependencies(ctx, fetched, models, false); err != nil {
+			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+			return
+		}
 		scope := dependencyRedactionScopeFromBinding(binding, nil)
-		items, info := paginate([]webAppTask{webAppTaskFromSDK(*task, scope)}, page)
+		items, info := paginate([]webAppTask{webAppTaskFromSDK(fetched[0], scope)}, page)
 		writeWebAppJSON(w, r, http.StatusOK, webAppPageFromSDK(items, info))
 		return
 	}
@@ -106,17 +119,29 @@ func (s *Service) getWebAppTask(ctx context.Context, w http.ResponseWriter, r *h
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	task, err := host.Tasks().Get(ctx, taskID)
-	if err != nil || task == nil {
+	// Resolved via the non-attaching fetchTask, and dependencies attached only
+	// below, after the scope check that can discard the result and 404.
+	dto, model, err := host.fetchTask(ctx, taskID)
+	if err != nil || dto == nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
-	if !webAppTaskMatches(ctx, host, binding, *task) {
+	if !webAppTaskMatches(ctx, host, binding, *dto) {
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	scope := dependencyRedactionScopeFromBinding(binding, []string{task.ID})
-	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*task, scope))
+	fetched := []pluginsdk.Task{*dto}
+	host.attachPullRequests(ctx, fetched)
+	var models []*taskmodels.Task
+	if model != nil {
+		models = []*taskmodels.Task{model}
+	}
+	if err := host.attachDependencies(ctx, fetched, models, false); err != nil {
+		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+		return
+	}
+	scope := dependencyRedactionScopeFromBinding(binding, []string{fetched[0].ID})
+	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(fetched[0], scope))
 }
 
 type webAppTaskPatch struct {
