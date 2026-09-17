@@ -257,23 +257,51 @@ func (s *RoutineService) CreateDefaultCoordinatorRoutine(
 
 	now := time.Now().UTC()
 
-	routine, decideRan, err := s.ensureCoordinatorRoutine(ctx, workspaceID, agentID)
+	routine, decision, err := s.ensureCoordinatorRoutine(ctx, workspaceID, agentID)
 	if err != nil {
-		return routine, s.reportCoordinatorLockFailure(workspaceID, agentID, decideRan, err,
+		return routine, s.reportCoordinatorLockFailure(workspaceID, agentID, decision, err,
 			coordinatorInstallConditionLookupFailed, "coordinator install: identity lookup failed")
 	}
+	if decision.created {
+		coordinatorInstallObserved(coordinatorInstallConditionRoutineCreated, workspaceID, agentID)
+		s.logger.Info("coordinator-heartbeat routine created",
+			zap.String("workspace_id", workspaceID),
+			zap.String("agent_id", agentID),
+			zap.String("routine_id", routine.ID))
+	}
 
-	triggerDecideRan := false
+	var triggerDecision coordinatorInstallDecision
 	triggerErr := s.repo.EnsureCoordinatorTrigger(ctx, routine.ID,
 		func(ctx context.Context, triggers []*RoutineTrigger, tx models.CoordinatorInstallTx) error {
-			triggerDecideRan = true
-			return s.decideCoordinatorTrigger(ctx, workspaceID, agentID, routine, triggers, tx, now)
+			triggerDecision.ran = true
+			created, derr := s.decideCoordinatorTrigger(ctx, workspaceID, agentID, routine, triggers, tx, now)
+			triggerDecision.created = created
+			triggerDecision.errored = derr != nil
+			return derr
 		})
 	if triggerErr != nil {
-		return routine, s.reportCoordinatorLockFailure(workspaceID, agentID, triggerDecideRan, triggerErr,
+		return routine, s.reportCoordinatorLockFailure(workspaceID, agentID, triggerDecision, triggerErr,
 			coordinatorInstallConditionTriggerReadFailed, "coordinator install: read existing routine triggers failed")
 	}
+	if triggerDecision.created {
+		coordinatorInstallObserved(coordinatorInstallConditionTriggerCompleted, workspaceID, agentID)
+		s.logger.Info("coordinator install: canonical trigger created",
+			zap.String("workspace_id", workspaceID),
+			zap.String("agent_id", agentID),
+			zap.String("routine_id", routine.ID))
+	}
 	return routine, nil
+}
+
+// coordinatorInstallDecision captures what decide did inside one serialized
+// section, independent of whether that section's transaction goes on to
+// commit. Reused for both the routine phase (created means a new routine
+// row) and the trigger phase (created means a new canonical trigger row),
+// which share the same shape.
+type coordinatorInstallDecision struct {
+	ran     bool
+	errored bool
+	created bool
 }
 
 // ensureCoordinatorRoutine implements
@@ -281,31 +309,37 @@ func (s *RoutineService) CreateDefaultCoordinatorRoutine(
 // InstallCoordinatorRoutine's cross-process lock: no match creates a
 // routine; one or more matches selects the earliest (already guaranteed by
 // the repository's created_at, id ordering), reporting the duplicate
-// before continuing exactly as a single match would. decideRan is false
+// before continuing exactly as a single match would. decision.ran is false
 // only when InstallCoordinatorRoutine's own identity lookup failed before
-// this ever ran.
+// this ever ran; decision.created is only ever true once InstallCoordinatorRoutine
+// has returned nil, i.e. once the routine it names has actually committed.
 func (s *RoutineService) ensureCoordinatorRoutine(
 	ctx context.Context, workspaceID, agentID string,
-) (*Routine, bool, error) {
+) (*Routine, coordinatorInstallDecision, error) {
 	var result *Routine
-	decideRan := false
+	var decision coordinatorInstallDecision
 	err := s.repo.InstallCoordinatorRoutine(ctx, workspaceID, agentID, CoordinatorRoutineName,
 		func(ctx context.Context, matches []*Routine, tx models.CoordinatorInstallTx) error {
-			decideRan = true
-			routine, err := s.selectOrCreateCoordinatorRoutine(ctx, workspaceID, agentID, matches, tx)
+			decision.ran = true
+			routine, created, err := s.selectOrCreateCoordinatorRoutine(ctx, workspaceID, agentID, matches, tx)
 			result = routine
+			decision.created = created
+			decision.errored = err != nil
 			return err
 		})
-	return result, decideRan, err
+	return result, decision, err
 }
 
 // selectOrCreateCoordinatorRoutine picks the earliest matched routine, or
 // creates one when none matched (AC-OFFICE-COORDINATOR-INSTALL-001.2/.3/.12).
+// The returned bool reports whether a new routine was created; the caller
+// reports that fact only once the enclosing transaction has committed.
 func (s *RoutineService) selectOrCreateCoordinatorRoutine(
 	ctx context.Context, workspaceID, agentID string, matches []*Routine, tx models.CoordinatorInstallTx,
-) (*Routine, error) {
+) (*Routine, bool, error) {
 	if len(matches) == 0 {
-		return s.createCoordinatorRoutine(ctx, workspaceID, agentID, tx)
+		routine, err := s.createCoordinatorRoutine(ctx, workspaceID, agentID, tx)
+		return routine, err == nil, err
 	}
 	selected := matches[0]
 	if len(matches) > 1 {
@@ -316,7 +350,7 @@ func (s *RoutineService) selectOrCreateCoordinatorRoutine(
 			zap.String("routine_id", selected.ID),
 			zap.Int("match_count", len(matches)))
 	}
-	return selected, nil
+	return selected, false, nil
 }
 
 // hasAnyCronTrigger reports whether the routine owns a cron trigger of any
@@ -336,7 +370,8 @@ func hasAnyCronTrigger(triggers []*RoutineTrigger) bool {
 // AC-OFFICE-COORDINATOR-INSTALL-001.12's routine half: no routine matched
 // the identity, so create one. A routine-insert failure creates nothing;
 // its canonical trigger is created separately by decideCoordinatorTrigger
-// once this commits.
+// once this commits. The success report belongs to the caller, once the
+// enclosing transaction has actually committed.
 func (s *RoutineService) createCoordinatorRoutine(
 	ctx context.Context, workspaceID, agentID string, tx models.CoordinatorInstallTx,
 ) (*Routine, error) {
@@ -359,11 +394,6 @@ func (s *RoutineService) createCoordinatorRoutine(
 			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID), zap.Error(err))
 		return nil, fmt.Errorf("create coordinator routine: %w", err)
 	}
-	coordinatorInstallObserved(coordinatorInstallConditionRoutineCreated, workspaceID, agentID)
-	s.logger.Info("coordinator-heartbeat routine created",
-		zap.String("workspace_id", workspaceID),
-		zap.String("agent_id", agentID),
-		zap.String("routine_id", routine.ID))
 	return routine, nil
 }
 
@@ -373,11 +403,13 @@ func (s *RoutineService) createCoordinatorRoutine(
 // trigger (canonical or not, enabled or disabled) is left untouched and its
 // schedule state reported; a routine with no cron trigger at all — whether
 // freshly created or a previous install's half-finished routine — gets the
-// canonical trigger created.
+// canonical trigger created. The returned bool reports whether a trigger was
+// newly created; the caller reports that fact only once the enclosing
+// transaction has committed.
 func (s *RoutineService) decideCoordinatorTrigger(
 	ctx context.Context, workspaceID, agentID string, routine *Routine,
 	triggers []*RoutineTrigger, tx models.CoordinatorInstallTx, now time.Time,
-) error {
+) (bool, error) {
 	if hasAnyCronTrigger(triggers) {
 		state, _ := ClassifyRoutine(triggers, now)
 		coordinatorInstallObserved(coordinatorInstallConditionScheduleState, workspaceID, agentID)
@@ -386,17 +418,12 @@ func (s *RoutineService) decideCoordinatorTrigger(
 			zap.String("agent_id", agentID),
 			zap.String("routine_id", routine.ID),
 			zap.String("schedule_state", string(state)))
-		return nil
+		return false, nil
 	}
 	if err := s.createCanonicalTrigger(ctx, workspaceID, agentID, routine, tx, now); err != nil {
-		return err
+		return false, err
 	}
-	coordinatorInstallObserved(coordinatorInstallConditionTriggerCompleted, workspaceID, agentID)
-	s.logger.Info("coordinator install: canonical trigger created",
-		zap.String("workspace_id", workspaceID),
-		zap.String("agent_id", agentID),
-		zap.String("routine_id", routine.ID))
-	return nil
+	return true, nil
 }
 
 // createCanonicalTrigger inserts the canonical cron trigger for routine:
@@ -444,16 +471,21 @@ func (s *RoutineService) createCanonicalTrigger(
 // returned and reports whichever condition decide had no chance to report
 // itself: lock contention (AC-OFFICE-COORDINATOR-INSTALL-001.13), the
 // caller's own context ending while waiting (also .13, distinguishable
-// from contention), or — via fallbackCondition/fallbackMsg — the read that
-// precedes decide failing before decide ever ran
-// (AC-OFFICE-COORDINATOR-INSTALL-001.7). When decideRan is true, the
-// specific condition was already reported at its own failure site inside
-// decide, so this only wraps the error for the caller — it never
-// double-reports.
+// from contention), the read that precedes decide failing before decide
+// ever ran (AC-OFFICE-COORDINATOR-INSTALL-001.7, via
+// fallbackCondition/fallbackMsg), or the serialized transaction failing to
+// commit after decide itself succeeded. decision.errored is checked first
+// and gates every other case: when decide's own failure path already
+// reported its specific condition at its own failure site, nothing here
+// reports again, even though classifyCoordinatorInstallWaitErr's
+// busy-text/deadline heuristic can independently match decide's own error
+// text and would otherwise also match the contention case below.
 func (s *RoutineService) reportCoordinatorLockFailure(
-	workspaceID, agentID string, decideRan bool, err error, fallbackCondition, fallbackMsg string,
+	workspaceID, agentID string, decision coordinatorInstallDecision, err error, fallbackCondition, fallbackMsg string,
 ) error {
 	switch {
+	case decision.errored:
+		// decide already reported at its own failure site; nothing to add.
 	case errors.Is(err, models.ErrCoordinatorInstallContention):
 		coordinatorInstallObserved(coordinatorInstallConditionContention, workspaceID, agentID)
 		s.logger.Warn("coordinator install: lock contention",
@@ -462,9 +494,16 @@ func (s *RoutineService) reportCoordinatorLockFailure(
 		coordinatorInstallObserved(coordinatorInstallConditionCancelled, workspaceID, agentID)
 		s.logger.Warn("coordinator install: context cancelled while waiting",
 			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID))
-	case !decideRan:
+	case !decision.ran:
 		coordinatorInstallObserved(fallbackCondition, workspaceID, agentID)
 		s.logger.Warn(fallbackMsg,
+			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID), zap.Error(err))
+	default:
+		// decide ran and returned nil, so the commit that failed is the
+		// only thing that went wrong (AC-OFFICE-COORDINATOR-INSTALL-001.12's
+		// "insert fails" branch: the work never became durable).
+		coordinatorInstallObserved(coordinatorInstallConditionCommitFailed, workspaceID, agentID)
+		s.logger.Warn("coordinator install: commit failed after decide succeeded",
 			zap.String("workspace_id", workspaceID), zap.String("agent_id", agentID), zap.Error(err))
 	}
 	return fmt.Errorf("create default coordinator routine: %w", err)

@@ -29,6 +29,7 @@ const (
 	coordinatorInstallConditionRoutineCreateFailed  = "routine_create_failed"
 	coordinatorInstallConditionContention           = "contention"
 	coordinatorInstallConditionCancelled            = "cancelled"
+	coordinatorInstallConditionCommitFailed         = "commit_failed"
 )
 
 // coordinatorInstallLabel builds the "k1=v1;k2=v2" label string the office

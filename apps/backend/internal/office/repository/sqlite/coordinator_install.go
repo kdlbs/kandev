@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -223,7 +224,7 @@ func (r *Repository) WithCoordinatorInstallLock(
 		return classifyCoordinatorInstallWaitErr(ctx, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return err
+		return classifyCoordinatorInstallWaitErr(ctx, err)
 	}
 	committed = true
 	return nil
@@ -263,11 +264,16 @@ const sqliteBusyErrText = "database is locked"
 // the latter is contention (AC-OFFICE-COORDINATOR-INSTALL-001.13), the
 // former is cancellation, reported distinguishably from both contention and
 // the plain read/write failures of AC-OFFICE-COORDINATOR-INSTALL-001.7.
+// sql.ErrTxDone is included in the contention bucket because it is what
+// database/sql surfaces from Commit when boundCtx's own deadline already
+// auto-rolled the transaction back underneath it — the same exhausted-wait
+// outcome as the deadline case, just observed one call later.
 func classifyCoordinatorInstallWaitErr(callerCtx context.Context, err error) error {
 	if callerCtx.Err() != nil {
 		return callerCtx.Err()
 	}
-	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), sqliteBusyErrText) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, sql.ErrTxDone) ||
+		strings.Contains(err.Error(), sqliteBusyErrText) {
 		return models.ErrCoordinatorInstallContention
 	}
 	return err

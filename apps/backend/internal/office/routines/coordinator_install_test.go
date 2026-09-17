@@ -366,6 +366,73 @@ func TestCreateDefaultCoordinatorRoutine_DuplicateMatchesSelectsEarliestAndCompl
 	}
 }
 
+// AC-OFFICE-COORDINATOR-INSTALL-001.3: when two duplicate matches share the
+// identical created_at, the tie is broken by id ascending — this is the
+// case TestCreateDefaultCoordinatorRoutine_DuplicateMatchesSelectsEarliestAndCompletes
+// above cannot exercise, since its two routines differ by created_at alone.
+func TestCreateDefaultCoordinatorRoutine_DuplicateMatchesTiesBreakByIDAscending(t *testing.T) {
+	repo := newCoordinatorInstallRepo(t)
+	tied := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	lowerID := &Routine{
+		ID: "r-aaa-lower", WorkspaceID: "ws-1", Name: CoordinatorRoutineName, TaskTemplate: "",
+		AssigneeAgentProfileID: "agent-1", Status: "active", ConcurrencyPolicy: "coalesce_if_active", Variables: "{}",
+	}
+	if err := repo.CreateRoutine(context.Background(), lowerID); err != nil {
+		t.Fatalf("seed lower-id routine: %v", err)
+	}
+	patchRoutineCreatedAt(t, repo, lowerID.ID, tied)
+
+	higherID := &Routine{
+		ID: "r-zzz-higher", WorkspaceID: "ws-1", Name: CoordinatorRoutineName, TaskTemplate: "",
+		AssigneeAgentProfileID: "agent-1", Status: "active", ConcurrencyPolicy: "coalesce_if_active", Variables: "{}",
+	}
+	if err := repo.CreateRoutine(context.Background(), higherID); err != nil {
+		t.Fatalf("seed higher-id routine: %v", err)
+	}
+	patchRoutineCreatedAt(t, repo, higherID.ID, tied)
+	if err := repo.CreateRoutineTrigger(context.Background(), &RoutineTrigger{
+		ID: "t-higher", RoutineID: higherID.ID, Kind: "cron",
+		CronExpression: "0 * * * *", Timezone: "UTC", Enabled: true,
+	}); err != nil {
+		t.Fatalf("seed higher-id trigger: %v", err)
+	}
+
+	svc := newCoordinatorInstallService(t, repo)
+
+	routine, err := svc.CreateDefaultCoordinatorRoutine(context.Background(), "ws-1", "agent-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routine.ID != lowerID.ID {
+		t.Errorf("selected routine id = %q, want the lower id %q for the created_at tie", routine.ID, lowerID.ID)
+	}
+
+	lowerTriggers, err := repo.ListTriggersByRoutineID(context.Background(), lowerID.ID)
+	if err != nil {
+		t.Fatalf("list lower-id triggers: %v", err)
+	}
+	if len(lowerTriggers) != 1 {
+		t.Fatalf("lower-id trigger count = %d, want 1 (completed)", len(lowerTriggers))
+	}
+
+	higherTriggers, err := repo.ListTriggersByRoutineID(context.Background(), higherID.ID)
+	if err != nil {
+		t.Fatalf("list higher-id triggers: %v", err)
+	}
+	if len(higherTriggers) != 1 || higherTriggers[0].ID != "t-higher" {
+		t.Errorf("non-selected (higher id) routine's trigger was touched: %+v", higherTriggers)
+	}
+
+	higherRoutine, err := repo.GetRoutine(context.Background(), higherID.ID)
+	if err != nil {
+		t.Fatalf("get higher-id routine: %v", err)
+	}
+	if higherRoutine.Status != "active" {
+		t.Errorf("non-selected (higher id) routine status changed to %q", higherRoutine.Status)
+	}
+}
+
 // AC-OFFICE-COORDINATOR-INSTALL-001.6: an existing match's status is never
 // changed by either the .4 (repair) or .5 (unchanged) branch, even when
 // the routine's status is not "active".
