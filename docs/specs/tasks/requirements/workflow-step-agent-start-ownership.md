@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-05
-updated: 2026-09-12
+updated: 2026-09-17
 owners:
   - Kandev
 ---
@@ -97,6 +97,35 @@ intent-derived destination.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.4:** Desktop and mobile task
 creation shall apply the same immediate-launch placement rule.
 
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005: Asynchronous start failure prompt preservation
+
+**Intent:** An automatic step prompt survives an agent start that fails after the
+launch call has already returned, so the step can proceed without a human
+retyping the prompt.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1:** When an automatic step
+launch for a `CREATED` session fails after the launch call returned, the system
+shall queue the composed step prompt for that session, with its attachments,
+entity references, and step handoff text.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.2:** The queued prompt shall
+be delivered once when the session next becomes promptable, and shall not create
+a second chat-history user message for a prompt already recorded at launch time.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.3:** Preserving the prompt
+shall not start an agent process. The session shall reach its failure state
+through the existing start-failure projection, and exactly one path shall own
+the agent start for the step entry.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** When the agent process
+starts successfully, the system shall discard the preserved prompt, so a later
+unrelated start failure on the same session shall not redeliver it.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** When the launch fails
+synchronously, the system shall preserve the prompt through the synchronous
+failure path only, and shall not queue the same prompt twice.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.6:** A start failure from a
+superseded execution, a stale resume attempt, or a session whose cancellation is
+in progress shall not consume or queue the preserved prompt.
+
 ## Migrated source detail
 
 ## Why
@@ -163,6 +192,8 @@ and unprompted.
   as today.
 - Queueing the prompt after a failed start itself fails: the failure is logged
   and the session's `FAILED` state is unchanged.
+- Queueing the prompt after an asynchronous start failure itself fails: the
+  failure is logged and the session's start-failure projection is unchanged.
 
 ## Scenarios
 
@@ -187,22 +218,28 @@ and unprompted.
 - **GIVEN** a `CREATED` launch rejected permanently (Office scheduler guard),
   **WHEN** the failure is handled, **THEN** the error is returned and no
   message is queued.
+- **GIVEN** a `CREATED` session entering a step whose `on_enter` has
+  `reset_agent_context` and `auto_start_agent`, **WHEN** the agent process start
+  fails after the launch call has already returned, **THEN** the composed step
+  prompt is queued exactly once for that session and no second agent start is
+  attempted.
+- **GIVEN** the same launch, **WHEN** the agent process starts successfully,
+  **THEN** the preserved prompt is discarded and a later start failure on that
+  session queues nothing.
 
-## Known gap
+## Asynchronous start failure
 
-Prompt preservation across an **asynchronous** start failure is not covered
-here. `startAgentOnExistingWorkspace` ends with `startAgentProcessAsync` and
-returns `nil`, so a session with a prepared execution — the incident's own shape
-— never surfaces a synchronous error for the clause above to catch. That failure
-is handled entirely by `handleAgentProcessStartFailure` →
-`Service.handleAgentStartFailed`, which has no access to the prompt the launch
-was carrying and therefore cannot re-queue it.
+`startAgentOnExistingWorkspace` ends with `startAgentProcessAsync` and returns
+`nil`, so a session with a prepared execution never surfaces a synchronous error
+for the clause above to catch. That failure is handled by
+`handleAgentProcessStartFailure` → `Service.handleAgentStartFailed`, which
+originally had no access to the prompt the launch was carrying and therefore
+dropped it.
 
-Task 01 removes the only known trigger for that path on a first-turn launch, so
-the incident cannot recur through it. The residual gap — any *other* async start
-failure on a first-turn launch drops the step prompt — is a distinct pre-existing
-defect. Closing it needs a pending-prompt handle the async failure path can
-read, which is a design change beyond this repair.
+REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005 closes that gap: the launch
+records a single-use handle carrying the composed prompt, and whichever of the
+two start outcomes lands first consumes it — a successful start discards it,
+an asynchronous failure queues it for the session's next promptable transition.
 
 ## Out of scope
 

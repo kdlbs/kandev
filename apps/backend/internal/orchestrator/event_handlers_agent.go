@@ -3477,6 +3477,13 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			}
 			return true
 		}
+
+		// This failure belongs to the session's current execution attempt:
+		// it survived the cancel-in-flight, stale-resume-attempt, and
+		// superseded/terminal checks above. Recover any step-entry prompt a
+		// CREATED-session auto-start launch armed before this asynchronous
+		// start failed, regardless of how the failure is classified below.
+		s.recoverPendingStepPromptOnAsyncStartFailure(ctx, sessionID)
 	}
 	if failureData.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution) {
 		s.logger.Info("managed npm runtime startup failure is recoverable",

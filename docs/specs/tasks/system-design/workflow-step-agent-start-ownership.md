@@ -6,6 +6,7 @@ requirements:
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004
+  - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005
 ---
 
 # Workflow Step Agent Start Ownership System Design
@@ -26,6 +27,7 @@ The design preserves runtime configuration through the existing reset contract. 
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002` | [Active-turn reset flow](#active-turn-reset-flow), [Bounded predecessor wait](#bounded-predecessor-wait), [Reset failure containment](#reset-failure-containment) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003` | [Prompt fallback ownership](#prompt-fallback-ownership), [Prompt-history contract](#prompt-history-contract), [Workflow-entry prompt flow](#workflow-entry-prompt-flow) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004` | [Creation destination routing](#creation-destination-routing) |
+| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005` | [Asynchronous start failure prompt preservation](#asynchronous-start-failure-prompt-preservation) |
 
 ## Components and responsibilities
 
@@ -250,6 +252,46 @@ step prompt a second time. If a non-empty step prompt does not contain
 
 The explicit workflow-step launch keeps its existing resume and session-setting
 behavior. It does not call `PromptTask` when the composed prompt is empty.
+
+## Asynchronous start failure prompt preservation
+
+The `CREATED` launch inside `autoStartStepPrompt` records the composed prompt in
+chat history and then hands the prompt to the executor as the execution
+description. `startAgentOnExistingWorkspace` starts the subprocess through
+`startAgentProcessAsync` and returns before the start outcome is known, so the
+prompt has no owner once that goroutine fails.
+
+The orchestrator owns a single-use pending step-prompt handle, keyed by session,
+holding everything the queue write needs: the prompt, plan mode, attachments,
+entity references, step handoff text, the workflow message origin, and whether
+the chat-history user row was already written.
+
+The launch arms the handle immediately before it calls
+`startCreatedSessionWithComposedPrompt`. Exactly one consumer takes it:
+
+1. A synchronous launch error takes the handle and preserves the prompt through
+   the existing synchronous failure path, so the prompt is never queued twice.
+2. A successful agent process start takes the handle and discards it. The
+   execution description already carried the prompt to the agent.
+3. An asynchronous start failure takes the handle and queues the prompt for the
+   session.
+
+The asynchronous consumer runs in `Service.handleAgentStartFailed`, after that
+handler's existing ownership checks. A failure from a superseded execution, a
+stale resume attempt, or a session with cancellation in progress returns before
+the take, so the handle stays armed for the path that owns the session.
+
+Preservation queues only. It starts no agent process and schedules no automatic
+resume, because the session is heading into the start-failure projection and a
+resume from this path would race that projection and could loop against a
+permanently failing start. The existing boot-ready drain delivers the queued
+prompt when the session next becomes promptable, through recovery or a user
+retry. The queue entry carries the recorded-message flag, so the drain does not
+write a second chat-history row for a prompt already recorded at launch.
+
+The handle is in-memory and scoped to one launch window. A backend restart
+between launch and failure outcome is covered by session recovery, not by this
+handle.
 
 ## Failure and recovery
 

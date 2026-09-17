@@ -299,6 +299,11 @@ func (s *Service) handleAgentProcessStarted(
 	ctx context.Context,
 	_, sessionID, agentExecutionID string,
 ) {
+	// A successful start already delivered any armed step-entry prompt as
+	// the execution description (see autoStartStepPrompt); discard the
+	// handle so an unrelated later failure on this session has nothing
+	// stale to re-queue.
+	s.discardPendingStepPrompt(sessionID)
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}

@@ -1435,6 +1435,15 @@ type Service struct {
 	resumeAttemptsMu sync.Mutex
 	resumeAttempts   *resumeAttemptRegistry
 
+	// pendingStepPrompts holds, per session, the composed step-entry prompt
+	// carried by a CREATED-session auto-start launch whose agent process is
+	// starting asynchronously. startAgentProcessAsync returns before the
+	// start outcome is known, so this handle lets a later async success or
+	// failure callback recover the prompt without it being threaded back
+	// through the launch's call stack (REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005).
+	pendingStepPromptsMu sync.Mutex
+	pendingStepPrompts   *pendingStepPromptRegistry
+
 	// Service state
 	mu        sync.RWMutex
 	running   bool

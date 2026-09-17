@@ -5793,6 +5793,23 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
+		// Arm the pending-prompt handle before the launch call: the agent
+		// process starts asynchronously (startAgentProcessAsync), so a start
+		// failure can surface after this call already returned success. The
+		// handle is disarmed just below on a synchronous failure (already
+		// queued by handleCreatedAutoStartLaunchFailure), taken by
+		// recoverPendingStepPromptOnAsyncStartFailure on an asynchronous one,
+		// or discarded by handleAgentProcessStarted on a successful start.
+		s.armPendingStepPrompt(sessionID, pendingStepPrompt{
+			taskID:              taskID,
+			prompt:              prompt,
+			planMode:            planMode,
+			attachments:         attachments,
+			origin:              origin,
+			userMessageRecorded: userMsgRecorded,
+			references:          references,
+			handoffText:         handoffForQueue,
+		})
 		_, err := s.startCreatedSessionWithComposedPrompt(
 			ctx, taskID, sessionID, session.AgentProfileID,
 			recordedPrompt, agentPrompt, true, planMode, true, attachments, references,
@@ -5802,6 +5819,7 @@ func (s *Service) autoStartStepPrompt(
 		// via heldRelease ensures the guard is always released even on panic.
 		defer heldRelease()
 		if err != nil {
+			s.discardPendingStepPrompt(sessionID)
 			s.handleCreatedAutoStartLaunchFailure(
 				ctx, taskID, sessionID, stepName, prompt, err,
 				planMode, shouldQueueIfBusy, userMsgRecorded,
@@ -6184,6 +6202,64 @@ func (s *Service) queueAutoStartPrompt(
 	references []v1.EntityReference,
 	handoffText string,
 ) error {
+	return s.queueWorkflowStepPrompt(
+		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
+		userMessageRecorded, references, handoffText, true,
+	)
+}
+
+// queueAsyncStartFailurePrompt queues a composed step-entry prompt that lost
+// an asynchronous agent-process start after startAgentProcessAsync already
+// returned control to its caller (REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4).
+// Unlike queueAutoStartPrompt, it does not schedule an auto-resume: the start
+// failure projection (or its recoverable-failure retry) already owns the
+// session's next promptable transition, and scheduling a resume here would
+// race that projection or loop indefinitely against a start that keeps
+// failing. The existing boot-ready drain delivers the prompt once the
+// session becomes promptable again (manual retry or recoverable-failure
+// resume), the same contract the synchronous failure path relies on.
+func (s *Service) queueAsyncStartFailurePrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	userMessageRecorded bool,
+	references []v1.EntityReference,
+	handoffText string,
+) error {
+	return s.queueWorkflowStepPrompt(
+		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
+		userMessageRecorded, references, handoffText, false,
+	)
+}
+
+// queueWorkflowStepPrompt persists a workflow step prompt for later drain.
+// userMessageRecorded must be the return value of recordAutoStartMessage: true
+// only when CreateUserMessage actually succeeded. The flag is stamped onto the
+// queue metadata so executeQueuedMessage skips its own CreateUserMessage and
+// avoids the duplicate-user-message bug observed when PromptTask failed
+// transiently and the queue drained on boot_ready. Passing false (failed write
+// or pre-record queue path) lets the drain side record the message instead.
+// Prompt content stays raw here; references remain metadata until drain-time
+// context is built, preventing duplicate system blocks across retries.
+// handoffText, if non-empty, is a completion handoff already claimed for this
+// step entry; it rides the same way, so a dispatch deferred through this
+// queue still appends it last, after entity-reference expansion, at actual
+// dispatch time. scheduleResume controls whether a live agent process is
+// kicked off to drain the queue immediately (see queueAutoStartPrompt vs
+// queueAsyncStartFailurePrompt).
+func (s *Service) queueWorkflowStepPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	userMessageRecorded bool,
+	references []v1.EntityReference,
+	handoffText string,
+	scheduleResume bool,
+) error {
 	if s.messageQueue == nil {
 		return fmt.Errorf("message queue is not configured")
 	}
@@ -6209,7 +6285,9 @@ func (s *Service) queueAutoStartPrompt(
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
+	if scheduleResume {
+		s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
+	}
 	return nil
 }
 
