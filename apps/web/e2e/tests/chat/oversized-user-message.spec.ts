@@ -29,7 +29,7 @@ function oversizedMessage(prefix: string): { source: string; tail: string; first
 }
 
 async function expectBounded(scope: Locator, tail: string): Promise<Locator> {
-  const preview = scope.getByTestId("bounded-message-preview").first();
+  const preview = scope.getByTestId("bounded-message-preview");
   await expect(preview).toBeVisible();
   await expect(preview.getByTestId("bounded-message-preview-notice")).toBeVisible();
   expect(await preview.locator("br").count()).toBeLessThanOrEqual(MESSAGE_PREVIEW_MAX_LINES - 1);
@@ -239,6 +239,40 @@ test.describe("Oversized user-message previews", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "desktop oversized message flow");
   });
 
+  test("keeps the download action touch-sized on a narrow fine-pointer viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 500, height: 900 });
+    const source = Array.from(
+      { length: MESSAGE_PREVIEW_MAX_LINES + 20 },
+      (_, index) => `NARROW-FINE-POINTER-${index}`,
+    ).join("\n");
+    const firstLine = source.split("\n", 1)[0];
+    const task = await createTask(apiClient, seedData, `Narrow fine pointer ${Date.now()}`);
+    if (!task.session_id) throw new Error("narrow fine-pointer task has no session_id");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.sendMessageViaButton(source);
+    await session.waitForChatIdle({ timeout: 60_000 });
+
+    const userBubble = session
+      .activeChat()
+      .getByTestId("user-message-bubble")
+      .filter({ hasText: firstLine })
+      .first();
+    await expect(userBubble).toBeVisible();
+    const download = userBubble.getByRole("button", { name: "Download full text" });
+    const downloadBox = await download.boundingBox();
+    expect(downloadBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await assertNoDocumentHorizontalOverflow(testPage, "narrow fine-pointer preview");
+  });
+
   test("bounds queued previews and keeps their full source expandable", async ({
     testPage,
     apiClient,
@@ -265,7 +299,7 @@ test.describe("Oversized user-message previews", () => {
     await chat.getByTestId("queue-chip").click();
     const panel = chat.getByTestId("queued-ghost-list");
     await expect(panel).toBeVisible();
-    const row = panel.getByTestId("queue-entry").first();
+    const row = panel.getByTestId("queue-entry");
     await expect(row).toBeVisible();
     await row.hover();
     await expectBounded(row, tail);

@@ -38,7 +38,7 @@ export function BoundedMessagePreview({
   testId = "bounded-message-preview",
 }: BoundedMessagePreviewProps) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const selectedPreview = useMemo(() => preview ?? getMessagePreview(source), [preview, source]);
   const download = useCallback(() => {
     triggerFileDownload({ fileName, content: downloadSource, isBinary: false });
@@ -69,7 +69,7 @@ export function BoundedMessagePreview({
             data-testid={`${testId}-download`}
             className={cn(
               "shrink-0 px-0 text-xs",
-              isFinePointer ? "h-7" : "h-11 w-full justify-start",
+              isFinePointer && !isMobile ? "h-7" : "h-11 w-full justify-start",
             )}
           >
             {t("task:downloadFullMessage")}

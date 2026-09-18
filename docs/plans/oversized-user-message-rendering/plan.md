@@ -172,6 +172,15 @@ Artifact validation on 2026-09-18:
 - Catalog discovery lists both new specifications. Git status contains only the four new package documents.
 - Issue assignee readback confirms `carlosflorencio`.
 
+Review remediation on 2026-09-18:
+
+- Preview download controls keep the 44px phone target whenever the responsive state is mobile,
+  including narrow fine-pointer viewports. Component coverage and a 500px fine-pointer desktop
+  browser scenario now verify this behavior.
+- The affected desktop oversized-message suite passed 3 tests, and the affected mobile suite
+  passed 1 test after removing ambiguous first-match selectors from bounded preview and queue-row
+  assertions.
+
 Public documentation changes are included in the completed implementation. Browser checks confirm
 the bounded DOM, exact complete downloads, source preservation, separate reload coverage, in-app
 task switching, queued expansion, pinned expansion, mobile touch targets, and horizontal

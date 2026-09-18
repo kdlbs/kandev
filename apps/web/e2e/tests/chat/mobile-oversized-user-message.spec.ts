@@ -28,7 +28,7 @@ function oversizedMessage(prefix: string): { source: string; tail: string; first
 }
 
 async function expectBounded(scope: Locator, tail: string): Promise<Locator> {
-  const preview = scope.getByTestId("bounded-message-preview").first();
+  const preview = scope.getByTestId("bounded-message-preview");
   await expect(preview).toBeVisible();
   await expect(preview.getByTestId("bounded-message-preview-notice")).toBeVisible();
   expect(await preview.locator("br").count()).toBeLessThanOrEqual(MESSAGE_PREVIEW_MAX_LINES - 1);
@@ -155,7 +155,7 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
   await chat.getByTestId("queue-chip").tap();
   const panel = chat.getByTestId("queued-ghost-list");
   await expect(panel).toBeVisible();
-  const row = panel.getByTestId("queue-entry").first();
+  const row = panel.getByTestId("queue-entry");
   await expect(row).toBeVisible();
   await expectBounded(row, queued.tail);
 

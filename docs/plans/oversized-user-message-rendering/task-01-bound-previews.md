@@ -153,6 +153,14 @@ Verification passed:
 - Public documentation validators and catalog validation.
 - `git diff --check`.
 
+Review remediation also passed:
+
+- The bounded preview component test keeps the download target at 44px for a mobile responsive
+  state with a fine pointer.
+- The desktop oversized-message suite passed 3 tests, including a 500px fine-pointer viewport;
+  the mobile oversized-message suite passed 1 test. Both suites use unambiguous preview and queue
+  row locators.
+
 `pnpm run i18n:zh-hant` remains blocked by the existing `openAgentSettings` residual simplified
 entries in the workflows catalogs; it refused to write and the complete Traditional Chinese task
 catalogs pass `i18n:check`. Full specification lint passed after the pre-existing duplicate

@@ -2,13 +2,40 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderUserMessageBody } from "./user-message-body";
 
-const { triggerFileDownload } = vi.hoisted(() => ({ triggerFileDownload: vi.fn() }));
+const { triggerFileDownload, responsiveBreakpoint } = vi.hoisted(() => ({
+  triggerFileDownload: vi.fn(),
+  responsiveBreakpoint: {
+    value: {
+      breakpoint: "desktop",
+      isMobile: false,
+      isTablet: false,
+      isDesktop: true,
+      isCompactDesktop: false,
+      isFullDesktop: true,
+      isFinePointer: true,
+      usesDesktopWorkbench: true,
+    },
+  },
+}));
 
 vi.mock("@/lib/utils/file-download", () => ({ triggerFileDownload }));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsiveBreakpoint.value,
+}));
 
 afterEach(() => {
   cleanup();
   triggerFileDownload.mockReset();
+  responsiveBreakpoint.value = {
+    breakpoint: "desktop",
+    isMobile: false,
+    isTablet: false,
+    isDesktop: true,
+    isCompactDesktop: false,
+    isFullDesktop: true,
+    isFinePointer: true,
+    usesDesktopWorkbench: true,
+  };
 });
 
 const oversizedLog = Array.from(
@@ -120,6 +147,37 @@ describe("renderUserMessageBody", () => {
     expect(container.querySelectorAll("br").length).toBeLessThanOrEqual(199);
     expect(container.textContent).not.toContain("after-119");
     expect(screen.getByTestId("bounded-message-preview-notice")).toBeTruthy();
+  });
+});
+
+describe("mobile renderUserMessageBody", () => {
+  it("keeps mobile download targets touch-sized with a fine pointer", () => {
+    responsiveBreakpoint.value = {
+      breakpoint: "mobile",
+      isMobile: true,
+      isTablet: false,
+      isDesktop: false,
+      isCompactDesktop: false,
+      isFullDesktop: false,
+      isFinePointer: true,
+      usesDesktopWorkbench: false,
+    };
+
+    render(
+      <>
+        {renderUserMessageBody({
+          hasContent: true,
+          showRaw: false,
+          hasAttachments: false,
+          content: oversizedLog,
+          taskId: "task-1",
+        })}
+      </>,
+    );
+
+    const download = screen.getByRole("button", { name: "Download full text" });
+    expect(download.className).toContain("h-11");
+    expect(download.className).not.toContain("h-7");
   });
 });
 
