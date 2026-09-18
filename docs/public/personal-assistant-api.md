@@ -8,7 +8,7 @@ status: experimental
 
 This reference describes the in-development backend for a user-owned assistant built on [workspace orchestration](orchestration-personas.md), independently of Office.
 
-It is **not ready for production use**. The central assistant UI and native attention/input handling are not implemented yet; combined qualification is still pending.
+It is **not ready for production use**. Native attention, input resolution and pause/stop APIs are implemented. The central assistant UI and combined qualification are still pending.
 
 Both `features.orchestration` (`KANDEV_FEATURES_ORCHESTRATION`) and
 `features.personalAssistant` (`KANDEV_FEATURES_PERSONAL_ASSISTANT`) must be enabled
@@ -195,3 +195,32 @@ Before launching a queued wake, the server re-reads its native source and scope.
 The `orchestration.assistant.updated` WebSocket notification reaches only the
 owner and contains `binding_id` and `revision`. Re-fetch the authorized page on
 notification or reconnect. Native resolution controls are added separately.
+
+
+## Native questions and controls
+
+`GET /assistant/attention/:id/input` returns the current attention revision and
+native input, including every offered option. Submit a human response to
+`POST /assistant/attention/:id/resolve` with `operation_id`,
+`expected_intent_revision`, `expected_binding_version`, `expected_revision`,
+`source_revision`, and `session_id`. Questions use `answers` entries with
+`question_id`, `selected_options` and/or `custom_text`; a permission uses its
+actual `option_id`. The original native authorization, current-turn and delivery
+checks apply. Expired requests remain expired. Reuse the exact operation ID and
+payload after a lost response; an unknown receipt must not trigger a blind retry.
+
+The broker exposes `attention_input` and `answer_question`. An assistant answer
+requires the native question's explicit `assistant_delegable: true`, a current
+worker `context_ref`, and `memory_ids` citing confirmed, untruncated memory in
+that context. The selected execution mode must permit worker writes. Native
+messages retain the assistant identity and cited memory IDs. A runtime cannot
+approve a permission, resolve authentication, or label its answer as a human's.
+
+Human `POST /assistant/control` accepts `pause`, `resume`, or
+`stop_managed_work` plus the same operation, intent and binding identities.
+Pause blocks new assistant turns while existing workers keep running. Stop
+invalidates older queued assistant commands and returns a receipt per managed
+session: `stopped`, `already_finished`, `failed` or `unknown`, with `partial`
+and a scope-bound `next_cursor`. Follow each cursor explicitly using the returned
+intent revision and a new operation ID. Stop neither deletes history nor
+undoes external changes. Both controls remain separate from native task status.

@@ -587,6 +587,7 @@ func (r *Repository) completeClaimedClarificationMessages(
 			return fmt.Errorf("clarification message %s is missing question_id", message.ID)
 		}
 		completedMetadata := maps.Clone(message.Metadata)
+		models.ApplyClarificationAttribution(ctx, completedMetadata)
 		completedMetadata["status"] = status
 		completedMetadata[clarificationResponseDeliveryPendingKey] = true
 		if status == clarificationStatusAnswered {

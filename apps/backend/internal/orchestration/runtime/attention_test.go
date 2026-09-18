@@ -28,7 +28,7 @@ func assistantAttentionFixture(t *testing.T) (*Service, *sqlx.DB, *models.Assist
 	t.Helper()
 	s, db, task := newRuntime(t)
 	ctx := context.Background()
-	require.Equal(t, 200, runtimeRequest(t, assistantRouter(s), "PUT", "/api/v1/orchestration/assistant", "", "", map[string]any{"orchestrator_id": "chief"}).Code)
+	require.Equal(t, 200, runtimeRequest(t, assistantRouter(s), "PUT", "/api/v1/orchestration/assistant", "", "", map[string]any{"orchestrator_id": "chief", "execution_mode": "execute"}).Code)
 	b, err := s.Repo.AssistantBinding(ctx, "owner")
 	require.NoError(t, err)
 	require.NoError(t, s.Repo.PutComment(ctx, &models.TaskComment{ID: "source", TaskID: task, AuthorType: "user", AuthorID: "owner", Source: "user", Body: "Review a sample task"}))

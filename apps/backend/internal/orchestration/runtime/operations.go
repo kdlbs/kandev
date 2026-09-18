@@ -61,7 +61,7 @@ func (h *Handler) performOperation(c *gin.Context, claims *runtimeauth.AgentClai
 }
 
 func replayOperation(c *gin.Context, operation *models.Operation) {
-	if operation.State == "acknowledged" || operation.State == statusFailed {
+	if operation.State == statusAcknowledged || operation.State == statusFailed {
 		c.Data(operation.HTTPStatus, "application/json", []byte(operation.ResponseJSON))
 		return
 	}
@@ -76,7 +76,7 @@ func (h *Handler) executeOperation(c *gin.Context, operation *models.Operation, 
 	} else {
 		err = rejectOperation(409, "operation_authority_superseded")
 	}
-	state := "acknowledged"
+	state := statusAcknowledged
 	raw, marshalErr := json.Marshal(result)
 	if err != nil || marshalErr != nil || len(raw) > 32000 {
 		state, raw, status = statusUnknown, []byte("{}"), http.StatusServiceUnavailable
@@ -95,6 +95,9 @@ func (h *Handler) executeOperation(c *gin.Context, operation *models.Operation, 
 	if state == statusUnknown {
 		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "operation_outcome_unknown", "operation_id": operation.OperationID})
 		return
+	}
+	if h.Service.AttentionUpdated != nil {
+		h.Service.AttentionUpdated(ctx, operation.BindingID, time.Now().UTC())
 	}
 	c.Data(status, "application/json", raw)
 }

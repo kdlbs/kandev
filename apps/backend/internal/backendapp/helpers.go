@@ -765,7 +765,9 @@ func registerRoutes(p routeParams) {
 	)
 
 	if p.services.Orchestration != nil {
-		p.services.Orchestration.SetAttentionReader(&assistantAttentionReader{tasks: p.taskSvc, permissions: p.orchestratorSvc, questions: clarificationStore})
+		reader := &assistantAttentionReader{tasks: p.taskSvc, permissions: p.orchestratorSvc, questions: clarificationStore}
+		p.services.Orchestration.SetAttentionReader(reader)
+		p.services.Orchestration.Inputs = &assistantInputResolver{attention: reader, sessions: p.taskSvc, permissions: p.orchestratorSvc, clarifications: clarificationResolver, stopper: p.orchestratorSvc}
 	}
 
 	// Wire pending clarification requests into the office inbox.

@@ -2043,9 +2043,10 @@ func buildQuestionSchemaItem() map[string]any {
 	return map[string]any{
 		typeKey: objType,
 		propsKey: map[string]any{
-			idArg:     str("Stable identifier used as the key in the response map. Auto-assigned (q1, q2, ...) if omitted."),
-			titleArg:  str("Optional short label (≤12 chars) shown above the prompt."),
-			promptArg: str("The question text shown to the user."),
+			idArg:                 str("Stable identifier used as the key in the response map. Auto-assigned (q1, q2, ...) if omitted."),
+			titleArg:              str("Optional short label (≤12 chars) shown above the prompt."),
+			promptArg:             str("The question text shown to the user."),
+			"assistant_delegable": map[string]any{typeKey: "boolean", descriptionArg: "Optional, default false. Allow the personal assistant to answer from confirmed context already authorized for this worker. Never use for permissions, credentials or decisions that require the human."},
 			optionsArg: map[string]any{
 				typeKey:        "array",
 				descriptionArg: "2-6 concrete, actionable choices.",

@@ -1,7 +1,7 @@
 ---
 id: "07-input-resolution"
 title: "Resolve native input from the assistant"
-status: pending
+status: done
 wave: 5
 depends_on: ["03-memory-context","05-tool-authority","06-attention"]
 plan: "plan.md"
@@ -111,4 +111,35 @@ control semantics consumed by the assistant UI.
 
 ## Results
 
-Pending. Record red/green test evidence, exact commands and counts, relevant artifacts, owned changes and cleanup here; synchronize the plan checkbox only after acceptance is met.
+Implemented typed human/native input and broker known-answer paths, stable
+operation receipts, assistant attribution in the native atomic claim, full
+permission generation identities, and independent pause/resume/stop controls.
+The existing native resolver and cancellation service own provider effects.
+No autopilot flag or approval policy is changed.
+
+Observed red/green probes: missing APIs initially returned 404; reused permission
+IDs collapsed three native generations/sessions into one; long questions lost
+their final condition. The final paths pass without duplicating native responses,
+truncating question semantics or treating a partial stop as all stopped.
+
+Verification recorded in local `assistant-input-*` and `assistant-controls-*`
+logs (all data and prompts synthetic):
+
+- Exact work-order filter selects **13 top-level tests**: nine runtime and four
+  native adapter tests. Human parity, current owner/session/revision, duplicate
+  replay, expiry, lost replies, scoped confirmed citations, nondelegable answers,
+  runtime permission denial, honest attribution, pause and per-session stop pass.
+- Full Orchestration, agentctl CLI and clarification packages pass with the race
+  detector. Native attention/input adapters also pass with the race detector.
+- Native stop authorization, full tuple matching, idempotency and coordinator
+  stop regressions pass with the race detector; parent-question tests pass.
+  The full native task-service suite also passes with the race detector (291s).
+- Control CAS, intent invalidation and replay pass on SQLite and PostgreSQL.
+  Full required-store conformance, previous-stable upgrade and canonical native
+  clarification claim tests pass on both engines. SQL guard passes; changed-code Go lint reports zero issues.
+- Feature-off route matrix includes every new input/control route. The named
+  assistant broker exposes 18 operations, without a permission-write tool.
+
+UI actions and visible attribution are owned by work order 08; combined browser
+and real-provider qualification remain in work order 11. The live service is
+unchanged.

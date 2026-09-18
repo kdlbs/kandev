@@ -184,7 +184,7 @@ Execute sequentially in the primary conversation. Waves show dependencies only; 
 | 2 | [02 Objectives and proportional routing](task-02-objectives-routing.md); [03 Scoped memory and handoffs](task-03-memory-context.md) | 02 and 03 done |
 | 3 | [04 Native capability inventory](task-04-capability-inventory.md); [06 Attention reconciliation](task-06-attention.md) | 04 and 06 done |
 | 4 | [05 Enforced inspection](task-05-tool-authority.md) | Done |
-| 5 | [07 Native resolution and controls](task-07-input-resolution.md) | Pending |
+| 5 | [07 Native resolution and controls](task-07-input-resolution.md) | Done |
 | 6 | [08 Assistant interface](task-08-assistant-ui.md) | Pending |
 | 7 | [09 Supervised improvements](task-09-workflow-improvements.md) | Pending |
 | 8 | [10 Workspace grants](task-10-workspace-grants.md) | Pending |

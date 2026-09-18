@@ -3,6 +3,7 @@ package runtime
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agent/runtimeauth"
@@ -54,7 +55,7 @@ func (h *Handler) assistant(c *gin.Context) {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
-	c.JSON(http.StatusOK, row)
+	h.assistantSnapshot(c, row)
 }
 
 func (h *Handler) assistantWorkspaceAllowed(c *gin.Context, workspaceID string) bool {
@@ -101,5 +102,8 @@ func (h *Handler) selectAssistant(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, row)
+	if h.Service.AttentionUpdated != nil {
+		h.Service.AttentionUpdated(ctx, row.ID, time.Now().UTC())
+	}
+	h.assistantSnapshot(c, row)
 }

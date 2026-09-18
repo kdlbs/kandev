@@ -39,6 +39,7 @@ type Launch struct {
 	Env                                              map[string]string
 }
 type Service struct {
+	Inputs           InputResolver
 	AssistantEnabled bool
 	Attention        AttentionReader
 	AttentionUpdated func(context.Context, string, time.Time)
@@ -161,7 +162,7 @@ func (s *Service) launch(ctx context.Context, run *runmodels.Run) error {
 		return err
 	}
 	env := map[string]string{"KANDEV_API_URL": s.APIURL, "KANDEV_API_KEY": token, "KANDEV_RUN_TOKEN": token, "KANDEV_AGENT_ID": a.ID, "KANDEV_AGENT_NAME": a.Name, "KANDEV_WORKSPACE_ID": ws, "KANDEV_RUN_ID": run.ID, "KANDEV_TASK_ID": taskID, "KANDEV_WAKE_REASON": run.Reason, "KANDEV_CLI": s.CLI, "KANDEV_RUNTIME_API_PREFIX": "/api/v1/orchestration"}
-	env["KANDEV_INTENT_REVISION"] = fmt.Sprint(payload["intent_revision"])
+	env["KANDEV_INTENT_REVISION"] = fmt.Sprint(payload[intentRevisionKey])
 	env["KANDEV_PERSONAL_ASSISTANT_ENABLED"] = fmt.Sprint(s.AssistantEnabled)
 	_ = s.Runs.UpdateRunPromptArtifacts(ctx, run.ID, prompt, "")
 	if err := s.Repo.SetRuntimeWorking(ctx, a.ID, true); err != nil {
@@ -237,7 +238,7 @@ func (s *Service) prompt(ctx context.Context, a *models.AgentInstance, taskID st
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&text, "\nCurrent user message (comment_id=%s, intent_revision=%v): %s\n", comment.ID, payload["intent_revision"], comment.Body)
+		fmt.Fprintf(&text, "\nCurrent user message (comment_id=%s, intent_revision=%v): %s\n", comment.ID, payload[intentRevisionKey], comment.Body)
 	}
 	if callback, ok := payload["callback"]; ok {
 		data, _ := json.Marshal(callback)

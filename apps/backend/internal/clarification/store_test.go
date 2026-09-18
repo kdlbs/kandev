@@ -759,3 +759,12 @@ func TestCancelSession_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh(t 
 		t.Fatal("expected CancelCh to be closed by whichever of CancelRequest/CancelSession won the race")
 	}
 }
+
+func TestAssistantInputDelegationChangeDoesNotReuseRequest(t *testing.T) {
+	store := NewStore(time.Minute)
+	first, _ := store.CreateRequest(&Request{SessionID: "session", TaskID: "task", Questions: []Question{{ID: "q", Prompt: "Sample question", AssistantDelegable: true}}})
+	second, _ := store.CreateRequest(&Request{SessionID: "session", TaskID: "task", Questions: []Question{{ID: "q", Prompt: "Sample question"}}})
+	if first == second {
+		t.Fatal("removing delegation must create a new native request")
+	}
+}

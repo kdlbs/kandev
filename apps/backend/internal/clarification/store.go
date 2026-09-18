@@ -507,7 +507,7 @@ func questionsEqual(a, b []Question) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Prompt != b[i].Prompt {
+		if a[i].Prompt != b[i].Prompt || a[i].AssistantDelegable != b[i].AssistantDelegable {
 			return false
 		}
 		if !optionsEqual(a[i].Options, b[i].Options) {

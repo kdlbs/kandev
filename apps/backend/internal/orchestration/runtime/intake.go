@@ -58,7 +58,7 @@ func (s *Service) DispatchIntake(ctx context.Context) error {
 	}
 	var problems []error
 	for _, row := range rows {
-		if err := s.dispatchIntake(ctx, row); err != nil && !errors.Is(err, ErrAssistantDisabled) {
+		if err := s.dispatchIntake(ctx, row); err != nil && !errors.Is(err, ErrAssistantDisabled) && !errors.Is(err, ErrAssistantPaused) {
 			problems = append(problems, err)
 		}
 	}
@@ -78,7 +78,7 @@ func (s *Service) dispatchIntake(ctx context.Context, row models.Intake) error {
 		return s.Repo.AcknowledgeIntake(ctx, row.CommentID, run.RunID)
 	}
 	if err := s.QueueTurn(ctx, row.AgentID, row.TaskID, "task_comment", "task_comment:"+row.CommentID,
-		map[string]any{"comment_id": row.CommentID, "intent_revision": row.Sequence}); err != nil {
+		map[string]any{"comment_id": row.CommentID, intentRevisionKey: row.Sequence}); err != nil {
 		return err
 	}
 	runs, err = s.Runs.GetRunsByCommentIDs(ctx, []string{row.CommentID})

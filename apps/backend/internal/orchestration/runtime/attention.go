@@ -142,7 +142,7 @@ func completeAttentionSources(sources []models.AttentionSource, previous []model
 			continue
 		}
 		source.State = "inactive"
-		if source.Kind == "question" || source.Kind == "permission" {
+		if source.Kind == attentionKindQuestion || source.Kind == "permission" {
 			source.State = models.AttentionExpired
 		}
 		sources = append(sources, source)
@@ -158,10 +158,10 @@ func validateAttentionSources(sources []models.AttentionSource) error {
 	for i := range sources {
 		s := &sources[i]
 		key := s.SessionID + ":" + s.Kind + ":" + s.SourceID
-		if seen[key] || s.SourceID == "" || len(s.SourceID) > 200 || len(s.SessionID) > 200 || s.SourceRevision == "" || len(s.SourceRevision) > 256 {
+		if seen[key] || s.SourceID == "" || len(s.SourceID) > 1024 || len(s.SessionID) > 200 || s.SourceRevision == "" || len(s.SourceRevision) > 256 {
 			return fmt.Errorf("invalid attention identity")
 		}
-		if !slices.Contains([]string{"question", "permission", "authentication", "failure", "review", "result"}, s.Kind) || !slices.Contains([]string{models.AttentionPending, "resolved", "expired", statusUnknown, "inactive"}, s.State) {
+		if !slices.Contains([]string{attentionKindQuestion, "permission", "authentication", "failure", "review", "result"}, s.Kind) || !slices.Contains([]string{models.AttentionPending, "resolved", "expired", statusUnknown, "inactive"}, s.State) {
 			return fmt.Errorf("invalid attention state")
 		}
 		seen[key] = true

@@ -16,12 +16,12 @@ func (s *Service) withIntentRevision(ctx context.Context, taskID string, payload
 	for key, value := range payload {
 		copy[key] = value
 	}
-	if _, present := copy["intent_revision"]; !present {
+	if _, present := copy[intentRevisionKey]; !present {
 		revision, err := s.Repo.IntentRevision(ctx, taskID)
 		if err != nil {
 			return nil, err
 		}
-		copy["intent_revision"] = revision
+		copy[intentRevisionKey] = revision
 	}
 	if _, present := copy["binding_version"]; !present {
 		id, version, err := s.bindingSnapshot(ctx, taskID)
@@ -80,7 +80,7 @@ func (h *Handler) currentIntent(c *gin.Context, taskID, payload string) bool {
 		return false
 	}
 	if snapshot.Revision != revision {
-		c.AbortWithStatusJSON(http.StatusConflict, gin.H{errorResponseKey: "intent_superseded", "intent_revision": revision})
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{errorResponseKey: "intent_superseded", intentRevisionKey: revision})
 		return false
 	}
 	return h.currentBinding(c, taskID, payload)

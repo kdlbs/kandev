@@ -16,16 +16,19 @@ const (
 )
 
 const (
-	statusActive        = "active"
-	authorTypeAgent     = "agent"
-	executionModeDesign = "design"
-	errorResponseKey    = "error"
-	statusFailed        = "failed"
-	nextCursorKey       = "next_cursor"
-	healthUnavailable   = "unavailable"
-	statusUnknown       = "unknown"
-	authorTypeUser      = "user"
-	scopeWorkspace      = "workspace"
+	statusAcknowledged    = "acknowledged"
+	intentRevisionKey     = "intent_revision"
+	attentionKindQuestion = "question"
+	statusActive          = "active"
+	authorTypeAgent       = "agent"
+	executionModeDesign   = "design"
+	errorResponseKey      = "error"
+	statusFailed          = "failed"
+	nextCursorKey         = "next_cursor"
+	healthUnavailable     = "unavailable"
+	statusUnknown         = "unknown"
+	authorTypeUser        = "user"
+	scopeWorkspace        = "workspace"
 )
 
 type Handler struct {
@@ -37,8 +40,13 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	assistant := g.Group("", h.requireAssistant)
 	assistant.GET("/assistant", h.assistant)
 	assistant.PUT("/assistant", h.selectAssistant)
+	assistant.POST("/assistant/control", h.assistantControl)
 	assistant.GET("/assistant/objectives", h.objectives)
 	assistant.GET("/assistant/attention", h.attention)
+	assistant.GET("/assistant/attention/:id/input", h.attentionInput)
+	assistant.GET("/runtime/attention/:id/input", h.attentionInput)
+	assistant.POST("/assistant/attention/:id/resolve", h.resolveAttention)
+	assistant.POST("/runtime/attention/:id/answer", h.resolveAttention)
 	assistant.GET("/runtime/attention", h.attention)
 	assistant.GET("/assistant/capabilities", h.capabilities)
 	assistant.GET("/runtime/capabilities", h.capabilities)

@@ -60,14 +60,17 @@ func assembleInteractions(rows []*models.Message) []*models.Interaction {
 		if pendingID == "" {
 			continue
 		}
-		if _, seen := grouped[pendingID]; !seen {
-			order = append(order, pendingID)
+		requestID, _ := row.Metadata["request_id"].(string)
+		key := row.TaskID + "\x00" + row.TaskSessionID + "\x00" + pendingID + "\x00" + requestID
+		if _, seen := grouped[key]; !seen {
+			order = append(order, key)
 		}
-		grouped[pendingID] = append(grouped[pendingID], row)
+		grouped[key] = append(grouped[key], row)
 	}
 	out := make([]*models.Interaction, 0, len(order))
-	for _, pendingID := range order {
-		if interaction := buildInteraction(pendingID, grouped[pendingID]); interaction != nil {
+	for _, key := range order {
+		pendingID, _ := grouped[key][0].Metadata["pending_id"].(string)
+		if interaction := buildInteraction(pendingID, grouped[key]); interaction != nil {
 			out = append(out, interaction)
 		}
 	}
@@ -188,6 +191,7 @@ func questionFromMetadata(metadata map[string]interface{}) models.InteractionQue
 			question.ID = v
 		}
 	}
+	question.AssistantDelegable, _ = data["assistant_delegable"].(bool)
 	question.Options = clarificationOptionsFromMetadata(data["options"])
 	return question
 }
@@ -236,4 +240,22 @@ func clarificationOptionsFromMetadata(value interface{}) []models.InteractionOpt
 		out = append(out, models.InteractionOption{ID: id, Label: label, Description: description})
 	}
 	return out
+}
+
+// GetScopedInteraction resolves a full native identity even when a provider
+// reuses its pending ID in another session or request generation.
+func (s *Service) GetScopedInteraction(ctx context.Context, task, session, pending, request string) (*models.Interaction, error) {
+	if err := s.AuthorizeTaskAccess(ctx, task); err != nil {
+		return nil, err
+	}
+	rows, err := s.messages.FindMessagesByPendingID(ctx, pending)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range assembleInteractions(rows) {
+		if row.TaskID == task && row.SessionID == session && row.RequestID == request {
+			return row, nil
+		}
+	}
+	return nil, nil
 }

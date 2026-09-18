@@ -341,3 +341,27 @@ and extensions are omitted, with `schema_partial` indicating incomplete data.
 Invocation uses the native full schema. Plugin hints and external MCP tools have
 unknown effect and no inspect grant. Stored integration health is read without
 provider probes; it is a historical observation, not a credential-use grant.
+
+
+## Implemented native input resolution
+
+The bounded native input adapter reads the current full task/session/pending/
+request tuple. Permission source identities encode the provider generation;
+reused pending IDs cannot merge different sessions or generations. Question
+text is redacted without truncating its meaning; a 32 KiB presentation budget
+redirects larger requests to the native task view. The runtime DTO imports no
+Office or clarification implementation.
+
+Human and broker writes use the durable operation ledger before native dispatch.
+Only questions explicitly marked `assistant_delegable` by the native request
+may use confirmed, untruncated citations from the current worker context.
+Attribution is written atomically with the canonical clarification claim.
+Permissions always require the human and a currently offered option. Native
+claim loss is a conflict; transport or delivery ambiguity remains unknown.
+
+Pause changes admission status without changing worker context. Stop advances
+human intent, enumerates managed tasks in pages of 25, rechecks each session's
+binding/link and native authorization, and persists per-session cancellation
+receipts. No broad process kill, history deletion or implied external rollback
+is used. Browser presentation and task-message attribution display follow in
+work order 08.

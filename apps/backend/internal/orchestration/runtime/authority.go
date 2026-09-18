@@ -89,6 +89,9 @@ func (s *Service) assistantAuthority(ctx context.Context, taskID string) (*model
 	if err != nil {
 		return nil, err
 	}
+	if paused(persona) {
+		return nil, ErrAssistantPaused
+	}
 	profile, executor, err := s.executionSelection(ctx, persona)
 	if err != nil {
 		return nil, err
@@ -197,7 +200,7 @@ func assistantRequestEffect(c *gin.Context) string {
 	switch path {
 	case "/runtime/comments", "/runtime/objectives", "/runtime/objectives/:id":
 		return "receipt"
-	case "/runtime/tasks", "/runtime/tasks/:id/manage", "/runtime/tasks/:id/status":
+	case "/runtime/tasks", "/runtime/tasks/:id/manage", "/runtime/tasks/:id/status", "/runtime/attention/:id/answer":
 		return "task_write"
 	default:
 		return statusUnknown

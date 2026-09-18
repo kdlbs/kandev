@@ -179,3 +179,18 @@ func TestInteractionStatusFromMetadataPreservesUnknownTerminalValues(t *testing.
 		t.Fatalf("unknown status = %q (terminal=%v), want it preserved and terminal", got, got.IsTerminal())
 	}
 }
+
+func TestAssistantInputPermissionIdentityIncludesSessionAndGeneration(t *testing.T) {
+	at := time.Now().UTC()
+	first := permissionRow("reused", "", at)
+	first.Metadata["request_id"] = "generation-one"
+	second := permissionRow("reused", "", at)
+	second.TaskSessionID = "session-two"
+	second.Metadata["request_id"] = "generation-two"
+	replacement := permissionRow("reused", "", at)
+	replacement.Metadata["request_id"] = "generation-three"
+	rows := assembleInteractions([]*models.Message{first, second, replacement})
+	if len(rows) != 3 {
+		t.Fatalf("got %d permissions, want each session/request generation", len(rows))
+	}
+}

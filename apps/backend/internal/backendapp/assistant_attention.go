@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -12,16 +13,18 @@ import (
 	shared "github.com/kandev/kandev/internal/orchestration/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"strings"
 )
 
 const attentionQuestion = "question"
+const attentionPermission = "permission"
 
 type attentionTasks interface {
 	AuthorizeTaskAccess(context.Context, string) error
 	GetTask(context.Context, string) (*taskmodels.Task, error)
 	ListTaskSessions(context.Context, string) ([]*taskmodels.TaskSession, error)
 	ListPendingInteractions(context.Context, taskmodels.PendingInteractionFilter) ([]*taskmodels.Interaction, error)
-	GetInteraction(context.Context, string) (*taskmodels.Interaction, error)
+	GetScopedInteraction(context.Context, string, string, string, string) (*taskmodels.Interaction, error)
 }
 type attentionPermissions interface {
 	ListPendingAgentPermissions(context.Context, string, string) ([]streams.PendingAgentPermission, error)
@@ -82,9 +85,9 @@ func attentionSafeSummary(value string) string {
 	return string(text[:min(len(text), 400)])
 }
 func (a *assistantAttentionReader) interactionSource(r *taskmodels.Interaction, live []streams.PendingAgentPermission) shared.AttentionSource {
-	source := shared.AttentionSource{SourceID: r.ID, SessionID: r.SessionID, Kind: attentionQuestion, State: shared.AttentionPending, SourceRevision: attentionDigest(r), Summary: attentionSafeSummary(r.Title)}
+	source := shared.AttentionSource{SourceID: attentionNativeIdentity(r), SessionID: r.SessionID, Kind: attentionQuestion, State: shared.AttentionPending, SourceRevision: attentionDigest(r), Summary: attentionSafeSummary(r.Title)}
 	if r.Kind == taskmodels.InteractionKindPermission {
-		source.Kind = "permission"
+		source.Kind = attentionPermission
 		source.Summary = "A native tool permission needs your decision."
 	}
 	if r.Status.IsTerminal() {
@@ -100,7 +103,7 @@ func (a *assistantAttentionReader) interactionSource(r *taskmodels.Interaction, 
 			}
 		}
 	} else if a.questions == nil {
-		source.State = "unknown"
+		source.State = capabilityUnknown
 	} else if request, ok := a.questions.GetRequest(r.ID); !ok || request.TaskID != r.TaskID || request.SessionID != r.SessionID {
 		source.State = shared.AttentionExpired
 	}
@@ -115,7 +118,7 @@ func attentionTerminalState(status taskmodels.InteractionStatus) string {
 	case taskmodels.InteractionStatusCancelled:
 		return "inactive"
 	default:
-		return "unknown"
+		return capabilityUnknown
 	}
 }
 func (a *assistantAttentionReader) completeAttentionSnapshot(ctx context.Context, task string, sources []shared.AttentionSource, previous []shared.Attention) ([]shared.AttentionSource, error) {
@@ -128,8 +131,8 @@ func (a *assistantAttentionReader) completeAttentionSnapshot(ctx context.Context
 			continue
 		}
 		source := old.AttentionSource
-		if old.Kind == attentionQuestion || old.Kind == "permission" {
-			canonical, err := a.tasks.GetInteraction(ctx, old.SourceID)
+		if old.Kind == attentionQuestion || old.Kind == attentionPermission {
+			canonical, err := a.readCanonicalInput(ctx, old)
 			if err != nil {
 				return nil, err
 			}
@@ -180,4 +183,24 @@ func errorAttentionSource(session, stamp, code string) shared.AttentionSource {
 		kind, summary = "authentication", "The selected provider requires authentication. Use the native account controls."
 	}
 	return shared.AttentionSource{SourceID: "active-error", SessionID: session, Kind: kind, State: shared.AttentionPending, SourceRevision: attentionDigest(stamp), Summary: summary}
+}
+
+func attentionNativeIdentity(request *taskmodels.Interaction) string {
+	if request.Kind != taskmodels.InteractionKindPermission {
+		return request.ID
+	}
+	raw, _ := json.Marshal([2]string{request.ID, request.RequestID})
+	return "permission:" + base64.RawURLEncoding.EncodeToString(raw)
+}
+func (a *assistantAttentionReader) readCanonicalInput(ctx context.Context, row shared.Attention) (*taskmodels.Interaction, error) {
+	pending, request := row.SourceID, ""
+	if row.Kind == attentionPermission {
+		var ids [2]string
+		raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(row.SourceID, "permission:"))
+		if err != nil || json.Unmarshal(raw, &ids) != nil || ids[0] == "" || ids[1] == "" {
+			return nil, nil
+		}
+		pending, request = ids[0], ids[1]
+	}
+	return a.tasks.GetScopedInteraction(ctx, row.TaskID, row.SessionID, pending, request)
 }
