@@ -40,7 +40,7 @@ Read the final tool result's `exit_code`, including for PTY/session commands.
 | Exit | Meaning | Action |
 | --- | --- | --- |
 | 0 | Terminal CI/review counts are clean | Refresh and classify review bodies before delivery. |
-| 1 | Terminal findings, conflicts, or base drift | Triage the reported findings. |
+| 1 | Terminal findings, review threads, conflicts, or base drift | Triage the reported findings. |
 | 2 | Pending checks or an unconfirmed terminal rollup at the deadline | Report the pending work at the user's limit. Otherwise continue waiting. |
 | 3 | Closed PR or unavailable/blocked evidence | Read the stated reason. Never infer a clean result. |
 
@@ -51,6 +51,12 @@ An `all-terminal` exit 1 can therefore show every check green, such as 59
 passed with 0 failed and 0 pending, when only the base relationship is stale.
 Treat that as a merge-result validation finding, not a CI failure; preserve the
 counts and validate against the live base before deciding what to change.
+
+Exit 1 can be a review-only blocker: if `failed_checks` and `pending_checks`
+are empty while unresolved review threads remain, proceed to thread disposition
+instead of CI remediation. After every waiter result, run both
+`scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`; do not
+call the PR clean until the thread list is also clear.
 
 Exit 2 can report zero pending and failed checks when the terminal rollup is
 still unconfirmed. Do not classify the wait as clean from those counts. Refresh
