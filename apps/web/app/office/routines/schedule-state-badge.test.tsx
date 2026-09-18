@@ -39,12 +39,12 @@ describe("ScheduleStateBadge", () => {
   ];
 
   it.each(cases)("renders the group label for schedule state %s", (state, label) => {
-    renderBadge(<ScheduleStateBadge routine={routine({ schedule_state: state })} />);
+    renderBadge(<ScheduleStateBadge routine={routine({ scheduleState: state })} />);
     expect(screen.getByText(label)).toBeTruthy();
   });
 
   it("never renders event_only as having no schedule (AC-002.11)", () => {
-    renderBadge(<ScheduleStateBadge routine={routine({ schedule_state: "event_only" })} />);
+    renderBadge(<ScheduleStateBadge routine={routine({ scheduleState: "event_only" })} />);
     expect(screen.queryByText("No schedule")).toBeNull();
   });
 
@@ -52,7 +52,7 @@ describe("ScheduleStateBadge", () => {
     const labels = new Set<string>();
     for (const [state, label] of cases) {
       cleanup();
-      renderBadge(<ScheduleStateBadge routine={routine({ schedule_state: state })} />);
+      renderBadge(<ScheduleStateBadge routine={routine({ scheduleState: state })} />);
       labels.add(label);
     }
     // Five distinct groups, not nine distinct per-state labels.
@@ -63,7 +63,7 @@ describe("ScheduleStateBadge", () => {
 describe("UnarmedScheduleHint", () => {
   it("renders nothing when the unarmed cron trigger list is empty (AC-002.4)", () => {
     const { container } = render(
-      <UnarmedScheduleHint routine={routine({ unarmed_cron_triggers: [] })} />,
+      <UnarmedScheduleHint routine={routine({ unarmedCronTriggers: [] })} />,
     );
     expect(container.firstChild).toBeNull();
   });
@@ -72,7 +72,7 @@ describe("UnarmedScheduleHint", () => {
     render(
       <UnarmedScheduleHint
         routine={routine({
-          unarmed_cron_triggers: [{ trigger_id: "t1", reasons: ["disabled"] }],
+          unarmedCronTriggers: [{ triggerId: "t1", reasons: ["disabled"] }],
         })}
       />,
     );
@@ -83,7 +83,7 @@ describe("UnarmedScheduleHint", () => {
     render(
       <UnarmedScheduleHint
         routine={routine({
-          unarmed_cron_triggers: [{ trigger_id: "t1", reasons: ["not_schedulable"] }],
+          unarmedCronTriggers: [{ triggerId: "t1", reasons: ["not_schedulable"] }],
         })}
       />,
     );
@@ -94,9 +94,9 @@ describe("UnarmedScheduleHint", () => {
     render(
       <UnarmedScheduleHint
         routine={routine({
-          unarmed_cron_triggers: [
-            { trigger_id: "t1", reasons: ["not_schedulable"] },
-            { trigger_id: "t2", reasons: ["disabled"] },
+          unarmedCronTriggers: [
+            { triggerId: "t1", reasons: ["not_schedulable"] },
+            { triggerId: "t2", reasons: ["disabled"] },
           ],
         })}
       />,

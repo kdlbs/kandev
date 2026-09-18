@@ -39,14 +39,13 @@ describe("readScheduleState / readUnarmedCronTriggers", () => {
     expect(readScheduleState(routine)).toBe("armed");
   });
 
-  it("falls back to the raw snake_case wire field fetchJson leaves untouched", () => {
-    const routine = routineWithRaw({ schedule_state: "trigger_disabled" });
-    expect(readScheduleState(routine)).toBe("trigger_disabled");
+  it("returns undefined when the mapping layer has no schedule state", () => {
+    expect(readScheduleState(routineWithRaw({}))).toBeUndefined();
   });
 
-  it("reads unarmed cron triggers from the snake_case wire shape", () => {
+  it("reads normalized unarmed cron triggers", () => {
     const routine = routineWithRaw({
-      unarmed_cron_triggers: [{ trigger_id: "trig-1", reasons: ["disabled"] }],
+      unarmedCronTriggers: [{ triggerId: "trig-1", reasons: ["disabled"] }],
     });
     expect(readUnarmedCronTriggers(routine)).toEqual([
       { triggerId: "trig-1", reasons: ["disabled"] },

@@ -1,9 +1,4 @@
-import type {
-  Routine,
-  ScheduleState,
-  UnarmedCronTrigger,
-  UnarmedReason,
-} from "@/lib/state/slices/office/types";
+import type { Routine, ScheduleState, UnarmedCronTrigger } from "@/lib/state/slices/office/types";
 
 /**
  * ScheduleStateGroup collapses the nine wire values of `ScheduleState` into
@@ -27,26 +22,14 @@ export function scheduleStateGroup(state: ScheduleState | undefined): ScheduleSt
   return state ? (GROUP_BY_STATE[state] ?? "unknown") : "unknown";
 }
 
-// readScheduleState and readUnarmedCronTriggers tolerate the raw snake_case
-// wire shape (`schedule_state`, `unarmed_cron_triggers`, `trigger_id`)
-// because fetchJson does not case-convert responses; see routine-row.tsx's
-// assigneeAgentProfileId fallback for the established pattern.
+// The API normalizer translates the wire fields before a routine reaches the
+// UI. These readers keep the component code independent of that wire shape.
 export function readScheduleState(routine: Routine): ScheduleState | undefined {
-  const raw = routine as unknown as Record<string, unknown>;
-  return routine.scheduleState ?? (raw.schedule_state as ScheduleState | undefined);
+  return routine.scheduleState;
 }
 
 export function readUnarmedCronTriggers(routine: Routine): UnarmedCronTrigger[] {
-  const raw = routine as unknown as Record<string, unknown>;
-  const list = routine.unarmedCronTriggers ?? (raw.unarmed_cron_triggers as unknown[] | undefined);
-  if (!Array.isArray(list)) return [];
-  return list.map((entry) => {
-    const e = entry as Record<string, unknown>;
-    return {
-      triggerId: (e.triggerId ?? e.trigger_id) as string,
-      reasons: (e.reasons ?? []) as UnarmedReason[],
-    };
-  });
+  return routine.unarmedCronTriggers ?? [];
 }
 
 // isSchedulableEntry reports whether this unarmed cron trigger could still
