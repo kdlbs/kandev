@@ -59,6 +59,12 @@ mergeability, then require the exact head, `checks_snapshot_complete=true`,
 empty failed and pending lists, no unresolved or hidden review threads, and
 `MERGEABLE`/`CLEAN` before calling it clean.
 
+Apply the same rule after `gh run rerun --failed`: a provisional terminal
+rollup may show zero failed and pending checks before the rerun evidence is
+confirmed. Poll once more through `scripts/pr-await`, then require a fresh
+matching-head `scripts/pr-state --summary <PR>` snapshot before triage or
+reporting completion.
+
 The structured report can also say `outcome: deadline` with zero failures while
 E2E jobs remain pending. Treat that outcome as non-terminal, refresh PR state,
 and report the pending checks separately; a deadline is not a green result.
