@@ -1,20 +1,20 @@
-# First live Coordinator pilot
+# First live Orchestrator pilot
 
 Status: applied and running. The implementation, packaged candidate and private
 migration/replay/rollback rehearsal completed before the authorized cutover.
 
 | Review item | Prepared result |
 | --- | --- |
-| Candidate | `0.94.0-orchestration.20260918.sha69753564d0d7` |
-| Source | `69753564d0d7c0121e8681a72e5b4ce8c384a106` |
+| Candidate | `0.94.0-orchestration.20260918.sha0edf89451144` |
+| Source | `0edf89451144098c513618f44cc7a341434b68a7` |
 | Base | Exact v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1` |
 | Bundle | Six immutable binaries; [SHA-256 receipt](candidate-receipt.json) |
 | Qualification | [Completed checks and platform/provider limits](candidate-qualification.md) |
 | Data rehearsal | [Migration, replay, synthetic Coordinator APIs and matched rollback](migration-rehearsal.md) |
 | Service patch | Staged private override; merged user-unit validation passed |
-| Initial flags | Coordinator on; Personal assistant off |
+| Initial flags | Orchestrator on; Office off |
 | Preserved settings | Port, authentication, data/home paths, provider PATH/accounts, identity and resource limits |
-| Live mutation | Candidate installed; Coordinator enabled; Personal assistant disabled |
+| Live mutation | Unified Orchestrator candidate installed |
 
 The local-only packet contains the exact staged override, current service-file
 hashes, final-backup boundaries and ordered cutover/rollback steps. It selects the
@@ -39,7 +39,7 @@ copy for deliberate reconciliation; external effects are not automatically undon
 The reviewed [live-pilot work order](../../plans/orchestration-delivery/task-04-live-pilot.md)
 received the explicit instruction to deploy the named qualified candidate. The
 deployment and recovery checks are recorded in [live-pilot-receipt.json](live-pilot-receipt.json).
-Assistant implementation remains disabled by the separate opt-in in the reviewed
-rollout plan. The first authenticated generic task/review/callback observation
+The Orchestrator includes the owner-level assistant capabilities under the same
+flag. Office remains disabled. The first authenticated generic task/review/callback observation
 and focused upstream PR/export remain follow-up work; no private prompts or
 account data are included in this packet.

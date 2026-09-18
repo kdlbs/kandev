@@ -1,14 +1,14 @@
 {
-  "candidate": "0.94.0-orchestration.20260918.sha69753564d0d7",
-  "source": "69753564d0d7c0121e8681a72e5b4ce8c384a106",
+  "candidate": "0.94.0-orchestration.20260918.sha0edf89451144",
+  "source": "0edf89451144098c513618f44cc7a341434b68a7",
   "base": "v0.94.0",
   "deployment": "applied",
-  "rollout": "Coordinator enabled; Personal assistant disabled",
+  "rollout": "Orchestrator enabled; Office disabled",
   "authentication": "enabled; unauthenticated API check returned 401",
   "service": "active",
   "readiness": "passed",
   "health": "passed",
-  "executable": "frozen candidate bundle",
+  "executable": "frozen candidate bundle; unified Orchestrator gate",
   "restart_recovery": "passed",
   "final_backup": "created and verified before install",
   "database": {
