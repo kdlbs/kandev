@@ -1091,6 +1091,72 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_SetPendingMoveRotatesRowIdentity(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	sqlRepo := repo.(*sqliteRepository)
+	ctx := context.Background()
+
+	move := &PendingMove{MoveID: "move-a", TaskID: "task-1", WorkflowStepID: "step-a"}
+	if err := repo.SetPendingMove(ctx, "session-1", move); err != nil {
+		t.Fatalf("set first pending move: %v", err)
+	}
+	var firstID string
+	if err := sqlRepo.db.GetContext(ctx, &firstID, `SELECT id FROM pending_moves WHERE session_id = ?`, "session-1"); err != nil {
+		t.Fatalf("read first row identity: %v", err)
+	}
+
+	move.MoveID = "move-b"
+	move.WorkflowStepID = "step-b"
+	if err := repo.SetPendingMove(ctx, "session-1", move); err != nil {
+		t.Fatalf("replace pending move: %v", err)
+	}
+	var replacementID string
+	if err := sqlRepo.db.GetContext(ctx, &replacementID, `SELECT id FROM pending_moves WHERE session_id = ?`, "session-1"); err != nil {
+		t.Fatalf("read replacement row identity: %v", err)
+	}
+
+	if firstID == "" || replacementID == "" {
+		t.Fatalf("pending row identities must be non-empty: first=%q replacement=%q", firstID, replacementID)
+	}
+	if firstID == replacementID {
+		t.Fatalf("replacement reused pending row identity %q", firstID)
+	}
+}
+
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-001.6
+func TestSQLiteRepository_SnapshotRestorePreservesPendingMoveIdentity(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	identity := QueueSessionIdentity{
+		TaskID:               "task-snapshot",
+		SessionID:            "session-snapshot",
+		SessionIncarnationID: "incarnation-snapshot",
+	}
+	seedQueueSessionIdentity(t, repo, identity)
+	move := &PendingMove{MoveID: "move-snapshot", TaskID: "task-snapshot", WorkflowStepID: "step-snapshot"}
+	if err := repo.SetPendingMove(ctx, "session-snapshot", move); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+
+	snapshot, err := repo.Snapshot(ctx, identity)
+	if err != nil {
+		t.Fatalf("snapshot session: %v", err)
+	}
+	if snapshot.PendingMove == nil || snapshot.PendingMove.ID != move.ID {
+		t.Fatalf("snapshot pending move = %#v, want row ID %q", snapshot.PendingMove, move.ID)
+	}
+	if err := repo.ReplaceSession(ctx, "session-snapshot", snapshot.Entries, snapshot.PendingMove); err != nil {
+		t.Fatalf("restore session: %v", err)
+	}
+	restored, err := repo.GetPendingMove(ctx, "session-snapshot")
+	if err != nil {
+		t.Fatalf("read restored pending move: %v", err)
+	}
+	if restored == nil || restored.ID != move.ID {
+		t.Fatalf("restored pending move = %#v, want row ID %q", restored, move.ID)
+	}
+}
+
 func TestSQLiteRepository_PendingMoveEntryOptions(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
@@ -1149,10 +1215,23 @@ func TestSQLiteRepository_PendingMoveSenderSessionMigration(t *testing.T) {
 		)`); err != nil {
 		t.Fatalf("create legacy pending_moves table: %v", err)
 	}
+	if _, err := db.Exec(`
+		INSERT INTO pending_moves
+			(id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at, actor)
+		VALUES ('legacy-row', 'legacy-session', 'legacy-task', 'legacy-workflow', 'legacy-step', 0, CURRENT_TIMESTAMP, 'agent')
+	`); err != nil {
+		t.Fatalf("seed legacy pending move: %v", err)
+	}
 
 	repo, err := NewSQLiteRepository(db, db)
 	if err != nil {
 		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	var lockCount int
+	if err := db.Get(&lockCount, `
+		SELECT COUNT(*) FROM queue_session_locks WHERE session_id = 'legacy-session'
+	`); err != nil || lockCount != 1 {
+		t.Fatalf("legacy pending move lock backfill count=%d err=%v", lockCount, err)
 	}
 	ctx := context.Background()
 	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{
