@@ -95,7 +95,9 @@ profiles and qualification limits.
 
 The Orchestrator uses your configured execution profile and Kandev's injected
 run credentials. It does not need a separate Kandev API key or private-assistant
-setup to manage the current workspace.
+setup to manage the current workspace. The managed Claude runtime preapproves
+Kandev broker calls; backend task and workflow checks still apply. Worker
+permissions continue to use the worker's configured policy.
 
 Ask it to create a task, edit its title, description, priority or parent, assign
 an execution profile, start or stop work, send a worker a message, move a task

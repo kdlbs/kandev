@@ -1417,7 +1417,9 @@ func (m *Manager) buildAdapterConfig() error {
 		RequiresProcessKill:       m.cfg.RequiresProcessKill,
 		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
 	}
-	if m.cfg.AssistantRestricted() {
+	// The managed Claude broker policy preapproves only Kandev MCP calls.
+	// Workspace account configuration remains valid without a private binding.
+	if m.cfg.AssistantRestricted() || (m.cfg.BrokerRestricted() && m.cfg.AgentType == "claude-acp") {
 		m.adapterCfg.ToolPolicy = config.AssistantToolPolicy
 	}
 

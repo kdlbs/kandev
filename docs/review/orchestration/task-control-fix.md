@@ -18,6 +18,10 @@ middleware repair allowed board reads but did not resolve these failures.
 - Read workspace Orchestrator memory without private-conversation setup.
 - Report status codes for empty HTTP errors instead of empty tool failures.
 - Avoid adding an objective delivery link after private task deletion.
+- Apply the existing managed Claude broker allowlist to workspace conversations.
+  A synthetic provider trial caught permission prompts for native broker reads;
+  only the configured `kandev_assistant` tools are preapproved. General permission
+  bypass stays off and provider account environment remains available.
 
 Task services continue to publish board events and perform cleanup. Workspace
 and conversation boundaries, active-run credentials, active-session move rules,
@@ -50,3 +54,7 @@ Private-conversation objective receipts, linked-workspace grants and maintenance
 remain private-scoped capabilities; they are not prerequisites for operating the
 workspace board. This repair changes backend task controls and tool discovery;
 it does not add a separate Orchestrator UI or require a database migration.
+
+The provider policy uses the existing qualified Claude ACP version and
+[SDK MCP allowlist](https://code.claude.com/docs/en/agent-sdk/mcp). It does not
+turn on blanket auto-approval or approve worker permission requests.
