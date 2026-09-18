@@ -139,6 +139,9 @@ search-quota failures, keep each work order and linked plan within one system
 or split the initiative, then fix the base-controlled helper through an
 authorized change. Use `no-docs-allow` only for an intentional documentation
 exemption, never to bypass a validator failure.
+For harness-only changes to agent skills, `AGENTS.md`, or PR tooling with no
+product work order, record that rationale in the live PR body and apply the
+label only with maintainer authorization; wait for a fresh synchronize check.
 
 When a work order references an acceptance criterion, keep that `AC-...` under
 the owning `REQ-...` heading in the requirement document. The coverage
