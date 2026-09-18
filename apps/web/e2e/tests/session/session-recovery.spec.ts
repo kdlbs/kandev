@@ -6,8 +6,12 @@ import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import {
   cleanupDelayedResumeFixture,
+  countResumeBootMessages,
   createFailOnResumeProfile,
+  readSessionMessageIdsContaining,
+  readSessionRuntimeIdentity,
   seedDelayedResumeFixture,
+  waitForNewSessionMessage,
   waitForSessionReady,
   waitForQueuedCount,
 } from "../../helpers/session-resume-prompt-queue";
@@ -150,6 +154,116 @@ test.describe("Session recovery", () => {
       await expect(fixture.session.activeChat().getByText("simple mock response")).toHaveCount(2);
     } finally {
       await cleanupDelayedResumeFixture(apiClient, fixture);
+    }
+  });
+
+  test("pausing an accepted lazy resume preserves the runtime for later turns", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(150_000);
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Accepted lazy resume pause recovery",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      if (!task.session_id) throw new Error("accepted lazy resume task has no session_id");
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      await session.waitForChatIdle({ timeout: 30_000 });
+
+      await backend.restart();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
+        timeout: 60_000,
+      });
+
+      const resumeBootsBeforeMessage = await countResumeBootMessages(apiClient, task.session_id);
+
+      // The slow response is the acceptance witness: provider output can only
+      // arrive after the resumed prompt crossed the dispatch callback.
+      await session.sendMessage("/slow 8s");
+      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      const initialRuntimeIdentity = await readSessionRuntimeIdentity(
+        apiClient,
+        task.id,
+        task.session_id,
+      );
+      await session.cancelAgentButton().click();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for accepted lazy resume cancellation",
+        timeout: 30_000,
+      });
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      const resumeBootsAfterFirstPause = await countResumeBootMessages(apiClient, task.session_id);
+      expect(resumeBootsAfterFirstPause).toBe(resumeBootsBeforeMessage + 1);
+
+      // A second accepted pause must use the same process and conversation.
+      const slowResponseMessageIdsBeforeSecond = await readSessionMessageIdsContaining(
+        apiClient,
+        task.session_id,
+        "Running slow response",
+      );
+      expect(slowResponseMessageIdsBeforeSecond.size).toBeGreaterThan(0);
+      await session.sendMessage("/slow 8s");
+      await waitForNewSessionMessage(
+        apiClient,
+        task.session_id,
+        slowResponseMessageIdsBeforeSecond,
+        "Running slow response",
+      );
+      await session.cancelAgentButton().click();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for the later accepted pause",
+        timeout: 30_000,
+      });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+
+      await session.sendMessage("/e2e:simple-message");
+      await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+    } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
     }
   });
 

@@ -3546,6 +3546,11 @@ func (s *Service) prepareWorkflowReplacementSession(
 	newAgentProfileID string,
 	workflowRoute *models.WorkflowSessionRoute,
 ) (*models.TaskSession, error) {
+	if workflowRoute != nil {
+		if err := s.workflowRouteMutationAllowed(ctx, taskID); err != nil {
+			return nil, err
+		}
+	}
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task for session switch: %w", err)
@@ -5331,7 +5336,20 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 		}
 	}
 	s.publishQueueStatusEventForIdentity(ctx, identity)
-	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+	hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+	if inputErr != nil {
+		s.logger.Warn("failed to inspect queued message input; retaining reservation",
+			zap.String("session_id", identity.SessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(inputErr))
+		if identity.SessionIncarnationID != "" {
+			s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: identity}, queuedMsg, queuedMsg.QueuedBy)
+		} else {
+			s.requeueMessage(ctx, queuedMsg, queuedMsg.QueuedBy)
+		}
+		return false
+	}
+	if !hasInput {
 		s.logger.Warn("skipping empty queued message after transition",
 			zap.String("session_id", identity.SessionID),
 			zap.String("queue_id", queuedMsg.ID))
@@ -5375,7 +5393,16 @@ func (s *Service) dispatchTakenQueuedMessage(
 		}
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+	hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+	if inputErr != nil {
+		s.logger.Warn("failed to inspect queued message input; retaining reservation",
+			zap.String("session_id", sessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(inputErr))
+		s.requeueMessage(ctx, queuedMsg, queuedMsg.QueuedBy)
+		return false
+	}
+	if !hasInput {
 		s.logger.Warn("discarding empty queued message after transition",
 			zap.String("session_id", sessionID),
 			zap.String("queue_id", queuedMsg.ID))
@@ -5479,6 +5506,17 @@ func (s *Service) autoStartPassthroughPrompt(
 // its own CreateUserMessage and avoid the duplicate observed when PromptTask
 // failed transiently and the queue was later drained via boot_ready.
 const metaKeyUserMessageRecorded = "user_message_recorded"
+
+// metaKeyWorkflowDispatchInputPresent records that the original workflow
+// dispatch had effective input, including mode-generated instructions. It is
+// written with the raw queue form so a recovery drain does not need to infer
+// actionability from mutable session metadata.
+const metaKeyWorkflowDispatchInputPresent = "workflow_dispatch_input_present"
+
+// metaKeyWorkflowConfigMode preserves the mode that contributed effective
+// input to a deferred workflow launch. The queue keeps the prompt raw and the
+// mode as metadata so recovery can apply the transform exactly once.
+const metaKeyWorkflowConfigMode = "workflow_config_mode"
 
 // MetaKeyTurnStartAlreadyProcessed marks a queued prompt whose on_turn_start
 // hook already ran synchronously before queuing (see
@@ -5752,6 +5790,12 @@ func (s *Service) autoStartStepPrompt(
 			}, referenceContext, pullRequestTargetContext)
 		}
 	}
+	// Use the fully composed forms after references, handoff, and first-turn
+	// context have been applied. This captures mode-generated input for an
+	// empty raw prompt while the queue still receives the raw prompt plus mode
+	// metadata, avoiding a second system block during recovery.
+	dispatchInputPresent := strings.TrimSpace(recordedPrompt) != "" ||
+		strings.TrimSpace(dispatchPrompt) != "" || len(attachments) > 0
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references, attachments)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
@@ -5788,38 +5832,37 @@ func (s *Service) autoStartStepPrompt(
 				release()
 			})
 		}
+		defer heldRelease()
 
 		s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		// Arm the pending-prompt handle before the launch call: the agent
-		// process starts asynchronously (startAgentProcessAsync), so a start
-		// failure can surface after this call already returned success. The
-		// handle is disarmed just below on a synchronous failure (already
-		// queued by handleCreatedAutoStartLaunchFailure), taken by
-		// recoverPendingStepPromptOnAsyncStartFailure on an asynchronous one,
-		// or discarded by handleAgentProcessStarted on a successful start.
-		s.armPendingStepPrompt(sessionID, pendingStepPrompt{
-			taskID:              taskID,
-			prompt:              prompt,
-			planMode:            planMode,
-			attachments:         attachments,
-			origin:              origin,
-			userMessageRecorded: userMsgRecorded,
-			references:          references,
-			handoffText:         handoffForQueue,
-		})
-		_, err := s.startCreatedSessionWithComposedPrompt(
-			ctx, taskID, sessionID, session.AgentProfileID,
+		queueIdentity, workflowEntry, workflowEntryRequired, captureErr := s.captureWorkflowStartPromptAdmission(ctx, taskID, fresh)
+		if captureErr != nil {
+			requeueTaken()
+			return captureErr
+		}
+		workflowAttempt := newWorkflowStartPromptAttemptWithAdmission(
+			taskID, sessionID, origin, prompt, planMode, attachments, references,
+			handoffForQueue, userMsgRecorded, dispatchInputPresent,
+			queueIdentity, workflowEntry, workflowEntryRequired,
+		)
+		workflowAttempt.workflowEntryRequired = workflowEntryRequired
+		workflowAttempt.configMode, _ = fresh.Metadata["config_mode"].(bool)
+		launchCtx := withWorkflowStartPromptAttempt(ctx, workflowAttempt)
+		execution, err := s.startCreatedSessionWithComposedPrompt(
+			launchCtx, taskID, sessionID, session.AgentProfileID,
 			recordedPrompt, agentPrompt, true, planMode, true, attachments, references,
 		)
+		if execution == nil {
+			workflowAttempt.retire()
+		}
 		// Release the guard as soon as StartCreatedSession has admitted the
 		// launch (succeeded or failed definitively). The deferred release
 		// via heldRelease ensures the guard is always released even on panic.
-		defer heldRelease()
 		if err != nil {
-			s.discardPendingStepPrompt(sessionID)
+			workflowAttempt.retire()
 			s.handleCreatedAutoStartLaunchFailure(
 				ctx, taskID, sessionID, stepName, prompt, err,
 				planMode, shouldQueueIfBusy, userMsgRecorded,
@@ -6202,23 +6245,21 @@ func (s *Service) queueAutoStartPrompt(
 	references []v1.EntityReference,
 	handoffText string,
 ) error {
-	return s.queueWorkflowStepPrompt(
+	queued, err := s.persistAutoStartPrompt(
 		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
-		userMessageRecorded, references, handoffText, true,
+		userMessageRecorded, references, handoffText,
 	)
+	if err != nil {
+		return err
+	}
+	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
+	return nil
 }
 
-// queueAsyncStartFailurePrompt queues a composed step-entry prompt that lost
-// an asynchronous agent-process start after startAgentProcessAsync already
-// returned control to its caller (REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4).
-// Unlike queueAutoStartPrompt, it does not schedule an auto-resume: the start
-// failure projection (or its recoverable-failure retry) already owns the
-// session's next promptable transition, and scheduling a resume here would
-// race that projection or loop indefinitely against a start that keeps
-// failing. The existing boot-ready drain delivers the prompt once the
-// session becomes promptable again (manual retry or recoverable-failure
-// resume), the same contract the synchronous failure path relies on.
-func (s *Service) queueAsyncStartFailurePrompt(
+// persistAutoStartPrompt writes a workflow auto-start prompt without starting
+// a resume. Failure callbacks use this boundary so the original launch error
+// remains the recovery signal and cleanup can finish before queue draining.
+func (s *Service) persistAutoStartPrompt(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
 	planMode bool,
@@ -6227,29 +6268,18 @@ func (s *Service) queueAsyncStartFailurePrompt(
 	userMessageRecorded bool,
 	references []v1.EntityReference,
 	handoffText string,
-) error {
-	return s.queueWorkflowStepPrompt(
+) (*messagequeue.QueuedMessage, error) {
+	snapshot := s.workflowStartPromptInputSnapshot(
+		ctx, sessionID, prompt, planMode, attachments, references, handoffText,
+	)
+	return s.persistAutoStartPromptWithAdmission(
 		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
-		userMessageRecorded, references, handoffText, false,
+		userMessageRecorded, references, handoffText,
+		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), nil, nil,
 	)
 }
 
-// queueWorkflowStepPrompt persists a workflow step prompt for later drain.
-// userMessageRecorded must be the return value of recordAutoStartMessage: true
-// only when CreateUserMessage actually succeeded. The flag is stamped onto the
-// queue metadata so executeQueuedMessage skips its own CreateUserMessage and
-// avoids the duplicate-user-message bug observed when PromptTask failed
-// transiently and the queue drained on boot_ready. Passing false (failed write
-// or pre-record queue path) lets the drain side record the message instead.
-// Prompt content stays raw here; references remain metadata until drain-time
-// context is built, preventing duplicate system blocks across retries.
-// handoffText, if non-empty, is a completion handoff already claimed for this
-// step entry; it rides the same way, so a dispatch deferred through this
-// queue still appends it last, after entity-reference expansion, at actual
-// dispatch time. scheduleResume controls whether a live agent process is
-// kicked off to drain the queue immediately (see queueAutoStartPrompt vs
-// queueAsyncStartFailurePrompt).
-func (s *Service) queueWorkflowStepPrompt(
+func (s *Service) persistAutoStartPromptAtWorkflowEntry(
 	ctx context.Context,
 	taskID, sessionID, prompt string,
 	planMode bool,
@@ -6258,10 +6288,36 @@ func (s *Service) queueWorkflowStepPrompt(
 	userMessageRecorded bool,
 	references []v1.EntityReference,
 	handoffText string,
-	scheduleResume bool,
-) error {
+	dispatchInputPresent bool,
+	configMode bool,
+	identity messagequeue.QueueSessionIdentity,
+	entry messagequeue.WorkflowEntryIdentity,
+) (*messagequeue.QueuedMessage, error) {
+	inputPresent := dispatchInputPresent
+	launchConfigMode := configMode
+	return s.persistAutoStartPromptWithAdmission(
+		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
+		userMessageRecorded, references, handoffText,
+		&inputPresent, &launchConfigMode, &identity, &entry,
+	)
+}
+
+func (s *Service) persistAutoStartPromptWithAdmission(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	userMessageRecorded bool,
+	references []v1.EntityReference,
+	handoffText string,
+	dispatchInputPresent *bool,
+	configMode *bool,
+	identity *messagequeue.QueueSessionIdentity,
+	entry *messagequeue.WorkflowEntryIdentity,
+) (*messagequeue.QueuedMessage, error) {
 	if s.messageQueue == nil {
-		return fmt.Errorf("message queue is not configured")
+		return nil, fmt.Errorf("message queue is not configured")
 	}
 	meta := workflowMessageMetadata(planMode, origin, references)
 	if userMessageRecorded {
@@ -6270,25 +6326,30 @@ func (s *Service) queueWorkflowStepPrompt(
 	if handoffText != "" {
 		meta[messagequeue.MetadataStepHandoff] = handoffText
 	}
-	queued, err := s.messageQueue.QueueMessageWithMetadata(
-		ctx,
-		sessionID,
-		taskID,
-		prompt,
-		"",
-		messagequeue.QueuedByWorkflow,
-		planMode,
-		toQueuedAttachments(attachments),
-		meta,
-	)
+	if dispatchInputPresent != nil {
+		meta[metaKeyWorkflowDispatchInputPresent] = *dispatchInputPresent
+	}
+	if configMode != nil {
+		meta[metaKeyWorkflowConfigMode] = *configMode
+	}
+	var queued *messagequeue.QueuedMessage
+	var err error
+	if identity != nil && entry != nil {
+		queued, err = s.messageQueue.QueueMessageWithMetadataForSessionAtWorkflowEntry(
+			ctx, *identity, *entry, prompt, "", messagequeue.QueuedByWorkflow,
+			planMode, toQueuedAttachments(attachments), meta,
+		)
+	} else {
+		queued, err = s.messageQueue.QueueMessageWithMetadata(
+			ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByWorkflow,
+			planMode, toQueuedAttachments(attachments), meta,
+		)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
+		return nil, fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	if scheduleResume {
-		s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
-	}
-	return nil
+	return queued, nil
 }
 
 // scheduleAutoResumeForWorkflowQueue kicks off a background resume when a

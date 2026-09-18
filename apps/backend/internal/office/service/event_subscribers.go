@@ -153,14 +153,21 @@ type ApprovalResolvedData struct {
 // same identity, so taskless fallback resolution and summary writes use this
 // field, not AgentID.
 type AgentLifecycleData struct {
-	TaskID         string                 `json:"task_id"`
-	RunID          string                 `json:"run_id"`
-	AgentID        string                 `json:"agent_id"`
-	AgentProfileID string                 `json:"agent_profile_id"`
-	SessionID      string                 `json:"session_id"`
-	TurnID         string                 `json:"turn_id,omitempty"`
-	ErrorMessage   string                 `json:"error_message"`
-	ProviderError  *streams.ProviderError `json:"provider_error,omitempty"`
+	TaskID                      string                 `json:"task_id"`
+	RunID                       string                 `json:"run_id"`
+	AgentID                     string                 `json:"agent_id"`
+	AgentProfileID              string                 `json:"agent_profile_id"`
+	SessionID                   string                 `json:"session_id"`
+	TurnID                      string                 `json:"turn_id,omitempty"`
+	ErrorMessage                string                 `json:"error_message"`
+	ProviderError               *streams.ProviderError `json:"provider_error,omitempty"`
+	AgentExecutionID            string                 `json:"agent_execution_id"`
+	PromptGeneration            uint64                 `json:"prompt_generation,omitempty"`
+	EvidenceKnown               bool                   `json:"evidence_known,omitempty"`
+	OutputObserved              bool                   `json:"output_observed,omitempty"`
+	EffectObserved              bool                   `json:"effect_observed,omitempty"`
+	ProviderDiagnosticCandidate bool                   `json:"provider_diagnostic_candidate,omitempty"`
+	ProviderDiagnosticText      string                 `json:"provider_diagnostic_text,omitempty"`
 }
 
 // resolveLifecycleRun resolves the exact claimed run named by a lifecycle
@@ -177,6 +184,9 @@ func (s *Service) resolveLifecycleRun(ctx context.Context, data AgentLifecycleDa
 			return nil, sql.ErrNoRows
 		}
 		if data.TaskID != "" && taskIDFromRunPayload(run.Payload) != data.TaskID {
+			return nil, sql.ErrNoRows
+		}
+		if data.SessionID != "" && run.SessionID != "" && data.SessionID != run.SessionID {
 			return nil, sql.ErrNoRows
 		}
 		return run, nil
@@ -743,12 +753,24 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
 		return nil
 	}
-	// Office failure path (v1): every agent error is terminal. The
-	// retry-by-classifier path lives behind HandleRunFailure for
-	// rate-limit-retry callers; we deliberately do NOT call into it
-	// here. See docs/specs/office/requirements/runtime.md.
+	// Office failure path: terminal for every error except a classified-
+	// transient failure, which HandleAgentFailure itself retries a
+	// bounded number of times before it counts toward auto-pause
+	// (AC-OFFICE-RUNTIME-001.11). The rate-limit-retry path behind
+	// HandleRunFailure is a separate, pre-launch tier; we deliberately
+	// do NOT call into it here. See docs/specs/office/requirements/runtime.md.
 	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
-	wrote, err := s.HandleAgentFailure(ctx, run, errMsg)
+	wrote, err := s.HandleAgentFailure(ctx, run, errMsg, data.AgentID, data.ProviderError, AgentFailureEvidence{
+		RunID:                       data.RunID,
+		SessionID:                   data.SessionID,
+		AgentExecutionID:            data.AgentExecutionID,
+		PromptGeneration:            data.PromptGeneration,
+		EvidenceKnown:               data.EvidenceKnown,
+		OutputObserved:              data.OutputObserved,
+		EffectObserved:              data.EffectObserved,
+		ProviderDiagnosticCandidate: data.ProviderDiagnosticCandidate,
+		ProviderDiagnosticText:      data.ProviderDiagnosticText,
+	})
 	if err != nil {
 		return err
 	}

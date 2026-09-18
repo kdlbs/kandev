@@ -1670,6 +1670,35 @@ export class ApiClient {
     return this.request("POST", "/api/v1/_test/comments", payload);
   }
 
+  /**
+   * Inserts an office_routine_triggers row directly, bypassing the public
+   * create-trigger endpoint's cron validation. The public endpoint always
+   * persists a schedulable, enabled trigger with a computed next_run_at, so
+   * it cannot produce trigger_invalid, trigger_unscheduled, or
+   * trigger_disabled; this seed is the only way an E2E fixture reaches
+   * every REQ-OFFICE-ROUTINE-ARMING-001 schedule state.
+   */
+  async seedRoutineTrigger(opts: {
+    routineId: string;
+    kind: "cron" | "webhook" | "manual";
+    cronExpression?: string;
+    timezone?: string;
+    enabled?: boolean;
+    nextRunAt?: string;
+    lastFiredAt?: string;
+  }): Promise<{ trigger_id: string }> {
+    const payload: Record<string, unknown> = {
+      routine_id: opts.routineId,
+      kind: opts.kind,
+    };
+    if (opts.cronExpression !== undefined) payload.cron_expression = opts.cronExpression;
+    if (opts.timezone !== undefined) payload.timezone = opts.timezone;
+    if (opts.enabled !== undefined) payload.enabled = opts.enabled;
+    if (opts.nextRunAt !== undefined) payload.next_run_at = opts.nextRunAt;
+    if (opts.lastFiredAt !== undefined) payload.last_fired_at = opts.lastFiredAt;
+    return this.request("POST", "/api/v1/_test/routine-triggers", payload);
+  }
+
   // --- GitHub Mock Control ---
 
   async mockGitHubReset(): Promise<void> {
@@ -2522,6 +2551,7 @@ export class ApiClient {
       id: string;
       task_id: string;
       queue_incarnation_id: string;
+      agent_execution_id?: string;
       agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;

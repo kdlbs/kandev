@@ -2443,10 +2443,10 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		return
 	}
 
-	s.taskRuntimeStateMu.Lock()
-	defer s.taskRuntimeStateMu.Unlock()
 	ctx, releaseCeilingEntry := s.lockCeilingEntryAdmission(ctx, taskID)
 	defer releaseCeilingEntry()
+	s.taskRuntimeStateMu.Lock()
+	defer s.taskRuntimeStateMu.Unlock()
 
 	if completedSessionID != "" {
 		if session, err := s.repo.GetTaskSession(ctx, completedSessionID); err == nil && session != nil && isWorkingSessionState(session.State) {
@@ -3282,18 +3282,29 @@ func (s *Service) handleOfficeTurnComplete(
 	return true
 }
 
-// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode)
-// and creates a dedicated agent_plan message in the session.
+// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode).
 func (s *Service) handleAgentPlanEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload.SessionID == "" || payload.Data.PlanContent == "" || s.messageCreator == nil {
 		return
 	}
 	sessionID := payload.SessionID
-	if err := s.messageCreator.CreateSessionMessage(
-		ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
-		string(models.MessageTypeAgentPlan), s.getActiveTurnID(sessionID), nil, false,
+	turnID := s.getActiveTurnID(sessionID)
+	if payload.Data.ToolCallID == "" {
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
+			string(models.MessageTypeAgentPlan), turnID, nil, false,
+		); err != nil {
+			s.logger.Error("failed to create uncorrelated agent plan message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	if err := s.messageCreator.UpsertAgentPlanMessage(
+		ctx, payload.TaskID, payload.Data.ToolCallID, sessionID, payload.Data.PlanContent, turnID,
 	); err != nil {
-		s.logger.Error("failed to create agent plan message",
+		s.logger.Error("failed to upsert agent plan message",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))

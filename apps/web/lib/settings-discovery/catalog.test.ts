@@ -18,6 +18,7 @@ const STORAGE_DISCOVERY_IDS = [
 const STABLE_CONTROL_IDS = [
   "appearance-color-theme",
   "appearance-rich-output-motion",
+  "appearance-chat-motion",
   "appearance-startup-page",
   "appearance-display-language",
   "terminal-preferred-shell",

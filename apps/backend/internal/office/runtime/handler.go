@@ -27,6 +27,7 @@ type Handler struct {
 	runEvents   RunEventAppender
 	decisions   DecisionRecorder
 	logger      *commonlogger.Logger
+	taskLister  TaskFilteredLister
 }
 
 // RunEventAppender records runtime behavior against a run.
@@ -42,6 +43,7 @@ func NewHandler(
 	runEvents RunEventAppender,
 	decisions DecisionRecorder,
 	log *commonlogger.Logger,
+	taskLister TaskFilteredLister,
 ) *Handler {
 	if log == nil {
 		log = commonlogger.Default()
@@ -53,6 +55,7 @@ func NewHandler(
 		runEvents:   runEvents,
 		decisions:   decisions,
 		logger:      log,
+		taskLister:  taskLister,
 	}
 }
 
@@ -62,6 +65,7 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/runtime/task/decision", h.recordAgentDecision)
 	group.POST("/runtime/tasks/:id/status", h.updateTaskStatus)
 	group.POST("/runtime/tasks/:id/subtasks", h.createSubtask)
+	group.GET("/runtime/tasks", h.listTasks)
 	group.POST("/runtime/tasks", h.createTask)
 	group.POST("/runtime/agents", h.createAgent)
 	group.GET("/runtime/projects", h.listProjects)
@@ -177,7 +181,7 @@ func (h *Handler) postComment(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	taskID := firstNonEmpty(req.TaskID, runCtx.TaskID)
+	taskID := strings.TrimSpace(firstNonEmpty(req.TaskID, runCtx.TaskID))
 	if err := h.actions.PostComment(c.Request.Context(), runCtx, taskID, req.Body); err != nil {
 		h.respondRuntimeError(c, runCtx, "post_comment", "task", taskID, err)
 		return
@@ -478,7 +482,9 @@ func (h *Handler) respondRuntimeError(
 	targetID string,
 	err error,
 ) {
-	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) || errors.Is(err, ErrReasonTooLong) {
+	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) ||
+		errors.Is(err, ErrReasonTooLong) || errors.Is(err, ErrInvalidListParams) ||
+		errors.Is(err, ErrCommentBodyRequired) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

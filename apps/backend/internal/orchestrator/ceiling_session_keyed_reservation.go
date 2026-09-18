@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
 	"go.uber.org/zap"
 
@@ -85,9 +86,14 @@ func (s *Service) admitOrDeferSessionKeyedLaunch(
 
 	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, kind, payload, decision.reasonCode,
 		decision.population, decision.populationKnown, decision.ceiling); err != nil {
-		s.logger.Zap().Error("could not persist a ceiling deferral; "+failureContext,
-			zap.String("task_id", taskID), zap.String("session_id", sessionID),
-			zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
+		if errors.Is(err, ErrCeilingLaunchConflict) && isSessionOpenRecoveryContext(ctx) {
+			s.logger.Zap().Debug("session-open recovery left the existing ceiling queue unchanged after capacity refusal",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		} else {
+			s.logger.Zap().Error("could not persist a ceiling deferral; "+failureContext,
+				zap.String("task_id", taskID), zap.String("session_id", sessionID),
+				zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
+		}
 		return nil, false, err
 	}
 	return nil, true, nil

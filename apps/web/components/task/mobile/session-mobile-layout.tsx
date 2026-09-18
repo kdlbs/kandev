@@ -41,6 +41,7 @@ import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugi
 import { useTranslation } from "react-i18next";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { LaunchQueueStatus } from "../launch-queue-status";
+import { WipQueueStatus } from "../wip-queue-status";
 
 export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
@@ -136,6 +137,7 @@ function MobileChatPanelContent({
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
+      <WipQueueStatus taskId={activeTaskId} />
       <div className="flex items-center px-1 py-2">
         <MobileSessionsPicker taskId={activeTaskId} sessionId={effectiveSessionId} fullWidth />
       </div>
@@ -156,6 +158,7 @@ function MobileChatPanelContent({
           isVisible={isVisible}
           onPendingScrollConsumed={onScrollTargetConsumed}
           hideLaunchQueueStatus
+          hideWipQueueStatus
         />
       )}
     </div>

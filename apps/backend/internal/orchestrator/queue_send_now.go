@@ -615,6 +615,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 			return false, fmt.Errorf("%w: deferred launch changed before Send Now", ErrCeilingLaunchSuperseded)
 		}
 		ceilingClaim.deferral = boundDeferral
+		ctx = withCeilingDispatchClaim(ctx, ceilingClaim)
 		if disposition, detail, validationErr := s.validateCeilingEntry(ctx, currentTask, ceilingClaim.deferral); validationErr != nil {
 			return false, validationErr
 		} else if disposition != ceilingEntryValid {
@@ -714,10 +715,10 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 
 	_, err = s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
 		claim.Dispatch.PlanMode, attachments, false, launchOriginManual, promptTaskOptions{
-			claimEntryID:         claim.Dispatch.ID,
-			afterClaim:           s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
-			beforeDispatch:       s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),
-			disableDispatchRetry: durablePlanComments,
+			claimEntryID:           claim.Dispatch.ID,
+			afterClaim:             s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
+			afterDispatchAdmission: s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),
+			disableDispatchRetry:   durablePlanComments,
 			afterDispatch: func() error {
 				return s.markSendNowClaimAcceptedWithRetry(ctx, claim)
 			},

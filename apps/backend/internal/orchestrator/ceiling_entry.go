@@ -628,12 +628,20 @@ func ceilingDeferralsEquivalentForAdmission(a, b models.CeilingDeferral) (bool, 
 // validateCeilingEntry compares a claimed record with the current task-owned
 // route and destination. It is deliberately read-only. Callers retain the
 // record on unavailable reads and only terminally dispose superseded entries.
+// It acquires task admission; a context that already owns that admission is
+// re-entrant.
 func (s *Service) validateCeilingEntry(
 	ctx context.Context,
 	task *models.Task,
 	deferral models.CeilingDeferral,
 ) (ceilingEntryDisposition, string, error) {
-	return s.validateCeilingEntryWithDestinationState(ctx, task, deferral, true)
+	taskID := ""
+	if task != nil {
+		taskID = task.ID
+	}
+	admissionCtx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
+	return s.validateCeilingEntryWithDestinationState(admissionCtx, task, deferral, true)
 }
 
 // validateCeilingEntryWithDestinationState checks the task-owned workflow
@@ -826,6 +834,12 @@ func (s *Service) validateClaimedCeilingBinding(
 	if binding == nil {
 		return nil
 	}
+	// Binding validation is the final route read before a concrete launch. Use
+	// the same short admission section as route mutation. Nested callers that
+	// already own the section are re-entrant through the context marker.
+	admissionCtx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
+	ctx = admissionCtx
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("reload task for deferred workflow entry: %w", err)

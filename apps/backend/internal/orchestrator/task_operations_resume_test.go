@@ -111,7 +111,7 @@ func TestGetTaskSessionStatus_AutoResumesNormalWaitingSession(t *testing.T) {
 	}
 }
 
-func TestAutoResumeEligibilityPreservesSessionOwnership(t *testing.T) {
+func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
 	queuedRecord := models.CeilingRecordKeys(models.CeilingDeferral{
 		Kind: models.CeilingLaunchStartCreated,
 		Payload: map[string]interface{}{
@@ -143,20 +143,20 @@ func TestAutoResumeEligibilityPreservesSessionOwnership(t *testing.T) {
 			wantAllowed: true,
 		},
 		{
-			name:      "durable parking blocks source session",
+			name:      "durable parking does not block source session",
 			sessionID: "parked-session",
 			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowParking: models.WorkflowParking{
 				Stamp:           "parking-1",
 				ParkedAt:        time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC),
 				SourceSessionID: "parked-session",
 			}},
-			wantBlockCode: autoResumeBlockedWorkflowParked,
+			wantAllowed: true,
 		},
 		{
-			name:          "malformed parking blocks conservatively",
-			sessionID:     "parked-session",
-			sessionMeta:   map[string]interface{}{models.SessionMetaKeyWorkflowParking: map[string]interface{}{"stamp": "parking-1"}},
-			wantBlockCode: autoResumeBlockedOwnershipUnavailable,
+			name:        "malformed parking does not block recovery",
+			sessionID:   "parked-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowParking: map[string]interface{}{"stamp": "parking-1"}},
+			wantAllowed: true,
 		},
 		{
 			name:          "queued destination is not passively resumed",
@@ -200,24 +200,24 @@ func TestAutoResumeEligibilityPreservesSessionOwnership(t *testing.T) {
 			wantBlockCode: autoResumeBlockedOwnershipUnavailable,
 		},
 		{
-			name:         "exact legacy route identifies parked source",
+			name:         "exact legacy route does not block parked source",
 			taskMetadata: map[string]interface{}{models.MetaKeyWorkflowSessionRoute: legacyRoute},
 			sessionID:    "parked-session",
 			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowProfileSwitchStopIntent: models.WorkflowProfileSwitchStopIntent{
 				ExecutionID: "execution-1",
 				Stamp:       "legacy-1",
 			}},
-			wantBlockCode: autoResumeBlockedWorkflowParked,
+			wantAllowed: true,
 		},
 		{
-			name:         "legacy stop without exact route is ambiguous",
+			name:         "legacy stop without exact route does not block recovery",
 			taskMetadata: map[string]interface{}{models.MetaKeyWorkflowSessionRoute: legacyRoute},
 			sessionID:    "other-session",
 			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowProfileSwitchStopIntent: models.WorkflowProfileSwitchStopIntent{
 				ExecutionID: "execution-1",
 				Stamp:       "legacy-1",
 			}},
-			wantBlockCode: autoResumeBlockedOwnershipUnavailable,
+			wantAllowed: true,
 		},
 	}
 

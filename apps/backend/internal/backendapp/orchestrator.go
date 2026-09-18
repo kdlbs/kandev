@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/system/queuesettings"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -73,6 +74,7 @@ func provideOrchestrator(
 	githubSvc *githubpkg.Service,
 	gitCredentialBroker *gitcredentials.Broker,
 	settingsStore *systemsettings.Store,
+	sessionCapacityEnvironment sessioncapacity.Environment,
 	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
@@ -89,6 +91,17 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.OfficeSessionIdentity =
 		cfg != nil && cfg.Features.OfficeSessionIdentity
+	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
+		settingsStore, sessionCapacityEnvironment, log,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve session capacity settings: %w", err)
+	}
+	serviceCfg.SessionCapacity = effectiveSessionCapacity(sessionCapacityResolution)
+	log.Info("Session capacity initialized",
+		zap.Int("ceiling", serviceCfg.SessionCapacity),
+		zap.String("source", string(sessionCapacityResolution.Effective.Source)),
+		zap.Bool("enabled", sessionCapacityResolution.Effective.Enabled))
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -435,6 +448,37 @@ func queueConfiguration(cfg *config.Config) queuesettings.Configuration {
 		return queuesettings.Configuration{}
 	}
 	return queuesettings.Configuration{Value: cfg.MessageQueue.MaxPerSession, Present: true}
+}
+
+func resolveSessionCapacityWithStore(
+	settingsStore *systemsettings.Store,
+	environment sessioncapacity.Environment,
+	log *logger.Logger,
+) (sessioncapacity.Resolution, error) {
+	var configured *sessioncapacity.Settings
+	if settingsStore != nil {
+		loaded, err := sessioncapacity.NewStore(settingsStore).Load(context.Background())
+		if err != nil {
+			return sessioncapacity.Resolution{}, err
+		}
+		configured = loaded
+	}
+	resolution, err := sessioncapacity.Resolve(configured, environment)
+	if err != nil {
+		return sessioncapacity.Resolution{}, err
+	}
+	if resolution.InvalidEnvironment && log != nil {
+		log.Warn("Ignoring invalid session capacity environment value",
+			zap.String("environment_variable", sessioncapacity.EnvironmentVariable))
+	}
+	return resolution, nil
+}
+
+func effectiveSessionCapacity(resolution sessioncapacity.Resolution) int {
+	if !resolution.Effective.Enabled {
+		return 0
+	}
+	return resolution.Effective.MaxSessions
 }
 
 func resolveEventNamespace(cfg *config.Config) string {

@@ -167,6 +167,9 @@ func (s *Service) resolveBoundSourceWorkflowSession(
 func (s *Service) persistWorkflowSessionRoute(ctx context.Context, taskID string, route models.WorkflowSessionRoute) error {
 	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
 	defer release()
+	if err := s.workflowRouteMutationAllowed(ctx, taskID); err != nil {
+		return err
+	}
 	setter, ok := s.repo.(taskMetadataKeySetter)
 	if !ok {
 		return nil
@@ -235,35 +238,44 @@ func (s *Service) promoteWorkflowSessionRoute(
 	destination *models.TaskSession,
 	route *models.WorkflowSessionRoute,
 ) (bool, error) {
-	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
-	defer release()
 	if destination == nil {
 		return false, nil
 	}
-	destinationParkingStamp := s.captureWorkflowParkingStamp(ctx, destination.ID)
-	if promoter, ok := s.repo.(workflowSessionRoutePromoter); ok && route != nil {
+	// The task admission lock covers the primary/route mutation only. Parking
+	// cleanup and task.updated publication may re-enter runtime paths and must
+	// happen after the durable ownership boundary is released.
+	admissionCtx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	destinationParkingStamp := ""
+	promoted := false
+	var promoteErr error
+	func() {
+		defer release()
+		if err := s.workflowRouteMutationAllowed(admissionCtx, taskID); err != nil {
+			promoteErr = err
+			return
+		}
+		destinationParkingStamp = s.captureWorkflowParkingStamp(admissionCtx, destination.ID)
+		if promoter, ok := s.repo.(workflowSessionRoutePromoter); ok && route != nil {
+			committed := *route
+			committed.DestinationID = destination.ID
+			committed.Phase = workflowSessionRouteCommitted
+			promoted, promoteErr = promoter.SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(admissionCtx, destination.ID, committed)
+			return
+		}
+		promoted, promoteErr = s.setNonterminalSessionPrimary(admissionCtx, destination.ID)
+		if promoteErr != nil || !promoted || route == nil {
+			return
+		}
 		committed := *route
 		committed.DestinationID = destination.ID
 		committed.Phase = workflowSessionRouteCommitted
-		promoted, err := promoter.SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(ctx, destination.ID, committed)
-		if err != nil || !promoted {
-			return promoted, err
+		if err := s.persistWorkflowSessionRoute(admissionCtx, taskID, committed); err != nil {
+			promoted = false
+			promoteErr = err
 		}
-		s.clearWorkflowParkingForExplicitExecution(ctx, destination.ID, destinationParkingStamp)
-		s.publishPrimarySessionUpdate(ctx, taskID, destination.ID)
-		return true, nil
-	}
-	promoted, err := s.setNonterminalSessionPrimary(ctx, destination.ID)
-	if err != nil || !promoted {
-		return promoted, err
-	}
-	if route != nil {
-		committed := *route
-		committed.DestinationID = destination.ID
-		committed.Phase = workflowSessionRouteCommitted
-		if err := s.persistWorkflowSessionRoute(ctx, taskID, committed); err != nil {
-			return false, err
-		}
+	}()
+	if promoteErr != nil || !promoted {
+		return promoted, promoteErr
 	}
 	// Promotion is the workflow's explicit selection of this destination,
 	// whether the compatibility path has a route object or only a primary

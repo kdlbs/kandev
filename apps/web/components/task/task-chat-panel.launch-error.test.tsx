@@ -29,6 +29,9 @@ const priorTranscriptMessage = {
 
 const appStoreState = {
   connection: { status: "connected" },
+  kanbanMulti: { snapshots: {} },
+  kanban: { workflowId: null, tasks: [], steps: [] },
+  workflows: { items: [] },
   userSettings: {
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: false,

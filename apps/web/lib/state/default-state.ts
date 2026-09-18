@@ -19,6 +19,7 @@ import {
   defaultReviewState,
   defaultNeedsYouInboxState,
   defaultFailedInboxState,
+  defaultInboxHistoryState,
 } from "./slices";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
@@ -84,6 +85,7 @@ export const defaultState = {
   taskReview: defaultReviewState.taskReview,
   needsYouInbox: defaultNeedsYouInboxState.needsYouInbox,
   failedInbox: defaultFailedInboxState.failedInbox,
+  inboxHistory: defaultInboxHistoryState.inboxHistory,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -550,6 +552,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
         ...initialState.failedInbox?.readRevisionByWorkspaceId,
       },
     },
+    inboxHistory: { ...defaultState.inboxHistory, ...initialState.inboxHistory },
     features: { ...defaultState.features, ...initialState.features },
     auth: { ...defaultState.auth, ...initialState.auth },
     ...mergeSessionHostnamesState(initialState),

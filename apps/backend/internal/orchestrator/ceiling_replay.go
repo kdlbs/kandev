@@ -186,6 +186,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 		return
 	}
 	deferral = claim.deferral
+	ctx = withCeilingDispatchClaim(ctx, claim)
 
 	defer claim.releaseIfHeld(ctx)
 	currentTask, currentErr := s.repo.GetTask(ctx, task.ID)
@@ -352,6 +353,14 @@ func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string,
 				return
 			}
 		}
+		if claim, ok := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim); ok && claim.taskID == taskID {
+			claimID, _, held := models.ReadCeilingLaunchClaim(existingRaw)
+			if !held || claimID != claim.id {
+				s.logger.Zap().Debug("skipping ceiling record clear: claim replaced by successor",
+					zap.String("task_id", taskID))
+				return
+			}
+		}
 		record := stripCeilingRecordKeys(existingRaw)
 		stored, lostCompare, err := s.repo.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, record)
 		if err != nil {
@@ -404,6 +413,26 @@ func stripCeilingRecordKeys(existing interface{}) map[string]interface{} {
 	return stripped
 }
 
+// loadCeilingReplayTask releases admission before session guards or provider
+// callbacks can run. Only the immutable workflow binding crosses into dispatch;
+// the durable claim owns replay until settlement.
+func (s *Service) loadCeilingReplayTask(ctx context.Context, taskID string, deferral models.CeilingDeferral) (*models.Task, ceilingReplayOutcome) {
+	ctx, release := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer release()
+	current, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || current == nil {
+		return nil, ceilingReplayFailed
+	}
+	disposition, _, validationErr := s.validateCeilingEntry(ctx, current, deferral)
+	if validationErr != nil || disposition == ceilingEntryUnavailable {
+		return nil, ceilingReplayFailed
+	}
+	if disposition == ceilingEntrySuperseded {
+		return nil, ceilingReplaySuperseded
+	}
+	return current, ceilingReplaySucceeded
+}
+
 // replayCeilingDeferral dispatches to the one replay function matching the
 // deferral's kind. The closed set is exhaustive; a kind outside it was
 // already rejected as unreplayable by ReadCeilingDeferral before this point.
@@ -411,21 +440,9 @@ func (s *Service) replayCeilingDeferral(ctx context.Context, task *models.Task, 
 	if task == nil || task.ID == "" {
 		return ceilingReplayFailed
 	}
-	ctx, release := s.lockCeilingEntryAdmission(ctx, task.ID)
-	defer release()
-	current, err := s.repo.GetTask(ctx, task.ID)
-	if err != nil || current == nil {
-		return ceilingReplayFailed
-	}
-	disposition, _, validationErr := s.validateCeilingEntry(ctx, current, deferral)
-	if validationErr != nil {
-		return ceilingReplayFailed
-	}
-	if disposition == ceilingEntrySuperseded {
-		return ceilingReplaySuperseded
-	}
-	if disposition == ceilingEntryUnavailable {
-		return ceilingReplayFailed
+	current, outcome := s.loadCeilingReplayTask(ctx, task.ID, deferral)
+	if current == nil {
+		return outcome
 	}
 	replayCtx := ctx
 	if binding, present, bindingErr := models.ReadCeilingWorkflowEntryBinding(deferral.Payload); bindingErr == nil && present {

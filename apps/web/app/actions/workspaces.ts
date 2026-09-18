@@ -30,6 +30,8 @@ import type {
   ListWorkflowTemplatesResponse,
   WorkflowTemplate,
   StepDefinition,
+  WorkflowImportPreview,
+  WorkflowImportProfileBinding,
 } from "@/lib/types/http";
 
 const { apiBaseUrl } = getBackendConfig();
@@ -46,9 +48,11 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const text = response.status === 204 ? "" : await response.text();
   if (!response.ok) {
     let message = `Request failed: ${response.status} ${response.statusText}`;
+    let errorBody: unknown = null;
     if (text) {
       try {
         const body = JSON.parse(text) as { error?: string; message?: string };
+        errorBody = body;
         const detail = body.error ?? body.message;
         if (detail) {
           message = detail;
@@ -57,7 +61,10 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
         // body was not JSON, fall back to status text
       }
     }
-    throw new Error(message);
+    const error = new Error(message) as Error & { status: number; body: unknown };
+    error.status = response.status;
+    error.body = errorBody;
+    throw error;
   }
   if (!text) {
     return undefined as T;
@@ -688,9 +695,23 @@ export async function exportAllWorkflowsAction(
 export async function importWorkflowsAction(
   workspaceId: string,
   yamlContent: string,
+  stepProfileBindings: WorkflowImportProfileBinding[] = [],
 ): Promise<ImportWorkflowsResult> {
   return fetchJson<ImportWorkflowsResult>(
-    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/import`,
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/import`,
+    {
+      method: "POST",
+      body: JSON.stringify({ yaml: yamlContent, step_profile_bindings: stepProfileBindings }),
+    },
+  );
+}
+
+export async function previewWorkflowImportAction(
+  workspaceId: string,
+  yamlContent: string,
+): Promise<WorkflowImportPreview> {
+  return fetchJson<WorkflowImportPreview>(
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/import/preview`,
     {
       method: "POST",
       headers: { "Content-Type": "application/x-yaml" },

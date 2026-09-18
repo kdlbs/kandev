@@ -63,6 +63,7 @@ import {
   LaunchQueueStatus,
   ParkedSessionNote,
 } from "./launch-queue-status";
+import { WipQueueStatus } from "./wip-queue-status";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -578,6 +579,8 @@ type TaskChatPanelProps = {
   hideSessionsDropdown?: boolean;
   /** Mobile layout renders the task queue above its session picker. */
   hideLaunchQueueStatus?: boolean;
+  /** Mobile layout renders the WIP queue above its session picker. */
+  hideWipQueueStatus?: boolean;
   /**
    * Embedded multi-panel hosts do not own the global workbench or shortcuts.
    * They keep the conversation and composer, but suppress those side effects.
@@ -1004,6 +1007,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   pendingScrollTarget,
   onPendingScrollConsumed,
   hideLaunchQueueStatus = false,
+  hideWipQueueStatus = false,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
@@ -1151,7 +1155,18 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     }
   }, [hasMore, firstMessageId]);
   // Search can target backend rows before the visible transcript boundary.
-  const search = useSessionSearch(resolvedSessionId, loadMoreRaw);
+  const navigateSearchHit = useCallback(
+    (id: string) => {
+      if (!messageListRef.current?.scrollToMessage(id, { align: "center" })) return null;
+      return (
+        panelRef.current?.querySelector<HTMLElement>(
+          `.chat-message-list [id="msg-${CSS.escape(id)}"]`,
+        ) ?? null
+      );
+    },
+    [messageListRef],
+  );
+  const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
     containerRef: panelRef,
@@ -1179,6 +1194,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       className="outline-none"
     >
       {!hideLaunchQueueStatus && <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />}
+      {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
       <ParkedSessionNote visible={hasWorkflowParkingMarker(session?.metadata)} />
       <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
         <TaskMarkdownFileLinkProvider

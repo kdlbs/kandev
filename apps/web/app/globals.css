@@ -2220,3 +2220,11 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
     animation: none;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-text-motion],
+  [data-chat-motion-item] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

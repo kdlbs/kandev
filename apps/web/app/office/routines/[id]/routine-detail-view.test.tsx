@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { RoutineDetailView } from "./routine-detail-view";
@@ -103,10 +104,12 @@ function renderDetailView(routine: Routine, triggers: RoutineTrigger[]) {
         office: { ...defaultOfficeState.office },
       }}
     >
-      <OfficeTopbarChromeProvider>
-        <RoutineDetailView initialRoutine={routine} initialTriggers={triggers} />
-        <TopbarActions />
-      </OfficeTopbarChromeProvider>
+      <TooltipProvider>
+        <OfficeTopbarChromeProvider>
+          <RoutineDetailView initialRoutine={routine} initialTriggers={triggers} />
+          <TopbarActions />
+        </OfficeTopbarChromeProvider>
+      </TooltipProvider>
     </StateProvider>,
   );
 }

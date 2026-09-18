@@ -12,6 +12,15 @@ legacy_specs: []
 
 # Implementation plan: Queued session ownership
 
+## Policy supersession, 2026-09-18
+
+The [revised conversation recovery package](../session-open-recovery-eligibility/plan.md)
+supersedes parked-session suppression and parking-note presentation in this
+historical package. Opening an earlier conversation now follows normal recovery.
+Keep queue identity, admission, callback, and reconciliation coverage. Replace
+old no-resume and parked-note assertions in the revised package's work orders.
+Historical results and outstanding PostgreSQL checks below are unchanged.
+
 ## Overview
 
 Keep Luna queued when a workflow enters Implement, keep the parked Astra
@@ -96,7 +105,7 @@ Review                       Scheduling
 
 +-------------------------------------------------------------------+
 | Investigate issue                                      Implement  |
-| Queued: Luna. Waiting for session capacity                         |
+| Queued: Luna. Waiting for global session capacity                  |
 | 5 of 5 in use. Checked just now. Queued since 21:15                 |
 | Starts automatically when capacity is available.                   |
 | [Astra] [Luna: Queued] [Plan]                                      |
@@ -123,7 +132,7 @@ Task detail (direct navigation)
 +------------------------------------+
 | Investigate issue        Implement |
 | Queued: Luna                       |
-| Waiting for session capacity       |
+| Waiting for global session capacity       |
 | 5 of 5. Checked just now.           |
 | Queued since 21:15                 |
 | Starts automatically.              |
@@ -191,6 +200,11 @@ transport before opening the task, selecting Astra, reloading, and reconnecting.
 Prove no Astra boot/prompt/queued-message additions and unchanged primary ownership.
 Do not use helpers that click recovery or reload as part of an idle wait.
 
+The [opt-in ceiling follow-up](../session-ceiling-opt-in/plan.md) disables the
+unconfigured default and adds live Settings. Keep this explicit environment
+fixture: queue-ownership scenarios require an enabled ceiling and must not rely
+on CPU count. This note changes no recorded results or task completion status.
+
 Release only the fixture's capacity holder. Observe Luna's one prompt delivery,
 queue removal, and untouched Astra. Add explicit Astra follow-up as a separate
 case; it must leave Luna's queue intact. Use real service/repository tests for
@@ -215,6 +229,12 @@ remain in progress because the required PostgreSQL checks need
 subagents are authorized by this plan.
 
 ## Related delivery records
+
+The [replay and cancellation deadlock repair](../ceiling-replay-cancellation-deadlock/plan.md)
+owns the concurrency regression observed on 2026-09-17. It narrows Task 02's
+lock scope while preserving its entry and state contracts. Its regression
+matrix is complete. Historical results and outstanding PostgreSQL checks in
+this package remain unchanged.
 
 [Workflow lifecycle](../workflow-profile-session-reuse/plan.md),
 [explicit targeting](../workflow-session-targeting/plan.md),
@@ -286,3 +306,11 @@ Implementation and available rendered verification on 2026-09-17:
 - Projection refreshes can accidentally count as user activity and reorder tasks.
 - Legacy ambiguous ownership must surface recovery without dispatch or data loss.
 - The unexplained warning must not cause blanket suppression of genuine empty turns.
+
+## Follow-up: Session-open recovery eligibility
+
+The [recovery eligibility repair](../session-open-recovery-eligibility/plan.md)
+owns the historical-stop and settled-deferral regressions found after restart.
+It replaces the parking suppression policy and removes the parking note, with
+separate and combined recovery cases on desktop and phone. Existing results and PostgreSQL prerequisites here
+remain unchanged. The follow-up work order is pending implementation.

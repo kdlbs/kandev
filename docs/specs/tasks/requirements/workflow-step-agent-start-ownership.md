@@ -97,34 +97,28 @@ intent-derived destination.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.4:** Desktop and mobile task
 creation shall apply the same immediate-launch placement rule.
 
-### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005: Asynchronous start failure prompt preservation
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005: Automatic prompt preservation after startup failure
 
-**Intent:** An automatic step prompt survives an agent start that fails after the
-launch call has already returned, so the step can proceed without a human
-retyping the prompt.
+**Intent:** Retain an automatic workflow prompt when its agent launch fails before prompt delivery.
+This draft extension addresses [issue #3753](https://github.com/kdlbs/kandev/issues/3753).
 
 #### Acceptance criteria
 
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1:** When an automatic step
-launch for a `CREATED` session fails after the launch call returned, the system
-shall queue the composed step prompt for that session, with its attachments,
-entity references, and step handoff text.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.2:** The queued prompt shall
-be delivered once when the session next becomes promptable, and shall not create
-a second chat-history user message for a prompt already recorded at launch time.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.3:** Preserving the prompt
-shall not start an agent process. The session shall reach its failure state
-through the existing start-failure projection, and exactly one path shall own
-the agent start for the step entry.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** When the agent process
-starts successfully, the system shall discard the preserved prompt, so a later
-unrelated start failure on the same session shall not redeliver it.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** When the launch fails
-synchronously, the system shall preserve the prompt through the synchronous
-failure path only, and shall not queue the same prompt twice.
-- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.6:** A start failure from a
-superseded execution, a stale resume attempt, or a session whose cancellation is
-in progress shall not consume or queue the preserved prompt.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1:** When an admitted automatic launch fails asynchronously before prompt delivery, the system shall preserve its prompt for recovery.
+  The preserved input shall include handoff text, attachments, references, plan mode, and workflow origin.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.2:** After successful recovery, the system shall deliver the preserved prompt once through normal queue admission.
+  It shall retain one existing user message and respect a paused queue.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.3:** Duplicate or superseded launch failures shall not duplicate queued input or affect a successor turn.
+  Cancellation, completion, archive, deletion, and a superseding workflow entry shall prevent stale prompt recovery.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** Prompt preservation shall retain the existing launch-error classification and recovery actions.
+  It shall not initiate another launch from the failure callback or turn permanent rejection into an automatic retry loop.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** After successful queue persistence, the preserved prompt shall survive a backend restart.
+  If persistence fails, the launch error shall remain visible and diagnostics shall identify the preservation failure without exposing prompt content.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.6:** Successful starts and synchronous permanent rejections shall not create asynchronous recovery entries.
+  Existing synchronous busy-error recovery shall retain its current behavior.
+
+This extension excludes a backend crash before the asynchronous failure callback persists the prompt.
+It also excludes replay after ambiguous provider acceptance, automatic repair of historical orphaned messages, and new recovery controls.
 
 ## Migrated source detail
 
@@ -192,8 +186,6 @@ and unprompted.
   as today.
 - Queueing the prompt after a failed start itself fails: the failure is logged
   and the session's `FAILED` state is unchanged.
-- Queueing the prompt after an asynchronous start failure itself fails: the
-  failure is logged and the session's start-failure projection is unchanged.
 
 ## Scenarios
 
@@ -218,28 +210,14 @@ and unprompted.
 - **GIVEN** a `CREATED` launch rejected permanently (Office scheduler guard),
   **WHEN** the failure is handled, **THEN** the error is returned and no
   message is queued.
-- **GIVEN** a `CREATED` session entering a step whose `on_enter` has
-  `reset_agent_context` and `auto_start_agent`, **WHEN** the agent process start
-  fails after the launch call has already returned, **THEN** the composed step
-  prompt is queued exactly once for that session and no second agent start is
-  attempted.
-- **GIVEN** the same launch, **WHEN** the agent process starts successfully,
-  **THEN** the preserved prompt is discarded and a later start failure on that
-  session queues nothing.
 
-## Asynchronous start failure
+## Asynchronous preservation delivery status
 
-`startAgentOnExistingWorkspace` ends with `startAgentProcessAsync` and returns
-`nil`, so a session with a prepared execution never surfaces a synchronous error
-for the clause above to catch. That failure is handled by
-`handleAgentProcessStartFailure` → `Service.handleAgentStartFailed`, which
-originally had no access to the prompt the launch was carrying and therefore
-dropped it.
-
-REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005 closes that gap: the launch
-records a single-use handle carrying the composed prompt, and whichever of the
-two start outcomes lands first consumes it — a successful start discards it,
-an asynchronous failure queues it for the session's next promptable transition.
+The original [start-ownership package](../../../plans/workflow-step-agent-start-ownership/plan.md)
+closed the synchronous failure path. Requirement
+`REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005` defines the asynchronous
+recovery contract. The [asynchronous prompt preservation package](../../../plans/workflow-async-start-prompt-preservation/plan.md)
+delivers it through its completed work order.
 
 ## Out of scope
 
