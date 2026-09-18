@@ -178,3 +178,16 @@ URL, task, and database; the main instance on :9998 was not changed.
 
 Whole-file cards use the file section’s left padding on desktop and phone,
 without the line-comment gutter indent (user follow-up, 2026-09-18).
+
+### PR review corrections (2026-09-18)
+
+Scoped Changes-panel delivery and clearing to the active session. Shared the
+collision-safe repository/file grouping between the overview and sent-message
+attachment, using repository IDs to combine mixed line/file feedback when
+available and repository names for legacy whole-file records. Preserved named
+repository context when opening a file from the passthrough comments panel.
+Four new regression tests failed before their fixes; all 48 affected tests,
+typecheck, and focused ESLint passed afterward.
+
+The disposable user test instance has been shut down as requested. The main
+instance on :9998 was not changed.

@@ -25,3 +25,21 @@ it("shows separate repository context and whole-file labels without line metadat
   expect(screen.getAllByText("File comment")).toHaveLength(2);
   expect(document.body.textContent).not.toContain("undefined");
 });
+
+it("keeps nested repository identities separate when display paths collide", () => {
+  const comments: ReviewFileComment[] = [
+    { repositoryName: "vendor/outer", filePath: "vendor/inner/README.md" },
+    { repositoryName: "vendor/outer/vendor", filePath: "inner/README.md" },
+  ].map((location, index) => ({
+    ...location,
+    source: "review-file",
+    id: String(index),
+    sessionId: "s",
+    text: "Feedback",
+    status: "pending",
+    createdAt: "now",
+  }));
+  render(<ReviewCommentsAttachment comments={comments} />);
+  fireEvent.click(screen.getByRole("button"));
+  expect(screen.getAllByText("vendor/outer/vendor/inner/README.md")).toHaveLength(2);
+});

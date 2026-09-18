@@ -406,7 +406,7 @@ function CommentsPanel({
   isTouch,
 }: {
   comments: ReviewComment[];
-  openFile: (path: string) => void;
+  openFile: (path: string, repositoryName?: string) => void;
   onSend: () => Promise<void> | void;
   isTouch: boolean;
 }) {
@@ -475,7 +475,7 @@ function CommentCard({
   openFile,
 }: {
   comment: ReviewComment;
-  openFile: (path: string) => void;
+  openFile: (path: string, repositoryName?: string) => void;
 }) {
   const { t } = useTranslation();
   const updateComment = useCommentsStore((s) => s.updateComment);
@@ -487,8 +487,9 @@ function CommentCard({
       : `${comment.filePath}:${lineRange}`;
 
   const handleOpenFile = useCallback(() => {
-    openFile(comment.filePath);
-  }, [openFile, comment.filePath]);
+    if (comment.source === "review-file") openFile(comment.filePath, comment.repositoryName);
+    else openFile(comment.filePath);
+  }, [openFile, comment]);
 
   return (
     <div

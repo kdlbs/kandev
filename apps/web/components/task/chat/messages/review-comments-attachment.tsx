@@ -1,5 +1,6 @@
 "use client";
 
+import { groupCommentsByFile } from "@/lib/state/slices/comments/group-review";
 import { useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -29,17 +30,8 @@ export function ReviewCommentsAttachment({ comments, className }: ReviewComments
     return null;
   }
 
-  // Group comments by file
-  const byFile: Record<string, ReviewComment[]> = {};
-  for (const comment of comments) {
-    const key =
-      comment.source === "review-file"
-        ? [comment.repositoryName, comment.filePath].filter(Boolean).join("/")
-        : comment.filePath;
-    (byFile[key] ??= []).push(comment);
-  }
-
-  const fileCount = Object.keys(byFile).length;
+  const groups = groupCommentsByFile(comments);
+  const fileCount = groups.length;
   const totalComments = comments.length;
 
   return (
@@ -73,8 +65,8 @@ export function ReviewCommentsAttachment({ comments, className }: ReviewComments
         {/* Expanded content */}
         <CollapsibleContent>
           <div className="border-t border-border/50 px-3 py-2">
-            {Object.entries(byFile).map(([filePath, fileComments]) => (
-              <div key={filePath} className="mb-3 last:mb-0">
+            {groups.map(({ key, filePath, comments: fileComments }) => (
+              <div key={key} className="mb-3 last:mb-0">
                 {/* File header */}
                 <div className="mb-1.5 flex items-center gap-1.5 text-xs">
                   <span className="font-medium text-muted-foreground">{filePath}</span>

@@ -231,7 +231,7 @@ function useChangesPRPresentation(opts: {
   return { selectedFileKey, blockChangesForPR };
 }
 
-function useFixCommentsRequest(
+export function useFixCommentsRequest(
   activeSessionId: string | null | undefined,
   workspaceBlocked: boolean,
 ) {
@@ -243,7 +243,9 @@ function useFixCommentsRequest(
 
   return useCallback(() => {
     if (workspaceBlocked || !activeSessionId || !activeTaskId) return;
-    const comments = getPendingComments().filter(isReviewComment);
+    const comments = getPendingComments()
+      .filter(isReviewComment)
+      .filter((comment) => comment.sessionId === activeSessionId);
     if (comments.length === 0) return;
     const markdown = formatReviewCommentsAsMarkdown(comments);
     if (!markdown) return;

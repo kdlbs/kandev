@@ -126,3 +126,12 @@ it("groups root file feedback with line feedback for the same file", () => {
   expect(groups).toHaveLength(1);
   expect(groups[0].comments.map((c) => c.id)).toEqual(["line", "whole"]);
 });
+
+it("groups named-repository line and file comments by repository ID", () => {
+  const line = comment({ id: "line", repositoryId: "repo-api" });
+  const whole = { ...line, id: "whole", source: "review-file" as const, repositoryName: "api" };
+  const groups = groupCommentsByFile([line, whole]);
+  expect(groups).toHaveLength(1);
+  expect(groups[0].comments.map((c) => c.id)).toEqual(["line", "whole"]);
+  expect(groups[0].filePath).toBe(`api/${line.filePath}`);
+});

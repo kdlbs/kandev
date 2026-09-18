@@ -5,46 +5,8 @@ import type { ReviewComment } from "@/lib/state/slices/comments";
 import { formatLineRange } from "@/lib/diff";
 import { useTranslation } from "react-i18next";
 
-type FileGroup = { key: string; filePath: string; comments: ReviewComment[] };
-
-function fileGroupKey(comment: ReviewComment): string {
-  return JSON.stringify([
-    comment.repositoryId ?? null,
-    comment.source === "review-file" ? comment.repositoryName || null : null,
-    comment.filePath,
-  ]);
-}
-
-/**
- * Groups comments by file, preserving first-seen file order so the overview
- * mirrors the order comments were added / appear in the file tree.
- */
-export function groupCommentsByFile(comments: ReviewComment[]): FileGroup[] {
-  const order: string[] = [];
-  const byFile = new Map<string, ReviewComment[]>();
-  const filePathByKey = new Map<string, string>();
-  for (const comment of comments) {
-    const key = fileGroupKey(comment);
-    const existing = byFile.get(key);
-    if (existing) {
-      existing.push(comment);
-    } else {
-      order.push(key);
-      filePathByKey.set(
-        key,
-        comment.source === "review-file"
-          ? [comment.repositoryName, comment.filePath].filter(Boolean).join("/")
-          : comment.filePath,
-      );
-      byFile.set(key, [comment]);
-    }
-  }
-  return order.map((key) => ({
-    key,
-    filePath: filePathByKey.get(key)!,
-    comments: byFile.get(key)!,
-  }));
-}
+import { groupCommentsByFile } from "@/lib/state/slices/comments/group-review";
+export { groupCommentsByFile } from "@/lib/state/slices/comments/group-review";
 
 function fileDir(filePath: string): string {
   const idx = filePath.lastIndexOf("/");
