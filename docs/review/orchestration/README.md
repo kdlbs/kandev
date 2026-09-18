@@ -30,8 +30,8 @@ source preservation, privacy review, hooks and remote verification.
 The original local snapshot remains local because it contained installation notes
 and identifying examples. This repository starts from public release ancestry
 and a clean import. New documentation does not turn pending features into
-completed implementation. Live data and provider-quality trials are not part of
-the existing fixture evidence.
+completed implementation. Live data and general provider quality are not part of
+the fixture evidence; the narrow real-provider trial is recorded separately below.
 
 ## Existing public discussion and synthetic demo
 
@@ -46,8 +46,8 @@ five desktop and five mobile screenshots plus desktop/mobile 24-second videos in
 MP4 and WebM, all silent. No production prompt/history or real model credential
 was used. Follow the issue's asset links to the already-published media.
 
-Those assets predate the release rebase and do not show the pending central task
-view. View task 03 requires fresh inspected screenshots/video after implementation.
+Those assets predate the release rebase and do not show the implemented central
+task view. Fresh inspected screenshots/video are linked below.
 No public code PR, new issue comment or live deployment is performed by this
 private publication.
 
@@ -57,13 +57,16 @@ The central workspace task view is now implemented and verified. See its
 [completed work orders](../../plans/workspace-coordinator-view/plan.md),
 [focused PR draft](coordinator-pr-draft.md), and
 [fresh desktop/mobile screenshots and silent clip](media/coordinator-view/README.md).
-These are private review artifacts from synthetic fixtures. The assistant
-continuation and candidate/live delivery plan remain in progress.
+These are private review artifacts from synthetic fixtures. Candidate/live
+delivery remains in progress.
 
-## Assistant qualification in progress
+## Assistant implementation and evidence
 
 The [39-criterion evidence matrix](assistant-evidence.md) maps every current
 requirement to its tests. The isolated real-provider trial now demonstrates a
 scoped task read, a native denied-write receipt and unchanged ordinary workspace
-data. Combined final browser evidence and synthetic media are being assembled.
+data. All eleven assistant work orders are complete; the combined browser matrix
+passes 52 checks and the final affected native filter passes 168 race tests.
+[Assistant screenshots and silent clip](media/assistant/README.md) use only
+generic fixtures and identify their clean source revision.
 This does not claim a qualified deployment bundle or a live-data upgrade.

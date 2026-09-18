@@ -1,7 +1,7 @@
 ---
 id: "11-read-only-e2e"
 title: "Read-only experiments and rollout evidence"
-status: in_progress
+status: done
 wave: 9
 depends_on: ["08-assistant-ui","09-workflow-improvements","10-workspace-grants"]
 plan: "plan.md"
@@ -172,7 +172,7 @@ provider enforcement or migration evidence remains a release limitation.
 
 ## Results
 
-In progress. The clean private checkpoint `41de43a14ae6d08a65d4b44167f4779f5cd2306d`
+Completed on 2026-09-18. The private checkpoint `41de43a14ae6d08a65d4b44167f4779f5cd2306d`
 contains completed assistant tasks 01–10. The [39-criterion matrix](../../review/orchestration/assistant-evidence.md)
 now links every requirement to executable evidence. Workspace-owned reset repairs
 preserve other workspaces and ordinary execution profiles. New browser scenarios
@@ -194,7 +194,15 @@ passes the coordinator/Automation pair and a fresh four-turn native provider
 trial. Typecheck, scoped ESLint, Go lint, SQL guard, architecture/spec lint and
 public-doc validation pass (61 documentation tests).
 
-Media hooks are present; fresh inspected screenshots/video and their
-source hashes still need capture before this work order can be marked complete.
+Source fixes and tests are committed and pushed privately in
+`c357f9ab94d3790a471d9db587c0a063c7f8d838`, with both normal commit hooks active
+and passing, no bypass, and a clean worktree at push. Fresh
+[coordinator](../../review/orchestration/media/coordinator-view/README.md) and
+[assistant](../../review/orchestration/media/assistant/README.md) media were
+captured from that clean revision. Eight screenshots and every one of the twelve
+video source frames were inspected; the two clips are silent and contain only
+generic fixtures. Source/test/frame/artifact hashes accompany the media. All
+eight desktop/phone capture tests pass without retries. The central mock profile
+remains visibly unsupported; media does not substitute for real-provider evidence.
 Immutable bundle, private-data rehearsal and live enablement remain delivery
 02–04 and are not implied by this experiment.

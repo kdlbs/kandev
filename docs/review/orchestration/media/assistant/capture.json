@@ -1,0 +1,42 @@
+{
+  "source_commit": "c357f9ab94d3790a471d9db587c0a063c7f8d838",
+  "base_commit": "bf819a0228e742d069c528293d848c985a4d1bd1",
+  "captured_at_utc": "2026-09-18",
+  "fixture": "Disposable E2E Workspace with generic tasks, instructions and mock workers",
+  "capture_fps": 5,
+  "playback_fps": 1,
+  "playback_slowdown_factor": 5,
+  "source_frame_sha256": {
+    "frame-0000.png": "557a4a070b3a334b0b746b906b26d60ca79dfd5129a92893be539cf4299c50af",
+    "frame-0001.png": "27df952655b5341a5f923e53706d3b675be2b10187b4259ea41dd45281146634",
+    "frame-0002.png": "b83bba82a4c6563192449d20f6cdff37904a77cfc56121eaad5bc212cc55c58e",
+    "frame-0003.png": "36b64b979ae2189192833f965c73891176c9b72563775a3d49d972198ee3272e",
+    "frame-0004.png": "ee885cef91685eea4613e58f7e0eacf67ebeb1da0e8b00985cbf19dd50040ff2"
+  },
+  "test_source_sha256": {
+    "personal-assistant.spec.ts": "ad72a8b8d86dec08824eb4f354c3d42f8bf2a5305a5f5ba7cefff7ccd2e06775",
+    "mobile-personal-assistant.spec.ts": "7b10a3415daa7724841214d3c2f16ba9502af34842c9726a826dbc8ef0b5d07c"
+  },
+  "visual_review": {
+    "screenshots": 4,
+    "source_frames": 5,
+    "private_prompt_or_credentials_visible": false,
+    "redaction_or_generated_image_used": false
+  },
+  "video_probe": {
+    "programs": [],
+    "streams": [
+      {
+        "codec_name": "vp9",
+        "codec_type": "video",
+        "width": 1440,
+        "height": 1000,
+        "r_frame_rate": "1/1",
+        "nb_read_frames": "5"
+      }
+    ],
+    "format": {
+      "duration": "5.000000"
+    }
+  }
+}

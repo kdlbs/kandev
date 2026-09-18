@@ -124,8 +124,10 @@ to executable checks. A separately isolated real-provider trial completed a
 scoped read and a denied task-write attempt with unchanged ordinary workspace
 data; its integration fixes have regression coverage.
 
-Still unfinished: final combined assistant evidence and media,
-candidate qualification, private live-data migration/rollback rehearsal, live
+Combined assistant evidence and inspected synthetic media are complete; see the
+[acceptance matrix](assistant-evidence.md).
+
+Still unfinished: candidate qualification, private live-data migration/rollback rehearsal, live
 pilot, dogfood evidence and focused upstream export. No live service cutover or
 public code PR is implied by these implementation checkpoints. See the
 [workbench](../../../WORKBENCH.md) for current review links.

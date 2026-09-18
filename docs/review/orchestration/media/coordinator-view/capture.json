@@ -1,0 +1,44 @@
+{
+  "source_commit": "c357f9ab94d3790a471d9db587c0a063c7f8d838",
+  "base_commit": "bf819a0228e742d069c528293d848c985a4d1bd1",
+  "captured_at_utc": "2026-09-18",
+  "fixture": "Disposable E2E Workspace with generic tasks, instructions and mock workers",
+  "capture_fps": 5,
+  "playback_fps": 1,
+  "playback_slowdown_factor": 5,
+  "source_frame_sha256": {
+    "frame-0000.png": "030399e54e0029c79e2cb637cebbdf3d4d15c6f2a2f8c2863330de2838c8751b",
+    "frame-0001.png": "22b4b57e58cb4725f6a4ebcae66841df6a94ec5ff93e7e016429f3d8f615fab6",
+    "frame-0002.png": "18236d909536005737cc144d8103b764bd377f9eb47fbd81cada5590860c0735",
+    "frame-0003.png": "2d4791695518874e5f239a89bd38d7367748415b66e314ebb1263504a13c5b88",
+    "frame-0004.png": "11c6ba9c5e077ff923e1c11dbaa8ff34f5449ef33e432ac77c5e45b0b07cfc7e",
+    "frame-0005.png": "c0ff8d0538706711721a9d132f0e6b9714a6eb2d3ce2f0b28345c846a95bbb5d",
+    "frame-0006.png": "ad5eca7583e01f758d0d6c47c8ed4eb97e755e66568150858ca04e301f6c72ba"
+  },
+  "test_source_sha256": {
+    "coordinator-view.spec.ts": "46c10ecfeada6cfb3addcda1d3258b0b154a5f88e3142e9f5ee08e171ff34c61",
+    "mobile-coordinator-view.spec.ts": "7af21828109eefc5ed249618f5e0f56048837e747fb8236ba34dafa9312e9e5a"
+  },
+  "visual_review": {
+    "screenshots": 4,
+    "source_frames": 7,
+    "private_prompt_or_credentials_visible": false,
+    "redaction_or_generated_image_used": false
+  },
+  "video_probe": {
+    "programs": [],
+    "streams": [
+      {
+        "codec_name": "vp9",
+        "codec_type": "video",
+        "width": 1440,
+        "height": 1000,
+        "r_frame_rate": "1/1",
+        "nb_read_frames": "7"
+      }
+    ],
+    "format": {
+      "duration": "7.000000"
+    }
+  }
+}

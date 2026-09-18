@@ -39,7 +39,7 @@ generic material; original local snapshot/backup refs are not published.
 | Assistant maintenance | Implemented; typed incidents, explicit grants, isolated checks/commits, human review, verified native recovery, recurrence and desktop/mobile proposal flow |
 | Assistant workspace grants | Implemented; explicit receiver consent, bounded exports, final-dispatch revocation, historical account reconfirmation, forgetting and desktop/mobile controls verified |
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
-| Combined assistant evidence | Final runs and media in progress; 168 affected race tests pass and the isolated real-provider read/denied-write trial passes. See the [39-criterion evidence matrix](docs/review/orchestration/assistant-evidence.md) |
+| Combined assistant evidence | Complete; 168 affected race tests, 52 combined browser checks and the isolated real-provider read/denied-write trial pass. The [39-criterion evidence matrix](docs/review/orchestration/assistant-evidence.md) links inspected generic screenshots/video |
 | Actual live-data rehearsal and deployment | Pending; live service unchanged |
 
 ## Development and contribution

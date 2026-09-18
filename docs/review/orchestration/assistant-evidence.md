@@ -1,6 +1,6 @@
 # Assistant acceptance evidence
 
-Task 11 is in progress. This inventory maps all 39 current acceptance criteria
+Task 11 is complete. This inventory maps all 39 current acceptance criteria
 to executable checks. It does not turn a deterministic test into a provider,
 deployment or production-data qualification claim.
 
@@ -8,7 +8,9 @@ The implementation starts from exact v0.94.0
 (`bf819a0228e742d069c528293d848c985a4d1bd1`); assistant tasks 01–10 are in private
 commit `41de43a14ae6d08a65d4b44167f4779f5cd2306d`. Task 11 adds fixture-isolation
 repairs, combined browser evidence, provider integration regressions and media.
-The final candidate receipt will identify the clean source and binary hashes.
+The source fixes and tests are in clean private commit
+`c357f9ab94d3790a471d9db587c0a063c7f8d838`. The final candidate receipt will
+identify the qualified source and binary hashes.
 
 ## Criterion matrix
 
@@ -151,3 +153,13 @@ Candidate qualification, private migration replay/rollback and live cutover have
 separate [delivery work orders](../../plans/orchestration-delivery/plan.md).
 Screenshots/video use fictional mock fixtures only; copied live data and real
 provider logs are excluded from media.
+
+## Inspected media
+
+The [coordinator](media/coordinator-view/README.md) and
+[assistant](media/assistant/README.md) packets contain eight desktop/phone
+screenshots and two silent clips from clean source `c357f9ab9`. All twelve source
+video frames were visually reviewed. Capture and artifact receipts identify the
+exact test, frame and output hashes. The eight desktop/phone capture tests pass
+without retries. The mock assistant's unsupported-profile banner is retained;
+the real-provider execution claim comes only from the separate native trial.
