@@ -37,6 +37,14 @@ vi.mock("@/hooks/use-in-office", () => ({
   useOfficeModeState: () => mode,
 }));
 
+vi.mock("@/hooks/use-kanban-onboarding-complete", () => ({
+  useKanbanOnboardingComplete: () => true,
+}));
+
+vi.mock("@/hooks/domains/orchestration/use-orchestrator-conversation", () => ({
+  useWorkspaceOrchestrators: () => ({ data: { orchestrators: [] } }),
+}));
+
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({
   useQuickChatLauncher: () => mocks.openQuickChat,
 }));
@@ -65,6 +73,7 @@ function renderNav(collapsed: boolean) {
 describe("AppSidebarPrimaryNav", () => {
   beforeEach(() => {
     state.workspaces.activeId = "ws-1";
+    state.features.orchestration = false;
     state.office.inboxCountByWorkspaceId = {};
     state.quickChat.isOpen = false;
     state.quickChat.sessions = [];
@@ -157,7 +166,7 @@ describe("AppSidebarPrimaryNav", () => {
 
 it("exposes the Orchestrator destination when orchestration is enabled", () => {
   const view = renderNav(false);
-  expect(screen.queryByTestId("assistant-nav")).toBeNull();
+  expect(screen.queryByTestId("workspace-coordinator-link")).toBeNull();
   state.features.orchestration = true;
   try {
     view.rerender(
@@ -165,7 +174,9 @@ it("exposes the Orchestrator destination when orchestration is enabled", () => {
         <AppSidebarPrimaryNav collapsed={false} />
       </TooltipProvider>,
     );
-    expect(screen.getByTestId("assistant-nav").getAttribute("href")).toBe("/assistant");
+    expect(screen.getByTestId("workspace-coordinator-link").getAttribute("href")).toBe(
+      "/workspaces/ws-1/coordinator",
+    );
   } finally {
     state.features.orchestration = false;
   }

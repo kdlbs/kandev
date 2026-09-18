@@ -105,22 +105,22 @@ export function CoordinatorContent({ catalog }: { catalog: CoordinatorWorkspace 
       {isMobile && <CoordinatorTabs tab={tab} setTab={setTab} />}
       <div className="flex flex-1 min-h-0 min-w-0">
         <div
-          id="coordinator-panel-tasks"
-          role={isMobile ? "tabpanel" : undefined}
-          aria-labelledby={isMobile ? "coordinator-tab-tasks" : undefined}
-          hidden={isMobile && tab !== "tasks"}
-          className="min-h-0 min-w-0 flex-1 flex flex-col [&[hidden]]:hidden"
-        >
-          <CoordinatorTaskList catalog={catalog} selected={selected} />
-        </div>
-        <aside
           id="coordinator-panel-chat"
           role={isMobile ? "tabpanel" : undefined}
           aria-labelledby={isMobile ? "coordinator-tab-chat" : undefined}
           hidden={isMobile ? tab !== "chat" : !showChat}
-          className="min-h-0 min-w-0 flex flex-col flex-1 md:flex-none md:w-[42%] md:max-w-xl md:border-l [&[hidden]]:hidden"
+          className="min-h-0 min-w-0 flex-1 flex flex-col [&[hidden]]:hidden"
         >
           <CoordinatorChat catalog={catalog} selected={selected} />
+        </div>
+        <aside
+          id="coordinator-panel-tasks"
+          role={isMobile ? "tabpanel" : undefined}
+          aria-labelledby={isMobile ? "coordinator-tab-tasks" : undefined}
+          hidden={isMobile && tab !== "tasks"}
+          className="min-h-0 min-w-0 flex flex-col flex-1 md:flex-none md:w-[44%] md:max-w-2xl md:border-l [&[hidden]]:hidden"
+        >
+          <CoordinatorTaskList catalog={catalog} selected={selected} />
         </aside>
       </div>
     </div>
