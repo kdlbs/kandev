@@ -107,8 +107,8 @@ vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
   }),
 }));
 
-vi.mock("@/hooks/domains/comments/use-diff-comments", () => ({
-  usePendingDiffCommentsByFile: () => mockPendingByFile,
+vi.mock("@/hooks/domains/comments/use-review-comments", () => ({
+  usePendingReviewCommentsByFile: () => mockPendingByFile,
 }));
 
 vi.mock("@/lib/state/slices/comments/comments-store", () => ({

@@ -31,14 +31,14 @@ import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { useAppStore } from "@/components/state-provider";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
-import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
+import { usePendingReviewCommentsByFile } from "@/hooks/domains/comments/use-review-comments";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { getShortcut, isUnboundShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 import { hasPendingClarification, shouldShowProceed } from "./chat/types";
@@ -221,14 +221,14 @@ export function PassthroughToolbar({
   );
 }
 
-function flattenComments(byFile: Record<string, DiffComment[]>): DiffComment[] {
-  const all: DiffComment[] = [];
+function flattenComments(byFile: Record<string, ReviewComment[]>): ReviewComment[] {
+  const all: ReviewComment[] = [];
   for (const list of Object.values(byFile)) all.push(...list);
   return all;
 }
 
 function usePendingPassthroughComments(sessionId: string | null | undefined) {
-  const pendingCommentsByFile = usePendingDiffCommentsByFile(sessionId ?? null);
+  const pendingCommentsByFile = usePendingReviewCommentsByFile(sessionId ?? null);
   const pendingComments = useMemo(
     () => flattenComments(pendingCommentsByFile),
     [pendingCommentsByFile],
@@ -405,7 +405,7 @@ function CommentsPanel({
   onSend,
   isTouch,
 }: {
-  comments: DiffComment[];
+  comments: ReviewComment[];
   openFile: (path: string) => void;
   onSend: () => Promise<void> | void;
   isTouch: boolean;
@@ -463,7 +463,8 @@ function CommentsPanel({
   );
 }
 
-function formatLineRange(comment: DiffComment): string {
+function formatLineRange(comment: ReviewComment): string {
+  if (comment.source === "review-file") return "";
   return comment.startLine === comment.endLine
     ? `${comment.startLine}`
     : `${comment.startLine}-${comment.endLine}`;
@@ -473,13 +474,17 @@ function CommentCard({
   comment,
   openFile,
 }: {
-  comment: DiffComment;
+  comment: ReviewComment;
   openFile: (path: string) => void;
 }) {
   const { t } = useTranslation();
   const updateComment = useCommentsStore((s) => s.updateComment);
   const removeComment = useCommentsStore((s) => s.removeComment);
   const lineRange = formatLineRange(comment);
+  const location =
+    comment.source === "review-file"
+      ? [comment.repositoryName, comment.filePath].filter(Boolean).join("/")
+      : `${comment.filePath}:${lineRange}`;
 
   const handleOpenFile = useCallback(() => {
     openFile(comment.filePath);
@@ -496,9 +501,9 @@ function CommentCard({
           onClick={handleOpenFile}
           className="truncate text-left font-mono text-[11px] text-primary hover:underline cursor-pointer"
           data-testid="passthrough-comment-file-ref"
-          title={`${comment.filePath}:${lineRange}`}
+          title={location}
         >
-          {comment.filePath}:{lineRange}
+          {location}
         </button>
         <button
           type="button"
@@ -510,7 +515,7 @@ function CommentCard({
           <IconTrash className="h-3.5 w-3.5" />
         </button>
       </div>
-      {comment.codeContent && (
+      {comment.source === "diff" && comment.codeContent && (
         <pre className="mb-1 max-h-16 overflow-y-auto rounded bg-muted/50 px-1.5 py-1 text-[10px] font-mono leading-tight">
           {comment.codeContent}
         </pre>

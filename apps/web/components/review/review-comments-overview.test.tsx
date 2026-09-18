@@ -110,3 +110,19 @@ describe("ReviewCommentsOverview", () => {
     expect(within(overview).getByText("2")).toBeDefined();
   });
 });
+
+it("groups root file feedback with line feedback for the same file", () => {
+  const wholeFile = {
+    id: "whole",
+    source: "review-file" as const,
+    sessionId: "s1",
+    repositoryName: "",
+    filePath: APP_PATH,
+    text: "Whole file",
+    status: "pending" as const,
+    createdAt: "now",
+  };
+  const groups = groupCommentsByFile([comment({ id: "line" }), wholeFile]);
+  expect(groups).toHaveLength(1);
+  expect(groups[0].comments.map((c) => c.id)).toEqual(["line", "whole"]);
+});

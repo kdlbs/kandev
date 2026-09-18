@@ -1,23 +1,27 @@
 "use client";
 
 import { IconMessage } from "@tabler/icons-react";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import { formatLineRange } from "@/lib/diff";
 import { useTranslation } from "react-i18next";
 
-type FileGroup = { key: string; filePath: string; comments: DiffComment[] };
+type FileGroup = { key: string; filePath: string; comments: ReviewComment[] };
 
-function fileGroupKey(comment: DiffComment): string {
-  return JSON.stringify([comment.repositoryId ?? null, comment.filePath]);
+function fileGroupKey(comment: ReviewComment): string {
+  return JSON.stringify([
+    comment.repositoryId ?? null,
+    comment.source === "review-file" ? comment.repositoryName || null : null,
+    comment.filePath,
+  ]);
 }
 
 /**
  * Groups comments by file, preserving first-seen file order so the overview
  * mirrors the order comments were added / appear in the file tree.
  */
-export function groupCommentsByFile(comments: DiffComment[]): FileGroup[] {
+export function groupCommentsByFile(comments: ReviewComment[]): FileGroup[] {
   const order: string[] = [];
-  const byFile = new Map<string, DiffComment[]>();
+  const byFile = new Map<string, ReviewComment[]>();
   const filePathByKey = new Map<string, string>();
   for (const comment of comments) {
     const key = fileGroupKey(comment);
@@ -26,7 +30,12 @@ export function groupCommentsByFile(comments: DiffComment[]): FileGroup[] {
       existing.push(comment);
     } else {
       order.push(key);
-      filePathByKey.set(key, comment.filePath);
+      filePathByKey.set(
+        key,
+        comment.source === "review-file"
+          ? [comment.repositoryName, comment.filePath].filter(Boolean).join("/")
+          : comment.filePath,
+      );
       byFile.set(key, [comment]);
     }
   }
@@ -51,7 +60,7 @@ function fileName(filePath: string): string {
  * Scrollable overview of pending review comments, grouped per file. Rendered
  * inside the "Fix Comments" hover popover on the review top bar.
  */
-export function ReviewCommentsOverview({ comments }: { comments: DiffComment[] }) {
+export function ReviewCommentsOverview({ comments }: { comments: ReviewComment[] }) {
   const { t } = useTranslation();
   const groups = groupCommentsByFile(comments);
   const total = comments.length;
@@ -103,10 +112,16 @@ export function ReviewCommentsOverview({ comments }: { comments: DiffComment[] }
                   className="rounded-md border border-border/50 bg-muted/30 px-2 py-1.5"
                 >
                   <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
-                    <span>{formatLineRange(comment.startLine, comment.endLine)}</span>
-                    <span className="text-muted-foreground/60">
-                      · {comment.side === "additions" ? t("review:new") : t("review:old")}
+                    <span>
+                      {comment.source === "review-file"
+                        ? t("review:fileComment")
+                        : formatLineRange(comment.startLine, comment.endLine)}
                     </span>
+                    {comment.source === "diff" && (
+                      <span className="text-muted-foreground/60">
+                        · {comment.side === "additions" ? t("review:new") : t("review:old")}
+                      </span>
+                    )}
                   </div>
                   <p className="line-clamp-2 whitespace-pre-wrap text-xs leading-snug text-foreground/90">
                     {comment.text}

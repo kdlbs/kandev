@@ -1,5 +1,5 @@
 import type {
-  DiffComment,
+  ReviewComment,
   PlanComment,
   PRFeedbackComment,
   WalkthroughComment,
@@ -38,7 +38,7 @@ export type PromptContextItem = ContextItemBase & {
 export type CommentContextItem = ContextItemBase & {
   kind: "comment";
   filePath: string;
-  comments: DiffComment[];
+  comments: ReviewComment[];
   onRemoveComment: (id: string) => void;
   onOpen?: () => void;
 };

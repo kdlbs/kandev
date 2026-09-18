@@ -8,7 +8,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useReviewSources, type ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
-import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
+import { useCommentsStore, isReviewComment } from "@/lib/state/slices/comments";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { generateUUID } from "@/lib/utils";
 import { updateUserSettings } from "@/lib/api";
@@ -135,7 +135,7 @@ function useChangesView(
     let count = 0;
     for (const id of commentSessionIds) {
       const comment = byId[id];
-      if (comment && isDiffComment(comment)) count++;
+      if (comment && isReviewComment(comment)) count++;
     }
     return count;
   }, [byId, commentSessionIds]);
@@ -243,7 +243,7 @@ function useFixCommentsRequest(
 
   return useCallback(() => {
     if (workspaceBlocked || !activeSessionId || !activeTaskId) return;
-    const comments = getPendingComments().filter(isDiffComment);
+    const comments = getPendingComments().filter(isReviewComment);
     if (comments.length === 0) return;
     const markdown = formatReviewCommentsAsMarkdown(comments);
     if (!markdown) return;

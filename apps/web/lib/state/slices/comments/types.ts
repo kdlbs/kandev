@@ -34,6 +34,18 @@ export type DiffComment = CommentBase & {
   codeContent: string;
 };
 
+export type ReviewFileComment = CommentBase & {
+  source: "review-file";
+  filePath: string;
+  repositoryName: string;
+};
+
+export type ReviewComment = DiffComment | ReviewFileComment;
+
+export function isReviewComment(c: Comment): c is ReviewComment {
+  return c.source === "diff" || c.source === "review-file";
+}
+
 export type PlanComment = CommentBase & {
   source: "plan";
   selectedText: string;
@@ -100,6 +112,7 @@ export type AgentMessageComment = CommentBase & {
 
 export type Comment =
   | DiffComment
+  | ReviewFileComment
   | PlanComment
   | FileEditorComment
   | PRFeedbackComment

@@ -11,6 +11,7 @@ import type {
   AgentMessageComment,
   PlanComment,
   DiffComment,
+  ReviewFileComment,
   PRFeedbackComment,
   WalkthroughComment,
 } from "./types";
@@ -285,4 +286,25 @@ describe("formatAgentMessageCommentsAsMarkdown", () => {
     expect(result).toContain("> Please expand this.\n> Include one example.");
     expect(result).toContain("---");
   });
+});
+
+// @covers AC-UI-REVIEW-FILE-COMMENTS-001.5
+it("formats whole-file feedback without inventing a line anchor", () => {
+  const comment = {
+    id: "file-1",
+    source: "review-file",
+    sessionId: "sess-1",
+    repositoryName: "packages/api",
+    repositoryId: "repo-1",
+    filePath: "README.md",
+    text: "Split this file.\nKeep the examples.",
+    status: "pending",
+    createdAt: "2026-09-17T00:00:00Z",
+  } satisfies ReviewFileComment;
+  const output = formatReviewCommentsAsMarkdown([comment]);
+  expect(output).toContain("**packages/api/README.md**");
+  expect(output).not.toContain("undefined");
+  expect(output).not.toContain("```");
+  expect(output).toContain("> Split this file.\n> Keep the examples.");
+  expect(formatCommentsForMessage([comment]).diffComments).toEqual([comment]);
 });

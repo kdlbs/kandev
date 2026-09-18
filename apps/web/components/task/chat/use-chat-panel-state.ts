@@ -18,7 +18,7 @@ import { useSessionModel } from "@/hooks/domains/session/use-session-model";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import { useContextFilesStore, type ContextFile } from "@/lib/state/context-files-store";
 import { useCommentsStore, isPlanComment, type Comment } from "@/lib/state/slices/comments";
-import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
+import { usePendingReviewCommentsByFile } from "@/hooks/domains/comments/use-review-comments";
 import {
   usePendingPlanComments,
   usePendingPRFeedback,
@@ -32,7 +32,7 @@ import {
   usePlanLayoutHandlers,
 } from "./use-plan-mode-helpers";
 import type { ContextItem } from "@/lib/types/context";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   AgentMessageComment,
   PlanComment,
@@ -57,7 +57,7 @@ const autoAppliedPlanSessions = new Set<string>();
 
 export type CommentsState = {
   planComments: PlanComment[];
-  pendingCommentsByFile: Record<string, DiffComment[]>;
+  pendingCommentsByFile: Record<string, ReviewComment[]>;
   pendingPRFeedback: PRFeedbackComment[];
   walkthroughComments: WalkthroughComment[];
   messageComments: AgentMessageComment[];
@@ -290,7 +290,7 @@ export function useCommentsState(
     if (resolvedSessionId) hydrateComments(resolvedSessionId);
   }, [resolvedSessionId, hydrateComments]);
   const planComments = usePendingPlanComments(taskId);
-  const pendingCommentsByFile = usePendingDiffCommentsByFile(resolvedSessionId);
+  const pendingCommentsByFile = usePendingReviewCommentsByFile(resolvedSessionId);
   const pendingPRFeedback = usePendingPRFeedback(resolvedSessionId);
   const walkthroughComments = usePendingWalkthroughComments(resolvedSessionId);
   const messageComments = usePendingAgentMessageComments(resolvedSessionId);

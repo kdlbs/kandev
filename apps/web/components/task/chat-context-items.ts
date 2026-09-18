@@ -2,7 +2,7 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import { getFileName } from "@/lib/utils/file-path";
 import { t } from "@/lib/i18n";
 import type { ContextItem } from "@/lib/types/context";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   PlanComment,
   PRFeedbackComment,
@@ -21,7 +21,7 @@ export type BuildContextItemsParams = {
   addPlan: () => void;
   promptsMap: Map<string, { content: string }>;
   onOpenFile?: (path: string) => void;
-  pendingCommentsByFile: Record<string, DiffComment[]>;
+  pendingCommentsByFile: Record<string, ReviewComment[]>;
   handleRemoveCommentFile: (filePath: string) => void;
   handleRemoveComment: (commentId: string) => void;
   onOpenFileAtLine?: (filePath: string) => void;
@@ -146,16 +146,17 @@ function buildCommentItems(params: BuildContextItemsParams): ContextItem[] {
     params;
   const items: ContextItem[] = [];
   if (!pendingCommentsByFile) return items;
-  for (const [filePath, comments] of Object.entries(pendingCommentsByFile)) {
+  for (const [groupKey, comments] of Object.entries(pendingCommentsByFile)) {
     if (comments.length === 0) continue;
+    const filePath = comments[0].filePath;
     const fileName = getFileName(filePath);
     items.push({
       kind: "comment",
-      id: `comment:${filePath}`,
+      id: `comment:${groupKey}`,
       label: `${fileName} (${comments.length})`,
       filePath,
       comments,
-      onRemove: () => handleRemoveCommentFile(filePath),
+      onRemove: () => handleRemoveCommentFile(groupKey),
       onRemoveComment: (cid) => handleRemoveComment(cid),
       onOpen: onOpenFileAtLine ? () => onOpenFileAtLine(filePath) : undefined,
     });
