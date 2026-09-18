@@ -151,6 +151,9 @@ fetch the exact job log and inspect the workflow step before changing docs or
 the validator. Reproduce the evaluator against the exact PR file set, then
 retry only the failed publisher job once; a successful retry without source
 changes is transient evidence, not proof that the original run was healthy.
+If duplicate publisher statuses contain only GitHub API 404/429 or rate-limit
+transport errors, collapse them to the leaf job, keep product/docs unchanged,
+restart `scripts/pr-await`, and verify the rerun and aggregate at the same head.
 
 `gh pr view --json` does not expose run-attempt metadata; do not request
 `runAttempt` or `run_attempt` there. When reruns leave an older conclusion in

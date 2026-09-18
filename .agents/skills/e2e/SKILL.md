@@ -182,6 +182,13 @@ For computed colors, parse alpha/opacity semantically or assert a deliberate cla
 
 **Animation-aware geometry:** Before reading dialog or panel geometry, wait only for currently running Web Animations with finite `effect.getComputedTiming().iterations`; await `animation.finished.catch(() => undefined)` because Radix overlays can cancel animations during close or replacement. Never blanket-await infinite animations or use a fixed sleep; then read bounding boxes and assert the relationship.
 
+For virtualized viewport-edge assertions, require the first visible row's top
+to cover the content top. Assert the last visible row's bottom only when the
+content overflows; allow legitimate trailing space and end padding in short
+trees. Check adjacent gaps and overlaps, and include blank-top, blank-bottom,
+and short-tree fixtures. Do not assert the opposite edge after filtering rows
+to viewport intersection, because that can reject valid virtualization states.
+
 For narrow-width clipping or overlap regressions, visibility and containment
 are insufficient: assert a real hit target. Check `document.elementFromPoint()`
 at the control center resolves to the control (or its descendant), then prove
@@ -226,6 +233,12 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 - **Import paths from subdirectories** use `../../` (e.g., `from "../../fixtures/test-base"`).
 - **Standalone root files** are allowed for truly cross-cutting tests that don't fit any group.
 - **Extract shared helpers.** Extract helpers into a sibling `*-helpers.ts` file whenever they are used by multiple spec files, even when small; keep only scenario-specific setup in specs. Reusable page polling, seeding, and Dockview cleanup belong in the helper module.
+- **Keep pure unit tests out of `apps/web/e2e/tests/`.** Playwright discovery
+  imports files in that tree, so a Vitest file can fail discovery before any
+  browser test runs. Put pure Vitest tests beside the component or helper, and
+  after adding an E2E-adjacent helper test run:
+  `cd apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --project=containers --list --reporter=json`.
+  Require zero discovery errors before treating the E2E suite as runnable.
 
 ## Test quality guidelines
 
