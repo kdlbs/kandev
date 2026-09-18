@@ -21,7 +21,9 @@ the mechanism that enforces it. It owns the runtime capability vocabulary, the
 task-scope derivation and the annotation predicate. The board-read endpoint's wire
 contract — route, parameters, response, ordering, error mapping and CLI — is
 [part 2](taskless-coordinator-authority-02.md). Neither part owns run launching, session
-identity, or the workflow engine.
+identity, or the workflow engine. This change prepares authority for a taskless run that
+has a runtime session. It does not create that session or change the scheduler's current
+taskless launch refusal. Taskless session creation remains a separate feature.
 
 ## Requirement mapping
 
@@ -312,14 +314,11 @@ marker is now final, adopt that scope and emit no scope event. If it is still no
 retry the derive-and-swap — bounded at three attempts, after which `BuildAndPersist`
 returns an error and the launch attempt fails, which the next attempt retries from scratch.
 
-**The swap guards the task scope, not the whole row.** A loser still has a `session_id` and
-an `input_snapshot` to persist, and today `BuildAndPersist` always writes them; a CAS that
-simply skipped the write on a loss would silently drop that. So the loser, having adopted
-the winning scope, performs the ordinary unconditional
-`UpdateRunRuntimeSnapshot` with it. That write is safe precisely because the scope it
-carries is the one that already won — the two processors now agree on it, so the write is
-idempotent in the field the guarantee is about, and `session_id` keeps its existing
-last-write-wins behavior, unchanged by this design.
+**The swap protects the complete runtime snapshot.** If a writer loses, it re-reads the run
+and adopts the winner's `capabilities`, `input_snapshot`, and `session_id` together. It
+does not perform an unconditional follow-up write, so it cannot replace the winner's
+scope or session identity. A normal build that reuses a final snapshot still refreshes
+the derived capability booleans through the existing write path.
 
 Comparing the previous **value** rather than extracting the marker in SQL is deliberate:
 `json_extract` is SQLite-flavoured, Postgres is a supported driver

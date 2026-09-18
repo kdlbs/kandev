@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
@@ -133,6 +134,68 @@ func TestListTasksFiltered_Pagination(t *testing.T) {
 	}
 	if page3.NextCursor != "" {
 		t.Errorf("expected empty NextCursor on final page, got %q", page3.NextCursor)
+	}
+}
+
+func TestListTasksFiltered_ProductionTimestampsPaginate(t *testing.T) {
+	for _, sortField := range []sqlite.TaskListSortField{
+		sqlite.TaskSortUpdatedAt,
+		sqlite.TaskSortCreatedAt,
+	} {
+		for _, descending := range []bool{true, false} {
+			name := string(sortField)
+			if descending {
+				name += "-desc"
+			} else {
+				name += "-asc"
+			}
+			t.Run(name, func(t *testing.T) {
+				repo := newTestRepo(t)
+				ensureTasksTable(t, repo)
+				ctx := context.Background()
+				ts := time.Date(2026, time.April, 1, 12, 0, 0, 123456789, time.UTC)
+				for _, id := range []string{"task-a", "task-b", "task-c"} {
+					if _, err := repo.ExecRaw(ctx, `
+						INSERT INTO tasks
+							(id, workspace_id, title, state, priority, created_at, updated_at, is_ephemeral)
+						VALUES (?, ?, ?, 'TODO', 'medium', ?, ?, 0)
+					`, id, "ws-1", id, ts, ts); err != nil {
+						t.Fatalf("insert task %s: %v", id, err)
+					}
+				}
+
+				page, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{
+					SortField: sortField, SortDesc: descending, Limit: 2,
+				})
+				if err != nil {
+					t.Fatalf("list first page: %v", err)
+				}
+				if len(page.Tasks) != 2 || page.NextCursor == "" {
+					t.Fatalf("first page = %v, cursor=%q; want two rows and a cursor", taskIDs(page.Tasks), page.NextCursor)
+				}
+
+				page2, err := repo.ListTasksFiltered(ctx, "ws-1", sqlite.ListTasksOptions{
+					SortField: sortField, SortDesc: descending, Limit: 2,
+					CursorValue: page.NextCursor, CursorID: page.NextID,
+				})
+				if err != nil {
+					t.Fatalf("list second page: %v", err)
+				}
+				if len(page2.Tasks) != 1 || page2.NextCursor != "" {
+					t.Fatalf("second page = %v, cursor=%q; want one final row", taskIDs(page2.Tasks), page2.NextCursor)
+				}
+				seen := map[string]bool{}
+				for _, task := range append(page.Tasks, page2.Tasks...) {
+					if seen[task.ID] {
+						t.Fatalf("task %s appeared more than once", task.ID)
+					}
+					seen[task.ID] = true
+				}
+				if len(seen) != 3 {
+					t.Fatalf("paged task IDs = %v, want all three tasks", seen)
+				}
+			})
+		}
 	}
 }
 

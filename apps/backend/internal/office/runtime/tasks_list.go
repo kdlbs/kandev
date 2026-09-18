@@ -57,7 +57,12 @@ func (h *Handler) listTasks(c *gin.Context) {
 		h.respondRuntimeError(c, runCtx, "list_tasks", "workspace", runCtx.WorkspaceID, ErrWorkspaceOutOfScope)
 		return
 	}
-	opts, err := parseListTasksQuery(c.Request.URL.Query())
+	query, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "list_tasks", "workspace", runCtx.WorkspaceID, ErrInvalidListParams)
+		return
+	}
+	opts, err := parseListTasksQuery(query)
 	if err != nil {
 		h.respondRuntimeError(c, runCtx, "list_tasks", "workspace", runCtx.WorkspaceID, err)
 		return

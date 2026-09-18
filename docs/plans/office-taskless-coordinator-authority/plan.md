@@ -19,11 +19,12 @@ legacy_specs: []
 
 The pre-installed "Coordinator heartbeat" routine is a taskless (no
 `task_template`) scheduled run whose job is to monitor the workspace, surface
-blockers, and react to events with no human driving the loop. Today it cannot
-do that job: the runtime capability vocabulary has no board-read key at all,
-and a taskless run's task-mutation scope is computed as `AllowedTaskIDs =
-[""]`, which matches no real task id or wildcard. The run launches, sees
-nothing, and can change nothing.
+blockers, and react to events with no human driving the loop. This change adds
+the authority layer for a taskless run with a runtime session. The scheduler
+still refuses a taskless launch, so session creation remains separate work.
+The old runtime capability vocabulary had no board-read key, and a taskless
+run's task-mutation scope was computed as `AllowedTaskIDs = [""]`, which
+matched no real task id or wildcard.
 
 This plan implements
 [`taskless-coordinator-authority-01.md`](../../specs/office/system-design/taskless-coordinator-authority-01.md)

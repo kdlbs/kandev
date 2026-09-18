@@ -189,6 +189,19 @@ func TestListTasks_InvalidParamRefusedBeforeQuery(t *testing.T) {
 	}
 }
 
+func TestListTasks_MalformedQueryRefusedBeforeQuery(t *testing.T) {
+	lister := &fakeTaskFilteredLister{}
+	h := newBoardReadHarness(t, Capabilities{CanListTasks: true}, "ws-1", lister)
+
+	resp := h.get(t, "/runtime/tasks?limit=1;bad")
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusBadRequest, resp.Body.String())
+	}
+	if lister.calls != 0 {
+		t.Fatalf("lister should not be called with a malformed query: %d", lister.calls)
+	}
+}
+
 func TestListTasks_RepeatableStatusFilterReachesLister(t *testing.T) {
 	lister := &fakeTaskFilteredLister{}
 	h := newBoardReadHarness(t, Capabilities{CanListTasks: true}, "ws-1", lister)

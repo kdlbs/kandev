@@ -708,6 +708,19 @@ $KANDEV_CLI kandev task create \
 
 Project list and create operations are forced to the workspace in the validated Office run token; the agent cannot select another workspace in these commands. Office runs cannot create or administer workspaces. Create additional workspaces through Kandev's user-facing setup and settings surfaces.
 
+An Office run can read tasks in its signed workspace with:
+
+```bash
+$KANDEV_CLI kandev tasks list
+```
+
+The command supports repeatable `--status` and `--priority` filters, plus
+`--assignee`, `--project`, `--sort`, `--order`, `--limit`, `--cursor`,
+`--cursor-id`, and `--include-system`. Use `--cursor` and `--cursor-id`
+together to continue a page walk. The workspace comes from the short-lived
+runtime token, so `KANDEV_WORKSPACE_ID` is not required for this command.
+Taskless launch and session creation remain separate Office scheduler work.
+
 </details>
 
 <details>
