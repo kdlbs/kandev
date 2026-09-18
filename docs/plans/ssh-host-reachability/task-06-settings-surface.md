@@ -6,6 +6,7 @@ wave: 4
 depends_on: ["04-reachability-api-and-events"]
 plan: "plan.md"
 requirements:
+  - REQ-EXECUTORS-SSH-REACHABILITY-001
   - REQ-EXECUTORS-SSH-REACHABILITY-002
 acceptance_criteria:
   - AC-EXECUTORS-SSH-REACHABILITY-001.25
@@ -18,6 +19,7 @@ acceptance_criteria:
   - AC-EXECUTORS-SSH-REACHABILITY-002.11
   - AC-EXECUTORS-SSH-REACHABILITY-002.12
 system_design:
+  - ../../specs/executors/system-design/ssh-reachability.md
   - ../../specs/executors/system-design/ssh-reachability-surfaces.md
 ---
 
