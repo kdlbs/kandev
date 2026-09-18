@@ -115,7 +115,7 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     await filterPaths.nth(1).fill("issue.id");
     await triggerCard.getByRole("combobox").nth(1).click();
     await testPage.getByRole("option", { name: "Not equals", exact: true }).click();
-    await triggerCard.getByPlaceholder("critical").blur();
+    await triggerCard.getByPlaceholder("critical", { exact: true }).blur();
 
     // Repository selector.
     await triggerCard.getByPlaceholder("service").fill("service");
@@ -143,7 +143,7 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     await expect(reopened.getByRole("combobox").nth(0)).toContainText("In list");
     await expect(reopened.getByRole("combobox").nth(1)).toContainText("Not equals");
     await expect(reopened.getByPlaceholder("critical, fatal")).toHaveValue("critical, fatal");
-    await expect(reopened.getByPlaceholder("critical")).toHaveValue("");
+    await expect(reopened.getByPlaceholder("critical", { exact: true })).toHaveValue("");
     await expect(reopened.getByPlaceholder("service")).toHaveValue("service");
   });
 
