@@ -245,6 +245,10 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 			name: "office with bearer deferred", method: http.MethodGet, path: "/api/v1/office/tasks/t1",
 			mutate: []func(*http.Request){func(r *http.Request) { r.Header.Set("Authorization", "Bearer agent.jwt.here") }},
 		},
+		{
+			name: "orchestration with bearer deferred", method: http.MethodGet, path: "/api/v1/orchestration/runtime/workspace",
+			mutate: []func(*http.Request){func(r *http.Request) { r.Header.Set("Authorization", "Bearer agent.jwt.here") }},
+		},
 
 		{name: "github credential broker readiness", method: http.MethodGet, path: "/api/v1/github/credentials/resolve"},
 		{name: "github credential broker resolve", method: http.MethodPost, path: "/api/v1/github/credentials/resolve"},

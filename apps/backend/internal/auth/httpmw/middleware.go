@@ -386,9 +386,9 @@ func isDeferredPath(c *gin.Context, path string) bool {
 		// plugins.Controller.webhook can read — it enforces the auth gate
 		// itself (webhookCallerAuthorized), mirroring the /mcp precedent above.
 		return true
-	case strings.HasPrefix(path, "/api/v1/office/") && BearerToken(c.Request) != "":
-		// Sandbox office agents call back with an agent JWT (KANDEV_API_KEY);
-		// officeagents.AgentAuthMiddleware validates it. Bearer-less office
+	case (strings.HasPrefix(path, "/api/v1/office/") || strings.HasPrefix(path, "/api/v1/orchestration/")) && BearerToken(c.Request) != "":
+		// Managed agents call back with an agent JWT (KANDEV_API_KEY);
+		// the Office/orchestration route middleware validates it. Bearer-less office
 		// requests do NOT defer — they need a session like any other API call.
 		return true
 	case !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/debug/"):
