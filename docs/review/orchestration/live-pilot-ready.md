@@ -5,8 +5,8 @@ migration/replay/rollback rehearsal completed before the authorized cutover.
 
 | Review item | Prepared result |
 | --- | --- |
-| Candidate | `0.94.0-orchestration.20260918.sha0edf89451144` |
-| Source | `0edf89451144098c513618f44cc7a341434b68a7` |
+| Candidate | `0.94.0-orchestration.20260918.sha901e94e18` |
+| Source | `901e94e18` |
 | Base | Exact v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1` |
 | Bundle | Six immutable binaries; [SHA-256 receipt](candidate-receipt.json) |
 | Qualification | [Completed checks and platform/provider limits](candidate-qualification.md) |
@@ -40,6 +40,8 @@ The reviewed [live-pilot work order](../../plans/orchestration-delivery/task-04-
 received the explicit instruction to deploy the named qualified candidate. The
 deployment and recovery checks are recorded in [live-pilot-receipt.json](live-pilot-receipt.json).
 The Orchestrator includes the owner-level assistant capabilities under the same
-flag. Office remains disabled. The first authenticated generic task/review/callback observation
-and focused upstream PR/export remain follow-up work; no private prompts or
-account data are included in this packet.
+flag. Workspace conversations use the backend-owned scoped broker surface, so
+they can inspect workspace/task state without user API keys. Office remains
+disabled. The first authenticated generic task/review/callback observation and
+focused upstream PR/export remain follow-up work; no private prompts or account
+data are included in this packet.
