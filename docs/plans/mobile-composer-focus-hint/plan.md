@@ -74,7 +74,7 @@ composer and inspect a phone screenshot. Use existing fixture readiness gates.
 
 ```sh
 (cd apps/web && pnpm exec vitest run components/task/chat/chat-input-body.test.tsx components/task/chat/use-chat-input-container.test.ts)
-(cd apps/web && pnpm exec eslint components/task/chat/chat-input-body.tsx components/task/chat/chat-input-body.test.tsx)
+(cd apps/web && pnpm exec eslint components/task/chat/chat-input-body.tsx components/task/chat/chat-input-body.test.tsx e2e/tests/chat/mobile-slash-command-composer.spec.ts e2e/tests/chat/slash-command-composer.spec.ts)
 (cd apps/web && pnpm e2e:run --project=mobile-chrome mobile-slash-command-composer.spec.ts)
 (cd apps/web && pnpm e2e:run --project=chromium slash-command-composer.spec.ts)
 python3 scripts/list-docs.py validate
@@ -127,3 +127,6 @@ viewport subscription. Responsive cases now use native Happy DOM viewport
 changes without parent rerenders. All 38 focused tests pass; disabling the
 subscription makes the boundary-transition cases fail. ESLint passes.
 Production behavior and screenshots are unchanged.
+
+CodeRabbit identified an incomplete recorded ESLint command. The command now
+lists both component files and both browser specs; rerunning it passed.
