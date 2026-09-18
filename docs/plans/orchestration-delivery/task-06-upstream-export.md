@@ -107,4 +107,7 @@ Issue #3752, scope audit, plugin review, source-preservation manifest and PR ski
 
 ## Results
 
-Pending. No public code push or PR is part of this private publication.
+Extraction remains pending. The private
+[contribution map](../../review/orchestration/upstream-map.md) records source
+checkpoints, proposed slices and required schema/privacy dependencies. No export
+checkout, public code push or PR is claimed by that preparation.

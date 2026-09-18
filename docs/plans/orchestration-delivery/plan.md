@@ -38,9 +38,10 @@ The exact base remains v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1`.
 The imported prototype already implements coordinator roles/assignments/chat,
 task delegation/callbacks, optional Automation delivery and backend assistant
 ownership/intake/objectives. Delivery 00–01, central-view 01–03 and assistant
-01–10 are now implemented and verified. Combined
-assistant/provider qualification, the versioned candidate, live-data rehearsal
-and cutover remain unfinished. See the [workbench](../../../WORKBENCH.md) for
+01–11 are now implemented and verified, including the combined browser matrix,
+restricted provider trial and inspected synthetic media. Repository-wide
+candidate qualification is in progress; the versioned bundle, live-data
+rehearsal and cutover remain unfinished. See the [workbench](../../../WORKBENCH.md) for
 current readiness and the [scope audit](../../review/orchestration/scope-audit.md)
 for the original imported baseline.
 
@@ -251,7 +252,8 @@ The complete design package and implementation checkpoints are committed and
 published privately. Delivery 00–01, central-view 01–03 and assistant 01–11 are
 complete. Assistant task 11 records passing affected race checks, an isolated
 real-provider read/denied-write trial, the combined browser matrix and inspected
-synthetic media. Delivery 02–06 remain pending; optional private CI is
+synthetic media. Delivery 02 is qualifying the first candidate; delivery 03–06
+remain pending. Optional private CI is
 disabled. Live Kandev has not been changed.
 [The publication receipt](../../review/orchestration/publication.md) records source
 preservation, checks, normal hooks and verified remote refs. The user requested

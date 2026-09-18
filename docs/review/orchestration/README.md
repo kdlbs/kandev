@@ -18,6 +18,8 @@ above exact v0.94.0. Start with the [root workbench guide](../../../WORKBENCH.md
 - [Plugin source review](plugin-review.md): useful patterns and incompatible host
   dependencies at a pinned revision. No plugin was installed or copied.
 - [Candidate/live runbook](../../plans/orchestration-delivery/dogfood-runbook.md).
+- [Proposed upstream contribution map](upstream-map.md): source checkpoints,
+  required dependency/privacy boundaries and private material to exclude.
 
 ## Validation provenance
 

@@ -1,7 +1,7 @@
 ---
 id: "02-candidate-qualification"
 title: "Candidate qualification"
-status: pending
+status: in_progress
 wave: 4
 depends_on: ["01-assistant-rollout-gate"]
 plan: "plan.md"
@@ -70,8 +70,8 @@ make lint
 pnpm --dir apps/web run i18n:check
 make -C apps/backend sqlguard
 (cd apps/backend && go test -race -tags fts5 -count=1 ./internal/persistence/requiredstores ./internal/persistence/storeconformance)
-pnpm --dir apps/web e2e:run --host --shards 1 --project chromium -- e2e/tests/orchestration/workspace-orchestrators.spec.ts e2e/tests/orchestration/automation-orchestrator.spec.ts e2e/tests/orchestration/coordinator-view.spec.ts --retries=0
-pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome -- e2e/tests/orchestration/mobile-coordinator-view.spec.ts --retries=0
+pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/orchestration/workspace-orchestrators.spec.ts tests/orchestration/automation-orchestrator.spec.ts tests/orchestration/coordinator-view.spec.ts tests/office/sidebar-office-gating.spec.ts -- --retries=0
+pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/orchestration/mobile-coordinator-view.spec.ts -- --retries=0
 make runtime-bundle RUNTIME_VERSION='<candidate-version>' RUNTIME_BUNDLE_DIR='<new-candidate-directory>'
 git diff --check
 ```
@@ -106,5 +106,17 @@ existing v0.94.0 baseline validation.
 
 ## Results
 
-Pending. Prior affected-scope validation is recorded in the audit; it is not this
-future candidate's full qualification.
+In progress after completing all eleven assistant work orders. Full repository
+qualification found and corrected seven PostgreSQL fixture dependencies and an
+Office New Task dialog compatibility regression. Fourteen PostgreSQL failure
+reproductions now pass with race detection; the backend rerun passes all 286
+packages and repository-wide lint passes. The full frontend run executed 1,913
+files and found one incomplete onboarding fixture; the corrected navigation
+files pass all 37 checks. CLI and the full script target pass after supplying
+the missing toolchain prerequisites. Type checking, locale checks, SQL guard and
+645 race-enabled conformance checks pass on both database engines. The combined
+six-check desktop browser invocation and the phone Coordinator flow pass with
+one worker and no retries. Packaged-runtime and matching capture checks remain.
+See the
+[qualification record](../../review/orchestration/candidate-qualification.md).
+No immutable bundle or private-data rehearsal is yet claimed.
