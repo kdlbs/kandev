@@ -1,5 +1,5 @@
 {
-  "source_commit": "c357f9ab94d3790a471d9db587c0a063c7f8d838",
+  "source_commit": "69753564d0d7c0121e8681a72e5b4ce8c384a106",
   "base_commit": "bf819a0228e742d069c528293d848c985a4d1bd1",
   "captured_at_utc": "2026-09-18",
   "fixture": "Disposable E2E Workspace with generic tasks, instructions and mock workers",
@@ -12,7 +12,7 @@
     "frame-0002.png": "18236d909536005737cc144d8103b764bd377f9eb47fbd81cada5590860c0735",
     "frame-0003.png": "2d4791695518874e5f239a89bd38d7367748415b66e314ebb1263504a13c5b88",
     "frame-0004.png": "11c6ba9c5e077ff923e1c11dbaa8ff34f5449ef33e432ac77c5e45b0b07cfc7e",
-    "frame-0005.png": "c0ff8d0538706711721a9d132f0e6b9714a6eb2d3ce2f0b28345c846a95bbb5d",
+    "frame-0005.png": "75158768c17e778a32be5cf0d79a9409e6dc22a547524ecde2d6f01b41ca5652",
     "frame-0006.png": "ad5eca7583e01f758d0d6c47c8ed4eb97e755e66568150858ca04e301f6c72ba"
   },
   "test_source_sha256": {
@@ -39,6 +39,30 @@
     ],
     "format": {
       "duration": "7.000000"
+    }
+  },
+  "runtime_version": "0.94.0-orchestration.20260918.sha69753564d0d7",
+  "runtime_binaries_sha256": {
+    "bin/agentctl": "ef3fd7915e2ca83d6689cbed4c0ce03255c554120c96b32232da6429fd89226c",
+    "bin/agentctl-darwin-amd64": "eb1371bba81ca945cebcc1710207eb367ae7a2ac4abfeea3236d37cb637ebb29",
+    "bin/agentctl-darwin-arm64": "231be726e4052b3a59932cb5f8be59bc661f0c726dcf8fbc77a02fe0ac4c0ee0",
+    "bin/agentctl-linux-amd64": "054748f50599f385202aab1ef93f00135565973e5dfcf81d1f35634b09b7df53",
+    "bin/agentctl-linux-arm64": "8b3afe6252c921444e94eaeec33d079299b813a1a7e39bc9f7c9941077fbecb1",
+    "bin/kandev": "49fb6a47d71c50a124094b91a2eb54b7da069de256d2b9ef669cd9c72e3916fb"
+  },
+  "runtime_copy_matches_frozen_bundle": true,
+  "test_only_adjacent_mock_agent_sha256": "0f3ad5c26d82fd624972a880dfc806f44fa69e54e4a245d0837fe4c9fdf180f5",
+  "web_variant": "E2E external web build from the same clean source, including pseudo locale; embedded production assets checked separately",
+  "managed_results": {
+    "desktop": {
+      "passed": 2,
+      "workers": 1,
+      "retries": 0
+    },
+    "mobile": {
+      "passed": 2,
+      "workers": 1,
+      "retries": 0
     }
   }
 }

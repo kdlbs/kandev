@@ -1,11 +1,16 @@
 # Coordinator view evidence
 
 Genuine Chromium/Pixel 5 captures from the disposable Kandev E2E backend on
-2026-09-18 from clean source `c357f9ab94d3790a471d9db587c0a063c7f8d838`.
+2026-09-18 from clean source `69753564d0d7c0121e8681a72e5b4ce8c384a106`.
 The database, browser context, tasks, conversations and execution
 profile are fixture-owned. No production database, account, credential, prompt
 or conversation was used. The mock provider is not evidence of real-provider
 quality or assistant inspection safety.
+
+The runtime is a byte-identical copy of the qualified candidate, with the
+fixture-only mock worker placed beside it. Captures use the E2E web build of
+that same source, including its pseudo locale. The embedded production web is
+verified separately in the [candidate receipt](../../candidate-receipt.json).
 
 - [Desktop task overview and chat](desktop.png)
 - [Selected-coordinator filter and independent draft](selected-coordinator.png)

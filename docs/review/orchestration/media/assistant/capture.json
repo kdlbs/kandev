@@ -1,5 +1,5 @@
 {
-  "source_commit": "c357f9ab94d3790a471d9db587c0a063c7f8d838",
+  "source_commit": "69753564d0d7c0121e8681a72e5b4ce8c384a106",
   "base_commit": "bf819a0228e742d069c528293d848c985a4d1bd1",
   "captured_at_utc": "2026-09-18",
   "fixture": "Disposable E2E Workspace with generic tasks, instructions and mock workers",
@@ -7,11 +7,11 @@
   "playback_fps": 1,
   "playback_slowdown_factor": 5,
   "source_frame_sha256": {
-    "frame-0000.png": "557a4a070b3a334b0b746b906b26d60ca79dfd5129a92893be539cf4299c50af",
-    "frame-0001.png": "27df952655b5341a5f923e53706d3b675be2b10187b4259ea41dd45281146634",
-    "frame-0002.png": "b83bba82a4c6563192449d20f6cdff37904a77cfc56121eaad5bc212cc55c58e",
-    "frame-0003.png": "36b64b979ae2189192833f965c73891176c9b72563775a3d49d972198ee3272e",
-    "frame-0004.png": "ee885cef91685eea4613e58f7e0eacf67ebeb1da0e8b00985cbf19dd50040ff2"
+    "frame-0000.png": "63cdf301e5fa2306dd10ceac571e91a798fc300bf6ba588cb2fa06c2dd69fcd8",
+    "frame-0001.png": "4ee243d667a4db06a1617dc7d737bb3d7dc569b4f9ca53d7ed56e30c721472a3",
+    "frame-0002.png": "a9080b321fe14ac2f95d12b70f742a22414c7b481a6c53332ae67664bef771ad",
+    "frame-0003.png": "963d20c1ee417fc8710ca7a14cd2e82fe74f53f421443a721f7c23e0a280fe85",
+    "frame-0004.png": "363d2122bd616c346231d04585de27e43714113f100d9e572c0974c73fc4bd81"
   },
   "test_source_sha256": {
     "personal-assistant.spec.ts": "ad72a8b8d86dec08824eb4f354c3d42f8bf2a5305a5f5ba7cefff7ccd2e06775",
@@ -37,6 +37,30 @@
     ],
     "format": {
       "duration": "5.000000"
+    }
+  },
+  "runtime_version": "0.94.0-orchestration.20260918.sha69753564d0d7",
+  "runtime_binaries_sha256": {
+    "bin/agentctl": "ef3fd7915e2ca83d6689cbed4c0ce03255c554120c96b32232da6429fd89226c",
+    "bin/agentctl-darwin-amd64": "eb1371bba81ca945cebcc1710207eb367ae7a2ac4abfeea3236d37cb637ebb29",
+    "bin/agentctl-darwin-arm64": "231be726e4052b3a59932cb5f8be59bc661f0c726dcf8fbc77a02fe0ac4c0ee0",
+    "bin/agentctl-linux-amd64": "054748f50599f385202aab1ef93f00135565973e5dfcf81d1f35634b09b7df53",
+    "bin/agentctl-linux-arm64": "8b3afe6252c921444e94eaeec33d079299b813a1a7e39bc9f7c9941077fbecb1",
+    "bin/kandev": "49fb6a47d71c50a124094b91a2eb54b7da069de256d2b9ef669cd9c72e3916fb"
+  },
+  "runtime_copy_matches_frozen_bundle": true,
+  "test_only_adjacent_mock_agent_sha256": "0f3ad5c26d82fd624972a880dfc806f44fa69e54e4a245d0837fe4c9fdf180f5",
+  "web_variant": "E2E external web build from the same clean source, including pseudo locale; embedded production assets checked separately",
+  "managed_results": {
+    "desktop": {
+      "passed": 2,
+      "workers": 1,
+      "retries": 0
+    },
+    "mobile": {
+      "passed": 2,
+      "workers": 1,
+      "retries": 0
     }
   }
 }

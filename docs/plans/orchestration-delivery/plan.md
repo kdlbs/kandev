@@ -40,8 +40,9 @@ task delegation/callbacks, optional Automation delivery and backend assistant
 ownership/intake/objectives. Delivery 00–01, central-view 01–03 and assistant
 01–11 are now implemented and verified, including the combined browser matrix,
 restricted provider trial and inspected synthetic media. Repository-wide
-candidate qualification is in progress; the versioned bundle, live-data
-rehearsal and cutover remain unfinished. See the [workbench](../../../WORKBENCH.md) for
+candidate qualification is complete for Linux x86-64, including the immutable
+bundle and matching synthetic media. Live-data rehearsal and cutover remain
+unfinished. See the [workbench](../../../WORKBENCH.md) for
 current readiness and the [scope audit](../../review/orchestration/scope-audit.md)
 for the original imported baseline.
 
@@ -147,7 +148,7 @@ session unless the user explicitly chooses another arrangement.
 
 - [x] [00 Private review publication](task-00-private-publication.md)
 - [x] [01 Independent assistant rollout gate](task-01-assistant-rollout-gate.md)
-- [ ] [02 Candidate qualification](task-02-candidate-qualification.md)
+- [x] [02 Candidate qualification](task-02-candidate-qualification.md)
 - [ ] [03 Private migration rehearsal](task-03-migration-rehearsal.md)
 - [ ] [04 Live coordinator pilot](task-04-live-pilot.md)
 - [ ] [05 Dogfood evidence](task-05-dogfood-evidence.md)
@@ -252,7 +253,7 @@ The complete design package and implementation checkpoints are committed and
 published privately. Delivery 00–01, central-view 01–03 and assistant 01–11 are
 complete. Assistant task 11 records passing affected race checks, an isolated
 real-provider read/denied-write trial, the combined browser matrix and inspected
-synthetic media. Delivery 02 is qualifying the first candidate; delivery 03–06
+synthetic media. Delivery 02 qualifies the frozen first candidate; delivery 03–06
 remain pending. Optional private CI is
 disabled. Live Kandev has not been changed.
 [The publication receipt](../../review/orchestration/publication.md) records source

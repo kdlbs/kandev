@@ -1,10 +1,14 @@
 # First candidate qualification
 
-Status: in progress. This is a validation record, not a deployment receipt.
+Status: qualified for private-data rehearsal on Linux x86-64. This is a validation
+record, not a deployment receipt. The immutable candidate is
+`0.94.0-orchestration.20260918.sha69753564d0d7`, built from clean source
+`69753564d0d7c0121e8681a72e5b4ce8c384a106`.
 The private source remains based on exact v0.94.0
 (`bf819a0228e742d069c528293d848c985a4d1bd1`). All three central-view and all eleven
-assistant implementation work orders are complete. Source is being finalized
-after the full repository checks below; no immutable bundle is qualified yet.
+assistant implementation work orders are complete. The
+[machine-readable receipt](candidate-receipt.json) identifies all six binary
+hashes, embedded web provenance, check results and remaining boundaries.
 
 ## Full-check findings
 
@@ -52,7 +56,7 @@ directly to Vitest, because the pnpm shortcut consumes `--reporter` itself.
 `make lint` passed: backend, full frontend with zero warnings, all 188 harness
 files, specification lint and architecture lint. Locale validation and the SQL
 guard also pass. Database conformance, browser and packaged-runtime results
-remain to be recorded.
+are recorded below.
 
 The complete frontend rerun executed **1,913 files / 16,242 tests**: 1,912 files
 passed, with five failures in `page-client.test.tsx` and four existing skips.
@@ -101,8 +105,39 @@ The freshly built Chromium invocation passed all **six tests with one worker and
 no retries**: workspace coordinator configuration/chat, Automation delivery,
 central task view, and all three native Office sidebar/navigation/New Task
 compatibility scenarios. The phone Coordinator flow also passed with one worker
-and no retries, using those same fresh artifacts. Immutable-bundle and matching
-capture checks follow before the candidate can be marked qualified.
+and no retries, using those same fresh artifacts.
+
+## Frozen bundle and matching media
+
+The complete `make runtime-bundle` target built a new versioned directory from
+clean commit `69753564d0d7c0121e8681a72e5b4ce8c384a106`. All six binaries and
+577 embedded production web assets have SHA-256 manifests. The bundle is
+read-only and its six binary hashes still match after browser capture. Backend
+version/help and agentctl help all exit successfully.
+
+The actual `kandev run --headless --port 4778` launcher passed in a fresh
+synthetic home with network disabled, a read-only container root, no provider
+credentials and no Docker socket. Readiness reports the exact candidate version.
+The embedded production SPA and all 69 root-linked entry/preload/style assets
+return successfully and match their build hashes. No external web override was
+used for this smoke. Coordinator APIs are enabled; assistant read and write APIs
+return `personal_assistant_disabled`. Page/API visits leave tasks, sessions,
+messages and runs at zero. Graceful launcher shutdown exits zero.
+
+The release bundle correctly omits the mock worker used by browser fixtures.
+The first candidate browser attempt therefore failed when the fixture looked
+for `mock-agent` beside the executable. A separate test directory contains
+byte-identical copies of all six frozen runtime binaries plus that test helper.
+No runtime source or frozen artifact changed. With this fixture, both desktop
+and both phone Coordinator/Assistant capture specs pass, one worker and zero
+retries. The browser captures use the E2E web build of the same clean source,
+including its pseudo locale; the embedded production web was checked separately
+above. Eight screenshots and all twelve frames in two silent videos were
+visually inspected. Only synthetic requests and fixture identifiers are shown.
+
+Build warnings concern Vite chunk sizes and unavailable Darwin signing tools.
+Remote helpers are cross-built artifacts, not evidence of execution on ARM,
+macOS or Windows. The selected Linux x86-64 candidate is qualified for rehearsal.
 
 ## Provenance and boundaries
 
@@ -114,8 +149,8 @@ Raw logs and credentials remain outside Git; only safe findings belong here.
 
 The inspected [coordinator](media/coordinator-view/README.md) and
 [assistant](media/assistant/README.md) media identify their capture revision.
-The final candidate receipt must record any later source differences and the
-fresh browser results. Prior provider evidence establishes only the restricted
+Later documentation/media commits do not replace the frozen runtime SHA.
+Prior provider evidence establishes only the restricted
 Linux Claude ACP path described in the [assistant matrix](assistant-evidence.md).
 
 Preparation for private-data rehearsal has verified a network-isolated container
@@ -124,5 +159,5 @@ read-only-source `VACUUM INTO` trial preserves committed WAL data and passes
 SQLite integrity checking without changing its source. These preparation probes
 do not constitute a live-data backup, migration or rollback rehearsal.
 
-The live service remains unchanged. Candidate bundle hashing/smoke and delivery
-03 migration/rollback evidence are required before live enablement.
+The live service remains unchanged. Delivery 03 migration/rollback evidence is
+still required before live enablement.

@@ -1,7 +1,7 @@
 ---
 id: "02-candidate-qualification"
 title: "Candidate qualification"
-status: in_progress
+status: done
 wave: 4
 depends_on: ["01-assistant-rollout-gate"]
 plan: "plan.md"
@@ -106,7 +106,7 @@ existing v0.94.0 baseline validation.
 
 ## Results
 
-In progress after completing all eleven assistant work orders. Full repository
+Complete for Linux x86-64. Full repository
 qualification found and corrected seven PostgreSQL fixture dependencies and an
 Office New Task dialog compatibility regression. Fourteen PostgreSQL failure
 reproductions now pass with race detection; the backend rerun passes all 286
@@ -116,7 +116,14 @@ files pass all 37 checks. CLI and the full script target pass after supplying
 the missing toolchain prerequisites. Type checking, locale checks, SQL guard and
 645 race-enabled conformance checks pass on both database engines. The combined
 six-check desktop browser invocation and the phone Coordinator flow pass with
-one worker and no retries. Packaged-runtime and matching capture checks remain.
-See the
+one worker and no retries. The frozen complete bundle
+`0.94.0-orchestration.20260918.sha69753564d0d7` passes its launcher smoke on
+synthetic data, including embedded asset hashes, disabled-assistant APIs and no
+work from page visits. Matching desktop and phone capture invocations pass two
+tests each. All eight screenshots and twelve silent-video source frames were
+visually reviewed. The E2E-only adjacent mock helper and external web variant are
+explicitly distinguished from the immutable production bundle. See the
 [qualification record](../../review/orchestration/candidate-qualification.md).
-No immutable bundle or private-data rehearsal is yet claimed.
+The [candidate receipt](../../review/orchestration/candidate-receipt.json) records
+the clean source, all six binary hashes and supported limits. Private-data
+migration and rollback are delivery 03 and are not yet claimed.

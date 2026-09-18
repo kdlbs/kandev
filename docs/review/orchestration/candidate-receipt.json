@@ -1,0 +1,170 @@
+{
+  "status": "qualified_for_private_data_rehearsal",
+  "date": "2026-09-18",
+  "source_commit": "69753564d0d7c0121e8681a72e5b4ce8c384a106",
+  "base_commit": "bf819a0228e742d069c528293d848c985a4d1bd1",
+  "version": "0.94.0-orchestration.20260918.sha69753564d0d7",
+  "clean_source": true,
+  "binaries_sha256": {
+    "bin/agentctl": "ef3fd7915e2ca83d6689cbed4c0ce03255c554120c96b32232da6429fd89226c",
+    "bin/agentctl-darwin-amd64": "eb1371bba81ca945cebcc1710207eb367ae7a2ac4abfeea3236d37cb637ebb29",
+    "bin/agentctl-darwin-arm64": "231be726e4052b3a59932cb5f8be59bc661f0c726dcf8fbc77a02fe0ac4c0ee0",
+    "bin/agentctl-linux-amd64": "054748f50599f385202aab1ef93f00135565973e5dfcf81d1f35634b09b7df53",
+    "bin/agentctl-linux-arm64": "8b3afe6252c921444e94eaeec33d079299b813a1a7e39bc9f7c9941077fbecb1",
+    "bin/kandev": "49fb6a47d71c50a124094b91a2eb54b7da069de256d2b9ef669cd9c72e3916fb"
+  },
+  "embedded_web": {
+    "asset_count": 577,
+    "canonical_manifest_sha256": "8e19586cc48fd9ed91482f5296fe57ad9303051b6aa43be3eef6066252bd2906",
+    "canonicalization": "UTF-8 JSON, sorted keys, compact separators, no trailing newline"
+  },
+  "toolchain": {
+    "go": "1.26.0",
+    "node": "24.11.1",
+    "pnpm": "9.15.9",
+    "make": "4.4.1",
+    "rust": "1.98.1",
+    "host": "linux/amd64"
+  },
+  "checks": {
+    "backend": {
+      "packages_passed": 286,
+      "conditional_skips": 25,
+      "postgresql_enabled": true,
+      "postgresql_skips": 0
+    },
+    "frontend_full": {
+      "files": 1913,
+      "passed_files": 1912,
+      "failed_files": 1,
+      "tests": 16242,
+      "passed_tests": 16233,
+      "failed_tests": 5,
+      "existing_skips": 4,
+      "outcome": "fixture failures corrected and affected tests rerun; not a single full green invocation"
+    },
+    "frontend_affected_rerun": {
+      "passed": 37,
+      "skipped": 0
+    },
+    "final_onboarding_after_lint": {
+      "passed": 10
+    },
+    "typecheck": "passed",
+    "lint": "passed",
+    "locale": "passed",
+    "sqlguard": "passed",
+    "test_scripts": "passed",
+    "conformance": {
+      "race": true,
+      "passed_including_subtests": 645,
+      "top_level": 26,
+      "skips": 0,
+      "engines": [
+        "sqlite3",
+        "pgx"
+      ],
+      "previous_stable_fixture": "0.93.0"
+    },
+    "browser_preflight": {
+      "desktop_passed": 6,
+      "mobile_passed": 1,
+      "workers": 1,
+      "retries": 0
+    },
+    "candidate_media": {
+      "desktop_passed": 2,
+      "mobile_passed": 2,
+      "workers": 1,
+      "retries": 0,
+      "screenshots_reviewed": 8,
+      "video_frames_reviewed": 12,
+      "runtime_copy_matches_frozen_bundle": true,
+      "external_e2e_web_from_same_source": true
+    }
+  },
+  "packaged_smoke": {
+    "outcome": "passed",
+    "synthetic_only": true,
+    "source_commit": "69753564d0d7c0121e8681a72e5b4ce8c384a106",
+    "version": "0.94.0-orchestration.20260918.sha69753564d0d7",
+    "embedded_web_override": false,
+    "launcher_command": "kandev run --headless --port 4778",
+    "ready": {
+      "service": "kandev",
+      "status": "ok",
+      "version": "0.94.0-orchestration.20260918.sha69753564d0d7"
+    },
+    "http_checks": {
+      "root_status": 200,
+      "features": {
+        "orchestration": true,
+        "personalAssistant": false,
+        "office": false
+      },
+      "coordinator_roles_status": 200,
+      "assistant_denials": [
+        {
+          "path": "/assistant",
+          "status": 404,
+          "error": "personal_assistant_disabled"
+        },
+        {
+          "path": "/assistant/memory",
+          "status": 404,
+          "error": "personal_assistant_disabled"
+        },
+        {
+          "path": "/assistant/attention",
+          "status": 404,
+          "error": "personal_assistant_disabled"
+        },
+        {
+          "path": "/runtime/tasks",
+          "status": 404,
+          "error": "personal_assistant_disabled"
+        }
+      ],
+      "assistant_write_status": 404,
+      "embedded_entry_assets_verified": 69
+    },
+    "no_work_after_visits": {
+      "tasks": 0,
+      "task_sessions": 0,
+      "task_session_messages": 0,
+      "runs": 0
+    },
+    "isolation": {
+      "network": "none",
+      "readonly_rootfs": true,
+      "host_credentials_mounted": false,
+      "docker_socket_mounted": false,
+      "mounts": [
+        {
+          "destination": "/state",
+          "writable": true
+        },
+        {
+          "destination": "/bundle",
+          "writable": false
+        },
+        {
+          "destination": "/tools/node",
+          "writable": false
+        }
+      ]
+    },
+    "launcher_exit_code": 0
+  },
+  "limitations": [
+    "Execution qualified on Linux x86-64 only; other helpers cross-built but not executed",
+    "Generic mock captures do not establish real-provider quality",
+    "Restricted provider coverage is the separate Linux Claude ACP trial",
+    "No private-data migration or rollback result yet",
+    "No live deployment or public PR"
+  ],
+  "initial_capture_failure": {
+    "cause": "Release bundle correctly omitted adjacent mock-agent required only by E2E mode",
+    "resolution": "Separate byte-identical runtime copy with the test helper added; immutable release bundle unchanged"
+  }
+}

@@ -1,14 +1,14 @@
 # Assistant interface evidence
 
 Genuine Chromium/Pixel 5 captures from clean source
-`c357f9ab94d3790a471d9db587c0a063c7f8d838` on 2026-09-18, above exact
+`69753564d0d7c0121e8681a72e5b4ce8c384a106` on 2026-09-18, above exact
 Kandev v0.94.0. The disposable E2E Workspace contains only generic instructions,
 example tasks and mock workers. No live database, conversation or provider log
 was used for these assets.
 
 - [Desktop native question](desktop-attention.png)
-- [Desktop saved preference and original instruction](desktop-memory.png)
-- [Phone native question and offered answers](mobile-attention.png)
+- [Desktop saved preference](desktop-memory.png)
+- [Phone attention list and native question](mobile-attention.png)
 - [Phone memory provenance close-up](mobile-memory.png)
 - [Silent memory interaction](assistant-demo.webm): VP9, 1440 × 1000, five frames
   played at 1 fps for five seconds. The original 5 fps capture is slowed five
@@ -19,6 +19,13 @@ execution. The visible banner reports that limitation. These assets demonstrate
 human native-input and memory controls, not a model executing an assistant turn.
 The separate [provider trial receipt](../../assistant-provider-trial.json) records
 the real restricted-provider read and denied write.
+
+The runtime is a byte-identical candidate copy with an adjacent test-only mock
+worker. The browser serves the E2E web variant from the same source, including
+the pseudo locale. The embedded production web is checked separately in the
+[candidate receipt](../../candidate-receipt.json). The phone attention screenshot
+shows the question near the fold; the passing flow scrolls to and uses its native
+answer controls. The short video samples the memory interaction after answering.
 
 All four screenshots and all five source video frames were visually inspected.
 Only generic requests and disposable fixture identifiers are visible. The clip
@@ -38,8 +45,9 @@ ffmpeg -framerate 1 -i frame-%04d.png -c:v libvpx-vp9 -threads 1 \
   -b:v 0 -crf 24 -pix_fmt yuv420p -an assistant-demo.webm
 ```
 
-The desktop capture invocation passed all four coordinator/assistant/maintenance/
-workspace-link tests; the phone invocation passed the corresponding four tests.
-The desktop invocation was repeated after archiving phone assets to preserve both
-output sets. This was capture housekeeping, with unchanged source and no retries.
+The desktop capture invocation passed both Coordinator/Assistant tests; the phone
+invocation passed their two mobile counterparts. Desktop assets were archived
+before the phone invocation cleaned the capture directory. Both use one worker,
+unchanged source and no retries. All six runtime binary hashes still match the
+frozen bundle after the runs.
 These are private review artifacts; no additional public publication is implied.
