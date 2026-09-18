@@ -948,6 +948,24 @@ as "task is actually blocked." This is distinct from the fan-out limit below:
 that refuses the whole call with `ResourceExhausted` rather than substituting
 a withheld verdict onto any task.
 
+No event delivered through `OnEvent` (`capabilities.events`) ever carries the
+dependency projection in its payload: `Blocked`, `BlockedReason`, `DependsOn`,
+`Blocks`, the truncation flags, and `StartWhenUnblocked` are
+`host.Tasks().Get`/`.List` fields only, never included in event data. A
+plugin that caches a task's dependency fields refetches them when: a
+`task.updated` event names that task or either end of one of its edges; a
+dependency is added or removed between that task and any other; or a
+`task.state_changed` event names any task ID present in that task's cached
+`DependsOn` or `Blocks` list, since a predecessor or dependent simply
+advancing state is not itself one of the first three signals. A single
+`Get`/`List` response is not a transactional snapshot: with no surrounding
+lock, an edge can change while the read is being derived, so one response can
+show an edge asymmetrically (for example, a predecessor still listed as
+pending after it has already resolved). Treat what a response returns as the
+union of independently-read facts, and resolve staleness by refetching on the
+next matching signal rather than trusting any single response as
+authoritative.
+
 Reading dependencies adds no extra query per task; the host derives them for
 the whole page in one batched pass. That batch is bounded by a fixed limit on
 the number of distinct task IDs it will read across all edges on the page:

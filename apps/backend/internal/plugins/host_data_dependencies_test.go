@@ -28,7 +28,7 @@ func TestAttachDependencies_CopiesViewOntoMatchingTask(t *testing.T) {
 	model := &taskmodels.Task{ID: "task-1"}
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{model}, false)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{model}, false, "Test")
 	require.NoError(t, err)
 
 	require.True(t, tasks[0].Blocked)
@@ -47,7 +47,7 @@ func TestAttachDependencies_BlocksEntriesNeverCarryStatus(t *testing.T) {
 	}
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, false)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, false, "Test")
 	require.NoError(t, err)
 
 	require.Len(t, tasks[0].Blocks, 1)
@@ -58,7 +58,7 @@ func TestAttachDependencies_EmptyEdgeListsAreNeverNil(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, false)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, false, "Test")
 	require.NoError(t, err)
 
 	require.NotNil(t, tasks[0].DependsOn)
@@ -82,7 +82,7 @@ func TestAttachDependencies_StartWhenUnblockedReflectsStoredIntentWhenNotWithhel
 	}
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{model}, false)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{model}, false, "Test")
 	require.NoError(t, err)
 	require.True(t, tasks[0].StartWhenUnblocked)
 }
@@ -102,7 +102,7 @@ func TestAttachDependencies_StartWhenUnblockedForcedFalseUnderWithheldVerdict(t 
 	}
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{model}, false)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{model}, false, "Test")
 	require.NoError(t, err)
 	require.False(t, tasks[0].StartWhenUnblocked, "the withheld verdict forces start_when_unblocked false regardless of the stored intent")
 }
@@ -112,7 +112,7 @@ func TestAttachDependencies_BoundedFanOutRefusalBecomesResourceExhausted(t *test
 	d.tasks.dependencyViewsErr = taskservice.ErrDependencyFanOutExceeded
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, true)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, true, "Test")
 	require.Error(t, err)
 	require.Equal(t, codes.ResourceExhausted, status.Code(err))
 }
@@ -121,7 +121,7 @@ func TestAttachDependencies_UnboundedVariantNeverConsultsBoundedSource(t *testin
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, false)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, false, "Test")
 	require.NoError(t, err)
 	require.Equal(t, 1, d.tasks.dependencyViewsCalls)
 	require.Equal(t, 0, d.tasks.dependencyViewsBoundedCalls)
@@ -129,7 +129,7 @@ func TestAttachDependencies_UnboundedVariantNeverConsultsBoundedSource(t *testin
 
 func TestAttachDependencies_NoopOnEmptyTasks(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
-	err := d.host.attachDependencies(context.Background(), nil, nil, true)
+	err := d.host.attachDependencies(context.Background(), nil, nil, true, "Test")
 	require.NoError(t, err)
 	require.Equal(t, 0, d.tasks.dependencyViewsBoundedCalls)
 }
@@ -185,7 +185,7 @@ func TestPluginHost_Tasks_ListTranslatesFanOutRefusalToResourceExhausted(t *test
 func TestAttachDependencies_WithholdsWhenTaskDataSourceNil(t *testing.T) {
 	host := &pluginHost{capabilities: manifest.Capabilities{APIRead: []string{"tasks"}}}
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
-	err := host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, true)
+	err := host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, true, "Test")
 	require.NoError(t, err)
 	require.True(t, tasks[0].Blocked, "a nil task-data source must fail closed to the withheld verdict, not report not-blocked")
 	require.Equal(t, taskservice.BlockedReasonUnknown, tasks[0].BlockedReason)
@@ -208,7 +208,7 @@ func TestAttachDependencies_WithholdsWhenCallerLacksReadCapability(t *testing.T)
 	}
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{model}, false)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{model}, false, "Test")
 	require.NoError(t, err)
 
 	require.True(t, tasks[0].Blocked, "a caller without api_read:tasks gets the fail-closed withheld verdict, not real data")
@@ -229,7 +229,7 @@ func TestAttachDependencies_WriteOnlyCapabilityWithholdsEvenWithTaskDataSource(t
 	}
 	tasks := []pluginsdk.Task{{ID: "task-1"}}
 
-	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, false)
+	err := d.host.attachDependencies(context.Background(), tasks, []*taskmodels.Task{{ID: "task-1"}}, false, "Test")
 	require.NoError(t, err)
 
 	require.Equal(t, taskservice.BlockedReasonUnknown, tasks[0].BlockedReason, "api_write:tasks alone never unlocks real dependency data")

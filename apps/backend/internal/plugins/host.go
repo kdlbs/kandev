@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
@@ -107,6 +108,18 @@ type pluginHost struct {
 	// and read through agentConversationsDeps (live, not snapshotted at
 	// hostForPlugin time, for the same late-wiring reason as writeDeps).
 	agentConversations func() AgentConversationService
+
+	// log receives the dependency-derivation-failure diagnostic emitted by
+	// attachDependencies (see host_data_dependencies.go). nil on a bare test
+	// host; attachDependencies skips logging rather than panicking.
+	log *logger.Logger
+
+	// instanceID identifies the canvas plugin instance a request is scoped
+	// to, set by Service.webAppHost. Empty on a gRPC plugin's host, which has
+	// no instance identity distinct from pluginID: every managed plugin uses
+	// one implicit global instance, so attachDependencies logs pluginID as
+	// the instance in that case.
+	instanceID string
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)

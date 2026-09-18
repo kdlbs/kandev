@@ -59,7 +59,7 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 		if model != nil {
 			models = []*taskmodels.Task{model}
 		}
-		if err := host.attachDependencies(ctx, fetched, models, false); err != nil {
+		if err := host.attachDependencies(ctx, fetched, models, false, "ListWebAppTasks"); err != nil {
 			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 			return
 		}
@@ -98,7 +98,7 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 			survivingModels = append(survivingModels, models[i])
 		}
 	}
-	if err := host.attachDependencies(ctx, survivingDTOs, survivingModels, true); err != nil {
+	if err := host.attachDependencies(ctx, survivingDTOs, survivingModels, true, "ListWebAppTasks"); err != nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
@@ -136,7 +136,7 @@ func (s *Service) getWebAppTask(ctx context.Context, w http.ResponseWriter, r *h
 	if model != nil {
 		models = []*taskmodels.Task{model}
 	}
-	if err := host.attachDependencies(ctx, fetched, models, false); err != nil {
+	if err := host.attachDependencies(ctx, fetched, models, false, "GetWebAppTask"); err != nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}

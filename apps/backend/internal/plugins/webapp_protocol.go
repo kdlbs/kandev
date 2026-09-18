@@ -119,9 +119,11 @@ func (s *Service) webAppHost(binding webapp.CapabilityBinding) *pluginHost {
 			taskWriter:    s.taskWriter,
 			taskPRsDep:    s.taskPRSourceDep,
 			writeDeps:     s.writeDependencies,
+			log:           s.log,
 		}
 	}
 	host.pluginID = binding.PluginID
+	host.instanceID = binding.InstanceID
 	host.capabilities = webAppCapabilities(binding.Permissions)
 	return host
 }

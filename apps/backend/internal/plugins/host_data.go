@@ -384,7 +384,7 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 	// otherwise fan out over every task kandev holds to fill a list the
 	// caller already bounded.
 	r.host.attachPullRequests(ctx, items)
-	if err := r.host.attachDependencies(ctx, items, models, true); err != nil {
+	if err := r.host.attachDependencies(ctx, items, models, true, "ListTasks"); err != nil {
 		return nil, nil, err
 	}
 	return items, info, nil
@@ -467,7 +467,7 @@ func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error)
 	}
 	items := []pluginsdk.Task{*dto}
 	r.host.attachPullRequests(ctx, items)
-	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{model}, false); err != nil {
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{model}, false, "GetTask"); err != nil {
 		return nil, err
 	}
 	return &items[0], nil

@@ -9,6 +9,8 @@ package plugins
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -17,12 +19,15 @@ import (
 // attachDependencies fills the seven dependency-projection fields on tasks in
 // place. models[i] must be the raw model backing tasks[i] (same order, same
 // length) — StartWhenUnblocked reads the stored auto-start intent directly
-// off models[i].
+// off models[i]. operation identifies the calling Host RPC or canvas route
+// (e.g. "ListTasks", "GetWebAppTask") for the derivation-failure diagnostic
+// logDependencyDerivationFailure emits; it never carries a task id or title.
 //
 // A caller without api_read:tasks never reaches real dependency data through
 // this path, even when it holds some other capability (e.g. api_write:tasks)
 // that let it reach a Task DTO in the first place: every task is stamped with
-// the withheld verdict instead of deriving anything.
+// the withheld verdict instead of deriving anything. That is not a failed
+// derivation attempt, so it is not logged.
 //
 // Unlike attachPullRequests, a derivation failure is not left at zero value:
 // BuildDependencyViews/Bounded already substitute the withheld verdict
@@ -30,8 +35,12 @@ import (
 // read failure, so this only copies whatever the derivation returned. The
 // one failure this function itself can return is the bounded fan-out
 // refusal, translated to a single gRPC ResourceExhausted error so a caller
-// never partially serializes a bounded batch around it.
-func (h *pluginHost) attachDependencies(ctx context.Context, tasks []pluginsdk.Task, models []*taskmodels.Task, bounded bool) error {
+// never partially serializes a bounded batch around it — that refusal is a
+// distinct sentinel, never a withheld verdict, so it is not logged here
+// either.
+func (h *pluginHost) attachDependencies(
+	ctx context.Context, tasks []pluginsdk.Task, models []*taskmodels.Task, bounded bool, operation string,
+) error {
 	if len(tasks) == 0 {
 		return nil
 	}
@@ -40,6 +49,7 @@ func (h *pluginHost) attachDependencies(ctx context.Context, tasks []pluginsdk.T
 		return nil
 	}
 	if h.taskData == nil {
+		h.logDependencyDerivationFailure(operation, "source_unavailable")
 		withholdDependencies(tasks)
 		return nil
 	}
@@ -53,6 +63,7 @@ func (h *pluginHost) attachDependencies(ctx context.Context, tasks []pluginsdk.T
 	} else {
 		views = h.taskData.BuildDependencyViews(ctx, models)
 	}
+	derivationWithheld := false
 	for i := range tasks {
 		view := views[tasks[i].ID]
 		tasks[i].Blocked = view.Blocked
@@ -63,8 +74,40 @@ func (h *pluginHost) attachDependencies(ctx context.Context, tasks []pluginsdk.T
 		tasks[i].BlocksTruncated = view.BlocksTruncated
 		withheld := view.BlockedReason == taskservice.BlockedReasonUnknown
 		tasks[i].StartWhenUnblocked = !withheld && taskmodels.HasStartWhenUnblockedIntent(models[i])
+		if withheld {
+			derivationWithheld = true
+		}
+	}
+	if derivationWithheld {
+		// One record for the whole attempt, however many tasks it withheld
+		// for: BuildDependencyViews/Bounded only ever substitute this
+		// verdict batch-wide, on one of the read or edge-end-resolution
+		// failures it already logs internally without plugin/instance/
+		// operation identity.
+		h.logDependencyDerivationFailure(operation, "derivation_withheld")
 	}
 	return nil
+}
+
+// logDependencyDerivationFailure emits one structured record per derivation
+// attempt: plugin, instance, resource type, operation, and result code,
+// never a task title, task id, or edge content. No counter or metric is
+// added; this log record is the whole observability contract.
+func (h *pluginHost) logDependencyDerivationFailure(operation, resultCode string) {
+	if h.log == nil {
+		return
+	}
+	instanceID := h.instanceID
+	if instanceID == "" {
+		instanceID = h.pluginID
+	}
+	h.log.Warn("plugin dependency derivation withheld",
+		zap.String("plugin_id", h.pluginID),
+		zap.String("instance_id", instanceID),
+		zap.String("resource_type", "task"),
+		zap.String("operation", operation),
+		zap.String("result_code", resultCode),
+	)
 }
 
 // withholdDependencies stamps every task with the fail-closed withheld

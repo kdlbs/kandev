@@ -223,7 +223,7 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		r.host.startTaskBestEffort(ctx, created.ID, launch)
 	}
 	items := []pluginsdk.Task{taskModelToDTO(created)}
-	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{created}, false); err != nil {
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{created}, false, "CreateTask"); err != nil {
 		return nil, err
 	}
 	return &items[0], nil
@@ -279,7 +279,7 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	}
 	items := []pluginsdk.Task{taskModelToDTO(updated)}
 	r.host.attachPullRequests(ctx, items)
-	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{updated}, false); err != nil {
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{updated}, false, "UpdateTask"); err != nil {
 		return nil, err
 	}
 	return &items[0], nil
@@ -324,7 +324,7 @@ func (r taskReader) Move(ctx context.Context, in pluginsdk.MoveTaskInput) (*plug
 	}
 	items := []pluginsdk.Task{taskModelToDTO(result.Task)}
 	r.host.attachPullRequests(ctx, items)
-	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{result.Task}, false); err != nil {
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{result.Task}, false, "MoveTask"); err != nil {
 		return nil, err
 	}
 	return &pluginsdk.MoveTaskOutcome{
@@ -566,7 +566,7 @@ func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID stri
 	}
 	dtos := tasksToDTOs(tasks)
 	m.host.attachPullRequests(ctx, dtos)
-	if err := m.host.attachDependencies(ctx, dtos, tasks, true); err != nil {
+	if err := m.host.attachDependencies(ctx, dtos, tasks, true, "PreviewPluginOwnedTaskTree"); err != nil {
 		return nil, err
 	}
 	return dtos, nil
