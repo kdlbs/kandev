@@ -225,3 +225,9 @@ CodeRabbit metadata correction: whole-file comments retain baseRef and
 isSubmodule from the review file through creation, edits, and storage hydration.
 The component regression failed before the fix; the existing lifecycle test now
 verifies both fields survive edits and reload.
+
+CI integration repair: merged main at 26254fe51 after its new queued-session
+requirements reused criterion 003.8. Renumbered the later parked-banner criterion
+to 003.10 and updated its supersession/design references. Full spec lint and the
+catalog validation (1017 specifications) pass. This is a documentation identity
+repair; queued-session behavior is unchanged.

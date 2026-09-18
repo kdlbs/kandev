@@ -99,6 +99,19 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, nil)
 }
 
+// RegisterInitialPromptDispatchCallbacks installs one-shot callbacks for the
+// initial prompt sent during StartAgentProcess. Model-switch startup launches
+// that prompt asynchronously, so callers that own startup cancellation must
+// wait for either provider acceptance or a pre-acceptance delivery failure.
+func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure)
+	return nil
+}
+
 // PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
 // must keep admission serialized until the queued prompt is actually dispatched.
 func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
@@ -1878,6 +1891,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	}
 	if client.HasAgentStream() {
 		releaseClient()
+		if execution.Status == v1.AgentStatusFailed &&
+			execution.isSessionInitialized() && execution.ACPSessionID != "" {
+			return m.restoreRecoveredFailedExecution(ctx, execution)
+		}
 		return nil
 	}
 	releaseClient()

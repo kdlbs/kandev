@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -39,10 +40,14 @@ func agentsList(args []string) int {
 
 	wsID := os.Getenv("KANDEV_WORKSPACE_ID")
 	path := fmt.Sprintf("/api/v1/office/workspaces/%s/agents", wsID)
-	return getWithParams(path, "KANDEV_WORKSPACE_ID", wsID, map[string]string{
-		"role":   *roleFlag,
-		"status": *statusFlag,
-	})
+	values := url.Values{}
+	if *roleFlag != "" {
+		values.Set("role", *roleFlag)
+	}
+	if *statusFlag != "" {
+		values.Set("status", *statusFlag)
+	}
+	return getWithParams(path, "KANDEV_WORKSPACE_ID", wsID, values)
 }
 
 // agentsCreate hires a new agent for the current workspace. The

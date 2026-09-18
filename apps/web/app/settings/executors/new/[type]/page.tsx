@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Badge } from "@kandev/ui/badge";
@@ -407,7 +408,9 @@ function useCreateProfileSave(executorId: string) {
             e.id === executorId ? { ...e, profiles: [...(e.profiles ?? []), profile] } : e,
           ),
         );
-        runWithNavigationBlockerBypassed(() => router.push(`/settings/executors/${profile.id}`));
+        runWithNavigationBlockerBypassed(() =>
+          router.push(executorProfileSettingsPath(profile.id)),
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : t("executors:failedToCreateProfile"));
         throw err;

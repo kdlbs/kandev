@@ -1,4 +1,8 @@
-import type { LaunchSessionRequest, MessageAttachment } from "./session-launch-service";
+import type {
+  LaunchActivationSource,
+  LaunchSessionRequest,
+  MessageAttachment,
+} from "./session-launch-service";
 import type { TaskPriority } from "@/lib/types/http";
 
 export type LayoutIntentHint = "default" | "plan" | "pr-review" | "keep";
@@ -86,12 +90,17 @@ export function buildStartCreatedRequest(
   };
 }
 
-export function buildResumeRequest(taskId: string, sessionId: string): BuildResult {
+export function buildResumeRequest(
+  taskId: string,
+  sessionId: string,
+  opts?: { activationSource?: LaunchActivationSource },
+): BuildResult {
   return {
     request: {
       task_id: taskId,
       intent: "resume",
       session_id: sessionId,
+      ...(opts?.activationSource ? { activation_source: opts.activationSource } : {}),
     },
     layout: "keep",
   };

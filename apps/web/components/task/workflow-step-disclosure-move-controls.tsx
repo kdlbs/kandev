@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useWorkflowMoveSubmit } from "./use-workflow-move-submit";
 import { StepDisclosureRowActions } from "./workflow-step-disclosure-actions";
 import {
   WorkflowMoveOptionsFields,
@@ -38,6 +39,7 @@ export function StepDisclosureMoveControls({
   const [showOptions, setShowOptions] = useState(false);
   const { draft, patchDraft } = useWorkflowMoveOptionsForm();
   const entryOptions = workflowMoveOptionsPayload(draft);
+  const submission = useWorkflowMoveSubmit(movePending, () => onMove(stepId, entryOptions));
   const invalidationKey = useWorkflowMovePreviewRevision(taskId, workflowId, stepId);
   const previewState = useWorkflowMovePreview({
     taskId,
@@ -56,13 +58,11 @@ export function StepDisclosureMoveControls({
         <StepDisclosureRowActions
           stepId={stepId}
           isMoving={isMoving}
-          movePending={movePending}
+          movePending={submission.busy}
           showOptions={showOptions}
           buttonSizeClass={buttonSizeClass}
-          draft={draft}
-          entryOptions={entryOptions}
           onToggleOptions={() => setShowOptions((value) => !value)}
-          onMove={onMove}
+          onSubmit={submission.submit}
         />
       </div>
       <CompactWorkflowMovePreview
@@ -73,7 +73,10 @@ export function StepDisclosureMoveControls({
       {showOptions && (
         <div
           className="pb-1 pl-4 pr-1"
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            submission.onKeyDown(event);
+            event.stopPropagation();
+          }}
           data-testid={`workflow-step-disclosure-options-panel-${stepId}`}
         >
           <WorkflowMoveOptionsFields

@@ -127,6 +127,14 @@ workspace there from the menu sheet instead.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
 
+If discovery cannot scan a root, the picker keeps repositories from successful
+roots available and retains its normal **Refresh repositories** action. Failed
+root paths stay in structured backend logs and are not shown in selectors. A
+missing or inaccessible root does not prevent you from validating an absolute
+repository path. On Desktop, a saved root that fails also offers **Reconnect**
+and **Remove**. Kandev does not retry failed roots in the background or create
+missing clone directories.
+
 New local repository records default to:
 
 - source type `local`;
@@ -229,3 +237,9 @@ Common corrections:
 For backup, update, log, database, and recovery details, see [Operations](operations.md). For release-specific disagreement, record the version from **Settings > System > About** and compare it with the matching GitHub tag.
 
 </details>
+
+## Use task actions by keyboard
+
+With a task open, press `Cmd/Ctrl+K` to find its sidebar actions. **Move to** lets you
+choose a step, add instructions, and submit with `Cmd/Ctrl+Enter`. See
+[task actions and move options](tasks-and-workflows.md#task-actions-from-the-command-palette).

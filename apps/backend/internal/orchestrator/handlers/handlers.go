@@ -170,8 +170,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsEnsureSessionRequest struct {
-	TaskID    string `json:"task_id"`
-	AutoStart *bool  `json:"auto_start,omitempty"`
+	TaskID           string                              `json:"task_id"`
+	AutoStart        *bool                               `json:"auto_start,omitempty"`
+	ActivationSource orchestrator.LaunchActivationSource `json:"activation_source,omitempty"`
 }
 
 // wsEnsureSession ensures a task has a session, honoring the auto_start override.
@@ -184,7 +185,9 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
-	resp, err := h.service.EnsureSession(ctx, req.TaskID, orchestrator.EnsureSessionOptions{AutoStart: req.AutoStart})
+	resp, err := h.service.EnsureSession(ctx, req.TaskID, orchestrator.EnsureSessionOptions{
+		AutoStart: req.AutoStart, ActivationSource: req.ActivationSource,
+	})
 	if err != nil {
 		h.logger.Error("failed to ensure session",
 			zap.String("task_id", req.TaskID),

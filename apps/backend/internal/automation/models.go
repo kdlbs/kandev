@@ -38,6 +38,7 @@ const (
 	triggerCategoryGitHub      = "github"
 	triggerDataSourceKey       = "source"
 	triggerDataSourceManual    = "manual"
+	webhookBodyPlaceholderKey  = "webhook.body"
 )
 
 // RunStatus tracks the outcome of a trigger firing.
@@ -208,6 +209,15 @@ type AutomationRun struct {
 	ThreadAction ThreadAction `json:"thread_action,omitempty" db:"thread_action"`
 	ThreadReason string       `json:"thread_reason,omitempty" db:"thread_reason"`
 	DisplayTitle string       `json:"display_title,omitempty" db:"display_title"`
+	// DedupReason records why the dedup key ended up as it did (see
+	// DedupBinding.Reason) — unresolved/not-configured dispositions that
+	// CreateRun persists once at admission time and that terminal-status
+	// blanking never touches.
+	DedupReason string `json:"dedup_reason,omitempty" db:"dedup_reason"`
+	// RepositoryReason records why the webhook repository selector produced
+	// no binding (see the token catalog in event_handlers_automation.go).
+	// Empty whenever a repository was bound — the binding is its own record.
+	RepositoryReason string `json:"repository_reason,omitempty" db:"repository_reason"`
 }
 
 // WorkspaceAutomationRun is a run carrying just enough of its owning
@@ -277,8 +287,95 @@ type GitHubPRMergedTriggerConfig struct {
 
 // WebhookTriggerConfig holds configuration for webhook triggers.
 type WebhookTriggerConfig struct {
+	// FilterExpression is retained for wire compatibility with older clients
+	// but has no reader — Filters is the live predicate list.
 	FilterExpression string `json:"filter_expression,omitempty"`
+	// DedupKey is an optional dot path into the webhook payload. When set, a
+	// firing whose resolved (trimmed, non-empty) value repeats within this
+	// automation is suppressed; see admitTriggerLocked and DedupBinding.
+	DedupKey string `json:"dedup_key,omitempty"`
+	// Filters are evaluated in order before dedup; every predicate must pass
+	// for the trigger to fire. See EvaluateFilters.
+	Filters []WebhookFilter `json:"filters,omitempty"`
+	// Repository selects which already-configured repository a firing binds
+	// to, by matching a payload-derived value against each configured
+	// repository's Name. Nil means no selector is declared (today's
+	// behavior: whatever resolveAutomationRepository already resolves).
+	Repository *WebhookRepositorySelector `json:"repository,omitempty"`
 }
+
+// WebhookFilterOp names a supported filter predicate operator.
+type WebhookFilterOp string
+
+const (
+	WebhookFilterOpEq        WebhookFilterOp = "eq"
+	WebhookFilterOpNe        WebhookFilterOp = "ne"
+	WebhookFilterOpIn        WebhookFilterOp = "in"
+	WebhookFilterOpNotIn     WebhookFilterOp = "not_in"
+	WebhookFilterOpExists    WebhookFilterOp = "exists"
+	WebhookFilterOpNotExists WebhookFilterOp = "not_exists"
+	WebhookFilterOpContains  WebhookFilterOp = "contains"
+)
+
+// WebhookFilter is one admission predicate evaluated against the webhook
+// payload. See EvaluateFilters for operator semantics and cardinality rules.
+type WebhookFilter struct {
+	Path   string          `json:"path"`
+	Op     WebhookFilterOp `json:"op"`
+	Values []string        `json:"values,omitempty"`
+}
+
+// WebhookRepositorySelector names the payload dot path whose resolved value
+// is matched, exactly and case-sensitively, against each of the automation's
+// already-configured repositories' Name. Declaring this is a commitment: an
+// unresolved or non-matching value binds no repository rather than falling
+// back to any other selection rule.
+type WebhookRepositorySelector struct {
+	SelectorPath string `json:"selector_path"`
+}
+
+// DedupBinding is the outcome of resolving a webhook trigger's dedup key for
+// one firing, produced by exactly one of the constructors below. It replaces
+// a bare string parameter on FireTrigger so every call site states which of
+// the three states it means, rather than relying on "" as an overloaded
+// sentinel for two different conditions (unresolved vs. not configured).
+type DedupBinding struct {
+	key        string
+	unresolved bool
+}
+
+// DedupKey produces a resolved, non-empty dedup key binding.
+func DedupKey(v string) DedupBinding { return DedupBinding{key: v} }
+
+// DedupUnresolved marks a firing whose trigger declared a dedup key path
+// that did not resolve to a non-empty value after trimming.
+func DedupUnresolved() DedupBinding { return DedupBinding{unresolved: true} }
+
+// DedupNotConfigured marks a firing whose trigger declared no dedup key
+// path at all.
+func DedupNotConfigured() DedupBinding { return DedupBinding{} }
+
+// Key returns the resolved dedup key, or "" when unresolved/not configured.
+func (d DedupBinding) Key() string { return d.key }
+
+// Reason returns the disposition token to persist on the run's DedupReason
+// column: "" when a key was resolved (the key is its own record),
+// "dedup_unresolved" when a declared path did not resolve, or
+// "dedup_not_configured" when no path was declared.
+func (d DedupBinding) Reason() string {
+	if d.key != "" {
+		return ""
+	}
+	if d.unresolved {
+		return dedupReasonUnresolved
+	}
+	return dedupReasonNotConfigured
+}
+
+const (
+	dedupReasonUnresolved    = "dedup_unresolved"
+	dedupReasonNotConfigured = "dedup_not_configured"
+)
 
 // TaskOriginLookup answers the task workspace and whether it is hidden
 // automation-run work. The merged-PR subscriber uses the same facts to avoid

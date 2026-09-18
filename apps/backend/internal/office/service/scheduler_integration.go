@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -350,9 +351,11 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	agent *models.AgentInstance, taskID string, execCfg *ExecutorConfig,
 ) {
 	runCtx, err := (&officeruntime.ContextBuilder{
-		Agents: si.svc,
-		Runs:   si.svc.repo,
-		Seats:  si.svc,
+		Agents:       si.svc,
+		Runs:         si.svc.repo,
+		Seats:        si.svc,
+		RunnerLister: si.svc.repo,
+		ScopeEvents:  si.svc,
 	}).BuildAndPersist(ctx, run)
 	if err != nil {
 		si.logger.Warn("runtime context build failed; retrying run",
@@ -893,7 +896,10 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 		"error_message": msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
-	wrote, err := si.svc.HandleAgentFailure(ctx, run, msg)
+	// No lifecycle event backs a wiring fault, so there is no agent id to
+	// thread — the message classifies unclassified from text alone either
+	// way (TestHandleAgentFailure_UnlaunchableMessageNotRetried).
+	wrote, err := si.svc.HandleAgentFailure(ctx, run, msg, "", nil)
 	if err != nil {
 		si.logger.Error("failed to handle agent failure for unlaunchable run",
 			zap.String("run_id", run.ID), zap.Error(err))
@@ -1028,9 +1034,13 @@ func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, run
 	si.svc.releaseTaskCheckoutForRun(ctx, run)
 }
 
-// extractTaskID parses the task_id from a run payload.
+// extractTaskID parses the task_id from a run payload, trimmed so a
+// whitespace-only value is treated as absent — the same "taskless" test
+// officeruntime.ContextBuilder applies, so checkoutTask's task-bound/
+// taskless branch and the runtime's scope-derivation branch never disagree
+// on which run has a task.
 func (si *SchedulerIntegration) extractTaskID(payload string) string {
-	return ParseRunPayload(payload)["task_id"]
+	return strings.TrimSpace(ParseRunPayload(payload)["task_id"])
 }
 
 // extractProjectID looks up the project ID for a task in the payload.

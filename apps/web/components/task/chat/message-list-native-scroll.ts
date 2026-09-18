@@ -1,5 +1,7 @@
 /* eslint-disable max-lines -- pagination, scroll anchoring, and retry state share one boundary. */
 
+import { cancelChatScrollMotion } from "./chat-scroll-motion";
+import { useChatScrollMotion } from "./use-chat-scroll-motion";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
@@ -49,6 +51,7 @@ const SCROLL_KEYS = new Set([
 /** Writes a clamped maximum so the browser resolves the native bottom without
  * forcing a synchronous scrollHeight layout read. */
 export function scrollNativeToBottom(element: HTMLElement): void {
+  cancelChatScrollMotion(element);
   element.scrollTop = NATIVE_BOTTOM_SCROLL_TOP;
 }
 
@@ -302,7 +305,10 @@ function useScrollPositionOnPrepend(
   const beginOlderLoad = useCallback(() => {
     if (olderLoadPendingRef.current) return;
     const el = scrollRef.current;
-    if (el) scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
+    if (el) {
+      cancelChatScrollMotion(el);
+      scrollState.current = capturePrependScrollState(el, newestItemKeyRef.current);
+    }
     olderLoadPendingRef.current = true;
   }, [scrollRef]);
 
@@ -623,23 +629,58 @@ const PROGRAMMATIC_SCROLL_GUARD_MS = 1000;
  * streaming in mid-animation can silently snap the transcript back to the
  * bottom, cancelling the user's action.
  */
-export function useAutoScroll(params: {
+function useFollowIntent({
+  scrollRef,
+  isVisibleRef,
+  isAnimating,
+  userReading,
+  isNearBottomRef,
+  cancelMotion,
+}: {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  isVisibleRef: React.RefObject<boolean>;
+  isAnimating: () => boolean;
+  userReading: React.RefObject<boolean>;
+  isNearBottomRef: React.RefObject<boolean>;
+  cancelMotion: () => void;
+}) {
+  const resyncIsNearBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || !isVisibleRef.current || isAnimating()) return;
+    isNearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < (userReading.current ? 3 : 100);
+    if (isNearBottomRef.current) userReading.current = false;
+  }, [scrollRef, isAnimating, userReading]);
+  const markNotNearBottom = useCallback(() => {
+    cancelMotion();
+    isNearBottomRef.current = false;
+  }, [cancelMotion]);
+  return { resyncIsNearBottom, markNotNearBottom };
+}
+
+type AutoScrollParams = {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   messages: Message[];
   isWorking: boolean;
   sessionId: string | null;
   enabled: boolean;
+  motionEnabled?: boolean;
+  motionBlocked?: boolean;
   hasUnreadDivider: boolean;
   isProgrammaticScrollLocked: () => boolean;
   isVisible?: boolean;
   initialPlacementPending?: boolean;
-}) {
+};
+
+export function useAutoScroll(params: AutoScrollParams) {
   const {
     scrollRef,
     messages,
     isWorking,
     sessionId,
     enabled,
+    motionEnabled = false,
+    motionBlocked = false,
     hasUnreadDivider,
     isProgrammaticScrollLocked,
     isVisible = true,
@@ -659,23 +700,36 @@ export function useAutoScroll(params: {
   sessionIdRef.current = sessionId;
   isProgrammaticScrollLockedRef.current = isProgrammaticScrollLocked;
 
-  const resyncIsNearBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el || !isVisibleRef.current) return;
-    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-  }, [scrollRef]);
-  const markNotNearBottom = useCallback(() => {
-    isNearBottomRef.current = false;
-  }, []);
-
-  useTranscriptViewportResize({
+  const {
+    followBottom,
+    cancel: cancelMotion,
+    isAnimating,
+    userReading,
+  } = useChatScrollMotion({
     scrollRef,
-    sessionId,
+    motionEnabled,
     enabled,
     isVisible,
-    initialPlacementPending,
-    isProgrammaticScrollLocked,
+    sessionId,
+    isNearBottomRef,
+    instant: scrollNativeToBottom,
+    isBlocked: () =>
+      motionBlocked ||
+      initialPlacementPending ||
+      isProgrammaticScrollLockedRef.current() ||
+      useDockviewStore.getState().pendingChatScrollTop !== null ||
+      useDockviewStore.getState().isRestoringLayout,
   });
+  const { resyncIsNearBottom, markNotNearBottom } = useFollowIntent({
+    scrollRef,
+    isVisibleRef,
+    isAnimating,
+    userReading,
+    isNearBottomRef,
+    cancelMotion,
+  });
+
+  useTranscriptViewportResize({ ...params, isVisible, initialPlacementPending });
 
   usePersistedTranscriptScroll({
     scrollRef,
@@ -691,6 +745,7 @@ export function useAutoScroll(params: {
   });
 
   useAutoScrollOnContent({
+    followBottom,
     scrollRef,
     messages,
     isWorking,
@@ -704,7 +759,7 @@ export function useAutoScroll(params: {
     initialPlacementPending,
   });
 
-  useCatchUpOnReEnable(scrollRef, messages, enabled, isNearBottomRef);
+  useCatchUpOnReEnable(scrollRef, messages, enabled, isNearBottomRef, followBottom);
   useCatchUpOnVisible({
     scrollRef,
     isVisible,
@@ -853,6 +908,7 @@ function usePersistedTranscriptScroll({
 }
 
 function useAutoScrollOnContent({
+  followBottom,
   scrollRef,
   messages,
   isWorking,
@@ -865,6 +921,7 @@ function useAutoScrollOnContent({
   prevIsWorkingRef,
   initialPlacementPending,
 }: {
+  followBottom: () => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   messages: Message[];
   isWorking: boolean;
@@ -896,7 +953,7 @@ function useAutoScrollOnContent({
     ) {
       const el = scrollRef.current;
       if (el) {
-        scrollNativeToBottom(el);
+        followBottom();
         isNearBottomRef.current = true;
         placementDebug("work-start bottom", { sessionId });
       }
@@ -907,6 +964,7 @@ function useAutoScrollOnContent({
     isWorking,
     sessionId,
     scrollRef,
+    followBottom,
     enabled,
     isProgrammaticScrollLocked,
     initialPlacementPending,
@@ -925,7 +983,7 @@ function useAutoScrollOnContent({
       }) &&
       enabled
     ) {
-      scrollNativeToBottom(el);
+      followBottom();
       if (messages.length !== lastLoggedMessageCountRef.current) {
         placementDebug("message-update bottom", {
           sessionId,
@@ -938,6 +996,7 @@ function useAutoScrollOnContent({
     messages,
     sessionId,
     scrollRef,
+    followBottom,
     enabled,
     isProgrammaticScrollLocked,
     initialPlacementPending,
@@ -1007,6 +1066,7 @@ function useCatchUpOnReEnable(
   messages: Message[],
   enabled: boolean,
   isNearBottomRef: React.RefObject<boolean>,
+  followBottom: () => void,
 ) {
   const prevEnabledRef = useRef(enabled);
   const baselineRef = useRef<{
@@ -1076,10 +1136,10 @@ function useCatchUpOnReEnable(
         isAtBottom,
       })
     ) {
-      scrollNativeToBottom(el);
+      followBottom();
       isNearBottomRef.current = true;
     }
-  }, [enabled, scrollRef, messages]);
+  }, [enabled, scrollRef, messages, followBottom]);
 }
 
 /**
@@ -1140,11 +1200,28 @@ function useProgrammaticScrollGuard(
 export function useScrollToMessage(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   runGuardedScroll: (performScroll: () => void) => void,
+  motionEnabled = true,
 ) {
   // Bumped on every scrollToMessage call; in-flight verifiers of a superseded
   // request bail on the next frame so stale work can never land the
   // transcript on an older prompt after a newer one consumed.
   const generationRef = useRef(0);
+  useLayoutEffect(() => {
+    if (motionEnabled || generationRef.current === 0) return;
+    generationRef.current += 1;
+    const element = scrollRef.current;
+    // A same-position write cancels native smooth scrolling without choosing a new target.
+    if (element) {
+      const currentTop = element.scrollTop;
+      element.scrollTop = currentTop;
+    }
+  }, [motionEnabled, scrollRef]);
+  useEffect(
+    () => () => {
+      generationRef.current += 1;
+    },
+    [],
+  );
   return useCallback(
     (messageId: string, options?: { align?: "start" | "center"; behavior?: "smooth" | "auto" }) => {
       // Advance the generation BEFORE the lookup: a superseding request whose
@@ -1155,10 +1232,11 @@ export function useScrollToMessage(
       const el = scrollRef.current?.querySelector<HTMLElement>(selector);
       if (!el) return false;
       const alignStart = options?.align === "start";
+      if (scrollRef.current) cancelChatScrollMotion(scrollRef.current);
       runGuardedScroll(() => {
         el.scrollIntoView({
           block: alignStart ? "start" : "center",
-          behavior: options?.behavior ?? "smooth",
+          behavior: motionEnabled ? (options?.behavior ?? "smooth") : "auto",
         });
         const container = scrollRef.current;
         if (!container) return;
@@ -1214,7 +1292,7 @@ export function useScrollToMessage(
       });
       return true;
     },
-    [runGuardedScroll, scrollRef],
+    [runGuardedScroll, scrollRef, motionEnabled],
   );
 }
 
@@ -1399,6 +1477,7 @@ function applyInitialScrollPosition(params: InitialScrollApplyParams): void {
       clientHeight: element.clientHeight,
     });
   };
+  cancelChatScrollMotion(element);
   element.scrollTop = scrollTop;
   syncNearBottom();
   reportInitialPlacement({
@@ -1594,6 +1673,7 @@ type NativeScrollManagementParams = {
   isWorking: boolean;
   sessionId: string | null;
   enabled: boolean;
+  motionEnabled?: boolean;
   hasUnreadDivider: boolean;
   /** Initial/refetch loading: the sentinel's hard block (never fires, never joins). */
   messagesLoading: boolean;
@@ -1621,6 +1701,7 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
     isWorking,
     sessionId,
     enabled,
+    motionEnabled = false,
     hasUnreadDivider,
     messagesLoading,
     historyRefreshPending = false,
@@ -1649,13 +1730,15 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
     isProgrammaticScrollLocked,
     isVisible,
     initialPlacementPending,
+    motionEnabled,
+    motionBlocked: messagesLoading || historyRefreshPending || isLoadingMore,
   });
   const runGuardedScroll = useProgrammaticScrollGuard(
     scrollRef,
     programmaticScrollLockRef,
     resyncIsNearBottom,
   );
-  const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll);
+  const handleScrollToMessage = useScrollToMessage(scrollRef, runGuardedScroll, motionEnabled);
   const beginOlderLoad = useScrollPositionOnPrepend(
     scrollRef,
     items,
