@@ -55,6 +55,7 @@ func RegisterAllRoutes(
 		svcs.Workspaces,
 		newRuntimeDecisionRecorder(svcs.Dashboard),
 		log,
+		svcs.Dashboard,
 	))
 
 	skillsHandler := skills.NewHandler(svcs.Skills)

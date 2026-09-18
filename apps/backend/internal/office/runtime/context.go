@@ -18,9 +18,24 @@ type Capabilities struct {
 	CanSpawnAgentRun    bool     `json:"spawn_agent_run"`
 	CanModifyAgents     bool     `json:"modify_agents"`
 	CanDeleteSkills     bool     `json:"delete_skills"`
+	CanListTasks        bool     `json:"list_tasks"`
 	CanHandoffTasks     bool     `json:"handoff_task"`
 	AllowedTaskIDs      []string `json:"allowed_task_ids"`
+	// TaskScopeSource marks which source produced AllowedTaskIDs — "payload"
+	// or "runner_set" (both final), or "unavailable" (provisional). Empty for
+	// a snapshot persisted before this marker existed. See
+	// docs/specs/office/system-design/taskless-coordinator-authority-01.md#snapshot-semantics.
+	TaskScopeSource string `json:"task_scope_source,omitempty"`
 }
+
+// Task scope source markers. "payload" and "runner_set" are final: a build
+// reads a final marker back verbatim rather than re-deriving the scope.
+// "unavailable" is provisional and is retried on the next build.
+const (
+	TaskScopeSourcePayload     = "payload"
+	TaskScopeSourceRunnerSet   = "runner_set"
+	TaskScopeSourceUnavailable = "unavailable"
+)
 
 // RunContext is the identity, runtime-permission, and advertised-action
 // envelope for one agent execution. AvailableActions only describes tools the
@@ -37,9 +52,13 @@ type RunContext struct {
 	AvailableActions []string     `json:"available_actions,omitempty"`
 }
 
-// CanMutateTask reports whether the run may mutate the given task.
+// CanMutateTask reports whether the run may mutate the given task. The
+// wildcard sentinel is never a real task id, so a target of exactly
+// WildcardTaskScope is refused outright — otherwise a run whose own TaskID
+// is the sentinel (a payload that injected task_id="*" stays task-bound,
+// see context_builder.go#build) would self-match against it.
 func (c RunContext) CanMutateTask(taskID string) bool {
-	if taskID == "" {
+	if taskID == "" || taskID == WildcardTaskScope {
 		return false
 	}
 	if taskID == c.TaskID {

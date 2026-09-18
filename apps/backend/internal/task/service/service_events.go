@@ -426,6 +426,9 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"updated_at":         task.UpdatedAt.Format(time.RFC3339Nano),
 		"is_ephemeral":       task.IsEphemeral,
 		"autopilot":          task.Autopilot,
+		// Always explicit because a project reassignment can change Office
+		// ownership in either direction while a client has the task cached.
+		"is_from_office": task.IsFromOffice,
 		// Consumers that restore quick-chat tabs filter on origin, so it has to
 		// travel with the event and not just the HTTP DTO.
 		"origin": task.Origin,
@@ -1007,8 +1010,13 @@ func (s *Service) publishEnvironmentEvent(ctx context.Context, eventType string,
 // straight into the repository so specs can script clarification/permission
 // states deterministically, and without this it never triggers the
 // pending_action recompute a real agent turn would.
-func (s *Service) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
-	return s.publishMessageEvent(ctx, eventType, message)
+func (s *Service) PublishMessageEvent(
+	ctx context.Context,
+	eventType string,
+	message *models.Message,
+	receipts ...*models.ConversationMutationReceipt,
+) error {
+	return s.publishMessageEvent(ctx, eventType, message, receipts...)
 }
 
 // publishMessageEvent publishes message events to the event bus.
@@ -1017,12 +1025,17 @@ func (s *Service) PublishMessageEvent(ctx context.Context, eventType string, mes
 // Ordinary persistence callers intentionally treat delivery as best effort
 // after their durable write succeeds. Synchronization-sensitive callers, such
 // as clarification bundle convergence, check and propagate the returned error.
-func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+func (s *Service) publishMessageEvent(ctx context.Context, eventType string, message *models.Message, receipts ...*models.ConversationMutationReceipt) error {
 	if s.eventBus == nil {
 		s.logger.Warn("publishMessageEvent: eventBus is nil, skipping")
 		return errors.New("event bus is unavailable")
 	}
 	event := newMessageEvent(eventType, message)
+	if len(receipts) > 0 && receipts[0] != nil {
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			data["conversation_receipt"] = projectConversationReceipt(receipts[0])
+		}
+	}
 	pendingProjection := s.addMessagePendingAction(ctx, eventType, message, event)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
 		s.logger.Error("failed to publish message event",
@@ -1035,6 +1048,42 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		s.publishSessionPendingActionChanged(ctx, message, *pendingProjection)
 	}
 	return nil
+}
+
+// projectConversationReceipt keeps the transient source receipt useful to the
+// live conversation transport without exposing repository-owned metadata or
+// system-injected message content through the event bus.
+func projectConversationReceipt(receipt *models.ConversationMutationReceipt) *models.ConversationMutationReceipt {
+	if receipt == nil {
+		return nil
+	}
+	projected := &models.ConversationMutationReceipt{
+		SessionID:    receipt.SessionID,
+		BaseRevision: receipt.BaseRevision,
+		Revision:     receipt.Revision,
+		Complete:     receipt.Complete,
+		Operations:   make([]models.ConversationMutationOperation, 0, len(receipt.Operations)),
+	}
+	for _, operation := range receipt.Operations {
+		copyOperation := operation
+		if operation.Message != nil {
+			message := *operation.Message
+			message.Content = sysprompt.StripSystemContent(message.Content)
+			message.Metadata = models.ProjectMessageMetadata(message.Metadata)
+			copyOperation.Message = &message
+		}
+		if operation.Turn != nil {
+			turn := *operation.Turn
+			turn.Metadata = models.ProjectTurnMetadata(turn.Metadata)
+			copyOperation.Turn = &turn
+		}
+		if operation.HadOutput != nil {
+			hadOutput := *operation.HadOutput
+			copyOperation.HadOutput = &hadOutput
+		}
+		projected.Operations = append(projected.Operations, copyOperation)
+	}
+	return projected
 }
 
 type pendingActionProjection struct {

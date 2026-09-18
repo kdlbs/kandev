@@ -6,7 +6,7 @@
 // Wired via thin wrappers around the server actions / WS payloads in
 // `app/actions/agents.ts` and `lib/ws/handlers/agents.ts`.
 
-import type { ProfileEnvVar } from "@/lib/types/http";
+import type { Agent, ProfileEnvVar } from "@/lib/types/http";
 import type {
   AgentProfile,
   DynamicAgentPolicy,
@@ -231,6 +231,14 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     autoApprove: pickBool(profile, "autoApprove", "auto_approve"),
     cliFlags: pickFlags(profile),
     commandPrefix: pickOptionalString(profile, "commandPrefix", "command_prefix"),
+    providerKind: pickOptionalString(profile, "providerKind", "provider_kind"),
+    providerBaseUrl: pickOptionalString(profile, "providerBaseUrl", "provider_base_url"),
+    providerApiKeySecretId: pickOptionalString(
+      profile,
+      "providerApiKeySecretId",
+      "provider_api_key_secret_id",
+    ),
+    providerSupported: pickBool(profile, "providerSupported", "provider_supported"),
     envVars: pickEnvVars(profile),
     cliPassthrough: pickBool(profile, "cliPassthrough", "cli_passthrough"),
     // Absent on legacy payloads → enabled by default.
@@ -243,6 +251,16 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     createdAt: pickString(profile, "createdAt", "created_at"),
     updatedAt: pickString(profile, "updatedAt", "updated_at"),
     ...(dynamic ? { dynamic } : {}),
+  };
+}
+
+/** Normalize all profiles on an agent returned by a boot, HTTP, or WS boundary. */
+export function normalizeAgentProfiles(agent: Agent): Agent {
+  return {
+    ...agent,
+    profiles: Array.isArray(agent.profiles)
+      ? agent.profiles.map((profile) => normalizeAgentProfile(profile))
+      : [],
   };
 }
 
@@ -279,6 +297,9 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "auto_approve", profile.autoApprove);
   setPayloadField(payload, "cli_flags", profile.cliFlags);
   setPayloadField(payload, "command_prefix", profile.commandPrefix);
+  setPayloadField(payload, "provider_kind", profile.providerKind);
+  setPayloadField(payload, "provider_base_url", profile.providerBaseUrl);
+  setPayloadField(payload, "provider_api_key_secret_id", profile.providerApiKeySecretId);
   setPayloadField(payload, "env_vars", profile.envVars);
   setPayloadField(payload, "cli_passthrough", profile.cliPassthrough);
   setPayloadField(payload, "enabled", profile.enabled);

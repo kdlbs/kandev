@@ -27,6 +27,14 @@ system_design:
 
 # Task 03: Extend Generic Task Panel Capabilities
 
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
+
 ## Scope
 
 Extend the existing generic task-panel contribution rather than adding prompt-history-specific host branches. Add localized title resolution, typed visibility context, session kind, and a generation-bound native message-navigation capability on desktop and mobile.

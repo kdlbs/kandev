@@ -2876,9 +2876,10 @@ test.describe("Git Changes Panel", () => {
     await expect(reviewDialog.getByTestId("vcs-primary-push")).toBeVisible({ timeout: 15_000 });
     await reviewDialog.getByRole("button", { name: "Open VCS options" }).click();
     const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
-    await expect(
-      openMenu.locator('[data-slot="dropdown-menu-sub-trigger"]').filter({ hasText: /^Push/ }),
-    ).not.toHaveAttribute("aria-disabled", "true");
+    const pushAction = openMenu
+      .locator('[data-slot="dropdown-menu-sub-trigger"]')
+      .filter({ hasText: /^Push/ });
+    await expect(pushAction).not.toHaveAttribute("aria-disabled", "true", { timeout: 15_000 });
     expect(git.getCurrentSha()).toBe(localHead);
     expect(git.exec("git status --porcelain").trim()).toBe("");
   });

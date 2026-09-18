@@ -1891,6 +1891,18 @@ func (s *Service) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Ta
 	return s.tasks.GetTasksByIDs(ctx, ids)
 }
 
+// GetWorkflowStep resolves one workflow step by ID for a caller that has
+// already authorized the owning task/workspace, mirroring GetTasksByIDs.
+// The Inbox History read uses this to test whether a task's current step
+// starts an agent; s.workflowStepGetter is always wired in production, but a
+// nil getter omits the label rather than panicking.
+func (s *Service) GetWorkflowStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	if s.workflowStepGetter == nil {
+		return nil, nil
+	}
+	return s.workflowStepGetter.GetStep(ctx, stepID)
+}
+
 func (s *Service) tryUpdateTaskPriorityOnly(
 	ctx context.Context,
 	id string,
@@ -4087,12 +4099,36 @@ func (s *Service) cleanupTaskEnvironment(
 	if !current {
 		return nil
 	}
-	if err := s.teardownEnvironmentResources(ctx, cleanup.env); err != nil {
+	_, archiveBatch := s.worktreeCleanup.(WorktreeArchiveBatchCleaner)
+	_, deleteBatch := s.worktreeCleanup.(WorktreeBatchCleaner)
+	needsArchiveBatch := false
+	if cleanup.env.ExecutorType == string(models.ExecutorTypeWorktree) {
+		for _, repo := range cleanup.env.Repos {
+			if repo != nil && repo.WorktreeID != "" && repo.Status != "deleted" {
+				needsArchiveBatch = true
+				break
+			}
+		}
+	}
+	if cleanup.preserveBranches && !archiveBatch && needsArchiveBatch {
+		if err := s.teardownEnvironmentRuntimeResources(ctx, cleanup.env); err != nil {
+			return []error{fmt.Errorf("teardown task environment %s runtime resources: %w", cleanup.env.ID, err)}
+		}
+		return []error{fmt.Errorf("archive cleanup requires a worktree archive batch cleaner")}
+	}
+	batchHandlesWorktrees := (cleanup.preserveBranches && archiveBatch) || (!cleanup.preserveBranches && deleteBatch)
+	var teardownErr error
+	if batchHandlesWorktrees {
+		teardownErr = s.teardownEnvironmentRuntimeResources(ctx, cleanup.env)
+	} else {
+		teardownErr = s.teardownEnvironmentResources(ctx, cleanup.env)
+	}
+	if teardownErr != nil {
 		s.logger.Warn("failed to teardown task environment during task cleanup",
 			zap.String("task_id", taskID),
 			zap.String("env_id", cleanup.env.ID),
-			zap.Error(err))
-		return []error{fmt.Errorf("teardown task environment %s: %w", cleanup.env.ID, err)}
+			zap.Error(teardownErr))
+		return []error{fmt.Errorf("teardown task environment %s: %w", cleanup.env.ID, teardownErr)}
 	}
 	if cleanup.deleteRow {
 		if cause := context.Cause(ctx); cause != nil {

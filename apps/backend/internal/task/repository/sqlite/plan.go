@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	internaldb "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -20,7 +21,7 @@ const revisionSelectCols = `id, task_id, revision_number, title, content, author
 // and is the fallback for unknown values when persisting plan history rows.
 const authorKindAgent = "agent"
 
-const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, comments_revision, implementation_started_at, implementation_started_session_id, implementation_started_by`
+const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, write_version, comments_revision, implementation_started_at, implementation_started_session_id, implementation_started_by`
 
 // CreateTaskPlan creates a new task plan.
 func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
@@ -37,11 +38,15 @@ func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 	if plan.CreatedBy == "" {
 		plan.CreatedBy = authorKindAgent
 	}
+	writeVersion := uuid.NewString()
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`), plan.ID, plan.TaskID, plan.Title, plan.Content, plan.CreatedBy, plan.CreatedAt, plan.UpdatedAt)
+		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at, write_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), plan.ID, plan.TaskID, plan.Title, plan.Content, plan.CreatedBy, plan.CreatedAt, plan.UpdatedAt, writeVersion)
+	if err == nil {
+		plan.WriteVersion = writeVersion
+	}
 	return err
 }
 
@@ -59,12 +64,13 @@ func (r *Repository) GetTaskPlan(ctx context.Context, taskID string) (*models.Ta
 
 // UpdateTaskPlan updates an existing task plan.
 func (r *Repository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
-	plan.UpdatedAt = time.Now().UTC()
+	updatedAt := time.Now().UTC()
+	writeVersion := uuid.NewString()
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_plans SET title = ?, content = ?, created_by = ?, updated_at = ?
+		UPDATE task_plans SET title = ?, content = ?, created_by = ?, updated_at = ?, write_version = ?
 		WHERE task_id = ?
-	`), plan.Title, plan.Content, plan.CreatedBy, plan.UpdatedAt, plan.TaskID)
+	`), plan.Title, plan.Content, plan.CreatedBy, updatedAt, writeVersion, plan.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to update task plan: %w", err)
 	}
@@ -73,6 +79,8 @@ func (r *Repository) UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) 
 	if rows == 0 {
 		return fmt.Errorf("task plan not found for task: %s", plan.TaskID)
 	}
+	plan.UpdatedAt = updatedAt
+	plan.WriteVersion = writeVersion
 	return nil
 }
 
@@ -229,6 +237,67 @@ func (r *Repository) ListTaskPlanRevisions(ctx context.Context, taskID string, l
 	return out, nil
 }
 
+// ListTaskPlanRevisionMetadata returns bounded newest-first revision metadata
+// without loading revision content. beforeRevisionNumber is an exclusive,
+// positive cursor; a non-positive value starts at the newest revision.
+func (r *Repository) ListTaskPlanRevisionMetadata(
+	ctx context.Context, taskID string, beforeRevisionNumber, limit int,
+) ([]*models.TaskPlanRevision, error) {
+	contentBytes := dialect.ByteLength(r.db.DriverName(), "content")
+	query := `SELECT id, task_id, revision_number, title, ` + contentBytes + `, author_kind, author_name, revert_of_revision_id, workflow_step_id, workflow_step_name, workflow_step_color, created_at, updated_at FROM task_plan_revisions WHERE task_id = ?`
+	args := []interface{}{taskID}
+	if beforeRevisionNumber > 0 {
+		query += ` AND revision_number < ?`
+		args = append(args, beforeRevisionNumber)
+	}
+	query += ` ORDER BY revision_number DESC`
+	if limit > 0 {
+		query += sqlLimitClause
+		args = append(args, limit)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list task plan revision metadata: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []*models.TaskPlanRevision
+	for rows.Next() {
+		rev := &models.TaskPlanRevision{}
+		var contentBytes int64
+		var revertOf sql.NullString
+		if err := rows.Scan(
+			&rev.ID, &rev.TaskID, &rev.RevisionNumber, &rev.Title, &contentBytes,
+			&rev.AuthorKind, &rev.AuthorName, &revertOf,
+			&rev.WorkflowStepID, &rev.WorkflowStepName, &rev.WorkflowStepColor,
+			&rev.CreatedAt, &rev.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan task plan revision metadata: %w", err)
+		}
+		rev.ContentBytes = int(contentBytes)
+		if revertOf.Valid {
+			v := revertOf.String
+			rev.RevertOfRevisionID = &v
+		}
+		out = append(out, rev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate task plan revision metadata: %w", err)
+	}
+	return out, nil
+}
+
+// GetTaskPlanRevisionForTask fetches a revision only when both its ID and
+// owning task match. This prevents cross-task revision identifiers from
+// becoming an information disclosure through agent recovery tools.
+func (r *Repository) GetTaskPlanRevisionForTask(
+	ctx context.Context, taskID, revisionID string,
+) (*models.TaskPlanRevision, error) {
+	return r.scanRevisionRow(r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT `+revisionSelectCols+` FROM task_plan_revisions WHERE task_id = ? AND id = ?`,
+	), taskID, revisionID))
+}
+
 // NextTaskPlanRevisionNumber returns max(revision_number)+1 for a task, or 1 if none exist.
 //
 // Note: prefer WritePlanRevision when writing a new revision — it computes the next number
@@ -284,7 +353,8 @@ func (r *Repository) WritePlanRevision(
 			return err
 		}
 	}
-	if err := upsertPlanHead(ctx, tx, r.db, head, now, preserveTitle, preserveCreatedBy); err != nil {
+	writeVersion, err := upsertPlanHead(ctx, tx, r.db, head, now, preserveTitle, preserveCreatedBy)
+	if err != nil {
 		return err
 	}
 	rev.Title = head.Title
@@ -297,7 +367,11 @@ func (r *Repository) WritePlanRevision(
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	head.WriteVersion = writeVersion
+	return nil
 }
 
 func scanPlanRow(row *sql.Row) (*models.TaskPlan, error) {
@@ -313,6 +387,7 @@ func scanPlanRow(row *sql.Row) (*models.TaskPlan, error) {
 		&plan.CreatedBy,
 		&plan.CreatedAt,
 		&plan.UpdatedAt,
+		&plan.WriteVersion,
 		&plan.CommentsRevision,
 		&startedAt,
 		&sessionID,
@@ -343,7 +418,7 @@ func upsertPlanHead(
 	head *models.TaskPlan,
 	now time.Time,
 	preserveTitle, preserveCreatedBy bool,
-) error {
+) (string, error) {
 	if head.ID == "" {
 		head.ID = uuid.New().String()
 	}
@@ -357,27 +432,29 @@ func upsertPlanHead(
 		head.CreatedAt = now
 	}
 	head.UpdatedAt = now
+	writeVersion := uuid.NewString()
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
-		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO task_plans (id, task_id, title, content, created_by, created_at, updated_at, write_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
 			title = CASE WHEN ? THEN task_plans.title ELSE excluded.title END,
 			content = excluded.content,
 			created_by = CASE WHEN ? THEN task_plans.created_by ELSE excluded.created_by END,
-			updated_at = excluded.updated_at
-	`), head.ID, head.TaskID, head.Title, head.Content, head.CreatedBy, head.CreatedAt, head.UpdatedAt,
+			updated_at = excluded.updated_at,
+			write_version = excluded.write_version
+	`), head.ID, head.TaskID, head.Title, head.Content, head.CreatedBy, head.CreatedAt, head.UpdatedAt, writeVersion,
 		preserveTitle, preserveCreatedBy); err != nil {
 		if internaldb.IsForeignKeyViolation(err) {
-			return fmt.Errorf("upsert task plan head for task %s: %w", head.TaskID, ErrTaskNotFound)
+			return "", fmt.Errorf("upsert task plan head for task %s: %w", head.TaskID, ErrTaskNotFound)
 		}
-		return fmt.Errorf("upsert task plan head: %w", err)
+		return "", fmt.Errorf("upsert task plan head: %w", err)
 	}
 	if preserveTitle || preserveCreatedBy {
 		var storedTitle, storedCreatedBy string
 		if err := tx.QueryRowContext(ctx, db.Rebind(`
 			SELECT title, created_by FROM task_plans WHERE task_id = ?
 		`), head.TaskID).Scan(&storedTitle, &storedCreatedBy); err != nil {
-			return fmt.Errorf("read preserved task plan metadata: %w", err)
+			return "", fmt.Errorf("read preserved task plan metadata: %w", err)
 		}
 		if preserveTitle {
 			head.Title = storedTitle
@@ -386,7 +463,7 @@ func upsertPlanHead(
 			head.CreatedBy = storedCreatedBy
 		}
 	}
-	return nil
+	return writeVersion, nil
 }
 
 func mergeRevisionInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rev *models.TaskPlanRevision, latestID string, now time.Time) error {

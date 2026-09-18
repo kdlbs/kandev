@@ -418,7 +418,7 @@ type ListTasksFilteredResult struct {
 func (r *Repository) ListTasksFiltered(
 	ctx context.Context, workspaceID string, opts ListTasksOptions,
 ) (*ListTasksFilteredResult, error) {
-	resolved, err := resolveListTasksOptions(opts)
+	resolved, err := resolveListTasksOptions(opts, r.ro.DriverName())
 	if err != nil {
 		return nil, err
 	}
@@ -479,10 +479,11 @@ type resolvedListTasksOptions struct {
 	limit     int
 	sortField TaskListSortField
 	sortCol   string
+	cursorCol string
 	dir       string
 }
 
-func resolveListTasksOptions(opts ListTasksOptions) (resolvedListTasksOptions, error) {
+func resolveListTasksOptions(opts ListTasksOptions, driver string) (resolvedListTasksOptions, error) {
 	limit := opts.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -495,11 +496,33 @@ func resolveListTasksOptions(opts ListTasksOptions) (resolvedListTasksOptions, e
 	if !ok {
 		return resolvedListTasksOptions{}, fmt.Errorf("invalid sort field: %s", sortField)
 	}
+	cursorCol := "?"
+	if sortField == TaskSortUpdatedAt || sortField == TaskSortCreatedAt {
+		sortCol = dialect.NormalizedMicrosecond(driver, sortCol)
+		// Use the same canonical microsecond key for the bound cursor. The
+		// SQLite expression repeats its input internally, so bind the value
+		// once in a subquery and reference that alias instead of expanding
+		// one placeholder per expression occurrence.
+		if dialect.IsPostgres(driver) {
+			cursorCol = "CAST(? AS timestamp)"
+		} else {
+			cursorCol = fmt.Sprintf(
+				"(SELECT %s FROM (SELECT ? AS cursor_value) AS cursor_bind)",
+				dialect.NormalizedMicrosecond(driver, "cursor_value"),
+			)
+		}
+	}
 	dir := "DESC"
 	if !opts.SortDesc {
 		dir = "ASC"
 	}
-	return resolvedListTasksOptions{limit: limit, sortField: sortField, sortCol: sortCol, dir: dir}, nil
+	return resolvedListTasksOptions{
+		limit:     limit,
+		sortField: sortField,
+		sortCol:   sortCol,
+		cursorCol: cursorCol,
+		dir:       dir,
+	}, nil
 }
 
 func buildTaskWhereClause(
@@ -539,8 +562,9 @@ func buildTaskWhereClause(
 			op = ">"
 		}
 		parts = append(parts, fmt.Sprintf(
-			"(%s %s ? OR (%s = ? AND t.id %s ?))",
-			resolved.sortCol, op, resolved.sortCol, op,
+			"(%s %s %s OR (%s = %s AND t.id %s ?))",
+			resolved.sortCol, op, resolved.cursorCol,
+			resolved.sortCol, resolved.cursorCol, op,
 		))
 		args = append(args, opts.CursorValue, opts.CursorValue, opts.CursorID)
 	}

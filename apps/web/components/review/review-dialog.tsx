@@ -1,11 +1,11 @@
 "use client";
 
 import { memo, useMemo, useCallback, createRef, useState } from "react";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import type { Comment } from "@/lib/state/slices/comments";
-import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
+import { useCommentsStore, isReviewComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useAppStore } from "@/components/state-provider";
@@ -166,12 +166,13 @@ export function buildAllFiles(
   return suppressAvailableGitlinkFiles(sortedFiles);
 }
 
-export function filterPendingDiffCommentsForSession(
+export function filterPendingReviewCommentsForSession(
   comments: Comment[],
   sessionId: string,
-): DiffComment[] {
+): ReviewComment[] {
   return comments.filter(
-    (comment): comment is DiffComment => comment.sessionId === sessionId && isDiffComment(comment),
+    (comment): comment is ReviewComment =>
+      comment.sessionId === sessionId && isReviewComment(comment),
   );
 }
 
@@ -180,7 +181,7 @@ export type ReviewDialogProps = {
   onOpenChange: (open: boolean) => void;
   sessionId: string;
   baseBranch?: string;
-  onSendComments: (comments: DiffComment[]) => void;
+  onSendComments: (comments: ReviewComment[]) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
@@ -213,15 +214,40 @@ function computeReviewSets(
   return { reviewedFiles: reviewed, staleFiles: stale };
 }
 
+function wholeFileCommentKey(path: string, repositoryName = ""): string {
+  return JSON.stringify([repositoryName, path]);
+}
+
+function countScopedFileComments(byId: Record<string, Comment>, ids: string[]) {
+  const counts = new Map<string, number>();
+  for (const id of ids) {
+    const comment = byId[id];
+    if (!comment || !isReviewComment(comment) || comment.repositoryName === undefined) continue;
+    const key = wholeFileCommentKey(comment.filePath, comment.repositoryName);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+const bucketKey = (repoId: string, path: string) => JSON.stringify([repoId, path]);
+
+function countLegacyLineComments(byId: Record<string, Comment>, ids: string[]) {
+  const counts = new Map<string, number>();
+  for (const id of ids) {
+    const comment = byId[id];
+    if (comment?.source !== "diff" || comment.repositoryName !== undefined) continue;
+    const key = bucketKey(comment.repositoryId ?? "", comment.filePath);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
- * Counts diff comments per file, scoped by repo when known. Multi-repo:
- * comments carrying `repositoryId` are matched only against files in that
- * repo (translated from `repository_name` via `repositoryNameToId`); legacy
- * comments without `repositoryId` and same-repo unattributed comments
- * match by path. Returned record is keyed by `reviewFileKey(file)` so the
- * file tree's per-row badge correctly disambiguates same-named files.
+ * Counts scoped review comments by repository name and path. Legacy line
+ * comments retain repository-ID or path-only matching. The file tree uses
+ * reviewFileKey so same-named files keep independent badges.
  */
-function computeCommentCounts(
+export function computeCommentCounts(
   byId: Record<string, import("@/lib/state/slices/comments").Comment>,
   sessionCommentIds: string[] | undefined,
   allFiles: ReviewFile[],
@@ -230,18 +256,11 @@ function computeCommentCounts(
   const counts: Record<string, number> = {};
   if (!sessionCommentIds) return counts;
 
-  type BucketKey = string;
-  const bucketKey = (repoId: string, path: string) => `${repoId}::${path}`;
-  const bucket = new Map<BucketKey, number>();
-  for (const id of sessionCommentIds) {
-    const comment = byId[id];
-    if (!comment || !isDiffComment(comment)) continue;
-    const k = bucketKey(comment.repositoryId ?? "", comment.filePath);
-    bucket.set(k, (bucket.get(k) ?? 0) + 1);
-  }
+  const bucket = countLegacyLineComments(byId, sessionCommentIds);
+  const scopedFileCounts = countScopedFileComments(byId, sessionCommentIds);
 
   for (const file of allFiles) {
-    let total = 0;
+    let total = scopedFileCounts.get(wholeFileCommentKey(file.path, file.repository_name)) ?? 0;
     if (file.repository_name) {
       const repoId = repositoryNameToId.get(file.repository_name) ?? "";
       if (repoId) total += bucket.get(bucketKey(repoId, file.path)) ?? 0;
@@ -294,7 +313,7 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
   );
 
   const handleSendComments = useCallback(
-    (comments: DiffComment[]) => {
+    (comments: ReviewComment[]) => {
       onSendComments(comments);
       onOpenChange(false);
     },
@@ -381,8 +400,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
   const byId = useCommentsStore((s) => s.byId);
   const sessionCommentIds = useCommentsStore((s) => s.bySession[sessionId]);
   const getStorePendingComments = useCommentsStore((s) => s.getPendingComments);
-  const getPendingComments = useCallback((): DiffComment[] => {
-    return filterPendingDiffCommentsForSession(getStorePendingComments(), sessionId);
+  const getPendingComments = useCallback((): ReviewComment[] => {
+    return filterPendingReviewCommentsForSession(getStorePendingComments(), sessionId);
   }, [getStorePendingComments, sessionId]);
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
 

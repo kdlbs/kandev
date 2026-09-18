@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CompositorPulse } from "@kandev/ui/compositor-pulse";
 import { cn } from "@/lib/utils";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TipTapInput } from "./tiptap-input";
 import { ChatInputFocusHint } from "./chat-input-focus-hint";
 import { ResizeHandle } from "./resize-handle";
@@ -382,6 +383,11 @@ function useChatInputDrop(addFiles: (files: File[]) => Promise<void>) {
   return { handleDragEnter, handleDragLeave, handleDragOver, handleDrop, isDragging };
 }
 
+function useChatFocusHintVisibility(showFocusHint: boolean): boolean {
+  const { isMobile } = useResponsiveBreakpoint();
+  return showFocusHint && !isMobile;
+}
+
 export function ChatInputBody({
   containerRef,
   height,
@@ -399,6 +405,7 @@ export function ChatInputBody({
   editorAreaProps,
   promptResultRecovery,
 }: ChatInputBodyProps) {
+  const focusHintVisible = useChatFocusHintVisibility(showFocusHint);
   const glowClass = chatInputGlowClass(isAgentBusy, isStarting);
   const hasGlow = Boolean(glowClass);
   const drop = useChatInputDrop(addFiles);
@@ -431,7 +438,7 @@ export function ChatInputBody({
         onDragLeave={drop.handleDragLeave}
         onDrop={drop.handleDrop}
       >
-        <ChatInputFocusHint visible={showFocusHint} />
+        <ChatInputFocusHint visible={focusHintVisible} />
         <ChatInputContextArea {...contextAreaProps} />
         <div
           ref={containerRef}
@@ -441,7 +448,7 @@ export function ChatInputBody({
         >
           <ChatInputEditorArea
             {...editorAreaProps}
-            editorClassName={cn(editorAreaProps.editorClassName, showFocusHint && "pr-28")}
+            editorClassName={cn(editorAreaProps.editorClassName, focusHintVisible && "pr-28")}
           />
         </div>
       </div>

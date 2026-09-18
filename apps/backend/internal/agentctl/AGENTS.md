@@ -88,6 +88,31 @@ Grok ACP currently exposes neither per-turn cost nor subscription quota/reset va
 
 JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/close`. Notifications: `session/update` with types `message_chunk`, `tool_call`, `tool_update`, `complete`, `error`, `permission_request`, `context_window`.
 
+### ACP permission identity and injected MCP approval
+
+The ACP client preserves `ToolCall.Name` and `ToolCall.Meta` on the internal
+permission request. The Claude dialect reads `_meta.claudeCode.toolName` only
+for Claude frames and uses an exact qualified title fallback only when both
+identity fields are absent and the ACP kind is `other`. Malformed or
+conflicting identity data stays in the normal permission path. Other provider
+dialects must not inherit this title fallback without a tested wire contract.
+
+The process manager may automatically select an offered allow-once, then
+allow-always option for any qualified tool on the host-injected Kandev MCP
+server when blanket approval is off. It requires the internal construction
+provenance marker and the exact current-port HTTP or SSE server entry. This
+server-wide provider-layer rule includes destructive Kandev tools; MCP
+authentication, task/session authorization, questions, and workflow gates stay
+separate. Shell, file, third-party, ambiguous, malformed, and unqualified
+requests keep the pending permission flow. Internal identity fields are not
+part of permission snapshots or stream events.
+
+The flattened `mcp__server__tool` parser accepts only one unambiguous `__`
+separator. It rejects delimiter collisions, adjacent underscores at the
+boundary, and additional `__` sequences in the tool suffix. This prevents a
+server such as `kandev__external` from being read as the reserved `kandev`
+server. Tool names with these ambiguous forms keep the pending flow.
+
 ### ACP frame debug logging (`adapter/transport/shared/acplog.go`)
 
 When `KANDEV_DEBUG_AGENT_MESSAGES=true` (on by default in the **dev** profile), the ACP adapter dumps every raw + normalized frame to **per-session** JSONL files:

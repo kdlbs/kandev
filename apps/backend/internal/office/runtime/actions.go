@@ -392,15 +392,52 @@ func (a *Actions) authorizeTaskWorkspace(ctx context.Context, runCtx RunContext,
 	return nil
 }
 
+// canAnnotateTask is the annotation scope predicate: a task-bound run may
+// annotate only its own (already-trimmed) task; a taskless run may annotate
+// any task that resolves to its own workspace claim. The two checks never
+// interact — a task-bound run never consults a workspace lookup, and a
+// taskless run never falls back to its (absent) task id. A cross-workspace
+// target and a nonexistent one refuse with the same sentinel so annotation
+// cannot be used as an existence oracle; a failed lookup is returned as-is
+// so an outage is not read as a refusal. The wildcard sentinel is never a
+// real task id, so it is refused outright before either branch — otherwise
+// a run whose own TaskID is the sentinel would self-match against it.
+func (a *Actions) canAnnotateTask(ctx context.Context, runCtx RunContext, taskID string) error {
+	if taskID == WildcardTaskScope {
+		return ErrTaskOutOfScope
+	}
+	if strings.TrimSpace(runCtx.TaskID) != "" {
+		if taskID != runCtx.TaskID {
+			return ErrTaskOutOfScope
+		}
+		return nil
+	}
+	if strings.TrimSpace(runCtx.WorkspaceID) == "" {
+		return ErrWorkspaceOutOfScope
+	}
+	if a.deps.Tasks == nil {
+		return fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
+	}
+	workspaceID, err := a.deps.Tasks.GetTaskWorkspaceID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if workspaceID == "" || workspaceID != runCtx.WorkspaceID {
+		return ErrTaskOutOfScope
+	}
+	return nil
+}
+
 // PostComment records an agent-authored task comment when the run is scoped for it.
 func (a *Actions) PostComment(ctx context.Context, runCtx RunContext, taskID, body string) error {
 	if !runCtx.Capabilities.Allows(CapabilityPostComment) {
 		return ErrCapabilityDenied
 	}
-	if !runCtx.CanMutateTask(taskID) {
-		return ErrTaskOutOfScope
+	if strings.TrimSpace(body) == "" {
+		return ErrCommentBodyRequired
 	}
-	if err := a.authorizeTaskWorkspace(ctx, runCtx, taskID); err != nil {
+	taskID = strings.TrimSpace(taskID)
+	if err := a.canAnnotateTask(ctx, runCtx, taskID); err != nil {
 		return err
 	}
 	if a.deps.Comments == nil {

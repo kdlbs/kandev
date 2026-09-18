@@ -58,3 +58,9 @@ Kanban tests pass.
 The requirement and system design define the complete ordering, validation,
 concurrency, and presentation contract. This work order records the delivery
 slice for that contract and its regression evidence.
+
+## Mobile follow-up
+
+[Remove mobile Kanban dragging](../remove-mobile-kanban-drag/plan.md) replaces
+the phone drag interaction and positive mobile reorder test. This completed
+package retains its historical results; desktop/tablet and backend scope remain.

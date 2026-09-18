@@ -774,6 +774,7 @@ func newHandoffHTTPHarness(t *testing.T, tokenCaps Capabilities, agent *models.A
 		&recordingRunEvents{},
 		&recordingDecisionRecorder{},
 		log,
+		nil,
 	))
 	return &handoffHTTPHarness{router: router, token: token}
 }

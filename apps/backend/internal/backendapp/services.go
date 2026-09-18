@@ -178,6 +178,17 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
+	userSvc.SetSidebarWorkspaceAccess(func(ctx context.Context) ([]string, error) {
+		workspaces, err := taskSvc.ListWorkspaces(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(workspaces))
+		for _, workspace := range workspaces {
+			ids = append(ids, workspace.ID)
+		}
+		return ids, nil
+	})
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
 	// Workspace membership needs to resolve colleague names and reject
 	// disabled or unknown accounts before writing a row.
@@ -250,6 +261,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		buildAgentProfileResolver(repos),
 		buildAgentProfileMatcher(repos, log),
 	)
+	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
 
 	githubSvc, _, githubErr := initGitHubServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(storeTracker, "github", githubErr); recordErr != nil {
@@ -1861,6 +1873,11 @@ func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *
 		AgentProfileID: &workflow.AgentProfileID,
 	})
 	return err
+}
+
+// DeleteWorkflow implements the compensating cleanup used by workflow imports.
+func (a *workflowProviderAdapter) DeleteWorkflow(ctx context.Context, id string) error {
+	return a.svc.DeleteWorkflow(ctx, id)
 }
 
 // buildAgentProfileResolver creates a resolver that converts profile IDs to portable form for export.

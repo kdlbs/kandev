@@ -111,6 +111,136 @@ func TestGetTaskSessionStatus_AutoResumesNormalWaitingSession(t *testing.T) {
 	}
 }
 
+func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
+	queuedRecord := models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID: "queued-session",
+		},
+		QueuedAt: time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC),
+	})
+	legacyRoute := models.WorkflowSessionRoute{
+		OperationID:       "route-1",
+		DestinationStepID: "step-2",
+		TargetKind:        "profile",
+		SourceSessionID:   "parked-session",
+		DestinationID:     "queued-session",
+		Phase:             "committed",
+	}
+
+	tests := []struct {
+		name          string
+		taskMetadata  map[string]interface{}
+		sessionID     string
+		sessionMeta   map[string]interface{}
+		primary       bool
+		wantAllowed   bool
+		wantBlockCode string
+	}{
+		{
+			name:        "ordinary session is eligible",
+			sessionID:   "ordinary-session",
+			wantAllowed: true,
+		},
+		{
+			name:      "durable parking does not block source session",
+			sessionID: "parked-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowParking: models.WorkflowParking{
+				Stamp:           "parking-1",
+				ParkedAt:        time.Date(2026, 9, 16, 20, 0, 0, 0, time.UTC),
+				SourceSessionID: "parked-session",
+			}},
+			wantAllowed: true,
+		},
+		{
+			name:        "malformed parking does not block recovery",
+			sessionID:   "parked-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowParking: map[string]interface{}{"stamp": "parking-1"}},
+			wantAllowed: true,
+		},
+		{
+			name:          "queued destination is not passively resumed",
+			taskMetadata:  map[string]interface{}{models.MetaKeyDeferredLaunch: queuedRecord},
+			sessionID:     "queued-session",
+			wantBlockCode: autoResumeBlockedLaunchQueued,
+		},
+		{
+			name: "sessionless workflow start protects its routed destination",
+			taskMetadata: map[string]interface{}{
+				models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+					Kind:    models.CeilingLaunchStart,
+					Payload: map[string]interface{}{metaKeyPrompt: "workflow prompt"},
+				}),
+				models.MetaKeyWorkflowSessionRoute: legacyRoute,
+			},
+			sessionID:     "queued-session",
+			wantBlockCode: autoResumeBlockedLaunchQueued,
+		},
+		{
+			name: "sessionless workflow start with no routed destination fails closed",
+			taskMetadata: map[string]interface{}{
+				models.MetaKeyDeferredLaunch: models.CeilingRecordKeys(models.CeilingDeferral{
+					Kind:    models.CeilingLaunchStart,
+					Payload: map[string]interface{}{metaKeyPrompt: "workflow prompt"},
+				}),
+			},
+			sessionID:     "ordinary-session",
+			wantBlockCode: autoResumeBlockedOwnershipUnavailable,
+		},
+		{
+			name:         "sibling remains eligible while another destination is queued",
+			taskMetadata: map[string]interface{}{models.MetaKeyDeferredLaunch: queuedRecord},
+			sessionID:    "sibling-session",
+			wantAllowed:  true,
+		},
+		{
+			name:          "malformed deferred launch blocks conservatively",
+			taskMetadata:  map[string]interface{}{models.MetaKeyDeferredLaunch: "not-a-record"},
+			sessionID:     "ordinary-session",
+			wantBlockCode: autoResumeBlockedOwnershipUnavailable,
+		},
+		{
+			name:         "exact legacy route does not block parked source",
+			taskMetadata: map[string]interface{}{models.MetaKeyWorkflowSessionRoute: legacyRoute},
+			sessionID:    "parked-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowProfileSwitchStopIntent: models.WorkflowProfileSwitchStopIntent{
+				ExecutionID: "execution-1",
+				Stamp:       "legacy-1",
+			}},
+			wantAllowed: true,
+		},
+		{
+			name:         "legacy stop without exact route does not block recovery",
+			taskMetadata: map[string]interface{}{models.MetaKeyWorkflowSessionRoute: legacyRoute},
+			sessionID:    "other-session",
+			sessionMeta: map[string]interface{}{models.SessionMetaKeyWorkflowProfileSwitchStopIntent: models.WorkflowProfileSwitchStopIntent{
+				ExecutionID: "execution-1",
+				Stamp:       "legacy-1",
+			}},
+			wantAllowed: true,
+		},
+	}
+
+	service := &Service{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &models.Task{Metadata: tt.taskMetadata}
+			session := &models.TaskSession{
+				ID:        tt.sessionID,
+				Metadata:  tt.sessionMeta,
+				IsPrimary: tt.primary,
+			}
+			allowed, reason := service.autoResumeEligibility(context.Background(), task, session)
+			if allowed != tt.wantAllowed {
+				t.Fatalf("allowed = %t, want %t (reason %q)", allowed, tt.wantAllowed, reason)
+			}
+			if reason != tt.wantBlockCode {
+				t.Fatalf("reason = %q, want %q", reason, tt.wantBlockCode)
+			}
+		})
+	}
+}
+
 // TestGetTaskSessionStatus_AutoResumesFailedSessionWithResumeToken verifies the
 // failed-but-recoverable path: a FAILED session that still has a resumable
 // runtime + resume token reports NeedsResume=true so the frontend retries

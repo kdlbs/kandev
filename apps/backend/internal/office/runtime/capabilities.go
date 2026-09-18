@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"strings"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -25,6 +27,7 @@ const (
 	CapabilitySpawnAgentRun    = "spawn_agent_run"
 	CapabilityModifyAgents     = "modify_agents"
 	CapabilityDeleteSkills     = "delete_skills"
+	CapabilityListTasks        = "list_tasks"
 	CapabilityHandoffTask      = "handoff_task"
 )
 
@@ -48,6 +51,8 @@ func (c Capabilities) Allows(key string) bool {
 		return c.CanCreateAgents
 	case CapabilityListProjects:
 		return c.CanListProjects
+	case CapabilityListTasks:
+		return c.CanListTasks
 	case CapabilityCreateProject:
 		return c.CanCreateProjects
 	case CapabilityRequestApproval:
@@ -71,10 +76,21 @@ func (c Capabilities) Allows(key string) bool {
 	}
 }
 
-// WithTaskScope returns a copy of the capabilities with the given task scope.
+// WithTaskScope returns a copy of the capabilities with the given task
+// scope, discarding empty, whitespace-only, and reserved-sentinel
+// identifiers so the scope never contains an entry that can never match a
+// real task id, and never grants the wildcard scope from a task identifier
+// an untrusted source supplied.
 func (c Capabilities) WithTaskScope(taskIDs ...string) Capabilities {
 	next := c
-	next.AllowedTaskIDs = append([]string(nil), taskIDs...)
+	filtered := make([]string, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		trimmed := strings.TrimSpace(id)
+		if trimmed != "" && trimmed != WildcardTaskScope {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	next.AllowedTaskIDs = filtered
 	return next
 }
 
@@ -87,6 +103,7 @@ func (c Capabilities) AllowedKeys() []string {
 		CapabilityCreateSubtask,
 		CapabilityCreateAgent,
 		CapabilityListProjects,
+		CapabilityListTasks,
 		CapabilityCreateProject,
 		CapabilityRequestApproval,
 		CapabilityReadMemory,
@@ -120,6 +137,7 @@ func FromAgent(agent *models.AgentInstance) Capabilities {
 		CanCreateSubtasks:   shared.HasPermission(perms, shared.PermCanCreateTasks),
 		CanCreateAgents:     shared.HasPermission(perms, shared.PermCanCreateAgents),
 		CanListProjects:     true,
+		CanListTasks:        true,
 		CanCreateProjects:   shared.HasPermission(perms, shared.PermCanCreateProjects),
 		CanRequestApproval:  shared.HasPermission(perms, shared.PermCanApprove),
 		CanReadMemory:       true,

@@ -1,0 +1,10 @@
+2026-09-16T23:00:11.514+0100	[34mINFO[0m	logger/logger.go:240	pre-migration backup taken	{"from_version": "pre-meta", "to_version": "large-upgrade-verification", "path": "/tmp/kandev-conversation-upgrade/data/data/backups/kandev-pre-meta-20260916T220010Z.db", "size_bytes": 471957504, "duration": 1.345753579}
+2026-09-16T23:01:07.725+0100	[34mINFO[0m	logger/logger.go:240	pre-migration backup taken	{"from_version": "pre-meta", "to_version": "large-upgrade-verification", "path": "/tmp/kandev-conversation-upgrade/data/data/backups/kandev-pre-meta-20260916T220106Z.db", "size_bytes": 476778496, "duration": 1.402432516}
+2026-09-16T23:01:08.498+0100	[34mINFO[0m	logger/logger.go:240	required persistence state updated	{"state": "healthy", "store_ids": [], "error_class": "none"}
+2026-09-16T23:01:08.505+0100	[34mINFO[0m	logger/logger.go:240	required persistence state updated	{"state": "healthy", "store_ids": [], "error_class": "none"}
+2026-09-16T23:01:23.500+0100	[34mINFO[0m	logger/logger.go:240	required persistence state updated	{"state": "healthy", "store_ids": [], "error_class": "none"}
+2026-09-16T23:01:38.500+0100	[34mINFO[0m	logger/logger.go:240	required persistence state updated	{"state": "healthy", "store_ids": [], "error_class": "none"}
+2026-09-16T23:01:53.517+0100	[34mINFO[0m	logger/logger.go:240	required persistence state updated	{"state": "healthy", "store_ids": [], "error_class": "none"}
+2026-09-16T23:02:08.564+0100	[34mINFO[0m	logger/logger.go:240	required persistence state updated	{"state": "healthy", "store_ids": [], "error_class": "none"}
+2026-09-16T23:03:37.929+0100	[34mINFO[0m	logger/logger.go:240	required persistence state updated	{"state": "healthy", "store_ids": [], "error_class": "none"}
+2026-09-16T23:03:37.936+0100	[34mINFO[0m	logger/logger.go:240	required persistence state updated	{"state": "healthy", "store_ids": [], "error_class": "none"}

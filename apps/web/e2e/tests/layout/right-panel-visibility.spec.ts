@@ -2,7 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { getDockviewGroupWidth } from "../../helpers/dockview-resize";
+import { getDockviewGroupWidth, resizeColumnViaSplitview } from "../../helpers/dockview-resize";
 import { SessionPage } from "../../pages/session-page";
 
 async function createTask(apiClient: ApiClient, seedData: SeedData, title: string) {
@@ -349,19 +349,10 @@ for (const layout of ["default", "plan", "preview"] as const) {
     }
     const panelId = { default: "files", preview: "browser", plan: "plan" }[layout]!;
     const before = await getDockviewGroupWidth(testPage, panelId);
-    const sashBox = await testPage.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const api = (window as any).__dockviewApi__;
-      const sashes = api.component.gridview.root.splitview.sashes;
-      const rect = sashes.at(-1).container.getBoundingClientRect();
-      return { x: rect.x + rect.width / 2, y: rect.y + 100 };
-    });
-    await testPage.mouse.move(sashBox.x, sashBox.y);
-    await testPage.mouse.down();
-    await testPage.mouse.move(sashBox.x - 100, sashBox.y, { steps: 10 });
-    await testPage.mouse.up();
-    await expect.poll(() => getDockviewGroupWidth(testPage, panelId)).toBeGreaterThan(before + 50);
-    const resized = await getDockviewGroupWidth(testPage, panelId);
+    // Use the same dockview resize path as the other pane specs. A real mouse
+    // drag can miss the sash under CI load even when the layout is ready.
+    const resized = await resizeColumnViaSplitview(testPage, "right", before + 100);
+    expect(resized).toBeGreaterThan(before + 50);
     const toggle = testPage.getByTestId("task-right-panels-toggle");
     for (let cycle = 0; cycle < 3; cycle++) {
       await toggle.click();

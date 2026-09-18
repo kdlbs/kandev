@@ -30,6 +30,19 @@ import { InboxTabStrip } from "@/components/needs-you-inbox/inbox-tab-strip";
 import { FailedInboxTabPanel } from "@/components/needs-you-inbox/failed-inbox-tab-panel";
 import { useFailedInboxController } from "@/hooks/domains/failed-inbox/use-failed-inbox-controller";
 import { buildInboxTabHref, resolveInboxTab, type InboxTab } from "@/lib/failed-inbox/inbox-tab";
+import { useInboxHistoryController } from "@/hooks/domains/inbox-history/use-inbox-history-controller";
+import type { InboxHistoryController } from "@/hooks/domains/inbox-history/use-inbox-history-controller";
+import {
+  selectInboxHistoryBundles,
+  selectInboxHistoryCount,
+  selectInboxHistoryHasMore,
+  selectInboxHistoryIsLoadingMore,
+  selectInboxHistoryLoadMoreError,
+  selectInboxHistoryStatus,
+} from "@/lib/state/slices/inbox-history/selectors";
+import { InboxHistoryList } from "@/components/inbox-history/inbox-history-list";
+import { InboxHistoryEmptyState } from "@/components/inbox-history/inbox-history-empty-state";
+import { InboxHistoryErrorState } from "@/components/inbox-history/inbox-history-error-state";
 
 type ViewMode = "error" | "loading" | "empty" | "list";
 
@@ -89,6 +102,8 @@ function NeedsYouInboxList({
   );
 }
 
+// "Needs you" is the tab strip's default-selected tab, and this content,
+// count and behavior are unchanged by the strip's presence.
 function NeedsYouInboxTabContent({ retry }: { retry: () => void }) {
   const { t } = useTranslation();
   const status = useAppStore(selectNeedsYouInboxStatus);
@@ -137,6 +152,60 @@ function NeedsYouInboxTabContent({ retry }: { retry: () => void }) {
   );
 }
 
+// A truncated-to-zero page (bundleCount === 0 with hasMore) still resolves
+// to the retryable error state, matching the Needs-you sibling's own
+// handling of the same shape.
+function resolveHistoryViewMode(status: string, bundleCount: number, hasMore: boolean): ViewMode {
+  if (status === "error" || (bundleCount === 0 && hasMore)) return "error";
+  if (status === "loading" && bundleCount === 0) return "loading";
+  if (bundleCount === 0) return "empty";
+  return "list";
+}
+
+// The History tab's own read-only content, driven by its own isolated slice --
+// never the Needs-you slice or its refresh trigger. The controller stays in
+// the parent so its lifecycle is mounted exactly once per page, not once per
+// tab activation.
+function InboxHistoryTabContent({ controller }: { controller: InboxHistoryController }) {
+  const { t } = useTranslation();
+  const status = useAppStore(selectInboxHistoryStatus);
+  const bundles = useAppStore(selectInboxHistoryBundles);
+  const hasMore = useAppStore(selectInboxHistoryHasMore);
+  const isLoadingMore = useAppStore(selectInboxHistoryIsLoadingMore);
+  const loadMoreError = useAppStore(selectInboxHistoryLoadMoreError);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { refresh, loadMore } = controller;
+  const retry = useCallback(() => {
+    if (workspaceId) void refresh(workspaceId);
+  }, [refresh, workspaceId]);
+  const loadNextPage = useCallback(() => {
+    if (workspaceId) void loadMore(workspaceId);
+  }, [loadMore, workspaceId]);
+
+  const viewMode = resolveHistoryViewMode(status, bundles.length, hasMore);
+
+  return (
+    <>
+      {viewMode === "error" && <InboxHistoryErrorState onRetry={retry} />}
+      {viewMode === "loading" && (
+        <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+          {t("common:loading")}
+        </p>
+      )}
+      {viewMode === "empty" && <InboxHistoryEmptyState />}
+      {viewMode === "list" && (
+        <InboxHistoryList
+          bundles={bundles}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          loadMoreError={loadMoreError}
+          onLoadMore={loadNextPage}
+        />
+      )}
+    </>
+  );
+}
+
 // v1 renders no tab strip and no in-page title (design-01#Components). This
 // capability adds the tab strip; the page title still belongs to the app top
 // bar, which is PageShell's, so this route mounts the same chrome every other
@@ -150,6 +219,9 @@ export function NeedsYouInboxPageClient() {
   const failedCount = useAppStore(selectFailedInboxCount);
   const failedCountKnown = useAppStore(selectFailedInboxCountIsKnown);
   const failedTruncated = useAppStore(selectFailedInboxTruncated);
+  // The History tab's own bundle count, populated the moment the Inbox page
+  // opens, without requiring a click into the tab.
+  const historyCount = useAppStore(selectInboxHistoryCount);
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -160,6 +232,9 @@ export function NeedsYouInboxPageClient() {
   // bucket's own refresh triggers, independent of the Needs-you controller
   // mounted at the app shell.
   useFailedInboxController(selectedTab);
+  // The History controller is mounted once at the page level (not gated by
+  // which tab is active), never from the Needs-you slice or its refresh tick.
+  const historyController = useInboxHistoryController();
 
   const retry = useCallback(() => bumpRefreshTick(), [bumpRefreshTick]);
   const selectTab = useCallback(
@@ -176,12 +251,16 @@ export function NeedsYouInboxPageClient() {
         needsYouHasMore={needsYouHasMore}
         failedCount={failedCountKnown ? failedCount : undefined}
         failedTruncated={failedTruncated}
+        historyCount={historyCount}
       >
         <TabsContent value="needs-you">
           <NeedsYouInboxTabContent retry={retry} />
         </TabsContent>
         <TabsContent value="failed">
           <FailedInboxTabPanel />
+        </TabsContent>
+        <TabsContent value="history">
+          <InboxHistoryTabContent controller={historyController} />
         </TabsContent>
       </InboxTabStrip>
     </PageShell>

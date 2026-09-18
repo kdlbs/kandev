@@ -37,6 +37,7 @@ import {
   survivingEntityReferences,
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
+import { BoundedMessagePreview } from "@/components/task/chat/messages/bounded-message-preview";
 import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
 import { useQueuedMessageOverflow } from "@/components/task/chat/use-queued-message-overflow";
 import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/queued-attachment-row";
@@ -246,20 +247,23 @@ function DisplayView({
         {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} size="xs" />}
         {senderTask && <SenderTaskBadge sender={senderTask} size="xs" />}
         {visible && (
-          <div
-            ref={previewRef}
-            data-testid="queue-entry-text"
-            data-expanded={expanded ? "true" : "false"}
-            className={cn(
+          <BoundedMessagePreview
+            source={visible}
+            fileName="kandev-queued-message.txt"
+            previewRef={previewRef}
+            previewTestId="queue-entry-text"
+            previewDataExpanded={expanded}
+            previewClassName={cn(
               "markdown-body max-w-none text-sm text-foreground/80 break-words overflow-hidden",
               "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
               expanded ? "max-h-[40rem]" : "max-h-[2.75rem]",
             )}
-          >
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={referenceMarkdownComponents}>
-              {visible}
-            </ReactMarkdown>
-          </div>
+            renderContent={(preview) => (
+              <ReactMarkdown remarkPlugins={remarkPlugins} components={referenceMarkdownComponents}>
+                {preview}
+              </ReactMarkdown>
+            )}
+          />
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
       </div>

@@ -939,23 +939,18 @@ func (r *Repository) FindMessageByPendingIDAndQuestion(ctx context.Context, sess
 // `status` is the user's approve/reject decision, not the tool call state. Forcing them to
 // "complete" wipes "approved"/"rejected" and re-shows the prompt buttons in the UI.
 func (r *Repository) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
-	drv := r.db.DriverName()
-	query := fmt.Sprintf(`
-		UPDATE task_session_messages
-		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
-		WHERE turn_id = ?
-		  AND type != 'permission_request'
-		  AND %s NOT IN ('complete', 'error')
-		  AND %s
-	`, dialect.JSONSet(drv, "metadata", "status", "complete"),
-		dialect.JSONExtract(drv, "metadata", "status"),
-		dialect.JSONExtractIsNotNull(drv, "metadata", "tool_call_id"))
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), turnID)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("failed to complete pending tool calls for turn %s: %w", turnID, err)
+		return 0, err
 	}
-
-	rows, _ := result.RowsAffected()
+	defer func() { _ = tx.Rollback() }()
+	rows, err := r.completePendingToolCallsForTurnTx(ctx, tx, turnID)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	return rows, nil
 }
 

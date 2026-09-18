@@ -767,10 +767,20 @@ func (s *DashboardService) SetRoutineLister(rl RoutineLister) {
 
 // ListActivityFiltered returns activity entries filtered by optional type.
 func (s *DashboardService) ListActivityFiltered(ctx context.Context, wsID, filterType string, limit int) ([]*models.ActivityEntry, error) {
+	var (
+		entries []*models.ActivityEntry
+		err     error
+	)
 	if filterType == "" || filterType == "all" {
-		return s.repo.ListActivityEntries(ctx, wsID, limit)
+		entries, err = s.repo.ListActivityEntries(ctx, wsID, limit)
+	} else {
+		entries, err = s.repo.ListActivityEntriesByType(ctx, wsID, filterType, limit)
 	}
-	return s.repo.ListActivityEntriesByType(ctx, wsID, filterType, limit)
+	if err != nil {
+		return nil, err
+	}
+	s.enrichActivityLabels(ctx, wsID, entries, nil)
+	return entries, nil
 }
 
 // ListActivityForTarget returns activity entries scoped to one target entity.

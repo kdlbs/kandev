@@ -14,6 +14,7 @@ const state = {
   features: { ...defaultFeatureFlags } as FeatureFlags,
   office: { inboxCountByWorkspaceId: {} as Record<string, number> },
   needsYouInbox: { byWorkspaceId: {} as Record<string, { count: number; hasMore?: boolean }> },
+  inboxHistory: { byWorkspaceId: {} as Record<string, { total: number }> },
   quickChat: {
     isOpen: false,
     sessions: [] as Array<{
@@ -72,6 +73,7 @@ describe("AppSidebarPrimaryNav", () => {
     state.userSettings = { ...defaultState.userSettings };
     state.features = { ...defaultFeatureFlags };
     state.needsYouInbox = { byWorkspaceId: {} };
+    state.inboxHistory = { byWorkspaceId: {} };
     state.office.inboxCountByWorkspaceId = {};
     state.quickChat.isOpen = false;
     state.quickChat.sessions = [];
@@ -174,6 +176,7 @@ describe("AppSidebarPrimaryNav — Needs-you Inbox nav entry", () => {
     state.userSettings = { ...defaultState.userSettings };
     state.features = { ...defaultFeatureFlags };
     state.needsYouInbox = { byWorkspaceId: {} };
+    state.inboxHistory = { byWorkspaceId: {} };
     state.office.inboxCountByWorkspaceId = {};
     mode = "kanban";
     pathname = "/";
@@ -226,5 +229,19 @@ describe("AppSidebarPrimaryNav — Needs-you Inbox nav entry", () => {
 
     const link = screen.getByRole("link", { name: "Inbox" });
     expect(link.textContent).toContain("50+");
+  });
+
+  // @covers AC-UI-INBOX-HISTORY-001.17
+  it("leaves the Needs-you badge unset when History is populated and Needs-you is empty", () => {
+    state.features.needsYouInbox = true;
+    state.needsYouInbox.byWorkspaceId["ws-1"] = { count: 0 };
+    state.inboxHistory.byWorkspaceId["ws-1"] = { total: 12 };
+    renderNav(false);
+
+    // A populated History total renders no badge at all (accessible name
+    // stays exactly "Inbox", with no count suffix) rather than a "0" badge or
+    // History's own total leaking into the Needs-you count.
+    const link = screen.getByRole("link", { name: "Inbox" });
+    expect(link.textContent).not.toContain("12");
   });
 });
