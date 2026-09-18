@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -52,6 +53,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Read the live standalone recovery-inventory records (startup step 3,
 	// AC-EXECUTORS-SURVIVAL-002.8) before recovery contacts any control
 	// server, and hand them to every runtime's RecoverInstances unchanged.
+	startup.BeginStep(ctx, startup.StepSessionsRecovery)
 	records, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
 	m.runRecoveryErr = listErr
 	if listErr != nil {
@@ -69,6 +71,11 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.logger.Error("skipping recovery: live standalone recovery-inventory records could not be read, so no live instance can be correlated to a session",
 			zap.Error(listErr))
 		records = nil
+		// The corpus is unknown, not zero: a failed read is not the same as
+		// an empty inventory, so this activation is locked opaque (never
+		// promoted to counted) rather than reporting SetTotal(0), which
+		// would claim a known-empty corpus.
+		startup.Degrade(ctx, startup.StepSessionsRecovery)
 	}
 
 	// Take a recovery guard for every named session except a confirmed
@@ -95,6 +102,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	// (ListLiveStandaloneExecutorsRunning), and StandaloneExecutor is the
 	// only backend that reads them, so this narrows nothing else.
 	records = recoverableRecords(records, guardedSessions)
+	if listErr == nil {
+		startup.SetTotal(ctx, startup.StepSessionsRecovery, int64(len(records)))
+	}
 
 	// AC-EXECUTORS-SURVIVAL-003.7: bound this pass's
 	// adoption+enumeration+reconstruction work with a single deadline, clocked
@@ -132,6 +142,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("instance_id", ri.InstanceID),
 					zap.String("session_id", ri.SessionID))
 				m.dispatchUnreconstructableStop(&stopWG, ri)
+				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
 			execution := &AgentExecution{
@@ -183,6 +194,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("instance_id", execution.ID),
 					zap.String("session_id", execution.SessionID))
 				m.dispatchUnreconstructableStop(&stopWG, ri)
+				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
 			// A recovered instance is resuming a live provider session (its
@@ -200,6 +212,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("session_id", execution.SessionID),
 					zap.Error(err))
 				m.dispatchUnreconstructableStop(&stopWG, ri)
+				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
 			// AC-EXECUTORS-SURVIVAL-002.14: Office profile identity is a new key
@@ -225,6 +238,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("agent_profile_id", execution.AgentProfileID),
 					zap.Error(err))
 				m.dispatchUnreconstructableStop(&stopWG, ri)
+				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
 			// AC-EXECUTORS-SURVIVAL-004.2/004.5: retrieve this instance's
@@ -239,6 +253,7 @@ func (m *Manager) Start(ctx context.Context) error {
 					zap.String("instance_id", execution.ID),
 					zap.String("session_id", execution.SessionID))
 				m.dispatchUnreconstructableStop(&stopWG, ri)
+				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
 			// Create trace span for the recovered session
@@ -268,6 +283,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				}
 				execution.EndSessionSpan()
 				initSpan.End()
+				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
 			m.setRuntimeInterest(execution.SessionID, true)
@@ -320,9 +336,11 @@ func (m *Manager) Start(ctx context.Context) error {
 			go m.streamManager.ReconnectAll(execution)
 
 			initSpan.End()
+			startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 		}
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
+	startup.EndStep(ctx, startup.StepSessionsRecovery)
 	cancelRecovery()
 
 	// AC-EXECUTORS-SURVIVAL-002.11: every dispatchUnreconstructableStop call

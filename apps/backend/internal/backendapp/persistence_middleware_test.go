@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/maintenance"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
@@ -98,6 +99,7 @@ func TestRequiredPersistenceMiddlewareBlocksStatefulTrafficButAllowsDiagnostics(
 	gin.SetMode(gin.TestMode)
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
@@ -150,6 +152,7 @@ func TestRequiredPersistenceMiddlewareRunsBeforeAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
@@ -217,6 +220,7 @@ func TestRequiredPersistenceMiddlewarePrecedesDatabaseBackedAuthentication(t *te
 
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)

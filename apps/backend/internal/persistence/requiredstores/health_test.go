@@ -10,6 +10,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
@@ -231,7 +232,7 @@ func TestHealthCheckMarksMissingTableUnhealthyAndRecovers(t *testing.T) {
 	}
 
 	tracker, err := NewTracker([]Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
@@ -278,7 +279,7 @@ func TestProbeTablesHonorsContextDeadline(t *testing.T) {
 	}
 
 	tracker, err := NewTracker([]Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)

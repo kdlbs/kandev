@@ -104,7 +104,7 @@ func TestProvideServicesStopsWhenManagedRuntimeReconciliationFails(t *testing.T)
 		t.Fatalf("close settings reader: %v", err)
 	}
 
-	_, _, err = provideServices(cfg, log, repos, pool, bus.NewMemoryEventBus(log), agentRegistry, "test-managed-runtime-defaults")
+	_, _, err = provideServices(context.Background(), cfg, log, repos, pool, bus.NewMemoryEventBus(log), agentRegistry, "test-managed-runtime-defaults")
 	if err == nil || !strings.Contains(err.Error(), "reconcile managed runtime defaults") {
 		t.Fatalf("provideServices error = %v, want reconciliation failure before readiness", err)
 	}

@@ -58,6 +58,7 @@ const (
 const defaultEventNamespace = "default"
 
 func provideOrchestrator(
+	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	pool *db.Pool,
@@ -116,7 +117,7 @@ func provideOrchestrator(
 
 	queueRepo, err := messagequeue.NewSQLiteRepository(pool.Writer(), pool.Reader())
 	if len(trackers) > 0 && trackers[0] != nil {
-		if recordErr := recordRequiredStore(trackers[0], "message-queue", err); recordErr != nil {
+		if recordErr := recordRequiredStore(ctx, trackers[0], "message-queue", err); recordErr != nil {
 			return nil, nil, fmt.Errorf("message queue store: %w", recordErr)
 		}
 	}

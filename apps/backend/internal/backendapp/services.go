@@ -69,7 +69,8 @@ const (
 	canonicalKandevName  = "kandev"
 )
 
-func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
+//nolint:gocognit,cyclop,funlen,maintidx // Legacy backend service-wiring orchestration predating startup-step instrumentation; split after launcher migration settles.
+func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
 	if repos == nil || repos.RequiredStores == nil {
 		return nil, nil, errors.New("required-store tracker is unavailable")
 	}
@@ -197,7 +198,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// company name to borrow, and an operator renames it in one click.
 	const defaultOrgName = "Default organization"
 	orgSvc, orgErr := buildOrgService(cfg, dbPool, repos, taskSvc, log)
-	if recordErr := recordRequiredStore(storeTracker, "organizations", orgErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "organizations", orgErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize organizations: %w", recordErr)
 	}
 	// The tenancy migration runs once at boot: it creates the default
@@ -209,7 +210,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// organization ids: placing a workspace before it knows its organization
 	// would put it under the wrong root.
 	unitSvc, unitErr := buildOrgUnitService(dbPool, repos.Task, repos.UserAccounts, log)
-	if recordErr := recordRequiredStore(storeTracker, "organization-units", unitErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "organization-units", unitErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize organization units: %w", recordErr)
 	}
 	taskSvc.SetUnitPlacer(unitSvc)
@@ -264,7 +265,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
 
 	githubSvc, _, githubErr := initGitHubServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(storeTracker, "github", githubErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "github", githubErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize github: %w", recordErr)
 	}
 	if githubSvc != nil {
@@ -277,7 +278,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 	}
 	gitlabSvc, gitlabCleanup, gitlabErr := initGitLabServiceRequiredWithSettings(repos.SystemSettings, dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(storeTracker, "gitlab", gitlabErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "gitlab", gitlabErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize gitlab: %w", recordErr)
 	}
 	if gitlabSvc != nil {
@@ -285,7 +286,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}
 	azureDevOpsSvc, _, azureDevOpsErr := initAzureDevOpsServiceRequired(dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(storeTracker, "azure-devops", azureDevOpsErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "azure-devops", azureDevOpsErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize azure devops: %w", recordErr)
 	}
 	if azureDevOpsSvc != nil {
@@ -293,23 +294,23 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	}
 	jiraSvc, _, jiraErr := initJiraServiceRequired(dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(storeTracker, "jira", jiraErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "jira", jiraErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize jira: %w", recordErr)
 	}
 	linearSvc, _, linearErr := initLinearServiceRequired(dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(storeTracker, "linear", linearErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "linear", linearErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize linear: %w", recordErr)
 	}
 	sentrySvc, _, sentryErr := initSentryServiceRequired(dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordRequiredStore(storeTracker, "sentry", sentryErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "sentry", sentryErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize sentry: %w", recordErr)
 	}
 	workflowSyncSvc, _, workflowSyncErr := initWorkflowSyncServiceRequired(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
-	if recordErr := recordRequiredStore(storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
 	pluginsSvc, pluginsCleanup, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
-	if recordErr := recordPluginStores(storeTracker, pluginStoreErrors); recordErr != nil {
+	if recordErr := recordPluginStores(ctx, storeTracker, pluginStoreErrors); recordErr != nil {
 		if pluginsCleanup != nil {
 			_ = pluginsCleanup()
 		}
@@ -341,7 +342,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		taskSvc.SetRepositorySelectionResolver(pluginRepositorySelectionResolver{inspector: pluginsSvc})
 	}
 	canvasRepo, canvasErr := canvasservice.NewRepository(dbPool)
-	if recordErr := recordRequiredStore(storeTracker, "canvas", canvasErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "canvas", canvasErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize canvas: %w", recordErr)
 	}
 	canvasSvc, err := initCanvasServiceWithRepository(cfg.Features.Canvases, canvasRepo, eventBus, pluginsSvc, taskSvc, log)
@@ -376,11 +377,11 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		githubSvc.SetCredentialBroker(github.NewCredentialBrokerFromBroker(gitCredentialBroker))
 	}
 	shareHTTP, _, shareErr := initShareHandlersRequired(dbPool, repos.Task, taskSvc, githubSvc, log, version)
-	if recordErr := recordRequiredStore(storeTracker, "task-share", shareErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "task-share", shareErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize task share: %w", recordErr)
 	}
 	_, officeConfigErr := officeconfigsync.NewStore(dbPool.Writer(), dbPool.Reader())
-	if recordErr := recordRequiredStore(storeTracker, "office-config-sync", officeConfigErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "office-config-sync", officeConfigErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize office config sync: %w", recordErr)
 	}
 
@@ -405,7 +406,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Initialize Automation service
 	automationComponents, automationErr := automation.Provide(dbPool.Writer(), dbPool.Reader(), eventBus, githubSvc, log)
-	if recordErr := recordRequiredStore(storeTracker, "automation", automationErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, storeTracker, "automation", automationErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize automation: %w", recordErr)
 	}
 	if automationComponents != nil {
@@ -1401,6 +1402,7 @@ const portsBackendDefault = 38429
 // available, mirroring how the Jira/Linear/Sentry pollers are started in
 // startAgentInfrastructure rather than inside their init*Service functions.
 func initPluginsService(
+	ctx context.Context,
 	cfg *config.Config,
 	dbPool *db.Pool,
 	eventBus bus.EventBus,
@@ -1429,7 +1431,7 @@ func initPluginsServiceRequired(
 	return plugins.ProvideWithStoreErrors(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
 }
 
-func recordPluginStores(tracker *requiredstores.Tracker, initErrors plugins.StoreInitErrors) error {
+func recordPluginStores(ctx context.Context, tracker *requiredstores.Tracker, initErrors plugins.StoreInitErrors) error {
 	var failures []error
 	for _, id := range []string{
 		"plugin-instances",
@@ -1439,7 +1441,7 @@ func recordPluginStores(tracker *requiredstores.Tracker, initErrors plugins.Stor
 		"plugin-instance-state",
 		"plugin-user-state",
 	} {
-		if err := recordRequiredStore(tracker, id, initErrors[id]); err != nil {
+		if err := recordRequiredStore(ctx, tracker, id, initErrors[id]); err != nil {
 			failures = append(failures, err)
 		}
 	}

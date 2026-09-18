@@ -120,7 +120,9 @@ func FromRequest(r *http.Request) string {
 }
 
 // parseAcceptLanguage returns the header's tags in descending q-value order.
-// Malformed entries are skipped rather than failing the request.
+// Malformed entries, and any entry whose q-value is unparseable or not
+// positive, are excluded rather than falling through to the request's
+// default acceptability of 1.0.
 func parseAcceptLanguage(header string) []string {
 	if header == "" {
 		return nil
@@ -136,15 +138,9 @@ func parseAcceptLanguage(header string) []string {
 		if tag == "" {
 			continue
 		}
-		q := 1.0
-		for _, field := range fields[1:] {
-			field = strings.TrimSpace(field)
-			if !strings.HasPrefix(field, "q=") {
-				continue
-			}
-			if _, err := fmt.Sscanf(field, "q=%f", &q); err != nil {
-				q = 1.0
-			}
+		q, ok := acceptLanguageQuality(fields[1:])
+		if !ok || q <= 0 {
+			continue
 		}
 		items = append(items, weighted{tag: tag, q: q})
 	}
@@ -159,6 +155,25 @@ func parseAcceptLanguage(header string) []string {
 		tags = append(tags, item.tag)
 	}
 	return tags
+}
+
+// acceptLanguageQuality reads the q parameter from one Accept-Language
+// field's ";"-separated parameters, defaulting to 1.0 when none is present.
+// It reports ok=false for a q parameter present but unparseable, so the
+// caller excludes the tag instead of promoting a malformed value to the
+// highest priority.
+func acceptLanguageQuality(params []string) (float64, bool) {
+	q := 1.0
+	for _, field := range params {
+		field = strings.TrimSpace(field)
+		if !strings.HasPrefix(field, "q=") {
+			continue
+		}
+		if _, err := fmt.Sscanf(field, "q=%f", &q); err != nil {
+			return 0, false
+		}
+	}
+	return q, true
 }
 
 // T returns the message for key in locale, falling back to DefaultLocale and
