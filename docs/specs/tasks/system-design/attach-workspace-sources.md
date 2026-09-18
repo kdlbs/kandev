@@ -177,11 +177,11 @@ contradictory duplicates or an active turn return `409`, and materialization fai
 
 A batch workspace-source request may commit while no eligible session exists. In that case the
 durable source remains attached, no live repository worktree is reported, and the next launch
-materializes the attachment. A task environment that is still creating or has no `task_dir_name`
-also returns an explicit deferred result so the launch path can finish provisioning first. These
-batch deferrals do not relax the legacy add-branch rule below: a target observed as live at
-preflight must remain live and materialize successfully or the new branch attachment is rolled
-back.
+materializes the attachment. A task environment that is still creating also returns an explicit
+deferred result. A host-workspace environment additionally defers while its `task_dir_name` is
+empty; remote executors do not require that host task-root identity. These batch deferrals do not
+relax the legacy add-branch rule below: a target observed as live at preflight must remain live and
+materialize successfully or the new branch attachment is rolled back.
 
 The backend publishes `task.updated` with both `repositories` and `workspace_folders`, then emits a
 session-scoped workspace-sources update after agentctl has adopted the new workspace root. Clients

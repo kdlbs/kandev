@@ -166,7 +166,9 @@ PR review fixup added RED coverage proving that:
 - a live target that disappears after preflight rolls back instead of becoming
   a deferred pre-launch success;
 - owner lookup errors retain their repository cause; and
-- batch workspace sources defer while an environment is still provisioning.
+- batch workspace sources defer while a host environment is still
+  provisioning without suppressing remote Docker, SSH, or Sprites
+  materialization.
 
 The shared batch commit wrapper now preserves the materializer's error identity
 alongside `ErrWorkspaceSourceMaterialize`, so an owner that disappears after
@@ -180,6 +182,8 @@ All regressions are GREEN. Verification completed with:
 - the MCP add-branch materialized-path handler test;
 - targeted race tests for inherited resolution, materialization, and rebound
   persistence;
+- real Docker and SSH workspace-source E2E coverage, including remote batch
+  rollback and repeated reconnect reconstruction;
 - full backend `golangci-lint`;
 - specification catalog validation, specification linter tests, the complete
   specification lint, and documentation diff checks.

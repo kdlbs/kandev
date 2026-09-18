@@ -117,7 +117,8 @@ func (m *workspaceSourceMaterializer) MaterializeWorkspaceSources(ctx context.Co
 	if state == nil || state.environment == nil {
 		return &taskservice.WorkspaceSourceMaterializationResult{}, nil
 	}
-	if state.environment.Status == models.TaskEnvironmentStatusCreating || state.environment.TaskDirName == "" {
+	if state.environment.Status == models.TaskEnvironmentStatusCreating ||
+		(isHostWorkspaceExecutor(state.environment.ExecutorType) && state.environment.TaskDirName == "") {
 		m.logger.Info("deferring workspace source materialization until the task environment is provisioned",
 			zap.String("task_id", taskID), zap.String("task_environment_id", state.environment.ID))
 		return &taskservice.WorkspaceSourceMaterializationResult{}, nil

@@ -186,7 +186,11 @@ func TestWorkspaceSourceMaterializer_RemoteMaterializesAdditionalRepositories(t 
 				t.Fatal(err)
 			}
 			env.ExecutorType = string(executorType)
+			env.TaskDirName = ""
 			if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.DB().ExecContext(ctx, `UPDATE task_environments SET task_dir_name = '' WHERE id = 'env-1'`); err != nil {
 				t.Fatal(err)
 			}
 			remote := &remoteWorkspaceMaterializerStub{ids: []string{"session-1"}}
