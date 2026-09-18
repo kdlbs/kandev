@@ -4,7 +4,7 @@
 // reported to the user as a successful answer.
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
-import { watchWs } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import { waitForSessionSettled } from "./quick-chat-helpers";
 
 test.describe("Clarification submit failure feedback", () => {
@@ -84,7 +84,9 @@ test.describe("Clarification submit failure feedback", () => {
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
+    let attempts = 0;
     await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempts += 1;
       await route.fulfill({
         status: 409,
         contentType: "application/json",
@@ -97,12 +99,15 @@ test.describe("Clarification submit failure feedback", () => {
 
     await session.clarificationOption("PostgreSQL").click();
 
-    const expiredBanner = testPage.getByTestId("clarification-expired");
-    await expect(expiredBanner).toBeVisible({ timeout: 15_000 });
+    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("clarification-retry")).toHaveCount(0);
-    // A dropped answer must never flip the chat back to idle -- that would be
-    // reporting success for an answer nobody received.
-    await expect(session.idleInput()).toHaveCount(0);
-    await expect(session.clarificationOverlay()).toBeVisible();
+    await expect(session.anyIdleInput()).toBeVisible();
+    await dwell(
+      testPage,
+      250,
+      "negative-assertion",
+      "observe that an inactive clarification is not submitted a second time",
+    );
+    expect(attempts).toBe(1);
   });
 });

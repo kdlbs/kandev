@@ -7,9 +7,13 @@ vi.mock("@/lib/config", () => ({
 }));
 
 const mockUpdateMessage = vi.fn();
+let mockMessagesBySession: Record<string, Message[]> = {};
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
-    getState: () => ({ updateMessage: mockUpdateMessage }),
+    getState: () => ({
+      updateMessage: mockUpdateMessage,
+      messages: { bySession: mockMessagesBySession },
+    }),
   }),
 }));
 
@@ -21,6 +25,7 @@ function clarMessage(opts: {
   questionId: string;
   index: number;
   total: number;
+  updatedAt?: string;
 }): Message {
   return {
     id: opts.id,
@@ -30,6 +35,7 @@ function clarMessage(opts: {
     content: "Q",
     type: "clarification_request",
     created_at: "2026-05-04T00:00:00Z",
+    ...(opts.updatedAt ? { updated_at: opts.updatedAt } : {}),
     metadata: {
       pending_id: opts.pendingId,
       question_id: opts.questionId,
@@ -46,6 +52,7 @@ const fetchMock = vi.fn();
 function setupFetchMock() {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
+  mockMessagesBySession = {};
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 }
@@ -182,5 +189,144 @@ describe("useClarificationGroup — request generation guard", () => {
       await secondSubmit;
     });
     expect(result.current.submitState).toBe("ok");
+  });
+});
+
+// eslint-disable-next-line max-lines-per-function -- inactive response races share one deterministic hook harness.
+describe("useClarificationGroup — inactive response reconciliation", () => {
+  beforeEach(setupFetchMock);
+
+  it("keeps a newer authoritative pending restoration when the inactive response settles late", async () => {
+    let resolveA: ((res: Response) => void) | null = null;
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (resolveA = resolve)),
+    );
+
+    const submitted = clarMessage({
+      id: "m-a",
+      pendingId: "pA",
+      questionId: "qA",
+      index: 0,
+      total: 1,
+      updatedAt: "2026-05-04T00:00:00.000Z",
+    });
+    const restored = {
+      ...submitted,
+      updated_at: "2026-05-04T00:00:01.000Z",
+      metadata: { ...submitted.metadata, status: "pending" as const },
+    };
+    mockMessagesBySession = { [submitted.session_id]: [submitted] };
+    const onOutcome = vi.fn();
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs, onOutcome), {
+      initialProps: { msgs: [submitted] },
+    });
+
+    let pendingRequest!: Promise<void>;
+    await act(async () => {
+      pendingRequest = result.current.skipAll();
+    });
+
+    mockMessagesBySession = { [restored.session_id]: [restored] };
+    rerender({ msgs: [restored] });
+
+    await act(async () => {
+      resolveA?.(new Response(null, { status: 409 }));
+      await pendingRequest;
+    });
+
+    expect(result.current.submitState).toBe("idle");
+    expect(onOutcome).not.toHaveBeenCalled();
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.skipAll();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.submitState).toBe("ok");
+  });
+
+  it("does not expire bundle A after it leaves and returns to the active generation", async () => {
+    let resolveA: ((res: Response) => void) | null = null;
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (resolveA = resolve)),
+    );
+
+    const bundle = (pendingId: string) => [
+      clarMessage({ id: "m-shared", pendingId, questionId: "q1", index: 0, total: 1 }),
+    ];
+    const bundleA = bundle("pA");
+    const bundleB = bundle("pB");
+    mockMessagesBySession = { [bundleA[0].session_id]: bundleA };
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
+      initialProps: { msgs: bundleA },
+    });
+
+    let pendingRequest!: Promise<void>;
+    await act(async () => {
+      pendingRequest = result.current.skipAll();
+    });
+    rerender({ msgs: bundleB });
+    mockMessagesBySession = { [bundleA[0].session_id]: bundleA };
+    rerender({ msgs: bundleA });
+
+    await act(async () => {
+      resolveA?.(new Response(null, { status: 409 }));
+      await pendingRequest;
+    });
+
+    expect(result.current.submitState).toBe("idle");
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps bundle B active when bundle A settles late with an inactive response", async () => {
+    let resolveA: ((res: Response) => void) | null = null;
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (resolveA = resolve)),
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+
+    const bundleA = [
+      clarMessage({ id: "m-a", pendingId: "pA", questionId: "qA", index: 0, total: 1 }),
+    ];
+    const bundleB = [
+      clarMessage({ id: "m-b", pendingId: "pB", questionId: "qB", index: 0, total: 1 }),
+    ];
+    mockMessagesBySession = { [bundleA[0].session_id]: [...bundleA, ...bundleB] };
+    const onOutcome = vi.fn();
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs, onOutcome), {
+      initialProps: { msgs: bundleA },
+    });
+
+    let firstSkip!: Promise<void>;
+    await act(async () => {
+      firstSkip = result.current.skipAll();
+    });
+    rerender({ msgs: bundleB });
+
+    let secondSubmit!: Promise<void>;
+    await act(async () => {
+      secondSubmit = result.current.submitCollected({
+        qB: { question_id: "qB", selected_options: ["second"] },
+      });
+      await secondSubmit;
+    });
+    expect(result.current.submitState).toBe("ok");
+    expect(onOutcome).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveA?.(new Response(null, { status: 409 }));
+      await firstSkip;
+    });
+
+    expect(result.current.submitState).toBe("ok");
+    expect(onOutcome).toHaveBeenCalledTimes(1);
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "m-a",
+        metadata: expect.objectContaining({ status: "expired" }),
+      }),
+    );
   });
 });

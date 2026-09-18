@@ -631,11 +631,19 @@ export function ClarificationInputOverlay({
   // guard could tell the dialog "handledHere" for a state where the widget
   // that would actually handle Escape never mounted in the first place.
   const armedEventRef = useEscapeGuardRegistration(
-    keyboardShortcutsEnabled && !isSubmitting && meta !== null,
+    keyboardShortcutsEnabled && !isSubmitting && group.submitState !== "expired" && meta !== null,
     shortcutScopeRef,
   );
 
   if (sortedMessages.length === 0) return null;
+
+  if (group.submitState === "expired") {
+    return (
+      <div className="relative" data-testid="clarification-overlay">
+        <ClarificationStatusBanner state="expired" onRetry={() => void group.retry()} />
+      </div>
+    );
+  }
 
   return (
     <div className="relative" data-testid="clarification-overlay">
@@ -653,7 +661,7 @@ export function ClarificationInputOverlay({
         onCollapse={onCollapse}
         collapseContentId={collapseContentId}
       />
-      {(group.submitState === "error" || group.submitState === "expired") && (
+      {group.submitState === "error" && (
         <ClarificationStatusBanner state={group.submitState} onRetry={() => void group.retry()} />
       )}
       {sharedContext && (

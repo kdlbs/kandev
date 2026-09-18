@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
-import { watchWs } from "../../helpers/causal-waits";
+import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForSessionSettled } from "./quick-chat-helpers";
 
 /**
@@ -217,6 +217,49 @@ test.describe("Mobile clarification multiline answer", () => {
     await settled;
     await expect(session.idleInput()).toBeVisible();
     expect(attempt).toBe(2);
+  });
+
+  test("inactive dismissal removes the stale panel and does not retry on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Inactive Dismissal",
+      { scenario: "clarification" },
+    );
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    let attempts = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempts += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "not_active" }),
+      });
+    });
+
+    const inactiveResponse = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/clarification\/[^/]+\/respond$/,
+    );
+    await session.clarificationSkip().tap();
+    await expect((await inactiveResponse).status()).toBe(409);
+
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+    await expect(session.anyIdleInput()).toBeVisible();
+    await dwell(
+      testPage,
+      250,
+      "negative-assertion",
+      "observe that an inactive clarification is not submitted a second time on mobile",
+    );
+    expect(attempts).toBe(1);
   });
 
   test("keeps the over-limit counter inside the phone viewport", async ({

@@ -133,6 +133,41 @@ winner when the first request committed, or claims the still-pending bundle
 when the first request did not. A 409 `not_active` remains an expired outcome,
 not a successful submission.
 
+### Inactive-response reconciliation
+
+An expired response must retire the exact submitted bundle from the client's
+actionable message cache. `useClarificationGroup` owns this reconciliation for
+task chat, Quick Chat, run transcripts, and the Needs-you Inbox.
+
+Read each submitted message from the latest store snapshot before updating it.
+Only pending rows with matching message, session, and pending IDs receive the
+existing local `expired` status. Preserve terminal siblings and all newer
+metadata. Treat a newer `updated_at` on a matching row as authoritative and
+leave it unchanged. A request from an older generation also cannot expire a
+bundle that has become current again under the same pending ID, while an old
+bundle may still be retired when another pending ID is active. Do not recreate
+deleted rows or change another bundle. This cache update does not write to the
+backend or assert that rejection succeeded.
+Authoritative message refreshes can replace the cached status, including a
+pending restoration after another caller's failed delivery.
+
+Keep the `no_longer_active` outcome distinct from `resolved`. Do not invoke
+the success-only `onResolved` callback for expiry. Existing message selectors
+remove the obsolete panel after cache reconciliation. A host with static
+message props may retain the existing expired notice, but no answer, Skip,
+Submit, or Retry controls remain actionable. Disable its answer shortcuts too.
+
+The submitted bundle snapshot identifies rows to reconcile even if another
+bundle is now visible. Existing request-generation checks protect the new
+bundle's submission state, outcome callback, and in-flight guard. Unknown or
+malformed conflicts and transport failures retain the retryable error path.
+The existing legacy conflict classification remains unchanged.
+
+Desktop and phone share this state transition. Keep the existing inline panel,
+scroll ownership, focus behavior, and coarse-pointer control sizes. Browser
+coverage must withhold the message update and prove that an inactive HTTP
+response alone removes the stale task-chat panel.
+
 Local collapse, dismiss, Escape, and task navigation do not mutate the bundle.
 Skip remains the explicit rejection path. These controls may be disabled only
 while the bounded request is in flight and become available again on a

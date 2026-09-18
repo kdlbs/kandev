@@ -36,6 +36,7 @@ vi.mock("@kandev/ui/tooltip", () => ({
 const fetchMock = vi.fn();
 const TESTID_OPTION = "clarification-option";
 const TESTID_STEP = "clarification-step";
+const TESTID_SKIP = "clarification-skip";
 const TESTID_SUBMIT_ERROR = "clarification-submit-error";
 
 function clarMessage(opts: {
@@ -226,6 +227,21 @@ describe("ClarificationInputOverlay — Escape guard predicate (F1 regression)",
     expect(getGuard()?.test(fakeEscape(composerRef.current!))).toBe(false);
   });
 
+  it("does not claim Escape after an inactive response leaves retained props mounted", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "not_active" }), { status: 409 }),
+    );
+    const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
+    const { composerRef, onDismiss, getGuard } = renderOverlayWithGuard(messages);
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await vi.waitFor(() => screen.getByTestId("clarification-expired"));
+
+    expect(getGuard()?.test(fakeEscape(composerRef.current!))).not.toBe(true);
+    fireEvent.keyDown(composerRef.current!, { key: "Escape" });
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
   it("does not claim Escape held with a modifier", () => {
     const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
     const { composerRef, getGuard } = renderOverlayWithGuard(messages);
@@ -348,7 +364,7 @@ describe("ClarificationInputOverlay — labelled Skip button", () => {
     const messages = [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })];
     renderOverlay(messages);
 
-    fireEvent.click(screen.getByTestId("clarification-skip"));
+    fireEvent.click(screen.getByTestId(TESTID_SKIP));
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [, init] = fetchMock.mock.calls[0];
@@ -406,7 +422,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     await vi.waitFor(() => expect(screen.getByTestId(TESTID_SUBMIT_ERROR)).toBeTruthy());
 
     expect(screen.getByTestId("clarification-retry")).toBeTruthy();
-    expect((screen.getByTestId("clarification-skip") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId(TESTID_SKIP) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.keyDown(scopeRef.current!, { key: "Escape" });
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
@@ -415,7 +431,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
     renderOverlay([clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })]);
 
-    fireEvent.click(screen.getByTestId("clarification-skip"));
+    fireEvent.click(screen.getByTestId(TESTID_SKIP));
 
     await vi.waitFor(() => expect(screen.queryByTestId(TESTID_SUBMIT_ERROR)).not.toBeNull());
     expect(screen.getByTestId(TESTID_SUBMIT_ERROR).textContent).toContain(
@@ -423,7 +439,7 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     );
   });
 
-  it("shows a non-retryable expired banner when the bundle is no longer active", async () => {
+  it("retires an inactive bundle without leaving response controls mounted", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({ code: "not_active", error: "clarification request is no longer active" }),
@@ -439,6 +455,9 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
     await vi.waitFor(() => screen.getByTestId("clarification-expired"));
     expect(onResolved).not.toHaveBeenCalled();
     expect(screen.queryByTestId("clarification-retry")).toBeNull();
+    expect(screen.queryByTestId(TESTID_SKIP)).toBeNull();
+    expect(screen.queryByTestId(TESTID_OPTION)).toBeNull();
+    expect(screen.queryByTestId("clarification-submit")).toBeNull();
   });
 
   // Regression: a new bundle (different pending_id) arriving after a failed

@@ -1,10 +1,13 @@
 "use client";
 
+/* eslint-disable max-lines -- clarification submission and recovery share one wire contract. */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ClarificationAnswer, ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import { getBackendConfig } from "@/lib/config";
 import { useAppStoreApi } from "@/components/state-provider";
+import { isPendingClarificationMessage } from "@/lib/utils/pending-clarification";
 
 type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
 
@@ -172,6 +175,32 @@ function questionIdsFromMessages(messages: readonly Message[]): string[] {
     .filter(Boolean);
 }
 
+function clarificationBundleStateKey(messages: readonly Message[] | null | undefined): string {
+  return JSON.stringify(
+    (messages ?? []).map((message) => {
+      const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+      return [
+        message.session_id,
+        message.id,
+        metadata?.pending_id ?? null,
+        metadata?.status ?? null,
+      ];
+    }),
+  );
+}
+
+function hasNewerMessageVersion(current: Message, submitted: Message): boolean {
+  if (!current.updated_at) return false;
+  if (!submitted.updated_at) return true;
+
+  const currentTime = Date.parse(current.updated_at);
+  const submittedTime = Date.parse(submitted.updated_at);
+  if (Number.isFinite(currentTime) && Number.isFinite(submittedTime)) {
+    return currentTime > submittedTime;
+  }
+  return current.updated_at > submitted.updated_at;
+}
+
 // classifyConflictResult reads a 409 response's body for a machine-readable
 // `code` (added alongside the existing human `error` string). A bodyless 409
 // (legacy backend) or an explicit "not_active" code both mean the bundle is
@@ -293,8 +322,10 @@ type RunClarificationRequestArgs = {
   requestGenerationRef: { current: number };
   inflightRef: { current: boolean };
   setSubmitState: (state: SubmitState) => void;
-  setLastResult: (result: ClarificationRespondResult) => void;
+  setLastResult: (result: ClarificationRespondResult | null) => void;
   onOutcome?: (outcome: ClarificationOutcome) => void;
+  inactivePendingIdRef: { current: string | null };
+  getLatestMessage: (sessionId: string, messageId: string) => Message | undefined;
   updateMessage: (message: Message) => void;
 };
 
@@ -314,6 +345,8 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     setSubmitState,
     setLastResult,
     onOutcome,
+    inactivePendingIdRef,
+    getLatestMessage,
     updateMessage,
   } = args;
   const requestGeneration = ++requestGenerationRef.current;
@@ -324,10 +357,17 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
   setSubmitState("submitting");
   try {
     const result = await post();
-    if (ownsRequest()) {
+    const hasNewerAuthority =
+      result.state === "expired" &&
+      hasNewerAuthoritativeMessage(bundle, requestPendingId, getLatestMessage);
+    if (ownsRequest() && !hasNewerAuthority) {
       setSubmitState(result.state);
       setLastResult(result);
       onOutcome?.(clarificationOutcome(result));
+      if (result.state === "expired") inactivePendingIdRef.current = requestPendingId;
+    } else if (ownsRequest() && hasNewerAuthority) {
+      setSubmitState("idle");
+      setLastResult(null);
     }
     if (result.state === "ok") {
       // Applies against the submit-time bundle snapshot regardless of which
@@ -339,6 +379,16 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
         ownAnswers,
       );
       safeApplyResolvedStatus(bundle, status, answersByQuestionId, updateMessage);
+    } else if (result.state === "expired" && !hasNewerAuthority) {
+      safeApplyExpiredStatus({
+        bundle,
+        pendingId: requestPendingId,
+        requestGeneration,
+        activePendingIdRef,
+        requestGenerationRef,
+        getLatestMessage,
+        update: updateMessage,
+      });
     }
   } catch (err) {
     console.error("Clarification request threw:", err);
@@ -393,6 +443,72 @@ function safeApplyResolvedStatus(
   }
 }
 
+type ExpiredStatusReconciliationArgs = {
+  bundle: readonly Message[];
+  pendingId: string;
+  requestGeneration: number;
+  activePendingIdRef: { current: string | null };
+  requestGenerationRef: { current: number };
+  getLatestMessage: (sessionId: string, messageId: string) => Message | undefined;
+  update: (message: Message) => void;
+};
+
+function applyExpiredStatusToBundle({
+  bundle,
+  pendingId,
+  requestGeneration,
+  activePendingIdRef,
+  requestGenerationRef,
+  getLatestMessage,
+  update,
+}: ExpiredStatusReconciliationArgs) {
+  if (
+    activePendingIdRef.current === pendingId &&
+    requestGenerationRef.current !== requestGeneration
+  )
+    return;
+
+  for (const submitted of bundle) {
+    const submittedMeta = submitted.metadata as ClarificationRequestMetadata | undefined;
+    if (submittedMeta?.pending_id !== pendingId) continue;
+
+    const current = getLatestMessage(submitted.session_id, submitted.id);
+    if (!current || current.session_id !== submitted.session_id) continue;
+    const currentMeta = current.metadata as ClarificationRequestMetadata | undefined;
+    if (currentMeta?.pending_id !== pendingId || !isPendingClarificationMessage(current)) continue;
+
+    update({
+      ...current,
+      metadata: { ...currentMeta, status: "expired" },
+    });
+  }
+}
+
+function safeApplyExpiredStatus(args: ExpiredStatusReconciliationArgs) {
+  if (args.bundle.length === 0) return;
+  try {
+    applyExpiredStatusToBundle(args);
+  } catch (err) {
+    console.error("Clarification expired update threw:", err);
+  }
+}
+
+function hasNewerAuthoritativeMessage(
+  bundle: readonly Message[],
+  pendingId: string,
+  getLatestMessage: (sessionId: string, messageId: string) => Message | undefined,
+): boolean {
+  return bundle.some((submitted) => {
+    const submittedMeta = submitted.metadata as ClarificationRequestMetadata | undefined;
+    if (submittedMeta?.pending_id !== pendingId) return false;
+
+    const current = getLatestMessage(submitted.session_id, submitted.id);
+    if (!current || current.session_id !== submitted.session_id) return false;
+    const currentMeta = current.metadata as ClarificationRequestMetadata | undefined;
+    return currentMeta?.pending_id === pendingId && hasNewerMessageVersion(current, submitted);
+  });
+}
+
 type UseClarificationSubmissionArgs = {
   pendingId: string | null;
   questionIds: string[];
@@ -403,8 +519,10 @@ type UseClarificationSubmissionArgs = {
   inflightRef: { current: boolean };
   setAnswers: (answers: Record<string, ClarificationAnswer>) => void;
   setSubmitState: (state: SubmitState) => void;
-  setLastResult: (result: ClarificationRespondResult) => void;
+  setLastResult: (result: ClarificationRespondResult | null) => void;
   onOutcome?: (outcome: ClarificationOutcome) => void;
+  inactivePendingIdRef: { current: string | null };
+  getLatestMessage: (sessionId: string, messageId: string) => Message | undefined;
   updateMessage: (message: Message) => void;
   defaultSkipReason: string;
 };
@@ -425,6 +543,8 @@ function baseClarificationRequestArgs(
     setSubmitState: common.setSubmitState,
     setLastResult: common.setLastResult,
     onOutcome: common.onOutcome,
+    inactivePendingIdRef: common.inactivePendingIdRef,
+    getLatestMessage: common.getLatestMessage,
     updateMessage: common.updateMessage,
   };
 }
@@ -446,6 +566,8 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
     setSubmitState,
     setLastResult,
     onOutcome,
+    inactivePendingIdRef,
+    getLatestMessage,
     updateMessage,
     defaultSkipReason,
   } = args;
@@ -454,6 +576,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
   const submitCollected = useCallback(
     async (override?: Record<string, ClarificationAnswer>) => {
       if (!pendingId) return;
+      if (inactivePendingIdRef.current === pendingId) return;
       if (inflightRef.current) return;
       const current = { ...answersRef.current, ...(override ?? {}) };
       const haveAll = questionIds.every((id) => Boolean(current[id]));
@@ -486,6 +609,8 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       setSubmitState,
       setLastResult,
       onOutcome,
+      inactivePendingIdRef,
+      getLatestMessage,
       updateMessage,
     ],
   );
@@ -493,6 +618,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
   const skipAll = useCallback(
     async (reason?: string) => {
       if (!pendingId) return;
+      if (inactivePendingIdRef.current === pendingId) return;
       if (inflightRef.current) return;
       const effectiveReason = reason ?? defaultSkipReason;
       lastActionRef.current = { kind: "skip", reason: effectiveReason };
@@ -512,6 +638,8 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       setSubmitState,
       setLastResult,
       onOutcome,
+      inactivePendingIdRef,
+      getLatestMessage,
       updateMessage,
       defaultSkipReason,
     ],
@@ -544,6 +672,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
 // Decision A is preserved (per-question commit, batched on the wire) but the
 // final submit is no longer implicit — the user clicks "Submit answers" or
 // presses ArrowRight on the last step.
+// eslint-disable-next-line max-lines-per-function -- owns the complete clarification lifecycle and restoration fence.
 export function useClarificationGroup(
   messages: readonly Message[] | null | undefined,
   onOutcome?: (outcome: ClarificationOutcome) => void,
@@ -563,6 +692,7 @@ export function useClarificationGroup(
   // guarantee that only one POST is in flight at a time.
   const inflightRef = useRef(false);
   const requestGenerationRef = useRef(0);
+  const inactivePendingIdRef = useRef<string | null>(null);
 
   const pendingId = useMemo(() => {
     if (!messages || messages.length === 0) return null;
@@ -602,6 +732,15 @@ export function useClarificationGroup(
   // current (see runClarificationRequest).
   const activePendingIdRef = useRef<string | null>(pendingId);
   activePendingIdRef.current = pendingId;
+  const bundleStateKey = useMemo(() => clarificationBundleStateKey(messages), [messages]);
+
+  const getLatestMessage = useCallback(
+    (sessionId: string, messageId: string) => {
+      const messages = storeApi.getState().messages?.bySession?.[sessionId];
+      return messages?.find((message) => message.id === messageId);
+    },
+    [storeApi],
+  );
 
   // i18n-exempt: the default reason is POSTed as the clarification answer and
   // reaches the agent verbatim; it is not rendered in the UI.
@@ -617,6 +756,8 @@ export function useClarificationGroup(
     setSubmitState,
     setLastResult,
     onOutcome,
+    inactivePendingIdRef,
+    getLatestMessage,
     updateMessage: storeApi.getState().updateMessage,
     defaultSkipReason: t("task:userSkippedClarification"),
   });
@@ -642,8 +783,43 @@ export function useClarificationGroup(
       setLastResult(null);
       resetLastAction();
       inflightRef.current = false;
+      inactivePendingIdRef.current = null;
     }
   }, [pendingId, resetLastAction, inflightRef]);
+
+  const lastBundleStateKeyRef = useRef(bundleStateKey);
+  useEffect(() => {
+    const changed = lastBundleStateKeyRef.current !== bundleStateKey;
+    lastBundleStateKeyRef.current = bundleStateKey;
+    if (!changed || inactivePendingIdRef.current !== pendingId || !pendingId) return;
+
+    const restored = messages?.some((message) => {
+      const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+      if (metadata?.pending_id !== pendingId || !isPendingClarificationMessage(message))
+        return false;
+      const current = getLatestMessage(message.session_id, message.id);
+      return current ? isPendingClarificationMessage(current) : false;
+    });
+    if (!restored) return;
+
+    requestGenerationRef.current += 1;
+    inactivePendingIdRef.current = null;
+    answersRef.current = {};
+    setAnswers({});
+    setSubmitState("idle");
+    setLastResult(null);
+    resetLastAction();
+    inflightRef.current = false;
+  }, [
+    answersRef,
+    bundleStateKey,
+    getLatestMessage,
+    inflightRef,
+    messages,
+    pendingId,
+    requestGenerationRef,
+    resetLastAction,
+  ]);
 
   return {
     pendingId,

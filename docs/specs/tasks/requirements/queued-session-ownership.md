@@ -144,7 +144,7 @@ destination entry, whereas a ceiling can delay a session already selected by ent
   After a limit change, the banner shall show refreshed state without a page
   reload and remain until dispatch or final disposition is confirmed.
 
-- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.8:** Desktop and phone conversation
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10:** Desktop and phone conversation
   surfaces shall not show a parked-session banner, toolbar, badge, or recovery
   explanation. Normal conversation controls shall remain available. Genuine queued
   destinations shall retain queue status without a duplicate Start or Resume action.

@@ -5,7 +5,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { seedClarificationSession } from "../../helpers/clarification";
 import { waitForSessionState } from "../../helpers/session";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
@@ -361,6 +361,49 @@ test.describe("Clarification flow", () => {
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     await session.clarificationSkip().click();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("inactive dismissal removes the stale panel and does not retry", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Inactive Dismissal",
+      "clarification",
+    );
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    let attempts = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      attempts += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "not_active" }),
+      });
+    });
+
+    const inactiveResponse = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/clarification\/[^/]+\/respond$/,
+    );
+    await session.clarificationSkip().click();
+    await expect((await inactiveResponse).status()).toBe(409);
+
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+    await expect(session.anyIdleInput()).toBeVisible();
+    await dwell(
+      testPage,
+      250,
+      "negative-assertion",
+      "observe that an inactive clarification is not submitted a second time",
+    );
+    expect(attempts).toBe(1);
   });
 
   test("timeout detaches clarification and accepts a custom deferred answer", async ({
