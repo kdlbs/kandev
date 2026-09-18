@@ -8,12 +8,14 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/kandev/kandev/internal/orchestration/maintenance"
 	"github.com/kandev/kandev/internal/orchestration/personas"
 	orchestrationruntime "github.com/kandev/kandev/internal/orchestration/runtime"
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"path/filepath"
 	"strings"
 )
 
@@ -26,6 +28,7 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 		return orch.PersonaSessionTerminator().TerminateAllForAgent(ctx, id, "orchestrator_deleted")
 	}}
 	return &orchestrationruntime.Service{
+		Maintenance:      maintenance.New(filepath.Join(cfg.ResolvedDataDir(), "orchestration-maintenance")),
 		AssistantEnabled: cfg.Features.Orchestration && cfg.Features.PersonalAssistant,
 		Repo:             repos.Orchestration, Personas: personasSvc, Runs: repos.Runs,
 		Auth: runtimeauth.NewAgentAuth(""), Tasks: services.Task,

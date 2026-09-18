@@ -39,6 +39,8 @@ type Launch struct {
 	Env                                              map[string]string
 }
 type Service struct {
+	Maintenance      MaintenanceSandbox
+	maintenanceMu    sync.Mutex
 	Inputs           InputResolver
 	AssistantEnabled bool
 	Attention        AttentionReader

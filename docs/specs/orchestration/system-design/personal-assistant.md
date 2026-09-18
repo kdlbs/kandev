@@ -21,7 +21,9 @@ requirements:
 This design completes the existing `internal/orchestration` assistant. Ownership,
 durable intake, objectives, context/credential metadata, capability discovery and
 enforced inspect mode, attention, native resolution and the app-level shell are
-implemented. Maintenance and workspace grants remain pending. The
+implemented. The maintenance backend foundation is implemented; its review UI,
+closure/recovery and broker integration remain in progress. Workspace grants
+remain pending. The
 [workspace Coordinator view](coordinator-view.md) is a separate observation UI
 that may ship first. Its grouped task list is not an assistant attention ledger.
 
@@ -265,6 +267,15 @@ The human maintenance grant specifies repository/workspace/profile and permitted
 local actions. Reuse objective/routing/receipts to create or adopt one isolated
 normal task. Record positive and negative regressions and a local commit. No
 automatic push, PR, merge, production restart, deployment or policy broadening.
+
+The [closed maintenance preparation decision](../../../decisions/2026-09-18-closed-maintenance-preparation.md)
+defines the executor boundary: exact file/action scope, fixed positive/negative
+checks in a qualified local Docker sandbox, private checkout and tree-bound
+local commit receipts. Checks can read the committed repository snapshot; patches
+are limited to the granted files. General native agent dispatch and contribution
+fork preparation are unavailable to maintenance tasks. Grants are human-only and
+expire within seven days; binding, intent, profile/configuration and native access
+are rechecked before effects. Unsupported isolation leaves the proposal intact.
 
 ## Workspace grants
 

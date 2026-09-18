@@ -23,6 +23,9 @@ func (h *Handler) delegationObjective(c *gin.Context, claims *runtimeauth.AgentC
 	if err != nil || o.WorkspaceID != claims.WorkspaceID {
 		return nil, fmt.Errorf("objective unavailable")
 	}
+	if err = h.checkOrdinaryObjective(c, b.ID, id); err != nil {
+		return nil, err
+	}
 	if o.Mode != executionModeExecute && o.Mode != executionModeDesign {
 		return nil, fmt.Errorf("answer and inspect do not delegate delivery work")
 	}
@@ -40,6 +43,14 @@ func (h *Handler) delegationObjective(c *gin.Context, claims *runtimeauth.AgentC
 		return nil, fmt.Errorf("update the objective for current user intent before delegation")
 	}
 	return o, nil
+}
+
+func (h *Handler) checkOrdinaryObjective(c *gin.Context, binding, id string) error {
+	maintenance, err := h.Service.Repo.IsMaintenanceObjective(c.Request.Context(), binding, id)
+	if err != nil || maintenance {
+		return fmt.Errorf("maintenance objectives require the closed repair controls")
+	}
+	return nil
 }
 
 func delegationReference(o *models.Objective, contextRef, operationID string) models.DelegationReference {

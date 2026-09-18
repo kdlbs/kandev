@@ -16,19 +16,23 @@ const (
 )
 
 const (
-	statusAcknowledged    = "acknowledged"
-	intentRevisionKey     = "intent_revision"
-	attentionKindQuestion = "question"
-	statusActive          = "active"
-	authorTypeAgent       = "agent"
-	executionModeDesign   = "design"
-	errorResponseKey      = "error"
-	statusFailed          = "failed"
-	nextCursorKey         = "next_cursor"
-	healthUnavailable     = "unavailable"
-	statusUnknown         = "unknown"
-	authorTypeUser        = "user"
-	scopeWorkspace        = "workspace"
+	statusAcknowledged          = "acknowledged"
+	intentRevisionKey           = "intent_revision"
+	attentionKindQuestion       = "question"
+	attentionKindPermission     = "permission"
+	attentionKindAuthentication = "authentication"
+	attentionKindFailure        = "failure"
+	entriesKey                  = "entries"
+	statusActive                = "active"
+	authorTypeAgent             = "agent"
+	executionModeDesign         = "design"
+	errorResponseKey            = "error"
+	statusFailed                = "failed"
+	nextCursorKey               = "next_cursor"
+	healthUnavailable           = "unavailable"
+	statusUnknown               = "unknown"
+	authorTypeUser              = "user"
+	scopeWorkspace              = "workspace"
 )
 
 type Handler struct {
@@ -42,6 +46,14 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	assistant.PUT("/assistant", h.selectAssistant)
 	assistant.POST("/assistant/control", h.assistantControl)
 	assistant.GET("/assistant/objectives", h.objectives)
+	assistant.GET("/assistant/improvements", h.improvements)
+	assistant.GET("/runtime/improvements", h.improvements)
+	assistant.GET("/assistant/improvements/:id", h.improvement)
+	assistant.GET("/runtime/improvements/:id", h.improvement)
+	assistant.PUT("/assistant/improvements/:id/grant", h.saveMaintenanceGrant)
+	assistant.DELETE("/assistant/improvements/:id/grant", h.revokeMaintenanceGrant)
+	assistant.POST("/assistant/improvements/:id/maintenance", h.maintenanceAction)
+	assistant.POST("/runtime/improvements/:id/maintenance", h.maintenanceAction)
 	assistant.GET("/assistant/attention", h.attention)
 	assistant.GET("/assistant/attention/:id/input", h.attentionInput)
 	assistant.GET("/runtime/attention/:id/input", h.attentionInput)
@@ -340,6 +352,9 @@ func (h *Handler) manageTask(c *gin.Context) {
 	req.ChiefID = claims.AgentProfileID
 	req.TaskID = c.Param("id")
 	h.performOperation(c, claims, req.OperationRequest, req, http.StatusOK, func() (any, error) {
+		if err := h.rejectMaintenanceTaskControl(c, req.TaskID); err != nil {
+			return nil, err
+		}
 		objective, err := h.delegationObjective(c, claims, req.ObjectiveID, "")
 		if err != nil {
 			return nil, rejectOperation(422, err.Error())
@@ -378,6 +393,9 @@ func (h *Handler) updateTask(c *gin.Context) {
 		return
 	}
 	h.performOperation(c, claims, req.OperationRequest, req, http.StatusOK, func() (any, error) {
+		if err := h.rejectMaintenanceTaskControl(c, c.Param("id")); err != nil {
+			return nil, err
+		}
 		if err := h.authorizeTaskEffect(c, claims, ""); err != nil {
 			return nil, err
 		}

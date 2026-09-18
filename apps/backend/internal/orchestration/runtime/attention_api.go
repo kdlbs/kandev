@@ -48,7 +48,7 @@ func (h *Handler) attention(c *gin.Context) {
 			visible = append(visible, row)
 		}
 	}
-	c.JSON(200, gin.H{"entries": visible, nextCursorKey: next, "binding_version": b.Version})
+	c.JSON(200, gin.H{entriesKey: visible, nextCursorKey: next, "binding_version": b.Version})
 }
 func attentionAfter(raw, scope string) (string, bool) {
 	if raw == "" {

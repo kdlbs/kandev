@@ -87,6 +87,9 @@ type CreateTaskRequest struct {
 	// surfaces set it; programmatic callers such as MCP must leave it false.
 	RecordAgentProfileRecentUse bool `json:"-"`
 	PlanMode                    bool `json:"plan_mode,omitempty"`
+	// LocalPreparationOnly excludes provider destination preparation. It is
+	// authored by the closed maintenance adapter, never by task API input.
+	LocalPreparationOnly bool `json:"-"`
 
 	// StartAgent reports that the caller intends to launch an agent for this
 	// task right away. It only steers step resolution (see resolveWorkflowStep)

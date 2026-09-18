@@ -1,7 +1,7 @@
 ---
 id: "09-workflow-improvements"
 title: "Supervised workflow improvement loop"
-status: pending
+status: in_progress
 wave: 7
 depends_on: ["05-tool-authority","06-attention","07-input-resolution","08-assistant-ui"]
 plan: "plan.md"
@@ -109,4 +109,43 @@ cannot be established, offer the proposal only and document unsupported repair.
 
 ## Results
 
-Pending. Record red/green test evidence, exact commands and counts, relevant artifacts, owned changes and cleanup here; synchronize the plan checkbox only after acceptance is met.
+In progress. The foundation includes typed native friction and original event
+times, deduplicated threshold aggregation, human-only revisioned grants,
+maintenance objectives and one native review task, private file CAS, qualified
+offline container checks, and validated local commit receipts. General task
+dispatch and ordinary objective delegation cannot bypass the maintenance path.
+The executor decision is recorded in
+[ADR-2026-09-18](../../decisions/2026-09-18-closed-maintenance-preparation.md).
+
+Behavioral red/green checks cover both SQL engines, actual isolated Git/Docker
+operations, concurrent file CAS, revoked grants before effects, foreign owners,
+unknown gate provenance, source-time windowing and old-workspace visibility.
+Detailed final checkpoint verification is recorded below after checks complete.
+
+Remaining: proposal/grant/review UI, named broker tools, file/artifact inspection,
+human closure with subsequent native success, recurrence after closure,
+retention/recovery integration and combined browser coverage. This work order
+and its plan checkbox remain incomplete until those outcomes are verified.
+
+### Foundation checkpoint verification, 2026-09-18
+
+From `apps/backend`, with the repository toolchain, an owned PostgreSQL fixture
+and `KANDEV_TEST_MAINTENANCE_IMAGE` set to an installed immutable Linux image:
+
+```sh
+GIN_MODE=release go test -race -tags fts5 -count=1 ./internal/orchestration/... ./internal/persistence/storeconformance
+GIN_MODE=release go test -race -tags fts5 -count=1 ./internal/persistence/storeconformance -run 'TestAssistant(Friction|Maintenance)'
+GIN_MODE=release go test -tags fts5 -count=1 ./internal/persistence/storeconformance -run 'TestPreviousStableUpgrade|TestUpgradeFixtureManifest'
+GIN_MODE=release go test -tags fts5 -count=1 ./internal/backendapp ./internal/task/service -run 'Test(Assistant|WorkspaceTask|Contribution|CreateTask.*Contribution)'
+go run ./cmd/sqlguard ./internal
+golangci-lint run --new-from-rev=upstream/release-v0.94.0
+```
+
+All passed. The full store suite passed in 117.2 seconds; the final open-candidate
+index received a subsequent both-engine friction/grant race check (5.9 seconds)
+and previous-stable upgrade check (19.1 seconds). The real sandbox package passed
+under the race detector in 3.8 seconds, including container isolation, stale tree
+rejection and unchanged source checkout. Runtime race checks passed in 21.5
+seconds. SQL guard, full specification lint and diff whitespace checks passed.
+No live service or real prompt history was used. Test repair containers are
+removed; the owned database fixture remains available for the next SQL slice.

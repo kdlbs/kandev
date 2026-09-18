@@ -7,12 +7,14 @@ const AttentionExpired = "expired"
 
 // AttentionSource contains references and bounded safe text, never tool arguments.
 type AttentionSource struct {
-	SourceID       string `json:"source_id" db:"source_id"`
-	SessionID      string `json:"session_id" db:"session_id"`
-	Kind           string `json:"kind" db:"kind"`
-	State          string `json:"state" db:"state"`
-	SourceRevision string `json:"source_revision" db:"source_revision"`
-	Summary        string `json:"summary" db:"summary"`
+	Friction       *FrictionCause `json:"-" db:"-"`
+	ObservedAt     *time.Time     `json:"-" db:"-"`
+	SourceID       string         `json:"source_id" db:"source_id"`
+	SessionID      string         `json:"session_id" db:"session_id"`
+	Kind           string         `json:"kind" db:"kind"`
+	State          string         `json:"state" db:"state"`
+	SourceRevision string         `json:"source_revision" db:"source_revision"`
+	Summary        string         `json:"summary" db:"summary"`
 }
 type Attention struct {
 	AttentionSource

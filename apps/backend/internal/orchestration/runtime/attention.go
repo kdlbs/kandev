@@ -99,6 +99,10 @@ func (s *Service) reconcileAttentionTarget(ctx context.Context, target models.At
 	if err != nil {
 		return err
 	}
+	var frictionErr error
+	if readErr == nil {
+		frictionErr = s.observeFriction(ctx, b, target.TaskID, sources)
+	}
 	if changed && s.AttentionUpdated != nil {
 		s.AttentionUpdated(ctx, b.ID, s.attentionNow())
 	}
@@ -113,9 +117,9 @@ func (s *Service) reconcileAttentionTarget(ctx context.Context, target models.At
 		return err
 	}
 	if paused(a) {
-		return nil
+		return frictionErr
 	}
-	return s.dispatchAttentionWakes(ctx, b, target.TaskID)
+	return errors.Join(s.dispatchAttentionWakes(ctx, b, target.TaskID), frictionErr)
 }
 func unknownAttentionSources(previous []models.Attention) []models.AttentionSource {
 	sources := make([]models.AttentionSource, 0, len(previous)+1)
@@ -129,7 +133,7 @@ func unknownAttentionSources(previous []models.Attention) []models.AttentionSour
 		}
 		sources = append(sources, source)
 	}
-	return append(sources, models.AttentionSource{SourceID: "source-health", Kind: "failure", State: statusUnknown, SourceRevision: healthUnavailable, Summary: "Current task attention is unavailable. Open the native task to check its state."})
+	return append(sources, models.AttentionSource{SourceID: "source-health", Kind: attentionKindFailure, State: statusUnknown, SourceRevision: healthUnavailable, Summary: "Current task attention is unavailable. Open the native task to check its state."})
 }
 func completeAttentionSources(sources []models.AttentionSource, previous []models.Attention) []models.AttentionSource {
 	seen := map[string]bool{}
@@ -142,7 +146,7 @@ func completeAttentionSources(sources []models.AttentionSource, previous []model
 			continue
 		}
 		source.State = "inactive"
-		if source.Kind == attentionKindQuestion || source.Kind == "permission" {
+		if source.Kind == attentionKindQuestion || source.Kind == attentionKindPermission {
 			source.State = models.AttentionExpired
 		}
 		sources = append(sources, source)
@@ -161,7 +165,7 @@ func validateAttentionSources(sources []models.AttentionSource) error {
 		if seen[key] || s.SourceID == "" || len(s.SourceID) > 1024 || len(s.SessionID) > 200 || s.SourceRevision == "" || len(s.SourceRevision) > 256 {
 			return fmt.Errorf("invalid attention identity")
 		}
-		if !slices.Contains([]string{attentionKindQuestion, "permission", "authentication", "failure", "review", "result"}, s.Kind) || !slices.Contains([]string{models.AttentionPending, "resolved", "expired", statusUnknown, "inactive"}, s.State) {
+		if !slices.Contains([]string{attentionKindQuestion, attentionKindPermission, attentionKindAuthentication, attentionKindFailure, "review", "result"}, s.Kind) || !slices.Contains([]string{models.AttentionPending, "resolved", "expired", statusUnknown, "inactive"}, s.State) {
 			return fmt.Errorf("invalid attention state")
 		}
 		seen[key] = true

@@ -3,6 +3,7 @@ package models
 // WorkspaceTaskSpec selects existing Kanban resources for delegated work.
 // WorkspaceID is supplied by the authenticated runtime, never by the agent payload.
 type WorkspaceTaskSpec struct {
+	MaintenanceCandidateID string
 	DelegationReference
 	DirectProfile  bool
 	WorkspaceID    string

@@ -262,3 +262,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-09-05-trusted-browser-html-preview | [Treat HTML Preview as Trusted Workspace Code](2026-09-05-trusted-browser-html-preview.md) | accepted | frontend, backend, agentctl, security | 2026-09-05 |
 | 2026-09-07-activate-managed-runtime-defaults | [Activate Shipped Managed Runtime Defaults](2026-09-07-activate-managed-runtime-defaults.md) | accepted | backend, frontend, protocol | 2026-09-07 |
 | 2026-09-17-restricted-assistant-broker | [Restrict the assistant to a native broker](2026-09-17-restricted-assistant-broker.md) | accepted | backend, protocol, security | 2026-09-17 |
+| 2026-09-18-closed-maintenance-preparation | [Prepare workflow repairs through closed operations](2026-09-18-closed-maintenance-preparation.md) | accepted | backend, protocol, workflow | 2026-09-18 |

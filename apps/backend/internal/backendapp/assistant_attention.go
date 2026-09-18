@@ -14,6 +14,7 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"strings"
+	"time"
 )
 
 const attentionQuestion = "question"
@@ -86,12 +87,14 @@ func attentionSafeSummary(value string) string {
 }
 func (a *assistantAttentionReader) interactionSource(r *taskmodels.Interaction, live []streams.PendingAgentPermission) shared.AttentionSource {
 	source := shared.AttentionSource{SourceID: attentionNativeIdentity(r), SessionID: r.SessionID, Kind: attentionQuestion, State: shared.AttentionPending, SourceRevision: attentionDigest(r), Summary: attentionSafeSummary(r.Title)}
+	source.ObservedAt = &r.CreatedAt
 	if r.Kind == taskmodels.InteractionKindPermission {
 		source.Kind = attentionPermission
 		source.Summary = "A native tool permission needs your decision."
 	}
 	if r.Status.IsTerminal() {
 		source.State = attentionTerminalState(r.Status)
+		attachRejectedFriction(&source, r)
 		return source
 	}
 	if r.Kind == taskmodels.InteractionKindPermission {
@@ -140,6 +143,7 @@ func (a *assistantAttentionReader) completeAttentionSnapshot(ctx context.Context
 			if canonical != nil && canonical.TaskID == task && canonical.SessionID == old.SessionID {
 				source.State = attentionTerminalState(canonical.Status)
 				source.SourceRevision = attentionDigest(canonical)
+				attachRejectedFriction(&source, canonical)
 			}
 		} else {
 			source.State = "inactive"
@@ -158,14 +162,14 @@ func taskAttentionSources(task *taskmodels.Task, sessions []*taskmodels.TaskSess
 		sources = append(sources, shared.AttentionSource{SourceID: "task-state", Kind: kind, State: shared.AttentionPending, SourceRevision: attentionDigest(string(task.State)), Summary: "Task status changed; inspect current acceptance and review evidence."})
 	}
 	if e, ok := taskmodels.LoadTaskLaunchError(task.Metadata); ok {
-		sources = append(sources, errorAttentionSource("", e.Stamp(), e.Code))
+		sources = append(sources, errorAttentionSource("", e.Stamp(), e.Code, e.OccurredAt))
 	}
 	for _, session := range sessions {
 		if session.TaskID != task.ID {
 			continue
 		}
 		if e, ok := taskmodels.LoadLastAgentError(session.Metadata); ok && !e.IsDismissed() {
-			sources = append(sources, errorAttentionSource(session.ID, e.Stamp(), e.Code))
+			sources = append(sources, errorAttentionSource(session.ID, e.Stamp(), e.Code, e.OccurredAt))
 			continue
 		}
 		switch session.State {
@@ -177,12 +181,24 @@ func taskAttentionSources(task *taskmodels.Task, sessions []*taskmodels.TaskSess
 	}
 	return sources
 }
-func errorAttentionSource(session, stamp, code string) shared.AttentionSource {
+func errorAttentionSource(session, stamp, code string, observed ...time.Time) shared.AttentionSource {
 	kind, summary := "failure", "A native task or session error needs attention. Open the task for details."
-	if code == "auth_required" || code == "authentication_required" || code == "missing_credentials" {
-		kind, summary = "authentication", "The selected provider requires authentication. Use the native account controls."
+	if code == "auth_required" || code == frictionAuthenticationRequired || code == "missing_credentials" {
+		kind, summary = frictionOriginAuthentication, "The selected provider requires authentication. Use the native account controls."
 	}
-	return shared.AttentionSource{SourceID: "active-error", SessionID: session, Kind: kind, State: shared.AttentionPending, SourceRevision: attentionDigest(stamp), Summary: summary}
+	row := shared.AttentionSource{SourceID: "active-error", SessionID: session, Kind: kind, State: shared.AttentionPending, SourceRevision: attentionDigest(stamp), Summary: summary, Friction: frictionCauseForError(code)}
+	if len(observed) > 0 {
+		row.ObservedAt = &observed[0]
+	}
+	return row
+}
+
+func attachRejectedFriction(source *shared.AttentionSource, r *taskmodels.Interaction) {
+	if r.Status != taskmodels.InteractionStatusRejected {
+		return
+	}
+	source.ObservedAt = &r.UpdatedAt
+	source.Friction = &shared.FrictionCause{Origin: frictionOriginNative, Operation: source.Kind, Reason: "denied_authority", Cause: source.Kind + "_rejected"}
 }
 
 func attentionNativeIdentity(request *taskmodels.Interaction) string {

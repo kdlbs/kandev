@@ -374,6 +374,9 @@ func (s *Service) prepareContributionDestination(ctx context.Context, req *Creat
 	if workflow == nil || workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID == "" {
 		return nil
 	}
+	if req.LocalPreparationOnly {
+		return fmt.Errorf("local preparation cannot invoke contribution destination effects")
+	}
 	repositories, err := s.loadContributionDestinationRepositories(ctx, req)
 	if err != nil {
 		return err

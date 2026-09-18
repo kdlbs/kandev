@@ -32,6 +32,12 @@ func (r *Repository) Migrate() error {
 	if err := r.migrateAttention(); err != nil {
 		return err
 	}
+	if err := r.migrateFriction(); err != nil {
+		return err
+	}
+	if err := r.migrateMaintenance(); err != nil {
+		return err
+	}
 	if err := r.ImportLegacyState(); err != nil {
 		return err
 	}

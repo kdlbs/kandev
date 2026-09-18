@@ -26,6 +26,10 @@ func TestAssistantFeatureGateDefaultRoutes(t *testing.T) {
 		{"PUT", "/assistant/memory/example"}, {"DELETE", "/assistant/memory/example"},
 		{"GET", "/assistant/credentials"}, {"PUT", "/assistant/credentials/example"},
 		{"GET", "/runtime/objectives"}, {"POST", "/runtime/objectives"},
+		{"GET", "/assistant/improvements"}, {"GET", "/runtime/improvements"},
+		{"GET", "/assistant/improvements/example"}, {"GET", "/runtime/improvements/example"},
+		{"PUT", "/assistant/improvements/example/grant"}, {"DELETE", "/assistant/improvements/example/grant"},
+		{"POST", "/assistant/improvements/example/maintenance"}, {"POST", "/runtime/improvements/example/maintenance"},
 		{"PATCH", "/runtime/objectives/example"}, {"GET", "/runtime/context/example"},
 	} {
 		t.Run(methodPath[0]+methodPath[1], func(t *testing.T) {

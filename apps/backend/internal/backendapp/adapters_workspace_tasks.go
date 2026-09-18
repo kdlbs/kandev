@@ -23,6 +23,12 @@ func (a *taskCreatorAdapter) CreateWorkspaceTask(ctx context.Context, spec share
 		return "", err
 	}
 	metadata := map[string]interface{}{"orchestration_chief_id": spec.ChiefID}
+	if spec.MaintenanceCandidateID != "" {
+		if _, err := a.ValidateMaintenanceScope(ctx, spec.WorkspaceID, shared.MaintenanceScope{RepositoryID: spec.RepositoryID, WorkflowID: workflowID, WorkflowStepID: spec.WorkflowStepID}); err != nil {
+			return "", err
+		}
+		metadata["orchestration_maintenance_candidate"] = spec.MaintenanceCandidateID
+	}
 	if spec.ObjectiveID != "" {
 		metadata["orchestration_objective_id"], metadata["orchestration_context_ref"] = spec.ObjectiveID, spec.ContextRef
 		metadata["orchestration_acceptance_revision"], metadata["orchestration_source_comment_id"] = spec.AcceptanceRevision, spec.SourceCommentID
@@ -42,8 +48,9 @@ func (a *taskCreatorAdapter) CreateWorkspaceTask(ctx context.Context, spec share
 		return "", err
 	}
 	req := &taskservice.CreateTaskRequest{
-		PlanMode:    spec.ExecutionMode == "design",
-		WorkspaceID: spec.WorkspaceID, WorkflowID: workflowID, WorkflowStepID: spec.WorkflowStepID,
+		LocalPreparationOnly: spec.MaintenanceCandidateID != "",
+		PlanMode:             spec.ExecutionMode == "design",
+		WorkspaceID:          spec.WorkspaceID, WorkflowID: workflowID, WorkflowStepID: spec.WorkflowStepID,
 		Title: spec.Title, Description: assistantDelegationPrompt(spec.Description, spec.DelegationReference), ParentID: spec.ParentID,
 		AssigneeAgentProfileID: profileID, Origin: models.TaskOriginAgentCreated, Metadata: metadata, ExternalID: spec.ExternalID,
 	}
@@ -151,6 +158,9 @@ func (a *taskCreatorAdapter) ManageWorkspaceTask(ctx context.Context, command sh
 	}
 	if task.IsFromOffice || task.IsEphemeral {
 		return fmt.Errorf("select a Kanban delivery task")
+	}
+	if candidate, _ := task.Metadata["orchestration_maintenance_candidate"].(string); candidate != "" {
+		return fmt.Errorf("maintenance tasks require the closed Assistant repair controls")
 	}
 	switch command.Action {
 	case "message":

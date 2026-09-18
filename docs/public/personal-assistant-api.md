@@ -61,6 +61,41 @@ Assistant mutations require `operation_id` and `expected_intent_revision`. Reuse
 
 The runtime CLI exposes `kandev objective list|create|update`. Delivery creation accepts `--mode execute|design` and an explicit permitted `--step`. Workflow defaults and repository-required design/review gates are not changed. Completion requires current evidence plus settled workers and required reviews; REVIEW alone is not completion.
 
+## Workflow maintenance foundation
+
+The maintenance backend is available behind the personal-assistant feature flag;
+the proposal/review interface and broker tools are still being completed. Lists
+and details use `GET /assistant/improvements` and
+`GET /assistant/improvements/:id`; current broker runs have equivalent
+`/runtime/improvements` read routes. Lists use bounded `limit` and opaque `after`
+cursors. Evidence contains typed native metadata, not private prompt bodies.
+Three matching incidents across two tasks in seven days create a proposal.
+Reading old native events again does not create new occurrences.
+
+Only the owner can `PUT /assistant/improvements/:id/grant`, with
+`expected_binding_version`, `expected_revision`, `candidate_revision`,
+`expires_at` and `scope`. Scope names `repository_id`, `workflow_id`,
+`workflow_step_id`, `profile_id`, exact `files`, local `actions`
+(`read`, `patch`, `test`, `commit`), an installed Linux container `image`, and
+`positive_check`/`negative_check` argument arrays. The backend qualifies local
+Docker isolation, resolves the immutable image and committed repository base,
+and refuses unsupported configurations. Expiry is at most seven days.
+`DELETE` on the grant route requires the current binding and grant revisions.
+
+`POST /assistant/improvements/:id/maintenance` and its `/runtime` counterpart
+accept `prepare`, `patch`, `check` or `commit`, plus operation ID, expected intent
+and binding revisions, candidate revision and grant revision. Patch supplies
+`file: {path, sha256, content}`. Preparation creates a private checkout and one
+native review task. A general agent cannot run that task. Checks run offline in
+a read-only container and can read the entire committed repository snapshot;
+only the exact granted files can be patched. Commit requires passing positive
+and negative checks for the same tree and grant revision.
+
+The resulting local commit is a prepared review artifact, not proof that the
+affected workflow recovered. Maintenance does not publish, create a PR, deploy,
+restart the application or modify the original checkout. Revocation blocks
+subsequent effects while preserving completed receipts.
+
 ## Memory and context
 
 The owner uses `GET /assistant/memory` (optional `scope`, `scope_id`, `limit` and

@@ -37,7 +37,7 @@ func (h *Handler) memory(c *gin.Context) {
 		}
 		filtered = append(filtered, row)
 	}
-	c.JSON(200, gin.H{"entries": filtered, "memory": filtered, "count": len(filtered)})
+	c.JSON(200, gin.H{entriesKey: filtered, "memory": filtered, "count": len(filtered)})
 }
 
 func (h *Handler) runtimeMemory(c *gin.Context) {

@@ -81,6 +81,9 @@ func (h *Handler) createObjective(c *gin.Context) {
 		if err != nil || source.AuthorType != authorTypeUser || source.AuthorID != binding.OwnerUserID {
 			return nil, rejectOperation(422, "objective requires an owner-authored source comment")
 		}
+		if source.Source == "maintenance_grant" {
+			return nil, rejectOperation(422, "maintenance confirmation cannot authorize a general delivery objective")
+		}
 		row := &models.Objective{BindingID: binding.ID, WorkspaceID: binding.WorkspaceID, SourceCommentID: req.Source, Title: req.Title, Mode: req.Mode, Status: statusActive, Acceptance: req.Acceptance, Evidence: []models.Evidence{}, IntentRevision: *req.ExpectedIntentRevision}
 		if err := row.Validate(); err != nil {
 			return nil, rejectOperation(422, err.Error())
@@ -114,6 +117,10 @@ func (h *Handler) updateObjective(c *gin.Context) {
 }
 
 func (h *Handler) applyObjectiveUpdate(ctx context.Context, b *models.AssistantBinding, id string, req objectiveUpdate) (*models.Objective, error) {
+	maintenance, err := h.Service.Repo.IsMaintenanceObjective(ctx, b.ID, id)
+	if err != nil || maintenance {
+		return nil, rejectOperation(403, "maintenance objectives require owner review through the repair controls")
+	}
 	row, err := h.Service.Repo.Objective(ctx, b.ID, id)
 	if err != nil {
 		return nil, rejectOperation(404, "objective unavailable")

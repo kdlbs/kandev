@@ -200,7 +200,7 @@ func assistantRequestEffect(c *gin.Context) string {
 	switch path {
 	case "/runtime/comments", "/runtime/objectives", "/runtime/objectives/:id":
 		return "receipt"
-	case "/runtime/tasks", "/runtime/tasks/:id/manage", "/runtime/tasks/:id/status", "/runtime/attention/:id/answer":
+	case "/runtime/tasks", "/runtime/tasks/:id/manage", "/runtime/tasks/:id/status", "/runtime/attention/:id/answer", "/runtime/improvements/:id/maintenance":
 		return "task_write"
 	default:
 		return statusUnknown

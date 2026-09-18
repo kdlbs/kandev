@@ -28,7 +28,7 @@ func (s *Service) credentialObservation(ctx context.Context, b *models.Assistant
 			validation.ValidatedAt = &checked
 		}
 		if validation.Status == healthReady && (validation.ValidatedAt == nil || observed.ConfigurationGeneration == "") {
-			validation.Status, validation.Reason = "unknown", "not_checked"
+			validation.Status, validation.Reason = statusUnknown, "not_checked"
 		}
 		validation.ConfigurationGeneration = cursorScope("credential-v1", profile, d.Resolver, d.Reference, strconv.FormatInt(d.Revision, 10), observed.ConfigurationGeneration)
 	}
@@ -50,6 +50,6 @@ func credentialHealthReason(status string) (string, string) {
 	case healthUnavailable:
 		return status, "resolver_unavailable"
 	default:
-		return "unknown", "not_checked"
+		return statusUnknown, "not_checked"
 	}
 }

@@ -15,6 +15,9 @@ import (
 
 func assistantDispatchGuard(s *orchestrationruntime.Service, owners *orchstore.Repository) executor.DispatchGuard {
 	return func(ctx context.Context, task *models.Task, session *models.TaskSession, profile string) error {
+		if err := checkMaintenanceDispatch(ctx, owners, task); err != nil {
+			return err
+		}
 		if err := checkAssistantConversationDispatch(ctx, s, owners, task.ID); err != nil {
 			return err
 		}
@@ -50,6 +53,23 @@ func assistantDispatchGuard(s *orchestrationruntime.Service, owners *orchstore.R
 		}
 		return nil
 	}
+}
+
+func checkMaintenanceDispatch(ctx context.Context, owners *orchstore.Repository, task *models.Task) error {
+	if id, _ := task.Metadata["orchestration_maintenance_candidate"].(string); id != "" {
+		return fmt.Errorf("maintenance tasks require the closed Assistant repair controls")
+	}
+	if owners == nil {
+		return nil
+	}
+	maintenance, err := owners.IsMaintenanceTask(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	if maintenance {
+		return fmt.Errorf("maintenance tasks require the closed Assistant repair controls")
+	}
+	return nil
 }
 
 func checkAssistantConversationDispatch(ctx context.Context, s *orchestrationruntime.Service, owners *orchstore.Repository, taskID string) error {
