@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/persistence"
@@ -95,6 +96,9 @@ func TestRunOutcomeActivation_WrittenOnceAfterSchemaProbe(t *testing.T) {
 // boot order (see internal/office/repository/sqlite/workflow_test.go).
 func TestPostgresRunOutcomeMigration_AddsColumnAndActivates(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
 	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init task repo: %v", err)
 	}

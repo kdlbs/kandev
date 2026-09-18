@@ -6,6 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/testutil"
@@ -18,6 +19,9 @@ import (
 func TestPostgresContinuationScopeMigration(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	ctx := context.Background()
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
 
 	if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
 		t.Fatalf("init task repo: %v", err)

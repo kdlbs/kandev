@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
@@ -26,6 +27,9 @@ import (
 // set.
 func TestPostgresQueueRun_DedupesOnIdempotencyIndexRace(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("init settings store: %v", err)
+	}
 	// runs is created by the office repo's own schema init, but that init
 	// references the tasks table, so the task repository's schema must
 	// run first — mirroring production boot order (see failure_postgres_test.go).
