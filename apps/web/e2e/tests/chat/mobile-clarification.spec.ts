@@ -262,6 +262,70 @@ test.describe("Mobile clarification multiline answer", () => {
     expect(attempts).toBe(1);
   });
 
+  test("late answer from an inactive historical question sends a new message on mobile", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Late Answer",
+      { scenario: "clarification" },
+    );
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for mobile late answer");
+
+    let responseAttempts = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      responseAttempts += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "not_active" }),
+      });
+    });
+
+    const inactiveResponse = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/clarification\/[^/]+\/respond$/,
+    );
+    await session.clarificationSkip().tap();
+    await expect((await inactiveResponse).status()).toBe(409);
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+
+    const answerAction = testPage.getByTestId("clarification-answer-as-new-message");
+    await expect(answerAction).toBeVisible({ timeout: 15_000 });
+    await answerAction.tap();
+    await expect(testPage.getByTestId("clarification-late-submit")).toBeDisabled();
+    await testPage.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" }).tap();
+    await expect(testPage.getByTestId("clarification-late-submit")).toBeEnabled();
+
+    await testPage.getByTestId("clarification-late-submit").tap();
+
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.some(
+            (message) =>
+              message.author_type === "user" &&
+              message.content.includes("Question 1") &&
+              message.content.includes("PostgreSQL"),
+          );
+        },
+        {
+          timeout: 30_000,
+          message: "mobile late clarification answer should be admitted as a message",
+        },
+      )
+      .toBe(true);
+    expect(responseAttempts).toBe(1);
+  });
+
   test("keeps the over-limit counter inside the phone viewport", async ({
     testPage,
     apiClient,

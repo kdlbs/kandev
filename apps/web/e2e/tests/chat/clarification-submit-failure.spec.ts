@@ -4,7 +4,7 @@
 // reported to the user as a successful answer.
 import { test, expect } from "../../fixtures/test-base";
 import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
-import { dwell, watchWs } from "../../helpers/causal-waits";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionSettled } from "./quick-chat-helpers";
 
 test.describe("Clarification submit failure feedback", () => {
@@ -68,7 +68,7 @@ test.describe("Clarification submit failure feedback", () => {
     expect(attempt).toBe(2);
   });
 
-  test("treats an inactive-bundle 409 as expired, never as a silent success", async ({
+  test("late answer fallback sends affirmative answers after an inactive-bundle 409", async ({
     testPage,
     apiClient,
     seedData,
@@ -97,17 +97,24 @@ test.describe("Clarification submit failure feedback", () => {
       });
     });
 
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for late clarification answer");
     await session.clarificationOption("PostgreSQL").click();
 
-    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("clarification-retry")).toHaveCount(0);
-    await expect(session.anyIdleInput()).toBeVisible();
-    await dwell(
-      testPage,
-      250,
-      "negative-assertion",
-      "observe that an inactive clarification is not submitted a second time",
-    );
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.some(
+            (message) =>
+              message.author_type === "user" &&
+              message.content.includes("Question 1") &&
+              message.content.includes("PostgreSQL"),
+          );
+        },
+        { timeout: 30_000, message: "inactive answer should be admitted as a new message" },
+      )
+      .toBe(true);
     expect(attempts).toBe(1);
   });
 });

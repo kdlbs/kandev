@@ -1,6 +1,8 @@
 "use client";
 
-import { IconMessageQuestion, IconCheck, IconX } from "@tabler/icons-react";
+import { useCallback, useRef, useState } from "react";
+import { IconMessageQuestion, IconCheck, IconX, IconMessagePlus } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import type {
   ClarificationAnswer,
   ClarificationQuestion,
@@ -9,9 +11,16 @@ import type {
 } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import { ClarificationMarkdown } from "../clarification-markdown";
+import { ClarificationInputOverlay } from "../clarification-input-overlay";
+import type { LateClarificationSnapshot } from "@/hooks/use-late-clarification-message";
+import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
 
 type ClarificationRequestMessageProps = {
   comment: Message;
+  messages?: readonly Message[];
+  onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
+  lateAnswerSnapshot?: LateClarificationSnapshot | null;
+  isCurrentTurn?: boolean;
 };
 
 function AnswerSummary({
@@ -55,8 +64,22 @@ function AnswerSummary({
  * Displays a resolved or superseded clarification request in the chat history.
  * The active pending clarification is shown in the input area instead.
  */
-export function ClarificationRequestMessage({ comment }: ClarificationRequestMessageProps) {
+// eslint-disable-next-line max-lines-per-function, complexity -- the transcript row owns question status and late-answer controls.
+export function ClarificationRequestMessage({
+  comment,
+  messages = [comment],
+  onLateAnswer,
+  lateAnswerSnapshot,
+  isCurrentTurn = false,
+}: ClarificationRequestMessageProps) {
   const { t } = useTranslation();
+  const [isAnswering, setIsAnswering] = useState(false);
+  const answerButtonRef = useRef<HTMLButtonElement>(null);
+  const answerScopeRef = useRef<HTMLDivElement>(null);
+  const closeAnswerForm = useCallback(() => {
+    setIsAnswering(false);
+    requestAnimationFrame(() => answerButtonRef.current?.focus());
+  }, []);
   const metadata = comment.metadata as ClarificationRequestMetadata | undefined;
 
   if (!metadata?.question) {
@@ -69,6 +92,8 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
   const isSkipped = status === "rejected";
   const isExpired = status === "expired";
   const isCancelled = status === "cancelled";
+  const canAnswerAsNewMessage =
+    !metadata.response && (status === "expired" || (status === "pending" && !isCurrentTurn));
 
   const getStatusIndicator = () => {
     if (isAnswered) {
@@ -138,6 +163,33 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
             >
               {getStatusIndicator()}
               {t("task:timedOutAgentMovedOn")}
+            </div>
+          )}
+          {canAnswerAsNewMessage && !isAnswering && (
+            <Button
+              ref={answerButtonRef}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 min-h-11 cursor-pointer gap-1.5 md:min-h-0"
+              onClick={() => setIsAnswering(true)}
+              data-testid="clarification-answer-as-new-message"
+            >
+              <IconMessagePlus className="h-3.5 w-3.5" />
+              {t("task:answerAsNewMessage")}
+            </Button>
+          )}
+          {canAnswerAsNewMessage && isAnswering && (
+            <div ref={answerScopeRef} className="mt-3 -ml-3 border-l border-border/60 pl-3">
+              <ClarificationInputOverlay
+                messages={messages}
+                mode="late"
+                onLateAnswer={onLateAnswer}
+                initialAnswers={lateAnswerSnapshot?.answers}
+                onResolved={() => {}}
+                shortcutScopeRef={answerScopeRef}
+                onDismiss={closeAnswerForm}
+              />
             </div>
           )}
         </div>

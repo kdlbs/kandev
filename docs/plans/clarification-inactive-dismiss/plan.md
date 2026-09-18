@@ -1,6 +1,6 @@
 ---
 created: 2026-09-18
-status: draft
+status: complete
 requirements:
   - REQ-TASKS-CLARIFICATION-LIFECYCLE-001
   - REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-001
@@ -15,12 +15,11 @@ legacy_specs: []
 ## Overview
 
 Repair the confirmed inactive-response path associated with
-[issue #3798](https://github.com/kdlbs/kandev/issues/3798).
-One work order updates shared response handling and proves desktop/phone recovery.
-Task 01 implements the previous removal-only behavior in PR #3799, head
-`6edc7320dd`. The user subsequently required late answers as ordinary messages.
-Task 02 supersedes removal-only presentation and remains pending. The package
-is not complete under the revised contract.
+[issue #3798](https://github.com/kdlbs/kandev/issues/3798) and preserve a useful
+conversation path after the original clarification waiter ends. Task 01
+reconciles inactive responses, race ordering, and Escape behavior. Task 02
+supersedes its removal-only presentation with late answers delivered as
+ordinary messages through the source task and session.
 
 ## Evidence and root cause
 
@@ -77,9 +76,8 @@ its actual outcome. Closing returns focus to its opener. Keep the existing
 phone scroll owner and safe areas; controls have 44px coarse-pointer targets.
 This view covers lifecycle criteria `.4` through `.9`. Exact spacing is illustrative.
 
-The original technical approach and results below document Task 01, not the
-acceptance criteria for Task 02. Production code must not be changed from this
-design handoff until the user explicitly requests implementation.
+The technical approach and results below retain Task 01's historical repair
+details and record Task 02's revised implementation separately.
 
 ## Requirement conformance
 
@@ -96,10 +94,16 @@ design handoff until the user explicitly requests implementation.
 
 ### In scope
 
-- Retire the submitted inactive bundle from the latest client message cache.
-- Preserve terminal siblings, newer bundles, and authoritative restoration.
-- Remove response controls from a static host's expired overlay.
-- Cover task chat on desktop and phone, plus shared hook and overlay behavior.
+- Reconcile submitted inactive bundles without overwriting newer authority,
+  terminal siblings, or restored pending rows.
+- Keep expired static overlays free of response controls and preserve the
+  existing Escape, collapse, and generation fences.
+- Offer historical unanswered questions an answer-as-new-message flow on
+  desktop and phone.
+- Preserve affirmative answers after recognized inactive responses and deliver
+  them through ordinary message admission with stable retry identity.
+- Localize the new actions and feedback, update public task guidance, and
+  validate the shared hook plus desktop/mobile browser flows.
 
 ### Out of scope
 
@@ -138,6 +142,13 @@ shared message cache. Their existing selectors remove the obsolete panel.
 The Inbox retains its existing `no_longer_active` handling. No host-specific
 successful-response callback substitutes for cache reconciliation.
 
+For Task 02, the shared late-answer adapter captures the source task/session,
+question bundle, and answers before invoking `useMessageHandler`. It reuses
+ordinary input-mode and queue admission, keeps the captured client message ID
+across remounts, and exposes sent, queued, and retryable failure outcomes.
+Historical transcript rows open the same inline question form in explicit
+new-message mode. The source conversation remains the routing authority.
+
 ## ASCII UI preview
 
 UI-01: Task chat after X receives `409 not_active`, desktop and phone.
@@ -166,8 +177,14 @@ Map this view to lifecycle AC `.2` and response-reliability AC `.1`.
   mounts, deleted rows, latest metadata preservation, authoritative restoration,
   and direct resubmission guards.
 - `clarification-input-overlay.test.tsx`: `X retires an inactive bundle without
-  another rejection request`; replace the existing expired-banner expectation
-  with a non-actionable notice and no success callback.
+another rejection request`; replace the existing expired-banner expectation
+  with a non-actionable notice and no success callback. Cover answer retention
+  and late-message success, queue, and retry feedback.
+- `clarification-request-message.test.tsx` and the formatter tests cover the
+  historical action, current-turn exclusion, question context, selected
+  labels, custom text, and system-marker neutralization.
+- `use-message-handler.test.ts` covers sent/queued outcomes, a current
+  clarification barrier, unavailable transport, and caller-owned retry IDs.
 - Existing timeout, retry, malformed-response, success, and collapse tests
   remain required. These cover response-reliability AC `.1` and `.4`.
 
@@ -181,23 +198,28 @@ Arm the HTTP causal wait before clicking/tapping X. Assert panel removal,
 composer availability, and no second rejection request. A newer bundle must
 remain answerable. Also retain existing real-backend Skip success coverage.
 
+Add `late answer` scenarios to the same desktop and phone files. Assert that a
+historical question can open the form, that the admitted message contains the
+question and answer, and that coarse-pointer controls remain reachable. Keep
+the active submission fallback covered by the submit-failure scenario.
+
 ## Work orders
 
 - [x] [Task 01: Reconcile inactive clarification responses](task-01-reconcile-inactive-responses.md)
-- [ ] [Task 02: Send late answers as new messages](task-02-late-answer-messages.md)
+- [x] [Task 02: Send late answers as new messages](task-02-late-answer-messages.md)
 
 Execute sequentially. Task 02 depends on Task 01 and revises its user-facing outcome.
 
 ## Verification results
 
-Temporary reproduction: failed at the expected control-removal assertion.
+The temporary reproduction failed at the expected control-removal assertion.
 The existing hook, overlay, and panel suites passed: 3 files, 73 tests.
 
 ```bash
 (cd apps/web && pnpm exec vitest run hooks/domains/session/use-clarification-group.test.ts components/task/chat/clarification-input-overlay.test.tsx components/task/chat/clarification-panel-section.test.tsx)
 ```
 
-Documentation catalog validation passed: 290 decisions and 1015 specifications.
+Documentation catalog validation passed: 291 decisions and 1015 specifications.
 The full specification lint initially exposed a pre-existing duplicate
 `AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.8` in
 `docs/specs/tasks/requirements/queued-session-ownership.md`; the unrelated
@@ -225,15 +247,20 @@ The review regressions also failed before the correction: the delayed restored
 bundle became `expired`, the A→B→A path wrote an expired row, and the expired
 overlay still claimed Escape. Each now passes.
 
-- Focused Vitest: 5 files, 96 tests.
-- Targeted ESLint: no errors or warnings.
-- Prettier, TypeScript typecheck, `make build-web`, `make build-backend`, and
+- Task 02 focused Vitest: 8 files, 142 tests passed.
+- Targeted ESLint: no errors or warnings on changed frontend and E2E files.
+- Targeted Prettier, TypeScript typecheck, `make build-web`, `make build-backend`, and
   `git diff --check` passed.
-- Desktop inactive-dismissal E2E: 1 test passed.
-- Phone inactive-dismissal E2E: 1 test passed.
+- Desktop historical late-answer E2E: 1 test passed.
+- Phone historical late-answer E2E: 1 test passed.
+- Active 409 late-answer fallback E2E: 1 test passed.
 - E2E fixture plugin packaging passed.
-- Documentation catalog validation passed: 290 decisions and 1015
+- Documentation catalog validation passed: 291 decisions and 1015
   specifications.
+- `i18n:check` passed for all supported catalogs. The all-locale
+  `i18n:zh-hant` helper still stops on the two pre-existing simplified
+  `workflows.openAgentSettings` entries; the changed `task` namespace converted
+  successfully for both Traditional Chinese catalogs.
 - Full specification lint passed after the pre-existing duplicate acceptance
   ID was corrected to `AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10`.
 - The review follow-up now compares message versions with `parseTurnTimestamp`,
@@ -261,4 +288,5 @@ delivery records. This follow-up does not change their completed scopes or resul
 
 Task 01 did not need public documentation changes. Task 02 must document the
 late-answer action and its normal send/queue behavior in the existing task
-conversation guide. Do not describe queued admission as agent receipt.
+conversation guide. This is recorded in `docs/public/tasks-and-workflows.md`;
+queued admission is described as queueing, not agent receipt.

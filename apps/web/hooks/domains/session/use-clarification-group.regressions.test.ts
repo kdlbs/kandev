@@ -245,6 +245,83 @@ describe("useClarificationGroup — inactive response reconciliation", () => {
     expect(result.current.submitState).toBe("ok");
   });
 
+  it("hands affirmative inactive answers to ordinary message admission", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "not_active" }), { status: 409 }),
+    );
+    const message = clarMessage({
+      id: "m-late",
+      pendingId: "p-late",
+      questionId: "q-late",
+      index: 0,
+      total: 1,
+    });
+    mockMessagesBySession = { [message.session_id]: [message] };
+    const onLateAnswer = vi.fn().mockResolvedValue("sent" as const);
+    const onOutcome = vi.fn();
+    const { result } = renderHook(() => useClarificationGroup([message], onOutcome, onLateAnswer));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        "q-late": { question_id: "q-late", selected_options: ["o1"] },
+      });
+    });
+
+    expect(onLateAnswer).toHaveBeenCalledWith({
+      messages: [message],
+      answers: [{ question_id: "q-late", selected_options: ["o1"] }],
+    });
+    expect(result.current.lateAnswerState).toBe("sent");
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "m-late",
+        metadata: expect.objectContaining({ status: "expired" }),
+      }),
+    );
+    expect(onOutcome).toHaveBeenCalledWith({
+      kind: "late_message_admitted",
+      delivery: "sent",
+    });
+  });
+
+  it("retains the answer and reuses the late admission after a failed fallback", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "not_active" }), { status: 409 }),
+    );
+    const message = clarMessage({
+      id: "m-retry",
+      pendingId: "p-retry",
+      questionId: "q-retry",
+      index: 0,
+      total: 1,
+    });
+    mockMessagesBySession = { [message.session_id]: [message] };
+    const onLateAnswer = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("message unavailable"))
+      .mockResolvedValueOnce("queued" as const);
+    const { result } = renderHook(() => useClarificationGroup([message], undefined, onLateAnswer));
+
+    await act(async () => {
+      await result.current.submitCollected({
+        "q-retry": { question_id: "q-retry", custom_text: "Keep the draft" },
+      });
+    });
+    expect(result.current.lateAnswerState).toBe("error");
+    expect(result.current.answers["q-retry"]).toEqual({
+      question_id: "q-retry",
+      custom_text: "Keep the draft",
+    });
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.retryLateAnswer();
+    });
+    expect(onLateAnswer).toHaveBeenCalledTimes(2);
+    expect(onLateAnswer.mock.calls[1][0]).toEqual(onLateAnswer.mock.calls[0][0]);
+    expect(result.current.lateAnswerState).toBe("queued");
+  });
+
   it("expires unchanged siblings while preserving a newer restored row", async () => {
     let resolveA: ((res: Response) => void) | null = null;
     fetchMock.mockImplementationOnce(

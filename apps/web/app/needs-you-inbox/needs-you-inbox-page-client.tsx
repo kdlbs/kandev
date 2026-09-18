@@ -43,6 +43,7 @@ import {
 import { InboxHistoryList } from "@/components/inbox-history/inbox-history-list";
 import { InboxHistoryEmptyState } from "@/components/inbox-history/inbox-history-empty-state";
 import { InboxHistoryErrorState } from "@/components/inbox-history/inbox-history-error-state";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
 type ViewMode = "error" | "loading" | "empty" | "list";
 
@@ -87,7 +88,7 @@ function NeedsYouInboxList({
     <>
       <div className="overflow-hidden rounded-lg border border-border divide-y divide-border">
         {bundles.map((bundle) => (
-          <NeedsYouInboxRow key={bundle.pending_id} bundle={bundle} />
+          <NeedsYouInboxRowWithLateAnswer key={bundle.pending_id} bundle={bundle} />
         ))}
       </div>
       {hasMore && (
@@ -100,6 +101,11 @@ function NeedsYouInboxList({
       )}
     </>
   );
+}
+
+function NeedsYouInboxRowWithLateAnswer({ bundle }: { bundle: ClarificationInboxBundle }) {
+  const lateAnswer = useLateClarificationMessage(bundle.messages[0]);
+  return <NeedsYouInboxRow bundle={bundle} onLateAnswer={lateAnswer.send} />;
 }
 
 // "Needs you" is the tab strip's default-selected tab, and this content,

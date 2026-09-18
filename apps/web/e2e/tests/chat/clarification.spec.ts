@@ -3,7 +3,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { seedClarificationSession } from "../../helpers/clarification";
+import { activeSessionId, seedClarificationSession } from "../../helpers/clarification";
 import { waitForSessionState } from "../../helpers/session";
 import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
@@ -404,6 +404,67 @@ test.describe("Clarification flow", () => {
       "observe that an inactive clarification is not submitted a second time",
     );
     expect(attempts).toBe(1);
+  });
+
+  test("late answer from an inactive historical question sends a new message", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Late Answer",
+      "clarification",
+    );
+    const sessionId = await activeSessionId(testPage);
+    if (!sessionId) throw new Error("expected an active session for late clarification answer");
+
+    let responseAttempts = 0;
+    await testPage.route("**/api/v1/clarification/*/respond", async (route) => {
+      responseAttempts += 1;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ code: "not_active" }),
+      });
+    });
+
+    const inactiveResponse = waitForHttp(
+      testPage,
+      "POST",
+      /\/api\/v1\/clarification\/[^/]+\/respond$/,
+    );
+    await session.clarificationSkip().click();
+    await expect((await inactiveResponse).status()).toBe(409);
+    await expect(session.clarificationOverlay()).not.toBeVisible();
+
+    const answerAction = testPage.getByTestId("clarification-answer-as-new-message");
+    await expect(answerAction).toBeVisible({ timeout: 15_000 });
+    await answerAction.click();
+    await expect(testPage.getByTestId("clarification-late-submit")).toBeDisabled();
+    await testPage.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" }).click();
+    await expect(testPage.getByTestId("clarification-late-submit")).toBeEnabled();
+
+    await testPage.getByTestId("clarification-late-submit").click();
+
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.some(
+            (message) =>
+              message.author_type === "user" &&
+              message.content.includes("Question 1") &&
+              message.content.includes("PostgreSQL"),
+          );
+        },
+        { timeout: 30_000, message: "late clarification answer should be admitted as a message" },
+      )
+      .toBe(true);
+    expect(responseAttempts).toBe(1);
   });
 
   test("timeout detaches clarification and accepts a custom deferred answer", async ({

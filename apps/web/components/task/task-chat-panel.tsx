@@ -64,6 +64,7 @@ import {
   ParkedSessionNote,
 } from "./launch-queue-status";
 import { WipQueueStatus } from "./wip-queue-status";
+import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -1048,6 +1049,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarificationGroup,
   } = panelState;
   const taskLaunchError = statusSummaryTaskError(launchStatusSummary);
+  const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const launchErrorOwned = Boolean(taskLaunchError);
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
@@ -1263,6 +1265,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             messages={pendingClarificationGroup}
             agentDisconnected={session?.pending_action === null}
             onResolved={handleClarificationResolved}
+            onLateAnswer={lateAnswer.send}
             shortcutScopeRef={panelRef}
             maxHeightVh={50}
           />

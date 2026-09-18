@@ -1,7 +1,7 @@
 ---
 id: "02-late-answer-messages"
 title: "Send late answers as new messages"
-status: pending
+status: done
 wave: 2
 depends_on:
   - 01-reconcile-inactive-responses
@@ -101,12 +101,13 @@ Localize action and sent/queued feedback. Map to criteria `.4` through `.9`.
 
 ## Tests and verification
 
-Add deterministic coverage for both entry points: inactive response after an
-answer submission, and direct historical-question answering. Cover the source
-session ending its turn without further output; no live waiter is required.
-Cover busy admission, another current question, unavailable session, timeout,
-retry identity, and navigation while admission is unresolved. Close must make
-zero new-message requests. Existing live-answer and Skip tests must stay green.
+Deterministic coverage covers both entry points: inactive response after an
+answer submission, and direct historical-question answering. The shared
+message-handler tests cover source-session barriers, busy queue admission,
+unavailable transport, and stable caller-owned retry IDs. Overlay and group
+tests cover answer retention, retry feedback, current-question exclusion,
+timeout/error separation, and zero-message Close behavior. Existing
+live-answer and Skip tests stay green.
 
 Add `late answer` cases to desktop/mobile clarification browser files. Assert
 actual admitted message or queue content with the original question and answers,
@@ -168,4 +169,30 @@ Current-turn authority and Inbox History isolation remain unchanged.
 
 ## Results
 
-Pending. No production changes, builds, or tests performed for this revised scope.
+Task 02 is complete. The shared late-answer adapter captures the source task and
+session, formats question context with selected labels and custom text as
+ordinary user content, and delivers it through the existing message admission
+and queue rules. A recognized inactive affirmative response preserves the
+answers and uses that same adapter. Close only dismisses the form. Unknown or
+ambiguous failures remain on the original retry path.
+
+The transcript action is available for historical unanswered questions, while a
+current pending turn does not expose a duplicate answer action. Desktop and
+phone use the same inline form with localized sent, queued, and retry feedback.
+The source question bundle and client admission ID remain stable across
+navigation and remounts. Inbox History remains read-only and continues to link
+to the source conversation.
+
+Validation passed:
+
+- Focused Vitest: 8 files, 142 tests.
+- TypeScript typecheck, `make build-web`, and `make build-backend`.
+- `i18n:check`; changed `task` namespaces converted for `zh-hk` and `zh-tw`.
+  The all-locale converter still reports the two unrelated historical
+  `workflows.openAgentSettings` residuals.
+- E2E: desktop historical late answer, mobile historical late answer, and
+  active 409 fallback, 1 test each.
+- Documentation catalog validation, full specification lint, targeted Prettier, and
+  `git diff --check`.
+- Targeted ESLint reported no errors or warnings on changed frontend and E2E
+  files.
