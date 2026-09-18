@@ -24,7 +24,7 @@ export type BuildContextItemsParams = {
   pendingCommentsByFile: Record<string, ReviewComment[]>;
   handleRemoveCommentFile: (filePath: string) => void;
   handleRemoveComment: (commentId: string) => void;
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   planComments: PlanComment[];
   handleClearPlanComments: () => void;
   pendingPRFeedback: PRFeedbackComment[];
@@ -148,17 +148,20 @@ function buildCommentItems(params: BuildContextItemsParams): ContextItem[] {
   if (!pendingCommentsByFile) return items;
   for (const [groupKey, comments] of Object.entries(pendingCommentsByFile)) {
     if (comments.length === 0) continue;
-    const filePath = comments[0].filePath;
+    const first = comments[0];
+    const filePath = first.filePath;
+    const repositoryName = first.source === "review-file" ? first.repositoryName : undefined;
     const fileName = getFileName(filePath);
     items.push({
       kind: "comment",
       id: `comment:${groupKey}`,
       label: `${fileName} (${comments.length})`,
       filePath,
+      repositoryName,
       comments,
       onRemove: () => handleRemoveCommentFile(groupKey),
       onRemoveComment: (cid) => handleRemoveComment(cid),
-      onOpen: onOpenFileAtLine ? () => onOpenFileAtLine(filePath) : undefined,
+      onOpen: onOpenFileAtLine ? () => onOpenFileAtLine(filePath, repositoryName) : undefined,
     });
   }
   return items;

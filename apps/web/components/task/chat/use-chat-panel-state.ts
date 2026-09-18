@@ -360,7 +360,7 @@ type ChatContextItemsOptions = {
   comments: CommentsState;
   taskId: string | null;
   onOpenFile?: (path: string, repo?: string) => void;
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
 };
 
 function useChatContextItems(opts: ChatContextItemsOptions) {
@@ -549,7 +549,7 @@ export type UseChatPanelStateOptions = {
   /** Disable Dockview and plan-layout mutations for embedded multi-panel hosts. */
   disableWorkbenchEffects?: boolean;
   onOpenFile?: (path: string, repo?: string) => void;
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
 };
 
 export function useChatPanelState({

@@ -38,6 +38,7 @@ export type PromptContextItem = ContextItemBase & {
 export type CommentContextItem = ContextItemBase & {
   kind: "comment";
   filePath: string;
+  repositoryName?: string;
   comments: ReviewComment[];
   onRemoveComment: (id: string) => void;
   onOpen?: () => void;

@@ -191,3 +191,8 @@ typecheck, and focused ESLint passed afterward.
 
 The disposable user test instance has been shut down as requested. The main
 instance on :9998 was not changed.
+
+A follow-up review identified the same repository omission in regular composer
+context chips. These now retain repositoryName and forward it through the chat
+panel callback chain. Named-repository and explicit workspace-root regression
+cases pass (five context-builder tests), along with typecheck.
