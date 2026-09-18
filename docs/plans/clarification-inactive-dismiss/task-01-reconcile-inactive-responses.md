@@ -166,7 +166,9 @@ correction, and pass after it.
 
 Validation passed:
 
-- Focused Vitest: 5 files, 94 tests.
+- Focused Vitest: 5 files, 95 tests.
+- Strict timestamp comparison preserves RFC3339Nano ordering and rejects
+  malformed or Date-normalized values.
 - Targeted ESLint: no errors or warnings.
 - Prettier and TypeScript typecheck.
 - `make build-web` and `make build-backend`.
@@ -180,3 +182,4 @@ The full specification lint first exposed a pre-existing duplicate acceptance
 ID in the queued-session ownership requirements. The unrelated
 conversation-surface criterion was renumbered to
 `AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10`; the final catalog lint passed.
+Companion parking work orders now reference that corrected criterion.

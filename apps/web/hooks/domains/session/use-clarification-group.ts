@@ -8,6 +8,7 @@ import type { ClarificationAnswer, ClarificationRequestMetadata, Message } from 
 import { getBackendConfig } from "@/lib/config";
 import { useAppStoreApi } from "@/components/state-provider";
 import { isPendingClarificationMessage } from "@/lib/utils/pending-clarification";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
 type SubmitState = "idle" | "submitting" | "ok" | "error" | "expired";
 
@@ -193,12 +194,10 @@ function hasNewerMessageVersion(current: Message, submitted: Message): boolean {
   if (!current.updated_at) return false;
   if (!submitted.updated_at) return true;
 
-  const currentTime = Date.parse(current.updated_at);
-  const submittedTime = Date.parse(submitted.updated_at);
-  if (Number.isFinite(currentTime) && Number.isFinite(submittedTime)) {
-    return currentTime > submittedTime;
-  }
-  return current.updated_at > submitted.updated_at;
+  const currentTime = parseTurnTimestamp(current.updated_at);
+  const submittedTime = parseTurnTimestamp(submitted.updated_at);
+  if (currentTime === null || submittedTime === null) return false;
+  return currentTime > submittedTime;
 }
 
 // classifyConflictResult reads a 409 response's body for a machine-readable

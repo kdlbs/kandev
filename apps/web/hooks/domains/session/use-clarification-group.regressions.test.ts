@@ -208,11 +208,11 @@ describe("useClarificationGroup — inactive response reconciliation", () => {
       questionId: "qA",
       index: 0,
       total: 1,
-      updatedAt: "2026-05-04T00:00:00.000Z",
+      updatedAt: "2026-05-04T00:00:00.000000001Z",
     });
     const restored = {
       ...submitted,
-      updated_at: "2026-05-04T00:00:01.000Z",
+      updated_at: "2026-05-04T00:00:00.000000002Z",
       metadata: { ...submitted.metadata, status: "pending" as const },
     };
     mockMessagesBySession = { [submitted.session_id]: [submitted] };
@@ -243,6 +243,38 @@ describe("useClarificationGroup — inactive response reconciliation", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.current.submitState).toBe("ok");
+  });
+
+  it("does not normalize an invalid current timestamp as newer authority", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 409 }));
+    const submitted = clarMessage({
+      id: "m-invalid",
+      pendingId: "p-invalid",
+      questionId: "q-invalid",
+      index: 0,
+      total: 1,
+      updatedAt: "2026-02-28T00:00:00.000000001Z",
+    });
+    const invalidCurrent = {
+      ...submitted,
+      updated_at: "2026-02-30T00:00:00.000000002Z",
+      metadata: { ...submitted.metadata, status: "pending" as const },
+    };
+    mockMessagesBySession = { [submitted.session_id]: [invalidCurrent] };
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
+      initialProps: { msgs: [submitted] },
+    });
+    rerender({ msgs: [invalidCurrent] });
+
+    await act(async () => {
+      await result.current.skipAll();
+    });
+
+    expect(result.current.submitState).toBe("expired");
+    expect(mockUpdateMessage).toHaveBeenCalledWith({
+      ...invalidCurrent,
+      metadata: { ...invalidCurrent.metadata, status: "expired" },
+    });
   });
 
   it("does not expire bundle A after it leaves and returns to the active generation", async () => {

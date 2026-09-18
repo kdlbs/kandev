@@ -182,7 +182,7 @@ The review regressions also failed before the correction: the delayed restored
 bundle became `expired`, the A→B→A path wrote an expired row, and the expired
 overlay still claimed Escape. Each now passes.
 
-- Focused Vitest: 5 files, 94 tests.
+- Focused Vitest: 5 files, 95 tests.
 - Targeted ESLint: no errors or warnings.
 - Prettier, TypeScript typecheck, `make build-web`, `make build-backend`, and
   `git diff --check` passed.
@@ -193,6 +193,9 @@ overlay still claimed Escape. Each now passes.
   specifications.
 - Full specification lint passed after the pre-existing duplicate acceptance
   ID was corrected to `AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10`.
+- The review follow-up now compares message versions with `parseTurnTimestamp`,
+  preserving nanosecond ordering and rejecting malformed timestamps; companion
+  parking work orders reference the corrected `.003.10` criterion.
 
 ## Related delivery records
 

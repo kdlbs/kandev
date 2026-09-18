@@ -143,7 +143,10 @@ Read each submitted message from the latest store snapshot before updating it.
 Only pending rows with matching message, session, and pending IDs receive the
 existing local `expired` status. Preserve terminal siblings and all newer
 metadata. Treat a newer `updated_at` on a matching row as authoritative and
-leave it unchanged. A request from an older generation also cannot expire a
+leave it unchanged. Compare untrusted values with the shared strict
+`parseTurnTimestamp` parser so RFC3339Nano precision is preserved and malformed
+or Date-normalized values are rejected; an unparseable current value is not
+treated as newer authority. A request from an older generation also cannot expire a
 bundle that has become current again under the same pending ID, while an old
 bundle may still be retired when another pending ID is active. Do not recreate
 deleted rows or change another bundle. This cache update does not write to the

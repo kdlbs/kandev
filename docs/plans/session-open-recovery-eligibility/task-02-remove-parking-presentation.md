@@ -18,7 +18,7 @@ acceptance_criteria:
   - AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.9
   - AC-TASKS-QUEUED-SESSION-OWNERSHIP-002.4
   - AC-TASKS-QUEUED-SESSION-OWNERSHIP-002.6
-  - AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.8
+  - AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10
 system_design:
   - ../../specs/tasks/system-design/queued-session-ownership.md
 ---
@@ -63,7 +63,7 @@ Both:    No parked-session row; genuine task queue status remains when needed.
 
 Keep the existing desktop tabs and phone task drawer/session picker.
 The chat remains the single conversation scroll owner. No new touch targets or
-hover-only behavior are introduced. Cover AC 001.9 and 003.8.
+hover-only behavior are introduced. Cover AC 001.9 and 003.10.
 
 ## Verification
 
