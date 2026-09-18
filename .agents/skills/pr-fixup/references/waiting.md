@@ -26,6 +26,13 @@ The default deadline is 45 minutes and the default cadence is 60 seconds.
 Pass an explicit deadline for a user-specified limit. Use `--interval-sec <S>`
 when the user specifies a cadence. Pending matrix counts can grow as jobs appear.
 
+Before starting the waiter, validate the GitHub credential with `gh auth status`.
+If it is stale or invalid, try an explicit `GH_TOKEN="$(gh auth token)"` prefix
+for the helper or use the structured connector fallback. Classify REST 401/403
+and rate-limit responses as authentication or transport blockage, not CI
+failures. A read-only status rollup can show current-head checks while required
+policy and review evidence remain unknown; it cannot prove the PR clean.
+
 ## Interpret the final result
 
 Read the final tool result's `exit_code`, including for PTY/session commands.

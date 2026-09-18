@@ -134,6 +134,12 @@ validator scans that requirement's heading section and stops at the next
 heading of equal or higher level; criteria placed under a later amendment
 heading are outside the owning section even when the document linter passes.
 
+If the trusted PR documentation publisher exits 1 without validator output,
+fetch the exact job log and inspect the workflow step before changing docs or
+the validator. Reproduce the evaluator against the exact PR file set, then
+retry only the failed publisher job once; a successful retry without source
+changes is transient evidence, not proof that the original run was healthy.
+
 `gh pr view --json` does not expose run-attempt metadata; do not request
 `runAttempt` or `run_attempt` there. When reruns leave an older conclusion in
 `gh run list`, query `gh api repos/<owner>/<repo>/actions/runs/<run-id> --jq

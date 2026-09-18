@@ -41,3 +41,11 @@ the workflow step metadata and summary-producing step. Reproduce the evaluator
 locally against the exact PR file set before changing documentation. Treat a
 transient API or evaluator failure as incomplete evidence until that
 reproduction or a fresh exact-head run explains it.
+
+If a terminal workflow job fails only because the workflow's own GitHub API or
+code-search request returned HTTP 429, with no product or test assertion and a
+matching PR head, classify it as external infrastructure. Preserve the head,
+wait for a bounded cooldown, rerun only that failed job once with
+`gh run rerun <run-id> --failed`, then use `scripts/pr-await --mode all-terminal`
+and `scripts/pr-state --summary` to verify both the rerun job and aggregate at
+the same head before unblocking the PR.
