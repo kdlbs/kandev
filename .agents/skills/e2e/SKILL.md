@@ -276,6 +276,11 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
   are inside the viewport after navigation. A short transcript's DOM-visible
   marker does not prove initial scroll behavior; cover every renderer/viewport
   strategy selected at runtime.
+- **Prove later-turn acceptance.** Capture the pre-turn message/response count
+  and resumed runtime identity before the first pause. Wait for a new turn-
+  specific marker after provider acceptance, then assert that original identity
+  after cancellation and each follow-up; persisted text with `.last()` can match
+  an earlier turn and is not evidence that the later prompt was accepted.
 - **Nested Escape controls.** If an inner panel inside a Radix Dialog handles Escape, intercept the key in capture phase and call both `preventDefault()` and `stopPropagation()` before dismissing the inner panel. A bubble-phase window handler runs after Radix can dismiss the outer dialog. Add a regression that asserts the inner panel collapses while the outer dialog remains open.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
 - **Open API-created tasks directly.** After API setup creates a task, navigate to `/t/<task-id>` instead of clicking a Kanban card; card rendering and virtualization add unrelated failure surface. For virtualized file trees, do not retain source and target locators while rows can recycle. Dispatch `dragstart` with a page-owned `DataTransfer`, reveal the target, dispatch `drop`, and clean up the transfer state before asserting the result.
