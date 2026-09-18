@@ -92,15 +92,19 @@ returned as a directly readable task in the same response, never by
 workspace equality alone; a task-scoped canvas admits none, seeing only the
 edge's `id` and, for a `depends_on` entry, its `status`.
 `blocked`, `blocked_reason`, and `start_when_unblocked` summarize the same
-projection at the task level. When the host cannot derive a verdict for a
-task — an internal read failure, or a caller that lacks the read capability —
-it returns a withheld verdict instead of failing the read: `blocked: true`,
+projection at the task level. When an internal read failure keeps the host
+from deriving a verdict for a task a route does return, it substitutes a
+withheld verdict rather than failing that route: `blocked: true`,
 `blocked_reason: "unknown"`, empty `depends_on`/`blocks`, both truncation
 flags `false`, and `start_when_unblocked: false`. Treat that shape as "no
-answer," not as "task is actually blocked." This is distinct from the
-fan-out limit described below, which fails the whole page with
-`response_too_large` rather than substituting a withheld verdict onto any
-task.
+answer," not as "task is actually blocked." A canvas lacking the read
+capability never sees this verdict: every task route, including the `PATCH`
+route, checks the read capability before returning any task and fails
+outright with `403 plugin_permission_denied` when it is missing, so accessor
+denial and a withheld verdict are never the same response. This is also
+distinct from the fan-out limit described below, which fails the whole page
+with `response_too_large` rather than substituting a withheld verdict onto
+any task.
 
 These seven fields exist on a task object only once the host's manifest
 `min_kandev_version` floor is met; declare that floor for the release your

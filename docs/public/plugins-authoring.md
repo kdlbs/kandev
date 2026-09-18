@@ -939,12 +939,19 @@ session-scoped canvas admits an end only when it is also returned as a
 directly readable task in the same response, and a task-scoped canvas admits
 none.
 
-If dependency derivation cannot produce a verdict for a task (an internal
-read failure, or a caller that lacks `api_read:tasks`), the host returns the
-withheld verdict instead of failing the surrounding read: `Blocked: true`,
-`BlockedReason: "unknown"`, empty `DependsOn`/`Blocks`, both truncation flags
-`false`, and `StartWhenUnblocked: false`. Treat this shape as "no answer," not
-as "task is actually blocked." This is distinct from the fan-out limit below:
+If dependency derivation cannot produce a verdict for a task that a call
+does return, the host substitutes the withheld verdict rather than failing
+that call: `Blocked: true`, `BlockedReason: "unknown"`, empty
+`DependsOn`/`Blocks`, both truncation flags `false`, and
+`StartWhenUnblocked: false`. Treat this shape as "no answer," not as "task is
+actually blocked." Two distinct causes reach it: an internal read failure
+during derivation, or a task reached through `CreateTask`/`UpdateTask`/
+`MoveTask` by a caller holding `api_write:tasks` but not `api_read:tasks` (an
+independent capability those RPCs gate on writing, not reading). `List` and
+`Get` themselves never produce this verdict for a missing read capability:
+each fails the call outright with `PermissionDenied` before any task is
+returned, so accessor denial and a withheld verdict on a returned task are
+never the same signal. This is also distinct from the fan-out limit below:
 that refuses the whole call with `ResourceExhausted` rather than substituting
 a withheld verdict onto any task.
 
