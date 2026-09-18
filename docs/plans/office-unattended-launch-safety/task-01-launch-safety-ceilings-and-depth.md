@@ -91,3 +91,21 @@ authoritative seam; moved windowed-dedup metric reporting into
 sole authoritative path; and rewrote the enqueue-consolidation guard test to
 scope its allowlist per function instead of per file, adding a regression
 test for that scoping. All focused package tests above pass.
+
+Maintainer fixup commit `5015b0fdfeefdfd1cc34c666d98ae25d0e4f127d` extends the
+workspace rule for task-bound global Kanban profiles, preserves the acting
+agent and source task across causation boundaries, maps typed runtime refusals
+to a safe conflict response, and documents the nine Office launch-safety
+startup settings.
+
+Post-fixup verification passed:
+
+```text
+go test ./internal/runs/service ./internal/runs/repository/sqlite
+go test ./internal/office/service ./internal/office/runtime
+go test ./internal/workflow/engine ./internal/backendapp
+KANDEV_INTERNAL_CONFIG_FILE= KANDEV_INTERNAL_CONFIG_HOME_FILE= go test ./internal/common/config
+node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+```

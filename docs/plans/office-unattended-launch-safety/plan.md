@@ -53,3 +53,21 @@ cd apps/backend && env -u KANDEV_HEALTH_TIMEOUT_MS go test \
   ./internal/runs/service ./internal/runs/repository/sqlite ./internal/workflow/engine
 python3 scripts/lint-spec-files.py --all
 ```
+
+The maintainer fixup commit `5015b0fdfeefdfd1cc34c666d98ae25d0e4f127d` also
+keeps task-bound global Kanban runs inside the trusted task workspace, records
+the acting agent separately from the run's original actor, and preserves the
+source task for cross-task workflow queue actions. It adds runtime refusal
+mapping and documents the nine Office launch-safety startup settings.
+
+Post-fixup verification passed:
+
+```text
+go test ./internal/runs/service ./internal/runs/repository/sqlite
+go test ./internal/office/service ./internal/office/runtime
+go test ./internal/workflow/engine ./internal/backendapp
+KANDEV_INTERNAL_CONFIG_FILE= KANDEV_INTERNAL_CONFIG_HOME_FILE= go test ./internal/common/config
+node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+```
