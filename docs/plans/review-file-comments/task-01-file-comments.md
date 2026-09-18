@@ -212,3 +212,11 @@ scoped feedback, annotation isolation, file counts, grouping, and formatting.
 Validation: 34 affected test files (272 tests), 26 focused count/build-file
 checks after the count-helper extraction, typecheck, focused lint, and spec lint
 passed. The three initial scope regressions failed before the implementation.
+
+Completed the production line-comment creator audit: Markdown preview and both
+file editors now pass explicit repository scope when creating and selecting
+comments. Five new editor/preview regressions failed before the fix and pass
+afterward, including named/root creation and cross-repository isolation.
+The six affected editor/Markdown/selector/formatter suites pass (34 tests), as
+do typecheck and focused lint. All production line-comment creators and scoped
+selection callers were enumerated and checked.
