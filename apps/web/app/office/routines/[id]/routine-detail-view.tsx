@@ -459,7 +459,7 @@ function DetailReadOnlyCard({
         <CardTitle className="text-sm font-medium">{t("office:schedule")}</CardTitle>
       </CardHeader>
       <CardContent className="text-sm text-muted-foreground space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ScheduleStateBadge routine={routine} />
           <UnarmedScheduleHint routine={routine} />
         </div>

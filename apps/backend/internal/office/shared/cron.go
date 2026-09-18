@@ -58,9 +58,7 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 }
 
 // parseCronExpression parses a 5-field cron expression into a
-// *cron.SpecSchedule, without computing an occurrence. Shared by
-// NextCronTime and ValidateCronSchedule so the two never drift on what
-// counts as valid.
+// *cron.SpecSchedule without computing an occurrence.
 func parseCronExpression(expression string) (*cron.SpecSchedule, error) {
 	trimmed := strings.TrimSpace(expression)
 	if len(strings.Fields(trimmed)) != 5 {
@@ -82,18 +80,12 @@ func parseCronExpression(expression string) (*cron.SpecSchedule, error) {
 	return specSchedule, nil
 }
 
-// ValidateCronSchedule reports whether a cron expression parses and its
-// timezone loads: the "schedulable" definition in
-// docs/specs/office/requirements/routine-arming-visibility.md. It
-// deliberately does not search for a next occurrence — a DOM-and-DOW
-// combination this cron's AND semantics rarely or never satisfies would
-// otherwise cost a linear scan of up to 366*24*60 minutes to learn nothing
-// "schedulable" doesn't already need.
+// ValidateCronSchedule reports whether the scheduler can compute a next
+// occurrence for a cron expression in its timezone. It uses the same parser
+// and occurrence rules as NextCronTime, including ErrUnsatisfiableCron for a
+// syntactically valid expression that can never match a date.
 func ValidateCronSchedule(expression, timezone string) error {
-	if _, err := resolveLocation(timezone); err != nil {
-		return err
-	}
-	_, err := parseCronExpression(expression)
+	_, err := NextCronTime(expression, timezone, time.Now().UTC())
 	return err
 }
 

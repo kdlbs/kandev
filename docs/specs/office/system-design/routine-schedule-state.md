@@ -18,11 +18,11 @@ This design adds a second, read-only classification, surfaces it everywhere
 intent is already surfaced (routine list/detail reads, the routines UI), and
 adds an unattended-install detection path (a startup scan) for the same
 classification. It repairs nothing — no code path here creates, edits, or
-enables/disables a trigger — and does not change dispatch (`GetDueTriggers`
-still ignores `office_routines.status`; see
-[coordinator-install-idempotency.md](coordinator-install-idempotency.md) for
-the one trigger-creation path this plan touches, and REQ-OFFICE-ROUTINE-ARMING-002's
-`## Out of scope` for the deferred operator-initiated repair).
+enables/disables a trigger. Dispatch keeps its existing status gates: the due
+trigger query is status-independent, then the service checks the routine before
+claiming a cron slot, while the manual and webhook paths reject non-firing
+statuses. See [coordinator-install-idempotency.md](coordinator-install-idempotency.md)
+for the one trigger-creation path this plan touches.
 
 ## Requirement mapping
 
@@ -74,8 +74,9 @@ order, stopping at the first match:
 1. Any enabled cron trigger with a next occurrence, or one that fired within
    the last `dispatchGrace` (60s, a compile-time constant shared verbatim
    with the startup scan) and hasn't been recomputed yet → `armed`.
-2. Any enabled cron trigger whose expression/timezone no longer parses
-   (`shared.ValidateCronSchedule`) → `trigger_invalid`.
+2. Any enabled cron trigger for which the shared scheduler cannot compute a
+   next occurrence (`shared.NextCronTime`), including an impossible but
+   syntactically valid expression → `trigger_invalid`.
 3. Any enabled, schedulable cron trigger with no next occurrence recorded →
    `trigger_unscheduled`.
 4. One or more cron triggers exist but none matched 1-3 (all disabled) →

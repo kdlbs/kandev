@@ -109,21 +109,21 @@ export function RoutineRow({
     <div>
       <div
         data-testid={`routine-row-${routine.id}`}
-        className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors cursor-pointer"
+        className="flex items-start gap-3 px-4 py-2.5 hover:bg-accent/50 transition-colors cursor-pointer"
         onClick={() => onClick(routine.id)}
       >
         <IconChevronDown
           className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`}
         />
-        <div className="flex-1 min-w-0">
+        <div className="flex min-w-0 flex-1 flex-col">
           <Link
             href={`/office/routines/${routine.id}`}
-            className="text-sm font-medium truncate cursor-pointer hover:underline"
+            className="block truncate text-sm font-medium cursor-pointer hover:underline"
             onClick={(e) => e.stopPropagation()}
           >
             {routine.name}
           </Link>
-          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
             {assignee && <span>{assignee.name}</span>}
             {cronTrigger?.cronExpression && (
               <span className="font-mono">{cronTrigger.cronExpression}</span>
@@ -132,40 +132,44 @@ export function RoutineRow({
             <span>{routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:neverRun")}</span>
             <span>{concurrencyLabel(t, routine.concurrencyPolicy)}</span>
           </div>
+          <div className="flex flex-wrap items-center gap-2 mt-1">
+            <Badge variant={isActive ? "default" : "secondary"}>
+              {isActive ? t("office:on") : t("office:off")}
+            </Badge>
+            <ScheduleStateBadge routine={routine} />
+            <UnarmedScheduleHint routine={routine} />
+          </div>
         </div>
-        <Badge variant={isActive ? "default" : "secondary"}>
-          {isActive ? t("office:on") : t("office:off")}
-        </Badge>
-        <ScheduleStateBadge routine={routine} />
-        <UnarmedScheduleHint routine={routine} />
-        <Switch
-          checked={isActive}
-          onCheckedChange={(checked) => {
-            onToggle(routine.id, checked);
-          }}
-          onClick={(e) => e.stopPropagation()}
-          className="cursor-pointer"
-        />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className="cursor-pointer"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Link href={`/office/routines/${routine.id}`}>
-                <IconPencil className="h-4 w-4" />
-              </Link>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("office:editRoutine")}</TooltipContent>
-        </Tooltip>
-        <RoutineActions
-          onRunNow={() => onRunNow(routine.id)}
-          onDelete={() => onDelete(routine.id)}
-        />
+        <div className="flex shrink-0 items-center gap-3 pt-0.5">
+          <Switch
+            checked={isActive}
+            onCheckedChange={(checked) => {
+              onToggle(routine.id, checked);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="cursor-pointer"
+          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                className="cursor-pointer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Link href={`/office/routines/${routine.id}`}>
+                  <IconPencil className="h-4 w-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("office:editRoutine")}</TooltipContent>
+          </Tooltip>
+          <RoutineActions
+            onRunNow={() => onRunNow(routine.id)}
+            onDelete={() => onDelete(routine.id)}
+          />
+        </div>
       </div>
       {expanded && (
         <RoutineExpandedDetail routine={routine} assignee={assignee} template={template} />

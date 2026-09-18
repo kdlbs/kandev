@@ -22,8 +22,9 @@ intent already is (routine reads, an unattended-install startup scan) and closes
 the one identity defect that lets onboarding duplicate the pre-installed
 coordinator routine. It repairs nothing: no criterion in any of the three
 requirement documents enables, disables, creates, or deletes a trigger, and none
-makes intent gate dispatch. That repair is deferred to task
-`b0382916-da13-44a5-85be-064ae6a9533c` and must not be pulled forward here.
+changes the existing routine-status dispatch gates. The scheduler already checks
+status before it claims a cron slot, and the manual and webhook paths reject
+non-firing statuses; this plan only makes the independent schedule state visible.
 
 Two system-design documents back this plan:
 [Routine Schedule State](../../specs/office/system-design/routine-schedule-state.md)
@@ -56,10 +57,11 @@ All paths relative to `apps/backend`.
   `internal/db/dialect`. There is no separate PostgreSQL schema file.
 - **Trigger reads today.** `internal/office/repository/sqlite/routines.go`:
   `GetDueTriggers` (L65-78) filters `kind='cron' AND enabled=1 AND
-  next_run_at IS NOT NULL AND next_run_at <= ?` with no `ORDER BY` and never
-  reads `office_routines.status` — confirms the requirement's central claim
-  that dispatch does not gate on intent. `ClaimTrigger` (L84-98) and
-  `UpdateTriggerNextRun` (L99-105) are the only trigger-state writers.
+  next_run_at IS NOT NULL AND next_run_at <= ?` with no `ORDER BY` and does not
+  read `office_routines.status`. `RoutineService.processCronTrigger` reads the
+  routine and applies its status gate before `ClaimTrigger`; the query is only
+  the first stage of that path. `ClaimTrigger` and `UpdateTriggerNextRun` remain
+  the trigger-state writers.
 - **Coordinator install today.** `internal/office/routines/service.go`:
   `CreateDefaultCoordinatorRoutine` (L145-196) calls `findCoordinatorRoutine`
   (L197-217), which matches workspace + assignee + canonical name +
@@ -71,9 +73,10 @@ All paths relative to `apps/backend`.
   AC-OFFICE-COORDINATOR-INSTALL-001.10 forbids reporting through a return
   value.
 - **Cron evaluation.** `internal/office/shared/cron.go`: `NextCronTime`
-  (L13-53) validates the timezone independently of the expression and
-  requires exactly 5 fields; `findNextMatch` (L221-235) returns no error, so
-  an impossible-but-parseable expression yields a time rather than failing.
+  validates the timezone, requires exactly 5 fields, follows the shared
+  day-of-month/day-of-week OR and DST rules, and returns `ErrUnsatisfiableCron`
+  when an otherwise valid expression has no possible occurrence. Schedule
+  classification uses the same occurrence path.
 - **Startup sequencing.** `internal/office/infra/reconcile.go`:
   `Reconciler.ReconcileAll` (L34-54) is synchronous with a void return;
   `createTriggersForNewRoutines` (L113-132) gives every trigger-less routine
@@ -152,21 +155,12 @@ After all task-level checks pass:
 
 ## Risks and non-goals
 
-- **Do not pull the deferred repair forward.** Both the operator-initiated
-  re-arm action and making intent gate dispatch are explicitly out of scope
-  of every document in this plan and belong to task
-  `b0382916-da13-44a5-85be-064ae6a9533c`. A work order that starts writing
-  `enabled` or `next_run_at` outside Task 05's own coordinator-install
-  repair path (AC-OFFICE-COORDINATOR-INSTALL-001.4/.12, which only ever
-  *creates* the coordinator's own canonical trigger) has drifted from scope.
-- **The runaway-fire defect is a known, accepted artifact, not a bug to
-  fix.** When `computeRoutineMissed` errors, `processCronTrigger`
-  (`routines/service.go:376-387`) re-arms to `now` and fires again every
-  tick. Under REQ-OFFICE-ROUTINE-ARMING-001 such a trigger classifies
-  `armed` (rule 1) forever, correctly per the requirement's own
-  `## Out of scope` → *Cron evaluation defects*. Do not special-case it in
-  Task 01's classifier, and write the fixture that way rather than assuming
-  decay to `trigger_invalid`.
+- **Keep repairs separate from visibility.** The operator-initiated re-arm
+  action remains outside this plan. A work order that starts writing `enabled`
+  or `next_run_at` outside Task 05's coordinator-install path has drifted from
+  scope. Schedule classification must continue to report an impossible cron
+  expression as `trigger_invalid`, matching `NextCronTime` and the scheduler's
+  permanent-disarm behavior.
 - **Dispatch grace is one constant, not two.** AC-OFFICE-ROUTINE-ARMING-001.10
   requires classification (Task 01) and the startup scan (Task 04) to share
   the exact same 60-second compile-time constant. Define it once in Task 01

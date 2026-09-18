@@ -579,19 +579,15 @@ func TestNextCronTime_RejectsCronTZPrefix(t *testing.T) {
 	}
 }
 
-// TestValidateCronSchedule_DoesNotSearchForOccurrence guards against
-// isSchedulable regressing back into computing a next occurrence: a
-// DOM-and-DOW combination this cron's AND semantics rarely or never
-// satisfies would cost a linear scan of up to 366*24*60 minutes
-// (NextCronTime's occurrence search) if this reused that path. Schedulable
-// per the spec only means the expression parses and the timezone loads.
-func TestValidateCronSchedule_DoesNotSearchForOccurrence(t *testing.T) {
+// TestValidateCronSchedule_RejectsUnsatisfiable verifies that validation uses
+// the scheduler's occurrence rules instead of accepting an impossible date.
+func TestValidateCronSchedule_RejectsUnsatisfiable(t *testing.T) {
 	start := time.Now()
-	if err := ValidateCronSchedule("0 0 30 2 *", "UTC"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := ValidateCronSchedule("0 0 30 2 *", "UTC")
+	if !errors.Is(err, ErrUnsatisfiableCron) {
+		t.Fatalf("expected ErrUnsatisfiableCron, got %v", err)
 	}
 	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
-		t.Errorf("ValidateCronSchedule took %v, want well under the ~250-500ms a full "+
-			"366-day occurrence search costs for this expression", elapsed)
+		t.Errorf("ValidateCronSchedule took %v, want a bounded scheduler check", elapsed)
 	}
 }

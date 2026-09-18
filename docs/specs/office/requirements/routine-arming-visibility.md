@@ -57,10 +57,12 @@ than closing the question.
   computed from the trigger rows alone, without reference to intent.
 - **Armed:** schedule state `armed` — some cron trigger can fire the routine on
   a schedule with no further operator action.
-- **Schedulable:** a cron trigger whose next occurrence can be computed, meaning
-  both that its cron expression is non-empty and parses, and that its timezone
-  loads. A trigger that fails either test is not schedulable, and no amount of
-  re-arming makes it fire.
+- **Schedulable:** a cron trigger for which the shared scheduler can compute a
+  next occurrence. The expression and timezone must be valid, and the
+  expression must name at least one real calendar slot. The scheduler's
+  day-of-month/day-of-week OR rule and DST handling apply here too. A trigger
+  that fails these checks is not schedulable, and no amount of re-arming makes
+  it fire.
 - **Dispatch grace:** a named duration of 60 seconds, separating a trigger
   mid-dispatch from one permanently stuck. See
   AC-OFFICE-ROUTINE-ARMING-001.10.
@@ -71,14 +73,12 @@ than closing the question.
 - **Surface:** report a state to an operator without changing routine, trigger,
   or run state.
 
-Intent and schedule state are two switches, not one, and the defect here is that
-the product reports only the first and behaves according to only the second.
-This document owns classification and reporting, and reads intent as a value it
-never acts on. **Intent still does not stop a routine firing** and this document
-does not change that: a paused routine with an armed cron trigger fires today and
-will keep firing after this ships. Making intent gate dispatch is deferred (see
-`## Out of scope`), so what ships here is "the operator can see both switches",
-not "both switches work".
+Intent and schedule state are two switches, and this document owns the
+classification and reporting of the second one. Classification reads trigger
+rows only. Dispatch uses the routine status separately: the cron path checks
+the status before it claims a slot, and the manual and webhook paths reject a
+non-firing status. This document reports both values and does not change those
+dispatch gates.
 
 ## Requirements
 
@@ -276,30 +276,20 @@ requirement.
   classification, so it depends on this document and not the reverse. Three
   contract defects in the cut text travelled to that card unfixed and are
   recorded there.
-- **Making intent actually gate dispatch (suppression). Deferred to task
-  `b0382916-da13-44a5-85be-064ae6a9533c`.** This is why this document can only
-  promise visibility. Its requirement was written alongside this one and cut
-  before Build, being the only part of the original scope that changes the
-  scheduler's dispatch path. What the successor needs: a due cron trigger whose
-  routine's intent is not `active` must not dispatch, must still consume its
-  occurrence so the schedule does not fall behind, must leave no run and no
-  wakeup, must emit a record distinguishing a tick suppressed by intent from one
-  suppressed because intent could not be read, must accrue no catch-up for the
-  time the routine was off, and must leave an explicit manual fire unaffected. It
-  must also decide the webhook path, which dispatches today without reading
-  intent at all, so a paused `event_only` routine fires on every delivery. Until
-  that card lands, every consumer of this document's intent value must read it as
-  an operator's wish, not as a statement about whether the routine will fire.
+- **Changing intent gating.** Routine status gating is owned by the routine
+  status requirement. The existing scheduler consumes a due cron slot when the
+  routine is not allowed to fire, and the manual and webhook handlers reject
+  non-firing statuses. This capability only reports the status and schedule
+  state; it does not change those gates.
 - **The coordinator install.** Keeping onboarding from duplicating the
   pre-installed routine is
   [Office Coordinator Install Idempotency](coordinator-install-idempotency.md).
-- **Cron evaluation defects.** The hand-rolled cron implementation ANDs
-  day-of-month with day-of-week where `crontab(5)` ORs them, matches local
-  wall-clock across DST transitions, and reads an impossible-but-parseable
-  expression as "24h from now". A routine misfiring for any of these is `armed`
-  here, correctly: the trigger fired. *Schedulable* means that implementation
-  accepts the expression and loads the timezone, not that the result is
-  `crontab(5)`-correct.
+- **Cron evaluation changes.** Cron parsing and next-occurrence calculation use
+  the shared `NextCronTime` implementation. It follows `crontab(5)` OR semantics
+  for restricted day-of-month/day-of-week fields, applies the documented DST
+  policy, and returns `ErrUnsatisfiableCron` for an expression with no possible
+  occurrence. The classifier reports that last case as not schedulable. Changes
+  to those scheduler rules are outside this capability.
 - **The routine list's own ordering.** This document pins the order of every
   trigger list it reports, and the startup scan document pins its own iteration
   order. The order routines appear in the list response is pre-existing behaviour
@@ -311,10 +301,9 @@ requirement.
 - **Disabling a trigger from the UI.** No endpoint sets
   `office_routine_triggers.enabled` to false today and this document adds none.
   Whether the column should be retired is not decided here.
-- **`office_routines.last_run_at` never advances to reflect a run,** so it reads
-  "never ran" on every dispatched routine. The generic routine UPDATE does persist
-  the column, but dispatch sets the value in memory only and never writes it back.
-  Either way it is not an input to schedule state.
+- **Using `office_routines.last_run_at` as schedule state.** Dispatch updates
+  this column through `TouchRoutineLastRun`; it is a run-history value, not an
+  input to schedule-state classification.
 - **Runs stranded in `claimed`,** and any reaper for them. A stranded run does not
   affect whether the next tick fires.
 - **Operator notification.** Inbox items, mail, and paging are separate work.

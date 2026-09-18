@@ -57,7 +57,7 @@ const (
 func ClassifyRoutine(triggers []*RoutineTrigger, now time.Time) (ScheduleState, []UnarmedCronTrigger) {
 	ordered := sortTriggers(triggers)
 	cronTriggers, hasEnabledWebhook, hasNonCronTrigger := partitionTriggers(ordered)
-	states := cronTriggerStates(cronTriggers)
+	states := cronTriggerStates(cronTriggers, now)
 	unarmed := unarmedCronTriggers(states, now)
 
 	if state, ok := classifyCronTriggers(states, now); ok {
@@ -99,10 +99,10 @@ type cronTriggerState struct {
 	schedulable bool
 }
 
-func cronTriggerStates(cronTriggers []*RoutineTrigger) []cronTriggerState {
+func cronTriggerStates(cronTriggers []*RoutineTrigger, now time.Time) []cronTriggerState {
 	states := make([]cronTriggerState, len(cronTriggers))
 	for i, t := range cronTriggers {
-		states[i] = cronTriggerState{trigger: t, schedulable: isSchedulable(t)}
+		states[i] = cronTriggerState{trigger: t, schedulable: isSchedulable(t, now)}
 	}
 	return states
 }
@@ -147,8 +147,9 @@ func isArmed(t *RoutineTrigger, now time.Time) bool {
 	return withinDispatchGrace(t, now)
 }
 
-func isSchedulable(t *RoutineTrigger) bool {
-	return shared.ValidateCronSchedule(t.CronExpression, t.Timezone) == nil
+func isSchedulable(t *RoutineTrigger, now time.Time) bool {
+	_, err := shared.NextCronTime(t.CronExpression, t.Timezone, now)
+	return err == nil
 }
 
 func withinDispatchGrace(t *RoutineTrigger, now time.Time) bool {

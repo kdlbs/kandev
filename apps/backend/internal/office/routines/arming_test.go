@@ -136,6 +136,13 @@ func TestClassifyRoutine_Rules(t *testing.T) {
 			want: routines.ScheduleStateTriggerInvalid,
 		},
 		{
+			name: "rule 3: enabled cron, syntactically valid but impossible occurrence",
+			triggers: []*models.RoutineTrigger{
+				trig(withCron("0 0 30 2 *", "UTC"), withNextRunAt(nil)),
+			},
+			want: routines.ScheduleStateTriggerInvalid,
+		},
+		{
 			name: "rule 2: enabled cron, schedulable, null next_run_at, within dispatch grace",
 			triggers: []*models.RoutineTrigger{
 				trig(withNextRunAt(nil), withLastFiredAt(timePtr(now.Add(-30*time.Second)))),
