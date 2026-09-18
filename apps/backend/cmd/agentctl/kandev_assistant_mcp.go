@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kandev/kandev/internal/orchestration/models"
+
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -37,7 +39,7 @@ var assistantBrokerTools = []assistantBrokerTool{
 	{"create_objective", "Record an objective. request must include operation_id, expected_intent_revision, source_comment_id, title, mode and acceptance (id and description entries).", http.MethodPost, "/runtime/objectives"},
 	{"update_objective", "Update objective id with expected_revision and acceptance evidence in request. Completing a turn does not complete an objective.", http.MethodPatch, "/runtime/objectives/:id"},
 	{"create_task", "Delegate a task when the owner selected design or execute. request requires operation_id, expected_intent_revision, objective_id, execution_mode, workflow_id, assignee, title and description. Respect the objective's scope.", http.MethodPost, "/runtime/tasks"},
-	{"manage_task", "Manage task id through native actions. request requires operation_id, expected_intent_revision, objective_id, action and current scoped context. Unknown outcomes must never be blindly retried.", http.MethodPost, "/runtime/tasks/:id/manage"},
+	{"manage_task", "Manage task id through native actions: edit (title, description, priority, parent_id), move (workflow_step_id, optional workflow_id and position), assign (assignee), adopt, start, stop, message (prompt, optional session_id), archive or delete. request requires operation_id, expected_intent_revision, objective_id, action and current scoped context. Unknown outcomes must never be blindly retried.", http.MethodPost, "/runtime/tasks/:id/manage"},
 	{"task_status", "Change task id status using native completion gates. request requires operation_id, expected_intent_revision and status.", http.MethodPost, "/runtime/tasks/:id/status"},
 	{subcmdComment, "Record an internal assistant conversation receipt. request contains body; task_id must be this conversation.", http.MethodPost, "/runtime/comments"},
 }
@@ -61,7 +63,14 @@ func runAssistantMCP() int {
 
 func newAssistantMCP(client *kandevClient) *server.MCPServer {
 	s := server.NewMCPServer("kandev_assistant", "1.0.0", server.WithToolCapabilities(false))
-	for _, definition := range assistantBrokerTools {
+	definitions := assistantBrokerTools
+	if os.Getenv("KANDEV_ORCHESTRATOR_SCOPE") == "workspace" {
+		definitions = nil
+		for _, tool := range models.WorkspaceBrokerTools() {
+			definitions = append(definitions, assistantBrokerTool{tool.Name, tool.Description, tool.Method, tool.Path})
+		}
+	}
+	for _, definition := range definitions {
 		options := []mcp.ToolOption{mcp.WithDescription(definition.description), mcp.WithObject("query", mcp.Description("Optional query parameters. Linked workspace operations require workspace_id and workspace_grant_revision from workspace_links. Omit both for home. Unsupported linked operations fail closed."))}
 		if strings.Contains(definition.path, ":id") {
 			options = append(options, mcp.WithString("id", mcp.Required()))
@@ -99,6 +108,9 @@ func callAssistantBroker(client *kandevClient, definition assistantBrokerTool, a
 		return mcp.NewToolResultError("broker transport unavailable; a write may have an unknown outcome"), nil
 	}
 	if status < 200 || status >= 300 {
+		if strings.TrimSpace(string(data)) == "" {
+			return mcp.NewToolResultError(fmt.Sprintf("Kandev returned HTTP %d (%s)", status, http.StatusText(status))), nil
+		}
 		return mcp.NewToolResultError(string(data)), nil
 	}
 	return mcp.NewToolResultText(string(data)), nil

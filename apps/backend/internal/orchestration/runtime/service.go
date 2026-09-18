@@ -255,7 +255,7 @@ func appendRuntimeToolGuidance(text *strings.Builder, payload map[string]any) {
 		data, _ := json.Marshal(authority)
 		fmt.Fprintf(text, "\nUse the supplied kandev_assistant MCP tools. Shell, built-in provider tools, plugins and other MCP servers are unavailable. Current server authority: %s. Every call rechecks live authority. An unknown operation outcome requires inspection of native evidence, never a fresh retry ID.\n", data)
 	} else {
-		text.WriteString("\nUse the supplied kandev_assistant MCP tools for workspace, task, and memory commands. Shell, built-in provider tools, plugins and other MCP servers are unavailable. Every call rechecks live workspace authority. An unknown operation outcome requires inspection of native evidence, never a fresh retry ID.\n")
+		text.WriteString("\nYou are the workspace Orchestrator. Use the supplied kandev_assistant MCP tools to carry out authorized requests: create, edit, assign, start, stop, message, move, archive and delete native tasks. Use workspace to discover workflow, repository and execution-profile IDs, task_details to inspect results, and capabilities for current controls. Workspace tasks do not require objectives or private-assistant setup; omit operation_id and expected_intent_revision. Shell, built-in provider tools, plugins and other MCP servers are unavailable. Every call rechecks live workspace authority. After an unknown outcome, inspect native evidence before retrying.\n")
 	}
 	text.WriteString("Your final reply appears in this conversation. Retrieve older comments only when needed.\n")
 }

@@ -190,8 +190,8 @@ identity. Validation observations are not stored in the descriptor record. Bitwa
 
 ## Capability directory
 
-`GET /assistant/capabilities` and `GET /runtime/capabilities` return the same
-owner-scoped directory. Use `kind` to select `native`, `profile`, `workflow`,
+`GET /assistant/capabilities` and private-conversation calls to
+`GET /runtime/capabilities` return the same owner-scoped directory. Use `kind` to select `native`, `profile`, `workflow`,
 `executor`, `integration`, `plugin` or `mcp`. Lists default to 50 entries and
 cap at 100. Pass `next_cursor` as `after` with the same filters. A malformed or
 foreign cursor returns 400; a changed directory generation returns 409 and
@@ -349,3 +349,32 @@ exports before central conversation history can be reused. Revocation blocks
 new reads/wakes/writes; it cannot erase text already in chat or at a provider.
 Forgetting deletes saved handoff packets, while native tasks, conversation history
 and metadata-only audit receipts remain. It does not restore revoked access.
+
+## Workspace Orchestrator task controls
+
+Ordinary workspace conversations use the same run-authenticated broker without
+requiring an owner binding or objective. The server supplies the MCP discovery
+scope from the conversation surface. `capabilities` lists the available native
+controls (`kind=native`, optional `limit` and `after`); `workspace` supplies
+workflow, step, repository and execution-profile IDs. `memory` reads the current
+Orchestrator's memory with optional `memory_id`, `layer` and `key` filters.
+
+| Tool | Endpoint | Request fields |
+| --- | --- | --- |
+| `create_task` | `POST /runtime/tasks` | `title`; optional `description`, `workflow_id`, `workflow_step_id`, `repository_id`, `parent_id`, `assignee`, `execution_mode`, `external_id` |
+| `manage_task` | `POST /runtime/tasks/:id/manage` | `action`, plus the fields below |
+| `task_status` | `POST /runtime/tasks/:id/status` | `status`: `todo`, `in_progress`, `in_review`, `done` |
+
+`manage_task` supports `edit` (optional `title`, `description`, `priority`,
+`parent_id`), `move` (`workflow_step_id`, optional `workflow_id`, `position`),
+`assign` (`assignee` execution-profile ID), `adopt`, `start`, `stop`, `message`
+(`prompt`, optional `session_id`), `archive` and `delete`. An empty `parent_id`
+removes nesting. Use `move` for board progression; `task_status` changes native
+status. Read `task_details` to verify the resulting state.
+
+Workspace calls omit `operation_id`, `expected_intent_revision` and
+`objective_id`; the private-conversation receipt contract above still applies
+in private scope. Workspace writes are not automatically retried. Inspect native
+evidence after a transport failure; an empty HTTP error is reported with its
+status code. Credentials expire with the active run, and payload workspace,
+Orchestrator and task identifiers cannot override the signed/path scope.

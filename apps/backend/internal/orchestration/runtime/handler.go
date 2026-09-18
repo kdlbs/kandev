@@ -378,7 +378,7 @@ func (h *Handler) manageTask(c *gin.Context) {
 			return nil, err
 		}
 		err = h.Service.Manager.ManageWorkspaceTask(c.Request.Context(), req)
-		if err == nil && objective != nil {
+		if err == nil && objective != nil && req.Action != "delete" {
 			err = h.Service.Repo.LinkObjectiveTask(c.Request.Context(), models.ObjectiveTask{ObjectiveID: objective.ID, TaskID: req.TaskID, SessionID: req.SessionID, Role: "implementation", ContextRef: req.ContextRef, OperationID: req.OperationID})
 		}
 		return gin.H{"ok": true}, err

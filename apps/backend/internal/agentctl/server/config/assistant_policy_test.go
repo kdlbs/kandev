@@ -19,6 +19,7 @@ func TestAssistantReadOnlyConfigurationOverrides(t *testing.T) {
 	require.Len(t, cfg.McpServers, 1)
 	require.Equal(t, "kandev_assistant", cfg.McpServers[0].Name)
 	require.Equal(t, "synthetic-token", cfg.McpServers[0].Env["KANDEV_API_KEY"])
+	require.Equal(t, "private", cfg.McpServers[0].Env["KANDEV_ORCHESTRATOR_SCOPE"])
 	require.NotContains(t, strings.Join(cfg.AgentEnv, "\n"), "mutate")
 	good := []string{"npx", "--yes", "--prefer-offline", "@agentclientprotocol/claude-agent-acp@0.75.1"}
 	require.NoError(t, ValidateAssistantCommand(cfg, good))
@@ -39,6 +40,7 @@ func TestOrchestratorBrokerUsesScopedToolsWithoutClaudeRuntimeRestriction(t *tes
 	require.False(t, cfg.ShellEnabled)
 	require.Len(t, cfg.McpServers, 1)
 	require.Equal(t, "kandev_assistant", cfg.McpServers[0].Name)
+	require.Equal(t, "workspace", cfg.McpServers[0].Env["KANDEV_ORCHESTRATOR_SCOPE"])
 	// Workspace Orchestrators can use any supported runtime; only the private
 	// Assistant broker validates the Claude ACP command line.
 	require.NoError(t, ValidateAssistantCommand(cfg, []string{"some-runtime", "--version"}))

@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agent/runtimeauth"
 	"github.com/kandev/kandev/internal/orchestration/models"
 )
 
@@ -19,6 +20,10 @@ func (h *Handler) memory(c *gin.Context) {
 		h.runtimeMemory(c)
 		return
 	}
+	h.workspaceMemory(c, claims)
+}
+
+func (h *Handler) workspaceMemory(c *gin.Context, claims *runtimeauth.AgentClaims) {
 	rows, err := h.Service.Repo.ListAgentMemory(c.Request.Context(), claims.AgentProfileID)
 	if err != nil {
 		fail(c, err)
@@ -41,6 +46,14 @@ func (h *Handler) memory(c *gin.Context) {
 }
 
 func (h *Handler) runtimeMemory(c *gin.Context) {
+	claims, valid := h.caller(c)
+	if !valid {
+		return
+	}
+	if claims.Capabilities == workspaceCoordinatorAudience {
+		h.workspaceMemory(c, claims)
+		return
+	}
 	_, binding, ok := h.runtimeAssistant(c)
 	if !ok {
 		return

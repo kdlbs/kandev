@@ -46,6 +46,11 @@ func applyAssistantPolicy(c *InstanceConfig) {
 		kept = append(kept, entry)
 	}
 	c.AgentEnv = kept
+	// Derive discovery scope from the server-owned surface, never profile env.
+	brokerEnv["KANDEV_ORCHESTRATOR_SCOPE"] = "workspace"
+	if c.AssistantRestricted() {
+		brokerEnv["KANDEV_ORCHESTRATOR_SCOPE"] = "private"
+	}
 	c.McpServers = []McpServerConfig{{Name: "kandev_assistant", Type: "stdio", Command: executable,
 		Args: []string{"kandev", "assistant-mcp"}, Env: brokerEnv}}
 }

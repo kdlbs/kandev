@@ -91,6 +91,29 @@ remaining pages for large sets. Stopping does not undo external changes. The
 [assistant reference](personal-assistant-api.md) documents supported execution
 profiles and qualification limits.
 
+## Control workspace tasks from chat
+
+The Orchestrator uses your configured execution profile and Kandev's injected
+run credentials. It does not need a separate Kandev API key or private-assistant
+setup to manage the current workspace.
+
+Ask it to create a task, edit its title, description, priority or parent, assign
+an execution profile, start or stop work, send a worker a message, move a task
+between workflow steps, archive it, or delete it. Changes use the native task
+services and appear on the board. For example: “Create a task called Update the
+sample README, then move it to the backlog.”
+
+Workflow moves respect configured manual-move rules, active-session restrictions
+and required review decisions. Deletion uses native cleanup and does not discard
+uncommitted work. Other workspaces, Office tasks and private conversations are
+outside these controls. The Orchestrator inspects native task details after an
+uncertain result before deciding whether an action needs retrying.
+
+Tool discovery follows the conversation's scope. A workspace conversation gets
+workspace task controls and its own memory; owner-scoped objectives, linked
+workspace grants and maintenance tools belong to a selected private conversation.
+They are not prerequisites for creating or managing a workspace task.
+
 ## Profiles and routing
 
 The coordinator's execution profile determines its provider and account. For example, a personal Claude coordinator can direct Jira work to your existing work Claude profile and personal development to a personal Claude or Codex profile. Describe these choices in its routing context, including when to use each profile and where account-specific setup instructions live.

@@ -5,10 +5,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAssistantBrokerForwardsOnlyNamedOperations(t *testing.T) {
+	t.Setenv("KANDEV_ORCHESTRATOR_SCOPE", "private")
 	calls := 0
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -41,4 +43,28 @@ func TestAssistantBrokerForwardsOnlyNamedOperations(t *testing.T) {
 		require.True(t, result.IsError)
 	}
 	require.Equal(t, 1, calls)
+}
+
+func TestWorkspaceBrokerAdvertisesUsableTaskControls(t *testing.T) {
+	t.Setenv("KANDEV_ORCHESTRATOR_SCOPE", "workspace")
+	s := newAssistantMCP(&kandevClient{})
+	for _, name := range []string{"workspace", "workspace_tasks", "task_details", "capabilities", "memory", "create_task", "manage_task", "task_status"} {
+		require.NotNil(t, s.GetTool(name), name)
+	}
+	for _, name := range []string{"create_objective", "objectives", "maintenance", "workspace_links", "answer_question"} {
+		require.Nil(t, s.GetTool(name), name)
+	}
+	for _, action := range []string{"edit", "move", "archive", "delete", "assign", "start", "stop", "message"} {
+		require.Contains(t, s.GetTool("manage_task").Tool.Description, action)
+	}
+	require.Contains(t, s.GetTool("create_task").Tool.Description, "No objective")
+}
+
+func TestAssistantBrokerReportsEmptyHTTPFailure(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) }))
+	defer backend.Close()
+	result, err := callAssistantBroker(&kandevClient{apiURL: backend.URL, http: backend.Client()}, assistantBrokerTool{method: "GET", path: "/runtime/objectives"}, nil)
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, result.Content, mcp.TextContent{Type: "text", Text: "Kandev returned HTTP 404 (Not Found)"})
 }

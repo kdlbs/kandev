@@ -23,14 +23,21 @@ type WorkspaceTaskSpec struct {
 type WorkspaceTaskCommand struct {
 	OperationRequest
 	DelegationReference
-	DirectProfile bool   `json:"-"`
-	SessionID     string `json:"session_id"`
-	Prompt        string `json:"prompt"`
-	WorkspaceID   string
-	ChiefID       string
-	TaskID        string
-	Action        string `json:"action"`
-	AssigneeID    string `json:"assignee"`
+	DirectProfile  bool   `json:"-"`
+	SessionID      string `json:"session_id"`
+	Prompt         string `json:"prompt"`
+	WorkspaceID    string
+	ChiefID        string
+	TaskID         string
+	Action         string  `json:"action"`
+	AssigneeID     string  `json:"assignee"`
+	Title          *string `json:"title,omitempty"`
+	Description    *string `json:"description,omitempty"`
+	Priority       *string `json:"priority,omitempty"`
+	ParentID       *string `json:"parent_id,omitempty"`
+	WorkflowID     string  `json:"workflow_id,omitempty"`
+	WorkflowStepID string  `json:"workflow_step_id,omitempty"`
+	Position       *int    `json:"position,omitempty"`
 }
 
 // DelegationReference follows an objective without changing the assigned profile

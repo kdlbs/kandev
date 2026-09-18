@@ -168,6 +168,10 @@ func (a *taskCreatorAdapter) ManageWorkspaceTask(ctx context.Context, command sh
 	if err := shared.CheckWorkspaceEffect(ctx); err != nil {
 		return err
 	}
+	return a.dispatchWorkspaceTask(ctx, task, command)
+}
+
+func (a *taskCreatorAdapter) dispatchWorkspaceTask(ctx context.Context, task *models.Task, command shared.WorkspaceTaskCommand) error {
 	switch command.Action {
 	case "message":
 		return a.messageWorkspaceTask(ctx, task, command)
@@ -175,6 +179,14 @@ func (a *taskCreatorAdapter) ManageWorkspaceTask(ctx context.Context, command sh
 		return a.adoptWorkspaceTask(ctx, task, command)
 	case "start":
 		return a.startWorkspaceTask(ctx, task, command.DirectProfile)
+	case "edit":
+		return a.editWorkspaceTask(ctx, task, command)
+	case "move":
+		return a.moveWorkspaceTask(ctx, task, command)
+	case "archive":
+		return a.taskSvc.ArchiveTask(ctx, task.ID)
+	case "delete":
+		return a.taskSvc.DeleteTask(ctx, task.ID)
 	case "stop":
 		if a.orch == nil {
 			return fmt.Errorf("orchestrator unavailable")
