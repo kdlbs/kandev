@@ -279,6 +279,12 @@ only when the user explicitly asks for reinforcement. Re-fetch immediately
 before delivery and start a new review round if `headRefOid` changed. Name the
 exact reviewed SHA in the outgoing finding.
 
+When handing findings to another Kandev session, include the file and line,
+severity, concrete fix, and targeted verification. Tell the recipient to call
+`step_complete_kandev` as its final action, then verify that the recipient
+session reaches a terminal or completed state instead of relying on a status
+message alone.
+
 ### 5. Output
 
 Use this format:

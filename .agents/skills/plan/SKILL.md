@@ -257,7 +257,12 @@ before marking Results complete. Record actual results, not planned or stale cou
 Before marking a new plan package complete, run `git diff --check --
 docs/plans/<initiative>` and `git status --short -- docs/plans/<initiative>`;
 the status check catches untracked work orders. Confirm every work order names
-existing `REQ-*`/`AC-*` IDs and an existing system-design path.
+existing `REQ-*`/`AC-*` IDs and an existing system-design path. Also verify that
+every requirement named by a work order is declared by at least one of its
+referenced system designs, and that every work-order design is included by the
+plan's system-design list. Run the repository's PR-documentation coverage
+preflight when one is available; `list-docs` and specification lint alone do
+not prove this cross-reference coverage.
 
 Do not add generic QA, review, simplify, security, or full-verification tasks.
 Task checks provide pre-PR evidence. Configured PR reviewers provide semantic
