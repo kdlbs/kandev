@@ -8,7 +8,7 @@ migration/replay/rollback rehearsal completed before the authorized cutover.
 | Candidate | `0.94.0-orchestration.20260918.sha2eaf7a892` |
 | Source | `2eaf7a892` |
 | Base | Exact v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1` |
-| Bundle | Six immutable binaries; [SHA-256 receipt](candidate-receipt.json) |
+| Bundle | Six immutable binaries; [current SHA-256 receipt](task-control-live-receipt.json) |
 | Qualification | [Completed checks and platform/provider limits](candidate-qualification.md) |
 | Data rehearsal | [Migration, replay, synthetic Coordinator APIs and matched rollback](migration-rehearsal.md) |
 | Service patch | Staged private override; merged user-unit validation passed |
