@@ -18,8 +18,9 @@ import (
 // used throughout this file for "a retryable blip".
 const transientMessage = "connection reset by peer"
 
-func safeTransientEvidence() service.AgentFailureEvidence {
+func safeTransientEvidence(run *models.Run) service.AgentFailureEvidence {
 	return service.AgentFailureEvidence{
+		RunID:            run.ID,
 		SessionID:        "session-test",
 		AgentExecutionID: "execution-test",
 		PromptGeneration: 1,
@@ -54,7 +55,7 @@ func TestHandleAgentFailure_TransientDoesNotCountTowardAutoPause(t *testing.T) {
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-transient")
 	run := queueAndReadRun(t, svc, "agent-transient", taskID)
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestHandleAgentFailure_TransientRetryBounded(t *testing.T) {
 	wantDelay := []time.Duration{5 * time.Second, 10 * time.Second}
 
 	for i := 0; i < 2; i++ {
-		wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+		wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 		if err != nil {
 			t.Fatalf("handle failure %d: %v", i, err)
 		}
@@ -129,7 +130,7 @@ func TestHandleAgentFailure_TransientRetryBounded(t *testing.T) {
 		run = refreshed
 	}
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure (bound): %v", err)
 	}
@@ -158,7 +159,7 @@ func TestHandleAgentFailure_NonTransientUnchanged(t *testing.T) {
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-non-transient")
 	run := queueAndReadRun(t, svc, "agent-non-transient", taskID)
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, "boom", "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, "boom", "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestHandleAgentFailure_UnlaunchableMessageNotRetried(t *testing.T) {
 	run := queueAndReadRun(t, svc, "agent-unlaunchable", taskID)
 
 	const msg = "scheduler cannot launch run: no task starter is configured"
-	wrote, err := svc.HandleAgentFailure(ctx, run, msg, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, msg, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -235,7 +236,7 @@ func TestHandleAgentFailure_StaleRunNotRetried(t *testing.T) {
 	svc.ExecSQL(t, `UPDATE runs SET requested_at = ? WHERE id = ?`, staleRequestedAt, run.ID)
 	run.RequestedAt = staleRequestedAt
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -285,7 +286,7 @@ func TestHandleAgentFailure_ClaimStaleRunNotRetried(t *testing.T) {
 	svc.ExecSQL(t, `UPDATE runs SET requested_at = ? WHERE id = ?`, requestedAt, run.ID)
 	run.RequestedAt = requestedAt
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -338,7 +339,7 @@ func TestHandleAgentFailure_ScheduledArrivalPastStaleThresholdNotRetried(t *test
 	svc.ExecSQL(t, `UPDATE runs SET requested_at = ? WHERE id = ?`, requestedAt, run.ID)
 	run.RequestedAt = requestedAt
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -388,7 +389,7 @@ func TestHandleAgentFailure_ScheduledArrivalPastStaleThresholdNotRetriedSecondAt
 	run.RequestedAt = requestedAt
 	run.RetryCount = 1
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -436,7 +437,7 @@ func TestHandleAgentFailure_ProviderErrorMessagePreferred(t *testing.T) {
 		OccurredAt: time.Now().UTC(),
 	}
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, "Overloaded", "", providerErr, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, "Overloaded", "", providerErr, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -477,6 +478,7 @@ func TestHandleAgentFailure_TransientRetryClearsDeadSession(t *testing.T) {
 	run.SessionID = deadSessionID
 
 	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, service.AgentFailureEvidence{
+		RunID:            run.ID,
 		SessionID:        deadSessionID,
 		AgentExecutionID: "execution-dead-session",
 		PromptGeneration: 1,
@@ -517,7 +519,7 @@ func TestHandleAgentFailure_ProviderIDRequiredForTransientClassification(t *test
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-rate-limit-id")
 	run := queueAndReadRun(t, svc, "agent-rate-limit-id", taskID)
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, rateLimitMessage, "claude-acp", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, rateLimitMessage, "claude-acp", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure (with agent id): %v", err)
 	}
@@ -541,7 +543,7 @@ func TestHandleAgentFailure_ProviderIDRequiredForTransientClassification(t *test
 	insertSyntheticTask(t, svc, taskID2, "ws-1", "agent-rate-limit-no-id")
 	run2 := queueAndReadRun(t, svc, "agent-rate-limit-no-id", taskID2)
 
-	wrote2, err := svc.HandleAgentFailure(ctx, run2, rateLimitMessage, "", nil, safeTransientEvidence())
+	wrote2, err := svc.HandleAgentFailure(ctx, run2, rateLimitMessage, "", nil, safeTransientEvidence(run2))
 	if err != nil {
 		t.Fatalf("handle failure (no agent id): %v", err)
 	}
@@ -584,7 +586,7 @@ func TestHandleAgentFailure_ProviderErrorIDSubstitutedWhenAgentIDHasNoRules(t *t
 	// "opencode-go" is a real model-provider id (routingerr/rules.go's
 	// HasProviderRules doc comment) with no rules of its own, so this only
 	// retries if providerErr.ProviderID is substituted in.
-	wrote, err := svc.HandleAgentFailure(ctx, run, "too many requests", "opencode-go", providerErr, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, "too many requests", "opencode-go", providerErr, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -627,7 +629,7 @@ func TestHandleAgentFailure_ScheduleRetryErrorFallsThroughToTerminal(t *testing.
 			SELECT RAISE(FAIL, 'retry_count update blocked for test');
 		END`)
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
@@ -670,6 +672,7 @@ func TestAgentFailedEvent_ThreadsAgentIDThroughToTransientRetry(t *testing.T) {
 
 	event := bus.NewEvent(events.AgentFailed, "orchestrator", service.AgentLifecycleData{
 		TaskID:           taskID,
+		RunID:            run.ID,
 		AgentID:          "claude-acp",
 		AgentProfileID:   "agent-e2e-ratelimit",
 		SessionID:        "session-e2e-ratelimit",
@@ -724,6 +727,7 @@ func TestAgentFailedEvent_UnknownOrEffectfulEvidenceFallsThroughToTerminal(t *te
 
 			event := bus.NewEvent(events.AgentFailed, "orchestrator", service.AgentLifecycleData{
 				TaskID:           taskID,
+				RunID:            run.ID,
 				AgentID:          "claude-acp",
 				AgentProfileID:   agentID,
 				AgentExecutionID: "execution-" + tc.name,
@@ -761,6 +765,7 @@ func TestAgentFailedEvent_DiagnosticMustMatchTerminalFailure(t *testing.T) {
 
 	event := bus.NewEvent(events.AgentFailed, "orchestrator", service.AgentLifecycleData{
 		TaskID:                      taskID,
+		RunID:                       run.ID,
 		AgentID:                     "claude-acp",
 		AgentProfileID:              "agent-diagnostic-mismatch",
 		SessionID:                   "session-diagnostic-mismatch",
@@ -820,6 +825,44 @@ func TestAgentFailedEvent_RejectsStaleSessionEvidence(t *testing.T) {
 	}
 }
 
+// TestAgentFailedEvent_WithoutRunIDStaysTerminal covers the compatibility
+// lookup for old events. The fallback can still find the claimed run by task
+// and agent, but that event must not authorize an automatic retry because it
+// cannot prove which run produced the failure.
+func TestAgentFailedEvent_WithoutRunIDStaysTerminal(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+	createTestAgent(t, svc, "ws-1", "agent-missing-run-id")
+	taskID := "task-missing-run-id"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-missing-run-id")
+	run := queueAndReadRun(t, svc, "agent-missing-run-id", taskID)
+
+	event := bus.NewEvent(events.AgentFailed, "orchestrator", service.AgentLifecycleData{
+		TaskID:           taskID,
+		AgentID:          "claude-acp",
+		AgentProfileID:   "agent-missing-run-id",
+		SessionID:        "session-missing-run-id",
+		AgentExecutionID: "execution-missing-run-id",
+		PromptGeneration: 1,
+		EvidenceKnown:    true,
+		ErrorMessage:     "rate limit exceeded",
+	})
+	if err := eb.Publish(ctx, events.AgentFailed, event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q: a legacy event without run identity must stay terminal", refreshed.Status, service.RunStatusFailed)
+	}
+	if refreshed.RetryCount != 0 {
+		t.Fatalf("retry_count = %d, want 0", refreshed.RetryCount)
+	}
+}
+
 // TestHandleAgentFailure_TransientRetryNeverMarksRunFailed pins Review
 // round 6's R6-1 fix: a classified-transient failure must requeue
 // straight off the row's 'claimed' status without ever passing through
@@ -850,7 +893,7 @@ func TestHandleAgentFailure_TransientRetryNeverMarksRunFailed(t *testing.T) {
 		END;
 	`, run.ID))
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v (the run was written to status=failed before requeuing)", err)
 	}
@@ -893,7 +936,7 @@ func TestHandleAgentFailure_TransientRetryLostRaceFallsThroughWithoutTerminalAcc
 	svc.ExecSQL(t, `UPDATE runs SET status = 'cancelled', finished_at = ? WHERE id = ?`,
 		time.Now().UTC(), run.ID)
 
-	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence())
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil, safeTransientEvidence(run))
 	if err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}

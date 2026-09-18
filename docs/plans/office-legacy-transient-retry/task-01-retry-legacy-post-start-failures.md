@@ -32,9 +32,9 @@ longer counts as a full strike toward `consecutive_failures` and auto-pause.
 - `ScheduleRetryIfClaimed` (claimed-only guarded write) so the retry can never
   resurrect a run the claim path already cancelled for staleness.
 - Agent id / `providerError.ProviderID` substitution into the classifier.
-- Lifecycle execution and prompt evidence must prove a current, effect-safe
-  invocation before the retry is scheduled. Unknown or mismatched evidence
-  falls through to terminal accounting.
+- Lifecycle run, execution, and prompt evidence must prove a current,
+  effect-safe invocation before the retry is scheduled. Unknown or mismatched
+  evidence falls through to terminal accounting.
 - Regression tests for eligibility, the scheduled-arrival gate, and the
   `claimed -> failed -> queued` race.
 
@@ -105,9 +105,9 @@ path again.
 ## Risks
 
 The retry re-drives the whole run from the top only after the lifecycle event
-proves that no output or effect was observed for the current invocation. Events
-with unknown, stale, output-producing, or effectful evidence fall through to
-terminal accounting.
+identifies the exact run and proves that no output or effect was observed for
+the current invocation. Events with missing or stale run identity, unknown,
+output-producing, or effectful evidence fall through to terminal accounting.
 
 ## Parallelism
 

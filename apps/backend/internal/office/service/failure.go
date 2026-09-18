@@ -43,9 +43,10 @@ var officeLegacyTransientBackoff = []time.Duration{
 
 // AgentFailureEvidence is the lifecycle snapshot for the invocation that
 // produced an agent failure. The legacy retry path requires this evidence to
-// prove that the failure happened before output or effects, and that the
-// event still belongs to the current invocation.
+// prove that the failure belongs to this run and invocation, and happened
+// before output or effects.
 type AgentFailureEvidence struct {
+	RunID                       string
 	SessionID                   string
 	AgentExecutionID            string
 	PromptGeneration            uint64
@@ -299,7 +300,8 @@ func classifyLegacyTransientFailure(
 }
 
 func legacyTransientRetryEvidenceSafe(run *models.Run, evidence AgentFailureEvidence) bool {
-	if run == nil || evidence.SessionID == "" || evidence.AgentExecutionID == "" || evidence.PromptGeneration == 0 ||
+	if run == nil || evidence.RunID == "" || evidence.RunID != run.ID || evidence.SessionID == "" ||
+		evidence.AgentExecutionID == "" || evidence.PromptGeneration == 0 ||
 		!evidence.EvidenceKnown || evidence.OutputObserved || evidence.EffectObserved {
 		return false
 	}

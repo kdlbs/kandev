@@ -126,7 +126,8 @@ for the full command list and receipts.
 ## Risks
 
 The retry re-drives the whole run from the top only after the lifecycle event
-proves that no output or effect was observed for the current invocation.
+identifies the exact run and proves that no output or effect was observed for
+the current invocation.
 Unknown, stale, output-producing, effectful, or diagnostically mismatched
 events fall through to terminal accounting.
 

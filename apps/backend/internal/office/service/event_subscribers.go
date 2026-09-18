@@ -761,6 +761,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// do NOT call into it here. See docs/specs/office/requirements/runtime.md.
 	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
 	wrote, err := s.HandleAgentFailure(ctx, run, errMsg, data.AgentID, data.ProviderError, AgentFailureEvidence{
+		RunID:                       data.RunID,
 		SessionID:                   data.SessionID,
 		AgentExecutionID:            data.AgentExecutionID,
 		PromptGeneration:            data.PromptGeneration,
