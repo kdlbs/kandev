@@ -37,10 +37,6 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
-  KANDEV_FEATURES_PERSONAL_ASSISTANT:
-    prod: "false"
-    dev: "false"
-    e2e: "false"
   KANDEV_FEATURES_ORCHESTRATION:
     prod: "false"
     dev: "false"

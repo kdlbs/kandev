@@ -128,7 +128,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_MOCK_JIRA", Class: "test", Reason: "test-only provider replacement"},
 	{EnvVar: "KANDEV_MOCK_LINEAR", Class: "test", Reason: "test-only provider replacement"},
 	{EnvVar: "KANDEV_FEATURES_OFFICE", Class: "profile", Reason: "runtime feature flag registry"},
-	{EnvVar: "KANDEV_FEATURES_PERSONAL_ASSISTANT", Class: "profile", Reason: "runtime feature flag registry"},
+	{EnvVar: "KANDEV_FEATURES_PERSONAL_ASSISTANT", Class: "exclusion", Reason: "retired Orchestrator alias; no independent feature"},
 	{EnvVar: "KANDEV_FEATURES_AUTH", Class: "profile", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_CANVASES", Class: "profile", Reason: "runtime feature flag registry"},
 	{EnvVar: "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", Class: "debug", Reason: "runtime feature flag registry"},
