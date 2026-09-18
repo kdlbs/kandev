@@ -95,9 +95,48 @@ type Skill struct {
 type RunSkillSnapshot struct {
 	RunID            string `json:"run_id" db:"run_id"`
 	SkillID          string `json:"skill_id" db:"skill_id"`
+	DisplayName      string `json:"display_name" db:"display_name"`
+	Slug             string `json:"slug" db:"slug"`
+	LabelSource      string `json:"label_source" db:"label_source"`
 	Version          string `json:"version" db:"version"`
 	ContentHash      string `json:"content_hash" db:"content_hash"`
 	MaterializedPath string `json:"materialized_path" db:"materialized_path"`
+}
+
+// RunSessionState is the durable lifecycle state of an Office execution that
+// is owned by a run rather than by a task session.
+type RunSessionState string
+
+const (
+	RunSessionStatePreparing   RunSessionState = "preparing"
+	RunSessionStateRunning     RunSessionState = "running"
+	RunSessionStateFinished    RunSessionState = "finished"
+	RunSessionStateFailed      RunSessionState = "failed"
+	RunSessionStateCancelled   RunSessionState = "cancelled"
+	RunSessionStateInterrupted RunSessionState = "interrupted"
+)
+
+// RunSession records one immutable attempt to execute an Office run. A retry
+// receives a new ID and attempt number, so delayed predecessor events cannot
+// be accepted as updates to the successor.
+type RunSession struct {
+	ID                 string          `json:"id" db:"id"`
+	WorkspaceID        string          `json:"workspace_id" db:"workspace_id"`
+	AgentProfileID     string          `json:"agent_profile_id" db:"agent_profile_id"`
+	RunID              string          `json:"run_id" db:"run_id"`
+	Attempt            int             `json:"attempt" db:"attempt"`
+	State              RunSessionState `json:"state" db:"state"`
+	ExecutionID        string          `json:"execution_id" db:"execution_id"`
+	ExecutionProfileID string          `json:"execution_profile_id" db:"execution_profile_id"`
+	Adapter            string          `json:"adapter" db:"adapter"`
+	Model              string          `json:"model" db:"model"`
+	ACPSessionID       string          `json:"acp_session_id" db:"acp_session_id"`
+	CreatedAt          time.Time       `json:"created_at" db:"created_at"`
+	StartedAt          *time.Time      `json:"started_at,omitempty" db:"started_at"`
+	FinishedAt         *time.Time      `json:"finished_at,omitempty" db:"finished_at"`
+	CancelRequestedAt  *time.Time      `json:"cancel_requested_at,omitempty" db:"cancel_requested_at"`
+	ErrorMessage       string          `json:"error_message,omitempty" db:"error_message"`
+	Version            int64           `json:"version" db:"version"`
 }
 
 // ProjectStatus represents the status of a project.
@@ -668,14 +707,17 @@ type Approval struct {
 
 // ActivityEntry represents an entry in the activity log.
 type ActivityEntry struct {
-	ID          string             `json:"id" db:"id"`
-	WorkspaceID string             `json:"workspace_id" db:"workspace_id"`
-	ActorType   ActivityActorType  `json:"actor_type" db:"actor_type"`
-	ActorID     string             `json:"actor_id" db:"actor_id"`
-	Action      ActivityAction     `json:"action" db:"action"`
-	TargetType  ActivityTargetType `json:"target_type" db:"target_type"`
-	TargetID    string             `json:"target_id" db:"target_id"`
-	Details     string             `json:"details" db:"details"`
+	ID               string             `json:"id" db:"id"`
+	WorkspaceID      string             `json:"workspace_id" db:"workspace_id"`
+	ActorType        ActivityActorType  `json:"actor_type" db:"actor_type"`
+	ActorID          string             `json:"actor_id" db:"actor_id"`
+	Action           ActivityAction     `json:"action" db:"action"`
+	TargetType       ActivityTargetType `json:"target_type" db:"target_type"`
+	TargetID         string             `json:"target_id" db:"target_id"`
+	ActorName        string             `json:"actor_name,omitempty" db:"-"`
+	TargetName       string             `json:"target_name,omitempty" db:"-"`
+	TargetIdentifier string             `json:"target_identifier,omitempty" db:"-"`
+	Details          string             `json:"details" db:"details"`
 	// RunID + SessionID let the run detail page join activity rows
 	// back to the originating run for the "Tasks Touched" surface.
 	// Empty string for activity not produced under a run (manual

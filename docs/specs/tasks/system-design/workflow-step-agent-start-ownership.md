@@ -327,7 +327,11 @@ Recovery boots the session and lets the existing queue drain send its preserved 
 Do not send the same prompt as both a launch description and a queue entry.
 
 A queue write failure does not mask the original startup failure.
-Log a separate bounded preservation diagnostic with task, session, execution, and attempt identity, without input text or attachment contents.
+The attempt-owned preservation path retries queue admission once while its
+claim remains current. It releases the claim only after that retry fails, so a
+later callback can retry only with the same launch ownership. Log a separate
+bounded preservation diagnostic with task, session, execution, and attempt
+identity, without input text or attachment contents.
 The existing persistent launch error remains the visible recovery signal.
 No frontend layout or copy changes are required by this package.
 

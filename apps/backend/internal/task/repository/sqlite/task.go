@@ -3796,20 +3796,23 @@ func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args[i] = id
+	var tasks []*models.Task
+	for _, chunk := range chunkIDs(ids, sqliteMaxHostParams) {
+		placeholders, args := buildInPlaceholders(chunk)
+		query := fmt.Sprintf(`SELECT %s FROM tasks t WHERE t.id IN (%s)`,
+			taskSelectColumns("t"), placeholders)
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+		if err != nil {
+			return nil, err
+		}
+		chunkTasks, err := r.scanTasks(rows)
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, chunkTasks...)
 	}
-	query := fmt.Sprintf(`SELECT %s FROM tasks t WHERE t.id IN (%s)`,
-		taskSelectColumns("t"), strings.Join(placeholders, ","))
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return r.scanTasks(rows)
+	return tasks, nil
 }
 
 // ArchiveTask sets the archived_at timestamp on a task

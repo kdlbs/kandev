@@ -61,6 +61,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
@@ -1164,6 +1165,11 @@ func startGatewayAndServe(
 		closeBoundListeners(server, listeners, log)
 		return false
 	}
+	if err := runProcessorSvc.ReconcileRunSessions(ctx); err != nil {
+		log.Error("Failed to reconcile Office run sessions", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
 	scheduling := startSchedulingRuntime(
 		ctx, repos, services, eventBus, orchestratorSvc, runProcessorSvc, log,
 		runsscheduler.TickIntervalFromConfig(cfg.Office.SchedulerTickMs),
@@ -1441,7 +1447,7 @@ func initOfficeServices(
 
 	runProcessorSvc := newRunProcessorService(
 		cfg, repos, services, orchestratorSvc, eventBus,
-		agentctlBinaryPath, cfgLoader, cfgWriter, log,
+		agentctlBinaryPath, cfgLoader, cfgWriter, lifecycleMgr, log,
 	)
 
 	// Task dependencies are a core Kanban relationship, not an Office feature.
@@ -1501,7 +1507,7 @@ func initOfficeServices(
 	// Build feature-package services and wire all inter-service dependencies.
 	services.OfficeSvcs = buildOfficeFeatureServices(
 		repos.Office, repos.Task, repos.AgentSettings, cfgLoader, cfgWriter, configBasePath,
-		agentRegistry, log, services, cfg.Office.JWTSigningKey,
+		agentRegistry, log, services, lifecycleMgr, cfg.Office.JWTSigningKey,
 	)
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
 	services.OfficeSvcs.Dashboard.SetOfficeSessionIdentity(cfg.Features.OfficeSessionIdentity)
@@ -1550,13 +1556,14 @@ func newRunProcessorService(
 	agentctlBinaryPath string,
 	cfgLoader *configloader.ConfigLoader,
 	cfgWriter *configloader.FileWriter,
+	lifecycleMgr *lifecycle.Manager,
 	log *logger.Logger,
 ) *officeservice.Service {
 	apiPort := cfg.Server.Port
 	if apiPort == 0 {
 		apiPort = ports.Backend
 	}
-	return officeservice.NewService(officeservice.ServiceOptions{
+	svc := officeservice.NewService(officeservice.ServiceOptions{
 		Repo:               repos.Office,
 		Logger:             log,
 		CfgLoader:          cfgLoader,
@@ -1571,6 +1578,8 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, log))
+	return svc
 }
 
 // wireOfficeSvcsDependencies wires inter-service dependencies into the
@@ -1671,6 +1680,7 @@ func wireOfficeProviderRouting(
 	resolver.SetExecutionProfileStore(repos.AgentSettings, agentRegistry)
 	scheduler.SetResolver(resolver)
 	scheduler.SetTaskStarter(&schedulerTaskStarterAdapter{orch: orchestratorSvc})
+	scheduler.SetRunSessionLauncher(services.Office.RunSessionLauncherHandle())
 	scheduler.SetEventBus(eventBus)
 	services.Office.SetRoutingDispatcher(scheduler)
 
@@ -2384,6 +2394,7 @@ func buildOfficeFeatureServices(
 	agentRegistry *registry.Registry,
 	log *logger.Logger,
 	services *Services,
+	lifecycleMgr *lifecycle.Manager,
 	jwtSigningKey string,
 ) *office.Services {
 	activity := officeshared.NewActivityLogger(repo, log)
@@ -2453,6 +2464,10 @@ func buildOfficeFeatureServices(
 	// (it already delegates to the orchestrator via SetTaskCanceller);
 	// services.Task satisfies WorkspaceChecker.
 	pauseSvc := officepause.NewService(repo, services.Office, services.Task, log)
+	pauseSvc.SetRunExecutionStopper(runtimeapi.New(lifecycleMgr))
+	if services.Office != nil {
+		services.Office.SetRunExecutionStopper(runtimeapi.New(lifecycleMgr))
+	}
 	routineSvc.SetPauseGate(pauseSvc)
 	routineWakeupDispatcher.SetPauseGate(pauseSvc)
 	schedulerSvc.SetPauseGate(pauseSvc)

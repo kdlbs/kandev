@@ -113,7 +113,10 @@ This draft extension addresses [issue #3753](https://github.com/kdlbs/kandev/iss
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** Prompt preservation shall retain the existing launch-error classification and recovery actions.
   It shall not initiate another launch from the failure callback or turn permanent rejection into an automatic retry loop.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** After successful queue persistence, the preserved prompt shall survive a backend restart.
-  If persistence fails, the launch error shall remain visible and diagnostics shall identify the preservation failure without exposing prompt content.
+  If queue admission fails, the same launch attempt shall retry once while it
+  still owns the preservation claim. After that retry fails, the launch error
+  shall remain visible and diagnostics shall identify the preservation failure
+  without exposing prompt content.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.6:** Successful starts and synchronous permanent rejections shall not create asynchronous recovery entries.
   Existing synchronous busy-error recovery shall retain its current behavior.
 

@@ -83,7 +83,7 @@ disposition without pretending the selected sibling started.
 ## Conversation recovery and workflow stop history
 
 Follow [the session-open decision](../../../decisions/2026-09-18-session-open-resumes-conversation.md)
-and AC 001.9/003.8. Opening an earlier conversation is sufficient to request
+and AC 001.9/003.10. Opening an earlier conversation is sufficient to request
 normal automatic recovery. No primary-role or committed-route exception is needed
 solely because the conversation was stopped by a workflow switch.
 

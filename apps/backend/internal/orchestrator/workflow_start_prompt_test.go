@@ -263,6 +263,45 @@ func TestWorkflowAsyncStartFailure_QueueFailureKeepsLaunchError(t *testing.T) {
 	}
 }
 
+func TestWorkflowAsyncStartFailure_RetriesTransientQueueFailure(t *testing.T) {
+	fixture := newWorkflowAsyncStartFailureFixture(t, errors.New("provider startup failed"))
+	queueRepo := &workflowStartPromptQueueRetryRepository{
+		Repository: newAuthoritativeMemoryRepository(fixture.repo),
+		err:        errors.New("temporary queue failure"),
+	}
+	queueRepo.remainingFailures.Store(1)
+	fixture.svc.messageQueue = messagequeue.NewService(
+		queueRepo, messagequeue.DefaultMaxPerSession, testLogger(),
+	)
+
+	if err := fixture.svc.autoStartStepPrompt(
+		context.Background(), fixture.taskID, fixture.session, fixture.step,
+		fixture.prompt, false, true, nil,
+	); err != nil {
+		t.Fatalf("autoStartStepPrompt returned launch error before asynchronous failure: %v", err)
+	}
+	select {
+	case <-fixture.startEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for asynchronous startup")
+	}
+	close(fixture.releaseStart)
+	select {
+	case <-fixture.startReturned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for startup failure callback")
+	}
+	waitForSessionState(t, fixture.repo, fixture.sessionID, models.TaskSessionStateFailed)
+
+	status := fixture.svc.messageQueue.GetStatus(context.Background(), fixture.sessionID)
+	if status.Count != 1 || status.Entries[0].Content != fixture.prompt {
+		t.Fatalf("queue after transient failure = %#v, want one preserved prompt", status)
+	}
+	if got := queueRepo.insertCalls.Load(); got != 2 {
+		t.Fatalf("queue insert attempts = %d, want one retry after the first failure", got)
+	}
+}
+
 func TestWorkflowAsyncStartFailure_QueueFullKeepsLaunchError(t *testing.T) {
 	fixture := newWorkflowAsyncStartFailureFixture(t, errors.New("provider startup failed"))
 	ctx := context.Background()
@@ -566,6 +605,46 @@ func (r *workflowStartPromptQueueFailureRepository) InsertForSession(
 	context.Context, messagequeue.QueueSessionIdentity, *messagequeue.QueuedMessage, int,
 ) error {
 	return r.err
+}
+
+type workflowStartPromptQueueRetryRepository struct {
+	messagequeue.Repository
+	err               error
+	remainingFailures atomic.Int32
+	insertCalls       atomic.Int32
+}
+
+func (r *workflowStartPromptQueueRetryRepository) shouldFail() bool {
+	for {
+		remaining := r.remainingFailures.Load()
+		if remaining <= 0 {
+			return false
+		}
+		if r.remainingFailures.CompareAndSwap(remaining, remaining-1) {
+			return true
+		}
+	}
+}
+
+func (r *workflowStartPromptQueueRetryRepository) Insert(
+	ctx context.Context, msg *messagequeue.QueuedMessage, maxPerSession int,
+) error {
+	r.insertCalls.Add(1)
+	if r.shouldFail() {
+		return r.err
+	}
+	return r.Repository.Insert(ctx, msg, maxPerSession)
+}
+
+func (r *workflowStartPromptQueueRetryRepository) InsertForSession(
+	ctx context.Context, identity messagequeue.QueueSessionIdentity,
+	msg *messagequeue.QueuedMessage, maxPerSession int,
+) error {
+	r.insertCalls.Add(1)
+	if r.shouldFail() {
+		return r.err
+	}
+	return r.Repository.InsertForSession(ctx, identity, msg, maxPerSession)
 }
 
 type workflowAsyncStartFailureFixture struct {

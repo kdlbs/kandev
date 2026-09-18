@@ -18,7 +18,7 @@ acceptance_criteria:
   - AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.9
   - AC-TASKS-QUEUED-SESSION-OWNERSHIP-002.4
   - AC-TASKS-QUEUED-SESSION-OWNERSHIP-002.6
-  - AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.8
+  - AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10
 system_design:
   - ../../specs/tasks/system-design/queued-session-ownership.md
 ---

@@ -833,9 +833,9 @@ func (r *Repository) GetRunWithCosts(
 			COALESCE(SUM(tokens_cached_in), 0) AS cached_tokens,
 			COALESCE(SUM(cost_subcents), 0)    AS cost_subcents
 		FROM office_cost_events
-		WHERE task_id != ''
-		  AND task_id = COALESCE(json_extract(?, '$.task_id'), '')
-	`), run.Payload).StructScan(&rollup)
+		WHERE (task_id != '' AND task_id = COALESCE(json_extract(?, '$.task_id'), ''))
+          OR (task_id = '' AND session_id IN (SELECT id FROM office_run_sessions WHERE run_id = ?))
+	`), run.Payload, run.ID).StructScan(&rollup)
 	if err != nil {
 		return &run, &RunCostRollup{}, nil
 	}

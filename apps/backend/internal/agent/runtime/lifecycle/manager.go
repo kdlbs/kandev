@@ -44,6 +44,7 @@ type Manager struct {
 	eventBus        bus.EventBus
 	credsMgr        CredentialsManager
 	profileResolver ProfileResolver
+	ownerAdmission  OwnerAdmission
 	worktreeMgr     *worktree.Manager
 	mcpProvider     McpConfigProvider
 	logger          *logger.Logger
@@ -235,7 +236,8 @@ type Manager struct {
 	// runningWriter persists the executors_running row in lockstep with executionStore.
 	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
 	// only component allowed to write the lifecycle-owned columns of this table.
-	runningWriter ExecutorRunningWriter
+	runningWriter  ExecutorRunningWriter
+	runRecoveryErr error
 
 	// executorProfileReader resolves the executor profile bound to a task
 	// environment so user shell terminals can be given the same profile env
@@ -297,6 +299,13 @@ type Manager struct {
 	activityLeaseOwners map[string]uint64
 	activityPending     map[string]map[uint64]*executionActivityClaim
 	activityGeneration  uint64
+}
+
+// SetOwnerAdmission wires the durable owner gate used by run-owned launches.
+// Task launches keep their existing task/session admission when no owner gate
+// is configured.
+func (m *Manager) SetOwnerAdmission(admission OwnerAdmission) {
+	m.ownerAdmission = admission
 }
 
 // ManagedGoCacheEnvironmentProvider supplies the environment for one new
