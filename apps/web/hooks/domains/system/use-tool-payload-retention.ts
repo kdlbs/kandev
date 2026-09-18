@@ -15,7 +15,11 @@ type Lifetime = {
   generation: number;
 };
 type AcceptedOperation = { id: string; kind: "analysis" | "cleanup" };
-type Updates = { pending: (value: boolean) => void; error: (cause: unknown) => void };
+type Updates = {
+  pending: (value: boolean) => void;
+  actionError: (cause: unknown) => void;
+  clearErrors: () => void;
+};
 
 function operationObserved(status: ToolPayloadRetentionStatus, accepted: AcceptedOperation) {
   if (status.operation?.id === accepted.id) return true;
@@ -26,7 +30,8 @@ function operationObserved(status: ToolPayloadRetentionStatus, accepted: Accepte
 function loadStatus(
   owner: Lifetime,
   accept: (value: ToolPayloadRetentionStatus) => void,
-  fail: Updates["error"],
+  recover: () => void,
+  fail: (cause: unknown) => void,
 ) {
   if (owner.mutating) return Promise.resolve();
   if (owner.reading) return owner.reading;
@@ -35,7 +40,10 @@ function loadStatus(
   const request = api
     .fetchToolPayloadRetention()
     .then((next) => {
-      if (current()) accept(next);
+      if (current()) {
+        accept(next);
+        recover();
+      }
     })
     .catch((cause: unknown) => {
       if (current()) fail(cause);
@@ -60,13 +68,13 @@ async function performMutation<T>(
   const { epoch } = owner;
   const current = () => owner.mounted && owner.epoch === epoch;
   updates.pending(true);
-  updates.error(null);
+  updates.clearErrors();
   try {
     const result = await request();
     if (current()) accept(result);
     return result;
   } catch (cause) {
-    if (current()) updates.error(cause);
+    if (current()) updates.actionError(cause);
     throw cause;
   } finally {
     owner.mutating = false;
@@ -113,9 +121,29 @@ function useRetentionLifetime(owner: { current: Lifetime }, reload: () => Promis
     };
   }, [owner, reload]);
 }
+function useRetentionMutation(
+  owner: { current: Lifetime },
+  setPending: (value: boolean) => void,
+  setStatusError: (value: unknown) => void,
+  setActionError: (value: unknown) => void,
+) {
+  return useCallback(
+    <T>(request: () => Promise<T>, accept: (value: T) => void) =>
+      performMutation(owner.current, request, accept, {
+        pending: setPending,
+        actionError: setActionError,
+        clearErrors: () => {
+          setStatusError(null);
+          setActionError(null);
+        },
+      }),
+    [owner, setActionError, setPending, setStatusError],
+  );
+}
 export function useToolPayloadRetention() {
   const [status, setStatus] = useState<ToolPayloadRetentionStatus | null>(null);
-  const [error, setError] = useState<unknown>(null);
+  const [statusError, setStatusError] = useState<unknown>(null);
+  const [actionError, setActionError] = useState<unknown>(null);
   const [pending, setPending] = useState(false);
   const [acceptedId, setAcceptedId] = useState<string | null>(null);
   const acceptedOperation = useRef<AcceptedOperation | null>(null);
@@ -138,12 +166,14 @@ export function useToolPayloadRetention() {
             setAcceptedId(null);
           }
         },
-        setError,
+        () => setStatusError(null),
+        setStatusError,
       ),
     [],
   );
   const refresh = useCallback(() => {
-    setError(null);
+    setStatusError(null);
+    setActionError(null);
     return reload();
   }, [reload]);
   useAcceptedOperationRefresh(acceptedId, reload);
@@ -152,11 +182,7 @@ export function useToolPayloadRetention() {
     status?.preparation.state === "pending" || status?.preparation.state === "running";
   const active = Boolean(acceptedId || preparing || status?.operation?.state === "running");
   useStatusPolling(reload, active, preparing);
-  const perform = useCallback(
-    <T>(request: () => Promise<T>, accept: (value: T) => void) =>
-      performMutation(owner.current, request, accept, { pending: setPending, error: setError }),
-    [],
-  );
+  const perform = useRetentionMutation(owner, setPending, setStatusError, setActionError);
   const acceptStatus = useCallback((next: ToolPayloadRetentionStatus) => {
     acceptedOperation.current = null;
     setStatus(next);
@@ -196,7 +222,7 @@ export function useToolPayloadRetention() {
   );
   return {
     status,
-    error,
+    error: actionError ?? statusError,
     pending,
     active,
     preparing,

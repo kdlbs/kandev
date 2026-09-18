@@ -169,10 +169,10 @@ const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTrig
           stepLabel: current.name,
           status: progressLabel,
         })}
-        onMouseEnter={controls.openDisclosure}
-        onMouseLeave={controls.scheduleClose}
-        onFocus={controls.handleTriggerFocus}
-        onBlur={controls.handleTriggerBlur}
+        onMouseEnter={usesTouchDrawer ? undefined : controls.openDisclosure}
+        onMouseLeave={usesTouchDrawer ? undefined : controls.scheduleClose}
+        onFocus={usesTouchDrawer ? undefined : controls.handleTriggerFocus}
+        onBlur={usesTouchDrawer ? undefined : controls.handleTriggerBlur}
         className={cn(
           "flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
           usesTouchDrawer && "min-h-11",

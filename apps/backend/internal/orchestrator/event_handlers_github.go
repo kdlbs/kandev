@@ -143,6 +143,11 @@ type ReviewTaskRepository struct {
 	BaseBranch     string
 	CheckoutBranch string
 	PRNumber       int // GitHub PR number; carried so worktree creation can use refs/pull/<N>/head for fork PRs.
+	// Name is the repository's configured Name, populated only by
+	// resolveExplicitRepositories for use by the webhook repository-selector
+	// match in resolveAutomationRepository (see S1 in the alert-ingest spec).
+	// Task creation itself does not read it.
+	Name string
 }
 
 // SetGitHubService sets the GitHub service for PR auto-detection.

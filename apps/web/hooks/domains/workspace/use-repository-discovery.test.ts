@@ -41,6 +41,15 @@ function response(scanTime = oldScan): RepositoryDiscoveryResponse {
   };
 }
 
+function failedResponse(
+  scanTime = new Date(currentTime).toISOString(),
+): RepositoryDiscoveryResponse {
+  return {
+    ...response(scanTime),
+    failed_roots: ["/missing"],
+  };
+}
+
 function client(overrides: Partial<RepositoryDiscoveryClient> = {}): RepositoryDiscoveryClient {
   return {
     getSnapshot: vi.fn(async () => response()),
@@ -135,6 +144,41 @@ describe("RepositoryDiscoveryCoordinator", () => {
     const release = coordinator.acquire(workspaceId);
     await vi.waitFor(() => expect(api.getSnapshot).toHaveBeenCalledTimes(1));
     expect(api.refresh).not.toHaveBeenCalled();
+    release();
+    coordinator.dispose();
+  });
+
+  it("does not auto-refresh a snapshot with failed roots", async () => {
+    const api = client({
+      getSnapshot: vi.fn(async () => failedResponse(oldScan)),
+    });
+    const coordinator = new RepositoryDiscoveryCoordinator(api, {
+      now: () => currentTime,
+    });
+
+    const release = coordinator.acquire(workspaceId);
+    await vi.waitFor(() => expect(api.getSnapshot).toHaveBeenCalledTimes(1));
+    expect(api.refresh).not.toHaveBeenCalled();
+    expect(coordinator.getSnapshot(workspaceId).response?.failed_roots).toEqual(["/missing"]);
+    release();
+    coordinator.dispose();
+  });
+
+  it("allows an explicit refresh to recover a failed snapshot", async () => {
+    const api = client({
+      getSnapshot: vi.fn(async () => failedResponse()),
+      refresh: vi.fn(async () => response(new Date(currentTime).toISOString())),
+    });
+    const coordinator = new RepositoryDiscoveryCoordinator(api, {
+      now: () => currentTime,
+    });
+
+    const release = coordinator.acquire(workspaceId);
+    await vi.waitFor(() => expect(api.getSnapshot).toHaveBeenCalledTimes(1));
+    await coordinator.refresh(workspaceId);
+
+    expect(api.refresh).toHaveBeenCalledWith(workspaceId, "manual_refresh");
+    expect(coordinator.getSnapshot(workspaceId).response?.failed_roots).toEqual([]);
     release();
     coordinator.dispose();
   });

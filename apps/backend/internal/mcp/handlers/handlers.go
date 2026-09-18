@@ -2359,7 +2359,13 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
 	}
 	if launchStepID != task.WorkflowStepID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow step changed before signal was recorded", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
+			"workflow step changed before signal was recorded. This turn started in step %s. "+
+				"The current step is %s. No signal was recorded. Retrying in this turn cannot recover. "+
+				"End this turn and ask the user to resume this session for the current step. "+
+				"After satisfying that step, signal completion from the new turn. "+
+				"Do not move the task solely to bypass this error.",
+			launchStepID, task.WorkflowStepID), nil)
 	}
 
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))

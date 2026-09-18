@@ -4,8 +4,7 @@ import { Button } from "@kandev/ui/button";
 import { IconChevronDown, IconArrowRight } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTranslation } from "react-i18next";
-import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
-import { workflowMoveOptionsPayload, type WorkflowMoveOptionsDraft } from "./workflow-move-options";
+import { workflowMoveShortcutLabel } from "./use-workflow-move-submit";
 
 type StepDisclosureRowActionsProps = {
   stepId: string;
@@ -13,10 +12,8 @@ type StepDisclosureRowActionsProps = {
   movePending: boolean;
   showOptions: boolean;
   buttonSizeClass: string;
-  draft: WorkflowMoveOptionsDraft;
-  entryOptions?: WorkflowMoveEntryOptions;
   onToggleOptions: () => void;
-  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
+  onSubmit: () => Promise<void>;
 };
 
 export function StepDisclosureRowActions({
@@ -25,10 +22,8 @@ export function StepDisclosureRowActions({
   movePending,
   showOptions,
   buttonSizeClass,
-  draft,
-  entryOptions,
   onToggleOptions,
-  onMove,
+  onSubmit,
 }: StepDisclosureRowActionsProps) {
   const { t } = useTranslation();
 
@@ -41,10 +36,15 @@ export function StepDisclosureRowActions({
         variant="outline"
         className={cn("shrink-0 cursor-pointer rounded-sm px-2.5 text-xs", buttonSizeClass)}
         disabled={movePending}
-        onClick={() => void onMove(stepId, entryOptions ?? workflowMoveOptionsPayload(draft))}
+        onClick={() => void onSubmit()}
       >
         {isMoving ? t("task:moving") : t("task:moveHere")}
         <IconArrowRight className="h-3 w-3" />
+        {showOptions && (
+          <kbd className="hidden self-center font-sans text-[10px] leading-none opacity-60 [@media(pointer:fine)]:inline">
+            {workflowMoveShortcutLabel()}
+          </kbd>
+        )}
       </Button>
       <Button
         type="button"

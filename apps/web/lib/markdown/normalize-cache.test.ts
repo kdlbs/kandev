@@ -21,6 +21,8 @@ const INTRO_TEXT = "Intro:";
 const INNER_PROMPT_TEXT = "nested prompt";
 const AFTER_NESTED_PROMPT = "After nested prompt.";
 const SAMPLE_PROSE_TEXT = "some explanation";
+const LONE_CR_PROSE =
+  "This paragraph explains the section in enough detail that the following separator must remain a rule.";
 const INTRO_AND_RULE_TEXT = "Intro and rule";
 const SELF_CONTAINED_TEXT = "That is self-contained.";
 const FIRST_FUNCTION_TEXT = "func first() {}";
@@ -213,6 +215,14 @@ describe("normalizeMarkdown bare-wrapper contract", () => {
     const input = BARE_WRAPPED_DOCUMENT.replaceAll("\n", "\r\n");
 
     expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("repairs lone-CR prose separators without changing their line endings", () => {
+    const input = `${LONE_CR_PROSE}\r---\rnext`;
+    const expected = `${LONE_CR_PROSE}\r\r---\rnext`;
+
+    expect(normalizeMarkdown(input)).toBe(expected);
+    expect(normalizeMarkdown(expected)).toBe(expected);
   });
 
   it("preserves an ambiguous glued outer close while retaining CRLF line endings", () => {

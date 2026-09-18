@@ -90,6 +90,70 @@ func TestEnsureSession_ReturnsExistingNewest_NoPrimary(t *testing.T) {
 	}
 }
 
+func TestEnsureSession_PassiveOpenReturnsExactQueuedDestination(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	seedTaskAndSession(t, repo, "task1", "session-astra", models.TaskSessionStateWaitingForInput)
+	if err := repo.SetSessionPrimary(ctx, "session-astra"); err != nil {
+		t.Fatalf("set parked session primary: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-luna", TaskID: "task1", State: models.TaskSessionStateCreated,
+		AgentProfileID: "profile-luna", StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create queued destination: %v", err)
+	}
+	queuedAt := now.Add(-time.Minute)
+	record := models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID:      "session-luna",
+			metaKeyAgentProfileID: "profile-luna",
+			metaKeyWorkflowStepID: "step-implement",
+		},
+		Origin:          string(launchOriginAutomatic),
+		QueuedAt:        queuedAt,
+		Population:      5,
+		PopulationKnown: true,
+		Ceiling:         5,
+	})
+	if err := repo.SetTaskMetadataKey(ctx, "task1", models.MetaKeyDeferredLaunch, record); err != nil {
+		t.Fatalf("set queued launch: %v", err)
+	}
+
+	response, err := svc.EnsureSession(ctx, "task1", EnsureSessionOptions{
+		ActivationSource: LaunchActivationSourceSessionOpen,
+	})
+	if err != nil {
+		t.Fatalf("EnsureSession: %v", err)
+	}
+	if response.SessionID != "session-luna" {
+		t.Fatalf("passive ensure session = %q, want exact queued destination", response.SessionID)
+	}
+	if response.Source != "existing_queued" || response.ActivationDisposition != "queued" ||
+		response.ActivationReason != "session_capacity" {
+		t.Fatalf("passive queued response = %+v", response)
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "task1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("passive ensure created or removed a session: got %d rows", len(sessions))
+	}
+	queuedTask, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if !models.HasCeilingDeferredIntent(queuedTask) {
+		t.Fatal("passive ensure cleared the queued launch")
+	}
+}
+
 func TestFindOfficeSessionForResumeUsesCanonicalOfficeProjection(t *testing.T) {
 	tests := []struct {
 		name         string

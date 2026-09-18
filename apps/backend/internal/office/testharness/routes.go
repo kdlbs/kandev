@@ -125,6 +125,7 @@ func RegisterRoutes(
 		g.POST("/run-skills", seedRunSkillSnapshotHandler(officeRepo, log))
 		g.POST("/cost-events", seedCostEventHandler(officeRepo, log))
 		g.POST("/activity", seedActivityHandler(officeRepo, log))
+		g.POST("/routine-triggers", seedRoutineTriggerHandler(officeRepo, log))
 	}
 	if agentSvc != nil {
 		g.POST("/runtime-token", mintRuntimeTokenHandler(agentSvc, log))

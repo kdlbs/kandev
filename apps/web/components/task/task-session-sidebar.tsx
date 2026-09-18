@@ -57,7 +57,7 @@ function findSidebarTask(state: ReturnType<StoreApi["getState"]>, taskId: string
   return undefined;
 }
 
-function useSidebarData(workspaceId: string | null) {
+export function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
@@ -355,7 +355,6 @@ export function useSidebarActions(store: StoreApi) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
-  const { renameTaskById } = useTaskActions();
   const router = useRouter();
   const pathname = usePathname();
   const { loadTaskSessionsForTask } = useTaskRemoval({
@@ -373,6 +372,11 @@ export function useSidebarActions(store: StoreApi) {
     setPreparingTaskId,
   });
 
+  return { preparingTaskId, handleSelectTask, ...useTaskRowActions(store) };
+}
+
+export function useTaskRowActions(store: StoreApi) {
+  const { renameTaskById } = useTaskActions();
   const archiveActions = useArchiveActions(store);
   const deleteActions = useDeleteActions(store);
   const detachActions = useTaskDetachDialog(store);
@@ -416,9 +420,7 @@ export function useSidebarActions(store: StoreApi) {
   const handleMoveToStep = useMoveToStep(store, clearTaskMoveError, reportTaskMoveError);
 
   return {
-    preparingTaskId,
     taskMoveError,
-    handleSelectTask,
     handleMoveToStep,
     handleNestTask,
     renamingTask,

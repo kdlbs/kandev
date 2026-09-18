@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -2425,21 +2426,25 @@ func taskArchived(task *models.Task) bool {
 func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
 	// Task lookup errors fail closed so office/archived guards cannot be bypassed
 	// by a transient repository failure.
-	if dbTask, err := s.repo.GetTask(ctx, taskID); err != nil {
+	dbTask, err := s.repo.GetTask(ctx, taskID)
+	switch {
+	case err != nil:
 		s.logger.Warn("failed to load task before REVIEW state reconcile",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
-	} else if dbTask != nil && dbTask.IsFromOffice {
+	case dbTask != nil && dbTask.IsFromOffice:
 		s.logger.Debug("skipping REVIEW transition for office task",
 			zap.String("task_id", taskID))
 		return
-	} else if taskArchived(dbTask) {
+	case taskArchived(dbTask):
 		s.logger.Debug("skipping REVIEW transition for archived task",
 			zap.String("task_id", taskID))
 		return
 	}
 
+	ctx, releaseCeilingEntry := s.lockCeilingEntryAdmission(ctx, taskID)
+	defer releaseCeilingEntry()
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
@@ -2453,23 +2458,61 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		}
 	}
 
-	if blockingSessionID, ok := s.otherWorkingSessionID(ctx, taskID, completedSessionID); !ok {
+	blockingSessionID, sessionsReadable := s.otherWorkingSessionID(ctx, taskID, completedSessionID)
+	if !sessionsReadable {
 		return
-	} else if blockingSessionID != "" {
+	}
+	if blockingSessionID != "" {
 		s.logger.Debug("skipping task REVIEW state while another session is working",
 			zap.String("task_id", taskID),
 			zap.String("completed_session_id", completedSessionID),
 			zap.String("blocking_session_id", blockingSessionID))
 		return
 	}
+	targetState := v1.TaskStateReview
+	allowedStates := []v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling}
+	observedDeferral, queued, queueErr := s.readValidCeilingDeferredLaunch(ctx, dbTask)
+	if queueErr != nil {
+		s.logger.Warn("skipping task REVIEW state reconcile while deferred launch ownership is uncertain",
+			zap.String("task_id", taskID), zap.Error(queueErr))
+		return
+	}
+	// The queue row and task route can change independently of the task-state
+	// CAS. Re-read both at the final boundary. A replacement entry is not ours
+	// to reconcile from this completion callback; its own admission/sweep path
+	// will publish the correct projection.
+	latestTask, latestTaskErr := s.repo.GetTask(ctx, taskID)
+	if latestTaskErr != nil || latestTask == nil || latestTask.IsFromOffice || taskArchived(latestTask) {
+		return
+	}
+	latestDeferral, latestQueued, latestQueueErr := s.readValidCeilingDeferredLaunch(ctx, latestTask)
+	if latestQueueErr != nil {
+		s.logger.Warn("skipping task REVIEW state reconcile while final deferred launch ownership is uncertain",
+			zap.String("task_id", taskID), zap.Error(latestQueueErr))
+		return
+	}
+	if queued && latestQueued {
+		equivalent, compareErr := sameCeilingDeferralIdentity(observedDeferral, latestDeferral)
+		if compareErr != nil || !equivalent {
+			return
+		}
+	}
+	queued = latestQueued
+	if queued {
+		// A sibling session can finish while the destination launch is waiting
+		// for capacity. Keep the task in Scheduling so the queued destination is
+		// not hidden behind a false Review state.
+		targetState = v1.TaskStateScheduling
+		allowedStates = append(allowedStates, v1.TaskStateReview)
+	}
 	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
 		ctx,
 		taskID,
-		v1.TaskStateReview,
-		[]v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling},
+		targetState,
+		allowedStates,
 	)
 	if err != nil {
-		s.logger.Error("failed to update task state to REVIEW",
+		s.logger.Error("failed to reconcile task runtime state",
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
@@ -2477,8 +2520,59 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 	if !updated {
 		return
 	}
-	s.logger.Info("task moved to REVIEW state",
+	s.logger.Info("task runtime state reconciled",
 		zap.String("task_id", taskID))
+}
+
+//nolint:cyclop,nestif // Queue reconciliation validates independent task, record, destination, and workflow-entry state.
+func (s *Service) readValidCeilingDeferredLaunch(
+	ctx context.Context,
+	task *models.Task,
+) (models.CeilingDeferral, bool, error) {
+	if task == nil || task.ArchivedAt != nil || task.State == v1.TaskStateCancelled {
+		return models.CeilingDeferral{}, false, nil
+	}
+	raw, _, err := s.repo.GetTaskDeferredLaunch(ctx, task.ID)
+	if err != nil {
+		return models.CeilingDeferral{}, false, err
+	}
+	if raw == nil {
+		return models.CeilingDeferral{}, false, nil
+	}
+	ceilingFlag, hasCeilingFlag := raw[models.CeilingDeferredKey]
+	if !hasCeilingFlag || ceilingFlag != true {
+		return models.CeilingDeferral{}, false, nil
+	}
+	deferral, err := models.ReadCeilingDeferral(raw)
+	if err != nil {
+		return models.CeilingDeferral{}, false, err
+	}
+	if sessionID := models.CeilingDeferralSessionID(task, deferral); sessionID != "" {
+		if !models.CeilingDeferralTargetsSession(task, deferral, sessionID) {
+			return models.CeilingDeferral{}, false, nil
+		}
+		session, sessionErr := s.repo.GetTaskSession(ctx, sessionID)
+		if sessionErr != nil {
+			if errors.Is(sessionErr, models.ErrTaskSessionNotFound) {
+				return models.CeilingDeferral{}, false, nil
+			}
+			return models.CeilingDeferral{}, false, sessionErr
+		}
+		if session == nil || session.TaskID != task.ID || isTerminalSessionState(session.State) {
+			return models.CeilingDeferral{}, false, nil
+		}
+		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
+			return models.CeilingDeferral{}, false, nil
+		}
+	}
+	disposition, detail, validationErr := s.validateCeilingEntry(ctx, task, deferral)
+	if validationErr != nil {
+		return models.CeilingDeferral{}, false, validationErr
+	}
+	if disposition == ceilingEntryUnavailable {
+		return models.CeilingDeferral{}, false, fmt.Errorf("deferred launch ownership is unavailable: %s", detail)
+	}
+	return deferral, disposition == ceilingEntryValid, nil
 }
 
 func isWorkingSessionState(state models.TaskSessionState) bool {
@@ -3188,18 +3282,29 @@ func (s *Service) handleOfficeTurnComplete(
 	return true
 }
 
-// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode)
-// and creates a dedicated agent_plan message in the session.
+// handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode).
 func (s *Service) handleAgentPlanEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload.SessionID == "" || payload.Data.PlanContent == "" || s.messageCreator == nil {
 		return
 	}
 	sessionID := payload.SessionID
-	if err := s.messageCreator.CreateSessionMessage(
-		ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
-		string(models.MessageTypeAgentPlan), s.getActiveTurnID(sessionID), nil, false,
+	turnID := s.getActiveTurnID(sessionID)
+	if payload.Data.ToolCallID == "" {
+		if err := s.messageCreator.CreateSessionMessage(
+			ctx, payload.TaskID, payload.Data.PlanContent, sessionID,
+			string(models.MessageTypeAgentPlan), turnID, nil, false,
+		); err != nil {
+			s.logger.Error("failed to create uncorrelated agent plan message",
+				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	if err := s.messageCreator.UpsertAgentPlanMessage(
+		ctx, payload.TaskID, payload.Data.ToolCallID, sessionID, payload.Data.PlanContent, turnID,
 	); err != nil {
-		s.logger.Error("failed to create agent plan message",
+		s.logger.Error("failed to upsert agent plan message",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))

@@ -23,6 +23,10 @@ var ErrInitialTaskBriefStale = errors.New("initial task brief is stale")
 // ErrMessageNotFound reports that no message row matched the supplied id.
 var ErrMessageNotFound = errors.New("message not found")
 
+// ErrMessageIdentityConflict reports that a deterministic message id already
+// belongs to a different immutable message identity.
+var ErrMessageIdentityConflict = errors.New("message identity conflict")
+
 // ErrTaskParentMismatch reports that a task no longer has the parent/workspace
 // relation a cross-task mutation was authorized against.
 var ErrTaskParentMismatch = errors.New("task parent relation no longer matches")
