@@ -28,8 +28,10 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 		return orch.PersonaSessionTerminator().TerminateAllForAgent(ctx, id, "orchestrator_deleted")
 	}}
 	return &orchestrationruntime.Service{
-		Maintenance:      maintenance.New(filepath.Join(cfg.ResolvedDataDir(), "orchestration-maintenance")),
-		AssistantEnabled: cfg.Features.Orchestration && cfg.Features.PersonalAssistant,
+		Maintenance: maintenance.New(filepath.Join(cfg.ResolvedDataDir(), "orchestration-maintenance")),
+		// The Orchestrator is the single product boundary. Its assistant
+		// capabilities are enabled with the same flag as workspace coordination.
+		AssistantEnabled: cfg.Features.Orchestration,
 		Repo:             repos.Orchestration, Personas: personasSvc, Runs: repos.Runs,
 		Auth: runtimeauth.NewAgentAuth(""), Tasks: services.Task,
 		Credentials:  assistantCredentialReader{store: repos.Secrets},

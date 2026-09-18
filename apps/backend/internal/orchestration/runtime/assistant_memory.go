@@ -49,7 +49,7 @@ func (r memoryEdit) valid() bool {
 	switch r.Scope {
 	case authorTypeUser, scopeWorkspace:
 		return true
-	case "project", "environment", "task":
+	case "project", "environment", scopeTask:
 		return r.ScopeID != ""
 	default:
 		return false

@@ -14,6 +14,8 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
+const assistantClaudeAgent = "claude-acp"
+
 type authorityProfiles interface {
 	GetAgent(context.Context, string) (*settings.Agent, error)
 	GetAgentProfile(context.Context, string) (*settings.AgentProfile, error)
@@ -71,7 +73,7 @@ func (a assistantAuthorityReader) claudeVersion(ctx context.Context) (string, er
 }
 
 func assistantRestrictionCompatibility(agent *settings.Agent, profile *settings.AgentProfile, executor *taskmodels.Executor, preset *taskmodels.ExecutorProfile, version string) string {
-	if agent.Name != "claude-acp" || agent.TUIConfig != nil || profile.CLIPassthrough || version != "0.75.1" {
+	if agent.Name != assistantClaudeAgent || agent.TUIConfig != nil || profile.CLIPassthrough || version != "0.75.1" {
 		return "unsupported_provider_or_version"
 	}
 	if reason := assistantProfileCompatibility(profile); reason != "" {

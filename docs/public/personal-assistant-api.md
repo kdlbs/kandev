@@ -4,20 +4,20 @@ description: "Experimental assistant intake, objectives and scoped context API r
 status: experimental
 ---
 
-# Personal assistant backend
+# Orchestrator central-assistant backend
 
 This reference describes the in-development backend for a user-owned assistant built on [workspace orchestration](orchestration-personas.md), independently of Office.
 
 It is **not ready for production use**. Native attention, input resolution, pause/stop and the central Assistant UI are implemented. Maintenance, workspace grants and combined qualification are still pending.
 
-Both `features.orchestration` (`KANDEV_FEATURES_ORCHESTRATION`) and
-`features.personalAssistant` (`KANDEV_FEATURES_PERSONAL_ASSISTANT`) must be enabled
-for the assistant. Both default off in every shipped profile and require a restart
-after a change through Settings > System > Feature Toggles. An explicit environment
-value overrides and locks the corresponding setting. Enabling orchestration alone
-keeps ordinary workspace coordinators available without enabling the assistant.
+`features.orchestration` (`KANDEV_FEATURES_ORCHESTRATION`) enables the complete
+Orchestrator, including workspace coordination and these owner-level capabilities.
+It defaults off in every shipped profile and requires a restart after a change
+through Settings > System > Feature Toggles. There is no separate Personal
+Assistant switch; an explicit environment value overrides and locks the
+Orchestrator setting.
 
-With the assistant disabled, assistant routes return 404 with
+With the Orchestrator disabled, its routes return 404 with
 `personal_assistant_disabled`; new private conversation turns, runtime tools and
 queued/native launches are blocked. Pending intake, schemas and retained ownership
 remain intact. Owners can still read protected conversation history. Re-enabling
@@ -30,7 +30,7 @@ and versions are unsupported for this assistant path. These restrictions do not
 change ordinary coordinator or worker execution. Provider availability still
 depends on the selected profile's existing credentials.
 
-## Assistant interface
+## Orchestrator interface
 
 The app-level `/assistant` route uses the selected private conversation, with
 native questions and permission decisions, objectives/evidence, memory editing

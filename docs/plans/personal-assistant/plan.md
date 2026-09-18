@@ -29,7 +29,11 @@ Implementation was explicitly requested after the design-package handoff. Tasks 
 
 The historical implementation started before the release rebase. The current private review branch is based on exact v0.94.0 (`bf819a0228e742d069c528293d848c985a4d1bd1`) with the preserved prototype imported above it. Use the [delivery plan](../orchestration-delivery/plan.md) for current repository, candidate and rollout status. Do not use old local baseline SHAs as new integration targets. Re-read current diffs before editing overlapping files.
 
-Delivery task 01 adds an independent assistant flag before coordinator-only dogfooding. Preserve retained-owner/context guards even with that flag off. Continue task 11; these work orders include canonical requirement/criterion references and detailed remaining checks. Completed tasks are historical work, not work to redo.
+The Orchestrator flag gates both workspace coordination and owner-level assistant
+capabilities. Preserve retained-owner/context guards when the Orchestrator is off;
+there is no separate assistant rollout switch. Continue task 11; these work orders
+include canonical requirement/criterion references and detailed remaining checks.
+Completed tasks are historical work, not work to redo.
 
 The existing [workspace-orchestrators plan](../workspace-orchestrators/plan.md) covers the already-built foundation. This spec extends its user-facing contract without changing old completion statuses. Runtime ownership stays in internal/orchestration; backendapp supplies adapters to core services.
 
@@ -203,7 +207,8 @@ Delivery task 01 supplies the assistant rollout gate before any live candidate.
 - Upstream side effects without idempotency cannot be made exactly-once; retain unknown outcomes.
 - Multiworkspace summaries export context to the central profile. Require explicit permission; changing profiles must not silently retain an incompatible export grant.
 - Mandatory repository planning policy is separate from workflow stage configuration. A future policy-change task needs explicit scope.
-- Both features.orchestration and the planned features.personalAssistant default off. This plan authorizes no production migration/deployment or adoption of all existing work.
+- `features.orchestration` defaults off. This plan authorizes no production
+  migration/deployment or adoption of all existing work.
 - Provider-specific permission failures need evidence identifying the authoritative classifier. Do not preselect a bypass or promise a provider-policy fix.
 
 ## Handoff checkpoint

@@ -278,5 +278,6 @@ func (s *Service) executionSelection(ctx context.Context, a *models.AgentInstanc
 }
 
 func paused(a *models.AgentInstance) bool {
-	return a.Status == models.AgentStatusPaused || a.Status == "stopped"
+	const stoppedStatus = "stopped"
+	return a.Status == models.AgentStatusPaused || a.Status == stoppedStatus
 }

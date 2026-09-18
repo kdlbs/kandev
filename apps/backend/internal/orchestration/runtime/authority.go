@@ -66,12 +66,16 @@ type AssistantAuthorityReader interface {
 }
 
 func assistantEffectAllowed(mode, effect string) bool {
+	const (
+		effectRead    = "read"
+		effectReceipt = "receipt"
+	)
 	switch mode {
 	case "answer", "inspect", executionModeDesign, executionModeExecute:
 	default:
 		return false
 	}
-	return effect == "read" || effect == "receipt" || (effect == "task_write" && (mode == executionModeDesign || mode == executionModeExecute))
+	return effect == effectRead || effect == effectReceipt || (effect == "task_write" && (mode == executionModeDesign || mode == executionModeExecute))
 }
 
 func (s *Service) assistantAuthority(ctx context.Context, taskID string) (*models.AssistantAuthority, error) {
@@ -200,6 +204,7 @@ func (h *Handler) authorizeTaskEffect(c *gin.Context, claims *runtimeauth.AgentC
 }
 
 func assistantRequestEffect(c *gin.Context) string {
+	const effectTaskWrite = "task_write"
 	if c.Request.Method == http.MethodGet {
 		return "read"
 	}
@@ -208,7 +213,7 @@ func assistantRequestEffect(c *gin.Context) string {
 	case "/runtime/comments", "/runtime/objectives", "/runtime/objectives/:id":
 		return "receipt"
 	case "/runtime/tasks", "/runtime/tasks/:id/manage", "/runtime/tasks/:id/status", "/runtime/attention/:id/answer", "/runtime/improvements/:id/maintenance":
-		return "task_write"
+		return effectTaskWrite
 	default:
 		return statusUnknown
 	}

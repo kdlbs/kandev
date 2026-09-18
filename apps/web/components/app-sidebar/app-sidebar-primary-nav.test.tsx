@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const state = {
-  features: { office: false, personalAssistant: false },
+  features: { office: false, orchestration: false },
   workspaces: { activeId: "ws-1" as string | null },
   office: { inboxCountByWorkspaceId: {} as Record<string, number> },
   quickChat: {
@@ -155,10 +155,10 @@ describe("AppSidebarPrimaryNav", () => {
   });
 });
 
-it("exposes the private assistant destination only when its own flag is enabled", () => {
+it("exposes the Orchestrator destination when orchestration is enabled", () => {
   const view = renderNav(false);
   expect(screen.queryByTestId("assistant-nav")).toBeNull();
-  state.features.personalAssistant = true;
+  state.features.orchestration = true;
   try {
     view.rerender(
       <TooltipProvider>
@@ -167,6 +167,6 @@ it("exposes the private assistant destination only when its own flag is enabled"
     );
     expect(screen.getByTestId("assistant-nav").getAttribute("href")).toBe("/assistant");
   } finally {
-    state.features.personalAssistant = false;
+    state.features.orchestration = false;
   }
 });

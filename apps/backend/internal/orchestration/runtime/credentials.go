@@ -47,7 +47,7 @@ func validCredential(d models.CredentialDescriptor) bool {
 	}
 	switch d.Scope {
 	case scopeWorkspace:
-	case "project", "environment", "task":
+	case "project", "environment", scopeTask:
 		if d.ScopeID == "" {
 			return false
 		}

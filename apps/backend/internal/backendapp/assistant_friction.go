@@ -6,6 +6,7 @@ const (
 	frictionOriginNative           = "native"
 	frictionOriginAuthentication   = "authentication"
 	frictionAuthenticationRequired = "authentication_required"
+	frictionOperationPermission    = "permission"
 )
 
 // Code provenance is native; provider classifier internals remain unknown.
@@ -13,7 +14,7 @@ func frictionCauseForError(code string) *shared.FrictionCause {
 	row := &shared.FrictionCause{Cause: code, Origin: "unknown", Operation: "launch"}
 	switch code {
 	case "permission_denied_by_user":
-		row.Origin, row.Operation, row.Reason = frictionOriginNative, "permission", "denied_authority"
+		row.Origin, row.Operation, row.Reason = frictionOriginNative, frictionOperationPermission, "denied_authority"
 	case "auth_required", frictionAuthenticationRequired:
 		row.Origin, row.Reason = frictionOriginAuthentication, frictionAuthenticationRequired
 	case "authentication_expired", "token_expired":

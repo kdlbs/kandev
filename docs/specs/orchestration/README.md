@@ -7,7 +7,14 @@ owners:
   - Kandev
 ---
 
-# Workspace orchestration
+# Orchestrator
+
+The Orchestrator is Kandev's single central coordination and assistant product.
+Workspace assignments, the central task view, owner-level objectives, attention,
+memory, capability discovery and managed work are one feature set behind
+`features.orchestration`. The older Personal Assistant name remains in some
+requirement IDs and file paths for compatibility, but it is not a second product
+or rollout gate. Office remains the separate legacy autonomous-agent fleet.
 
 ## Purpose and ownership
 

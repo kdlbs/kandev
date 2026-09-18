@@ -122,14 +122,19 @@ func (s *Service) performMaintenance(ctx context.Context, b *models.AssistantBin
 	if err := guard(ctx); err != nil {
 		return nil, err
 	}
+	const (
+		maintenanceActionPatch  = "patch"
+		maintenanceActionCheck  = "check"
+		maintenanceActionCommit = "commit"
+	)
 	switch req.Action {
 	case "prepare":
 		return s.startMaintenance(ctx, b, grant, req, guard)
-	case "patch":
+	case maintenanceActionPatch:
 		return s.patchMaintenance(ctx, b, grant, req.File, guard)
-	case "check":
+	case maintenanceActionCheck:
 		return s.checkMaintenance(ctx, b, grant, guard)
-	case "commit":
+	case maintenanceActionCommit:
 		return s.commitMaintenance(ctx, b, grant, guard)
 	default:
 		return nil, fmt.Errorf("unsupported maintenance action")

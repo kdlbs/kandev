@@ -7,6 +7,8 @@ above exact v0.94.0. Start with the [root workbench guide](../../../WORKBENCH.md
 
 ## Scope and implementation plan
 
+- [Orchestrator product boundary](../../decisions/2026-09-18-orchestrator-product-boundary.md): one central product and rollout gate; Office remains legacy compatibility.
+
 - [Full scope audit](scope-audit.md): original requirement crosswalk, all implemented
   and partial behavior, contribution limits and central-view/plugin findings.
 - [Prototype file inventory](scope-file-inventory.csv) and [baseline metadata](scope-baseline.json):

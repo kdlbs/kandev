@@ -37,7 +37,7 @@ contain no production cookies/history. Verify health/version, login when enabled
 Kanban access, role/assignment setup, task overview and persistent chat, multiple
 assignments, callback/retry, mobile controls and feature combinations.
 
-Verify Orchestration on / Personal assistant off through direct APIs, not only
+Verify the Orchestrator gate through direct APIs, not only
 hidden navigation. Confirm a page visit sends no prompt or delivery task. Test
 Automation delivery only with a fixture-owned manually triggered schedule; remove
 it afterward. This database is the only source for shareable media.
@@ -98,7 +98,7 @@ dispatch by supported controls, and record the final pre-cutover state.
    Existing `ExecStart` drop-ins can override a freshly installed unit; inspect
    the effective result. Do not assume `make service-install` supersedes them.
 4. Set candidate bundle/version metadata consistently, enable Orchestration and
-   keep Personal assistant disabled for the first pilot. Other feature settings
+   keep Office disabled for the first pilot. Other feature settings
    remain the reviewed installation choices.
 5. Reload systemd, start the service, verify health/version and effective executable,
    then run the smoke below. Re-enable dispatch/schedules only as intended.

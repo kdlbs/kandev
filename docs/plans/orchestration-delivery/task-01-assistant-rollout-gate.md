@@ -1,6 +1,6 @@
 ---
 id: "01-assistant-rollout-gate"
-title: "Independent assistant rollout gate"
+title: "Unified Orchestrator rollout gate"
 status: done
 wave: 2
 depends_on: ["00-private-publication"]
@@ -16,7 +16,7 @@ system_design:
   - ../../specs/orchestration/system-design/personal-assistant.md
 ---
 
-# Task 01: Independent assistant rollout gate
+# Task 01: Unified Orchestrator rollout gate
 
 ## Summary
 
@@ -26,10 +26,11 @@ requirements and tests before building the first live candidate.
 
 ## In scope
 
-1. Recheck active and retired flag identities; add typed `features.personalAssistant`
-   and `KANDEV_FEATURES_PERSONAL_ASSISTANT`. Default false in root and embedded
-   prod/dev/e2e profiles; expose effective source through existing flag diagnostics.
-2. Compute assistant enablement as Orchestration AND Personal assistant. Apply it
+1. Recheck active and retired flag identities; use typed `features.orchestration`
+   and `KANDEV_FEATURES_ORCHESTRATION` for the complete Orchestrator. Default
+   false in root and embedded prod/dev/e2e profiles; expose effective source
+   through existing flag diagnostics.
+2. Compute all Orchestrator capability enablement from the Orchestration flag. Apply it
    at composition and every assistant route, CLI/tool discovery, binding selection,
    intake admission, queued dispatch, callback/wake and native launch entry.
 3. Enumerate all ingress paths in a test matrix. A valid old runtime token,
@@ -40,7 +41,7 @@ requirements and tests before building the first live candidate.
    existing records intact; disabling is not deletion or migration rollback.
 5. Add frontend flag typing/contract coverage and effective configuration copy.
    New assistant UI work must consume this flag. Existing coordinator routes/chat
-   remain available with Orchestration on and Personal assistant off.
+   remain available under the same Orchestrator boundary.
 6. Document restart semantics from the actual composition lifecycle. Re-enable
    only through current binding/account/context admission, not blanket queue replay.
 

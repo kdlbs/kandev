@@ -23,8 +23,8 @@ func orchestrationRunGuard(features config.FeaturesConfig, repo *officesqlite.Re
 			return false, err
 		}
 		if role != "" {
-			owner, err := repo.OrchestrationStore().PersonaUserOwner(ctx, id)
-			return features.Orchestration && (owner == "" || features.PersonalAssistant), err
+			_, err := repo.OrchestrationStore().PersonaUserOwner(ctx, id)
+			return features.Orchestration, err
 		}
 		owner, err := repo.OrchestrationStore().PersonaUserOwner(ctx, id)
 		return features.Office && owner == "", err

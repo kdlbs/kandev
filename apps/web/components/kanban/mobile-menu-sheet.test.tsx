@@ -12,7 +12,7 @@ const { useKanbanDisplaySettingsMock, breakpointMocks, storeMocks } = vi.hoisted
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
-      features: { personalAssistant: false },
+      features: { orchestration: false },
       mobileKanban: { focusedWorkflowId: storeMocks.focusedWorkflowId },
     }),
 }));

@@ -12,6 +12,7 @@ const (
 	kandevTaskIDKey    = "task_id"
 	kandevTitleKey     = "title"
 	kandevUpdateAction = "update"
+	methodPost         = "POST"
 )
 
 func runObjectiveCmd(args []string) int {
@@ -49,7 +50,7 @@ func runObjectiveCmd(args []string) int {
 		return 1
 	}
 	op.add(payload)
-	method, path := "POST", orchestrationAPIPrefix+"/runtime/objectives"
+	method, path := methodPost, orchestrationAPIPrefix+"/runtime/objectives"
 	if args[0] == kandevUpdateAction {
 		if *id == "" || *revision < 1 {
 			cliError("--id and --revision are required for update")

@@ -70,7 +70,7 @@ func nativeFriction(source models.AttentionSource, session *taskmodels.TaskSessi
 	}
 	switch source.Kind {
 	case attentionKindQuestion:
-		row.Operation, row.Reason, row.Cause = "question", "pending_approval", "question_request"
+		row.Operation, row.Reason, row.Cause = attentionKindQuestion, "pending_approval", "question_request"
 	case attentionKindPermission:
 		row.Origin, row.Operation, row.Reason, row.Cause = "provider", attentionKindPermission, "pending_approval", "permission_request"
 	case attentionKindAuthentication:

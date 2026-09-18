@@ -6,7 +6,7 @@ const fixture = vi.hoisted(() => ({ enabled: true, owner: "owner", mobile: false
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (select: (value: unknown) => unknown) =>
     select({
-      features: { personalAssistant: fixture.enabled },
+      features: { orchestration: fixture.enabled },
       auth: { user: { id: fixture.owner } },
       workspaces: { items: [{ id: "ws", name: "Example workspace" }] },
     }),

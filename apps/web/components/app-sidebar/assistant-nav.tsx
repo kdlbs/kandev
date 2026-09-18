@@ -11,7 +11,7 @@ export function AssistantNav({
   onNavigate?: () => void;
 }) {
   const { t } = useTranslation();
-  const enabled = useAppStore((s) => s.features.personalAssistant);
+  const enabled = useAppStore((s) => s.features.orchestration);
   const router = useRouter();
   if (!enabled) return null;
   return (

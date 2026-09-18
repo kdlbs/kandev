@@ -8,7 +8,10 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const assistantPolicyMetadata = "assistant_broker_policy"
+const (
+	assistantPolicyMetadata = "assistant_broker_policy"
+	assistantClaudeAgent    = "claude-acp"
+)
 
 func assistantRestrictedLaunch(req *LaunchRequest) bool {
 	return req.McpProfile != nil && req.McpProfile.Surface == mcpprofile.SurfaceAssistantBroker
@@ -33,7 +36,7 @@ func validateAssistantCommand(req *LaunchRequest, profile *AgentProfileInfo, age
 	if !assistantRestrictedLaunch(req) {
 		return nil
 	}
-	if agent.ID() != "claude-acp" || version != "0.75.1" || len(flags) != 0 || len(prefix) != 0 || profile == nil ||
+	if agent.ID() != assistantClaudeAgent || version != "0.75.1" || len(flags) != 0 || len(prefix) != 0 || profile == nil ||
 		profile.CLIPassthrough || len(profile.EnvVars) != 0 || len(profile.ConfigOptions) != 0 {
 		return fmt.Errorf("assistant policy unsupported by the selected runtime")
 	}

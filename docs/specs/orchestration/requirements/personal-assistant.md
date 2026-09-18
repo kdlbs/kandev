@@ -6,17 +6,17 @@ owners:
   - Kandev
 ---
 
-# Personal assistant completion requirements
+# Orchestrator central-assistant capabilities
 
 ## Overview
 
-Complete the partly implemented assistant without confusing workspace task
+Complete the central Orchestrator capabilities without confusing workspace task
 observation, agent-turn completion and fulfilled user outcomes. This document
 replaces the legacy personal-assistant specification. Work-order status, not
 this document, records what is built. Existing owner/intake/objective behavior
 must survive the remaining implementation.
 
-The assistant is an owner-selected existing coordinator conversation. An
+The Orchestrator is an owner-selected existing coordinator conversation. An
 objective records the current intent and acceptance conditions; an attention
 record points to a canonical actionable source. A credential descriptor contains
 resolver/reference/scope knowledge, never a secret. A workspace grant is explicit
@@ -206,26 +206,27 @@ permission to observe/coordinate/export context within the owner's existing acce
   already delivered to a provider. Stored-copy forgetting shall be explicit, and
   another workspace's unrelated transcripts shall not be exported as context.
 
-### REQ-ORCHESTRATION-ASSISTANT-010: Independent assistant rollout
+### REQ-ORCHESTRATION-ASSISTANT-010: Unified Orchestrator rollout
 
-**Intent:** Permit coordinator use while unfinished assistant execution stays off.
+**Intent:** Keep every Orchestrator capability behind one understandable rollout gate.
 
 #### Acceptance criteria
 
-- **AC-ORCHESTRATION-ASSISTANT-010.1:** Personal-assistant execution shall require
-  both Orchestration and a separate Personal assistant toggle. All shipped
-  profiles shall default the new toggle off; enabling Orchestration alone shall
-  retain ordinary coordinator conversation/callback behavior.
-- **AC-ORCHESTRATION-ASSISTANT-010.2:** With Personal assistant off, its new
-  selection/mutation/runtime tools and background dispatch shall be unavailable
+- **AC-ORCHESTRATION-ASSISTANT-010.1:** All Orchestrator execution, including
+  owner-level objectives, context, attention, capability and native-input
+  features, shall require `features.orchestration`. There is no separate
+  Personal assistant product toggle.
+- **AC-ORCHESTRATION-ASSISTANT-010.2:** With Orchestration off, all Orchestrator
+  selection, mutation, runtime tools and background dispatch shall be unavailable
   through direct APIs as well as hidden in UI. Queued assistant work shall remain
   blocked; existing privacy protections shall remain active.
-- **AC-ORCHESTRATION-ASSISTANT-010.3:** Disabling either toggle shall preserve
-  stored ownership/schema/history. An owned assistant conversation shall never
+- **AC-ORCHESTRATION-ASSISTANT-010.3:** Disabling Orchestration shall preserve
+  stored ownership/schema/history. An owned Orchestrator conversation shall never
   be treated as an unowned legacy conversation to bypass the disabled path.
-- **AC-ORCHESTRATION-ASSISTANT-010.4:** Operators shall see effective flag source
-  and restart requirements through existing feature settings. Enabling the
-  assistant shall not imply that an unsupported inspect profile is safe.
+- **AC-ORCHESTRATION-ASSISTANT-010.4:** Operators shall see the effective
+  Orchestrator flag source and restart requirements through existing feature
+  settings. Enabling it shall not imply that an unsupported inspect profile is
+  safe.
 
 ## Exclusions and legacy mapping
 

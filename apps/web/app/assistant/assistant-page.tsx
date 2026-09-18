@@ -15,7 +15,7 @@ import { AssistantDetails } from "./assistant-details";
 import { AssistantAttentionPanel } from "./assistant-attention";
 export function AssistantPage() {
   const { t } = useTranslation();
-  const enabled = useAppStore((s) => s.features.personalAssistant);
+  const enabled = useAppStore((s) => s.features.orchestration);
   const owner = useAppStore((s) => s.auth.user?.id);
   return (
     <PageShell title={t("orchestration:assistant")} scroll="none">

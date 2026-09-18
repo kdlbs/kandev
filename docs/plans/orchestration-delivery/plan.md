@@ -31,7 +31,7 @@ legacy_specs:
 
 Maintain a private, reviewable Kandev workbench; finish the central workspace
 Coordinator page; qualify a coordinator-only build for daily use; then complete
-the larger personal assistant in independently verified increments. Export
+the larger Orchestrator capabilities in independently verified increments. Export
 focused contributions to upstream without exposing private operations or history.
 
 The exact base remains v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1`.
@@ -84,7 +84,7 @@ no release credentials, production backups or private prompts belong in CI.
 
 ```mermaid
 flowchart TD
-  R[Private review repository] --> G[Separate assistant rollout gate]
+  R[Private review repository] --> G[Unified Orchestrator rollout gate]
   G --> V[Central task view: observations, page, evidence]
   V --> Q[Candidate qualification]
   Q --> D[Private data rehearsal and rollback drill]
@@ -121,7 +121,7 @@ session unless the user explicitly chooses another arrangement.
 ## Exact next execution sequence
 
 1. Complete and publish this planning/review package (delivery 00).
-2. Implement delivery 01, the independent assistant toggle. Preserve all retained
+2. Implement delivery 01, the unified Orchestrator gate. Preserve all retained
    ownership guards with both toggles off. This is the prerequisite for using
    the whole private branch as a coordinator-only candidate.
 3. Implement central-view tasks 01, 02 and 03. Task 01 resolves canonical

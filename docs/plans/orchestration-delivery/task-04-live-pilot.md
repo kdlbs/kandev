@@ -30,7 +30,7 @@ planning request do not themselves replace the running service.
    effective `ExecStart` override if one pins an older binary; preserve port,
    authentication, data paths, user identity, provider configuration and PATH.
    A generic service installer may leave a higher-priority override untouched.
-4. Enable Orchestration and keep Personal assistant off. Reload the user service
+4. Enable the Orchestrator. Reload the user service
    manager, start the service, verify health/version, actual executable and data
    location, and inspect bounded startup errors without exporting private logs.
 5. In one deliberately selected workspace, configure a generic coordinator and
@@ -100,7 +100,7 @@ the candidate/migration receipts.
 ## Results
 
 The named-candidate deployment instruction was received and the pilot is running
-with Coordinator enabled and Personal assistant disabled. The final cold backup,
+with the Orchestrator enabled. The final cold backup,
 health/version/auth checks, exact executable check and controlled restart recovery
 passed; the redacted result is in [live-pilot-receipt.json](../../review/orchestration/live-pilot-receipt.json).
 The first authenticated generic task/review/callback cycle remains for dogfood

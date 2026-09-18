@@ -67,12 +67,10 @@ receipts and does not replay uncertain writes.
 
 ## Rollout isolation
 
-Add `features.personalAssistant` / `KANDEV_FEATURES_PERSONAL_ASSISTANT` using the
-typed runtime flag registry and existing override precedence. The candidate key
-is unused in the active/retired registry at the planning baseline. Verify it again
-before implementation. Default prod/dev/e2e false; document restart requirement
-according to composition lifecycle. Overall enabled state is Orchestration AND
-Personal assistant. Existing Office remains independent.
+Use the existing `features.orchestration` / `KANDEV_FEATURES_ORCHESTRATION` flag
+for the complete Orchestrator using the typed runtime flag registry and existing
+override precedence. Default prod/dev/e2e false; document restart requirement
+according to composition lifecycle. Existing Office remains independent.
 
 Gate human assistant selection/mutations, runtime assistant endpoints/CLI/tool
 exposure, assistant intake dispatch, callbacks/attention wakes and launch. Do not
@@ -82,10 +80,10 @@ Keep owner-authorized historical reads available through existing protected
 conversation paths. Flag-off selection/configuration requests return the existing
 unavailable style rather than secretly creating a binding.
 
-The coordinator-only live pilot uses Orchestration on and Personal assistant off.
-Assistant adoption is a later milestone after context, authority, attention,
-resolution and UI checks pass. Records already created by the prototype remain
-preserved even when the assistant is disabled.
+The live pilot enables the Orchestrator as one product. Broader dogfood remains
+sequenced after context, authority, attention, resolution and UI checks pass.
+Records already created by the prototype remain preserved when Orchestration is
+disabled.
 
 ## Context completion
 
