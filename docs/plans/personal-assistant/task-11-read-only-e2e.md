@@ -1,7 +1,7 @@
 ---
 id: "11-read-only-e2e"
 title: "Read-only experiments and rollout evidence"
-status: pending
+status: in_progress
 wave: 9
 depends_on: ["08-assistant-ui","09-workflow-improvements","10-workspace-grants"]
 plan: "plan.md"
@@ -94,8 +94,10 @@ Run each parenthesized command from the repository root. Use the repository Go/N
 ```sh
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test -tags fts5 -count=1 ./internal/backendapp -run 'Test.*E2E.*Reset|TestAssistantReadOnly')
-pnpm --dir apps/web e2e:run --host --shards 1 --project chromium -- e2e/tests/orchestration --retries=0 --repeat-each=2
-pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome -- e2e/tests/orchestration/mobile-personal-assistant.spec.ts --retries=0
+python3 apps/web/e2e/scripts/orchestration-evidence.py --project chromium --order forward --cycles 2
+python3 apps/web/e2e/scripts/orchestration-evidence.py --project chromium --order reverse --cycles 2 --no-build
+python3 apps/web/e2e/scripts/orchestration-evidence.py --project mobile-chrome --order forward --cycles 2 --no-build
+python3 apps/web/e2e/scripts/orchestration-evidence.py --project mobile-chrome --order reverse --cycles 2 --no-build
 ```
 
 ## Dependencies and risks
@@ -170,4 +172,29 @@ provider enforcement or migration evidence remains a release limitation.
 
 ## Results
 
-Pending. Record red/green test evidence, exact commands and counts, relevant artifacts, owned changes and cleanup here; synchronize the plan checkbox only after acceptance is met.
+In progress. The clean private checkpoint `41de43a14ae6d08a65d4b44167f4779f5cd2306d`
+contains completed assistant tasks 01–10. The [39-criterion matrix](../../review/orchestration/assistant-evidence.md)
+now links every requirement to executable evidence. Workspace-owned reset repairs
+preserve other workspaces and ordinary execution profiles. New browser scenarios
+cover two pending worker sessions/lost response/restart, a paused assistant's
+human permission action, capability page two and specific account unblock text.
+
+The isolated four-turn provider trial passed a native scoped read and a denied
+task write, with unchanged ordinary tasks/repositories/workflows and no host file
+write. This exposed and repaired canonical provider identity, durable native
+session restriction, managed-only MCP attachment and pinned provider launch
+compatibility. Review the [aggregate receipt](../../review/orchestration/assistant-provider-trial.json)
+and broker ADR; no private prompt or credential value appears in those artifacts.
+
+The final affected run passes 168 top-level race tests without selected skips,
+including the ten attention-only event cases and normal terminal failure
+reporting. The combined matrix passes 18 desktop checks in each order and eight
+phone checks in each order without retries; the final terminal-event change also
+passes the coordinator/Automation pair and a fresh four-turn native provider
+trial. Typecheck, scoped ESLint, Go lint, SQL guard, architecture/spec lint and
+public-doc validation pass (61 documentation tests).
+
+Media hooks are present; fresh inspected screenshots/video and their
+source hashes still need capture before this work order can be marked complete.
+Immutable bundle, private-data rehearsal and live enablement remain delivery
+02–04 and are not implied by this experiment.

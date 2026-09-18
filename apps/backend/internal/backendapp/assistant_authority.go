@@ -71,7 +71,7 @@ func (a assistantAuthorityReader) claudeVersion(ctx context.Context) (string, er
 }
 
 func assistantRestrictionCompatibility(agent *settings.Agent, profile *settings.AgentProfile, executor *taskmodels.Executor, preset *taskmodels.ExecutorProfile, version string) string {
-	if agent.ID != "claude-acp" || agent.TUIConfig != nil || profile.CLIPassthrough || version != "0.75.1" {
+	if agent.Name != "claude-acp" || agent.TUIConfig != nil || profile.CLIPassthrough || version != "0.75.1" {
 		return "unsupported_provider_or_version"
 	}
 	if reason := assistantProfileCompatibility(profile); reason != "" {

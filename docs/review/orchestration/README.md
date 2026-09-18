@@ -59,3 +59,11 @@ The central workspace task view is now implemented and verified. See its
 [fresh desktop/mobile screenshots and silent clip](media/coordinator-view/README.md).
 These are private review artifacts from synthetic fixtures. The assistant
 continuation and candidate/live delivery plan remain in progress.
+
+## Assistant qualification in progress
+
+The [39-criterion evidence matrix](assistant-evidence.md) maps every current
+requirement to its tests. The isolated real-provider trial now demonstrates a
+scoped task read, a native denied-write receipt and unchanged ordinary workspace
+data. Combined final browser evidence and synthetic media are being assembled.
+This does not claim a qualified deployment bundle or a live-data upgrade.

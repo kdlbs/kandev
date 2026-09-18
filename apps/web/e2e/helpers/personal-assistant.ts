@@ -6,6 +6,7 @@ import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import type { AssistantBinding } from "../../lib/api/domains/assistant-api";
 import { DatabaseSync } from "./node-sqlite";
+import type { PrAssetCapture } from "./pr-asset-capture";
 export const ASSISTANT_ENV = {
   KANDEV_FEATURES_ORCHESTRATION: "true",
   KANDEV_FEATURES_PERSONAL_ASSISTANT: "true",
@@ -38,6 +39,8 @@ export async function selectExampleAssistant(
   const orchestrator = await created.json();
   await page.goto("/assistant");
   await expect(page.getByTestId("assistant-setup")).toBeVisible();
+  await page.getByTestId("assistant-workspace").click();
+  await page.getByRole("option", { name: "E2E Workspace", exact: true }).click();
   await page.getByTestId("assistant-selector").click();
   await page.getByRole("option", { name: role.name, exact: true }).click();
   await page.getByRole("button", { name: "Use this assistant" }).click();
@@ -97,7 +100,7 @@ export async function exerciseExampleAssistant(
   backend: BackendContext,
   api: ApiClient,
   seed: SeedData,
-  mobile: boolean,
+  { mobile, capture }: { mobile: boolean; capture?: PrAssetCapture },
 ) {
   const binding = await selectExampleAssistant(page, backend, api, seed);
   // The generic mock provider is deliberately unsupported by the restricted
@@ -137,6 +140,10 @@ export async function exerciseExampleAssistant(
   await expect(page.getByTestId("assistant-attention-card")).toContainText(
     "Which heading should the sample guide use?",
   );
+  await capture?.screenshot(mobile ? "phone-attention" : "desktop-attention", {
+    caption: "A generic worker question resolved through the Assistant's native input controls.",
+  });
+  if (!mobile) await capture?.startRecording("assistant-generic-walkthrough");
   await page.getByTestId("clarification-option").filter({ hasText: "Quick start" }).click();
   await expect
     .poll(
@@ -169,6 +176,14 @@ export async function exerciseExampleAssistant(
   await expect(memory.locator("blockquote")).toHaveText(
     "Please use short headings for the example guide.",
   );
+  await capture?.screenshot(mobile ? "phone-memory" : "desktop-memory", {
+    caption: "A confirmed example preference with its original generic instruction.",
+  });
+  if (!mobile) {
+    await capture?.stopRecording({
+      caption: "Answer a generic worker question and save a confirmed example preference.",
+    });
+  }
   const rows = await (
     await page.request.get(`${backend.baseUrl}/api/v1/orchestration/assistant/memory`)
   ).json();

@@ -23,7 +23,7 @@ status: in_progress
 
 Extend the existing independent Orchestration runtime, not Office. First make intent and delivery durable; then add proportional routing, shared context and enforceable tools; then reconcile/resolve blockers and expose the central assistant. Add supervised workflow improvement and explicitly linked workspaces only after the single-workspace boundaries are tested.
 
-Implementation was explicitly requested after the design-package handoff. Tasks 01 through 10 are verified; task 11 remains pending. The subsequent binding-switch privacy regression was repaired after the user's explicit follow-up; the [ownership checkpoint](ownership-checkpoint.md) records the retained-owner boundary and passing checks. The [experiment report](experiments.md) records the pre-implementation baseline.
+Implementation was explicitly requested after the design-package handoff. Tasks 01 through 10 are verified; task 11 is in progress. The subsequent binding-switch privacy regression was repaired after the user's explicit follow-up; the [ownership checkpoint](ownership-checkpoint.md) records the retained-owner boundary and passing checks. The [experiment report](experiments.md) records the pre-implementation baseline.
 
 ## Continuation context
 
@@ -188,7 +188,7 @@ Execute sequentially in the primary conversation. Waves show dependencies only; 
 | 6 | [08 Assistant interface](task-08-assistant-ui.md) | Done |
 | 7 | [09 Supervised improvements](task-09-workflow-improvements.md) | Done |
 | 8 | [10 Workspace grants](task-10-workspace-grants.md) | Done |
-| 9 | [11 Combined evidence](task-11-read-only-e2e.md) | Pending |
+| 9 | [11 Combined evidence](task-11-read-only-e2e.md) | In progress |
 
 The chosen execution order is 03 → 04 → 05 → 06 → 07 → 08 → 09 → 10 → 11.
 Wave 3 shows that attention can technically follow existing task 02 independently

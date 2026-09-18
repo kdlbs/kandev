@@ -7,7 +7,6 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
-	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestration/maintenance"
 	orchestrationmodels "github.com/kandev/kandev/internal/orchestration/models"
 	"github.com/kandev/kandev/internal/orchestration/personas"
@@ -39,27 +38,7 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 		Manager:      &taskCreatorAdapter{taskSvc: services.Task, profiles: repos.AgentSettings, orch: orch, taskRepo: repos.Task, workflow: repos.Workflow},
 		APIURL:       fmt.Sprintf("http://localhost:%d", apiPort), CLI: cli,
 		Start: func(ctx context.Context, launch orchestrationruntime.Launch) error {
-			var profile *mcpprofile.Context
-			prepared := launch.OnSessionPrepared
-			if launch.Authority != nil {
-				value := mcpprofile.New(mcpprofile.SurfaceAssistantBroker, nil, nil)
-				profile = &value
-				prepared = func(ctx context.Context, sessionID string) error {
-					if err := launch.OnSessionPrepared(ctx, sessionID); err != nil {
-						return err
-					}
-					session, err := repos.Task.GetTaskSession(ctx, sessionID)
-					if err != nil {
-						return err
-					}
-					if session.Metadata == nil {
-						session.Metadata = map[string]any{}
-					}
-					session.Metadata[orchestrationruntime.AssistantPolicyMetadata] = string(mcpprofile.SurfaceAssistantBroker)
-					return repos.Task.UpdateTaskSession(ctx, session)
-				}
-			}
-			return orch.StartTaskWithRoute(ctx, launch.TaskID, launch.PersonaID, orchexecutor.LaunchContext{McpProfile: profile, ExecutorProfileID: launch.ExecutorID, Prompt: launch.Prompt, Env: launch.Env, OnSessionPrepared: prepared}, orchexecutor.RouteOverride{ExecutionProfileID: launch.ProfileID})
+			return orch.StartTaskWithRoute(ctx, launch.TaskID, launch.PersonaID, orchestrationLaunchContext(repos, launch), orchexecutor.RouteOverride{ExecutionProfileID: launch.ProfileID})
 		},
 		UpdateStatus: func(ctx context.Context, ws, id, status string) error {
 			return updateOrchestratedStatus(ctx, services.Task, repos, ws, id, status)

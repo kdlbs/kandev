@@ -27,7 +27,7 @@ func (a *Adapter) assistantSessionMeta(servers []types.McpServer) (map[string]an
 			"strictMcpConfig": true, "allowedTools": []string{"mcp__kandev_assistant__*"},
 			"settings":                map[string]any{"disableAllHooks": true},
 			"enableFileCheckpointing": false,
-			"extraArgs":               map[string]any{"disable-slash-commands": nil, "restricted": nil},
+			"extraArgs":               map[string]any{"disable-slash-commands": nil, "permission-mode": "dontAsk"},
 		}},
 	}, nil
 }

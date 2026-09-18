@@ -74,6 +74,7 @@ function AssistantCredentials({
             {row.account} · {row.environment}
           </p>
           <p>{row.validation.status}</p>
+          {row.unblock_action && <p>{row.unblock_action}</p>}
           <Link
             href="/settings/agents"
             className="inline-flex items-center text-xs underline cursor-pointer max-md:min-h-11"

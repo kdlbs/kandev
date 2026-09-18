@@ -5,6 +5,7 @@ test("phone assistant navigation, native answer and memory controls fit one colu
   backend,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   test.setTimeout(180000);
   await backend.restart(ASSISTANT_ENV);
@@ -13,7 +14,10 @@ test("phone assistant navigation, native answer and memory controls fit one colu
   await page.getByRole("button", { name: "Open menu", exact: true }).click();
   await page.getByTestId("mobile-home-menu-card").getByTestId("assistant-nav").click();
   await expect(page).toHaveURL(/\/assistant$/);
-  await exerciseExampleAssistant(page, backend, apiClient, seedData, true);
+  await exerciseExampleAssistant(page, backend, apiClient, seedData, {
+    mobile: true,
+    capture: prCapture,
+  });
   await page.evaluate(() => {
     document.cookie = "kandev_locale=pseudo; path=/; max-age=31536000; SameSite=Lax";
   });

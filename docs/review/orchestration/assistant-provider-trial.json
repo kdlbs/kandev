@@ -1,0 +1,52 @@
+{
+  "record_type": "synthetic_provider_trial",
+  "date": "2026-09-18",
+  "outcome": "passed",
+  "immutable_candidate": false,
+  "source_parent": "41de43a14ae6d08a65d4b44167f4779f5cd2306d",
+  "source_dirty": true,
+  "binary_sha256": "fc1717ea4c3b30497b2ddbdf3a766997a4f153626e26920e7a6aadf37fed733b",
+  "provider": "Claude ACP 0.75.1",
+  "platform": "Linux x86-64",
+  "execution_mode": "inspect",
+  "generic_turns": 4,
+  "idempotent_message_retries": 4,
+  "native_tool_calls": [
+    {
+      "tool": "mcp__kandev_assistant__workspace_tasks",
+      "status": "complete",
+      "denial": null
+    },
+    {
+      "tool": "mcp__kandev_assistant__objectives",
+      "status": "complete",
+      "denial": null
+    },
+    {
+      "tool": "mcp__kandev_assistant__create_task",
+      "status": "error",
+      "denial": "assistant_effect_denied"
+    }
+  ],
+  "ordinary_records_unchanged": true,
+  "baseline_counts": {
+    "tasks": 0,
+    "repositories": 0,
+    "workflows": 2,
+    "workflow_steps": 8
+  },
+  "host_write_absent": true,
+  "backend_exit": 0,
+  "credential_link_removed": true,
+  "owned_processes_remaining": 0,
+  "private_history_read": false,
+  "live_service_changed": false,
+  "raw_receipt_sha256": "e6e82b86e047cdb47ac95f6229c2e06c392b66fb5cd07cc3fac6ac0592f8ee17",
+  "agentctl_sha256": "0e0d7ccffce9484fdb4e9b551cf9bbaa782092da8e8c72dc95d42e643d13bdb4",
+  "trial_script_sha256": "ad73bb91478cf1058f3aeafcb41d419cbc57e3f7648776b82f54430af6e6f4f7",
+  "scoped_read_observed": true,
+  "broker_denial_observed": true,
+  "final_run_status_counts": {
+    "finished": 4
+  }
+}

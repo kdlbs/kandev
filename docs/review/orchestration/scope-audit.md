@@ -119,7 +119,12 @@ and limits; the 476-path inventory below remains the original prototype inventor
 - The independent personal-assistant toggle defaults off and preserves retained
   conversation privacy with either feature disabled.
 
-Still unfinished: combined assistant/provider evidence,
+The [assistant acceptance matrix](assistant-evidence.md) now maps all 39 criteria
+to executable checks. A separately isolated real-provider trial completed a
+scoped read and a denied task-write attempt with unchanged ordinary workspace
+data; its integration fixes have regression coverage.
+
+Still unfinished: final combined assistant evidence and media,
 candidate qualification, private live-data migration/rollback rehearsal, live
 pilot, dogfood evidence and focused upstream export. No live service cutover or
 public code PR is implied by these implementation checkpoints. See the

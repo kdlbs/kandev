@@ -132,7 +132,7 @@ session unless the user explicitly chooses another arrangement.
    and uses the tested rollback, not unreviewed edits to the running installation.
 6. Finish assistant task 03, then 04, 05, 06, 07, 08, 09, 10, 11 in order. Task 06
    is technically independent of 04/05 but shares store/runtime files; run it
-   sequentially. Keep task 03 `in_progress` until its remaining contract is tested.
+   sequentially. Tasks 01–10 are complete; task 11 is collecting final evidence.
 7. Repeat qualification/rehearsal for every schema or authority change before
    assistant enablement. Coordinator daily use need not wait for all assistant
    work; assistant rollout does wait for its enforcement and evidence.
@@ -247,10 +247,13 @@ quality is observed separately from deterministic test success.
 
 ## Results
 
-The complete design package and existing implementation are committed and
-published privately; delivery 00 is done. Delivery 01 is implemented and verified. Central-view work is next; assistant
-tasks 01/02 are historical completions and task 03 remains partial.
-Private CI is optional and disabled. Live Kandev has not been changed.
+The complete design package and implementation checkpoints are committed and
+published privately. Delivery 00–01, central-view 01–03 and assistant 01–10 are
+complete. Assistant task 11 has passing affected race checks and an isolated
+real-provider read/denied-write trial; its final combined browser and media
+receipts are in progress. Delivery 02–06 remain pending; optional private CI is
+disabled. Live Kandev has not been changed.
 [The publication receipt](../../review/orchestration/publication.md) records source
-preservation, checks, normal hooks and verified remote refs. The user has requested full implementation. Continue through the central-view
-package and remaining assistant work before qualifying the complete candidate.
+preservation, checks, normal hooks and verified remote refs. The user requested
+full implementation. Complete assistant evidence, then qualify the complete
+candidate and rehearse its migration and rollback before live cutover.

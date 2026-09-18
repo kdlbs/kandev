@@ -39,6 +39,7 @@ generic material; original local snapshot/backup refs are not published.
 | Assistant maintenance | Implemented; typed incidents, explicit grants, isolated checks/commits, human review, verified native recovery, recurrence and desktop/mobile proposal flow |
 | Assistant workspace grants | Implemented; explicit receiver consent, bounded exports, final-dispatch revocation, historical account reconfirmation, forgetting and desktop/mobile controls verified |
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
+| Combined assistant evidence | Final runs and media in progress; 168 affected race tests pass and the isolated real-provider read/denied-write trial passes. See the [39-criterion evidence matrix](docs/review/orchestration/assistant-evidence.md) |
 | Actual live-data rehearsal and deployment | Pending; live service unchanged |
 
 ## Development and contribution
@@ -58,5 +59,6 @@ the public fork. See [upstream export](docs/plans/orchestration-delivery/task-06
 Yes, this workbench can supply the build used in actual Kandev. Source publication
 does not change the running application: qualify a complete versioned bundle,
 rehearse migration/rollback against a private copy, then perform a reviewed live
-cutover. The first pilot enables the coordinator with the unfinished assistant off.
+cutover. The first pilot enables the coordinator; assistant enablement is a
+separate opt-in after its candidate and migration qualification.
 Screenshots/video always come from separate fictional fixtures with generic prompts.

@@ -73,6 +73,11 @@ func (s *Service) onEvent(ctx context.Context, event *bus.Event) error {
 }
 
 func (s *Service) finishTurn(ctx context.Context, event *bus.Event, data map[string]any, taskID, owner string) error {
+	switch event.Type {
+	case events.AgentCompleted, events.AgentStopped, events.AgentFailed:
+	default:
+		return nil
+	}
 	run, err := s.Runs.GetClaimedRunByTaskID(ctx, taskID)
 	if err != nil || run == nil {
 		return nil

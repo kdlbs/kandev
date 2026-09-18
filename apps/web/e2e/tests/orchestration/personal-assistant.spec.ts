@@ -5,6 +5,7 @@ test("assistant resumes privately and resolves native input with Office disabled
   backend,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   test.setTimeout(180000);
   await backend.restart({ ...ASSISTANT_ENV, KANDEV_FEATURES_PERSONAL_ASSISTANT: "false" });
@@ -20,5 +21,8 @@ test("assistant resumes privately and resolves native input with Office disabled
   page.off("request", watch);
   await backend.restart(ASSISTANT_ENV);
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await exerciseExampleAssistant(page, backend, apiClient, seedData, false);
+  await exerciseExampleAssistant(page, backend, apiClient, seedData, {
+    mobile: false,
+    capture: prCapture,
+  });
 });

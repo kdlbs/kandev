@@ -1552,7 +1552,7 @@ func registerSecondaryRoutes(
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
+		p.router, p.dbPool.Writer(), p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
 	)
 
 	if officetestharness.Enabled() {

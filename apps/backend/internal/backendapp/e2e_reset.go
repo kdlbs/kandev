@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/automation"
@@ -38,6 +39,7 @@ const (
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
 func registerE2EResetRoutes(
 	router *gin.Engine,
+	database *sqlx.DB,
 	repo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
 	automationSvc *automation.Service,
@@ -52,7 +54,7 @@ func registerE2EResetRoutes(
 	}
 
 	api := router.Group("/api/v1/e2e")
-	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, log))
+	api.DELETE("/reset/:workspaceId", handleE2EReset(database, repo, taskSvc, automationSvc, githubSvc, gitlabSvc, log))
 	// Hidden-workflow factory: lets E2E tests cover the system-only
 	// workflow path (e.g. improve-kandev) without depending on the real
 	// bootstrap endpoint, which clones from GitHub and shells out to gh.
@@ -91,6 +93,7 @@ func registerE2EResetRoutes(
 }
 
 func handleE2EReset(
+	database *sqlx.DB,
 	repo *sqliterepo.Repository,
 	taskSvc *taskservice.Service,
 	automationSvc *automation.Service,
@@ -191,16 +194,9 @@ func handleE2EReset(
 			}
 		}
 
-		// Reset every agent's routing override to the inherit-markers
-		// shape onboarding writes. Without this, an agent-override test
-		// leaves the CEO pinned to a single provider, which derails
-		// subsequent workspace-level routing specs that expect the
-		// resolver to walk the full provider_order.
-		if _, err := repo.DB().ExecContext(ctx, `
-			UPDATE agent_profiles
-			SET settings = '{"routing":{"provider_order_source":"inherit","tier_source":"inherit"}}'
-			WHERE workspace_id = ?
-		`, workspaceID); err != nil {
+		// Office routing fixtures restore inheritance without overwriting native
+		// execution profiles or an Orchestration assignment's selected account.
+		if err := resetOfficeRoutingForE2E(ctx, database, workspaceID); err != nil {
 			log.Warn("e2e reset: agent settings reset failed", zap.Error(err))
 		}
 
@@ -307,6 +303,11 @@ func handleE2EReset(
 		// resourceCleanups, so the fire-and-forget fallback is not expected here.
 		if err := waitForE2ETaskCleanup(ctx, repo.DB(), deletedTaskIDs); err != nil {
 			log.Error("e2e reset: task cleanup did not finish", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		if err := resetOrchestrationForE2E(ctx, database, workspaceID); err != nil {
+			log.Error("e2e reset: orchestration cleanup failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
 		}

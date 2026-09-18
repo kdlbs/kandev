@@ -564,11 +564,7 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 		s.logger.Debug("reset MCP backend client for new session")
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
-	if s.mcpServer != nil {
-		mcpServers = s.injectKandevMcpServers(mcpServers)
-	}
+	mcpServers := s.sessionMcpServers(req.McpServers)
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
@@ -615,11 +611,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		s.logger.Debug("reset MCP backend client for loaded session")
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
-	if s.mcpServer != nil {
-		mcpServers = s.injectKandevMcpServers(mcpServers)
-	}
+	mcpServers := s.sessionMcpServers(req.McpServers)
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
@@ -907,11 +899,7 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		return resp
 	}
 
-	// If MCP server is enabled, prepend the local kandev MCP server to the list.
-	mcpServers := req.McpServers
-	if s.mcpServer != nil {
-		mcpServers = s.injectKandevMcpServers(mcpServers)
-	}
+	mcpServers := s.sessionMcpServers(req.McpServers)
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
