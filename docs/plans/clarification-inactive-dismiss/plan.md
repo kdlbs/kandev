@@ -263,6 +263,8 @@ overlay still claimed Escape. Each now passes.
   successfully for both Traditional Chinese catalogs.
 - Full specification lint passed after the pre-existing duplicate acceptance
   ID was corrected to `AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10`.
+- PR documentation coverage passed after nesting the late-answer criteria under
+  the lifecycle requirement heading.
 - The review follow-up now compares message versions with `parseTurnTimestamp`,
   preserving nanosecond ordering and rejecting malformed timestamps. Expiry is
   selective per row, so an unchanged pending sibling still retires beside a

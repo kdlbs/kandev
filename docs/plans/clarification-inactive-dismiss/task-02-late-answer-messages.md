@@ -194,5 +194,7 @@ Validation passed:
   active 409 fallback, 1 test each.
 - Documentation catalog validation, full specification lint, targeted Prettier, and
   `git diff --check`.
+- PR documentation coverage passed after nesting the late-answer criteria under
+  the lifecycle requirement heading.
 - Targeted ESLint reported no errors or warnings on changed frontend and E2E
   files.

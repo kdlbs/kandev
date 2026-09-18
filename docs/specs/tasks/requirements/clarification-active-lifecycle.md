@@ -174,7 +174,7 @@ They do not prohibit the separate late-answer message action specified below.
 
 
 
-## Late answers as new messages
+#### Late answers as new messages
 
 These criteria extend the existing lifecycle requirement. They separate an
 operational tool response from a user choosing to continue the conversation.
