@@ -6,6 +6,8 @@ export type ReviewFileCommentTarget = {
   filePath: string;
   repositoryName: string;
   repositoryId?: string;
+  baseRef?: string;
+  isSubmodule?: boolean;
 };
 
 export function buildReviewFileComment(

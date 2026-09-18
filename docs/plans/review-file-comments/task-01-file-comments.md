@@ -220,3 +220,8 @@ afterward, including named/root creation and cross-repository isolation.
 The six affected editor/Markdown/selector/formatter suites pass (34 tests), as
 do typecheck and focused lint. All production line-comment creators and scoped
 selection callers were enumerated and checked.
+
+CodeRabbit metadata correction: whole-file comments retain baseRef and
+isSubmodule from the review file through creation, edits, and storage hydration.
+The component regression failed before the fix; the existing lifecycle test now
+verifies both fields survive edits and reload.

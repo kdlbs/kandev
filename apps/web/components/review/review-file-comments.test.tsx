@@ -8,6 +8,8 @@ import type { ReviewFile } from "./types";
 const file: ReviewFile = {
   path: "README.md",
   repository_name: "api",
+  base_ref: "parent-gitlink",
+  is_submodule: true,
   status: "deleted",
   source: "uncommitted",
   staged: false,
@@ -46,6 +48,8 @@ it("creates, edits and deletes a comment on a patchless deleted file", () => {
     expect.objectContaining({
       source: "review-file",
       repositoryName: "api",
+      baseRef: "parent-gitlink",
+      isSubmodule: true,
       filePath: "README.md",
     }),
   ]);

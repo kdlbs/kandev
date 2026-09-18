@@ -40,6 +40,8 @@ export type ReviewFileComment = CommentBase & {
   source: "review-file";
   filePath: string;
   repositoryName: string;
+  baseRef?: string;
+  isSubmodule?: boolean;
 };
 
 export type ReviewComment = DiffComment | ReviewFileComment;

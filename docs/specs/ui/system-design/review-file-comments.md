@@ -24,7 +24,10 @@ to publish comments on GitHub or another provider.
 Add `ReviewFileComment` to `lib/state/slices/comments/types.ts` with
 `source: "review-file"`, the existing comment base, `filePath`, and
 `repositoryName` (including an explicit empty string for the workspace root).
-Retain `repositoryId` when resolved. Do not add line, side, or code fields.
+Retain `repositoryId` when resolved, plus the file's explicit `base_ref` and
+`is_submodule` as optional `baseRef`/`isSubmodule` comment metadata. Store
+hydration and edits preserve that parent-gitlink context. Do not add line, side,
+or code fields.
 Add a `ReviewComment = DiffComment | ReviewFileComment` union and
 `isReviewComment` guard for aggregate review consumers. Keep `isDiffComment`,
 line selectors, and `commentsToAnnotations` restricted to actual line comments.

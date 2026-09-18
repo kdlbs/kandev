@@ -8,6 +8,8 @@ const target = {
   repositoryName: "packages/lib",
   repositoryId: "repo",
   filePath: "README.md",
+  baseRef: "parent-gitlink",
+  isSubmodule: true,
 };
 beforeEach(() => {
   sessionStorage.clear();

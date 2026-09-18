@@ -154,6 +154,8 @@ export function ReviewFileComments({
                 filePath: file.path,
                 repositoryName: file.repository_name ?? "",
                 repositoryId: file.repository_id,
+                baseRef: file.base_ref,
+                isSubmodule: file.is_submodule,
               },
               text,
             );
