@@ -1,9 +1,9 @@
 ---
-id: "08-dependency-projection"
+id: "01-dependency-projection"
 title: "Expose task dependencies in the plugin and canvas data API"
 status: done
-wave: 5
-depends_on: ["04-host-data-impl"]
+wave: 1
+depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-PLUGINS-TASK-DEPS-001
@@ -73,13 +73,13 @@ acceptance_criteria:
   - AC-PLUGINS-TASK-DEPS-006.4
   - AC-PLUGINS-TASK-DEPS-006.5
 system_design:
-  - ../../../specs/plugins/system-design/task-dependency-projection.md
-  - ../../../specs/plugins/system-design/task-dependency-refresh.md
-  - ../../../specs/plugins/system-design/task-dependency-edge-ends.md
-  - ../../../specs/plugins/system-design/task-dependency-response-bounds.md
+  - ../../specs/plugins/system-design/task-dependency-projection.md
+  - ../../specs/plugins/system-design/task-dependency-refresh.md
+  - ../../specs/plugins/system-design/task-dependency-edge-ends.md
+  - ../../specs/plugins/system-design/task-dependency-response-bounds.md
 ---
 
-# Task 08: Expose task dependencies in the plugin and canvas data API
+# Task 01: Expose task dependencies in the plugin and canvas data API
 
 ## Summary
 
