@@ -186,3 +186,48 @@ describe("buildContextItems file and directory context", () => {
     expect(fileItem?.onOpen).toEqual(expect.any(Function));
   });
 });
+
+it.each(["api", ""])("opens whole-file composer context in repository %j", (repositoryName) => {
+  const onOpenFileAtLine = vi.fn();
+  const items = buildContextItems({
+    planContextEnabled: false,
+    contextFiles: [],
+    resolvedSessionId: "session-1",
+    removeContextFile: vi.fn(),
+    unpinFile: vi.fn(),
+    addPlan: vi.fn(),
+    promptsMap: new Map(),
+    pendingCommentsByFile: {
+      file: [
+        {
+          source: "review-file",
+          id: "whole",
+          sessionId: "session-1",
+          repositoryName,
+          filePath: "README.md",
+          text: "Feedback",
+          status: "pending",
+          createdAt: "now",
+        },
+      ],
+    },
+    handleRemoveCommentFile: vi.fn(),
+    handleRemoveComment: vi.fn(),
+    onOpenFileAtLine,
+    planComments: [],
+    handleClearPlanComments: vi.fn(),
+    pendingPRFeedback: [],
+    handleRemovePRFeedback: vi.fn(),
+    handleClearPRFeedback: vi.fn(),
+    walkthroughComments: [],
+    handleRemoveWalkthroughComment: vi.fn(),
+    handleClearWalkthroughComments: vi.fn(),
+    messageComments: [],
+    handleClearMessageComments: vi.fn(),
+    taskId: "task-1",
+  });
+  const item = items.find((candidate) => candidate.kind === "comment");
+  item?.onOpen?.();
+  expect(onOpenFileAtLine).toHaveBeenCalledWith("README.md", repositoryName);
+  expect(item).toHaveProperty("repositoryName", repositoryName);
+});

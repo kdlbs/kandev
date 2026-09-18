@@ -615,6 +615,9 @@ type startCreatedSessionOptions struct {
 	// server-owned expansion snapshot, including an empty snapshot.
 	promptReferencesPrepared bool
 	preserveDirectPrompt     bool
+	// ceilingEntryBinding is carried by a replay and checked at both the
+	// admission boundary and immediately before runtime dispatch.
+	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -629,6 +632,12 @@ func (s *Service) startCreatedSession(
 ) (*executor.TaskExecution, error) {
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	if options.ceilingEntryBinding == nil {
+		options.ceilingEntryBinding = ceilingEntryBindingFromContext(ctx)
+	}
+	if options.ceilingEntryBinding != nil {
+		ctx = withCeilingEntryBinding(ctx, options.ceilingEntryBinding)
+	}
 
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
@@ -652,6 +661,9 @@ func (s *Service) startCreatedSession(
 	if session.State != models.TaskSessionStateCreated && session.State != models.TaskSessionStateWaitingForInput {
 		return nil, fmt.Errorf("session is not in CREATED or WAITING_FOR_INPUT state (current: %s)", session.State)
 	}
+	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
+		return nil, err
+	}
 
 	// Office-owned sessions must be started by the scheduler. Reject before
 	// resolving profiles or persisting any caller-derived session metadata.
@@ -663,8 +675,9 @@ func (s *Service) startCreatedSession(
 		return nil, errOfficeTaskStartRequiresScheduler
 	}
 
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, originFromAutoStart(autoStart),
-		seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options))
+	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
+	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, originFromAutoStart(autoStart), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -865,6 +878,9 @@ func (s *Service) startCreatedSession(
 			isOfficeTask, configMode, titleOwner, includeCanvasGuidance, references, promptReferenceContext,
 		)
 	}
+	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
+		return nil, err
+	}
 
 	executorID := session.ExecutorID
 
@@ -881,6 +897,13 @@ func (s *Service) startCreatedSession(
 		mcpMode = executor.McpModeOffice
 	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
+	ctx = bindWorkflowStartPromptAttemptTurn(ctx, initialTurnID)
+	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
+		if initialTurnCreated {
+			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
+		}
+		return nil, err
+	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
@@ -1169,6 +1192,10 @@ type startTaskOptions struct {
 	// process to start now: an Office scheduler launch only chose a provider.
 	// Zero value means "derive from autoStart".
 	Origin launchOrigin
+	// ceilingEntryBinding is set only by a replay that owns a persisted
+	// workflow-entry record. The start path rechecks it immediately before
+	// runtime admission so a stale route cannot dispatch the old payload.
+	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1232,6 +1259,7 @@ func (s *Service) prepareExplicitWorkflowStartRoute(
 	route := &models.WorkflowSessionRoute{
 		OperationID:       workflowSessionRouteID(taskID, candidateStep.ID, s.workflowEntryIdentity(ctx, taskID, entryIDs...), candidateStep.SessionTarget, startPolicy),
 		DestinationStepID: candidateStep.ID,
+		EntryIdentity:     s.workflowEntryIdentity(ctx, taskID, entryIDs...),
 		TargetKind:        string(candidateStep.SessionTarget.Kind),
 		TargetStepID:      candidateStep.SessionTarget.StepID,
 		AgentProfileID:    profileID,
@@ -1277,9 +1305,12 @@ func (s *Service) promoteSelectedExplicitWorkflowSession(
 	return session.ID, true, nil
 }
 
-//nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
+//nolint:cyclop,funlen,gocognit,nestif // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
 func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, opts startTaskOptions) (*executor.TaskExecution, error) {
 	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
+	if opts.ceilingEntryBinding != nil {
+		ctx = withCeilingEntryBinding(ctx, opts.ceilingEntryBinding)
+	}
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
 	// Fail before task-state or session mutations when the selected logical
@@ -1307,6 +1338,30 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	origin := opts.Origin
 	if origin == "" {
 		origin = originFromAutoStart(autoStart)
+	}
+	claimedCeilingBinding := opts.ceilingEntryBinding != nil
+	// Bind workflow-origin launches before seam 1 records a sessionless
+	// deferral. The destination session does not exist yet, so this uses the
+	// task's current route when available and otherwise the immutable step-entry
+	// identity. A later replay must compare this binding before it allocates or
+	// dispatches a destination session.
+	if opts.ceilingEntryBinding == nil && (workflowStepID != "" || opts.WorkflowEntryID > 0) {
+		if bindingTask, bindingErr := s.repo.GetTask(ctx, taskID); bindingErr == nil && bindingTask != nil {
+			bindingPayload := map[string]interface{}{
+				metaKeyWorkflowStepID: workflowStepID,
+			}
+			if opts.WorkflowEntryID > 0 {
+				bindingPayload["workflow_entry_id"] = opts.WorkflowEntryID
+			}
+			if binding, bound := s.deriveCeilingEntryBinding(ctx, bindingTask, bindingPayload, ""); bound {
+				opts.ceilingEntryBinding = &binding
+			}
+		}
+	}
+	if claimedCeilingBinding {
+		if err := s.validateClaimedCeilingBinding(ctx, taskID, opts.ceilingEntryBinding); err != nil {
+			return nil, err
+		}
 	}
 	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin,
 		seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts))
@@ -1633,7 +1688,20 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
+	if claimedCeilingBinding {
+		if err := s.validateClaimedCeilingBinding(ctx, taskID, opts.ceilingEntryBinding); err != nil {
+			return nil, err
+		}
+	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
+	if claimedCeilingBinding {
+		if err := s.validateClaimedCeilingBinding(ctx, taskID, opts.ceilingEntryBinding); err != nil {
+			if initialTurnCreated {
+				s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
+			}
+			return nil, err
+		}
+	}
 
 	// Cache the raw prompt so a transient-provider-error (529) retry can
 	// re-drive this first turn — initial launches bypass PromptTask.
@@ -2101,6 +2169,11 @@ func (s *Service) createStartSessionWithWorkflowRoute(
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 	workflowRoute *models.WorkflowSessionRoute,
 ) (string, bool, error) {
+	if workflowRoute != nil {
+		if err := s.workflowRouteMutationAllowed(ctx, task.ID); err != nil {
+			return "", false, err
+		}
+	}
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err != nil || dbTask == nil || !dbTask.IsFromOffice {
 		var sessionID string
@@ -2820,6 +2893,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	options executor.ResumeOptions,
 	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
 ) (*executor.TaskExecution, error) {
+	entryBinding := ceilingEntryBindingFromContext(ctx)
 	s.logger.Debug("resuming task session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
@@ -2832,6 +2906,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	}
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
+	}
+	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
+		return nil, err
 	}
 	allowCompletedResume := options.AllowCompletedSessionResume &&
 		session.State == models.TaskSessionStateCompleted
@@ -2912,7 +2989,21 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	if isOfficeTask {
 		return nil, decorateResumeFailure(errOfficeTaskResumeRequiresScheduler)
 	}
-	seam4Res, deferred, err := s.admitOrDeferSeam4(ctx, taskID, sessionID, launchOrigin(options.Origin), seam4ResumePayload(sessionID, options))
+	admissionCtx := ctx
+	releaseAdmission := func() {}
+	if isSessionOpenRecoveryContext(ctx) {
+		admissionCtx, releaseAdmission = s.lockCeilingEntryAdmission(ctx, taskID)
+	}
+	seam4Res, deferred, err := func() (*sessionKeyedCeilingReservation, bool, error) {
+		defer releaseAdmission()
+		if isSessionOpenRecoveryContext(ctx) {
+			if reason := s.sessionOpenRecoveryBlockReason(admissionCtx, taskID, session); reason != "" {
+				return nil, false, &sessionOpenRecoveryBlockedError{reason: reason}
+			}
+		}
+		return s.admitOrDeferSeam4(admissionCtx, taskID, sessionID, launchOrigin(options.Origin),
+			seam4ResumePayloadWithBinding(sessionID, options, entryBinding))
+	}()
 	if err != nil {
 		return nil, err
 	}
@@ -2948,7 +3039,19 @@ func (s *Service) resumeTaskSessionWithContinuation(
 				zap.Error(err))
 		}
 	}
-	execution, err := s.executor.ResumeSessionWithOptions(resumeCtx, session, true, options)
+	if err := s.validateClaimedCeilingBinding(resumeCtx, taskID, entryBinding); err != nil {
+		s.cleanupCancelledResumeAttempt(attempt)
+		return nil, err
+	}
+	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
+		resumeCtx, taskID, entryBinding,
+	)
+	if err != nil {
+		s.cleanupCancelledResumeAttempt(attempt)
+		return nil, err
+	}
+	execution, err := s.executor.ResumeSessionWithOptions(dispatchCtx, session, true, options)
+	releaseCeilingDispatch()
 	if execution != nil {
 		attempt.setExecutionID(execution.AgentExecutionID)
 	}
@@ -3112,7 +3215,14 @@ func (s *Service) recoverAlreadyRunningResume(
 		return nil, nil, fmt.Errorf("task session does not belong to task")
 	}
 
-	execution, err := s.executor.ResumeSessionWithOptions(resumeCtx, session, true, options)
+	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
+		resumeCtx, taskID, ceilingEntryBindingFromContext(resumeCtx),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	execution, err := s.executor.ResumeSessionWithOptions(dispatchCtx, session, true, options)
+	releaseCeilingDispatch()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -3157,6 +3267,7 @@ func (s *Service) waitForStartingSessionPromptable(ctx context.Context, taskID, 
 // step's prompt_prefix, prompt_suffix, and plan_mode settings combined with the task description.
 func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessionID, workflowStepID string) error {
 	ctx = withWorkflowMetaCache(ctx)
+	entryBinding := ceilingEntryBindingFromContext(ctx)
 	s.logger.Debug("starting session for workflow step",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -3196,12 +3307,21 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	if err != nil {
 		return fmt.Errorf("failed to get task: %w", err)
 	}
+	derivedEntryBinding := false
+	replayWorkflowStepBinding := entryBinding != nil &&
+		ceilingEntryKindFromContext(ctx) == models.CeilingLaunchWorkflowStepEnsure
+	if entryBinding == nil {
+		if derivedBinding, derived := s.workflowEntryBindingForStep(ctx, taskID, step, sessionID); derived {
+			entryBinding = derivedBinding
+			ctx = withCeilingEntryBinding(ctx, entryBinding)
+			derivedEntryBinding = true
+		}
+	}
 
 	if session.ReviewStatus == models.ReviewStatusPending {
 		return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
 	}
-
-	preConsultRes, refused, err := s.admitOrDeferWorkflowStepEnsure(ctx, taskID, sessionID, workflowStepID)
+	preConsultRes, refused, err := s.admitOrDeferWorkflowStepEnsureWithBinding(ctx, taskID, sessionID, workflowStepID, entryBinding)
 	if err != nil {
 		return err
 	}
@@ -3210,8 +3330,29 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	}
 	defer preConsultRes.releaseIfNotConsumed()
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, preConsultRes.manualOverride, preConsultRes.population, preConsultRes.populationKnown, preConsultRes.ceiling)
+	if replayWorkflowStepBinding {
+		if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
+			return err
+		}
+	}
 
 	s.advanceTaskWorkflowStep(ctx, dbTask, workflowStepID, session)
+	if derivedEntryBinding || replayWorkflowStepBinding {
+		// The pre-consultation binding identifies the requested destination while
+		// the task still points at its source step. Once admission succeeds, the
+		// step transition allocates the committed entry identity. Carry that new
+		// identity into the prompt and dispatch guards; otherwise a legitimate
+		// transition would look like a successor replacing the very entry it just
+		// committed.
+		if latestTask, reloadErr := s.repo.GetTask(ctx, taskID); reloadErr == nil && latestTask != nil {
+			if latestBinding, bound := s.workflowEntryBindingForStep(ctx, taskID, step, sessionID); bound {
+				entryBinding = latestBinding
+				ctx = withCeilingEntryBinding(ctx, entryBinding)
+			} else {
+				entryBinding = nil
+			}
+		}
+	}
 
 	effectivePrompt, err := s.buildWorkflowEntryPrompt(
 		ctx, dbTask.Description, step, taskID, sessionID, session.IsPassthrough,
@@ -3220,7 +3361,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return fmt.Errorf("failed to build workflow prompt: %w", err)
 	}
 
-	if err := s.ensureSessionRunning(ctx, sessionID, session, launchOriginAutomatic); err != nil {
+	if err := s.ensureSessionRunningWithBinding(ctx, sessionID, session, launchOriginAutomatic, entryBinding); err != nil {
 		return err
 	}
 	preConsultRes.consume()
@@ -3259,6 +3400,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		promptAlreadyComposed: true,
 		fallbackLaunchPrompt:  composedLaunchPrompt,
 		fallbackRetryPrompt:   effectivePrompt,
+		ceilingEntryBinding:   entryBinding,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
@@ -3317,6 +3459,38 @@ func (s *Service) ensureSessionRunningWithAttempt(
 	session *models.TaskSession,
 	origin launchOrigin,
 ) (*resumeAttempt, error) {
+	return s.ensureSessionRunningWithAttemptAndBinding(
+		ctx, sessionID, session, origin, ceilingEntryBindingFromContext(ctx),
+	)
+}
+
+func (s *Service) ensureSessionRunningWithBinding(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	origin launchOrigin,
+	binding *models.CeilingWorkflowEntryBinding,
+) error {
+	attempt, err := s.ensureSessionRunningWithAttemptAndBinding(ctx, sessionID, session, origin, binding)
+	if attempt != nil {
+		attempt.finish(s.resumeAttemptStore())
+	}
+	return err
+}
+
+func (s *Service) ensureSessionRunningWithAttemptAndBinding(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	origin launchOrigin,
+	binding *models.CeilingWorkflowEntryBinding,
+) (*resumeAttempt, error) {
+	if binding != nil {
+		ctx = withCeilingEntryBinding(ctx, binding)
+		if err := s.validateClaimedCeilingBinding(ctx, session.TaskID, binding); err != nil {
+			return nil, err
+		}
+	}
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 
@@ -3399,6 +3573,9 @@ func (s *Service) runResumeAttempt(
 	s.logger.Debug("agent not running for session, attempting resume",
 		zap.String("session_id", sessionID),
 		zap.String("session_state", string(session.State)))
+	if err := s.validateContextCeilingEntry(resumeCtx, session.TaskID); err != nil {
+		return s.finishResumeAttemptWithError(startupAttempt, err)
+	}
 	return s.coldResumeSession(resumeCtx, sessionID, session, isOfficeTask, startupAttempt, origin)
 }
 
@@ -3467,6 +3644,9 @@ func (s *Service) coldResumeSession(
 	startupAttempt *resumeAttempt,
 	origin launchOrigin,
 ) (*resumeAttempt, error) {
+	if err := s.validateContextCeilingEntry(ctx, session.TaskID); err != nil {
+		return s.finishResumeAttemptWithError(startupAttempt, err)
+	}
 	seam3Res, refusal := s.admitSeam3(ctx, session.TaskID, sessionID, origin)
 	if refusal != nil {
 		return startupAttempt, refusal
@@ -3549,6 +3729,9 @@ func (s *Service) attemptColdResume(
 	if session.State == models.TaskSessionStateCreated {
 		hasRunning, _ := s.repo.HasExecutorRunningRow(ctx, sessionID)
 		if hasRunning {
+			if err := s.validateContextCeilingEntry(ctx, session.TaskID); err != nil {
+				return false, err
+			}
 			return false, s.startAgentOnPreparedWorkspace(ctx, sessionID, session, resumeAttempt)
 		}
 	}
@@ -3576,7 +3759,17 @@ func (s *Service) attemptColdResume(
 	if executor.IsCancellableResumeContext(ctx) {
 		resumeCtx = ctx
 	}
-	execution, launchErr := s.executor.ResumeSession(resumeCtx, session, true)
+	if err := s.admitCeilingDispatch(resumeCtx, session.TaskID); err != nil {
+		return false, err
+	}
+	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
+		resumeCtx, session.TaskID, ceilingEntryBindingFromContext(resumeCtx),
+	)
+	if err != nil {
+		return false, err
+	}
+	execution, launchErr := s.executor.ResumeSession(dispatchCtx, session, true)
+	releaseCeilingDispatch()
 	if execution != nil && resumeAttempt != nil {
 		resumeAttempt.setExecutionID(execution.AgentExecutionID)
 	}
@@ -3757,8 +3950,14 @@ func (s *Service) startAgentOnPreparedWorkspace(
 	if err != nil {
 		return fmt.Errorf("failed to get task for prepared session: %w", err)
 	}
+	if err := s.validateContextCeilingEntry(launchCtx, session.TaskID); err != nil {
+		return err
+	}
 	if _, err := s.ClaimTaskTitleSession(launchCtx, session.TaskID, sessionID); err != nil {
 		return fmt.Errorf("failed to claim first-turn task title: %w", err)
+	}
+	if err := s.validateContextCeilingEntry(launchCtx, session.TaskID); err != nil {
+		return err
 	}
 	var execution *executor.TaskExecution
 	if execution, err = s.launchPreparedSessionWithDynamicFallback(launchCtx, task, sessionID, executor.LaunchOptions{
@@ -3900,6 +4099,7 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 	resp.State = string(session.State)
 	resp.UpdatedAt = session.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	resp.AgentProfileID = session.AgentProfileID
+	resp.AutoResumeAllowed, resp.AutoResumeBlockedReason = s.autoResumeEligibility(ctx, task, session)
 	if task.ArchivedAt != nil {
 		resp.ResumeReason = resumeReasonTaskArchived
 		return resp, nil
@@ -3993,6 +4193,85 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 
 	// 4. No resume token — check if session can be started fresh.
 	return evaluateFreshStartResume(session, running, runErr, resp), nil
+}
+
+const (
+	autoResumeBlockedLaunchQueued         = "launch_queued"
+	autoResumeBlockedOwnershipUnavailable = "ownership_unavailable"
+)
+
+func (s *Service) sessionOpenRecoveryBlockReason(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) string {
+	if s == nil || s.repo == nil || session == nil {
+		return autoResumeBlockedOwnershipUnavailable
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return autoResumeBlockedOwnershipUnavailable
+	}
+	allowed, reason := s.autoResumeEligibility(ctx, task, session)
+	if allowed {
+		return ""
+	}
+	return reason
+}
+
+// autoResumeEligibility is intentionally conservative about deferred launches.
+// Passive inspection may resume a session unless a valid durable launch belongs
+// to that exact session. A malformed deferred record blocks recovery instead of
+// falling back to a fresh launch.
+//
+//nolint:cyclop // Passive recovery checks each ownership source independently.
+func (s *Service) autoResumeEligibility(
+	ctx context.Context, task *models.Task, session *models.TaskSession,
+) (bool, string) {
+	if session == nil || task == nil {
+		return false, autoResumeBlockedOwnershipUnavailable
+	}
+	raw, present := task.Metadata[models.MetaKeyDeferredLaunch]
+	if !present || raw == nil {
+		return true, ""
+	}
+	record, ok := raw.(map[string]interface{})
+	if !ok {
+		return false, autoResumeBlockedOwnershipUnavailable
+	}
+	if len(record) == 0 {
+		return true, ""
+	}
+	deferral, err := models.ReadCeilingDeferral(record)
+	if err != nil {
+		return false, autoResumeBlockedOwnershipUnavailable
+	}
+	if deferral.Kind == models.CeilingLaunchStart {
+		// Seam 1 can defer before a destination session exists. Once a route is
+		// committed, the route destination is the only session that may own this
+		// record. Do not let passive recovery wake an existing predecessor while
+		// the sessionless workflow start is waiting, and fail closed when the
+		// route/binding cannot identify that destination.
+		destinationID := models.CeilingDeferralSessionID(task, deferral)
+		if destinationID == "" || !models.CeilingDeferralTargetsSession(task, deferral, destinationID) {
+			return false, autoResumeBlockedOwnershipUnavailable
+		}
+		if destinationID == session.ID {
+			return false, autoResumeBlockedLaunchQueued
+		}
+		return true, ""
+	}
+	destinationID := models.CeilingDeferralSessionID(task, deferral)
+	if destinationID == "" || !models.CeilingDeferralTargetsSession(task, deferral, destinationID) {
+		return false, autoResumeBlockedOwnershipUnavailable
+	}
+	if destinationID == session.ID {
+		return false, autoResumeBlockedLaunchQueued
+	}
+	// A valid deferral owned by another session does not block passive recovery
+	// of this session. The queue projection is task-scoped and names its exact
+	// destination separately.
+	return true, ""
 }
 
 // evaluateFreshStartResume checks whether a session without a resume token can be
@@ -5342,12 +5621,15 @@ type promptTaskOptions struct {
 	lifecyclePrompt bool
 	afterClaim      func() error
 	afterDispatch   func() error
-	// beforeDispatch is the durable at-most-once boundary for caller-owned
-	// queue receipts. It runs once, immediately before the first provider or
-	// model-switch I/O that can carry the prompt.
-	beforeDispatch        func() error
-	disableDispatchRetry  bool
-	preservePromptContext bool
+	// beforeDispatch runs once before the final dispatch admission boundary.
+	beforeDispatch func() error
+	// afterDispatchAdmission runs once after final dispatch admission succeeds
+	// and before the first provider or model-switch I/O that can carry the
+	// prompt. Queue receipts use this boundary because admission can reject a
+	// stale claim.
+	afterDispatchAdmission func() error
+	disableDispatchRetry   bool
+	preservePromptContext  bool
 	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
 	// dispatch, while delaying the visible turn.started event until acceptance.
 	reserveTurnUntilDispatch  bool
@@ -5363,6 +5645,9 @@ type promptTaskOptions struct {
 	// plumbing and is never passed to a caller.
 	promptAccepted          *atomic.Bool
 	expectedSessionIdentity *messagequeue.QueueSessionIdentity
+	// configModeOverride preserves the launch-time mode for a deferred
+	// workflow prompt whose raw queue content is intentionally empty.
+	configModeOverride *bool
 	// promptAlreadyComposed and fallbackRetryPrompt mirror the composed-prompt
 	// seam autoStartStepPrompt's own ErrExecutionNotFound branch uses (see
 	// fallbackFreshLaunchOnMissingExecution). When promptAlreadyComposed is
@@ -5382,6 +5667,9 @@ type promptTaskOptions struct {
 	// ownership record. The outer resume operation finishes it after provider
 	// acceptance or the retry's terminal result.
 	resumeAttempt *resumeAttempt
+	// ceilingEntryBinding pins replayed workflow work to the committed route
+	// and destination that admitted it.
+	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
 }
 
 type promptDispatchOutcome struct {
@@ -5483,6 +5771,15 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
 	s.logPromptTaskCall(taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly)
+	if options.ceilingEntryBinding == nil {
+		options.ceilingEntryBinding = ceilingEntryBindingFromContext(ctx)
+	}
+	if options.ceilingEntryBinding != nil {
+		ctx = withCeilingEntryBinding(ctx, options.ceilingEntryBinding)
+	}
+	if bindingErr := s.validateContextCeilingEntry(ctx, taskID); bindingErr != nil {
+		return nil, bindingErr
+	}
 	// Check resume-attempt ownership before any repository read can observe a
 	// compound resume's cancellation as a generic context error.
 	if err := s.validatePromptTaskPreconditions(sessionID, options.resumeAttempt); err != nil {
@@ -5511,6 +5808,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// AgentExecutionID, then begin the foreground dispatch on it.
 	session, effectivePrompt, foregroundDispatch, err := s.beginForegroundDispatchForPrompt(
 		resumePromptCtx, taskID, sessionID, prompt, planMode, session, foregroundClaim,
+		options.configModeOverride,
 	)
 	if err != nil {
 		return nil, err
@@ -5536,6 +5834,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		}
 	}
 	runBeforeDispatch := runBeforeDispatchOnce(options.beforeDispatch)
+	runAfterDispatchAdmission := runBeforeDispatchOnce(options.afterDispatchAdmission)
 
 	// Keep the replay payload only after this provider attempt is accepted.
 	// Admission and dispatch failures must not retain prompt attachments until
@@ -5566,6 +5865,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 
 	switchResult, switchHandled, modelSwitchGuard, switchErr := s.resolveModelSwitchAttempt(
 		resumePromptCtx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch, runBeforeDispatch,
+		runAfterDispatchAdmission,
 		resumeAttempt, modelSwitchGuard,
 	)
 	if switchHandled {
@@ -5591,6 +5891,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	return s.runPromptTurn(
 		resumePromptCtx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments, dispatchOnly,
 		effectivePrompt, session, rollback, options, foregroundDispatch, runBeforeDispatch,
+		runAfterDispatchAdmission,
 		releaseDispatchGuard, resumeAttempt,
 	)
 }
@@ -5610,18 +5911,33 @@ func (s *Service) runPromptTurn(
 	options promptTaskOptions,
 	foregroundDispatch *foregroundDispatch,
 	runBeforeDispatch func() error,
+	runAfterDispatchAdmission func() error,
 	releaseDispatchGuard func(),
 	resumeAttempt *resumeAttempt,
 ) (*PromptResult, error) {
 	promptCtx, session, earlyResult, err := s.validateAndRunDispatchBoundary(
 		ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
-		session, rollback, options, foregroundDispatch, runBeforeDispatch, releaseDispatchGuard,
+		session, rollback, options, foregroundDispatch, runBeforeDispatch, runAfterDispatchAdmission, releaseDispatchGuard,
 	)
 	if err != nil || earlyResult != nil {
 		return earlyResult, err
 	}
+	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
+		promptCtx, taskID, ceilingEntryBindingFromContext(promptCtx),
+	)
+	if err != nil {
+		if releaseDispatchGuard != nil {
+			releaseDispatchGuard()
+		}
+		return nil, s.failPromptDispatch(
+			ctx, taskID, sessionID, foregroundDispatch, rollback, options, resumeAttempt, err,
+		)
+	}
+	defer releaseCeilingDispatch()
+	promptCtx = dispatchCtx
 	onDispatched, dispatchOutcome := s.preparePromptDispatchCallback(
 		promptCtx, taskID, sessionID, session, rollback, options, foregroundDispatch, releaseDispatchGuard,
+		resumeAttempt,
 	)
 	result, execErr := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
@@ -5709,11 +6025,13 @@ func (s *Service) resolveModelSwitchAttempt(
 	session *models.TaskSession,
 	foregroundDispatch *foregroundDispatch,
 	runBeforeDispatch func() error,
+	runAfterDispatchAdmission func() error,
 	resumeAttempt *resumeAttempt,
 	modelSwitchGuard *lockedCancelInFlightGuard,
 ) (switchResult *PromptResult, handled bool, remainingGuard *lockedCancelInFlightGuard, switchErr error) {
 	result, handledSwitch, attemptErr := s.attemptModelSwitchForPrompt(
 		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch, runBeforeDispatch,
+		runAfterDispatchAdmission, resumeAttempt,
 	)
 	if !handledSwitch {
 		if modelSwitchGuard != nil {
@@ -5933,8 +6251,8 @@ func (s *Service) finishPromptExecutorDispatch(
 }
 
 // validateAndRunDispatchBoundary resolves promptTask's queued-dispatch
-// identity check and the caller's beforeDispatch hook — the two checks that
-// must both pass immediately before the executor call — rolling back the
+// identity check, pre-admission hook, and post-admission hook — the checks
+// that must all pass immediately before the executor call — rolling back the
 // foreground dispatch and prompt claim on either failure. Only bounded-ack
 // callers preserve request context past this point; ordinary prompts can take
 // minutes, so the executor context is resolved here and threaded back out.
@@ -5942,6 +6260,7 @@ func (s *Service) validateAndRunDispatchBoundary(
 	ctx context.Context, taskID, sessionID, prompt string, planMode, resumedForPrompt bool,
 	attachments []v1.MessageAttachment, session *models.TaskSession, rollback promptClaimRollback,
 	options promptTaskOptions, foregroundDispatch *foregroundDispatch, runBeforeDispatch func() error,
+	runAfterDispatchAdmission func() error,
 	releaseDispatchGuard func(),
 ) (promptCtx context.Context, resolvedSession *models.TaskSession, earlyResult *PromptResult, err error) {
 	promptCtx = options.executorContext(ctx)
@@ -5961,7 +6280,24 @@ func (s *Service) validateAndRunDispatchBoundary(
 		)
 		return promptCtx, nil, result, err
 	}
-	if boundaryErr := runBeforeDispatch(); boundaryErr != nil {
+	if bindingErr := s.validateContextCeilingEntry(promptCtx, taskID); bindingErr != nil {
+		if releaseDispatchGuard != nil {
+			releaseDispatchGuard()
+		}
+		failureCtx, cancel := options.failureContext(ctx)
+		defer cancel()
+		s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
+		s.rollbackPromptClaim(failureCtx, taskID, sessionID, rollback)
+		return promptCtx, nil, nil, bindingErr
+	}
+	boundaryErr := runBeforeDispatch()
+	if boundaryErr == nil {
+		boundaryErr = s.admitCeilingDispatch(promptCtx, taskID)
+	}
+	if boundaryErr == nil {
+		boundaryErr = runAfterDispatchAdmission()
+	}
+	if boundaryErr != nil {
 		if releaseDispatchGuard != nil {
 			releaseDispatchGuard()
 		}
@@ -5976,13 +6312,14 @@ func (s *Service) validateAndRunDispatchBoundary(
 
 // preparePromptDispatchCallback binds the turn, arms the interactive-prompt
 // attempt evidence, and builds the onDispatched callback executor.
-// PromptWithDispatchCallback invokes once agentctl accepts the prompt —
-// wrapping in the caller's afterDispatch hook and the nonterminal dispatch
-// guard release, innermost first, when either applies.
+// PromptWithDispatchCallback invokes once agentctl accepts the prompt. For a
+// resumed turn, ownership transfer wraps the durable afterDispatch hook and
+// identity publication; the nonterminal dispatch guard releases last.
 func (s *Service) preparePromptDispatchCallback(
 	promptCtx context.Context, taskID, sessionID string, session *models.TaskSession,
 	rollback promptClaimRollback, options promptTaskOptions, foregroundDispatch *foregroundDispatch,
 	releaseDispatchGuard func(),
+	resumeAttempt *resumeAttempt,
 ) (onDispatched func(), dispatchOutcome *promptDispatchOutcome) {
 	s.bindPromptTurnID(promptCtx, session, rollback.turnID)
 	s.beginInteractivePromptAttempt(
@@ -6003,9 +6340,10 @@ func (s *Service) preparePromptDispatchCallback(
 			}
 		}
 	}
+	acceptedExecutionID := session.AgentExecutionID
 	onDispatched = s.promptDispatchCallbackForIdentity(
 		promptCtx, taskID, sessionID, rollback.sessionIdentity,
-		session.AgentExecutionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
+		acceptedExecutionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
 	)
 	if options.afterDispatch != nil {
 		originalOnDispatched := onDispatched
@@ -6014,6 +6352,15 @@ func (s *Service) preparePromptDispatchCallback(
 			originalOnDispatched()
 			_, publicationErr := dispatchOutcome.snapshot()
 			dispatchOutcome.recordAccepted(errors.Join(durableOutcomeErr, publicationErr))
+		}
+	}
+	if resumeAttempt != nil {
+		originalOnDispatched := onDispatched
+		onDispatched = func() {
+			// Transfer startup ownership before any durable post-acceptance hook
+			// or identity publication can fail and before the dispatch guard releases.
+			s.acceptResumeAttemptAtPromptAcceptance(acceptedExecutionID, resumeAttempt)
+			originalOnDispatched()
 		}
 	}
 	if releaseDispatchGuard != nil {
@@ -6028,6 +6375,25 @@ func (s *Service) preparePromptDispatchCallback(
 		}
 	}
 	return onDispatched, dispatchOutcome
+}
+
+func (s *Service) acceptResumeAttemptAtPromptAcceptance(
+	expectedExecutionID string,
+	attempt *resumeAttempt,
+) bool {
+	if attempt == nil {
+		return false
+	}
+	if expectedExecutionID == "" {
+		expectedExecutionID = attempt.execution()
+	}
+	if expectedExecutionID == "" {
+		return false
+	}
+	// Provider acceptance is the irreversible boundary for startup teardown.
+	// Use the execution admitted before the provider call; stale-incarnation
+	// publication remains separately fenced by promptDispatchCallbackForIdentity.
+	return s.resumeAttemptStore().accept(attempt, expectedExecutionID)
 }
 
 func (s *Service) finishPromptDispatchFailure(
@@ -6086,9 +6452,12 @@ func (s *Service) beginForegroundDispatchForPrompt(
 	planMode bool,
 	session *models.TaskSession,
 	foregroundClaim *foregroundClaim,
+	configModeOverride *bool,
 ) (*models.TaskSession, string, *foregroundDispatch, error) {
 	session = s.reloadPromptSession(ctx, sessionID, session)
-	effectivePrompt := s.effectivePromptForSession(sessionID, prompt, planMode, session)
+	effectivePrompt := s.effectivePromptForSessionWithConfigMode(
+		sessionID, prompt, planMode, session, configModeOverride,
+	)
 	activityExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	foregroundDispatch := s.beginForegroundDispatch(sessionID, foregroundClaim, activityExecutionID)
 	if foregroundDispatch == nil {
@@ -6449,8 +6818,9 @@ func (s *Service) promptDispatchCallbackForIdentity(
 }
 
 // attemptModelSwitchForPrompt runs promptTask's pre-dispatch model-switch
-// handling: arming the initial-prompt-attempt evidence and the caller's
-// beforeDispatch hook when a switch is required, then delegating to
+// handling: arming the initial-prompt-attempt evidence, running the caller's
+// pre-admission hook, admitting the dispatch, and running the caller's
+// post-admission hook when a switch is required, then delegating to
 // trySwitchModelForPrompt. handled reports whether the caller already has its
 // full response — a dispatched switch, a switch failure, or a beforeDispatch
 // failure — in which case promptTask returns (result, err) directly without
@@ -6458,16 +6828,30 @@ func (s *Service) promptDispatchCallbackForIdentity(
 func (s *Service) attemptModelSwitchForPrompt(
 	ctx context.Context, taskID, sessionID, model, effectivePrompt string, session *models.TaskSession,
 	foregroundDispatch *foregroundDispatch, runBeforeDispatch func() error,
+	runAfterDispatchAdmission func() error, resumeAttempts ...*resumeAttempt,
 ) (result *PromptResult, handled bool, err error) {
+	var resumeAttempt *resumeAttempt
+	if len(resumeAttempts) > 0 {
+		resumeAttempt = resumeAttempts[0]
+	}
 	if modelSwitchRequired(session, model) {
 		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
-		if err := runBeforeDispatch(); err != nil {
+		admissionErr := runBeforeDispatch()
+		if admissionErr == nil {
+			admissionErr = s.admitCeilingDispatch(ctx, taskID)
+		}
+		if admissionErr == nil {
+			admissionErr = runAfterDispatchAdmission()
+		}
+		if admissionErr != nil {
 			s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 			s.clearPromptAttemptEvidence(sessionID, "", 0)
-			return nil, true, err
+			return nil, true, admissionErr
 		}
 	}
-	result, handled, switchErr := s.trySwitchModelForPrompt(ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch)
+	result, handled, switchErr := s.trySwitchModelForPrompt(
+		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch, resumeAttempt,
+	)
 	if handled && switchErr != nil {
 		s.clearPromptAttemptEvidence(sessionID, "", 0)
 	}
@@ -6476,23 +6860,67 @@ func (s *Service) attemptModelSwitchForPrompt(
 
 // trySwitchModelForPrompt keeps foreground admission consistent when a model
 // switch either dispatches the prompt itself or fails before reaching the agent.
-func (s *Service) trySwitchModelForPrompt(ctx context.Context, taskID, sessionID, model, prompt string, session *models.TaskSession, dispatch *foregroundDispatch) (*PromptResult, bool, error) {
-	result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, prompt, session)
+func (s *Service) trySwitchModelForPrompt(
+	ctx context.Context,
+	taskID, sessionID, model, prompt string,
+	session *models.TaskSession,
+	dispatch *foregroundDispatch,
+	resumeAttempt *resumeAttempt,
+) (*PromptResult, bool, error) {
+	releaseHold, onDispatched, onFailure, holdErr := s.modelSwitchResumeCallbacks(session, model, resumeAttempt)
+	if holdErr != nil {
+		return nil, true, holdErr
+	}
+	result, switched, err := s.trySwitchModelWithDispatchCallbacks(
+		ctx, taskID, sessionID, model, prompt, session, onDispatched, onFailure,
+	)
 	if !switched && err == nil {
+		releaseHold()
 		return nil, false, nil
 	}
 	if err != nil {
+		releaseHold()
 		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, dispatch)
 		return result, true, err
 	}
 	if executionID, executionErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID); executionErr == nil && executionID != "" {
 		s.bindPromptAttemptToExecution(ctx, sessionID, executionID)
+		if resumeAttempt != nil {
+			// The replacement's initial prompt is dispatched asynchronously by
+			// lifecycle. Bind its immutable execution identity now; startup
+			// ownership transfers only from the callback installed for that prompt.
+			resumeAttempt.setExecutionID(executionID)
+		}
 	}
 	revealedBackground := s.acceptForegroundDispatch(dispatch)
 	if revealedBackground || dispatch.yieldedBeforeBegin || s.acceptedForegroundDispatchClaim(dispatch) {
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 	return result, true, nil
+}
+
+func (s *Service) modelSwitchResumeCallbacks(
+	session *models.TaskSession,
+	model string,
+	resumeAttempt *resumeAttempt,
+) (release func(), onDispatched func(executionID string), onFailure func(), err error) {
+	release = func() {}
+	if resumeAttempt == nil || !modelSwitchRequired(session, model) {
+		return release, nil, nil, nil
+	}
+	registry := s.resumeAttemptStore()
+	if !registry.holdForInitialPrompt(resumeAttempt) {
+		s.cleanupCancelledResumeAttempt(resumeAttempt)
+		return nil, nil, nil, ErrResumeAttemptCancelled
+	}
+	release = func() { registry.releaseInitialPromptHold(resumeAttempt) }
+	onDispatched = func(executionID string) {
+		if s.acceptResumeAttemptAtPromptAcceptance(executionID, resumeAttempt) {
+			registry.finishAfterInitialPromptAcceptance(resumeAttempt)
+		}
+	}
+	onFailure = func() { registry.abortInitialPromptHold(resumeAttempt) }
+	return release, onDispatched, onFailure, nil
 }
 
 type promptClaimRollback struct {
@@ -6886,8 +7314,24 @@ func (s *Service) handlePromptDispatchFailure(
 // follows ensureSessionRunning, in case metadata changed in between —
 // without double-prepending either transform's system-prompt wrapper.
 func (s *Service) effectivePromptForSession(sessionID, prompt string, planMode bool, session *models.TaskSession) string {
+	return s.effectivePromptForSessionWithConfigMode(sessionID, prompt, planMode, session, nil)
+}
+
+func (s *Service) effectivePromptForSessionWithConfigMode(
+	sessionID, prompt string,
+	planMode bool,
+	session *models.TaskSession,
+	configModeOverride *bool,
+) string {
 	effectivePrompt := prompt
-	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+	configMode := false
+	if session != nil {
+		configMode, _ = session.Metadata["config_mode"].(bool)
+	}
+	if configModeOverride != nil {
+		configMode = *configModeOverride
+	}
+	if configMode {
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
 	}
 	if planMode {
@@ -7540,6 +7984,16 @@ func modelSwitchRequired(session *models.TaskSession, model string) bool {
 }
 
 func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, effectivePrompt string, session *models.TaskSession) (*PromptResult, bool, error) {
+	return s.trySwitchModelWithDispatchCallbacks(ctx, taskID, sessionID, model, effectivePrompt, session, nil, nil)
+}
+
+func (s *Service) trySwitchModelWithDispatchCallbacks(
+	ctx context.Context,
+	taskID, sessionID, model, effectivePrompt string,
+	session *models.TaskSession,
+	onDispatched func(executionID string),
+	onFailure func(),
+) (*PromptResult, bool, error) {
 	if !modelSwitchRequired(session, model) {
 		return nil, false, nil
 	}
@@ -7555,7 +8009,9 @@ func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, 
 		zap.String("from", currentModel),
 		zap.String("to", model))
 	switchCtx := context.WithoutCancel(ctx)
-	switchResult, err := s.executor.SwitchModel(switchCtx, taskID, sessionID, model, effectivePrompt)
+	switchResult, err := s.executor.SwitchModelWithDispatchCallbacks(
+		switchCtx, taskID, sessionID, model, effectivePrompt, onDispatched, onFailure,
+	)
 	if err != nil {
 		return nil, true, fmt.Errorf("model switch failed: %w", err)
 	}

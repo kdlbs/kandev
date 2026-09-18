@@ -16,6 +16,7 @@ import type { QueuedMessage } from "@/lib/state/slices/session/types";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  triggerFileDownload.mockReset();
 });
 
 vi.mock("@kandev/ui/tooltip", () => ({
@@ -38,6 +39,10 @@ const EDIT_TITLE = "Edit queued message";
 const MERGE_TITLE = "Merge with above";
 
 const QUEUE_EDIT_TEXTAREA_TESTID = "queue-edit-textarea";
+const { triggerFileDownload } = vi.hoisted(() => ({ triggerFileDownload: vi.fn() }));
+
+vi.mock("@/lib/utils/file-download", () => ({ triggerFileDownload }));
+
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
     id: "q-1",
@@ -765,5 +770,36 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
     const above = entry({ id: "q-a", queued_by: "user-1" });
     const below = entry({ id: "q-b", queued_by: "server" });
     expect(canMergeWithAbove(below, above)).toBe(false);
+  });
+});
+
+describe("QueuedGhostMessage bounded previews", () => {
+  it("bounds the display while keeping complete download and edit values", async () => {
+    const content = Array.from({ length: 240 }, (_, index) => `queued-${index}`).join("\n");
+    const onSave = vi.fn(async (_content: string) => undefined);
+
+    renderWithProviders(
+      <QueuedGhostMessage entry={entry({ content })} canEdit onSave={onSave} onRemove={vi.fn()} />,
+    );
+
+    const preview = screen.getByTestId("queue-entry-text");
+    expect(preview.textContent).not.toContain("queued-239");
+    fireEvent.click(screen.getByTestId("bounded-message-preview-download"));
+    expect(triggerFileDownload).toHaveBeenCalledWith({
+      fileName: "kandev-queued-message.txt",
+      content,
+      isBinary: false,
+    });
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    const textarea = screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID) as HTMLTextAreaElement;
+    expect(textarea.value).toBe(content);
+
+    const editedContent = `${content}\nedited`;
+    fireEvent.change(textarea, { target: { value: editedContent } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0]?.[0]).toBe(editedContent);
   });
 });

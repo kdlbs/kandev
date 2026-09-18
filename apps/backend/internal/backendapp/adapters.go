@@ -1431,6 +1431,15 @@ func (a *messageCreatorAdapter) UpdateToolCallMessage(ctx context.Context, taskI
 	return a.svc.UpdateToolCallMessageWithCreate(ctx, agentSessionID, toolCallID, parentToolCallID, status, result, title, normalized, taskID, turnID, msgType)
 }
 
+func (a *messageCreatorAdapter) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, agentSessionID, content, turnID string,
+) error {
+	return a.svc.UpsertAgentPlanMessage(
+		ctx, taskID, sourceToolCallID, agentSessionID, content, turnID,
+	)
+}
+
 // CreateSessionMessage creates a message for non-chat session updates (status/progress/error/etc).
 func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{

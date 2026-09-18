@@ -17,7 +17,7 @@ type ChatContextItemsOptions = {
   previewFeedback: TaskPreviewFeedback[];
   taskId: string | null;
   onOpenFile?: (path: string, repo?: string) => void;
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   onOpenPreviewFeedback: () => void;
 };
 

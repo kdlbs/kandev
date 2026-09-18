@@ -5,7 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
+
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 func TestRoutine_CRUD(t *testing.T) {
@@ -199,6 +204,93 @@ func TestRoutineRun_ActiveFingerprint(t *testing.T) {
 		t.Error("expected nil for non-matching fingerprint")
 	}
 
+}
+
+func TestListTriggersByRoutineIDs_Batch(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+		t.Fatalf("settings store init: %v", err)
+	}
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	ctx := context.Background()
+
+	r1 := &models.Routine{
+		WorkspaceID: "ws-1", Name: "R1", TaskTemplate: "{}",
+		Status: "active", ConcurrencyPolicy: "skip_if_active", Variables: "{}",
+	}
+	r2 := &models.Routine{
+		WorkspaceID: "ws-1", Name: "R2", TaskTemplate: "{}",
+		Status: "active", ConcurrencyPolicy: "skip_if_active", Variables: "{}",
+	}
+	r3 := &models.Routine{
+		WorkspaceID: "ws-1", Name: "R3 (no triggers)", TaskTemplate: "{}",
+		Status: "active", ConcurrencyPolicy: "skip_if_active", Variables: "{}",
+	}
+	for _, r := range []*models.Routine{r1, r2, r3} {
+		if err := repo.CreateRoutine(ctx, r); err != nil {
+			t.Fatalf("create routine: %v", err)
+		}
+	}
+
+	// t1 and t2 belong to r1 and get the same created_at (forced below), so
+	// the id tiebreak is the only thing that can order them.
+	t1 := &models.RoutineTrigger{ID: "trigger-b", RoutineID: r1.ID, Kind: "manual", Enabled: true}
+	t2 := &models.RoutineTrigger{ID: "trigger-a", RoutineID: r1.ID, Kind: "manual", Enabled: true}
+	t3 := &models.RoutineTrigger{RoutineID: r2.ID, Kind: "manual", Enabled: true}
+	for _, tr := range []*models.RoutineTrigger{t1, t2, t3} {
+		if err := repo.CreateRoutineTrigger(ctx, tr); err != nil {
+			t.Fatalf("create trigger: %v", err)
+		}
+	}
+
+	tie := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := db.ExecContext(ctx,
+		`UPDATE office_routine_triggers SET created_at = ? WHERE id IN (?, ?)`,
+		tie, t1.ID, t2.ID,
+	); err != nil {
+		t.Fatalf("force created_at tie: %v", err)
+	}
+
+	byRoutine, err := repo.ListTriggersByRoutineIDs(ctx, []string{r1.ID, r2.ID, r3.ID})
+	if err != nil {
+		t.Fatalf("batch list: %v", err)
+	}
+	if len(byRoutine) != 3 {
+		t.Fatalf("map size = %d, want 3", len(byRoutine))
+	}
+
+	r1Triggers := byRoutine[r1.ID]
+	if len(r1Triggers) != 2 {
+		t.Fatalf("r1 triggers = %d, want 2", len(r1Triggers))
+	}
+	if r1Triggers[0].ID != "trigger-a" || r1Triggers[1].ID != "trigger-b" {
+		t.Errorf("r1 trigger order = [%s, %s], want [trigger-a, trigger-b] (id tiebreak)",
+			r1Triggers[0].ID, r1Triggers[1].ID)
+	}
+
+	if len(byRoutine[r2.ID]) != 1 {
+		t.Fatalf("r2 triggers = %d, want 1", len(byRoutine[r2.ID]))
+	}
+
+	if r3Triggers, ok := byRoutine[r3.ID]; !ok || r3Triggers == nil || len(r3Triggers) != 0 {
+		t.Errorf("r3 triggers = %v, want present and empty", r3Triggers)
+	}
+
+	empty, err := repo.ListTriggersByRoutineIDs(ctx, nil)
+	if err != nil {
+		t.Fatalf("empty batch list: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("empty input map size = %d, want 0", len(empty))
+	}
 }
 
 func TestRoutineRun_Create(t *testing.T) {

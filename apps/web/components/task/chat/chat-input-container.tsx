@@ -3,7 +3,7 @@
 import { forwardRef, useCallback } from "react";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { Message } from "@/lib/types/http";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
@@ -56,7 +56,7 @@ export type ChatSubmitResult = void | boolean | Promise<void | boolean>;
 
 export type ChatSubmitPayload = {
   message: string;
-  reviewComments?: DiffComment[];
+  reviewComments?: ReviewComment[];
   attachments?: MessageAttachment[];
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
@@ -101,7 +101,7 @@ type ChatInputContainerProps = {
   onClarificationResolved?: () => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
-  pendingCommentsByFile?: Record<string, DiffComment[]>;
+  pendingCommentsByFile?: Record<string, ReviewComment[]>;
   hasContextComments?: boolean;
   submitKey?: "enter" | "cmd_enter";
   hasAgentCommands?: boolean;

@@ -56,6 +56,9 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	r.migrateRunOutcome()
+	if err := r.migrateRunSkillLabels(); err != nil {
+		return err
+	}
 	if err := r.migrateParentWakeIndexes(); err != nil {
 		return err
 	}
@@ -77,6 +80,29 @@ func (r *Repository) runMigrations() error {
 		return err
 	}
 	return nil
+}
+
+// migrateRunSkillLabels adds the captured labels used by run history. The
+// snapshot keeps its display identity even if the live skill is renamed or
+// deleted later.
+
+func (r *Repository) migrateRunSkillLabels() error {
+	if err := r.migrate.Apply(
+		"office_run_skills.display_name",
+		`ALTER TABLE office_run_skills ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`,
+	); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply(
+		"office_run_skills.slug",
+		`ALTER TABLE office_run_skills ADD COLUMN slug TEXT NOT NULL DEFAULT ''`,
+	); err != nil {
+		return err
+	}
+	return r.migrate.Apply(
+		"office_run_skills.label_source",
+		`ALTER TABLE office_run_skills ADD COLUMN label_source TEXT NOT NULL DEFAULT ''`,
+	)
 }
 
 // backfillRoutineTriggerTimezones sets an explicit "UTC" on cron triggers

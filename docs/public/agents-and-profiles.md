@@ -7,6 +7,8 @@ description: "Install agent CLIs and create profiles for models, modes, flags, s
 
 An **agent** is Kandev's integration with a coding-agent CLI. A **profile** is its reusable launch configuration. Create separate profiles when model, credentials, or permissions need different trust boundaries.
 
+The composer model picker shows the session's agent CLI logo beside the selected model and beside **Model** in the open popover. This identifies the CLI running the session, even when it supports models from several vendors.
+
 Agent authentication is separate from repository and integration credentials.
 
 ## Quick path
@@ -244,6 +246,11 @@ backoff, or until its trusted reset time when one is available. Kandev runs an
 exclusive health probe before it becomes eligible again. This shared error
 classification is used by task/Kanban and Office routing, while the per-
 candidate policies are configured on dynamic profiles.
+
+When a task launch waits for session capacity, Kandev keeps the selected
+destination and retries it automatically. Inspecting another session does not
+resume a parked predecessor. Use an explicit **Resume** action or send a
+message for manual recovery. These actions can override the automatic ceiling.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn

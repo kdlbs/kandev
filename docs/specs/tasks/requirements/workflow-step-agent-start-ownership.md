@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-05
-updated: 2026-09-12
+updated: 2026-09-17
 owners:
   - Kandev
 ---
@@ -97,6 +97,32 @@ intent-derived destination.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.4:** Desktop and mobile task
 creation shall apply the same immediate-launch placement rule.
 
+### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005: Automatic prompt preservation after startup failure
+
+**Intent:** Retain an automatic workflow prompt when its agent launch fails before prompt delivery.
+This draft extension addresses [issue #3753](https://github.com/kdlbs/kandev/issues/3753).
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.1:** When an admitted automatic launch fails asynchronously before prompt delivery, the system shall preserve its prompt for recovery.
+  The preserved input shall include handoff text, attachments, references, plan mode, and workflow origin.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.2:** After successful recovery, the system shall deliver the preserved prompt once through normal queue admission.
+  It shall retain one existing user message and respect a paused queue.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.3:** Duplicate or superseded launch failures shall not duplicate queued input or affect a successor turn.
+  Cancellation, completion, archive, deletion, and a superseding workflow entry shall prevent stale prompt recovery.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.4:** Prompt preservation shall retain the existing launch-error classification and recovery actions.
+  It shall not initiate another launch from the failure callback or turn permanent rejection into an automatic retry loop.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.5:** After successful queue persistence, the preserved prompt shall survive a backend restart.
+  If queue admission fails, the same launch attempt shall retry once while it
+  still owns the preservation claim. After that retry fails, the launch error
+  shall remain visible and diagnostics shall identify the preservation failure
+  without exposing prompt content.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005.6:** Successful starts and synchronous permanent rejections shall not create asynchronous recovery entries.
+  Existing synchronous busy-error recovery shall retain its current behavior.
+
+This extension excludes a backend crash before the asynchronous failure callback persists the prompt.
+It also excludes replay after ambiguous provider acceptance, automatic repair of historical orphaned messages, and new recovery controls.
+
 ## Migrated source detail
 
 ## Why
@@ -188,21 +214,13 @@ and unprompted.
   **WHEN** the failure is handled, **THEN** the error is returned and no
   message is queued.
 
-## Known gap
+## Asynchronous preservation delivery status
 
-Prompt preservation across an **asynchronous** start failure is not covered
-here. `startAgentOnExistingWorkspace` ends with `startAgentProcessAsync` and
-returns `nil`, so a session with a prepared execution — the incident's own shape
-— never surfaces a synchronous error for the clause above to catch. That failure
-is handled entirely by `handleAgentProcessStartFailure` →
-`Service.handleAgentStartFailed`, which has no access to the prompt the launch
-was carrying and therefore cannot re-queue it.
-
-Task 01 removes the only known trigger for that path on a first-turn launch, so
-the incident cannot recur through it. The residual gap — any *other* async start
-failure on a first-turn launch drops the step prompt — is a distinct pre-existing
-defect. Closing it needs a pending-prompt handle the async failure path can
-read, which is a design change beyond this repair.
+The original [start-ownership package](../../../plans/workflow-step-agent-start-ownership/plan.md)
+closed the synchronous failure path. Requirement
+`REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005` defines the asynchronous
+recovery contract. The [asynchronous prompt preservation package](../../../plans/workflow-async-start-prompt-preservation/plan.md)
+delivers it through its completed work order.
 
 ## Out of scope
 

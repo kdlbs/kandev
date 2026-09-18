@@ -47,6 +47,7 @@ import {
   defaultNeedsYouInboxState,
   defaultFailedInboxState,
   defaultPreviewFeedbackState,
+  defaultInboxHistoryState,
 } from "./slices";
 import type {
   WorkspaceState,
@@ -229,6 +230,10 @@ export type AppState = KanbanSlice & {
   // Task-owned pending feedback captured from rendered previews.
   previewFeedback: (typeof defaultPreviewFeedbackState)["previewFeedback"];
 
+  // Inbox History slice (actions merged via InboxHistorySliceActions
+  // intersection on AppState)
+  inboxHistory: (typeof defaultInboxHistoryState)["inboxHistory"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -255,6 +260,7 @@ export type AppState = KanbanSlice & {
   appSidebar: (typeof defaultUIState)["appSidebar"];
   settingsMenu: (typeof defaultUIState)["settingsMenu"];
   richOutputMotion: (typeof defaultUIState)["richOutputMotion"];
+  chatMotion: (typeof defaultUIState)["chatMotion"];
   acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
   dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
@@ -643,6 +649,9 @@ export type AppState = KanbanSlice & {
   previewRichOutputAnimations: UIA["previewRichOutputAnimations"];
   commitRichOutputAnimations: UIA["commitRichOutputAnimations"];
   restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];
+  previewChatAnimations: UIA["previewChatAnimations"];
+  commitChatAnimations: UIA["commitChatAnimations"];
+  restoreChatAnimations: UIA["restoreChatAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
 } & AppStateExtraActions &

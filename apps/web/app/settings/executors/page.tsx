@@ -22,6 +22,7 @@ import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 
 type ProfileWithExecutor = ExecutorProfile & {
   executor_type: string;
@@ -114,7 +115,7 @@ function ProfileCard({
   return (
     <Card
       className="group cursor-pointer transition-colors hover:bg-muted/50"
-      onClick={() => router.push(`/settings/executors/${profile.id}`)}
+      onClick={() => router.push(executorProfileSettingsPath(profile.id))}
     >
       <CardContent className="flex items-center gap-3 p-4">
         <ExecutorIconBadge type={profile.executor_type} />

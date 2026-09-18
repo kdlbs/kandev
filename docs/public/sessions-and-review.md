@@ -255,6 +255,19 @@ the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under
 Provider Usage**. Kandev hides the context ring rather than presenting
 impossible data when reported use exceeds the reported window.
 
+## Control chat animations
+
+Open **Settings > Preferences > Appearance** and change **Chat animations**.
+The setting is on by default and controls incoming text, new chat items, and
+smooth scrolling on this device. Choose **Save changes** to keep the choice
+across reloads, or **Reset** to discard the preview.
+
+Your device's reduced-motion preference disables these effects even when the
+switch is on. Turning chat animations off keeps content visible immediately
+and leaves the session's auto-scroll preference unchanged. Scroll up to read
+history without being pulled back by incoming content. Rich-output chart
+animations have their own Appearance setting.
+
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.
@@ -325,7 +338,9 @@ During review you can:
 
 Reviewed state is stored per session. Kandev also stores the diff hash: if the file changes after you review it, the file becomes stale and unreviewed. By default, manually scrolling past a file marks it reviewed; file-selection jumps in Review do not. Use the review toolbar to disable **Auto-mark reviewed on scroll**. Review does not embed walkthrough steps in its diff list; follow a saved walkthrough from its launcher and file editor.
 
-Pending inline comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent and close the review dialog. If the agent is busy, normal session queuing applies. The UI clears pending comments immediately after starting the fire-and-forget send; if that request later fails, it shows an error but does not restore them. Copy important feedback before sending. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
+**Whole-file feedback:** Select **Comment on file** in a file header, or in its file actions menu on a phone. Add feedback without selecting lines, including for deleted, renamed, or non-text files. Saved comments appear above the diff, where you can edit or delete them. File comments join line comments in **Fix comments** and the chat composer.
+
+Pending line and file comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent and close the review dialog. If the agent is busy, normal session queuing applies. The UI clears pending comments immediately after starting the fire-and-forget send; if that request later fails, it shows an error but does not restore them. Copy important feedback before sending. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
 
 ## Generate a walkthrough
 

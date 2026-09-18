@@ -35,12 +35,13 @@ hand-off it is designed to protect.
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.2:** Re-enabling auto-scroll retains the existing catch-up behavior.
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.3:** The clarification-recovery concurrency regression waits for its asynchronous completion signal within a bounded interval instead of treating scheduler timing as a product failure.
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.4:** **GIVEN** an overflowing native transcript at its bottom with auto-scroll disabled, **WHEN** a new message is appended, **THEN** the transcript's `scrollTop` remains at the pre-append position.
-- **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.5:** **GIVEN** an overflowing native transcript with auto-scroll enabled, **WHEN** new content arrives, **THEN** the transcript remains pinned to the bottom.
+- **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.5:** **GIVEN** an overflowing native transcript with auto-scroll enabled, **WHEN** new content arrives, **THEN** the transcript follows the bottom. With chat motion enabled, bounded settling follows [chat motion](chat-motion.md); otherwise pinning is immediate.
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.6:** **GIVEN** clarification recovery has accepted its retry prompt, **WHEN** its asynchronous dispatch is scheduled, **THEN** the recovery call completes before the intentionally blocked prompt is released.
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.7:** **GIVEN** an enabled transcript that is
   pinned to the bottom, **WHEN** streamed content commits, **THEN** the
-  transcript remains pinned without a synchronous content-size read in the
-  message-commit path.
+  transcript retains bottom-follow intent without a synchronous content-size
+  read in the message-commit path. Enabled chat motion uses the bounded settling
+  contract in [chat motion](chat-motion.md).
 - **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.8:** **GIVEN** an enabled, overflowing
   transcript that was mounted while its desktop session tab was inactive,
   **WHEN** the user activates that tab after initial load or page refresh,

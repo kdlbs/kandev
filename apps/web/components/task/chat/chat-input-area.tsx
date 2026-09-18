@@ -25,7 +25,7 @@ import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-
 import { useToast } from "@/components/toast-provider";
 import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
 import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { useComposerProps } from "./use-composer-props";
@@ -58,7 +58,7 @@ const PLAN_CONTEXT_PATH = "plan:context";
  */
 export function buildSubmitMessage(args: {
   message: string;
-  reviewComments?: DiffComment[];
+  reviewComments?: ReviewComment[];
   pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[];
   planComments: import("@/lib/state/slices/comments").PlanComment[];
   walkthroughComments?: import("@/lib/state/slices/comments").WalkthroughComment[];

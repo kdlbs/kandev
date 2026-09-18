@@ -316,11 +316,16 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
 func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.queuedCount = summary.QueuedPromptCount
+	state.launchQueue = cloneLaunchQueue(summary.LaunchQueue)
+	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -412,6 +417,22 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Projector) restoreLaunchQueue(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadLaunchQueue == nil {
+		return nil
+	}
+	queue, err := p.loadLaunchQueue(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load launch queue for task status summary %q: %w", taskID, err)
+	}
+	state.launchQueue = cloneLaunchQueue(queue)
+	state.launchQueueObserved = true
 	return nil
 }
 

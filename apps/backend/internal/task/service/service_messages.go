@@ -31,6 +31,8 @@ const (
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
 
+var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
 		context.Context,
@@ -149,6 +151,13 @@ type conversationMessageReceiptWriter interface {
 	CreateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
 	UpdateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
 	DeleteMessageWithConversationReceipt(context.Context, string) (*models.ConversationMutationReceipt, error)
+}
+
+type agentPlanMessageWriter interface {
+	UpsertAgentPlanMessageWithConversationReceipt(
+		context.Context,
+		*models.Message,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
 }
 
 type planCommentAdmissionLocker interface {
@@ -1194,6 +1203,130 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 // The normalized parameter contains typed tool payload data that gets added to metadata.
 func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, normalized *streams.NormalizedPayload) error {
 	return s.UpdateToolCallMessageWithCreate(ctx, sessionID, toolCallID, "", status, result, title, normalized, "", "", "")
+}
+
+// UpsertAgentPlanMessage persists the latest snapshot for one plan-producing
+// tool call. Its deterministic identity makes first delivery and retries use
+// the same row without the missing-tool retry delay.
+func (s *Service) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, sessionID, content, turnID string,
+) error {
+	name := fmt.Sprintf("%s\x00%s\x00%s", sessionID, turnID, sourceToolCallID)
+	messageID := uuid.NewSHA1(agentPlanMessageIDNamespace, []byte(name)).String()
+	correlationID := "agent-plan:" + messageID
+	req := &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeAgentPlan),
+		Metadata: map[string]interface{}{
+			"tool_call_id":            correlationID,
+			"agent_plan_tool_call_id": sourceToolCallID,
+		},
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return err
+	}
+	session, err := s.getSessionWithRetry(
+		ctx, sessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return err
+	}
+	message, err := s.buildMessage(ctx, messageID, req, session)
+	if err != nil {
+		return err
+	}
+	if writer, ok := s.messages.(agentPlanMessageWriter); ok {
+		persisted, receipt, created, err := writer.UpsertAgentPlanMessageWithConversationReceipt(ctx, message)
+		if errors.Is(err, repoerrors.ErrMessageIdentityConflict) {
+			return ErrMessageIDConflict
+		}
+		if err != nil || receipt == nil {
+			return err
+		}
+		return s.publishAgentPlanMessage(ctx, persisted, receipt, created)
+	}
+	return s.upsertAgentPlanMessageFallback(ctx, message, req)
+}
+
+func (s *Service) upsertAgentPlanMessageFallback(
+	ctx context.Context,
+	message *models.Message,
+	req *CreateMessageRequest,
+) error {
+	admissionCtx, releaseAdmission, err := s.AcquireMessageAdmission(ctx, message.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseAdmission()
+
+	existing, err := s.messages.GetMessageWithPromptIndex(admissionCtx, message.ID)
+	if err == nil && existing != nil {
+		if !sameAgentPlanMessageIdentity(existing, message) {
+			return ErrMessageIDConflict
+		}
+		if existing.Content == message.Content {
+			return nil
+		}
+		existing.Content = message.Content
+		receipt, err := s.updateMessageWithReceipt(admissionCtx, existing)
+		if err != nil {
+			return err
+		}
+		return s.publishAgentPlanMessage(admissionCtx, existing, receipt, false)
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check existing agent plan message: %w", err)
+	}
+	snapshots, err := s.createMessageWithRequestRetry(
+		admissionCtx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return err
+	}
+	return s.publishAgentPlanMessage(admissionCtx, message, snapshots.receipt, true)
+}
+
+func (s *Service) publishAgentPlanMessage(
+	ctx context.Context,
+	message *models.Message,
+	receipt *models.ConversationMutationReceipt,
+	created bool,
+) error {
+	eventType := events.MessageUpdated
+	if created {
+		eventType = events.MessageAdded
+	}
+	err := s.publishMessageEvent(ctx, eventType, message, receipt)
+	if created {
+		return nil
+	}
+	return err
+}
+
+func sameAgentPlanMessageIdentity(existing, incoming *models.Message) bool {
+	if existing.ID != incoming.ID ||
+		existing.TaskSessionID != incoming.TaskSessionID ||
+		existing.TaskID != incoming.TaskID ||
+		existing.TurnID != incoming.TurnID ||
+		existing.AuthorType != incoming.AuthorType ||
+		existing.AuthorID != incoming.AuthorID ||
+		existing.Type != incoming.Type ||
+		existing.RequestsInput != incoming.RequestsInput {
+		return false
+	}
+	for _, key := range []string{"tool_call_id", "agent_plan_tool_call_id"} {
+		existingValue, existingOK := existing.Metadata[key].(string)
+		incomingValue, incomingOK := incoming.Metadata[key].(string)
+		if !existingOK || !incomingOK || existingValue != incomingValue {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateToolCallMessageWithCreate is like UpdateToolCallMessage but can create the message if not found.

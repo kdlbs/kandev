@@ -140,4 +140,4 @@ One line per case; the cited AC is authoritative for the expected value.
     the ledger's first row (2026-08-16) is a fact about this database's history
     that no fixture reproduces, so there is nothing to assert against. This case
     exists so the requirement is discharged explicitly rather than by silence
-  (002.6).
+    (002.6).

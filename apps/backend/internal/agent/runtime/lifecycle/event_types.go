@@ -12,7 +12,11 @@ import (
 type AgentEventPayload struct {
 	AgentExecutionID   string                 `json:"agent_execution_id"`
 	AttemptID          string                 `json:"attempt_id,omitempty"`
+	OwnerKind          ExecutionOwnerKind     `json:"owner_kind,omitempty"`
+	WorkspaceID        string                 `json:"workspace_id,omitempty"`
 	RunID              string                 `json:"run_id,omitempty"`
+	RunSessionID       string                 `json:"run_session_id,omitempty"`
+	RunAttempt         int                    `json:"run_attempt,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
 	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
@@ -77,17 +81,22 @@ type AgentStalledPayload struct {
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
 type AgentctlEventPayload struct {
-	TaskID            string `json:"task_id"`
-	SessionID         string `json:"session_id"`
-	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
-	AgentExecutionID  string `json:"agent_execution_id"`
-	AttemptID         string `json:"attempt_id,omitempty"`
-	ErrorMessage      string `json:"error_message,omitempty"`
-	FailureCode       string `json:"failure_code,omitempty"`
-	FailureDetails    string `json:"failure_details,omitempty"`
-	WorktreeID        string `json:"worktree_id,omitempty"`
-	WorktreePath      string `json:"worktree_path,omitempty"`
-	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	OwnerKind         ExecutionOwnerKind `json:"owner_kind,omitempty"`
+	WorkspaceID       string             `json:"workspace_id,omitempty"`
+	RunID             string             `json:"run_id,omitempty"`
+	RunSessionID      string             `json:"run_session_id,omitempty"`
+	RunAttempt        int                `json:"run_attempt,omitempty"`
+	TaskID            string             `json:"task_id"`
+	SessionID         string             `json:"session_id"`
+	TaskEnvironmentID string             `json:"task_environment_id,omitempty"`
+	AgentExecutionID  string             `json:"agent_execution_id"`
+	AttemptID         string             `json:"attempt_id,omitempty"`
+	ErrorMessage      string             `json:"error_message,omitempty"`
+	FailureCode       string             `json:"failure_code,omitempty"`
+	FailureDetails    string             `json:"failure_details,omitempty"`
+	WorktreeID        string             `json:"worktree_id,omitempty"`
+	WorktreePath      string             `json:"worktree_path,omitempty"`
+	WorktreeBranch    string             `json:"worktree_branch,omitempty"`
 	// TaskWorkspacePath is the task root that contains every per-repo
 	// worktree as a sibling subdir, populated when the event signals a
 	// sibling worktree being added (multi-branch add_branch flow) rather
@@ -280,10 +289,16 @@ type AgentStreamEventData struct {
 type AgentStreamEventPayload struct {
 	Type           string                `json:"type"` // Always "agent/event"
 	Timestamp      string                `json:"timestamp"`
-	AgentID        string                `json:"agent_id"`                   // Historical: execution.ID. Prefer ExecutionID.
-	ExecutionID    string                `json:"execution_id"`               // Lifecycle execution ID; stable across the payload's lifetime.
-	AttemptID      string                `json:"attempt_id,omitempty"`       // Immutable recovery attempt that owns this callback.
+	AgentID        string                `json:"agent_id"`             // Historical: execution.ID. Prefer ExecutionID.
+	ExecutionID    string                `json:"execution_id"`         // Lifecycle execution ID; stable across the payload's lifetime.
+	AttemptID      string                `json:"attempt_id,omitempty"` // Immutable recovery attempt that owns this callback.
+	OwnerKind      ExecutionOwnerKind    `json:"owner_kind,omitempty"`
+	WorkspaceID    string                `json:"workspace_id,omitempty"`
+	RunID          string                `json:"run_id,omitempty"`
+	RunSessionID   string                `json:"run_session_id,omitempty"`
+	RunAttempt     int                   `json:"run_attempt,omitempty"`
 	AgentProfileID string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
+	AgentType      string                `json:"agent_type,omitempty"`
 	TaskID         string                `json:"task_id"`
 	SessionID      string                `json:"session_id"` // Task session ID
 	Data           *AgentStreamEventData `json:"data"`
