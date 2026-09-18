@@ -9,11 +9,14 @@ import (
 )
 
 func orchestrationLaunchContext(repos *Repositories, launch orchestrationruntime.Launch) orchexecutor.LaunchContext {
-	var profile *mcpprofile.Context
+	// Every Orchestrator conversation uses the backend-owned broker surface.
+	// Workspace coordinators have no user assistant binding, but they still need
+	// the same scoped native workspace/task tools. Keeping this profile on the
+	// launch prevents the agent from falling back to an ambient CLI/API key.
+	value := mcpprofile.New(mcpprofile.SurfaceAssistantBroker, nil, nil)
+	profile := &value
 	prepared := launch.OnSessionPrepared
 	if launch.Authority != nil {
-		value := mcpprofile.New(mcpprofile.SurfaceAssistantBroker, nil, nil)
-		profile = &value
 		prepared = func(ctx context.Context, sessionID string) error {
 			if err := launch.OnSessionPrepared(ctx, sessionID); err != nil {
 				return err
