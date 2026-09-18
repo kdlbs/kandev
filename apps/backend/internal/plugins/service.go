@@ -5,12 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/google/uuid"
@@ -94,27 +93,24 @@ type Service struct {
 	// directory belongs to an install still waiting for it.
 	extractingPaths map[string]int
 
-	pluginsDir          string
-	store               store.Store
-	approvals           *approvalLedger
-	registry            *Registry
-	state               *state.Store
-	userState           *state.UserStore
-	instances           *instances.Store
-	instanceState       *state.InstanceStore
-	webArtifacts        *webapp.ArtifactStore
-	webRuntime          *webapp.Runtime
-	eventHub            *webapp.EventHub
-	eventSubscription   bus.Subscription
-	userStateCleanup    userStateCleanupStore
-	agentConvs          AgentConversationService
-	eventBus            bus.EventBus
-	conversationTokens  *conversationTokenManager
-	sessionEvents       *SessionEventLog
-	sessionDelivery     *SessionDeliveryDispatcher
-	conversationJournal *sqlx.DB
-	sessionEventSink    func(SessionEvent)
-	log                 *logger.Logger
+	pluginsDir         string
+	store              store.Store
+	approvals          *approvalLedger
+	registry           *Registry
+	state              *state.Store
+	userState          *state.UserStore
+	instances          *instances.Store
+	instanceState      *state.InstanceStore
+	webArtifacts       *webapp.ArtifactStore
+	webRuntime         *webapp.Runtime
+	eventHub           *webapp.EventHub
+	eventSubscription  bus.Subscription
+	userStateCleanup   userStateCleanupStore
+	agentConvs         AgentConversationService
+	eventBus           bus.EventBus
+	conversationTokens *conversationTokenManager
+	conversationEpoch  string
+	log                *logger.Logger
 
 	deliverer                Deliverer
 	agentToolCatalogListener AgentToolCatalogListener
@@ -195,8 +191,6 @@ type Service struct {
 	reservedReferenceProviderKinds map[string]struct{}
 }
 
-const sessionEventMaintenanceInterval = time.Minute
-
 // ReferenceIdentity reserves a host-owned composer source and its canonical
 // provider/kind pair so a plugin cannot shadow a built-in integration.
 type ReferenceIdentity struct {
@@ -209,7 +203,6 @@ type ReferenceIdentity struct {
 // Provide is the usual entry point in production; NewService is exposed
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
-	sessionEvents := mustSessionEventLog()
 	service := &Service{
 		store:               pluginStore,
 		registry:            registry,
@@ -221,10 +214,16 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		agentToolGeneration: uuid.NewString(),
 		eventHub:            webapp.NewEventHub(),
 		conversationTokens:  newConversationTokenManager(),
-		sessionEvents:       sessionEvents,
+		conversationEpoch:   uuid.NewString(),
 	}
-	service.sessionDelivery = NewSessionDeliveryDispatcher(sessionEvents)
 	return service
+}
+
+// ConversationEpoch identifies this backend process for Host-only source
+// reconciliation. A restart starts a new epoch, so a client cannot treat a
+// cursor or live batch from the previous process as current.
+func (s *Service) ConversationEpoch() string {
+	return s.conversationEpoch
 }
 
 // SetGitCredentialLeaseRevoker wires immediate provider-lease revocation for
@@ -703,114 +702,52 @@ func (s *Service) Shutdown() {
 	}
 }
 
-// Close releases durable plugin conversation state after workers stop.
+// Close stops plugin runtimes after workers stop.
 func (s *Service) Close() error {
 	s.Shutdown()
-	if s.sessionEvents == nil {
-		return nil
-	}
-	return s.sessionEvents.Close()
+	return nil
 }
 
 // SetPluginsDir wires the root directory pkgtar.Install/pkgtar.Remove
-// operate under and initializes mandatory durable conversation state.
+// operate under and initializes the signing key for conversation bindings.
 func (s *Service) SetPluginsDir(dir string) error {
-	// Keep package installation rooted correctly even when durable conversation
-	// state initialization fails and the caller continues in degraded mode.
+	// Keep package installation rooted correctly even when binding setup fails
+	// and the caller continues in degraded mode.
 	s.pluginsDir = dir
 	s.approvals = newApprovalLedger(dir)
 	hostDir := filepath.Join(dir, ".host")
+	if err := removeLegacyConversationFiles(hostDir); err != nil {
+		return err
+	}
 	conversationTokens, err := loadOrCreateConversationTokenManager(
 		filepath.Join(hostDir, "conversation-token.key"),
 	)
 	if err != nil {
 		return err
 	}
-	sessionEvents, err := NewSessionEventLog(filepath.Join(hostDir, "session-events.sqlite"))
-	if err != nil {
-		return err
-	}
-	sessionDelivery := NewSessionDeliveryDispatcher(sessionEvents)
-	now := time.Now().UTC()
-	if err := sessionDelivery.ReclaimExpiredLeases(now); err != nil {
-		_ = sessionEvents.Close()
-		return fmt.Errorf("reclaim plugin session event leases: %w", err)
-	}
-	if err := sessionEvents.CollectExpired(now); err != nil {
-		_ = sessionEvents.Close()
-		return fmt.Errorf("collect expired plugin session events: %w", err)
-	}
-	previousSessionEvents := s.sessionEvents
 	s.pluginsDir = dir
 	s.conversationTokens = conversationTokens
-	s.sessionEvents = sessionEvents
-	s.sessionDelivery = sessionDelivery
-	if previousSessionEvents != nil {
-		_ = previousSessionEvents.Close()
-	}
 	return nil
 }
 
-func (s *Service) maintainSessionEvents(ctx context.Context, now time.Time) error {
-	// A failing partition must not freeze the rest of maintenance: mirror
-	// errors are isolated per session (syncAll collects them), and the
-	// remaining passes still run so healthy sessions are collected and the
-	// primary journal is pruned every tick.
-	events, syncErr := s.syncAllCommittedSessionEvents(ctx)
-	s.mu.Lock()
-	sink := s.sessionEventSink
-	s.mu.Unlock()
-	if sink != nil {
-		for _, event := range events {
-			sink(event)
+func removeLegacyConversationFiles(hostDir string) error {
+	for _, name := range []string{"session-events.sqlite", "session-events.sqlite-wal", "session-events.sqlite-shm"} {
+		path := filepath.Join(hostDir, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
 		}
-	}
-	if err := s.sessionDelivery.ReclaimExpiredLeases(now); err != nil {
-		return fmt.Errorf("reclaim plugin session event leases: %w", err)
-	}
-	// Poison attempts are counted only when delivery is actually observed
-	// (a hub fanout or replay attempt), never by the maintenance ticker.
-	// A poison no subscriber ever attempted to consume stays pending until
-	// retention reaps it instead of being exhaustively cycled blind.
-	if err := s.sessionEvents.CollectExpired(now); err != nil {
-		return fmt.Errorf("collect expired plugin session events: %w", err)
-	}
-	retained := s.sessionEvents.RetainedSessionIDs(now)
-	if err := s.pruneConversationJournal(
-		ctx, now.UTC().Add(-SessionEventRetention), retained,
-	); err != nil {
-		return fmt.Errorf("prune primary conversation journal: %w", err)
-	}
-	if syncErr != nil {
-		return fmt.Errorf("synchronize committed conversation journal: %w", syncErr)
+		if err != nil {
+			return fmt.Errorf("inspect legacy conversation file %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to remove non-regular legacy conversation file %s", path)
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove legacy conversation file %s: %w", path, err)
+		}
 	}
 	return nil
-}
-
-// StartSessionEventMaintenanceWorker keeps cursor retention and expired poison
-// leases bounded for the lifetime of the backend, not only during startup.
-func (s *Service) StartSessionEventMaintenanceWorker(ctx context.Context) func() {
-	workerContext, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(sessionEventMaintenanceInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-workerContext.Done():
-				return
-			case now := <-ticker.C:
-				if err := s.maintainSessionEvents(workerContext, now.UTC()); err != nil && s.log != nil {
-					s.log.Error("plugins: maintain session event stream", zap.Error(err))
-				}
-			}
-		}
-	}()
-	return func() {
-		cancel()
-		<-done
-	}
 }
 
 // RevealSecret resolves the cleartext value of the secret reference ref via

@@ -1,3 +1,5 @@
+import { MinimalWorkflowStepper } from "./workflow-step-disclosure";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { moveTask } from "@/lib/api";
@@ -49,15 +51,6 @@ vi.mock("@/lib/state/dockview-store", () => ({
 }));
 vi.mock("@/hooks/use-toolbar-collapsed", () => ({
   useToolbarCollapsed: () => false,
-}));
-vi.mock("./workflow-move-options", () => ({
-  useWorkflowMoveOptionsForm: () => ({
-    draft: {},
-    patchDraft: vi.fn(),
-    resetDraft: vi.fn(),
-  }),
-  WorkflowMoveOptionsFields: () => null,
-  workflowMoveOptionsPayload: () => undefined,
 }));
 
 const POPOVER_TEST_ID = "workflow-step-popover";
@@ -150,6 +143,55 @@ describe("WorkflowStepper full-layout keyboard disclosure", () => {
       }),
     );
   });
+});
+
+// @covers AC-TASKS-KEYBOARD-ACTIONS-001.1
+it("submits inline step options from the instruction field", async () => {
+  moveTaskMock.mockResolvedValue({});
+  render(
+    <TooltipProvider>
+      <WorkflowStepper steps={STEPS} currentStepId="work" taskId="task-1" workflowId="workflow-1" />
+    </TooltipProvider>,
+  );
+  screen.getByTestId("workflow-step-Review").focus();
+  fireEvent.click(await screen.findByTestId("workflow-step-move-options-trigger"));
+  const input = screen.getByTestId("workflow-move-instructions");
+  fireEvent.change(input, { target: { value: "Review keyboard flow" } });
+  fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+  await waitFor(() =>
+    expect(moveTask).toHaveBeenCalledWith("task-1", {
+      workflow_id: "workflow-1",
+      workflow_step_id: "review",
+      position: 0,
+      entry_options: { instructions: "Review keyboard flow" },
+    }),
+  );
+});
+
+it("submits compact disclosure options from the instruction field", async () => {
+  const onMove = vi.fn().mockResolvedValue(false);
+  render(
+    <TooltipProvider>
+      <MinimalWorkflowStepper
+        sortedSteps={STEPS}
+        currentIndex={1}
+        taskId="task-1"
+        workflowId="workflow-1"
+        movingToStepId={null}
+        onMove={onMove}
+      />
+    </TooltipProvider>,
+  );
+  fireEvent.click(screen.getByTestId("workflow-stepper-minimal"));
+  fireEvent.click(await screen.findByTestId("workflow-step-disclosure-options-review"));
+  const input = screen.getByTestId("workflow-move-instructions");
+  fireEvent.change(input, { target: { value: "Compact instructions" } });
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+  await waitFor(() =>
+    expect(onMove).toHaveBeenCalledWith("review", {
+      instructions: "Compact instructions",
+    }),
+  );
 });
 
 describe("WorkflowStepper exclusive hover", () => {

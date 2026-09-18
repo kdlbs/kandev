@@ -315,12 +315,15 @@ type WorkflowInitialSessionSnapshot struct {
 type WorkflowSessionRoute struct {
 	OperationID       string `json:"operation_id"`
 	DestinationStepID string `json:"destination_step_id"`
-	TargetKind        string `json:"target_kind"`
-	TargetStepID      string `json:"target_step_id,omitempty"`
-	AgentProfileID    string `json:"agent_profile_id,omitempty"`
-	SourceSessionID   string `json:"source_session_id,omitempty"`
-	DestinationID     string `json:"destination_session_id,omitempty"`
-	Phase             string `json:"phase"`
+	// EntryIdentity binds the route to the workflow entry that created it. It
+	// prevents a late replay from consuming a newer route for the same step.
+	EntryIdentity   string `json:"entry_identity,omitempty"`
+	TargetKind      string `json:"target_kind"`
+	TargetStepID    string `json:"target_step_id,omitempty"`
+	AgentProfileID  string `json:"agent_profile_id,omitempty"`
+	SourceSessionID string `json:"source_session_id,omitempty"`
+	DestinationID   string `json:"destination_session_id,omitempty"`
+	Phase           string `json:"phase"`
 }
 
 // LoadWorkflowSessionRoute decodes the bounded route record stored in task
@@ -580,6 +583,41 @@ func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
 	for _, key := range promptDispatchMetadataKeys {
 		delete(metadata, key)
 	}
+}
+
+// publicTurnMetadataKeys is the allowlist for first-party live turn
+// projections. Prompt-dispatch recovery state and arbitrary repository-owned
+// fields stay inside the service and are not sent through the shared event
+// bus. The REST turn DTO has its own compatibility contract; this narrower
+// projection is used only for the v2 Host conversation transport.
+var publicTurnMetadataKeys = [...]string{
+	TurnMetaKeyRuntimeConfigSnapshot,
+	TurnMetaKeyWorkflowStepIDAtStart,
+	TurnMetaKeyLifecycleOnly,
+	"prompt_usage",
+	"model",
+	"agent_id",
+	"agent_type",
+	"usage_multiplier",
+}
+
+// ProjectTurnMetadata returns the first-party-safe metadata needed by live
+// core conversation consumers without exposing arbitrary turn state.
+func ProjectTurnMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if len(metadata) == 0 {
+		return nil
+	}
+	projected := make(map[string]interface{}, len(publicTurnMetadataKeys))
+	for _, key := range publicTurnMetadataKeys {
+		if value, ok := metadata[key]; ok {
+			projected[key] = value
+		}
+	}
+	ClearPromptDispatchMetadata(projected)
+	if len(projected) == 0 {
+		return nil
+	}
+	return projected
 }
 
 // PromptDispatchRecovery identifies the exact clarification claim that an
@@ -2563,11 +2601,14 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 
 // TaskPlan represents a plan associated with a task
 type TaskPlan struct {
-	ID                             string     `json:"id"`
-	TaskID                         string     `json:"task_id"`
-	Title                          string     `json:"title"`
-	Content                        string     `json:"content"`
-	CreatedBy                      string     `json:"created_by"` // "agent" or "user"
+	ID        string `json:"id"`
+	TaskID    string `json:"task_id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	CreatedBy string `json:"created_by"` // "agent" or "user"
+	// WriteVersion changes on every committed title/content write. It is an
+	// internal optimistic-concurrency token and is not part of browser DTOs.
+	WriteVersion                   string     `json:"-"`
 	CreatedAt                      time.Time  `json:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at"`
 	CommentsRevision               int64      `json:"comments_revision"`
@@ -2607,11 +2648,14 @@ type TaskPlanCommentRef struct {
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.
 // Revisions are the source of truth for history; TaskPlan stores the latest revision's content as HEAD.
 type TaskPlanRevision struct {
-	ID                 string  `json:"id"`
-	TaskID             string  `json:"task_id"`
-	RevisionNumber     int     `json:"revision_number"`
-	Title              string  `json:"title"`
-	Content            string  `json:"content"`
+	ID             string `json:"id"`
+	TaskID         string `json:"task_id"`
+	RevisionNumber int    `json:"revision_number"`
+	Title          string `json:"title"`
+	Content        string `json:"content"`
+	// ContentBytes is populated by bounded metadata reads. Full revision reads
+	// leave it zero because callers can derive the size from Content.
+	ContentBytes       int     `json:"-"`
 	AuthorKind         string  `json:"author_kind"` // "agent" | "user"
 	AuthorName         string  `json:"author_name"` // display snapshot (agent profile name or user identifier)
 	RevertOfRevisionID *string `json:"revert_of_revision_id,omitempty"`

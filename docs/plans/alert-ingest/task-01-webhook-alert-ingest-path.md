@@ -1,7 +1,7 @@
 ---
 id: "01-webhook-alert-ingest-path"
 title: "Webhook alert ingest path"
-status: pending
+status: done
 wave: 0
 depends_on: []
 plan: "plan.md"

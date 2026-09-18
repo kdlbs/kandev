@@ -76,7 +76,7 @@ lib/api/domains/                    # API clients
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
-Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in `quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts` owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
+`chatMotion` owns per-device chat animation preview and persistence; `useChatMotion` applies OS reduced motion. Keep it separate from `richOutputMotion` and transcript auto-scroll. Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in `quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts` owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
 
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
@@ -271,10 +271,9 @@ When you hit a limit, extract a helper function, custom hook, or sub-component. 
 ## Plugin system
 
 The public frontend contract is `apps/packages/plugin-sdk`; `docs/plans/plugins/PLUGIN-API.md`
-and `lib/plugins/types.ts` are its detailed host implementation — all three must change
-together. `lib/plugins/registry.ts` is the reactive singleton `PluginRegistry`; every
-`register*` call needs matching cleanup in `unregisterPlugin` and `totalCount()`, or a disabled/uninstalled
-plugin leaks a stale registration.
+and `lib/plugins/types.ts` are its detailed host implementation — all three must change together.
+`lib/plugins/registry.ts` is the reactive singleton `PluginRegistry`; every
+`register*` call needs matching cleanup in `unregisterPlugin` and `totalCount()`, or a disabled/uninstalled plugin leaks a stale registration.
 
 - **Task panels** (`registerTaskPanel`): one generic dockview component, `"plugin-panel"`, shared by
   every plugin — identity lives in `params: { pluginId, panelKey }` (id helpers in
@@ -287,11 +286,12 @@ plugin leaks a stale registration.
   the `Edit` submenu. Group `"primary"` adds flat actions to card and desktop/mobile task-row menus.
   Card indicator/tag slots stay card-specific; `task-row-metadata` is generic for sidebar and `/tasks` rows.
 - **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", ...)` renders after Quick Terminal/Quick Chat in the desktop sidebar's New Task row and in the shared phone navigation sheet, forwarding `SidebarWorkspaceActionsSlotProps` with `presentation: "desktop" | "mobile"`; mobile plugin controls own a 44px touch target and accessible name.
-- **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`), backed by
-  `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`).
-  `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering
-  and own-tab echo suppression via a per-tab `writerId`.
+- **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`) backed by `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`); `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering and own-tab echo suppression via a per-tab `writerId`.
 - **`host.ui.RichTextEditor`/`RichTextReadOnly`** (`components/editors/tiptap/rich-text-editor.tsx`): narrow Plan-panel-tiptap wrappers; update `PLUGIN-API.md` before widening props beyond `{ taskId, value, onChange, placeholder, className, testId }` / `{ value, className, testId }`.
+
+## Sidebar task views
+
+`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields.
 
 ## Testing notes
 

@@ -15,78 +15,79 @@ type UserDTO struct {
 }
 
 type UserSettingsDTO struct {
-	UserID                            string                              `json:"user_id"`
-	WorkspaceID                       string                              `json:"workspace_id"`
-	KanbanViewMode                    string                              `json:"kanban_view_mode"`
-	StartupPage                       string                              `json:"startup_page"`
-	WorkflowFilterID                  string                              `json:"workflow_filter_id"`
-	RepositoryIDs                     []string                            `json:"repository_ids"`
-	TasksListSort                     string                              `json:"tasks_list_sort"`
-	TasksListGroup                    string                              `json:"tasks_list_group"`
-	TasksListShowDetails              bool                                `json:"tasks_list_show_details"`
-	InitialSetupComplete              bool                                `json:"initial_setup_complete"`
-	PreferredShell                    string                              `json:"preferred_shell"`
-	DefaultEditorID                   string                              `json:"default_editor_id"`
-	EnablePreviewOnClick              bool                                `json:"enable_preview_on_click"`
-	ChatSubmitKey                     string                              `json:"chat_submit_key"`
-	ReviewAutoMarkOnScroll            bool                                `json:"review_auto_mark_on_scroll"`
-	ConfirmTaskArchive                bool                                `json:"confirm_task_archive"`
-	PreventAutoStartAgentOnOpen       bool                                `json:"prevent_auto_start_agent_on_open"`
-	UnreadDivider                     bool                                `json:"unread_divider"`
-	AgentGeneratedTaskTitles          bool                                `json:"agent_generated_task_titles"`
-	AutoFocusNewTasks                 bool                                `json:"auto_focus_new_tasks"`
-	MCPTaskAgentProfileDefault        string                              `json:"mcp_task_agent_profile_default"`
-	ShowAnchoredPromptBar             bool                                `json:"show_anchored_prompt_bar"`
-	ShowScrollToLastPrompt            bool                                `json:"show_scroll_to_last_prompt"`
-	ShowScrollToStart                 bool                                `json:"show_scroll_to_start"`
-	ShowTranscriptAutoScrollControl   bool                                `json:"show_transcript_auto_scroll_control"`
-	ShowTodoListPanel                 bool                                `json:"show_todo_list_panel"`
-	ShowTodoListPanelOnlyWhenNotEmpty bool                                `json:"show_todo_list_panel_only_when_not_empty"`
-	ShowReleaseNotification           bool                                `json:"show_release_notification"`
-	ReleaseNotesLastSeenVersion       string                              `json:"release_notes_last_seen_version"`
-	LspAutoStartLanguages             []string                            `json:"lsp_auto_start_languages"`
-	LspAutoInstallLanguages           []string                            `json:"lsp_auto_install_languages"`
-	LspServerConfigs                  map[string]map[string]interface{}   `json:"lsp_server_configs,omitempty"`
-	LspStatusLocation                 string                              `json:"lsp_status_location"`
-	SavedLayouts                      []models.SavedLayout                `json:"saved_layouts"`
-	SidebarViews                      []models.SidebarView                `json:"sidebar_views"`
-	SidebarActiveViewID               string                              `json:"sidebar_active_view_id"`
-	SidebarDraft                      *models.SidebarViewDraft            `json:"sidebar_draft"`
-	ThreadViews                       []models.ThreadView                 `json:"thread_views"`
-	ThreadActiveViewID                string                              `json:"thread_active_view_id"`
-	ThreadViewDraft                   *models.ThreadViewDraft             `json:"thread_view_draft"`
-	SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
-	SidebarTaskColorAutomation        models.SidebarTaskColorAutomation   `json:"sidebar_task_color_automation"`
-	SidebarTaskColors                 map[string]*string                  `json:"sidebar_task_colors"`
-	TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
-	JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views,omitempty"`
-	JiraTaskPresets                   json.RawMessage                     `json:"jira_task_presets,omitempty"`
-	GitHubSavedPresets                json.RawMessage                     `json:"github_saved_presets,omitempty"`
-	GitHubDefaultQueryPresets         json.RawMessage                     `json:"github_default_query_presets,omitempty"`
-	GitLabSavedPresets                json.RawMessage                     `json:"gitlab_saved_presets,omitempty"`
-	AzureDevOpsBrowsePreferences      json.RawMessage                     `json:"azure_devops_browse_preferences,omitempty"`
-	DefaultUtilityAgentID             string                              `json:"default_utility_agent_id"`
-	DefaultUtilityModel               string                              `json:"default_utility_model"`
-	DefaultUtilityAgentProfileID      string                              `json:"default_utility_agent_profile_id"`
-	KeyboardShortcuts                 map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
-	TerminalLinkBehavior              string                              `json:"terminal_link_behavior"`
-	TerminalFontFamily                string                              `json:"terminal_font_family"`
-	TerminalFontSize                  int                                 `json:"terminal_font_size"`
-	ChangesPanelLayout                string                              `json:"changes_panel_layout"`
-	LastSeenDisplay                   string                              `json:"last_seen_display"`
-	SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
-	AppStatusBarEnabled               bool                                `json:"app_status_bar_enabled"`
-	SidebarHoverEnabled               bool                                `json:"sidebar_hover_enabled"`
-	SidebarHoverDelayMs               int                                 `json:"sidebar_hover_delay_ms"`
-	ResolveSessionHostnames           bool                                `json:"resolve_session_hostnames"`
-	AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
-	QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
-	KanbanHiddenStepIDs               map[string][]string                 `json:"kanban_hidden_step_ids"`
-	WorkflowIDsWithAutoHideEmptySteps []string                            `json:"workflow_ids_with_auto_hide_empty_steps"`
-	KanbanSort                        string                              `json:"kanban_sort"`
-	KanbanPriorityFilterTokens        []string                            `json:"kanban_priority_filter_tokens"`
-	Revision                          int64                               `json:"revision"`
-	UpdatedAt                         string                              `json:"updated_at"`
+	SidebarViewsByWorkspace           map[string]models.SidebarWorkspaceState `json:"sidebar_views_by_workspace"`
+	UserID                            string                                  `json:"user_id"`
+	WorkspaceID                       string                                  `json:"workspace_id"`
+	KanbanViewMode                    string                                  `json:"kanban_view_mode"`
+	StartupPage                       string                                  `json:"startup_page"`
+	WorkflowFilterID                  string                                  `json:"workflow_filter_id"`
+	RepositoryIDs                     []string                                `json:"repository_ids"`
+	TasksListSort                     string                                  `json:"tasks_list_sort"`
+	TasksListGroup                    string                                  `json:"tasks_list_group"`
+	TasksListShowDetails              bool                                    `json:"tasks_list_show_details"`
+	InitialSetupComplete              bool                                    `json:"initial_setup_complete"`
+	PreferredShell                    string                                  `json:"preferred_shell"`
+	DefaultEditorID                   string                                  `json:"default_editor_id"`
+	EnablePreviewOnClick              bool                                    `json:"enable_preview_on_click"`
+	ChatSubmitKey                     string                                  `json:"chat_submit_key"`
+	ReviewAutoMarkOnScroll            bool                                    `json:"review_auto_mark_on_scroll"`
+	ConfirmTaskArchive                bool                                    `json:"confirm_task_archive"`
+	PreventAutoStartAgentOnOpen       bool                                    `json:"prevent_auto_start_agent_on_open"`
+	UnreadDivider                     bool                                    `json:"unread_divider"`
+	AgentGeneratedTaskTitles          bool                                    `json:"agent_generated_task_titles"`
+	AutoFocusNewTasks                 bool                                    `json:"auto_focus_new_tasks"`
+	MCPTaskAgentProfileDefault        string                                  `json:"mcp_task_agent_profile_default"`
+	ShowAnchoredPromptBar             bool                                    `json:"show_anchored_prompt_bar"`
+	ShowScrollToLastPrompt            bool                                    `json:"show_scroll_to_last_prompt"`
+	ShowScrollToStart                 bool                                    `json:"show_scroll_to_start"`
+	ShowTranscriptAutoScrollControl   bool                                    `json:"show_transcript_auto_scroll_control"`
+	ShowTodoListPanel                 bool                                    `json:"show_todo_list_panel"`
+	ShowTodoListPanelOnlyWhenNotEmpty bool                                    `json:"show_todo_list_panel_only_when_not_empty"`
+	ShowReleaseNotification           bool                                    `json:"show_release_notification"`
+	ReleaseNotesLastSeenVersion       string                                  `json:"release_notes_last_seen_version"`
+	LspAutoStartLanguages             []string                                `json:"lsp_auto_start_languages"`
+	LspAutoInstallLanguages           []string                                `json:"lsp_auto_install_languages"`
+	LspServerConfigs                  map[string]map[string]interface{}       `json:"lsp_server_configs,omitempty"`
+	LspStatusLocation                 string                                  `json:"lsp_status_location"`
+	SavedLayouts                      []models.SavedLayout                    `json:"saved_layouts"`
+	SidebarViews                      []models.SidebarView                    `json:"sidebar_views"`
+	SidebarActiveViewID               string                                  `json:"sidebar_active_view_id"`
+	SidebarDraft                      *models.SidebarViewDraft                `json:"sidebar_draft"`
+	ThreadViews                       []models.ThreadView                     `json:"thread_views"`
+	ThreadActiveViewID                string                                  `json:"thread_active_view_id"`
+	ThreadViewDraft                   *models.ThreadViewDraft                 `json:"thread_view_draft"`
+	SidebarTaskPrefs                  models.SidebarTaskPrefs                 `json:"sidebar_task_prefs"`
+	SidebarTaskColorAutomation        models.SidebarTaskColorAutomation       `json:"sidebar_task_color_automation"`
+	SidebarTaskColors                 map[string]*string                      `json:"sidebar_task_colors"`
+	TaskCreateLastUsed                models.TaskCreateLastUsed               `json:"task_create_last_used"`
+	JiraSavedViews                    json.RawMessage                         `json:"jira_saved_views,omitempty"`
+	JiraTaskPresets                   json.RawMessage                         `json:"jira_task_presets,omitempty"`
+	GitHubSavedPresets                json.RawMessage                         `json:"github_saved_presets,omitempty"`
+	GitHubDefaultQueryPresets         json.RawMessage                         `json:"github_default_query_presets,omitempty"`
+	GitLabSavedPresets                json.RawMessage                         `json:"gitlab_saved_presets,omitempty"`
+	AzureDevOpsBrowsePreferences      json.RawMessage                         `json:"azure_devops_browse_preferences,omitempty"`
+	DefaultUtilityAgentID             string                                  `json:"default_utility_agent_id"`
+	DefaultUtilityModel               string                                  `json:"default_utility_model"`
+	DefaultUtilityAgentProfileID      string                                  `json:"default_utility_agent_profile_id"`
+	KeyboardShortcuts                 map[string]interface{}                  `json:"keyboard_shortcuts,omitempty"`
+	TerminalLinkBehavior              string                                  `json:"terminal_link_behavior"`
+	TerminalFontFamily                string                                  `json:"terminal_font_family"`
+	TerminalFontSize                  int                                     `json:"terminal_font_size"`
+	ChangesPanelLayout                string                                  `json:"changes_panel_layout"`
+	LastSeenDisplay                   string                                  `json:"last_seen_display"`
+	SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
+	AppStatusBarEnabled               bool                                    `json:"app_status_bar_enabled"`
+	SidebarHoverEnabled               bool                                    `json:"sidebar_hover_enabled"`
+	SidebarHoverDelayMs               int                                     `json:"sidebar_hover_delay_ms"`
+	ResolveSessionHostnames           bool                                    `json:"resolve_session_hostnames"`
+	AppStatusBarOrder                 models.AppStatusBarOrder                `json:"app_status_bar_order"`
+	QuickChatTabOrderByWorkspace      map[string][]string                     `json:"quick_chat_tab_order_by_workspace"`
+	KanbanHiddenStepIDs               map[string][]string                     `json:"kanban_hidden_step_ids"`
+	WorkflowIDsWithAutoHideEmptySteps []string                                `json:"workflow_ids_with_auto_hide_empty_steps"`
+	KanbanSort                        string                                  `json:"kanban_sort"`
+	KanbanPriorityFilterTokens        []string                                `json:"kanban_priority_filter_tokens"`
+	Revision                          int64                                   `json:"revision"`
+	UpdatedAt                         string                                  `json:"updated_at"`
 }
 
 type UserResponse struct {
@@ -130,6 +131,7 @@ type ShellOption struct {
 }
 
 type UpdateUserSettingsRequest struct {
+	SidebarViewState                  *models.SidebarWorkspacePatch      `json:"sidebar_view_state,omitempty"`
 	WorkspaceID                       *string                            `json:"workspace_id,omitempty"`
 	KanbanViewMode                    *string                            `json:"kanban_view_mode,omitempty"`
 	StartupPage                       *string                            `json:"startup_page,omitempty"`
@@ -362,6 +364,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LspStatusLocation:                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		SavedLayouts:                      settings.SavedLayouts,
 		SidebarViews:                      settings.SidebarViews,
+		SidebarViewsByWorkspace:           settings.SidebarViewsByWorkspace,
 		SidebarActiveViewID:               settings.SidebarActiveViewID,
 		SidebarDraft:                      settings.SidebarDraft,
 		ThreadViews:                       settings.ThreadViews,

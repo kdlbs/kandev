@@ -2883,18 +2883,18 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 		return fmt.Errorf("load session for on_enter: %w", err)
 	}
 
-	// entryID 0: this path (manual move / legacy on_turn_start/complete) does
+	// transitionID 0: this path (manual move / legacy on_turn_start/complete) does
 	// not attach a step-entry ResultHolder before ApplyTransition, so no
 	// entry was allocated for this step-entry. processOnEnter's engine-owned
-	// action cases treat entryID==0 as "not this Build round's dispatch
+	// action cases treat transitionID==0 as "not this Build round's dispatch
 	// path" and skip with a log rather than executing — see
 	// docs/specs/workflow-on-enter-action-dispatch/spec.md and the task
 	// plan's scope note for why E2-E5 dispatch is deferred.
-	var entryID int64
+	var transitionID int64
 	if len(entryIDs) > 0 {
-		entryID = entryIDs[0]
+		transitionID = entryIDs[0]
 	}
-	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID, sourceStep)
+	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, transitionID, sourceStep)
 	return nil
 }
 
@@ -3546,6 +3546,11 @@ func (s *Service) prepareWorkflowReplacementSession(
 	newAgentProfileID string,
 	workflowRoute *models.WorkflowSessionRoute,
 ) (*models.TaskSession, error) {
+	if workflowRoute != nil {
+		if err := s.workflowRouteMutationAllowed(ctx, taskID); err != nil {
+			return nil, err
+		}
+	}
 	task, err := s.scheduler.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get task for session switch: %w", err)
@@ -4136,7 +4141,7 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 }
 
 // processOnEnter processes the on_enter events for a step after transitioning
-// to it. entryID is the workflow_step_entries row allocated for this
+// to it. transitionID is the workflow-step transition ledger row allocated for this
 // step-entry by the write site that persisted the transition (0 when no
 // entry was allocated for this call path — see finalizeStepEnter's call
 // site); it is retained on this signature for callers/tests, but this
@@ -4145,17 +4150,20 @@ func (s *Service) dispatchOnEnterActions(ctx context.Context, taskID string, ses
 // engine.DispatchStepEntry (Repository.dispatchStepEntry's call chain),
 // entirely outside processOnEnter. See
 // docs/specs/office/system-design/step-entry-dispatch-convergence.md.
-func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, entryID int64, sourceStep *wfmodels.WorkflowStep) {
+func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, transitionID int64, sourceStep *wfmodels.WorkflowStep) {
 	// The step transition is already durable before on_enter runs. Its effects
 	// must finish even if the request or agent-event context that triggered the
 	// transition is cancelled.
 	ctx = context.WithoutCancel(ctx)
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, transitionID) {
+		return
+	}
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID
-	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step, sourceStep, entryID); !ok {
+	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step, sourceStep, transitionID); !ok {
 		return
 	}
 	sessionSwitched := session.ID != prevSessionID
@@ -4225,7 +4233,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	dispatchResult := s.dispatchOnEnterActions(ctx, taskID, session, step, isPassthrough, hasPlanMode)
 
-	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched)
+	s.launchAfterOnEnterDispatch(ctx, taskID, session, step, taskDescription, hasPlanMode, dispatchResult.hasAutoStart, sessionSwitched, transitionID)
 }
 
 // launchAfterOnEnterDispatch runs the auto-start decision that follows
@@ -4237,9 +4245,15 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 //nolint:cyclop,funlen,gocognit // profile-switch recovery has independent terminal and retry branches.
 func (s *Service) launchAfterOnEnterDispatch(
 	ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep,
-	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool,
+	taskDescription string, hasPlanMode, hasAutoStart, sessionSwitched bool, entryIDs ...int64,
 ) {
+	if !s.workflowEntryDispatchIsCurrentForSession(ctx, taskID, session.ID, step, entryIDs...) {
+		return
+	}
 	sessionID := session.ID
+	if binding, bound := s.workflowEntryBindingForStep(ctx, taskID, step, sessionID, entryIDs...); bound {
+		ctx = withCeilingEntryBinding(ctx, binding)
+	}
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
 	// One claim for this whole step entry: every branch and replacement
 	// launch below shares it, so a successful claim's text is reused rather
@@ -4354,15 +4368,16 @@ func (s *Service) launchAfterOnEnterDispatch(
 							zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
 						return
 					}
+					replacementCtx := withCeilingEntryBindingForSession(asyncCtx, replacement.ID)
 					replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
-						asyncCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+						replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 					)
 					if promptErr != nil {
-						s.handleWorkflowEntryPromptError(asyncCtx, taskID, replacement, step, promptErr)
+						s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 						return
 					}
 					if replacementErr = s.autoStartStepPrompt(
-						asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
+						replacementCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
 					); replacementErr != nil {
 						s.logger.Error("failed to auto-start replacement after terminalized profile switch",
 							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -4392,15 +4407,16 @@ func (s *Service) launchAfterOnEnterDispatch(
 								zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
 							return
 						}
+						replacementCtx := withCeilingEntryBindingForSession(asyncCtx, replacement.ID)
 						replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
-							asyncCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+							replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 						)
 						if promptErr != nil {
-							s.handleWorkflowEntryPromptError(asyncCtx, taskID, replacement, step, promptErr)
+							s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 							return
 						}
 						if replacementErr = s.autoStartStepPrompt(
-							asyncCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
+							replacementCtx, taskID, replacement, step, replacementPrompt, planMode, true, handoffOnce,
 						); replacementErr != nil {
 							s.logger.Error("failed to auto-start replacement after terminalized dispatch",
 								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -4465,15 +4481,16 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(replacementErr))
 		return
 	}
+	replacementCtx := withCeilingEntryBindingForSession(ctx, replacement.ID)
 	replacementPrompt, promptErr := s.buildWorkflowEntryPrompt(
-		ctx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+		replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
 	)
 	if promptErr != nil {
-		s.handleWorkflowEntryPromptError(ctx, taskID, replacement, step, promptErr)
+		s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
 		return
 	}
 	if replacementErr = s.autoStartStepPrompt(
-		ctx, taskID, replacement, step, replacementPrompt, hasPlanMode, true, handoffOnce,
+		replacementCtx, taskID, replacement, step, replacementPrompt, hasPlanMode, true, handoffOnce,
 	); replacementErr != nil {
 		s.logger.Error("failed to auto-start replacement after reused session terminalized",
 			zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
@@ -5319,7 +5336,20 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 		}
 	}
 	s.publishQueueStatusEventForIdentity(ctx, identity)
-	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+	hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+	if inputErr != nil {
+		s.logger.Warn("failed to inspect queued message input; retaining reservation",
+			zap.String("session_id", identity.SessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(inputErr))
+		if identity.SessionIncarnationID != "" {
+			s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: identity}, queuedMsg, queuedMsg.QueuedBy)
+		} else {
+			s.requeueMessage(ctx, queuedMsg, queuedMsg.QueuedBy)
+		}
+		return false
+	}
+	if !hasInput {
 		s.logger.Warn("skipping empty queued message after transition",
 			zap.String("session_id", identity.SessionID),
 			zap.String("queue_id", queuedMsg.ID))
@@ -5363,7 +5393,16 @@ func (s *Service) dispatchTakenQueuedMessage(
 		}
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
+	hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+	if inputErr != nil {
+		s.logger.Warn("failed to inspect queued message input; retaining reservation",
+			zap.String("session_id", sessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(inputErr))
+		s.requeueMessage(ctx, queuedMsg, queuedMsg.QueuedBy)
+		return false
+	}
+	if !hasInput {
 		s.logger.Warn("discarding empty queued message after transition",
 			zap.String("session_id", sessionID),
 			zap.String("queue_id", queuedMsg.ID))
@@ -5467,6 +5506,17 @@ func (s *Service) autoStartPassthroughPrompt(
 // its own CreateUserMessage and avoid the duplicate observed when PromptTask
 // failed transiently and the queue was later drained via boot_ready.
 const metaKeyUserMessageRecorded = "user_message_recorded"
+
+// metaKeyWorkflowDispatchInputPresent records that the original workflow
+// dispatch had effective input, including mode-generated instructions. It is
+// written with the raw queue form so a recovery drain does not need to infer
+// actionability from mutable session metadata.
+const metaKeyWorkflowDispatchInputPresent = "workflow_dispatch_input_present"
+
+// metaKeyWorkflowConfigMode preserves the mode that contributed effective
+// input to a deferred workflow launch. The queue keeps the prompt raw and the
+// mode as metadata so recovery can apply the transform exactly once.
+const metaKeyWorkflowConfigMode = "workflow_config_mode"
 
 // MetaKeyTurnStartAlreadyProcessed marks a queued prompt whose on_turn_start
 // hook already ran synchronously before queuing (see
@@ -5740,6 +5790,12 @@ func (s *Service) autoStartStepPrompt(
 			}, referenceContext, pullRequestTargetContext)
 		}
 	}
+	// Use the fully composed forms after references, handoff, and first-turn
+	// context have been applied. This captures mode-generated input for an
+	// empty raw prompt while the queue still receives the raw prompt plus mode
+	// metadata, avoiding a second system block during recovery.
+	dispatchInputPresent := strings.TrimSpace(recordedPrompt) != "" ||
+		strings.TrimSpace(dispatchPrompt) != "" || len(attachments) > 0
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references, attachments)
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
@@ -5776,20 +5832,37 @@ func (s *Service) autoStartStepPrompt(
 				release()
 			})
 		}
+		defer heldRelease()
 
 		s.logger.Info("auto-start: session is CREATED, launching agent via StartCreatedSession",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.startCreatedSessionWithComposedPrompt(
-			ctx, taskID, sessionID, session.AgentProfileID,
+		queueIdentity, workflowEntry, workflowEntryRequired, captureErr := s.captureWorkflowStartPromptAdmission(ctx, taskID, fresh)
+		if captureErr != nil {
+			requeueTaken()
+			return captureErr
+		}
+		workflowAttempt := newWorkflowStartPromptAttemptWithAdmission(
+			taskID, sessionID, origin, prompt, planMode, attachments, references,
+			handoffForQueue, userMsgRecorded, dispatchInputPresent,
+			queueIdentity, workflowEntry, workflowEntryRequired,
+		)
+		workflowAttempt.workflowEntryRequired = workflowEntryRequired
+		workflowAttempt.configMode, _ = fresh.Metadata["config_mode"].(bool)
+		launchCtx := withWorkflowStartPromptAttempt(ctx, workflowAttempt)
+		execution, err := s.startCreatedSessionWithComposedPrompt(
+			launchCtx, taskID, sessionID, session.AgentProfileID,
 			recordedPrompt, agentPrompt, true, planMode, true, attachments, references,
 		)
+		if execution == nil {
+			workflowAttempt.retire()
+		}
 		// Release the guard as soon as StartCreatedSession has admitted the
 		// launch (succeeded or failed definitively). The deferred release
 		// via heldRelease ensures the guard is always released even on panic.
-		defer heldRelease()
 		if err != nil {
+			workflowAttempt.retire()
 			s.handleCreatedAutoStartLaunchFailure(
 				ctx, taskID, sessionID, stepName, prompt, err,
 				planMode, shouldQueueIfBusy, userMsgRecorded,
@@ -6172,8 +6245,79 @@ func (s *Service) queueAutoStartPrompt(
 	references []v1.EntityReference,
 	handoffText string,
 ) error {
+	queued, err := s.persistAutoStartPrompt(
+		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
+		userMessageRecorded, references, handoffText,
+	)
+	if err != nil {
+		return err
+	}
+	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
+	return nil
+}
+
+// persistAutoStartPrompt writes a workflow auto-start prompt without starting
+// a resume. Failure callbacks use this boundary so the original launch error
+// remains the recovery signal and cleanup can finish before queue draining.
+func (s *Service) persistAutoStartPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	userMessageRecorded bool,
+	references []v1.EntityReference,
+	handoffText string,
+) (*messagequeue.QueuedMessage, error) {
+	snapshot := s.workflowStartPromptInputSnapshot(
+		ctx, sessionID, prompt, planMode, attachments, references, handoffText,
+	)
+	return s.persistAutoStartPromptWithAdmission(
+		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
+		userMessageRecorded, references, handoffText,
+		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), nil, nil,
+	)
+}
+
+func (s *Service) persistAutoStartPromptAtWorkflowEntry(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	userMessageRecorded bool,
+	references []v1.EntityReference,
+	handoffText string,
+	dispatchInputPresent bool,
+	configMode bool,
+	identity messagequeue.QueueSessionIdentity,
+	entry messagequeue.WorkflowEntryIdentity,
+) (*messagequeue.QueuedMessage, error) {
+	inputPresent := dispatchInputPresent
+	launchConfigMode := configMode
+	return s.persistAutoStartPromptWithAdmission(
+		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
+		userMessageRecorded, references, handoffText,
+		&inputPresent, &launchConfigMode, &identity, &entry,
+	)
+}
+
+func (s *Service) persistAutoStartPromptWithAdmission(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	userMessageRecorded bool,
+	references []v1.EntityReference,
+	handoffText string,
+	dispatchInputPresent *bool,
+	configMode *bool,
+	identity *messagequeue.QueueSessionIdentity,
+	entry *messagequeue.WorkflowEntryIdentity,
+) (*messagequeue.QueuedMessage, error) {
 	if s.messageQueue == nil {
-		return fmt.Errorf("message queue is not configured")
+		return nil, fmt.Errorf("message queue is not configured")
 	}
 	meta := workflowMessageMetadata(planMode, origin, references)
 	if userMessageRecorded {
@@ -6182,23 +6326,30 @@ func (s *Service) queueAutoStartPrompt(
 	if handoffText != "" {
 		meta[messagequeue.MetadataStepHandoff] = handoffText
 	}
-	queued, err := s.messageQueue.QueueMessageWithMetadata(
-		ctx,
-		sessionID,
-		taskID,
-		prompt,
-		"",
-		messagequeue.QueuedByWorkflow,
-		planMode,
-		toQueuedAttachments(attachments),
-		meta,
-	)
+	if dispatchInputPresent != nil {
+		meta[metaKeyWorkflowDispatchInputPresent] = *dispatchInputPresent
+	}
+	if configMode != nil {
+		meta[metaKeyWorkflowConfigMode] = *configMode
+	}
+	var queued *messagequeue.QueuedMessage
+	var err error
+	if identity != nil && entry != nil {
+		queued, err = s.messageQueue.QueueMessageWithMetadataForSessionAtWorkflowEntry(
+			ctx, *identity, *entry, prompt, "", messagequeue.QueuedByWorkflow,
+			planMode, toQueuedAttachments(attachments), meta,
+		)
+	} else {
+		queued, err = s.messageQueue.QueueMessageWithMetadata(
+			ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByWorkflow,
+			planMode, toQueuedAttachments(attachments), meta,
+		)
+	}
 	if err != nil {
-		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
+		return nil, fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
-	return nil
+	return queued, nil
 }
 
 // scheduleAutoResumeForWorkflowQueue kicks off a background resume when a
@@ -7472,14 +7623,14 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// ResetAgentContext → sendStreamRequest, which blocks G_reader waiting for a response
 	// that can only be delivered by G_reader reading from the same WebSocket — a deadlock.
 	// The DB transition is already persisted above, so it's safe to process on_enter async.
-	var stepEntryID int64
+	var transitionID int64
 	if stepEntry != nil {
-		stepEntryID = stepEntry.EntryID
+		transitionID = stepEntry.TransitionID
 	}
 	// The caller may still hold the source session guard, but this work runs
 	// asynchronously after that guard is released. Clear the synchronous
 	// ownership marker so profile-switch parking acquires its own guard.
-	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, stepEntryID, fromStep)
+	s.launchProcessOnEnter(withoutWorkflowProfileSwitchGuard(context.WithoutCancel(ctx)), taskID, session, targetStep, taskDescription, transitionID, fromStep)
 	return true
 }
 
@@ -7489,7 +7640,7 @@ func (s *Service) launchProcessOnEnter(
 	session *models.TaskSession,
 	targetStep *wfmodels.WorkflowStep,
 	taskDescription string,
-	entryID int64,
+	transitionID int64,
 	sourceStep *wfmodels.WorkflowStep,
 ) {
 	go func() {
@@ -7498,7 +7649,7 @@ func (s *Service) launchProcessOnEnter(
 				s.onProcessOnEnterComplete()
 			}
 		}()
-		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryID, sourceStep)
+		s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, transitionID, sourceStep)
 	}()
 }
 

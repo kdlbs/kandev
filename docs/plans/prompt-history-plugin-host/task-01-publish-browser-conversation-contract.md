@@ -20,6 +20,14 @@ system_design:
 
 # Task 01: Publish Browser Conversation Contract
 
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
+
 ## Scope
 
 Publish the additive, runtime-free TypeScript contract before implementing either side. Define conversation DTOs, the `PluginConversationError` shape with stable codes and `retryable`, hook state types, task-panel context, visibility/title/navigation/favorite/mention/lifecycle contracts, and canonical documentation. This task publishes shapes only; runtime behavior belongs to later work orders.

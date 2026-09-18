@@ -1,6 +1,7 @@
 import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -65,6 +66,19 @@ test.describe("Workflow step progress", () => {
     const targetRow = disclosure.getByTestId(`workflow-step-disclosure-row-${targetStep.id}`);
     const marker = targetRow.locator("[data-marker-state]");
     await expect(marker).toBeVisible();
+    const move = targetRow.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
+    await expect(move).toBeVisible();
+    await waitForFiniteAnimations(testPage.locator('[data-slot="popover-content"]:visible'));
+    const labelBox = requireBox(
+      await targetRow.getByText(targetStep.name, { exact: true }).boundingBox(),
+      "step label",
+    );
+    const moveBox = requireBox(await move.boundingBox(), "direct move button");
+    expect(
+      Math.abs(labelBox.y + labelBox.height / 2 - moveBox.y - moveBox.height / 2),
+    ).toBeLessThan(2);
+    expect(moveBox.height).toBeCloseTo(28, 0);
+    await expect(targetRow.getByTestId("workflow-move-preview-details")).toHaveCount(0);
     const before = await marker.boundingBox();
     expect(before).not.toBeNull();
 
