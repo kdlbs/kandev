@@ -131,6 +131,9 @@ Wave 4 (parallel):
 - [x] [task-05-rewrite-agent-stats-plugin](task-05-rewrite-agent-stats-plugin.md)
 - [x] [task-06-tests](task-06-tests.md)
 - [x] [task-07-docs](task-07-docs.md)
+
+Wave 5:
+- [x] [task-08-dependency-projection](task-08-dependency-projection.md)
 ```
 
 Rationale: task-01 (contract) and task-02 (aggregation) touch disjoint packages
