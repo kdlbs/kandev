@@ -19,6 +19,13 @@ system_design:
 
 # Task 01: Reconcile inactive clarification responses
 
+## Follow-up scope
+
+This work order records the completed removal-only implementation at PR #3799
+head `6edc7320dd`. The user's later direction supersedes that presentation.
+[Task 02](task-02-late-answer-messages.md) adds answers as ordinary messages.
+The results below are historical evidence, not validation of the new scope.
+
 ## Summary
 
 Close stale task-chat questions when X receives an authoritative inactive response.

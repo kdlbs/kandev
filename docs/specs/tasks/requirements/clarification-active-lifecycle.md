@@ -15,7 +15,7 @@ owners:
 
 
 
-Clarification bundles remain answerable only for the session turn that owns them, while detached and recovery paths preserve the response contract.
+Tool responses belong to the owning session turn. Users can send answers to earlier questions as new messages without reopening the original tool request.
 
 
 
@@ -31,6 +31,9 @@ session can also produce a correct task-row icon while task navigation opens the
 hiding the action the icon represents.
 
 ## What
+
+The active/answerable rules in this section describe the original tool request.
+They do not prohibit the separate late-answer message action specified below.
 
 - A clarification bundle is active only when at least one row in the bundle is pending and the bundle
   belongs to the session's current turn.
@@ -130,8 +133,7 @@ hiding the action the icon represents.
   one turn identity from the same bundle rule: legacy empty turn IDs do not mask a consistent non-empty
   identity, while conflicting non-empty IDs invalidate the identity.
 - Any response to a superseded or terminal bundle returns conflict, performs no message mutation, and
-  initiates no agent resume. Current clients close their obsolete local overlay through the existing
-  conflict handling.
+  initiates no agent resume. Clients distinguish rejection from an affirmative answer. An affirmative answer can continue as a new user message under the late-answer criteria below.
 - Persisted task status summaries reconcile `pending_action` against current-turn repository state on
   source events and task-list/boot reads. Existing summaries are repaired, not only missing rows.
 - When a task row advertises a pending action, desktop and phone task activation load the task's
@@ -158,7 +160,7 @@ hiding the action the icon represents.
 
 
 
-**Intent:** Clarification bundles remain answerable only for the session turn that owns them, while detached and recovery paths preserve the response contract.
+**Intent:** Tool responses belong to the owning session turn. Users can send answers to earlier questions as new messages without reopening the original tool request.
 
 
 
@@ -166,11 +168,38 @@ hiding the action the icon represents.
 
 
 
-- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.1:** When a clarification is pending, the system shall expose and process only the bundle owned by the session's current turn.
-- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.2:** When a newer turn or terminal session state supersedes a bundle, the system shall keep its transcript history without leaving it answerable or able to block workflow progress.
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.1:** When a clarification is pending, the system shall process tool responses only for the bundle owned by the session's current turn. Earlier questions can accept new-message answers under the late-answer criteria below.
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.2:** When a newer turn or terminal session state supersedes a bundle, the system shall keep its transcript history without leaving the original tool request answerable or able to block workflow progress. Users can answer through a separate new-message action.
 - **AC-TASKS-CLARIFICATION-LIFECYCLE-001.3:** When detached clarification recovery succeeds or fails, the system shall return the bounded response and durable recovery outcome defined by the lifecycle contract.
 
 
+
+## Late answers as new messages
+
+These criteria extend the existing lifecycle requirement. They separate an
+operational tool response from a user choosing to continue the conversation.
+
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.4:** When an unanswered question is
+  superseded or expired, its transcript entry shall offer an answer-as-new-message
+  action on desktop and phone. It shall not claim that the agent is still waiting.
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.5:** When an affirmative answer receives
+  a recognized inactive result, the interface shall preserve the submitted answers
+  and send them with their question context through ordinary message delivery.
+  It shall not silently discard those answers or report successful tool delivery.
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.6:** A late answer shall target the
+  question's original task and session. It shall follow ordinary sending,
+  steering, queue ordering, and unavailable-session behavior. An idle input-capable
+  session shall receive it without requiring the original tool waiter.
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.7:** Closing an inactive question shall
+  dismiss its answer surface without sending a message or resuming the agent.
+  The question shall remain in history. Active rejection keeps its existing semantics.
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.8:** A failed late-message admission shall
+  preserve the answer and offer retry. An ambiguous transport result shall not
+  automatically start another delivery path. Retrying one admission shall reuse
+  its identity rather than create duplicate messages.
+- **AC-TASKS-CLARIFICATION-LIFECYCLE-001.9:** Sending a late answer shall not reopen
+  the original tool request, restore its workflow barrier, or resolve another
+  pending question. The interface shall distinguish sent from queued admission.
 
 ## Out of scope
 

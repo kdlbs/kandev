@@ -1,6 +1,6 @@
 ---
 created: 2026-09-18
-status: done
+status: draft
 requirements:
   - REQ-TASKS-CLARIFICATION-LIFECYCLE-001
   - REQ-TASKS-CLARIFICATION-RESPONSE-RELIABILITY-001
@@ -10,14 +10,17 @@ system_design:
 legacy_specs: []
 ---
 
-# Implementation Plan: Dismiss inactive clarification questions
+# Implementation Plan: Close or answer inactive clarification questions
 
 ## Overview
 
 Repair the confirmed inactive-response path associated with
 [issue #3798](https://github.com/kdlbs/kandev/issues/3798).
 One work order updates shared response handling and proves desktop/phone recovery.
-Implementation is complete.
+Task 01 implements the previous removal-only behavior in PR #3799, head
+`6edc7320dd`. The user subsequently required late answers as ordinary messages.
+Task 02 supersedes removal-only presentation and remains pending. The package
+is not complete under the revised contract.
 
 ## Evidence and root cause
 
@@ -39,6 +42,44 @@ The temporary test was removed; permanent regressions are recorded in Task 01.
 
 This proves one repairable path, not the cause of every reported occurrence.
 Timeouts, failed requests, and malformed responses remain distinct outcomes.
+
+## Revised contract and delivery scope
+
+The user's latest direction takes precedence over the historical Task 01
+approach below. Reuse `REQ-TASKS-CLARIFICATION-LIFECYCLE-001`, amended criteria
+`.1`/`.2` and new criteria `.4` through `.9`. Requirements, design, and the
+[late-answer ADR](../../decisions/2026-09-18-late-clarification-messages.md)
+now separate operational tool responses from ordinary messages.
+
+- Preserve earlier questions in transcript history with an answer-as-new-message action.
+- Preserve submitted answers across `409 not_active` and send through normal admission.
+- Keep X/Close as dismissal without a new message for inactive questions.
+- Reuse existing sending/steering/queue rules; no new busy-agent policy is introduced.
+- Keep Inbox History read-only and use its existing source-conversation navigation.
+- Keep Task 01's race and Escape fixes wherever applicable.
+- Task 02 owns UI, admission adapter, localization, and focused regression coverage.
+
+UI-02: Earlier question, shared desktop and phone inline composition.
+
+```text
+[Earlier question                                  ]
+[Answer as new message                             ]
+       opens:
+[Question and answer choices                       ]
+[Custom answer                                     ]
+[Close]                       [Send as new message  ]
+[Failure: draft retained, Retry available           ]
+```
+
+A recognized inactive result during answer submission uses the same delivery
+path with the captured draft. Sent or queued admission replaces the form with
+its actual outcome. Closing returns focus to its opener. Keep the existing
+phone scroll owner and safe areas; controls have 44px coarse-pointer targets.
+This view covers lifecycle criteria `.4` through `.9`. Exact spacing is illustrative.
+
+The original technical approach and results below document Task 01, not the
+acceptance criteria for Task 02. Production code must not be changed from this
+design handoff until the user explicitly requests implementation.
 
 ## Requirement conformance
 
@@ -143,8 +184,9 @@ remain answerable. Also retain existing real-backend Skip success coverage.
 ## Work orders
 
 - [x] [Task 01: Reconcile inactive clarification responses](task-01-reconcile-inactive-responses.md)
+- [ ] [Task 02: Send late answers as new messages](task-02-late-answer-messages.md)
 
-Execute sequentially. No delegation is required or authorized.
+Execute sequentially. Task 02 depends on Task 01 and revises its user-facing outcome.
 
 ## Verification results
 
@@ -217,5 +259,6 @@ delivery records. This follow-up does not change their completed scopes or resul
 
 ## Documentation impact
 
-This package records implementation intent. No public UI labels, API contract,
-or operator procedure changes; public documentation does not need an update.
+Task 01 did not need public documentation changes. Task 02 must document the
+late-answer action and its normal send/queue behavior in the existing task
+conversation guide. Do not describe queued admission as agent receipt.
