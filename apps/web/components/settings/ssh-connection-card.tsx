@@ -302,7 +302,10 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
           canTest={c.canTest}
           canSave={c.canSave}
           onTest={c.handleTest}
-          onSave={c.handleSave}
+          // handleSave rethrows so the settings save coordinator can react.
+          // This path has no coordinator -- the failure is already in `c.error`
+          // below -- so absorb the rejection rather than leaving it unhandled.
+          onSave={() => void c.handleSave().catch(() => undefined)}
           showSave={!props.coordinatedSaveId}
         />
         {c.error && (

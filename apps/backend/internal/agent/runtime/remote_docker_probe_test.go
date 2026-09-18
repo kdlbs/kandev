@@ -11,6 +11,10 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 )
 
+// probeTestUser keeps the fixture independent of the ambient environment:
+// target resolution falls back to $USER, which a CI runner does not set.
+const probeTestUser = "builder"
+
 func stubProber() *RemoteDockerProber {
 	return &RemoteDockerProber{
 		Dial: func(context.Context, *lifecycle.SSHTarget) (*ssh.Client, string, error) {
@@ -37,7 +41,7 @@ func stepByName(result RemoteDockerTestResult, name string) (RemoteDockerTestSte
 // TestProbeReportsEveryStep gives the user one row per thing that can fail,
 // because each one needs a different fix on the remote host.
 func TestProbeReportsEveryStep(t *testing.T) {
-	result := stubProber().Run(context.Background(), RemoteDockerTestRequest{Host: "build-box"})
+	result := stubProber().Run(context.Background(), RemoteDockerTestRequest{Host: "build-box", User: probeTestUser})
 
 	if !result.Success {
 		t.Fatalf("Run = failure: %+v", result)
@@ -67,7 +71,7 @@ func TestProbeReportsEveryStep(t *testing.T) {
 // before anything is dialed.
 func TestProbeRejectsDaemonURL(t *testing.T) {
 	for _, host := range []string{"tcp://build-box:2375", "ssh://dev@build-box"} {
-		result := stubProber().Run(context.Background(), RemoteDockerTestRequest{Host: host})
+		result := stubProber().Run(context.Background(), RemoteDockerTestRequest{Host: host, User: probeTestUser})
 		if result.Success {
 			t.Errorf("Run with host %q succeeded, want rejection", host)
 		}
@@ -109,7 +113,7 @@ func TestProbeSeparatesSocketDenialFromDeadDaemon(t *testing.T) {
 			p := stubProber()
 			p.Daemon = func(context.Context, *ssh.Client) (string, error) { return "", tc.daemonErr }
 
-			result := p.Run(context.Background(), RemoteDockerTestRequest{Host: "build-box"})
+			result := p.Run(context.Background(), RemoteDockerTestRequest{Host: "build-box", User: probeTestUser})
 			if result.Success {
 				t.Fatal("Run succeeded despite a daemon failure")
 			}
@@ -135,7 +139,7 @@ func TestProbeStopsAtTheFirstFailure(t *testing.T) {
 		return nil, "", errors.New("connection refused")
 	}
 
-	result := p.Run(context.Background(), RemoteDockerTestRequest{Host: "build-box"})
+	result := p.Run(context.Background(), RemoteDockerTestRequest{Host: "build-box", User: probeTestUser})
 	if result.Success {
 		t.Fatal("Run succeeded with a failed connection")
 	}
@@ -160,7 +164,7 @@ func TestProbeRejectsUnsupportedPlatform(t *testing.T) {
 		}, nil
 	}
 
-	result := p.Run(context.Background(), RemoteDockerTestRequest{Host: "build-box"})
+	result := p.Run(context.Background(), RemoteDockerTestRequest{Host: "build-box", User: probeTestUser})
 	if result.Success {
 		t.Fatal("Run succeeded on an unsupported platform")
 	}

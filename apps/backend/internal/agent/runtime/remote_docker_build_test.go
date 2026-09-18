@@ -24,9 +24,14 @@ func (f *fakeBuildClient) BuildImage(_ context.Context, dockerfile, tag string, 
 	return io.NopCloser(strings.NewReader("built")), nil
 }
 
+// validConfig names the SSH user explicitly. Target resolution falls back to
+// $USER when the config omits it, which passes on a developer machine and
+// fails on a CI runner that sets no $USER; the fixture must not depend on the
+// ambient environment either way.
 func validConfig() map[string]string {
 	return map[string]string{
 		"ssh_host":             "build-box",
+		"ssh_user":             "builder",
 		"ssh_host_fingerprint": "SHA256:abc",
 	}
 }
