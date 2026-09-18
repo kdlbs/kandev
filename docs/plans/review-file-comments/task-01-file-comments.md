@@ -196,3 +196,9 @@ A follow-up review identified the same repository omission in regular composer
 context chips. These now retain repositoryName and forward it through the chat
 panel callback chain. Named-repository and explicit workspace-root regression
 cases pass (five context-builder tests), along with typecheck.
+
+Nested-scope review correction: whole-file grouping retains repository name/path
+even when nested scopes share an ID. Legacy line rows join a named group only
+when the ID-to-name mapping is unambiguous. Regression coverage also verifies
+stable grouping when a repository ID becomes available later. The four new
+identity cases and both aggregate component suites pass (16 tests).
