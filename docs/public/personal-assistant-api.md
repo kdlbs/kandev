@@ -8,7 +8,7 @@ status: experimental
 
 This reference describes the in-development backend for a user-owned assistant built on [workspace orchestration](orchestration-personas.md), independently of Office.
 
-It is **not ready for production use**. Native attention, input resolution and pause/stop APIs are implemented. The central assistant UI and combined qualification are still pending.
+It is **not ready for production use**. Native attention, input resolution, pause/stop and the central Assistant UI are implemented. Maintenance, workspace grants and combined qualification are still pending.
 
 Both `features.orchestration` (`KANDEV_FEATURES_ORCHESTRATION`) and
 `features.personalAssistant` (`KANDEV_FEATURES_PERSONAL_ASSISTANT`) must be enabled
@@ -29,6 +29,14 @@ overrides, fallback routing or executor scripts are unsupported. Other providers
 and versions are unsupported for this assistant path. These restrictions do not
 change ordinary coordinator or worker execution. Provider availability still
 depends on the selected profile's existing credentials.
+
+## Assistant interface
+
+The app-level `/assistant` route uses the selected private conversation, with
+native questions and permission decisions, objectives/evidence, memory editing
+and forgetting, capability health and activity. Desktop and phone layouts share
+the same transports and revision checks. The disabled route does not read private
+assistant data or create a binding. See the [usage guide](orchestration-personas.md#use-the-personal-assistant).
 
 ## Ownership and intake
 
@@ -62,6 +70,14 @@ and cap at 100, ordered by stable memory ID. Pass the opaque `next_cursor` as
 malformed or mismatched cursors return 400. Expired, forgotten, foreign-owned
 and unavailable-scope entries are excluded. Explicit invalid scope references
 return 422 without changing stored data. PUT accepts key/content, scope/scope ID, an owner-authored source comment, confirmation, priority, expiry and `expected_revision`. DELETE requires the current revision. Legacy memories remain unconfirmed and workspace-scoped.
+
+`GET /assistant/memory/:id/source` returns the visible memory's owner-authored
+source instruction from this private conversation, bounded to 6,000 Unicode
+characters. `truncated` identifies an excerpt. Missing, foreign or no-longer-visible
+memory returns 404; runtime credentials cannot use this human provenance endpoint.
+Owner-only `orchestration.assistant.updated` events contain binding/revision hints,
+not private content. Clients refetch authorized snapshots after changes and
+reconnecting.
 
 Context is fetched with:
 

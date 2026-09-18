@@ -23,6 +23,7 @@ import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
+import { AssistantNav } from "@/components/app-sidebar/assistant-nav";
 import { useMobileMenuSheetState } from "@/hooks/use-mobile-menu-sheet-state";
 import { ColumnsMenu, type ColumnsMenuStep } from "./columns-menu";
 import {
@@ -398,6 +399,7 @@ function MobileMenuContent({
         onSearchChange={onSearchChange}
         isSearchLoading={isSearchLoading ?? false}
       />
+      <AssistantNav onNavigate={() => onOpenChange(false)} />
       <MobileWorkspaceSection onOpenChange={onOpenChange} />
       <MobileViewSection
         viewValue={viewValue}

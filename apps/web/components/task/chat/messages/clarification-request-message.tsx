@@ -114,6 +114,11 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
             <div className="mt-1 ml-3 flex items-start gap-1.5 text-xs text-foreground/80">
               {getStatusIndicator()}
               <AnswerSummary question={question} response={metadata.response} />
+              {metadata.response_author_type === "agent" && (
+                <span className="text-muted-foreground" data-testid="assistant-answer-attribution">
+                  {t("orchestration:assistantAnswered")}
+                </span>
+              )}
               {metadata.agent_disconnected && (
                 <span className="text-muted-foreground">{t("task:sentAsNewMessage")}</span>
               )}

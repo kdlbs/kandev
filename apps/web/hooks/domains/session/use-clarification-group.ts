@@ -1,6 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ClarificationTransportContext,
+  type ClarificationTransport,
+} from "@/components/task/chat/clarification-transport";
 import { useTranslation } from "react-i18next";
 import type { ClarificationAnswer, ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import { getBackendConfig } from "@/lib/config";
@@ -354,6 +358,7 @@ function safeApplyResolvedStatus(
 }
 
 type UseClarificationSubmissionArgs = {
+  transport?: ClarificationTransport;
   pendingId: string | null;
   questionIds: string[];
   answersRef: { current: Record<string, ClarificationAnswer> };
@@ -384,6 +389,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
     setSubmitState,
     updateMessage,
     defaultSkipReason,
+    transport,
   } = args;
   const lastActionRef = useRef<{ kind: "submit" } | { kind: "skip"; reason: string } | null>(null);
 
@@ -404,7 +410,10 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       setAnswers(current);
       lastActionRef.current = { kind: "submit" };
       await runClarificationRequest({
-        post: () => postClarificationBatch(pendingId, ordered),
+        post: () =>
+          transport
+            ? transport.respond(pendingId, { answers: ordered, rejected: false })
+            : postClarificationBatch(pendingId, ordered),
         ownStatus: "answered",
         ownAnswers: current,
         bundle: submitBundleRef.current.slice(),
@@ -427,6 +436,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       setAnswers,
       setSubmitState,
       updateMessage,
+      transport,
     ],
   );
 
@@ -437,7 +447,10 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       const effectiveReason = reason ?? defaultSkipReason;
       lastActionRef.current = { kind: "skip", reason: effectiveReason };
       await runClarificationRequest({
-        post: () => postClarificationSkip(pendingId, effectiveReason),
+        post: () =>
+          transport
+            ? transport.respond(pendingId, { rejected: true, reject_reason: effectiveReason })
+            : postClarificationSkip(pendingId, effectiveReason),
         ownStatus: "rejected",
         ownAnswers: {},
         bundle: submitBundleRef.current.slice(),
@@ -458,23 +471,11 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       setSubmitState,
       updateMessage,
       defaultSkipReason,
+      transport,
     ],
   );
 
-  const retry = useCallback(async () => {
-    const action = lastActionRef.current;
-    if (!action) return;
-    if (action.kind === "submit") {
-      await submitCollected();
-    } else {
-      await skipAll(action.reason);
-    }
-  }, [submitCollected, skipAll]);
-
-  const resetLastAction = useCallback(() => {
-    lastActionRef.current = null;
-  }, []);
-
+  const { retry, resetLastAction } = useClarificationRetry(lastActionRef, submitCollected, skipAll);
   return { submitCollected, skipAll, retry, resetLastAction };
 }
 
@@ -493,6 +494,7 @@ export function useClarificationGroup(
 ): ClarificationGroupApi {
   const { t } = useTranslation();
   const storeApi = useAppStoreApi();
+  const transport = useContext(ClarificationTransportContext);
   const [answers, setAnswers] = useState<Record<string, ClarificationAnswer>>({});
   const answersRef = useRef(answers);
   useEffect(() => {
@@ -557,7 +559,8 @@ export function useClarificationGroup(
     inflightRef,
     setAnswers,
     setSubmitState,
-    updateMessage: storeApi.getState().updateMessage,
+    transport,
+    updateMessage: transport?.updateMessage ?? storeApi.getState().updateMessage,
     defaultSkipReason: t("task:userSkippedClarification"),
   });
 
@@ -596,4 +599,26 @@ export function useClarificationGroup(
     skipAll,
     retry,
   };
+}
+
+function useClarificationRetry(
+  lastActionRef: { current: { kind: "submit" } | { kind: "skip"; reason: string } | null },
+  submitCollected: () => Promise<void>,
+  skipAll: (reason: string) => Promise<void>,
+) {
+  const retry = useCallback(async () => {
+    const action = lastActionRef.current;
+    if (!action) return;
+    if (action.kind === "submit") {
+      await submitCollected();
+    } else {
+      await skipAll(action.reason);
+    }
+  }, [submitCollected, skipAll]);
+
+  const resetLastAction = useCallback(() => {
+    lastActionRef.current = null;
+  }, []);
+
+  return { retry, resetLastAction };
 }

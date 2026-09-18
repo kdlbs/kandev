@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const state = {
-  features: { office: false },
+  features: { office: false, personalAssistant: false },
   workspaces: { activeId: "ws-1" as string | null },
   office: { inboxCountByWorkspaceId: {} as Record<string, number> },
   quickChat: {
@@ -153,4 +153,20 @@ describe("AppSidebarPrimaryNav", () => {
 
     expect(screen.queryByRole("link", { name: "Home" })).toBeNull();
   });
+});
+
+it("exposes the private assistant destination only when its own flag is enabled", () => {
+  const view = renderNav(false);
+  expect(screen.queryByTestId("assistant-nav")).toBeNull();
+  state.features.personalAssistant = true;
+  try {
+    view.rerender(
+      <TooltipProvider>
+        <AppSidebarPrimaryNav collapsed={false} />
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId("assistant-nav").getAttribute("href")).toBe("/assistant");
+  } finally {
+    state.features.personalAssistant = false;
+  }
 });

@@ -1,3 +1,4 @@
+import { AssistantPage } from "@/app/assistant/assistant-page";
 import { CoordinatorPage } from "@/app/coordinator/coordinator-page";
 import { OrchestrationConversationRoute } from "@/app/settings/orchestration/conversation-route";
 import { readTaskId } from "./spa-routing";
@@ -112,6 +113,7 @@ type SpaRoute =
   | { kind: "office"; pathname: string }
   | { kind: "orchestrationConversation"; taskId: string }
   | { kind: "coordinator"; workspaceId: string }
+  | { kind: "assistant" }
   | { kind: "plugin"; path: string }
   | { kind: "login" }
   | { kind: "setup" }
@@ -266,6 +268,7 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
 }
 
 function resolveNestedRoute(normalized: string): SpaRoute | null {
+  if (normalized === "/assistant") return { kind: "assistant" };
   const coordinator = normalized.match(/^\/workspaces\/([^/]+)\/coordinator$/);
   if (coordinator) {
     const workspaceId = safeDecodePathSegment(coordinator[1]);
@@ -356,9 +359,8 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
       </Suspense>
     );
   }
-  if (route.kind === "coordinator") return <CoordinatorPage workspaceId={route.workspaceId} />;
-  if (route.kind === "orchestrationConversation")
-    return <OrchestrationConversationRoute taskId={route.taskId} />;
+  const orchestration = renderOrchestrationRoute(route);
+  if (orchestration) return orchestration;
   if (route.kind === "office") {
     return (
       <Suspense fallback={<RouteLoading routeNameKey="sidebar:office" />}>
@@ -666,4 +668,12 @@ function listWorkspaceWorkflowSteps(workspaceId: string) {
 function normalizePath(pathname: string): string {
   if (!pathname || pathname === "/") return "/";
   return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
+function renderOrchestrationRoute(route: SpaRoute) {
+  if (route.kind === "assistant") return <AssistantPage />;
+  if (route.kind === "coordinator") return <CoordinatorPage workspaceId={route.workspaceId} />;
+  if (route.kind === "orchestrationConversation")
+    return <OrchestrationConversationRoute taskId={route.taskId} />;
+  return null;
 }

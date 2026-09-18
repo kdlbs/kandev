@@ -182,3 +182,9 @@ func (s *Service) attentionEventTask(ctx context.Context, data map[string]any) s
 	}
 	return row.TaskID
 }
+
+func (s *Service) notifyAssistantUpdated(ctx context.Context, bindingID string) {
+	if s.AttentionUpdated != nil {
+		s.AttentionUpdated(ctx, bindingID, time.Now().UTC())
+	}
+}

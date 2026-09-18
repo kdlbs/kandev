@@ -185,7 +185,7 @@ Execute sequentially in the primary conversation. Waves show dependencies only; 
 | 3 | [04 Native capability inventory](task-04-capability-inventory.md); [06 Attention reconciliation](task-06-attention.md) | 04 and 06 done |
 | 4 | [05 Enforced inspection](task-05-tool-authority.md) | Done |
 | 5 | [07 Native resolution and controls](task-07-input-resolution.md) | Done |
-| 6 | [08 Assistant interface](task-08-assistant-ui.md) | Pending |
+| 6 | [08 Assistant interface](task-08-assistant-ui.md) | Done |
 | 7 | [09 Supervised improvements](task-09-workflow-improvements.md) | Pending |
 | 8 | [10 Workspace grants](task-10-workspace-grants.md) | Pending |
 | 9 | [11 Combined evidence](task-11-read-only-e2e.md) | Pending |

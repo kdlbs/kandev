@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 export const ORCHESTRATION_CHANGED = "kandev:orchestration-changed";
 export const notifyOrchestrationChanged = () =>
   window.dispatchEvent(new Event(ORCHESTRATION_CHANGED));
@@ -26,9 +26,10 @@ export function useOrchestrationData<T>(load: () => Promise<T>, scopeKey?: strin
     window.addEventListener(ORCHESTRATION_CHANGED, changed);
     return () => window.removeEventListener(ORCHESTRATION_CHANGED, changed);
   }, []);
+  const refresh = useCallback(() => setRevision((value) => value + 1), []);
   return {
     data: snapshot?.load === load && snapshot.scopeKey === scopeKey ? snapshot.data : undefined,
     error: error?.load === load && error.scopeKey === scopeKey ? error.message : undefined,
-    refresh: () => setRevision((v) => v + 1),
+    refresh,
   };
 }

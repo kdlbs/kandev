@@ -96,6 +96,7 @@ func (h *Handler) editCredential(c *gin.Context) {
 		memoryFailure(c, err)
 		return
 	}
+	h.Service.notifyAssistantUpdated(c.Request.Context(), b.ID)
 	c.JSON(200, h.Service.credentialObservation(c.Request.Context(), b, d))
 }
 
@@ -150,6 +151,7 @@ func (h *Handler) forgetCredential(c *gin.Context) {
 		memoryFailure(c, err)
 		return
 	}
+	h.Service.notifyAssistantUpdated(c.Request.Context(), b.ID)
 	c.JSON(200, gin.H{"forgotten": true})
 }
 

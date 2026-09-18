@@ -62,3 +62,18 @@ describe("ClarificationRequestMessage", () => {
     expect(customText?.querySelector("code, strong")).toBeNull();
   });
 });
+
+it("shows assistant authorship only when recorded on the canonical answered message", () => {
+  const message = answeredClarification();
+  message.metadata = {
+    ...message.metadata,
+    response_author_type: "agent",
+    response_author_id: "binding",
+    response_memory_ids: ["confirmed-memory"],
+  };
+  const view = render(<ClarificationRequestMessage comment={message} />);
+  expect(view.getByTestId("assistant-answer-attribution").textContent).toContain("assistant");
+  view.rerender(<ClarificationRequestMessage comment={answeredClarification()} />);
+  expect(view.queryByTestId("assistant-answer-attribution")).toBeNull();
+  view.unmount();
+});

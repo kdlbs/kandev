@@ -5,7 +5,10 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { TaskChat } from "@/components/task/simple/task-chat";
-import { CommentTransportContext } from "@/components/task/simple/comment-transport";
+import {
+  CommentTransportContext,
+  type CommentTransport,
+} from "@/components/task/simple/comment-transport";
 import { RecoveryTransportContext } from "@/components/task/simple/recovery-transport";
 import {
   postConversationComment,
@@ -33,6 +36,8 @@ export function OrchestratorConversationPane({
   onCommentsChanged,
   orchestratorId,
   embedded = false,
+  transport = postConversationComment,
+  readOnly = false,
 }: {
   task: Pick<Task, "id" | "title" | "workspaceId">;
   comments: TaskComment[];
@@ -42,6 +47,8 @@ export function OrchestratorConversationPane({
   onCommentsChanged: () => void;
   orchestratorId: string;
   embedded?: boolean;
+  transport?: CommentTransport;
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const { data } = useWorkspaceOrchestrators(task.workspaceId);
@@ -81,14 +88,14 @@ export function OrchestratorConversationPane({
             <h1 className="text-xl font-semibold my-4">{task.title}</h1>
             <TopbarWorkingIndicator taskId={task.id} />
             <RecoveryTransportContext.Provider value={retryConversation}>
-              <CommentTransportContext.Provider value={postConversationComment}>
+              <CommentTransportContext.Provider value={transport}>
                 <TaskChat
                   taskId={task.id}
                   comments={comments}
                   sessions={sessions}
                   timeline={timeline}
                   scrollParent={scrollParent}
-                  readOnly={false}
+                  readOnly={readOnly}
                   onCommentsChanged={onCommentsChanged}
                 />
               </CommentTransportContext.Provider>

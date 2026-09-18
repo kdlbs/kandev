@@ -53,6 +53,7 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	assistant.GET("/runtime/memory", h.runtimeMemory)
 	assistant.GET("/assistant/memory", h.assistantMemory)
 	assistant.GET("/assistant/memory/:id", h.assistantMemory)
+	assistant.GET("/assistant/memory/:id/source", h.assistantMemorySource)
 	assistant.PUT("/assistant/memory/:id", h.editAssistantMemory)
 	assistant.DELETE("/assistant/memory/:id", h.forgetAssistantMemory)
 	assistant.GET("/assistant/credentials", h.credential)

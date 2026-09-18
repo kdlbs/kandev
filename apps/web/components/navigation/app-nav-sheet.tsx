@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@kandev/ui/sheet";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
+import { AssistantNav } from "@/components/app-sidebar/assistant-nav";
 import { WorkspaceChiefNav } from "@/components/app-sidebar/workspace-chief-nav";
 import { AppNavTrigger } from "./app-nav-trigger";
 
@@ -57,6 +58,7 @@ export function AppNavSheet({ pageNav, omitDestinations }: AppNavSheetProps) {
             className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-contain p-4"
             onClick={closeOnLinkClick}
           >
+            <AssistantNav onNavigate={close} />
             <WorkspaceChiefNav onNavigate={close} />
             {renderedPageNav}
             <AppNavSections

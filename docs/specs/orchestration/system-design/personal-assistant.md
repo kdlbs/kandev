@@ -20,8 +20,8 @@ requirements:
 
 This design completes the existing `internal/orchestration` assistant. Ownership,
 durable intake, objectives, context/credential metadata, capability discovery and
-enforced inspect mode and attention are implemented. Native resolution, the
-app-level shell, maintenance and workspace grants remain pending. The
+enforced inspect mode, attention, native resolution and the app-level shell are
+implemented. Maintenance and workspace grants remain pending. The
 [workspace Coordinator view](coordinator-view.md) is a separate observation UI
 that may ship first. Its grouped task list is not an assistant attention ledger.
 
@@ -365,3 +365,23 @@ binding/link and native authorization, and persists per-session cancellation
 receipts. No broad process kill, history deletion or implied external rollback
 is used. Browser presentation and task-message attribution display follow in
 work order 08.
+
+
+## Implemented Assistant interface
+
+`/assistant` is independently feature gated before any private read. Desktop,
+mobile page navigation and the mobile board menu select the existing binding.
+Native conversation chat uses an injected sender with stable message IDs; native
+clarification presentation uses an optional scoped transport, preserving the
+ordinary task transport. Permission decisions render only the current native
+options. Abort/generation guards and owner/binding identities protect snapshots;
+reconnect and revision hints cause authorized refetch rather than trusting pushed
+content. Cursor refresh replays loaded coverage and removes forgotten rows.
+
+The UI exposes native attention, current objective evidence, memory CAS/provenance,
+capability health, credential metadata and per-session control receipts. Definite
+conflicts refresh request state; uncertain outcomes retain their operation ID.
+Pause and stop have separate semantics. Temporary read failure keeps the current
+draft, disables affected writes, and offers a retry. Source instruction reads are
+human-only and bounded. Mobile tabs keep chat mounted to retain drafts and own
+scroll regions, with safe-area padding and 44px controls.

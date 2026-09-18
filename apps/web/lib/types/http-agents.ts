@@ -290,6 +290,9 @@ export type ClarificationQuestion = {
 // question_index/question_total so the renderer can show "Question 2 of 3"
 // progress chips.
 export type ClarificationRequestMetadata = {
+  response_author_type?: "agent";
+  response_author_id?: string;
+  response_memory_ids?: string[];
   pending_id: string;
   session_id: string;
   task_id?: string;

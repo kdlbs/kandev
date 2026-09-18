@@ -94,6 +94,7 @@ func (h *Handler) editAssistantMemory(c *gin.Context) {
 		c.AbortWithStatus(503)
 		return
 	}
+	h.Service.notifyAssistantUpdated(c.Request.Context(), b.ID)
 	c.JSON(200, saved)
 }
 
@@ -113,6 +114,7 @@ func (h *Handler) forgetAssistantMemory(c *gin.Context) {
 		memoryFailure(c, err)
 		return
 	}
+	h.Service.notifyAssistantUpdated(c.Request.Context(), b.ID)
 	c.JSON(200, gin.H{"forgotten": true})
 }
 

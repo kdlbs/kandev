@@ -52,6 +52,45 @@ device, Tasks and Chat share the same workspace and conversation. Expand
 **Filters** for workflow, repository and coordinator scope controls. Live task
 summaries update the groups, and reconnecting refreshes the loaded rows.
 
+## Use the personal Assistant
+
+With Orchestration and Personal assistant enabled, open **Assistant** in app
+navigation, or visit `/assistant`. Choose an existing workspace orchestrator.
+The page resumes its conversation and claims it for your user; it creates no
+additional workflow or delivery task. Office is not required. Configuration
+remains in workspace Orchestration settings. Unsupported execution profiles
+show a configuration link and cannot send assistant turns.
+
+Desktop keeps chat beside Attention and Details. Phones use Chat, Attention and
+Details tabs. Drafts survive tab changes and temporary connection failures
+within the page, but not a reload or change of assistant identity. Message
+retries preserve their client identity to avoid duplicate accepted turns.
+
+Attention shows native worker questions, permissions, failures and review or
+result observations. **Review and respond** opens the original question form
+or the provider's offered permission choices. Decisions use the same native
+task services; stale requests cannot approve a newer request. **Open original
+task** returns to the exact task/session. Assistant-authored answers are
+attributed to the assistant in native task history.
+
+Details includes objectives and acceptance evidence, delivery activity,
+capabilities, credential-health metadata and memory. Accepted messages,
+finished assistant turns and review status do not prove objective completion.
+Lists show loaded coverage and offer additional pages when available.
+
+Add or edit a memory with an instruction you sent, its scope and optional
+expiry. Confirmation permits its use as confirmed context. Concurrent edits
+use revision checks. **Original instruction** shows provenance; **Forget**
+removes the memory from future context. Neither action erases text already
+sent to a provider or kept in history/backups. Keep secret values out of memory.
+
+**Pause assistant** blocks new assistant turns while existing workers continue.
+**Stop managed work** asks the native task service to stop managed sessions and
+reports each result, including uncertain or partial results. Continue through
+remaining pages for large sets. Stopping does not undo external changes. The
+[assistant reference](personal-assistant-api.md) documents supported execution
+profiles and qualification limits.
+
 ## Profiles and routing
 
 The coordinator's execution profile determines its provider and account. For example, a personal Claude coordinator can direct Jira work to your existing work Claude profile and personal development to a personal Claude or Codex profile. Describe these choices in its routing context, including when to use each profile and where account-specific setup instructions live.
@@ -78,7 +117,7 @@ Creating an orchestrator does not schedule recurring work. Use workspace Automat
 
 Native conversation turns use fresh provider context with bounded recent conversation excerpts: up to four comments at 1,000 bytes each and up to 6,000 bytes from the triggering comment. Routing includes at most 12 profile names/IDs and 2,000 bytes of guidance. Memory selection now prioritizes confirmed, applicable preferences within a byte budget rather than selecting eight recent entries. Instructions and anything the agent retrieves also consume context; these bounds are not a total token budget.
 
-The [personal assistant backend reference](personal-assistant-api.md) documents the in-development objective, intake and shared-context additions, including retained private ownership across default changes and restrictions on private automation targets. The personal assistant now has a restricted broker for supported execution profiles; its central UI and combined qualification remain in development. Ordinary workspace coordinators retain their existing tool access.
+The [personal assistant backend reference](personal-assistant-api.md) documents the in-development objective, intake and shared-context additions, including retained private ownership across default changes and restrictions on private automation targets. The personal assistant has a restricted broker and an app-level interface for testing; combined qualification remains in development. Ordinary workspace coordinators retain their existing tool access.
 
 Orchestration owns its runtime, conversation API, instructions, memory and conversation registry. It uses core execution profiles, task sessions, authentication, run queue and chat rendering. Office is independently feature flagged and is not required to configure or run an orchestrator. Office APIs cannot operate on registered orchestrators or their conversations. Disabling Orchestration hides its navigation and rejects its API/run paths without deleting configuration. The scoped `POST /api/v1/orchestration/workspaces/:wsId/import/:id` endpoint can explicitly register an existing assistant using a complete orchestrator configuration while retaining its identity and conversation history.
 

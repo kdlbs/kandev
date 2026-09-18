@@ -76,3 +76,38 @@ export const PermissionActionRow = memo(function PermissionActionRow({
     </div>
   );
 });
+
+/** Only the current provider's offered options may be presented as decisions. */
+export function NativePermissionOptions({
+  options,
+  onSelect,
+  isResponding = false,
+}: {
+  options: readonly { option_id: string; name: string; kind: string }[];
+  onSelect: (optionId: string) => void;
+  isResponding?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex flex-wrap gap-2 rounded-sm bg-amber-500/10 px-3 py-2"
+      data-testid="permission-action-row"
+    >
+      <p className="w-full text-xs text-amber-600 dark:text-amber-400">
+        {t("task:approveThisAction")}
+      </p>
+      {options.map((option) => (
+        <Button
+          key={option.option_id}
+          variant="outline"
+          size="sm"
+          disabled={isResponding}
+          className={`${ACTION_BUTTON_CLASS} max-md:min-h-11`}
+          onClick={() => onSelect(option.option_id)}
+        >
+          {option.name}
+        </Button>
+      ))}
+    </div>
+  );
+}

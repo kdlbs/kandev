@@ -418,6 +418,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
     "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
     "task.state_changed": BackendMessage<"task.state_changed", TaskEventPayload>;
+    "orchestration.assistant.updated": BackendMessage<
+      "orchestration.assistant.updated",
+      { binding_id: string; revision: string }
+    >;
     "task.status_summary.updated": BackendMessage<
       "task.status_summary.updated",
       TaskStatusSummaryUpdatedPayload

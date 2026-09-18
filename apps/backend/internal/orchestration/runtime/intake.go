@@ -46,6 +46,9 @@ func (h *Handler) acceptComment(c *gin.Context, agentID string) {
 	if created {
 		status = http.StatusCreated
 	}
+	if binding, err := h.Service.Repo.AssistantForConversation(c.Request.Context(), row.TaskID); err == nil {
+		h.Service.notifyAssistantUpdated(c.Request.Context(), binding.ID)
+	}
 	c.JSON(status, row)
 }
 

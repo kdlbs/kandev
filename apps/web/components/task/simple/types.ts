@@ -21,6 +21,10 @@ export type TaskStatus =
 export type TaskRunStatus = "queued" | "claimed" | "finished" | "failed" | "cancelled";
 
 export type TaskComment = {
+  clientMessageId?: string;
+  receiptStatus?: string;
+  intentRevision?: number;
+  sequence?: number;
   id: string;
   taskId: string;
   authorType: "user" | "agent";

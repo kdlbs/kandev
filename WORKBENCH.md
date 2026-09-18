@@ -35,7 +35,8 @@ generic material; original local snapshot/backup refs are not published.
 | Assistant tool enforcement | Implemented; restricted Claude ACP broker, live authority and unknown-delivery checks verified |
 | Assistant attention | Implemented; all-session native sources, durable wakes, pause/expiry and owner-scoped updates verified |
 | Assistant resolution and controls | Implemented; native parity, attributed known answers, pause and per-session stop verified |
-| Assistant UI, maintenance and workspace grants | Fully planned; implementation pending |
+| Assistant UI | Implemented; scoped chat, native decisions, memory controls, desktop/mobile and localization verified |
+| Assistant maintenance and workspace grants | Fully planned; implementation pending |
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
 | Actual live-data rehearsal and deployment | Pending; live service unchanged |
 

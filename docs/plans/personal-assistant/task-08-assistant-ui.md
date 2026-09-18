@@ -1,7 +1,7 @@
 ---
 id: "08-assistant-ui"
 title: "First-class assistant interface"
-status: pending
+status: done
 wave: 6
 depends_on: ["02-objectives-routing","03-memory-context","04-capability-inventory","07-input-resolution"]
 plan: "plan.md"
@@ -113,6 +113,67 @@ without backend enforcement and feature gates.
 
 `sequential`
 
+## Working mobile contract
+
+Desktop uses the shared conversation renderer with a bounded attention/details
+column. Phone uses focused Chat, Attention and Details views, following the
+existing Coordinator route and `mobile-column-tabs` pattern. Global entry is the
+shared app navigation sheet; dense content stays in the route rather than a
+picker drawer. Each active pane owns its vertical scroll, uses the page shell's
+dynamic viewport/safe area and exposes 44px phone actions. Shared domain hooks,
+request identities and presenters preserve native behavior in both layouts.
+Mobile E2E will enter through navigation, send a generic request, resolve native
+input and inspect memory without horizontal overflow.
+
 ## Results
 
-Pending. Record red/green test evidence, exact commands and counts, relevant artifacts, owned changes and cleanup here; synchronize the plan checkbox only after acceptance is met.
+Implemented the app-level Assistant route, desktop sidebar, shared mobile sheet
+and mobile board menu. The selected private conversation uses native chat with
+stable retry IDs, paginated history and reconnect/foreground refresh. Scoped
+observation generations discard old-owner responses. Transient read failures keep
+drafts while disabling writes. Native live activity remains in the canonical store.
+
+Attention injects a narrow native clarification transport, offers only current
+provider permission options, preserves task/session/source identity and links to
+the original task. Native task history displays assistant attribution. Details
+contains objective evidence, activity, capability/credential metadata, and scoped
+memory editing/forgetting with original-instruction provenance. All five locales
+and generated pseudo/Traditional Chinese catalogs are synchronized.
+
+Verification (2026-09-18; logs in the private local implementation evidence directory):
+
+- The retry regression first failed because a confirmed conflict retained intent
+  revision 4 after current intent became 6. After clearing only definite failed
+  attempts, all four input-hook tests passed; ambiguous retries retain their ID.
+  A separate skip-reason assertion was corrected to use the existing native
+  `reject_reason` contract; that transport already preserved the reason.
+- `pnpm --dir apps/web test app/assistant hooks/domains/orchestration
+  hooks/domains/session/use-clarification-transport.test.ts
+  hooks/domains/session/use-clarification-group.test.ts
+  components/task/chat/messages/clarification-request-message.test.tsx
+  components/task/chat/messages/permission-action-row.test.tsx
+  components/task/chat/clarification-input-overlay.test.tsx
+  lib/api/domains/assistant-api.test.ts
+  lib/api/domains/orchestration-conversation-api.test.ts
+  src/spa-routes.canvas.test.ts`: 91 tests in 16 files passed.
+- Navigation regression tests cover app sidebar, shared sheet and mobile board
+  menu. The enabled/disabled Assistant destination has a dedicated assertion.
+- Managed host E2E, one worker, retries disabled: desktop personal-assistant flow
+  passed (6.9s); Pixel 5 mobile flow passed (8.1s). Both use the real backend and a
+  running native mock worker question, test-owned SQL objective/source fixtures,
+  no HTTP stubs, and Office off. Selection creates no duplicate conversation
+  session. Native answer, objective, memory provenance/forget and pause/resume
+  converge. Disabled desktop route makes no assistant API requests.
+- Phone E2E also checks pseudo-locale, 44px tabs and no horizontal overflow;
+  `assistant-phone-pseudo.png` was visually inspected and stays in local E2E
+  evidence. Initial E2E failures exposed a wrong test button label and missing
+  mobile-board entry; both were corrected before the passing runs.
+- Full Orchestration runtime race suite passed (15.262s), including the new
+  provenance route's owner/runtime/feature-off checks. Go lint reports zero issues.
+- Typecheck, changed-file ESLint, i18n validation, architecture checks, public-doc
+  validator (48 pages) and its 61 tests pass. Backend schema is unchanged.
+
+This work does not qualify a provider: the synthetic mock profile is correctly
+shown as unsupported for restricted assistant execution. Task 11 supplies combined
+scenarios, constrained-provider evidence and fresh shareable synthetic media.
+Live Kandev and its data were not changed.
