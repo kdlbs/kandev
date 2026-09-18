@@ -41,6 +41,7 @@ func TestPersistenceMiddlewareRemainsAvailableDuringManagedMaintenance(t *testin
 		pool := db.NewPool(conn, conn)
 		tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 			ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+			Sweep: startup.StepStoresRepositories,
 		}})
 		if err != nil {
 			t.Fatalf("NewTracker: %v", err)

@@ -44,7 +44,7 @@ func holdWriter(t *testing.T, conn *sqlx.DB) *sqlx.Tx {
 
 func TestRuntimeHealthDefersDuringMaintenance(t *testing.T) {
 	conn, pool, tracker, health := newSQLiteHealthFixture(t, []Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if _, err := conn.Exec("CREATE TABLE first (id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatalf("create first table: %v", err)
@@ -81,8 +81,8 @@ func TestRuntimeHealthDefersDuringMaintenance(t *testing.T) {
 
 func TestRuntimeHealthDeferralPreservesMixedStoreStates(t *testing.T) {
 	conn, pool, tracker, health := newSQLiteHealthFixture(t, []Descriptor{
-		{ID: "healthy", OwnerPackage: "owner/healthy", RequiredTables: []string{"healthy"}},
-		{ID: "unhealthy", OwnerPackage: "owner/unhealthy", RequiredTables: []string{"unhealthy"}},
+		{ID: "healthy", OwnerPackage: "owner/healthy", RequiredTables: []string{"healthy"}, Sweep: startup.StepStoresRepositories},
+		{ID: "unhealthy", OwnerPackage: "owner/unhealthy", RequiredTables: []string{"unhealthy"}, Sweep: startup.StepStoresRepositories},
 	})
 	if _, err := conn.Exec("CREATE TABLE healthy (id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatalf("create healthy table: %v", err)
@@ -119,7 +119,7 @@ func TestRuntimeHealthDeferralPreservesMixedStoreStates(t *testing.T) {
 
 func TestStartupHealthDoesNotDefer(t *testing.T) {
 	conn, pool, tracker, health := newSQLiteHealthFixture(t, []Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if _, err := conn.Exec("CREATE TABLE first (id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatalf("create first table: %v", err)
@@ -161,7 +161,7 @@ func TestStartupHealthDoesNotDefer(t *testing.T) {
 
 func TestRuntimeHealthResumesAfterMaintenance(t *testing.T) {
 	conn, pool, tracker, health := newSQLiteHealthFixture(t, []Descriptor{{
-		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"},
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
 	}})
 	if _, err := conn.Exec("CREATE TABLE first (id TEXT PRIMARY KEY)"); err != nil {
 		t.Fatalf("create first table: %v", err)
