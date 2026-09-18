@@ -955,11 +955,15 @@ never the same signal. This is also distinct from the fan-out limit below:
 that refuses the whole call with `ResourceExhausted` rather than substituting
 a withheld verdict onto any task.
 
-No event delivered through `OnEvent` (`capabilities.events`) ever carries the
-dependency projection in its payload: `Blocked`, `BlockedReason`, `DependsOn`,
-`Blocks`, the truncation flags, and `StartWhenUnblocked` are
-`host.Tasks().Get`/`.List` fields only, never included in event data. A
-plugin that caches a task's dependency fields refetches them when: a
+Canvas event payloads do not carry the dependency projection: `Blocked`,
+`BlockedReason`, `DependsOn`, `Blocks`, the truncation flags, and
+`StartWhenUnblocked` are refetch-on-signal fields for the canvas surface.
+Native plugin `OnEvent` deliveries can carry the four dependency fields
+(`blocked`, `blocked_reason`, `depends_on`, and `blocks`) on dependency-related
+`task.updated` events. The truncation flags and `start_when_unblocked` still
+come from `host.Tasks().Get`/`.List`, so an event is never a complete
+replacement for a task read. A plugin that caches a task's dependency fields
+refetches them when: a
 `task.updated` event names that task or either end of one of its edges; a
 `task.dependencies_resolved` or `task.dependency_failed` event names that
 task; or a `task.state_changed` event names any task ID present in that

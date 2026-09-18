@@ -538,6 +538,38 @@ func TestBuildDependencyViews_DependsOnListTruncatesAt512(t *testing.T) {
 	if view.Blocked {
 		t.Errorf("blocked=%v reason=%q; every predecessor (shown or not) resolved", view.Blocked, view.BlockedReason)
 	}
+
+	// The predecessor beyond the displayed limit still participates in the
+	// verdict. Changing only that omitted predecessor must make the task block,
+	// while the displayed list stays capped and unchanged.
+	omittedID := fmt.Sprintf("pred-%04d", total-1)
+	for _, tc := range []struct {
+		name   string
+		state  v1.TaskState
+		reason string
+	}{
+		{name: "pending", state: v1.TaskStateInProgress, reason: BlockedReasonPending},
+		{name: "failed", state: v1.TaskStateFailed, reason: BlockedReasonFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setDependencyState(t, svc, omittedID, tc.state)
+			got := svc.BuildDependencyViews(ctx, []*models.Task{dependent})[dependent.ID]
+			if len(got.DependsOn) != maxTaskDependencyCount {
+				t.Fatalf("depends_on length = %d, want %d", len(got.DependsOn), maxTaskDependencyCount)
+			}
+			if !got.DependsOnTruncated {
+				t.Error("depends_on_truncated = false, want true")
+			}
+			for i, ref := range got.DependsOn {
+				if ref.ID != view.DependsOn[i].ID {
+					t.Errorf("depends_on[%d] = %s, want %s", i, ref.ID, view.DependsOn[i].ID)
+				}
+			}
+			if !got.Blocked || got.BlockedReason != tc.reason {
+				t.Errorf("blocked=%v reason=%q; omitted %s predecessor should block with %q", got.Blocked, got.BlockedReason, tc.state, tc.reason)
+			}
+		})
+	}
 }
 
 // The dependent direction is cut to 512 BEFORE resolution: only the first 512
