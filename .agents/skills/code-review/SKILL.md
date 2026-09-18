@@ -35,7 +35,12 @@ change and a small diff because this limits risk and maintainer burden.
 
 Determine the right diff scope:
 - **Local changes**: `git diff --name-only` (unstaged) and `git diff --cached --name-only` (staged)
+- **Untracked changes**: `git ls-files --others --exclude-standard`; read any in-scope source or tests before drawing conclusions
 - **PR review**: `git diff origin/<base_branch>...HEAD --name-only` to diff against the base branch
+
+Reconcile the inventory with `git status --short` without staging user changes. If
+the review includes uncommitted files, describe it as a working-tree snapshot
+over `HEAD`; do not imply that `HEAD` contains the implementation.
 
 For an existing PR, first confirm the exact head under review. Do not assume the
 local checkout is current: inspect the PR's base branch and head SHA, fetch the

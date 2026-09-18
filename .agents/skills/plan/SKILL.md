@@ -97,6 +97,12 @@ State the result, the implementation order, and the reason for that order.
 Name exact files, symbols, schema changes, contracts, and integration points.
 Organize this section by implementation boundary or vertical slice.
 
+For a shared provider or adapter path, include a compact compatibility matrix
+covering the provider, transport, identity or capability shape, intended
+behavior, verification evidence, and unsupported-shape fallback. Shared
+implementation does not imply that every provider is supported; state
+conditional coverage explicitly.
+
 ## ASCII UI preview
 
 Required when rendered UI changes. Follow the preview contract in

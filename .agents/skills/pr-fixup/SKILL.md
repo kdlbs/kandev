@@ -45,6 +45,10 @@ runtime. If the runtime denies access, stop until the user authorizes access.
 Run `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`.
 Load [review-evidence.md](references/review-evidence.md) for snapshot fields,
 review classification, hidden threads, and access fallbacks.
+Capture each helper's stdout, stderr, and exit code once per evidence round,
+then inspect that bounded snapshot. Do not fan out repeated `pr-state` calls
+while diagnosing one head; repeated API reads can consume the available rate
+budget and turn a usable snapshot into transport blockage.
 For cross-repository PRs, use the snapshot's delivery fields as the push target.
 
 Then run `gh pr view <PR> --json state,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision`.
@@ -102,6 +106,14 @@ logs, use the same fallback; it handles plain-text and ZIP responses and emits
 bounded context. Follow `references/ci-troubleshooting.md`. Reproduce the exact
 failed command where possible; CI-specific Go lint often needs
 `golangci-lint run ./... --new-from-rev=<base> --timeout=5m`.
+
+Bind every failed status and workflow run to the current PR head SHA and the
+current run attempt before acting. Older red runs can remain visible after a
+push or rerun while a current-head run is queued. A mixed GitHub
+`statusCheckRollup` may contain both check runs and legacy status contexts, so
+classify each item from the fields it actually provides and report passed,
+skipped, pending, and failed counts separately; do not treat a missing
+`conclusion` or an older run as a current failure.
 
 If CI reports files or commits outside the PR diff, or a stale base SHA, resolve
 the authoritative base repository, ref name, and current base SHA from PR
