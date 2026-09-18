@@ -115,7 +115,9 @@ test.describe("automations — webhook alert ingest (T01)", () => {
     await filterPaths.nth(1).fill("issue.id");
     await triggerCard.getByRole("combobox").nth(1).click();
     await testPage.getByRole("option", { name: "Not equals", exact: true }).click();
-    await triggerCard.getByPlaceholder("critical", { exact: true }).blur();
+    const emptyScalarInput = triggerCard.getByPlaceholder("critical", { exact: true });
+    await emptyScalarInput.focus();
+    await emptyScalarInput.blur();
 
     // Repository selector.
     await triggerCard.getByPlaceholder("service").fill("service");
