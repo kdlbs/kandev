@@ -1,7 +1,7 @@
-# Prepared first live pilot
+# First live Coordinator pilot
 
-Status: prepared, not applied. The implementation, packaged candidate and private
-migration/replay/rollback rehearsal are complete. Live Kandev remains on v0.94.0.
+Status: applied and running. The implementation, packaged candidate and private
+migration/replay/rollback rehearsal completed before the authorized cutover.
 
 | Review item | Prepared result |
 | --- | --- |
@@ -14,7 +14,7 @@ migration/replay/rollback rehearsal are complete. Live Kandev remains on v0.94.0
 | Service patch | Staged private override; merged user-unit validation passed |
 | Initial flags | Coordinator on; Personal assistant off |
 | Preserved settings | Port, authentication, data/home paths, provider PATH/accounts, identity and resource limits |
-| Live mutation | None |
+| Live mutation | Candidate installed; Coordinator enabled; Personal assistant disabled |
 
 The local-only packet contains the exact staged override, current service-file
 hashes, final-backup boundaries and ordered cutover/rollback steps. It selects the
@@ -24,12 +24,11 @@ uses about 11.55 GiB; capacity was checked before staging. Reserve several minut
 for quiescing work, the final cold backup and verification, then restart/smoke.
 Isolated startup timings do not guarantee that whole-window duration.
 
-After explicit deployment authorization, recheck active work and service/bundle
-hashes, stop the service, create and verify the final matched cold backup, install
-the reviewed override, reload/start and verify health/version/login/history.
-Then complete one generic task/review/callback cycle with an explicit profile
-and executor, followed by a controlled restart while quiescent. The pilot adds
-no recurring schedule. Keep the normal upstream updater unapplied during this
+The authorized cutover rechecked active work and service/bundle hashes, stopped
+the service, created and verified the final matched cold backup, installed the
+reviewed override, reloaded/started and verified health/version/login/history.
+Controlled restart recovery also passed while quiescent. The pilot adds no
+recurring schedule. Keep the normal upstream updater unapplied during this
 custom-branch pilot; later upgrades require another qualified private bundle.
 
 Rollback stops the candidate, preserves its new state privately and restores the
@@ -38,7 +37,9 @@ only the new candidate override. Post-cutover writes remain in the diagnostic
 copy for deliberate reconciliation; external effects are not automatically undone.
 
 The reviewed [live-pilot work order](../../plans/orchestration-delivery/task-04-live-pilot.md)
-requires an "explicit instruction to deploy the named qualified candidate."
-That release action remains pending. Assistant implementation is complete, but
-its live enablement follows the separate opt-in in the reviewed rollout plan.
-Dogfood observations and the focused upstream PR/export remain after the pilot.
+received the explicit instruction to deploy the named qualified candidate. The
+deployment and recovery checks are recorded in [live-pilot-receipt.json](live-pilot-receipt.json).
+Assistant implementation remains disabled by the separate opt-in in the reviewed
+rollout plan. The first authenticated generic task/review/callback observation
+and focused upstream PR/export remain follow-up work; no private prompts or
+account data are included in this packet.

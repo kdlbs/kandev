@@ -1,7 +1,7 @@
 ---
 id: "04-live-pilot"
 title: "Live coordinator pilot"
-status: pending
+status: deployed-awaiting-dogfood
 wave: 6
 depends_on: ["03-migration-rehearsal"]
 plan: "plan.md"
@@ -99,9 +99,9 @@ the candidate/migration receipts.
 
 ## Results
 
-Prepared, pending the named-candidate deployment instruction. The complete
-candidate `0.94.0-orchestration.20260918.sha69753564d0d7` is qualified and passes
-the private-data migration/replay/rollback rehearsal. The exact local service
-override and rollback packet are staged; merged user-unit validation passes.
-No override has been installed and live Kandev remains unchanged. See the
-[reviewable pilot packet](../../review/orchestration/live-pilot-ready.md).
+The named-candidate deployment instruction was received and the pilot is running
+with Coordinator enabled and Personal assistant disabled. The final cold backup,
+health/version/auth checks, exact executable check and controlled restart recovery
+passed; the redacted result is in [live-pilot-receipt.json](../../review/orchestration/live-pilot-receipt.json).
+The first authenticated generic task/review/callback cycle remains for dogfood
+observation before wider use. See the [reviewable pilot packet](../../review/orchestration/live-pilot-ready.md).

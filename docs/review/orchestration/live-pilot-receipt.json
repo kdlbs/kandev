@@ -1,0 +1,27 @@
+{
+  "candidate": "0.94.0-orchestration.20260918.sha69753564d0d7",
+  "source": "69753564d0d7c0121e8681a72e5b4ce8c384a106",
+  "base": "v0.94.0",
+  "deployment": "applied",
+  "rollout": "Coordinator enabled; Personal assistant disabled",
+  "authentication": "enabled; unauthenticated API check returned 401",
+  "service": "active",
+  "readiness": "passed",
+  "health": "passed",
+  "executable": "frozen candidate bundle",
+  "restart_recovery": "passed",
+  "final_backup": "created and verified before install",
+  "database": {
+    "integrity": "ok",
+    "tasks": 76,
+    "task_sessions": 70,
+    "task_session_messages": 20749,
+    "runs": 0,
+    "queued_messages": 0,
+    "pending_moves": 0,
+    "task_search_alignment": "76/76; zero orphan or missing rows"
+  },
+  "live_task_cycle": "pending authenticated dogfood observation",
+  "private_data": "no prompts, credentials, account identifiers or private logs included",
+  "recorded": "2026-09-18"
+}
