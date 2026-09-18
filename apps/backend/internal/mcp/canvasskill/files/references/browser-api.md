@@ -207,13 +207,14 @@ No event ever carries the dependency projection (`blocked`, `blocked_reason`,
 `depends_on`, `blocks`, the truncation flags, `start_when_unblocked`) in its
 data payload — those fields are refetch-on-signal only. Refetch a cached
 task's dependency fields when: a `task.updated` event names that task or
-either end of one of its edges; a dependency is added or removed between that
-task and any other; or a `task.state_changed` event names any task ID
-present in that task's cached `depends_on` or `blocks` list, since a
-predecessor or dependent simply advancing state is not itself one of the
-first three signals. A single task read is not a transactional snapshot: with
-no surrounding lock, an edge can change while the read is being derived, so
-one response can show an edge asymmetrically (for example, a predecessor
+either end of one of its edges; a `task.dependencies_resolved` or
+`task.dependency_failed` event names that task; or a `task.state_changed`
+event names any task ID present in that task's cached `depends_on` or
+`blocks` list, since a predecessor or dependent simply advancing state is not
+itself one of the first three signals. A single task read is not a
+transactional snapshot: with no surrounding lock, an edge can change while
+the read is being derived, so one response can show an edge asymmetrically
+(for example, a predecessor
 still listed as pending after it has already resolved). Treat what a
 response returns as the union of independently-read facts, and resolve
 staleness by refetching on the next matching signal rather than by trusting
