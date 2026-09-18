@@ -28,6 +28,8 @@ type CommentBase = {
 export type DiffComment = CommentBase & {
   source: "diff";
   filePath: string;
+  /** Explicit scope for new comments; absent on legacy persisted rows. */
+  repositoryName?: string;
   startLine: number;
   endLine: number;
   side: AnnotationSide;

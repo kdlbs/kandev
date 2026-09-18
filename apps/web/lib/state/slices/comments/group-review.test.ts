@@ -51,3 +51,11 @@ it("keeps whole-file identity stable when repository ID resolution changes", () 
   const unresolved = { ...resolved, id: "unresolved", repositoryId: undefined };
   expect(groupCommentsByFile([resolved, unresolved])).toHaveLength(1);
 });
+
+it("groups new scoped line and whole-file comments without repository IDs", () => {
+  const scopedLine = { ...line(), repositoryId: undefined, repositoryName: "api" };
+  const scopedWhole = { ...whole("api"), repositoryId: undefined };
+  const groups = groupCommentsByFile([scopedLine, scopedWhole, whole("")]);
+  expect(groups.map((g) => g.filePath)).toEqual(["api/README.md", "README.md"]);
+  expect(groups[0].comments).toHaveLength(2);
+});

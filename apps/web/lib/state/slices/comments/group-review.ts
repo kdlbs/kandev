@@ -5,7 +5,7 @@ type FileGroup = { key: string; filePath: string; comments: ReviewComment[] };
 function repositoryNamesById(comments: ReviewComment[]): Map<string, Set<string>> {
   const names = new Map<string, Set<string>>();
   for (const comment of comments) {
-    if (comment.source !== "review-file" || !comment.repositoryId) continue;
+    if (comment.repositoryName === undefined || !comment.repositoryId) continue;
     const scopes = names.get(comment.repositoryId) ?? new Set<string>();
     scopes.add(comment.repositoryName);
     names.set(comment.repositoryId, scopes);
@@ -14,7 +14,7 @@ function repositoryNamesById(comments: ReviewComment[]): Map<string, Set<string>
 }
 
 function fileGroupKey(comment: ReviewComment, names: Map<string, Set<string>>): string {
-  if (comment.source === "review-file") {
+  if (comment.repositoryName !== undefined) {
     return JSON.stringify(["name", comment.repositoryName, comment.filePath]);
   }
   if (!comment.repositoryId) return JSON.stringify(["name", "", comment.filePath]);
@@ -35,7 +35,7 @@ export function groupCommentsByFile(comments: ReviewComment[]): FileGroup[] {
   for (const comment of comments) {
     const key = fileGroupKey(comment, names);
     const filePath =
-      comment.source === "review-file"
+      comment.repositoryName !== undefined
         ? [comment.repositoryName, comment.filePath].filter(Boolean).join("/")
         : comment.filePath;
     const existing = byFile.get(key);

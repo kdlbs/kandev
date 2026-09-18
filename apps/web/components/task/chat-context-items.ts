@@ -150,7 +150,7 @@ function buildCommentItems(params: BuildContextItemsParams): ContextItem[] {
     if (comments.length === 0) continue;
     const first = comments[0];
     const filePath = first.filePath;
-    const repositoryName = first.source === "review-file" ? first.repositoryName : undefined;
+    const repositoryName = first.repositoryName;
     const fileName = getFileName(filePath);
     items.push({
       kind: "comment",

@@ -42,7 +42,9 @@ export function formatReviewCommentsAsMarkdown(comments: ReviewComment[]): strin
           ? `${comment.startLine}`
           : `${comment.startLine}-${comment.endLine}`;
 
-      lines.push(`**${filePath}:${lineRange}**`);
+      lines.push(
+        `**${[comment.repositoryName, filePath].filter(Boolean).join("/")}:${lineRange}**`,
+      );
       lines.push("```");
       lines.push(comment.codeContent);
       lines.push("```");

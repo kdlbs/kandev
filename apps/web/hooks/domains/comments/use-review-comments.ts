@@ -13,10 +13,9 @@ export function usePendingReviewCommentsByFile(
     for (const id of pending) {
       const comment = byId[id];
       if (!comment || !isReviewComment(comment) || comment.sessionId !== sessionId) continue;
-      const key =
-        comment.source === "review-file" && comment.repositoryName
-          ? JSON.stringify([comment.repositoryName, comment.filePath])
-          : comment.filePath;
+      const key = comment.repositoryName
+        ? JSON.stringify([comment.repositoryName, comment.filePath])
+        : comment.filePath;
       (groups[key] ??= []).push(comment);
     }
     return groups;

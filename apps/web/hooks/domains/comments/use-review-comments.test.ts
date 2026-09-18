@@ -67,3 +67,35 @@ it("combines root file and line feedback in one composer group", () => {
   expect(Object.values(result.current)).toHaveLength(1);
   expect(Object.values(result.current)[0].map((c) => c.id)).toEqual(["line", "file"]);
 });
+
+it("combines scoped line and whole-file feedback in one named composer group", () => {
+  act(() => {
+    useCommentsStore.getState().addComment({
+      id: "line",
+      source: "diff",
+      repositoryName: "api",
+      sessionId: "s1",
+      filePath: "a.txt",
+      text: "line",
+      status: "pending",
+      createdAt: "now",
+      startLine: 1,
+      endLine: 1,
+      side: "additions",
+      codeContent: "a",
+    });
+    useCommentsStore.getState().addComment({
+      id: "file",
+      source: "review-file",
+      sessionId: "s1",
+      filePath: "a.txt",
+      repositoryName: "api",
+      text: "file",
+      status: "pending",
+      createdAt: "now",
+    });
+  });
+  const { result } = renderHook(() => usePendingReviewCommentsByFile("s1"));
+  expect(Object.values(result.current)).toHaveLength(1);
+  expect(Object.values(result.current)[0].map((c) => c.id)).toEqual(["line", "file"]);
+});

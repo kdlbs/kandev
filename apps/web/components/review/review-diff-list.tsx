@@ -437,7 +437,7 @@ function renderDiffContent(opts: {
             hideHeader
             expandUnchanged={expandUnchanged}
             onToggleExpandUnchanged={onToggleExpandUnchanged}
-            repo={file.repository_name}
+            repo={file.repository_name ?? ""}
           />
         </DiffErrorBoundary>
         {file.diff_skip_reason === "truncated" && (

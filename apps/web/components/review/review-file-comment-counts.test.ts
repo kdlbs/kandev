@@ -67,3 +67,38 @@ it.each([undefined, ""])("counts root file comments for repository name %s", (re
     [reviewFileKey(file)]: 1,
   });
 });
+
+it("counts newly scoped line comments only in their named repository", () => {
+  const file = {
+    path: "README.md",
+    repository_name: "api",
+    status: "modified",
+    source: "uncommitted",
+    staged: false,
+    diff: "",
+    additions: 0,
+    deletions: 0,
+  } as ReviewFile;
+  const comment = {
+    source: "diff" as const,
+    id: "line",
+    sessionId: "s",
+    filePath: file.path,
+    repositoryName: "api",
+    startLine: 1,
+    endLine: 1,
+    side: "additions" as const,
+    codeContent: "",
+    text: "Feedback",
+    status: "pending" as const,
+    createdAt: "now",
+  };
+  expect(
+    computeCommentCounts(
+      { line: comment },
+      ["line"],
+      [file, { ...file, repository_name: "" }],
+      new Map(),
+    ),
+  ).toEqual({ [reviewFileKey(file)]: 1 });
+});

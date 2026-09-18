@@ -202,3 +202,13 @@ even when nested scopes share an ID. Legacy line rows join a named group only
 when the ID-to-name mapping is unambiguous. Regression coverage also verifies
 stable grouping when a repository ID becomes available later. The four new
 identity cases and both aggregate component suites pass (16 tests).
+
+Review-scope follow-up: newly created line comments retain the diff viewer's
+repository name, including explicit root scope. Both Pierre and Monaco paths
+carry it through creation and Run; annotation selection, aggregate grouping,
+counts, composer navigation, and delivery formatting preserve it. Legacy saved
+rows keep their previous fallback behavior. Added regression cases for mixed
+scoped feedback, annotation isolation, file counts, grouping, and formatting.
+Validation: 34 affected test files (272 tests), 26 focused count/build-file
+checks after the count-helper extraction, typecheck, focused lint, and spec lint
+passed. The three initial scope regressions failed before the implementation.

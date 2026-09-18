@@ -484,10 +484,10 @@ function CommentCard({
   const location =
     comment.source === "review-file"
       ? [comment.repositoryName, comment.filePath].filter(Boolean).join("/")
-      : `${comment.filePath}:${lineRange}`;
+      : `${[comment.repositoryName, comment.filePath].filter(Boolean).join("/")}:${lineRange}`;
 
   const handleOpenFile = useCallback(() => {
-    if (comment.source === "review-file") openFile(comment.filePath, comment.repositoryName);
+    if (comment.repositoryName !== undefined) openFile(comment.filePath, comment.repositoryName);
     else openFile(comment.filePath);
   }, [openFile, comment]);
 

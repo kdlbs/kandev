@@ -218,24 +218,34 @@ function wholeFileCommentKey(path: string, repositoryName = ""): string {
   return JSON.stringify([repositoryName, path]);
 }
 
-function countWholeFileComments(byId: Record<string, Comment>, ids: string[]) {
+function countScopedFileComments(byId: Record<string, Comment>, ids: string[]) {
   const counts = new Map<string, number>();
   for (const id of ids) {
     const comment = byId[id];
-    if (comment?.source !== "review-file") continue;
+    if (!comment || !isReviewComment(comment) || comment.repositoryName === undefined) continue;
     const key = wholeFileCommentKey(comment.filePath, comment.repositoryName);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
 }
 
+const bucketKey = (repoId: string, path: string) => JSON.stringify([repoId, path]);
+
+function countLegacyLineComments(byId: Record<string, Comment>, ids: string[]) {
+  const counts = new Map<string, number>();
+  for (const id of ids) {
+    const comment = byId[id];
+    if (comment?.source !== "diff" || comment.repositoryName !== undefined) continue;
+    const key = bucketKey(comment.repositoryId ?? "", comment.filePath);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
- * Counts diff comments per file, scoped by repo when known. Multi-repo:
- * comments carrying `repositoryId` are matched only against files in that
- * repo (translated from `repository_name` via `repositoryNameToId`); legacy
- * comments without `repositoryId` and same-repo unattributed comments
- * match by path. Returned record is keyed by `reviewFileKey(file)` so the
- * file tree's per-row badge correctly disambiguates same-named files.
+ * Counts scoped review comments by repository name and path. Legacy line
+ * comments retain repository-ID or path-only matching. The file tree uses
+ * reviewFileKey so same-named files keep independent badges.
  */
 export function computeCommentCounts(
   byId: Record<string, import("@/lib/state/slices/comments").Comment>,
@@ -246,19 +256,11 @@ export function computeCommentCounts(
   const counts: Record<string, number> = {};
   if (!sessionCommentIds) return counts;
 
-  type BucketKey = string;
-  const bucketKey = (repoId: string, path: string) => `${repoId}::${path}`;
-  const bucket = new Map<BucketKey, number>();
-  const wholeFileCounts = countWholeFileComments(byId, sessionCommentIds);
-  for (const id of sessionCommentIds) {
-    const comment = byId[id];
-    if (comment?.source !== "diff") continue;
-    const k = bucketKey(comment.repositoryId ?? "", comment.filePath);
-    bucket.set(k, (bucket.get(k) ?? 0) + 1);
-  }
+  const bucket = countLegacyLineComments(byId, sessionCommentIds);
+  const scopedFileCounts = countScopedFileComments(byId, sessionCommentIds);
 
   for (const file of allFiles) {
-    let total = wholeFileCounts.get(wholeFileCommentKey(file.path, file.repository_name)) ?? 0;
+    let total = scopedFileCounts.get(wholeFileCommentKey(file.path, file.repository_name)) ?? 0;
     if (file.repository_name) {
       const repoId = repositoryNameToId.get(file.repository_name) ?? "";
       if (repoId) total += bucket.get(bucketKey(repoId, file.path)) ?? 0;

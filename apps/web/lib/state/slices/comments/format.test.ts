@@ -102,6 +102,13 @@ describe("formatReviewCommentsAsMarkdown", () => {
     };
   }
 
+  it("includes repository context when sending scoped line feedback", () => {
+    const result = formatReviewCommentsAsMarkdown([
+      makeDiffComment({ filePath: "README.md", repositoryName: "api", startLine: 1, endLine: 1 }),
+    ]);
+    expect(result).toContain("**api/README.md:1**");
+  });
+
   it("returns empty string for empty input", () => {
     expect(formatReviewCommentsAsMarkdown([])).toBe("");
   });

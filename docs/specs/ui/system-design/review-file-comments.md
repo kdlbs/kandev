@@ -37,6 +37,11 @@ an unresolved named repository as the root or apply legacy path-only wildcard
 matching to new file comments. Preserve submodule names, including when a
 nested scope shares its parent's repository ID. Follow existing review identity
 rules from `components/review/AGENTS.md`; do not rewrite legacy line rows.
+New line comments also retain the optional repository name supplied by either
+diff viewer. Grouping, annotation selection, counts, composer navigation, and
+agent delivery use that explicit scope. Existing rows without a name retain
+legacy matching; ID-only rows bridge aggregate groups only when their mapping
+to an observed name is unambiguous.
 
 Existing store add/update/remove and hydration actions own persistence and
 pending IDs. No storage-key migration is needed. Old comments load unchanged.
