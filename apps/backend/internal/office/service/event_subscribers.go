@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	commoncosts "github.com/kandev/kandev/internal/common/costs"
@@ -153,15 +154,19 @@ type ApprovalResolvedData struct {
 // same identity, so taskless fallback resolution and summary writes use this
 // field, not AgentID.
 type AgentLifecycleData struct {
+	AgentExecutionID            string                 `json:"agent_execution_id"`
 	TaskID                      string                 `json:"task_id"`
 	RunID                       string                 `json:"run_id"`
+	RunSessionID                string                 `json:"run_session_id"`
+	RunAttempt                  int                    `json:"run_attempt"`
+	WorkspaceID                 string                 `json:"workspace_id"`
+	OwnerKind                   string                 `json:"owner_kind"`
 	AgentID                     string                 `json:"agent_id"`
 	AgentProfileID              string                 `json:"agent_profile_id"`
 	SessionID                   string                 `json:"session_id"`
 	TurnID                      string                 `json:"turn_id,omitempty"`
 	ErrorMessage                string                 `json:"error_message"`
 	ProviderError               *streams.ProviderError `json:"provider_error,omitempty"`
-	AgentExecutionID            string                 `json:"agent_execution_id"`
 	PromptGeneration            uint64                 `json:"prompt_generation,omitempty"`
 	EvidenceKnown               bool                   `json:"evidence_known,omitempty"`
 	OutputObserved              bool                   `json:"output_observed,omitempty"`
@@ -189,6 +194,21 @@ func (s *Service) resolveLifecycleRun(ctx context.Context, data AgentLifecycleDa
 		if data.SessionID != "" && run.SessionID != "" && data.SessionID != run.SessionID {
 			return nil, sql.ErrNoRows
 		}
+		if data.RunSessionID != "" {
+			session, sessionErr := s.repo.GetRunSession(ctx, data.RunSessionID)
+			if sessionErr != nil {
+				return nil, sessionErr
+			}
+			if session == nil || session.RunID != run.ID || session.Attempt != data.RunAttempt ||
+				session.AgentProfileID != run.AgentProfileID ||
+				(session.State != models.RunSessionStatePreparing && session.State != models.RunSessionStateRunning &&
+					session.State != models.RunSessionStateFinished) {
+				return nil, sql.ErrNoRows
+			}
+			if data.AgentExecutionID != "" && session.ExecutionID != "" && session.ExecutionID != data.AgentExecutionID {
+				return nil, sql.ErrNoRows
+			}
+		}
 		return run, nil
 	}
 	if data.TaskID != "" {
@@ -202,17 +222,28 @@ func (s *Service) resolveLifecycleRun(ctx context.Context, data AgentLifecycleDa
 	return s.repo.GetClaimedTasklessRunForAgent(ctx, agentProfileID)
 }
 
+// exactRunSessionEvent reports whether the lifecycle event carries the
+// immutable run-attempt identity. A missing claimed run for such an event is
+// a stale predecessor signal and must not clear a successor's working state.
+func exactRunSessionEvent(data *AgentLifecycleData) bool {
+	return data != nil && data.RunID != "" && data.RunSessionID != ""
+}
+
 type PromptUsageData struct {
-	TaskID         string      `json:"task_id"`
-	SessionID      string      `json:"session_id"`
-	AgentID        string      `json:"agent_id"`
-	AgentProfileID string      `json:"agent_profile_id,omitempty"`
-	AgentType      string      `json:"agent_type"`
-	Model          string      `json:"model"`
-	Provider       string      `json:"provider"`
-	Usage          UsageTokens `json:"usage"`
-	TurnID         string      `json:"turn_id,omitempty"`
-	UsageEventID   string      `json:"usage_event_id,omitempty"`
+	AgentExecutionID string      `json:"agent_execution_id,omitempty"`
+	TaskID           string      `json:"task_id"`
+	SessionID        string      `json:"session_id"`
+	RunSessionID     string      `json:"run_session_id,omitempty"`
+	RunAttempt       int         `json:"run_attempt,omitempty"`
+	WorkspaceID      string      `json:"workspace_id,omitempty"`
+	AgentID          string      `json:"agent_id"`
+	AgentProfileID   string      `json:"agent_profile_id,omitempty"`
+	AgentType        string      `json:"agent_type"`
+	Model            string      `json:"model"`
+	Provider         string      `json:"provider"`
+	Usage            UsageTokens `json:"usage"`
+	TurnID           string      `json:"turn_id,omitempty"`
+	UsageEventID     string      `json:"usage_event_id,omitempty"`
 }
 
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
@@ -271,6 +302,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
 		{events.OfficeCommentCreated, s.handleCommentCreated},
 		{events.AgentCompleted, maybeAsync(s.handleAgentCompleted)},
+		{events.AgentReady, maybeAsync(s.handleTasklessAgentReady)},
 		// AgentStopped fires when StopAgent is called (e.g. office
 		// fire-and-forget turn-complete teardown). Same handler — both
 		// signal "the agent is no longer running on this task and the
@@ -281,6 +313,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.AgentStopped, maybeAsync(s.handleAgentCompleted)},
 		{events.AgentFailed, maybeAsync(s.handleAgentFailed)},
 		{events.BuildSessionPromptUsageWildcardSubject(), maybeAsync(s.handlePromptUsage)},
+		{events.BuildAgentStreamWildcardSubject(), maybeAsync(s.handleAgentStreamUsage)},
 		{events.AgentTurnMessageSaved, maybeAsync(s.handleAgentTurnMessageSaved)},
 	}
 	for _, sub := range subs {
@@ -425,6 +458,9 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if exactRunSessionEvent(data) {
+				return nil
+			}
 			// No claimed run resolves for this event: it already finished
 			// via another path, arrived late/duplicated, or a cancellation
 			// marked the run terminal before this event landed. There is no
@@ -565,6 +601,9 @@ func (s *Service) handleTasklessAgentCompleted(
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if exactRunSessionEvent(data) {
+				return nil
+			}
 			// Same reasoning as handleAgentCompleted's and handleAgentFailed's
 			// ErrNoRows exits: no claimed run resolves, so nothing reaches
 			// this function's own clear below, but the agent may still be
@@ -577,6 +616,9 @@ func (s *Service) handleTasklessAgentCompleted(
 			s.clearAgentWorking(ctx, agentProfileID, data.RunID)
 			return nil
 		}
+		return err
+	}
+	if err := s.finishRunSession(ctx, data, models.RunSessionStateFinished, ""); err != nil {
 		return err
 	}
 	// run came from GetClaimedTasklessRunForAgent: it is the run that
@@ -609,6 +651,42 @@ func (s *Service) handleTasklessAgentCompleted(
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil
+}
+
+func (s *Service) finishRunSession(
+	ctx context.Context, data *AgentLifecycleData, state models.RunSessionState, message string,
+) error {
+	if data == nil || data.RunSessionID == "" {
+		return nil
+	}
+	session, err := s.repo.GetRunSession(ctx, data.RunSessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return sql.ErrNoRows
+	}
+	if session.State == state {
+		return nil
+	}
+	if session.State != models.RunSessionStatePreparing && session.State != models.RunSessionStateRunning {
+		return sql.ErrNoRows
+	}
+	wrote, err := s.repo.FinishRunSession(ctx, data.RunSessionID, state, message)
+	if err != nil {
+		return err
+	}
+	if wrote {
+		return nil
+	}
+	latest, err := s.repo.GetRunSession(ctx, data.RunSessionID)
+	if err != nil {
+		return err
+	}
+	if latest != nil && latest.State == state {
+		return nil
+	}
+	return sql.ErrNoRows
 }
 
 // refreshContinuationSummary rebuilds the continuation summary for the
@@ -726,12 +804,18 @@ func truncateRunOutputSummary(content string) string {
 
 func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[AgentLifecycleData](event)
-	if err != nil || data.TaskID == "" {
+	if err != nil {
 		return nil
+	}
+	if data.TaskID == "" {
+		return s.handleTasklessAgentFailed(ctx, data)
 	}
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if exactRunSessionEvent(data) {
+				return nil
+			}
 			// Same reasoning as handleAgentCompleted's ErrNoRows exit: no
 			// claimed run resolves, so nothing reaches HandleAgentFailure's
 			// clear, but the agent may still be "working" from the launch.
@@ -781,6 +865,74 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 		return nil
 	}
 	s.dispatchAgentErrorTrigger(ctx, run, data.TaskID, data.SessionID, errMsg)
+	return nil
+}
+
+func (s *Service) handleTasklessAgentFailed(
+	ctx context.Context, data *AgentLifecycleData,
+) error {
+	if data == nil || (data.AgentID == "" && data.AgentProfileID == "" && data.RunID == "") {
+		return nil
+	}
+	run, err := s.resolveLifecycleRun(ctx, *data)
+	if err != nil {
+		return s.handleTasklessAgentLookupError(ctx, data, err)
+	}
+	s.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
+		"session_id":     data.SessionID,
+		"run_session_id": data.RunSessionID,
+		"error_message":  data.ErrorMessage,
+	})
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	if err := s.finishRunSession(ctx, data, models.RunSessionStateFailed, data.ErrorMessage); err != nil {
+		return err
+	}
+	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
+		return nil
+	}
+	wrote, err := s.HandleAgentFailure(
+		ctx,
+		run,
+		enrichModelFailureMessage(run, data.ErrorMessage),
+		data.AgentID,
+		data.ProviderError,
+		AgentFailureEvidence{
+			RunID:                       data.RunID,
+			SessionID:                   data.SessionID,
+			AgentExecutionID:            data.AgentExecutionID,
+			PromptGeneration:            data.PromptGeneration,
+			EvidenceKnown:               data.EvidenceKnown,
+			OutputObserved:              data.OutputObserved,
+			EffectObserved:              data.EffectObserved,
+			ProviderDiagnosticCandidate: data.ProviderDiagnosticCandidate,
+			ProviderDiagnosticText:      data.ProviderDiagnosticText,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if wrote {
+		s.publishRunProcessedForWorkspace(ctx, run.ID, RunStatusFailed, run, data.WorkspaceID)
+	}
+	return nil
+}
+
+func (s *Service) handleTasklessAgentLookupError(
+	ctx context.Context,
+	data *AgentLifecycleData,
+	err error,
+) error {
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if exactRunSessionEvent(data) {
+		return nil
+	}
+	agentProfileID := data.AgentProfileID
+	if agentProfileID == "" {
+		agentProfileID = data.AgentID
+	}
+	s.clearAgentWorking(ctx, agentProfileID, data.RunID)
 	return nil
 }
 
@@ -899,18 +1051,31 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		s.recordCostEventDropped(costDropReasonDecodeError, "")
 		return nil
 	}
-	if data.TaskID == "" || data.SessionID == "" {
+	var fields *sqlite.TaskExecutionFields
+	switch {
+	case data.TaskID == "" && data.RunSessionID != "":
+		fields, err = s.tasklessUsageFields(ctx, data)
+		if err != nil {
+			return err
+		}
+		if fields == nil {
+			s.recordCostEventDropped(costDropReasonMissingIDs, data.TaskID)
+			return nil
+		}
+
+	case data.TaskID == "" || data.SessionID == "":
 		s.recordCostEventDropped(costDropReasonMissingIDs, data.TaskID)
 		return nil
-	}
-	fields, err := s.repo.GetTaskExecutionFields(ctx, data.TaskID)
-	if err != nil {
-		s.recordCostEventDropped(costDropReasonTaskFieldsError, data.TaskID)
-		return nil
+	default:
+		fields, err = s.repo.GetTaskExecutionFields(ctx, data.TaskID)
+		if err != nil {
+			s.recordCostEventDropped(costDropReasonTaskFieldsError, data.TaskID)
+			return nil
+		}
 	}
 
 	sessionAgentProfileID := data.AgentProfileID
-	if sessionAgentProfileID == "" {
+	if sessionAgentProfileID == "" && data.TaskID != "" {
 		id, lookupErr := s.repo.GetSessionAgentProfileID(ctx, data.TaskID, data.SessionID)
 		if lookupErr != nil {
 			// Best-effort attribution fallback: log and continue with an
@@ -952,6 +1117,43 @@ func (s *Service) handlePromptUsage(ctx context.Context, event *bus.Event) error
 		}
 	}
 	return nil
+}
+
+// handleAgentStreamUsage bridges direct shared-runtime usage into the Office
+// cost ledger. Taskless executions do not have an orchestrator task session,
+// so the owner fields on the stream payload provide exact attribution.
+func (s *Service) handleAgentStreamUsage(ctx context.Context, event *bus.Event) error {
+	payload, err := decodeEventData[runtimeapi.AgentStreamEventPayload](event)
+	if err != nil || payload.OwnerKind != runtimeapi.ExecutionOwnerRun || payload.RunSessionID == "" || payload.Data == nil || payload.Data.Usage == nil {
+		return nil
+	}
+	usage := payload.Data.Usage
+	outputPresent := usage.OutputTokensPresent
+	return s.handlePromptUsage(ctx, bus.NewEvent(events.SessionPromptUsageUpdated, "office-service", PromptUsageData{
+		AgentExecutionID: payload.ExecutionID,
+		SessionID:        payload.RunSessionID,
+		RunSessionID:     payload.RunSessionID,
+		RunAttempt:       payload.RunAttempt,
+		WorkspaceID:      payload.WorkspaceID,
+		AgentID:          payload.AgentType,
+		AgentProfileID:   payload.AgentProfileID,
+		AgentType:        payload.AgentType,
+		Model:            payload.Data.CurrentModelID,
+		TurnID:           payload.Data.TurnID,
+		UsageEventID:     fmt.Sprintf("run:%s:%d", payload.ExecutionID, payload.Data.PromptGeneration),
+		Usage: UsageTokens{
+			InputTokens:                  usage.InputTokens,
+			OutputTokens:                 usage.OutputTokens,
+			OutputTokensPresent:          &outputPresent,
+			CachedReadTokens:             usage.CachedReadTokens,
+			CachedWriteTokens:            usage.CachedWriteTokens,
+			ThoughtTokens:                usage.ThoughtTokens,
+			TotalTokens:                  usage.TotalTokens,
+			ProviderReportedCostSubcents: usage.ProviderReportedCostSubcents,
+			ProviderReportedCostPresent:  usage.ProviderReportedCostPresent,
+			Estimated:                    usage.Estimated,
+		},
+	}))
 }
 
 // publishCostRecorded emits the durable cost write as an Office notification.

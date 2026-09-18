@@ -1226,6 +1226,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		exec.FinishedAt = &now
 	})
 
+	if execution.Owner.Kind == ExecutionOwnerRun {
+		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+			return err
+		}
+	}
 	// End session trace span
 	execution.EndSessionSpan()
 
@@ -2642,7 +2647,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 	runtimeInstance := &ExecutorInstance{
 		InstanceID:           execution.ID,
 		TaskID:               execution.TaskID,
-		SessionID:            execution.SessionID,
+		SessionID:            executionInventorySessionID(execution),
 		ContainerID:          execution.ContainerID,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,

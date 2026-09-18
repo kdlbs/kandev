@@ -154,6 +154,19 @@ func (a *workflowStartPromptAttempt) claimPreservation() bool {
 	)
 }
 
+// releasePreservationClaim makes a failed queue admission retryable for this
+// launch attempt. The claim is shared by every callback context, so a later
+// callback can retry only while it still owns the same attempt.
+func (a *workflowStartPromptAttempt) releasePreservationClaim() bool {
+	if a == nil || a.claim == nil {
+		return false
+	}
+	return a.claim.state.CompareAndSwap(
+		uint32(workflowStartPromptAttemptPreservationClaimed),
+		uint32(workflowStartPromptAttemptActive),
+	)
+}
+
 func (a *workflowStartPromptAttempt) hasInput() bool {
 	return a != nil && (a.dispatchInputPresent || len(a.attachments) > 0 ||
 		len(a.references) > 0 || strings.TrimSpace(a.handoffText) != "")
@@ -351,6 +364,33 @@ func (s *Service) preserveWorkflowStartPromptAfterFailure(
 	if !attempt.claimPreservation() {
 		return
 	}
+	err := s.persistWorkflowStartPromptAttempt(ctx, attempt)
+	if err != nil && s.workflowStartPromptAttemptIsCurrent(ctx, attempt, executionID) {
+		// Queue admission can fail before the transaction writes a row. Retry
+		// once while this callback still owns the immutable launch attempt. The
+		// attempt claim prevents duplicate callbacks from racing this retry.
+		err = s.persistWorkflowStartPromptAttempt(ctx, attempt)
+	}
+	if err != nil {
+		attempt.releasePreservationClaim()
+		// Keep the startup error as the user-visible recovery signal. This
+		// diagnostic carries only ownership identifiers, never prompt content.
+		s.logger.Warn("failed to preserve workflow prompt after asynchronous startup failure",
+			zap.String("task_id", attempt.taskID),
+			zap.String("session_id", attempt.sessionID),
+			zap.String("agent_execution_id", executionID),
+			zap.String("launch_token", attempt.launchToken),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) persistWorkflowStartPromptAttempt(
+	ctx context.Context,
+	attempt *workflowStartPromptAttempt,
+) error {
+	if attempt == nil {
+		return fmt.Errorf("workflow start prompt attempt is nil")
+	}
 	var err error
 	if attempt.workflowEntryCaptured {
 		_, err = s.persistAutoStartPromptAtWorkflowEntry(
@@ -383,16 +423,7 @@ func (s *Service) preserveWorkflowStartPromptAfterFailure(
 			attempt.handoffText,
 		)
 	}
-	if err != nil {
-		// Keep the startup error as the user-visible recovery signal. This
-		// diagnostic carries only ownership identifiers, never prompt content.
-		s.logger.Warn("failed to preserve workflow prompt after asynchronous startup failure",
-			zap.String("task_id", attempt.taskID),
-			zap.String("session_id", attempt.sessionID),
-			zap.String("agent_execution_id", executionID),
-			zap.String("launch_token", attempt.launchToken),
-			zap.Error(err))
-	}
+	return err
 }
 
 func (s *Service) workflowStartPromptAttemptIsCurrent(

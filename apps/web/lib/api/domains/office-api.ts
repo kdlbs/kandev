@@ -20,6 +20,8 @@ export {
   setupChannel,
   deleteChannel,
   exportConfig,
+  exportConfigManifest,
+  exportSelectedConfigZip,
   exportConfigZipUrl,
   previewImport,
   applyImport,

@@ -22,10 +22,9 @@ import (
 // as a success. That is exactly the shape of the card's "323 consecutive
 // successful runs, zero agent sessions" measurement.
 //
-// The scheduler cannot currently launch a taskless run at all (that
-// requires a taskless session seam — task_sessions.task_id is NOT NULL —
-// which is a follow-up feature, not part of this card). So the correct
-// terminal state today is a loud, immediate failure, not silent success.
+// This isolated service test intentionally leaves the run-session launcher
+// unwired, so the scheduler must retain its fail-closed behavior rather than
+// reporting a successful launch that never happened.
 func TestSchedulerTick_TasklessRunFailsInsteadOfFinishing(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
@@ -276,9 +275,8 @@ func TestSchedulerTick_TaskBoundRunStillLaunches(t *testing.T) {
 }
 
 // TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent is the WO-35 Review
-// round 1 regression test. A taskless run is a scheduler capability gap
-// (the taskless-launch seam does not exist yet — see failTasklessRun's
-// SCOPE-1 decision comment in scheduler_integration.go), not an agent
+// round 1 regression test. A taskless run without a configured launcher is a
+// wiring failure, not an agent
 // failure, so failing it must not touch the agent's consecutive-failure
 // counter. The pre-installed "Coordinator heartbeat" routine is taskless
 // by design and fires every 5 minutes

@@ -476,11 +476,37 @@ func (r *Repository) createRunTables() error {
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,
 		skill_id TEXT NOT NULL,
+		display_name TEXT NOT NULL DEFAULT '',
+		slug TEXT NOT NULL DEFAULT '',
+		label_source TEXT NOT NULL DEFAULT '',
 		version TEXT NOT NULL,
 		content_hash TEXT NOT NULL,
 		materialized_path TEXT NOT NULL,
 		PRIMARY KEY (run_id, skill_id)
 	);
+
+	CREATE TABLE IF NOT EXISTS office_run_sessions (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		attempt INTEGER NOT NULL,
+		state TEXT NOT NULL,
+		execution_id TEXT NOT NULL DEFAULT '',
+		execution_profile_id TEXT NOT NULL DEFAULT '',
+		adapter TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		acp_session_id TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		started_at TIMESTAMP,
+		finished_at TIMESTAMP,
+		cancel_requested_at TIMESTAMP,
+		error_message TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL DEFAULT 1,
+		UNIQUE (run_id, attempt)
+	);
+	CREATE INDEX IF NOT EXISTS idx_office_run_sessions_run ON office_run_sessions(run_id, attempt);
+	CREATE INDEX IF NOT EXISTS idx_office_run_sessions_live ON office_run_sessions(workspace_id, state);
 	`)
 	if err != nil {
 		return err
