@@ -5,7 +5,7 @@ import "github.com/kandev/kandev/internal/agentctl/types"
 // sessionMcpServers keeps the managed assistant broker as the sole attachment
 // across new sessions, restored sessions and context resets.
 func (s *Server) sessionMcpServers(requested []types.McpServer) []types.McpServer {
-	if s.cfg.AssistantRestricted() {
+	if s.cfg.BrokerRestricted() {
 		servers := make([]types.McpServer, 0, len(s.cfg.McpServers))
 		for _, server := range s.cfg.McpServers {
 			servers = append(servers, types.McpServer{

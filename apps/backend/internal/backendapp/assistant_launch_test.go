@@ -42,12 +42,16 @@ func TestAssistantPreparedSessionPersistsRestriction(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, true, session.Metadata["native_conversation"])
 			require.NotNil(t, prepared.McpProfile)
-			require.Equal(t, mcpprofile.SurfaceAssistantBroker, prepared.McpProfile.Surface)
-			if name == "assistant" {
+			switch name {
+			case "assistant":
+				require.Equal(t, mcpprofile.SurfaceAssistantBroker, prepared.McpProfile.Surface)
 				require.Equal(t, true, session.Metadata["run_bound"])
 				require.Equal(t, string(mcpprofile.SurfaceAssistantBroker), session.Metadata[orchestrationruntime.AssistantPolicyMetadata])
-			} else {
+			case "coordinator":
+				require.Equal(t, mcpprofile.SurfaceOrchestratorBroker, prepared.McpProfile.Surface)
 				require.NotContains(t, session.Metadata, orchestrationruntime.AssistantPolicyMetadata)
+			case "revoked":
+				require.Equal(t, mcpprofile.SurfaceAssistantBroker, prepared.McpProfile.Surface)
 			}
 		})
 	}

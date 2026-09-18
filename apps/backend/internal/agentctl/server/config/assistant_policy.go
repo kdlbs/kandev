@@ -15,10 +15,14 @@ func (c *InstanceConfig) AssistantRestricted() bool {
 	return c.McpProfile != nil && c.McpProfile.Surface == mcpprofile.SurfaceAssistantBroker
 }
 
+func (c *InstanceConfig) BrokerRestricted() bool {
+	return c.McpProfile != nil && (c.McpProfile.Surface == mcpprofile.SurfaceAssistantBroker || c.McpProfile.Surface == mcpprofile.SurfaceOrchestratorBroker)
+}
+
 // applyAssistantPolicy replaces every ambient MCP attachment. The executable
 // is this managed agentctl binary, never a profile-supplied command.
 func applyAssistantPolicy(c *InstanceConfig) {
-	if !c.AssistantRestricted() {
+	if !c.BrokerRestricted() {
 		return
 	}
 	c.AutoApprovePermissions = false

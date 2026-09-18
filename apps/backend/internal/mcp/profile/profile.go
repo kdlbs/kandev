@@ -21,6 +21,10 @@ const (
 	// SurfaceAssistantBroker has no general native or plugin tools. Its only
 	// attachment is the restricted assistant broker, authorized on every call.
 	SurfaceAssistantBroker Surface = "assistant-broker-v1"
+	// SurfaceOrchestratorBroker attaches the same backend-owned broker to a
+	// workspace Orchestrator without imposing the private Assistant's
+	// Claude-specific runtime restrictions.
+	SurfaceOrchestratorBroker Surface = "orchestrator-broker-v1"
 )
 
 type Capability string
@@ -107,7 +111,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceConversation, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceAssistantBroker:
+	case SurfaceKanbanTask, SurfaceConversation, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceAssistantBroker, SurfaceOrchestratorBroker:
 		return surface
 	default:
 		return SurfaceKanbanTask
