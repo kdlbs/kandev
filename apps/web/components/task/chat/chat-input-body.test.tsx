@@ -1,5 +1,6 @@
 import { createRef } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import type { Window as HappyDOMWindow } from "happy-dom";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatInputBody, type ChatInputBodyProps } from "./chat-input-body";
@@ -8,6 +9,7 @@ import { shouldShowCancelAgent } from "./types";
 const tipTapPropsMock = vi.hoisted(() => vi.fn());
 const MOCK_TIPTAP_INPUT_TEST_ID = "mock-tiptap-input";
 const initialWidth = window.innerWidth;
+const viewport = (window as unknown as HappyDOMWindow).happyDOM;
 const CHAT_INPUT_GLOW_TEST_ID = "chat-input-glow";
 
 vi.mock("./tiptap-input", () => ({
@@ -27,7 +29,7 @@ vi.mock("./context-items/context-zone", () => ({
 
 afterEach(() => {
   cleanup();
-  Object.defineProperty(window, "innerWidth", { configurable: true, value: initialWidth });
+  viewport.setWindowSize({ width: initialWidth });
   tipTapPropsMock.mockClear();
 });
 
@@ -174,8 +176,8 @@ describe("ChatInputBody focus hint", () => {
 
   // @covers AC-UI-COMPOSER-FOCUS-HINT-001.1, AC-UI-COMPOSER-FOCUS-HINT-001.2
   it.each([393, 767, 768, 1024])("matches focus hint and padding to viewport width %i", (width) => {
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
-    const { rerender } = render(
+    viewport.setWindowSize({ width });
+    render(
       <TooltipProvider>
         <ChatInputBody {...props({ showFocusHint: true })} />
       </TooltipProvider>,
@@ -186,15 +188,7 @@ describe("ChatInputBody focus hint", () => {
     expect(hint !== null).toBe(width >= 768);
     expect(editor.parentElement?.classList.contains("pr-28")).toBe(width >= 768);
 
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: width < 768 ? 768 : 767,
-    });
-    rerender(
-      <TooltipProvider>
-        <ChatInputBody {...props({ showFocusHint: true })} />
-      </TooltipProvider>,
-    );
+    act(() => viewport.setWindowSize({ width: width < 768 ? 768 : 767 }));
     expect(screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID)).toBe(editor);
     expect(screen.queryByText("to focus") !== null).toBe(width < 768);
     expect(editor.parentElement?.classList.contains("pr-28")).toBe(width < 768);
@@ -209,16 +203,11 @@ describe("ChatInputBody focus hint", () => {
         <ChatInputBody {...inputProps} />
       </TooltipProvider>
     );
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 768 });
-    const { rerender } = render(body);
+    viewport.setWindowSize({ width: 768 });
+    render(body);
     const editor = screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID);
 
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 767 });
-    rerender(
-      <TooltipProvider>
-        <ChatInputBody {...inputProps} />
-      </TooltipProvider>,
-    );
+    act(() => viewport.setWindowSize({ width: 767 }));
 
     expect(screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID)).toBe(editor);
     expect(tipTapPropsMock).toHaveBeenLastCalledWith(

@@ -119,3 +119,11 @@ identity were restored for publication.
 
 Hiding only the hint leaves wasted padding. Using one effective predicate
 prevents that mismatch. Do not redefine tablet or coarse-pointer policy.
+
+## Review follow-up
+
+Greptile identified that forced component rerenders could mask a broken
+viewport subscription. Responsive cases now use native Happy DOM viewport
+changes without parent rerenders. All 38 focused tests pass; disabling the
+subscription makes the boundary-transition cases fail. ESLint passes.
+Production behavior and screenshots are unchanged.

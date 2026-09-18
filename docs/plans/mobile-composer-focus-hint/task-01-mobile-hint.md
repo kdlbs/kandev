@@ -128,3 +128,11 @@ are unchanged. Internal requirements, design, and delivery records are updated.
 Fresh synthetic desktop and phone PR screenshots were captured and visually
 checked. Both capture runs passed. GitHub access and the user-approved commit
 identity were restored for publication.
+
+## Review follow-up
+
+Greptile identified that forced component rerenders could mask a broken
+viewport subscription. Responsive cases now use native Happy DOM viewport
+changes without parent rerenders. All 38 focused tests pass; disabling the
+subscription makes the boundary-transition cases fail. ESLint passes.
+Production behavior and screenshots are unchanged.
