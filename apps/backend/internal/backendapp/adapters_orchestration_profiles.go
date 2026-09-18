@@ -3,7 +3,7 @@ package backendapp
 import (
 	"context"
 	"fmt"
-	"github.com/kandev/kandev/internal/office/shared"
+	shared "github.com/kandev/kandev/internal/orchestration/models"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"maps"
@@ -41,6 +41,9 @@ func (a *taskCreatorAdapter) assignDirectWorkspaceTask(ctx context.Context, task
 	metadata["orchestration_chief_id"] = command.ChiefID
 	description, err := attachAssistantTaskContext(task, metadata, command.AssigneeID, command.DelegationReference)
 	if err != nil {
+		return err
+	}
+	if err = shared.CheckWorkspaceEffect(ctx); err != nil {
 		return err
 	}
 	_, err = a.taskSvc.UpdateTask(ctx, task.ID, &taskservice.UpdateTaskRequest{Metadata: metadata, Description: description})

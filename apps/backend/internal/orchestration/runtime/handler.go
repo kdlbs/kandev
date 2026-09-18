@@ -49,6 +49,7 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	assistant.POST("/assistant/control", h.assistantControl)
 	assistant.GET("/assistant/objectives", h.objectives)
 	h.registerMaintenanceRoutes(assistant)
+	h.registerWorkspaceGrantRoutes(assistant)
 	assistant.GET("/assistant/attention", h.attention)
 	assistant.GET("/assistant/attention/:id/input", h.attentionInput)
 	assistant.GET("/runtime/attention/:id/input", h.attentionInput)
@@ -77,6 +78,7 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	g.POST("/tasks/:id/comments", h.comment)
 	g.POST("/tasks/:id/retry", h.retry)
 	g.GET("/runtime/workspace", h.catalog)
+	assistant.GET("/runtime/tasks", h.workspaceTasks)
 	g.GET("/runtime/tasks/:id/details", h.details)
 	g.POST("/runtime/tasks", h.createTask)
 	g.POST("/runtime/tasks/:id/manage", h.manageTask)
@@ -112,7 +114,7 @@ func (h *Handler) caller(c *gin.Context) (*runtimeauth.AgentClaims, bool) {
 	if !h.assistantInvocation(c, claims, run.Payload) {
 		return nil, false
 	}
-	return claims, true
+	return h.resolveWorkspaceTarget(c, claims)
 }
 
 func (h *Handler) currentRunAuthority(c *gin.Context, claims *runtimeauth.AgentClaims, payload string) bool {
@@ -251,6 +253,10 @@ func (h *Handler) catalog(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if _, linked := c.Get(workspaceSelectionKey); linked {
+		h.workspaceDirectory(c, claims)
+		return
+	}
 	result, err := h.Service.Manager.WorkspaceCatalog(c.Request.Context(), claims.WorkspaceID)
 	if err != nil {
 		fail(c, err)
@@ -269,6 +275,10 @@ func (h *Handler) catalog(c *gin.Context) {
 func (h *Handler) details(c *gin.Context) {
 	claims, ok := h.caller(c)
 	if !ok || !h.privateRuntimeAllowed(c, claims, c.Param("id")) {
+		return
+	}
+	if _, linked := c.Get(workspaceSelectionKey); linked {
+		h.workspaceTask(c, claims)
 		return
 	}
 	result, err := h.Service.Manager.WorkspaceTaskDetails(c.Request.Context(), claims.WorkspaceID, c.Param("id"))

@@ -85,12 +85,16 @@ func (s *Service) reconcileAttentionTarget(ctx context.Context, target models.At
 		return err
 	}
 	ctx = authn.WithIdentity(ctx, authn.Identity{UserID: b.OwnerUserID, Role: authn.RoleMember})
+	scoped, grant, err := s.attentionWorkspace(ctx, b, target.TaskID)
+	if err != nil {
+		return nil
+	}
 	previous, err := s.Repo.AttentionForTask(ctx, b.ID, target.TaskID)
 	if err != nil {
 		return err
 	}
 	sourceCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	sources, readErr := s.Attention.ReadAttention(sourceCtx, b, target.TaskID, previous)
+	sources, readErr := s.Attention.ReadAttention(sourceCtx, scoped, target.TaskID, previous)
 	cancel()
 	if readErr != nil {
 		sources = unknownAttentionSources(previous)
@@ -100,12 +104,18 @@ func (s *Service) reconcileAttentionTarget(ctx context.Context, target models.At
 	if err = validateAttentionSources(sources); err != nil {
 		return err
 	}
-	changed, err := s.Repo.ProjectAttention(ctx, b, target.TaskID, sources, s.attentionNow())
+	if grant != nil {
+		if _, err = s.currentWorkspaceGrant(ctx, b, grant.WorkspaceID, grant.Revision, "observe", "task_summary"); err != nil {
+			return nil
+		}
+		sources = linkedAttentionSources(sources)
+	}
+	changed, err := s.Repo.ProjectWorkspaceAttention(ctx, b, grant, target.TaskID, sources, s.attentionNow())
 	if err != nil {
 		return err
 	}
 	var frictionErr error
-	if readErr == nil {
+	if readErr == nil && grant == nil {
 		frictionErr = s.observeFriction(ctx, b, target.TaskID, sources)
 	}
 	if changed && s.AttentionUpdated != nil {
@@ -114,6 +124,9 @@ func (s *Service) reconcileAttentionTarget(ctx context.Context, target models.At
 	if readErr != nil {
 		return fmt.Errorf("attention source unavailable")
 	}
+	return s.dispatchUnpausedAttentionWakes(ctx, b, target.TaskID, frictionErr)
+}
+func (s *Service) dispatchUnpausedAttentionWakes(ctx context.Context, b *models.AssistantBinding, task string, frictionErr error) error {
 	if !s.AssistantEnabled {
 		return nil
 	}
@@ -124,8 +137,9 @@ func (s *Service) reconcileAttentionTarget(ctx context.Context, target models.At
 	if paused(a) {
 		return frictionErr
 	}
-	return errors.Join(s.dispatchAttentionWakes(ctx, b, target.TaskID), frictionErr)
+	return errors.Join(s.dispatchAttentionWakes(ctx, b, task), frictionErr)
 }
+
 func unknownAttentionSources(previous []models.Attention) []models.AttentionSource {
 	sources := make([]models.AttentionSource, 0, len(previous)+1)
 	for _, row := range previous {
@@ -180,8 +194,10 @@ func validateAttentionSources(sources []models.AttentionSource) error {
 }
 
 type attentionWakeRef struct {
-	ID             string `json:"id"`
-	SourceRevision string `json:"source_revision"`
+	ID                     string `json:"id"`
+	SourceRevision         string `json:"source_revision"`
+	WorkspaceID            string `json:"workspace_id,omitempty"`
+	WorkspaceGrantRevision int64  `json:"workspace_grant_revision,omitempty"`
 }
 
 func (s *Service) dispatchAttentionWakes(ctx context.Context, b *models.AssistantBinding, task string) error {
@@ -191,7 +207,15 @@ func (s *Service) dispatchAttentionWakes(ctx context.Context, b *models.Assistan
 	}
 	for _, wake := range wakes {
 		refs := []attentionWakeRef{{ID: wake.AttentionID, SourceRevision: wake.SourceRevision}}
-		payload := map[string]any{"attention_refs": refs, "callback": map[string]string{taskIDKey: task, "reason": "attention_changed"}}
+		refs, err = s.attentionWakeScope(ctx, b, task, refs)
+		if err != nil {
+			return err
+		}
+		callback := map[string]any{taskIDKey: task, "reason": "attention_changed"}
+		if refs[0].WorkspaceID != "" {
+			callback[workspaceIDKey], callback["workspace_grant_revision"] = refs[0].WorkspaceID, refs[0].WorkspaceGrantRevision
+		}
+		payload := map[string]any{"attention_refs": refs, "callback": callback}
 		if err = s.QueueTurn(ctx, b.OrchestratorID, b.ConversationID, "assistant_attention", "assistant-attention:"+wake.ID, payload); err != nil {
 			return err
 		}
@@ -230,8 +254,8 @@ func (s *Service) validateAttentionWake(ctx context.Context, payload map[string]
 		if err != nil {
 			return err
 		}
-		if !s.attentionVisible(ctx, b, *row) {
-			return fmt.Errorf("attention task no longer managed")
+		if err = s.validateVisibleAttentionWake(ctx, b, row, ref); err != nil {
+			return err
 		}
 		if !refreshed[row.TaskID] {
 			if err = s.ReconcileAttentionTask(ctx, row.TaskID); err != nil {
@@ -246,6 +270,16 @@ func (s *Service) validateAttentionWake(ctx context.Context, payload map[string]
 	}
 	if !current {
 		return fmt.Errorf("attention request no longer current")
+	}
+	return nil
+}
+
+func (s *Service) validateVisibleAttentionWake(ctx context.Context, b *models.AssistantBinding, row *models.Attention, ref attentionWakeRef) error {
+	if err := s.validateWorkspaceWake(ctx, b, row, ref); err != nil {
+		return err
+	}
+	if !s.attentionVisible(ctx, b, *row) {
+		return fmt.Errorf("attention task no longer managed")
 	}
 	return nil
 }

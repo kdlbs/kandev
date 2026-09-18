@@ -1,7 +1,7 @@
 ---
 id: "10-workspace-grants"
 title: "Explicit linked-workspace scope"
-status: pending
+status: done
 wave: 8
 depends_on: ["05-tool-authority","08-assistant-ui","09-workflow-improvements"]
 plan: "plan.md"
@@ -112,4 +112,72 @@ keep the existing strict single-workspace credential contract intact.
 
 ## Results
 
-Pending. Record red/green test evidence, exact commands and counts, relevant artifacts, owned changes and cleanup here; synchronize the plan checkbox only after acceptance is met.
+Complete on 2026-09-18. Grants are explicit owner/binding/workspace records with
+operation/export allowlists, exact receiving profile/account revisions, CAS,
+revocation and event audit. The existing coordinator token retains its home
+workspace. The assistant broker resolves only an explicitly named linked target;
+there is no installation-wide discovery or raw foreign task/transcript export.
+
+Linked reads return bounded directory, task summary, result and current-input
+projections. Context packets preserve the target worker profile and carry only
+explicitly user-wide preferences from the central assistant, never home workspace
+memory or account-bound credential descriptors. Native effects, queued context
+and final wake/session dispatch recheck authority. Target/grant revision is part
+of operation identity; a completed foreign receipt cannot replay against home.
+Resolved attention can be acknowledged by an active session without bypassing
+the original grant check.
+
+Possible-delivery receipts retain the workspace/field/receiver metadata. A new
+receiving account requires historical export reconfirmation before launch.
+Revocation blocks future access; explicit forgetting deletes cached handoffs and
+increments the grant revision so identical old references cannot be recreated.
+Neither action claims to remove provider history or native tasks. The localized
+Details panel exposes grant/review/revoke/forget controls, consent invalidation
+when receiver or scope changes, and the paginated context-delivery audit.
+
+### Verification
+
+Behavioral red/green checks cover missing grants, CAS/concurrent revisions,
+in-flight revocation, foreign-owner/native access, explicit target selection,
+old coordinator denial, worker account preservation, home-memory exclusion,
+queued context invalidation, receiving-account history reconfirmation, bounded
+input export, wake dispatch and acknowledgement. Native adapter tests assert no
+task creation when access is revoked immediately before its first effect.
+
+With the repository toolchain, an owned PostgreSQL fixture and immutable local
+maintenance image, these commands passed from `apps/backend`:
+
+```sh
+go run ./cmd/sqlguard ./internal
+GIN_MODE=release go test -tags fts5 -race -count=1 ./internal/orchestration/... ./internal/persistence/storeconformance ./internal/backendapp ./cmd/agentctl
+GIN_MODE=release go test -tags fts5 -race -count=1 ./internal/orchestration/... ./internal/agent/runtimeauth ./cmd/agentctl
+GIN_MODE=release go test -tags fts5 -race -count=1 ./internal/orchestration/runtime ./internal/backendapp -run 'TestAssistantWorkspace|TestAssistantAttention|TestAssistantContext'
+GIN_MODE=release go test -tags fts5 -race -count=1 ./internal/orchestration/runtime
+golangci-lint run --new-from-rev=upstream/release-v0.94.0
+```
+
+Full store conformance passed in 127.7 seconds, including both-engine fresh,
+replay and previous-stable upgrades. Full native backend checks passed in 51.3
+seconds. Final runtime race checks after the wake acknowledgement repair passed
+in 20.7 seconds. The two consent-form tests, web typecheck/scoped lint, all locale
+checks, SQL guard, architecture, harness and specification validation passed.
+
+Browser commands from `apps/web`, run separately with one worker and no retries:
+
+```sh
+pnpm e2e:run --host --shards 1 --project chromium tests/orchestration/assistant-workspace-links.spec.ts -- --retries=0
+pnpm e2e:run --host --shards 1 --project mobile-chrome tests/orchestration/mobile-assistant-workspace-links.spec.ts -- --retries=0
+```
+
+Each passed one test. They exercise explicit receiving-account consent, save,
+forget, revoke and reload with only synthetic data, preserve the same central
+conversation and assert no native agent session was launched. Both screenshots
+were inspected. The mock central profile remains correctly unsupported. Combined
+cross-feature/provider qualification and final PR media remain task 11; this
+checkpoint neither qualifies a live build nor changes the running service.
+
+Normal commit-hook review required decomposing six functions to stay within the
+repository complexity limit. After that refactor the full Orchestration, native
+adapter and both-engine store race checks passed again (34.4, 57.4 and 141.1
+seconds respectively); SQL guard, PR-scope lint and a fresh desktop browser flow
+also passed. No hook was bypassed.

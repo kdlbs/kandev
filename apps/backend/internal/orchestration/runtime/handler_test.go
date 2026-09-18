@@ -44,6 +44,7 @@ func TestRuntimeAPIScopesWritesAndRevokesFinishedRuns(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/orchestration", runtimeauth.Middleware(s.Auth, s.Personas)), &Handler{Service: s})
 	url := "/api/v1/orchestration/tasks/"
+	require.Equal(t, 403, runtimeRequest(t, router, "GET", "/api/v1/orchestration/runtime/workspace?workspace_id=other&workspace_grant_revision=1", token, "", nil).Code)
 	require.Equal(t, 404, runtimeRequest(t, router, "GET", url+"foreign", token, "", nil).Code)
 	require.Equal(t, 403, runtimeRequest(t, router, "POST", url+"delivery/comments", token, "", map[string]string{"body": "A note"}).Code)
 	require.Equal(t, 201, runtimeRequest(t, router, "POST", url+"delivery/comments", token, run.ID, map[string]string{"body": "A note", "author_id": "spoof"}).Code)

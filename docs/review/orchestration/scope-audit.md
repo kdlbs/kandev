@@ -87,7 +87,7 @@ and unavailable resolvers remain unavailable.
 
 ### Verified continuation through 2026-09-18
 
-The central Coordinator task view and assistant work orders 01–09 are now
+The central Coordinator task view and assistant work orders 01–10 are now
 implemented. Their checked-in work orders contain commands, behavioral evidence
 and limits; the 476-path inventory below remains the original prototype inventory.
 
@@ -112,10 +112,14 @@ and limits; the 476-path inventory below remains the original prototype inventor
   Human review includes incident cohorts, native resource/result pickers,
   revocation, bounded check output, complete patch download, verified subsequent
   recovery, recurrence, retention and interrupted-operation reconciliation.
+- Linked workspaces add explicit owner/receiver consent, revisioned operation and
+  field grants, bounded broker projections, native effect/queue/wake rechecks,
+  worker account isolation, historical receiver reconfirmation and truthful
+  revoke/forget receipts. Desktop and phone controls preserve one conversation.
 - The independent personal-assistant toggle defaults off and preserves retained
   conversation privacy with either feature disabled.
 
-Still unfinished: linked-workspace grants, combined assistant/provider evidence,
+Still unfinished: combined assistant/provider evidence,
 candidate qualification, private live-data migration/rollback rehearsal, live
 pilot, dogfood evidence and focused upstream export. No live service cutover or
 public code PR is implied by these implementation checkpoints. See the

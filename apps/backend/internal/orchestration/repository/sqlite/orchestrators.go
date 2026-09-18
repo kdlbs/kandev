@@ -23,32 +23,15 @@ func (r *Repository) Migrate() error {
 			return err
 		}
 	}
-	if err := r.migrateAssistantStorage(); err != nil {
-		return err
-	}
-	if err := r.migrateObjectives(); err != nil {
-		return err
-	}
-	if err := r.migrateAttention(); err != nil {
-		return err
-	}
-	if err := r.migrateFriction(); err != nil {
-		return err
-	}
-	if err := r.migrateMaintenance(); err != nil {
-		return err
-	}
-	if err := r.ImportLegacyState(); err != nil {
-		return err
-	}
-	if err := r.migrateConversationOwnership(); err != nil {
-		return err
-	}
-	if err := r.migrateMemoryContext(); err != nil {
-		return err
-	}
-	if err := r.migrateRoleConfiguration(); err != nil {
-		return err
+	for _, migrate := range []func() error{
+		r.migrateAssistantStorage, r.migrateObjectives, r.migrateAttention,
+		r.migrateFriction, r.migrateMaintenance, r.migrateWorkspaceGrants,
+		r.ImportLegacyState, r.migrateConversationOwnership,
+		r.migrateMemoryContext, r.migrateRoleConfiguration,
+	} {
+		if err := migrate(); err != nil {
+			return err
+		}
 	}
 	// Settings initializes profiles before Orchestration in the application; standalone
 	// schema migrations may run before that store is present.

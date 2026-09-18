@@ -146,7 +146,7 @@ func (s *Service) launch(ctx context.Context, run *runmodels.Run) error {
 	if err != nil {
 		return err
 	}
-	authority, err := s.validateAssistantAuthority(ctx, taskID, run.Payload)
+	authority, err := s.authorizeHistoryLaunch(ctx, taskID, run.Payload)
 	if err != nil {
 		return err
 	}

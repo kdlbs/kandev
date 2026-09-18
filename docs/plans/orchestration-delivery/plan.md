@@ -38,7 +38,7 @@ The exact base remains v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1`.
 The imported prototype already implements coordinator roles/assignments/chat,
 task delegation/callbacks, optional Automation delivery and backend assistant
 ownership/intake/objectives. Delivery 00–01, central-view 01–03 and assistant
-01–09 are now implemented and verified. Explicit workspace grants, combined
+01–10 are now implemented and verified. Combined
 assistant/provider qualification, the versioned candidate, live-data rehearsal
 and cutover remain unfinished. See the [workbench](../../../WORKBENCH.md) for
 current readiness and the [scope audit](../../review/orchestration/scope-audit.md)
@@ -167,8 +167,8 @@ desktop/mobile screenshots and video.
 ### Personal assistant
 
 The [assistant plan](../personal-assistant/plan.md) owns its implementation records.
-Tasks 01–09 are complete and must not be redone. Tasks 10–11 retain detailed
-continuation checklists, source boundaries, criterion references and verification.
+Tasks 01–10 are complete and must not be redone. Task 11 retains its detailed
+continuation checklist, source boundaries, criterion references and verification.
 Their authoritative
 [requirements](../../specs/orchestration/requirements/personal-assistant.md) and
 [design](../../specs/orchestration/system-design/personal-assistant.md) replace the

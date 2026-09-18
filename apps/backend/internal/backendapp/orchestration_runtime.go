@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestration/maintenance"
+	orchestrationmodels "github.com/kandev/kandev/internal/orchestration/models"
 	"github.com/kandev/kandev/internal/orchestration/personas"
 	orchestrationruntime "github.com/kandev/kandev/internal/orchestration/runtime"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -79,6 +80,9 @@ func updateOrchestratedStatus(ctx context.Context, tasks *taskservice.Service, r
 		if err := validateOrchestratedCompletion(ctx, repos, task.WorkflowStepID, id); err != nil {
 			return err
 		}
+	}
+	if err = orchestrationmodels.CheckWorkspaceEffect(ctx); err != nil {
+		return err
 	}
 	_, err = tasks.UpdateTask(ctx, id, &taskservice.UpdateTaskRequest{State: &state})
 	if err != nil {

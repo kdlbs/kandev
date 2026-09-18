@@ -22,8 +22,9 @@ This design completes the existing `internal/orchestration` assistant. Ownership
 durable intake, objectives, context/credential metadata, capability discovery and
 enforced inspect mode, attention, native resolution and the app-level shell are
 implemented. The maintenance preparation and human review loop is implemented,
-including artifact inspection, native-success closure and recovery. Workspace grants
-remain pending. The
+including artifact inspection, native-success closure and recovery. Explicit
+workspace grants, export receipts and native dispatch checks are implemented;
+combined browser/provider qualification remains pending. The
 [workspace Coordinator view](coordinator-view.md) is a separate observation UI
 that may ship first. Its grouped task list is not an assistant attention ledger.
 
@@ -300,12 +301,30 @@ only and checks current native workspace access. Home scope is explicit; linked
 scope never overrides native membership. A profile change invalidates incompatible
 export grants rather than silently sending context to another account.
 
-Use a separate assistant broker credential binding owner, binding, run/session
-and target grant revision. Do not broaden the meaning of `workspace_coordinator`
-JWTs. Recheck target grant before every read, wake, operation and context export;
+Use the separate assistant broker credential bound to the home conversation and
+run/session. Resolve the owner/binding and an explicit target grant revision on
+each linked request, without modifying the signed claims. Do not broaden the
+meaning of `workspace_coordinator` JWTs. Recheck target grant before every read,
+wake, operation and context export;
 revoke invalidates queued work. Export bounded task/evidence references and scoped
 context, not wholesale foreign transcripts. UI names the receiving profile and
 the limits of forgetting already-delivered content.
+
+The [export-authority decision](../../../decisions/2026-09-18-workspace-export-authority.md)
+defines the metadata-only delivery ledger, historical account reconfirmation and
+explicit handoff-cache forgetting. Native reads use bounded field projections;
+linked attention summaries contain references without request text. Input text
+requires its own export scope. Worker packets retain their selected account and
+include user-wide preferences, without migrating home memory or descriptors.
+
+Details exposes a linked-workspace section with an explicit receiver checkbox,
+separate coordination/export choices, revisioned review/revoke/forget controls and
+delivery audit. Desktop and phone share these controls in the existing Details
+scroll region. Phone forms use a native workspace picker and stacked labeled
+checkboxes; action rows wrap with 44-pixel touch targets. The nearby maintenance
+and memory forms establish the inline form pattern. No extra overlay or scroll
+owner is introduced. Browser coverage exercises grant, forget, revoke and reload
+in desktop Chromium and the phone project with fictional workspace names.
 
 ## Storage, verification and release
 

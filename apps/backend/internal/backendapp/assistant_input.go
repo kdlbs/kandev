@@ -95,6 +95,9 @@ func (a *assistantInputResolver) ResolveInput(ctx context.Context, b *shared.Ass
 	if input.State != shared.AttentionPending || input.SourceRevision != row.SourceRevision {
 		return nil, inputRejected(409, "native_input_expired_or_superseded")
 	}
+	if err := shared.CheckWorkspaceEffect(ctx); err != nil {
+		return nil, err
+	}
 	if input.Kind == attentionPermission {
 		return a.resolvePermission(ctx, b, input, response)
 	}
@@ -153,6 +156,9 @@ func (a *assistantInputResolver) StopSession(ctx context.Context, b *shared.Assi
 	}
 	if a.stopper == nil {
 		return inputStopFailed, fmt.Errorf("native session control unavailable")
+	}
+	if err := shared.CheckWorkspaceEffect(ctx); err != nil {
+		return inputStopFailed, err
 	}
 	changed, err := a.stopper.StopTaskSessionForCoordinator(ctx, task, session)
 	if err != nil {

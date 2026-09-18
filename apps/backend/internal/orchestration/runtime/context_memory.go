@@ -24,13 +24,20 @@ func contextMemoryReference(objective string, scope models.ContextScope) string 
 }
 
 func (h *Handler) contextMemory(c *gin.Context) {
-	_, b, ok := h.runtimeAssistant(c)
+	claims, b, ok := h.runtimeAssistant(c)
 	if !ok {
+		return
+	}
+	if !h.contextObjectiveTarget(c, b, claims.WorkspaceID) {
 		return
 	}
 	packet, err := h.Service.buildContext(c.Request.Context(), b, c.Param("id"), contextScopeQuery(c))
 	if err != nil {
 		c.AbortWithStatus(422)
+		return
+	}
+	if packet.WorkspaceID != claims.WorkspaceID {
+		c.AbortWithStatus(403)
 		return
 	}
 	limit, ok := boundedPageLimit(c)
@@ -51,7 +58,7 @@ func (h *Handler) contextMemory(c *gin.Context) {
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 	entries := make([]models.ContextMemory, 0, limit+1)
 	for _, row := range rows {
-		if row.ID <= after || !row.MatchesContext(b, packet.ContextScope) || !h.Service.memoryVisible(c.Request.Context(), b, row) {
+		if !contextMemoryMatches(row, b, packet, after) || !h.Service.memoryVisible(c.Request.Context(), b, row) {
 			continue
 		}
 		entries = append(entries, models.ContextMemory{ID: row.ID, Revision: row.Revision, Scope: row.Scope, ScopeID: row.ScopeID, SourceCommentID: row.SourceCommentID, Confirmed: row.Confirmed, Content: redaction.NewRedactor().String(row.Content)})
@@ -64,5 +71,12 @@ func (h *Handler) contextMemory(c *gin.Context) {
 		entries = entries[:limit]
 		next = encodeScopedCursor(scope, entries[limit-1].ID)
 	}
-	c.JSON(200, gin.H{memoryResponseKey: entries, nextCursorKey: next, "context_ref": packet.ID})
+	h.workspaceResponse(c, gin.H{memoryResponseKey: entries, nextCursorKey: next, "context_ref": packet.ID}, "handoff")
+}
+
+func contextMemoryMatches(row *models.AgentMemory, b *models.AssistantBinding, packet *models.ContextPacket, after string) bool {
+	if packet.WorkspaceID != b.WorkspaceID && row.Scope != authorTypeUser {
+		return false
+	}
+	return row.ID > after && row.MatchesContext(b, packet.ContextScope)
 }

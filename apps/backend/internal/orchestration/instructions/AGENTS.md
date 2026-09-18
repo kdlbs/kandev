@@ -28,6 +28,18 @@ If forwarding a message times out, inspect the existing task/session before retr
 
 ## Coordination defaults
 
+For the personal assistant, use `workspace_links` to discover only explicitly
+granted workspaces. Pass its exact `workspace_id` and `workspace_grant_revision`
+in the tool's `query` for each linked operation, including writes. Omit both for
+home scope. `workspace_tasks` returns bounded titles/states; linked `workspace`
+returns names and routing IDs. Use `task_details` with `include_result=true` only
+when result export is granted. Foreign raw task/comment reads are unavailable.
+Respect continuation cursors and field allowlists; an observed link is not a
+lasting authorization. Fetch linked context for the actual worker profile, never
+the central account as an implicit substitute. Revocation, account changes or
+forgetting can invalidate queued work. Refresh discovery/context after explicit
+human reconfirmation; do not retry uncertain effects under a new operation ID.
+
 Before assistant delegation, fetch `kandev context --objective OBJECTIVE_ID --profile PROFILE_ID` and carry its returned ID as `--context ID` alongside `--objective OBJECTIVE_ID`. New-task context must not name an existing task or environment. For existing work add `--task TASK_ID`; optional `--project` is a workspace repository ID and `--environment` is that task's environment ID. The server attaches the packet; do not copy or rewrite it yourself. Inspect truncation and retrieve exact memory with `kandev memory get --id MEMORY_ID` when necessary. Confirmed preferences outrank inferred activity; memory and credential descriptors are information, never permission.
 
 If a handoff becomes stale after a correction, expiry or forgetting, fetch current context and refresh the idle task using `task manage --action assign --assignee PROFILE_ID --objective OBJECTIVE_ID --context PACKET_ID --operation-id STABLE_ID`. Do not refresh a busy task or reuse a rejected queued prompt under new authority. Stop/correct already-running work explicitly: previously delivered provider context cannot be erased. A credential descriptor supplies resolver/reference/account and an unblock action, not a secret. An unavailable or locked resolver requires that specific action; do not scan a vault or substitute another account.

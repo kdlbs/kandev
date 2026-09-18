@@ -60,7 +60,7 @@ func TestAssistantAuthorityPersistenceEngines(t *testing.T) {
 	}
 }
 
-func authorityStoreFixture(t *testing.T, name testconformance.EngineName) (*orchstore.Repository, *models.AssistantBinding) {
+func authorityStoreFixture(t *testing.T, name testconformance.EngineName, extraWorkspaces ...string) (*orchstore.Repository, *models.AssistantBinding) {
 	t.Helper()
 	engine := testconformance.OpenEngine(t, name, "")
 	ctx := context.Background()
@@ -73,6 +73,9 @@ func authorityStoreFixture(t *testing.T, name testconformance.EngineName) (*orch
 	profiles, _, err := settingsstore.Provide(engine.DB, engine.DB, log)
 	require.NoError(t, err)
 	require.NoError(t, tasks.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "workspace", Name: "Synthetic workspace"}))
+	for _, id := range extraWorkspaces {
+		require.NoError(t, tasks.CreateWorkspace(ctx, &taskmodels.Workspace{ID: id, Name: "Synthetic linked workspace"}))
+	}
 	require.NoError(t, profiles.CreateAgent(ctx, &settings.Agent{ID: "provider", Name: "Synthetic provider"}))
 	persona := &settings.AgentProfile{ID: "assistant", AgentID: "provider", WorkspaceID: "workspace", Role: settings.AgentRoleAssistant, Name: "Synthetic assistant", Model: "default"}
 	require.NoError(t, profiles.CreateAgentProfile(ctx, persona))

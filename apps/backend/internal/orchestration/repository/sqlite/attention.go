@@ -14,7 +14,10 @@ func (r *Repository) AttentionTargets(ctx context.Context, taskID, after string,
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`SELECT DISTINCT b.id AS binding_id,l.task_id,b.id || ':' || l.task_id AS cursor
  FROM orchestration_assistant_bindings b JOIN orchestration_objectives o ON o.binding_id=b.id
  JOIN orchestration_objective_tasks l ON l.objective_id=o.id JOIN tasks t ON t.id=l.task_id
- WHERE t.workspace_id=b.workspace_id AND t.id<>b.conversation_id AND (?='' OR t.id=?)
+ WHERE t.workspace_id=o.workspace_id AND (t.workspace_id=b.workspace_id OR EXISTS (
+ SELECT 1 FROM orchestration_workspace_grants g WHERE g.binding_id=b.id AND g.workspace_id=t.workspace_id
+ AND g.owner_user_id=b.owner_user_id AND g.binding_version=b.version AND g.revoked_at IS NULL))
+ AND t.id<>b.conversation_id AND (?='' OR t.id=?)
  AND (b.id || ':' || l.task_id)>? ORDER BY cursor LIMIT ?`), taskID, taskID, after, min(max(limit, 1), 100))
 	return rows, err
 }
@@ -45,21 +48,33 @@ func (r *Repository) AttentionByID(ctx context.Context, binding, id string) (*mo
 // Projection and wake insertion share a transaction. Native occurrence identity
 // survives unknown reads, enqueue acknowledgement loss and process restart.
 func (r *Repository) ProjectAttention(ctx context.Context, b *models.AssistantBinding, task string, sources []models.AttentionSource, now time.Time) (bool, error) {
+	return r.ProjectWorkspaceAttention(ctx, b, nil, task, sources, now)
+}
+
+func (r *Repository) ProjectWorkspaceAttention(ctx context.Context, b *models.AssistantBinding, grant *models.WorkspaceGrant, task string, sources []models.AttentionSource, now time.Time) (bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var current int
-	if err = tx.GetContext(ctx, &current, tx.Rebind(`SELECT count(*) FROM orchestration_assistant_bindings WHERE id=? AND version=?`), b.ID, b.Version); err != nil {
+	if err = lockAssistantBinding(ctx, tx, b); err != nil {
 		return false, err
 	}
-	if current != 1 {
-		return false, models.ErrConflict
+	scoped := *b
+	if grant != nil {
+		var current int
+		err = tx.GetContext(ctx, &current, tx.Rebind(`SELECT count(*) FROM orchestration_workspace_grants WHERE id=? AND binding_id=? AND owner_user_id=? AND binding_version=? AND revision=? AND revoked_at IS NULL`), grant.ID, b.ID, b.OwnerUserID, b.Version, grant.Revision)
+		if err != nil {
+			return false, err
+		}
+		if current != 1 {
+			return false, models.ErrConflict
+		}
+		scoped.WorkspaceID = grant.WorkspaceID
 	}
 	changed := false
 	for _, source := range sources {
-		updated, err := projectAttentionSource(ctx, tx, b, task, source, now)
+		updated, err := projectAttentionSource(ctx, tx, &scoped, task, source, now)
 		if err != nil {
 			return false, err
 		}

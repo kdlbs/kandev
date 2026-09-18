@@ -28,7 +28,10 @@ func (r *Repository) AssistantManagedTasks(ctx context.Context, binding, after s
 	rows := []string{}
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`SELECT DISTINCT t.id FROM orchestration_assistant_bindings b
  JOIN orchestration_objectives o ON o.binding_id=b.id JOIN orchestration_objective_tasks l ON l.objective_id=o.id
- JOIN tasks t ON t.id=l.task_id WHERE b.id=? AND t.workspace_id=b.workspace_id AND t.id<>b.conversation_id AND t.id>?
+ JOIN tasks t ON t.id=l.task_id WHERE b.id=? AND t.workspace_id=o.workspace_id
+ AND (t.workspace_id=b.workspace_id OR EXISTS(SELECT 1 FROM orchestration_workspace_grants g
+ WHERE g.binding_id=b.id AND g.workspace_id=t.workspace_id AND g.owner_user_id=b.owner_user_id
+ AND g.binding_version=b.version AND g.revoked_at IS NULL)) AND t.id<>b.conversation_id AND t.id>?
  ORDER BY t.id LIMIT ?`), binding, after, min(max(limit, 1), 101))
 	return rows, err
 }

@@ -23,15 +23,16 @@ type ContextMemory struct {
 }
 
 type ContextPacket struct {
-	ID                 string `json:"id"`
-	BindingID          string `json:"binding_id"`
-	BindingVersion     int64  `json:"binding_version"`
-	ObjectiveID        string `json:"objective_id"`
-	ObjectiveRevision  int64  `json:"objective_revision"`
-	AcceptanceRevision int64  `json:"acceptance_revision"`
-	IntentRevision     int64  `json:"intent_revision"`
-	WorkspaceID        string `json:"workspace_id"`
-	ProfileRevision    string `json:"profile_revision"`
+	ID                     string `json:"id"`
+	BindingID              string `json:"binding_id"`
+	BindingVersion         int64  `json:"binding_version"`
+	ObjectiveID            string `json:"objective_id"`
+	ObjectiveRevision      int64  `json:"objective_revision"`
+	AcceptanceRevision     int64  `json:"acceptance_revision"`
+	IntentRevision         int64  `json:"intent_revision"`
+	WorkspaceID            string `json:"workspace_id"`
+	WorkspaceGrantRevision int64  `json:"workspace_grant_revision,omitempty"`
+	ProfileRevision        string `json:"profile_revision"`
 	ContextScope
 	Mode            string              `json:"mode"`
 	Objective       string              `json:"objective"`

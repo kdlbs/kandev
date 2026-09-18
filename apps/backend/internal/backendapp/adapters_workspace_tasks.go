@@ -61,6 +61,9 @@ func (a *taskCreatorAdapter) CreateWorkspaceTask(ctx context.Context, spec share
 		}
 		req.Repositories = []taskservice.TaskRepositoryInput{{RepositoryID: spec.RepositoryID, BaseBranch: repository.DefaultBranch}}
 	}
+	if err := shared.CheckWorkspaceEffect(ctx); err != nil {
+		return "", err
+	}
 	result, err := a.taskSvc.CreateTask(ctx, req)
 	if err != nil {
 		return "", err
@@ -162,25 +165,16 @@ func (a *taskCreatorAdapter) ManageWorkspaceTask(ctx context.Context, command sh
 	if candidate, _ := task.Metadata["orchestration_maintenance_candidate"].(string); candidate != "" {
 		return fmt.Errorf("maintenance tasks require the closed Assistant repair controls")
 	}
+	if err := shared.CheckWorkspaceEffect(ctx); err != nil {
+		return err
+	}
 	switch command.Action {
 	case "message":
 		return a.messageWorkspaceTask(ctx, task, command)
 	case "adopt", "assign":
 		return a.adoptWorkspaceTask(ctx, task, command)
 	case "start":
-		if command.DirectProfile {
-			return a.startAssignedWorkspaceTask(ctx, task)
-		}
-		if a.orch == nil {
-			return fmt.Errorf("orchestrator unavailable")
-		}
-		profile, _ := task.Metadata["orchestration_execution_profile_id"].(string)
-		if profile == "" {
-			return fmt.Errorf("assign a worker before starting delegated work")
-		}
-		executor, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
-		_, err := a.orch.StartTask(ctx, task.ID, profile, "", executor, "", task.Description, task.WorkflowStepID, false, false, nil)
-		return err
+		return a.startWorkspaceTask(ctx, task, command.DirectProfile)
 	case "stop":
 		if a.orch == nil {
 			return fmt.Errorf("orchestrator unavailable")
@@ -189,6 +183,22 @@ func (a *taskCreatorAdapter) ManageWorkspaceTask(ctx context.Context, command sh
 	default:
 		return fmt.Errorf("unsupported task action")
 	}
+}
+
+func (a *taskCreatorAdapter) startWorkspaceTask(ctx context.Context, task *models.Task, direct bool) error {
+	if direct {
+		return a.startAssignedWorkspaceTask(ctx, task)
+	}
+	if a.orch == nil {
+		return fmt.Errorf("orchestrator unavailable")
+	}
+	profile, _ := task.Metadata["orchestration_execution_profile_id"].(string)
+	if profile == "" {
+		return fmt.Errorf("assign a worker before starting delegated work")
+	}
+	executor, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
+	_, err := a.orch.StartTask(ctx, task.ID, profile, "", executor, "", task.Description, task.WorkflowStepID, false, false, nil)
+	return err
 }
 
 func (a *taskCreatorAdapter) requireIdleWorkspaceTask(ctx context.Context, taskID string) error {
@@ -239,11 +249,17 @@ func (a *taskCreatorAdapter) adoptWorkspaceTask(ctx context.Context, task *model
 		metadata = selected
 	}
 	metadata["orchestration_chief_id"] = command.ChiefID
+	if err := shared.CheckWorkspaceEffect(ctx); err != nil {
+		return err
+	}
 	_, err := a.taskSvc.UpdateTask(ctx, task.ID, &taskservice.UpdateTaskRequest{Metadata: metadata})
 	return err
 }
 
 func (a *taskCreatorAdapter) observeWorkspaceTask(ctx context.Context, taskID, chiefID string) error {
+	if err := shared.CheckWorkspaceEffect(ctx); err != nil {
+		return err
+	}
 	changed, err := a.taskRepo.SetTaskMetadataKeyIfNotArchived(ctx, taskID, "orchestration_chief_id", chiefID)
 	if err != nil {
 		return err

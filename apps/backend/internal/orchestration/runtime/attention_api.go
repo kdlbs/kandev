@@ -5,15 +5,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agent/runtimeauth"
 	"github.com/kandev/kandev/internal/orchestration/models"
 	"strconv"
 )
 
 func (h *Handler) attention(c *gin.Context) {
 	var b *models.AssistantBinding
+	var claims *runtimeauth.AgentClaims
 	var ok bool
 	if _, agent := c.Get("agent_claims"); agent {
-		_, b, ok = h.runtimeAssistant(c)
+		claims, b, ok = h.runtimeAssistant(c)
 	} else {
 		b, ok = h.humanAssistant(c)
 	}
@@ -44,11 +46,19 @@ func (h *Handler) attention(c *gin.Context) {
 	}
 	visible := make([]models.Attention, 0, len(rows))
 	for _, row := range rows {
+		if claims != nil && row.WorkspaceID != claims.WorkspaceID {
+			continue
+		}
 		if h.Service.attentionVisible(c.Request.Context(), b, row) {
 			visible = append(visible, row)
 		}
 	}
-	c.JSON(200, gin.H{entriesKey: visible, nextCursorKey: next, "binding_version": b.Version})
+	result := gin.H{entriesKey: visible, nextCursorKey: next, "binding_version": b.Version}
+	if claims != nil {
+		h.workspaceResponse(c, result, "task_summary")
+		return
+	}
+	c.JSON(200, result)
 }
 func attentionAfter(raw, scope string) (string, bool) {
 	if raw == "" {
@@ -64,7 +74,10 @@ func attentionAfter(raw, scope string) (string, bool) {
 
 func (s *Service) attentionVisible(ctx context.Context, b *models.AssistantBinding, row models.Attention) bool {
 	task, err := s.Tasks.GetTask(ctx, row.TaskID)
-	if err != nil || task.WorkspaceID != b.WorkspaceID {
+	if err != nil || (row.WorkspaceID != "" && task.WorkspaceID != row.WorkspaceID) {
+		return false
+	}
+	if _, _, err = s.attentionWorkspace(ctx, b, row.TaskID); err != nil {
 		return false
 	}
 	targets, err := s.Repo.AttentionTargets(ctx, row.TaskID, "", 100)

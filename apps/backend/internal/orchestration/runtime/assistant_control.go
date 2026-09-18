@@ -137,7 +137,13 @@ func (s *Service) stopManagedSession(ctx context.Context, b *models.AssistantBin
 		return s.saveStopReceipt(ctx, operation.ID, result)
 	}
 	stopCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	status, err := s.Inputs.StopSession(stopCtx, b, session.TaskID, session.ID)
+	scoped, stopCtx, err := s.managedStopWorkspace(stopCtx, b, session.TaskID)
+	if err != nil {
+		cancel()
+		result.Status = statusFailed
+		return s.saveStopReceipt(ctx, operation.ID, result)
+	}
+	status, err := s.Inputs.StopSession(stopCtx, scoped, session.TaskID, session.ID)
 	cancel()
 	result.Status = status
 	if err != nil || (status != "stopped" && status != "already_finished" && status != statusFailed) {

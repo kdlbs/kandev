@@ -305,3 +305,47 @@ session: `stopped`, `already_finished`, `failed` or `unknown`, with `partial`
 and a scope-bound `next_cursor`. Follow each cursor explicitly using the returned
 intent revision and a new operation ID. Stop neither deletes history nor
 undoes external changes. Both controls remain separate from native task status.
+
+## Linked workspaces
+
+In Assistant → Details → Linked workspaces, choose a workspace, review the named
+receiving profile, select context fields and explicitly confirm access. Observation
+is required; coordination is optional. Workers retain their selected profiles and
+native workflow/approval rules. Nothing automatically adopts another workspace.
+
+Human APIs:
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /assistant/workspace-options` | Native-visible choices and current receiving profile/revisions |
+| `GET /assistant/workspace-links` | Current grants, activity state and reason |
+| `PUT /assistant/workspace-links/:workspaceId` | Grant/reconfirm exact scope and receiving account |
+| `DELETE /assistant/workspace-links/:workspaceId` | Revoke future access |
+| `POST /assistant/workspace-links/:workspaceId/forget` | Delete saved handoff packets and invalidate old queued references |
+| `GET /assistant/workspace-links/:workspaceId/events` | Grant/revoke/forget audit |
+| `GET /assistant/workspace-exports` | Metadata-only possible-delivery records |
+
+Mutations require `expected_binding_version` and `expected_revision` (zero for a
+new grant). Grant requests also include the exact `receiver` returned by options
+and `scope: {operations, context_exports}`. Operations are `observe` and optional
+`coordinate`. Exports are `directory`, `task_summary`, `task_result`, `task_input`
+and `handoff`; results/input require summary scope. List APIs accept `after` and
+`limit` with a maximum of 100 and return `entries` and `next_cursor`.
+
+The assistant broker's `workspace_links` tool discovers current authorized links.
+For each supported linked read/write, send `workspace_id` and
+`workspace_grant_revision` in `query`. The broker rechecks them against current
+owner access, binding, profile, intent and native authority. `workspace_tasks`
+returns bounded task summaries. Linked `workspace` returns names/routing IDs;
+`task_details` adds bounded agent-result excerpts only with `include_result=true`
+and matching result permission. Raw foreign tasks/comments, capability/plugin
+configuration and maintenance operations are unavailable through linked targets.
+Use current explicit targets for objectives, context, attention and task controls.
+
+Linked handoffs contain the owner request, objective, acceptance and user-wide
+preferences. Home workspace memory and account-bound credential descriptors are
+not copied. A new receiving account requires reconfirmation covering historical
+exports before central conversation history can be reused. Revocation blocks
+new reads/wakes/writes; it cannot erase text already in chat or at a provider.
+Forgetting deletes saved handoff packets, while native tasks, conversation history
+and metadata-only audit receipts remain. It does not restore revoked access.

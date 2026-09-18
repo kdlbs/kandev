@@ -1,5 +1,7 @@
 # Decision Log
 
+- [2026-09-18: Bind linked context to explicit receiving accounts](2026-09-18-workspace-export-authority.md) — accepted, backend, frontend, protocol.
+
 - [2026-09-16: Default selection does not own privacy](2026-09-16-private-conversation-ownership.md) — accepted, backend.
 
 Architecture Decision Records (ADRs) for the Kandev project. Each decision captures the context, choice, consequences, and alternatives for significant architectural or design decisions.

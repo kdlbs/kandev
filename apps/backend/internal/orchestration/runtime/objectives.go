@@ -17,7 +17,9 @@ func (h *Handler) runtimeAssistant(c *gin.Context) (*runtimeauth.AgentClaims, *m
 		return nil, nil, false
 	}
 	row, err := h.Service.Repo.AssistantForConversation(c.Request.Context(), claims.TaskID)
-	if err != nil || row.OrchestratorID != claims.AgentProfileID || row.WorkspaceID != claims.WorkspaceID {
+	raw, _ := c.Get("agent_claims")
+	signed, _ := raw.(*runtimeauth.AgentClaims)
+	if err != nil || signed == nil || row.OrchestratorID != claims.AgentProfileID || row.WorkspaceID != signed.WorkspaceID {
 		c.AbortWithStatus(404)
 		return nil, nil, false
 	}
@@ -39,9 +41,10 @@ func (h *Handler) humanAssistant(c *gin.Context) (*models.AssistantBinding, bool
 
 func (h *Handler) objectives(c *gin.Context) {
 	var binding *models.AssistantBinding
+	var claims *runtimeauth.AgentClaims
 	var ok bool
 	if _, runtime := c.Get("agent_claims"); runtime {
-		_, binding, ok = h.runtimeAssistant(c)
+		claims, binding, ok = h.runtimeAssistant(c)
 	} else {
 		binding, ok = h.humanAssistant(c)
 	}
@@ -57,6 +60,16 @@ func (h *Handler) objectives(c *gin.Context) {
 	if len(rows) > 50 {
 		rows = rows[:50]
 		next = rows[len(rows)-1].ID
+	}
+	if claims != nil {
+		visible := make([]*models.Objective, 0, len(rows))
+		for _, row := range rows {
+			if row.WorkspaceID == claims.WorkspaceID {
+				visible = append(visible, row)
+			}
+		}
+		h.workspaceResponse(c, gin.H{"objectives": visible, nextCursorKey: next}, "task_summary")
+		return
 	}
 	c.JSON(200, gin.H{"objectives": rows, nextCursorKey: next})
 }
@@ -85,7 +98,7 @@ func (h *Handler) createObjective(c *gin.Context) {
 		if strings.HasPrefix(source.Source, "maintenance_") {
 			return nil, rejectOperation(422, "maintenance confirmation cannot authorize a general delivery objective")
 		}
-		row := &models.Objective{BindingID: binding.ID, WorkspaceID: binding.WorkspaceID, SourceCommentID: req.Source, Title: req.Title, Mode: req.Mode, Status: statusActive, Acceptance: req.Acceptance, Evidence: []models.Evidence{}, IntentRevision: *req.ExpectedIntentRevision}
+		row := &models.Objective{BindingID: binding.ID, WorkspaceID: claims.WorkspaceID, SourceCommentID: req.Source, Title: req.Title, Mode: req.Mode, Status: statusActive, Acceptance: req.Acceptance, Evidence: []models.Evidence{}, IntentRevision: *req.ExpectedIntentRevision}
 		if err := row.Validate(); err != nil {
 			return nil, rejectOperation(422, err.Error())
 		}
@@ -113,6 +126,13 @@ func (h *Handler) updateObjective(c *gin.Context) {
 		return
 	}
 	h.performOperation(c, claims, req.OperationRequest, req, http.StatusOK, func() (any, error) {
+		row, err := h.Service.Repo.Objective(c.Request.Context(), binding.ID, c.Param("id"))
+		if err != nil || row.WorkspaceID != claims.WorkspaceID {
+			return nil, rejectOperation(404, "objective unavailable in this workspace")
+		}
+		if err = h.authorizeObjectiveEvidence(c, req); err != nil {
+			return nil, err
+		}
 		return h.applyObjectiveUpdate(c.Request.Context(), binding, c.Param("id"), req)
 	})
 }

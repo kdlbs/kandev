@@ -15,9 +15,11 @@ import (
 type assistantBrokerTool struct{ name, description, method, path string }
 
 var assistantBrokerTools = []assistantBrokerTool{
-	{subcmdWorkspace, "Read the authorized workspace's tasks, workflows and execution profiles.", http.MethodGet, "/runtime/workspace"},
+	{subcmdWorkspace, "Read the authorized workspace directory. Linked targets return bounded names and routing IDs. Optional query: after, limit.", http.MethodGet, "/runtime/workspace"},
+	{"workspace_links", "Discover only explicitly granted linked workspaces and their current scope/revision. Optional query: after, limit. Never infer permission from an old link.", http.MethodGet, "/runtime/workspace-links"},
+	{"workspace_tasks", "Read a bounded page of task summaries in the selected workspace. Optional query: after, limit. No descriptions or transcripts.", http.MethodGet, "/runtime/tasks"},
 	{subcmdTask, "Read a native task by id.", http.MethodGet, "/tasks/:id"},
-	{"task_details", "Read current native task details and sessions by id.", http.MethodGet, "/runtime/tasks/:id/details"},
+	{"task_details", "Read current native task details by id. A linked workspace returns a bounded summary; query.include_result=true additionally requests explicitly granted worker-result excerpts.", http.MethodGet, "/runtime/tasks/:id/details"},
 	{"comments", "Read a task's conversation. Optional query: before, limit.", http.MethodGet, "/tasks/:id/comments"},
 	{subcmdCapabilities, "Discover current scoped tools. Optional query: kind, session_id, after, limit.", http.MethodGet, "/runtime/capabilities"},
 	{"objectives", "Read durable objectives and their evidence.", http.MethodGet, "/runtime/objectives"},
@@ -60,12 +62,12 @@ func runAssistantMCP() int {
 func newAssistantMCP(client *kandevClient) *server.MCPServer {
 	s := server.NewMCPServer("kandev_assistant", "1.0.0", server.WithToolCapabilities(false))
 	for _, definition := range assistantBrokerTools {
-		options := []mcp.ToolOption{mcp.WithDescription(definition.description)}
+		options := []mcp.ToolOption{mcp.WithDescription(definition.description), mcp.WithObject("query", mcp.Description("Optional query parameters. Linked workspace operations require workspace_id and workspace_grant_revision from workspace_links. Omit both for home. Unsupported linked operations fail closed."))}
 		if strings.Contains(definition.path, ":id") {
 			options = append(options, mcp.WithString("id", mcp.Required()))
 		}
 		if definition.method == http.MethodGet {
-			options = append(options, mcp.WithObject("query", mcp.Description("Optional query parameters.")), mcp.WithReadOnlyHintAnnotation(true))
+			options = append(options, mcp.WithReadOnlyHintAnnotation(true))
 		} else {
 			options = append(options, mcp.WithObject("request", mcp.Required(), mcp.Description("Native request body. Runtime authorization is checked by Kandev.")))
 		}

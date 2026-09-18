@@ -37,7 +37,7 @@ func (h *Handler) inputBinding(c *gin.Context) (*runtimeauth.AgentClaims, *model
 }
 func (h *Handler) scopedAttention(c *gin.Context, b *models.AssistantBinding) (*models.Attention, bool) {
 	row, err := h.Service.Repo.AttentionByID(c.Request.Context(), b.ID, c.Param("id"))
-	if err != nil || !h.Service.attentionVisible(c.Request.Context(), b, *row) {
+	if err != nil || !h.attentionTargetMatches(c, b, row) || !h.Service.attentionVisible(c.Request.Context(), b, *row) {
 		c.AbortWithStatus(404)
 		return nil, false
 	}
@@ -64,9 +64,17 @@ func (h *Handler) attentionInput(c *gin.Context) {
 	if !ok {
 		return
 	}
-	input, err := h.Service.Inputs.ReadInput(c.Request.Context(), b, *row)
+	input, err := h.readScopedInput(c, b, row)
 	if err != nil {
 		inputError(c, err)
+		return
+	}
+	if _, agent := c.Get("agent_claims"); agent {
+		h.workspaceResponse(c, gin.H{"attention": row, "input": input}, "task_input")
+		return
+	}
+	if _, _, err = h.Service.inputWorkspace(c.Request.Context(), b, row, "observe"); err != nil {
+		c.AbortWithStatus(403)
 		return
 	}
 	c.JSON(200, gin.H{"attention": row, "input": input})
@@ -97,7 +105,15 @@ func (h *Handler) resolveAttention(c *gin.Context) {
 		if err := h.validateInputResponse(c, claims, b, row, &req); err != nil {
 			return nil, err
 		}
-		result, err := h.Service.Inputs.ResolveInput(c.Request.Context(), b, *row, req.InputResponse)
+		scoped, g, err := h.Service.inputWorkspace(c.Request.Context(), b, row, "coordinate")
+		if err != nil {
+			return nil, rejectOperation(403, "workspace_input_scope_required")
+		}
+		ctx := c.Request.Context()
+		if g != nil {
+			ctx = h.Service.workspaceEffectContext(ctx, b, g, "coordinate", "task_input")
+		}
+		result, err := h.Service.Inputs.ResolveInput(ctx, scoped, *row, req.InputResponse)
 		if err != nil {
 			var rejected *models.InputRejection
 			if errors.As(err, &rejected) {
@@ -122,7 +138,7 @@ func (h *Handler) validateInputResponse(c *gin.Context, claims *runtimeauth.Agen
 	if !h.Service.attentionVisible(ctx, b, *fresh) {
 		return rejectOperation(404, "attention_unavailable")
 	}
-	input, err := h.Service.Inputs.ReadInput(ctx, b, *fresh)
+	input, err := h.readScopedInput(c, b, fresh)
 	if err != nil {
 		return rejectOperation(409, "native_input_unavailable")
 	}

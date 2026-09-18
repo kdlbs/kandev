@@ -110,6 +110,9 @@ func (s *Service) assistantAuthority(ctx context.Context, taskID string) (*model
 	if err != nil {
 		return nil, err
 	}
+	if err = s.validateWorkspaceHistory(ctx, binding, row, false); err != nil {
+		return nil, err
+	}
 	return &row, nil
 }
 
@@ -121,12 +124,16 @@ func (s *Service) validateAssistantAuthority(ctx context.Context, taskID, payloa
 	var snapshot struct {
 		Authority *models.AssistantAuthority `json:"assistant_authority"`
 		Revision  int64                      `json:"intent_revision"`
+		Attention []attentionWakeRef         `json:"attention_refs"`
 	}
 	if json.Unmarshal([]byte(payload), &snapshot) != nil || snapshot.Authority == nil || *snapshot.Authority != *row || snapshot.Revision != row.IntentRevision {
 		return nil, models.ErrConflict
 	}
 	if row.UnsupportedReason != "" {
 		return nil, errors.New("assistant_policy_unsupported")
+	}
+	if err = s.validateWorkspaceWakeAuthority(ctx, row.BindingID, snapshot.Attention); err != nil {
+		return nil, err
 	}
 	return row, nil
 }
@@ -153,7 +160,7 @@ func (h *Handler) assistantInvocation(c *gin.Context, claims *runtimeauth.AgentC
 		return false
 	}
 	binding, err := h.Service.Repo.AssistantForConversation(c.Request.Context(), claims.TaskID)
-	if err != nil {
+	if err != nil || binding.WorkspaceID != claims.WorkspaceID || binding.OrchestratorID != claims.AgentProfileID {
 		c.AbortWithStatus(http.StatusForbidden)
 		return false
 	}
@@ -189,7 +196,7 @@ func (h *Handler) authorizeTaskEffect(c *gin.Context, claims *runtimeauth.AgentC
 	if err != nil || revision != snapshot.Revision {
 		return rejectOperation(409, "intent_superseded")
 	}
-	return nil
+	return h.checkSelectedWorkspace(c, false)
 }
 
 func assistantRequestEffect(c *gin.Context) string {

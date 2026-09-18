@@ -15,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestration/models"
 )
 
+const operationIDKey = "operation_id"
+
 func (h *Handler) performOperation(c *gin.Context, claims *runtimeauth.AgentClaims, req models.OperationRequest, input any, status int, execute func() (any, error)) {
 	ctx := c.Request.Context()
 	binding, err := h.Service.Repo.AssistantForConversation(ctx, claims.TaskID)
@@ -35,6 +37,16 @@ func (h *Handler) performOperation(c *gin.Context, claims *runtimeauth.AgentClai
 		c.AbortWithStatusJSON(http.StatusUnprocessableEntity, gin.H{errorResponseKey: "operation_identity_required"})
 		return
 	}
+	target := c.Request.URL.Path
+	if value, linked := c.Get(workspaceSelectionKey); linked {
+		selection := value.(workspaceSelection)
+		target += "?workspace_id=" + selection.Grant.WorkspaceID
+		input = struct {
+			Request       any    `json:"request"`
+			Workspace     string `json:"workspace_id"`
+			GrantRevision int64  `json:"workspace_grant_revision"`
+		}{input, selection.Grant.WorkspaceID, selection.Grant.Revision}
+	}
 	raw, err := json.Marshal(input)
 	if err != nil {
 		fail(c, err)
@@ -42,7 +54,7 @@ func (h *Handler) performOperation(c *gin.Context, claims *runtimeauth.AgentClai
 	}
 	operation, created, err := h.Service.Repo.BeginOperation(ctx, models.Operation{
 		BindingID: binding.ID, OperationID: req.OperationID, ConversationID: claims.TaskID,
-		RunID: claims.RunID, Target: c.Request.URL.Path, RequestHash: fmt.Sprintf("%x", sha256.Sum256(raw)),
+		RunID: claims.RunID, Target: target, RequestHash: fmt.Sprintf("%x", sha256.Sum256(raw)),
 		IntentRevision: *req.ExpectedIntentRevision, BindingVersion: binding.Version,
 	})
 	if err != nil {
@@ -65,14 +77,17 @@ func replayOperation(c *gin.Context, operation *models.Operation) {
 		c.Data(operation.HTTPStatus, "application/json", []byte(operation.ResponseJSON))
 		return
 	}
-	c.AbortWithStatusJSON(http.StatusConflict, gin.H{errorResponseKey: "operation_outcome_unknown", "operation_id": operation.OperationID})
+	c.AbortWithStatusJSON(http.StatusConflict, gin.H{errorResponseKey: "operation_outcome_unknown", operationIDKey: operation.OperationID})
 }
 
 func (h *Handler) executeOperation(c *gin.Context, operation *models.Operation, status int, execute func() (any, error)) {
 	var result any
 	err := h.Service.Repo.DispatchOperation(c.Request.Context(), operation)
 	if err == nil {
-		result, err = execute()
+		err = h.checkSelectedWorkspace(c, true)
+		if err == nil {
+			result, err = execute()
+		}
 	} else {
 		err = rejectOperation(409, "operation_authority_superseded")
 	}
@@ -93,11 +108,15 @@ func (h *Handler) executeOperation(c *gin.Context, operation *models.Operation, 
 		state = statusUnknown
 	}
 	if state == statusUnknown {
-		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "operation_outcome_unknown", "operation_id": operation.OperationID})
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorResponseKey: "operation_outcome_unknown", operationIDKey: operation.OperationID})
 		return
 	}
 	if h.Service.AttentionUpdated != nil {
 		h.Service.AttentionUpdated(ctx, operation.BindingID, time.Now().UTC())
+	}
+	if err = h.checkSelectedWorkspace(c, false); err != nil {
+		c.AbortWithStatusJSON(403, gin.H{errorResponseKey: "workspace_grant_superseded", operationIDKey: operation.OperationID})
+		return
 	}
 	c.Data(status, "application/json", raw)
 }

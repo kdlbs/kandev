@@ -37,7 +37,7 @@ generic material; original local snapshot/backup refs are not published.
 | Assistant resolution and controls | Implemented; native parity, attributed known answers, pause and per-session stop verified |
 | Assistant UI | Implemented; scoped chat, native decisions, memory controls, desktop/mobile and localization verified |
 | Assistant maintenance | Implemented; typed incidents, explicit grants, isolated checks/commits, human review, verified native recovery, recurrence and desktop/mobile proposal flow |
-| Assistant workspace grants | Fully planned; implementation pending |
+| Assistant workspace grants | Implemented; explicit receiver consent, bounded exports, final-dispatch revocation, historical account reconfirmation, forgetting and desktop/mobile controls verified |
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
 | Actual live-data rehearsal and deployment | Pending; live service unchanged |
 
