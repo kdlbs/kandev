@@ -5,8 +5,8 @@ migration/replay/rollback rehearsal completed before the authorized cutover.
 
 | Review item | Prepared result |
 | --- | --- |
-| Candidate | `0.94.0-orchestration.20260918.sha2808579e7` |
-| Source | `2808579e7` |
+| Candidate | `0.94.0-orchestration.20260918.sha2eaf7a892` |
+| Source | `2eaf7a892` |
 | Base | Exact v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1` |
 | Bundle | Six immutable binaries; [SHA-256 receipt](candidate-receipt.json) |
 | Qualification | [Completed checks and platform/provider limits](candidate-qualification.md) |
@@ -45,3 +45,8 @@ they can inspect workspace/task state without user API keys. Office remains
 disabled. The first authenticated generic task/review/callback observation and
 focused upstream PR/export remain follow-up work; no private prompts or account
 data are included in this packet.
+
+The latest [task-control repair](task-control-fix.md) adds native create, edit,
+move, archive and delete controls to the existing workspace conversation. The
+packaged runtime passed a synthetic three-turn Claude chat trial before live
+cutover. [Current deployment receipt](task-control-live-receipt.json).

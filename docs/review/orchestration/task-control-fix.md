@@ -58,3 +58,28 @@ it does not add a separate Orchestrator UI or require a database migration.
 The provider policy uses the existing qualified Claude ACP version and
 [SDK MCP allowlist](https://code.claude.com/docs/en/agent-sdk/mcp). It does not
 turn on blanket auto-approval or approve worker permission requests.
+
+## Actual provider qualification
+
+The final packaged candidate passed a three-turn managed Claude ACP trial in an
+isolated, synthetic workspace. The first turn read capabilities and memory,
+created an unassigned task, edited title/description/priority and moved its board
+column. The resumed conversation archived the task in turn two and deleted it
+in turn three. Database assertions verified each result. No permission request
+was emitted, and no synthetic delivery task remained after cleanup. The provider
+credential link was removed when the fixture stopped.
+
+See the [sanitized provider receipt](task-control-provider-receipt.json). This
+qualifies the packaged chat/runtime path; it is not a transcript of live user work.
+
+## Live deployment
+
+Candidate `0.94.0-orchestration.20260918.sha2eaf7a892` is deployed. A verified cold
+backup and the previous bundle/service configuration are retained privately.
+Startup health reports the expected version, unauthenticated workspace access
+remains denied, database integrity and foreign keys pass, and retained row counts
+match. No live user prompt was replayed or copied into this packet.
+
+See the [sanitized deployment receipt](task-control-live-receipt.json). Refresh the
+UI and send a new message in the existing Orchestrator conversation to use the
+new runtime and tool discovery.

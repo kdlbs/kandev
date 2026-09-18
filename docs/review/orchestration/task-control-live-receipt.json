@@ -1,0 +1,25 @@
+{
+  "candidate": "0.94.0-orchestration.20260918.sha2eaf7a892",
+  "source_commit": "2eaf7a8928a175bbe5411c088be6f45bfacfab91",
+  "outcome": "passed",
+  "backup_verified": true,
+  "auth_enforced": true,
+  "health": {
+    "mode": "websocket+http",
+    "service": "kandev",
+    "status": "ok",
+    "version": "0.94.0-orchestration.20260918.sha2eaf7a892"
+  },
+  "retained_row_counts_match": true,
+  "database_integrity": "ok",
+  "foreign_key_violations": 0,
+  "binaries_sha256": {
+    "agentctl-linux-amd64": "8b58a203bebea86060ece9fec3b96a03866aaa9f04a30db2ca7324f44b2f09e4",
+    "agentctl-linux-arm64": "cba2c752fd7db462cc52820ac73b1103fbc3ef6db01a76a235963a1d7d7c740e",
+    "agentctl-darwin-arm64": "749c68b8d3f893e39ce7de09eaa0795993155b70f0284f2db45f7943a6054330",
+    "agentctl": "867b188cde49fd5a899a54c37becc0dbc57cbb98a07494f43f1247f162830971",
+    "agentctl-darwin-amd64": "dfd11b284236ea44ea9358267fe7d78e8aa79f87199d906d726824d5ec5927ed",
+    "kandev": "4b446c4b7bab6b67db4ccd27953d9b61d42e029cb7d089d470adecb6f5b4299f"
+  },
+  "live_user_prompt_replayed": false
+}

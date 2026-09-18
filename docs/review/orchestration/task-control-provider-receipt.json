@@ -1,0 +1,23 @@
+{
+  "source_commit": "2eaf7a8928a175bbe5411c088be6f45bfacfab91",
+  "candidate": "0.94.0-orchestration.20260918.sha2eaf7a892",
+  "synthetic_only": true,
+  "provider": "managed Claude ACP 0.75.1",
+  "actual_provider_turns": 3,
+  "verified_actions": [
+    "capabilities",
+    "memory",
+    "create",
+    "edit",
+    "move",
+    "archive",
+    "delete"
+  ],
+  "permission_requests": 0,
+  "remaining_synthetic_delivery_tasks": 0,
+  "credential_link_removed": true,
+  "backend_sha256": "4b446c4b7bab6b67db4ccd27953d9b61d42e029cb7d089d470adecb6f5b4299f",
+  "outcome": "passed",
+  "successful_broker_calls": 10,
+  "post_delete_details_unavailable": true
+}
