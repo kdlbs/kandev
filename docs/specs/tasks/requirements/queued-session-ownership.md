@@ -116,7 +116,7 @@ destination entry, whereas a ceiling can delay a session already selected by ent
   queued destination, waiting reason, queue time, capacity observation, and
   automatic retry explanation outside the historical transcript. This status
   shall remain visible when the user selects a parked predecessor.
-- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.3:** Superseded by criterion 003.8.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.3:** Superseded by criterion 003.10.
   The original requirement to identify a conversation as parked no longer applies.
 - **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.4:** Queue status shall clear after
   confirmed dispatch or final disposition. Older snapshots shall not restore a
@@ -144,7 +144,7 @@ destination entry, whereas a ceiling can delay a session already selected by ent
   After a limit change, the banner shall show refreshed state without a page
   reload and remain until dispatch or final disposition is confirmed.
 
-- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.8:** Desktop and phone conversation
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10:** Desktop and phone conversation
   surfaces shall not show a parked-session banner, toolbar, badge, or recovery
   explanation. Normal conversation controls shall remain available. Genuine queued
   destinations shall retain queue status without a duplicate Start or Resume action.
