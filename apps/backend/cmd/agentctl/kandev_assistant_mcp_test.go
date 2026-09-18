@@ -24,6 +24,12 @@ func TestAssistantBrokerForwardsOnlyNamedOperations(t *testing.T) {
 	require.Len(t, s.ListTools(), len(assistantBrokerTools))
 	require.Nil(t, s.GetTool("shell"))
 	require.Nil(t, s.GetTool("invoke_plugin"))
+	for _, name := range []string{"improvements", "improvement", "maintenance_file", "maintenance_artifact", "maintenance"} {
+		require.NotNil(t, s.GetTool(name), name)
+	}
+	for _, name := range []string{"grant_maintenance", "review_improvement", "publish_repair"} {
+		require.Nil(t, s.GetTool(name), name)
+	}
 	definition := assistantBrokerTool{name: "manage_task", method: "POST", path: "/runtime/tasks/:id/manage"}
 	result, err := callAssistantBroker(c, definition, map[string]any{"id": "target", "request": map[string]any{"action": "start"}})
 	require.NoError(t, err)

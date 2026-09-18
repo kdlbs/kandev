@@ -28,7 +28,7 @@ func (s *Service) Subscribe(eb bus.EventBus) (func(), error) {
 		if err != nil {
 			return
 		}
-		_ = eb.Publish(ctx, events.AssistantUpdated, bus.NewEvent(events.AssistantUpdated, "orchestration", map[string]any{"user_id": b.OwnerUserID, "binding_id": id, "revision": now.Format(time.RFC3339Nano)}))
+		_ = eb.Publish(ctx, events.AssistantUpdated, bus.NewEvent(events.AssistantUpdated, "orchestration", map[string]any{"user_id": b.OwnerUserID, "binding_id": id, revisionResponseKey: now.Format(time.RFC3339Nano)}))
 	}
 	ids := []bus.Subscription{}
 	cleanup := func() {

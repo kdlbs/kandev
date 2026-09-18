@@ -53,3 +53,12 @@ func (r *Repository) UnknownMaintenanceRepair(ctx context.Context, binding, cand
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE orchestration_improvements SET state='unknown',revision=revision+1,updated_at=? WHERE binding_id=? AND id=? AND state='investigating' AND repair_task_id=''`), time.Now().UTC(), binding, candidate)
 	return err
 }
+
+func (r *Repository) RecoverMaintenance(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE orchestration_improvements SET state='unknown',revision=revision+1,updated_at=CURRENT_TIMESTAMP
+ WHERE state='investigating' AND (repair_task_id='' OR EXISTS(SELECT 1 FROM orchestration_operations o
+ WHERE o.binding_id=orchestration_improvements.binding_id AND o.state='unknown'
+ AND o.target IN ('/api/v1/orchestration/assistant/improvements/' || orchestration_improvements.id || '/maintenance',
+ '/api/v1/orchestration/runtime/improvements/' || orchestration_improvements.id || '/maintenance')))`)
+	return err
+}

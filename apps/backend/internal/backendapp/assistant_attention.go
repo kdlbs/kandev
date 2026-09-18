@@ -176,7 +176,7 @@ func taskAttentionSources(task *taskmodels.Task, sessions []*taskmodels.TaskSess
 		case taskmodels.TaskSessionStateCompleted:
 			sources = append(sources, shared.AttentionSource{SourceID: "session-result", SessionID: session.ID, Kind: "result", State: shared.AttentionPending, SourceRevision: attentionDigest(session.UpdatedAt), Summary: "A worker session finished. Review its result against the objective."})
 		case taskmodels.TaskSessionStateFailed:
-			sources = append(sources, errorAttentionSource(session.ID, session.UpdatedAt.String(), "session_failed"))
+			sources = append(sources, errorAttentionSource(session.ID, session.UpdatedAt.String(), "session_failed", session.UpdatedAt))
 		}
 	}
 	return sources

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -125,7 +126,7 @@ func (s *Service) performMaintenance(ctx context.Context, b *models.AssistantBin
 	case "prepare":
 		return s.startMaintenance(ctx, b, grant, req, guard)
 	case "patch":
-		return s.Maintenance.Patch(ctx, grant, req.File, guard)
+		return s.patchMaintenance(ctx, b, grant, req.File, guard)
 	case "check":
 		return s.checkMaintenance(ctx, b, grant, guard)
 	case "commit":
@@ -133,4 +134,15 @@ func (s *Service) performMaintenance(ctx context.Context, b *models.AssistantBin
 	default:
 		return nil, fmt.Errorf("unsupported maintenance action")
 	}
+}
+
+func (s *Service) patchMaintenance(ctx context.Context, b *models.AssistantBinding, grant models.MaintenanceGrant, file models.MaintenanceFile, guard maintenance.Guard) (any, error) {
+	artifact, err := s.Maintenance.Patch(ctx, grant, file, guard)
+	if errors.Is(err, models.ErrConflict) {
+		return nil, rejectOperation(409, "maintenance_file_superseded")
+	}
+	if err != nil {
+		return artifact, err
+	}
+	return artifact, s.Repo.ClearMaintenanceValidation(ctx, b.ID, grant.CandidateID)
 }

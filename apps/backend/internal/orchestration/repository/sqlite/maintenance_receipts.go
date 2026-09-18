@@ -21,6 +21,11 @@ func (r *Repository) SaveMaintenanceValidation(ctx context.Context, binding, can
 	return maintenanceRowChanged(result, err)
 }
 
+func (r *Repository) ClearMaintenanceValidation(ctx context.Context, binding, candidate string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM orchestration_maintenance_validation WHERE candidate_id=? AND EXISTS(SELECT 1 FROM orchestration_improvements c WHERE c.id=candidate_id AND c.binding_id=?)`), candidate, binding)
+	return err
+}
+
 func (r *Repository) MaintenanceValidation(ctx context.Context, binding, candidate string) (*models.MaintenanceValidation, error) {
 	var raw string
 	err := r.db.GetContext(ctx, &raw, r.db.Rebind(`SELECT v.validation_json FROM orchestration_maintenance_validation v JOIN orchestration_improvements c ON c.id=v.candidate_id WHERE c.binding_id=? AND c.id=?`), binding, candidate)
@@ -32,6 +37,14 @@ func (r *Repository) MaintenanceValidation(ctx context.Context, binding, candida
 }
 
 func (r *Repository) RecordMaintenancePrepared(ctx context.Context, b *models.AssistantBinding, id string, artifact models.MaintenanceArtifact) error {
+	return r.recordMaintenancePrepared(ctx, b, id, artifact, 0)
+}
+
+func (r *Repository) RecordRecoveredMaintenancePrepared(ctx context.Context, b *models.AssistantBinding, id string, artifact models.MaintenanceArtifact) error {
+	return r.recordMaintenancePrepared(ctx, b, id, artifact, 1)
+}
+
+func (r *Repository) recordMaintenancePrepared(ctx context.Context, b *models.AssistantBinding, id string, artifact models.MaintenanceArtifact, recovered int) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -39,7 +52,7 @@ func (r *Repository) RecordMaintenancePrepared(ctx context.Context, b *models.As
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE orchestration_improvements SET commit_oid=?,prepared_at=?,updated_at=?,revision=revision+1,
- state=CASE WHEN state='investigating' THEN 'prepared' ELSE state END WHERE id=? AND binding_id=? AND repair_task_id<>'' AND commit_oid=''`), artifact.CommitOID, now, now, id, b.ID)
+ state=CASE WHEN state='investigating' OR (state='unknown' AND ?=1) THEN 'prepared' ELSE state END WHERE id=? AND binding_id=? AND repair_task_id<>'' AND commit_oid=''`), artifact.CommitOID, now, now, recovered, id, b.ID)
 	if err = maintenanceRowChanged(result, err); err != nil {
 		return err
 	}

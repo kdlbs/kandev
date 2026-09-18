@@ -106,7 +106,7 @@ func (h *Handler) revokeMaintenanceGrant(c *gin.Context) {
 		return
 	}
 	h.Service.notifyAssistantUpdated(c.Request.Context(), b.ID)
-	c.JSON(200, gin.H{"revoked": true, "revision": req.ExpectedRevision + 1})
+	c.JSON(200, gin.H{"revoked": true, revisionResponseKey: req.ExpectedRevision + 1})
 }
 
 func (h *Handler) improvement(c *gin.Context) {
@@ -124,22 +124,19 @@ func (h *Handler) improvement(c *gin.Context) {
 		c.AbortWithStatus(503)
 		return
 	}
-	evidence, err := h.Service.Repo.ImprovementEvidence(c.Request.Context(), b.ID, row.Fingerprint, "", 100)
-	if err != nil {
-		c.AbortWithStatus(503)
+	visible, next, ok := h.improvementEvidencePage(c, b, row)
+	if !ok {
 		return
-	}
-	visible := []models.Friction{}
-	for _, row := range evidence {
-		task, err := h.Service.Tasks.GetTask(c.Request.Context(), row.TaskID)
-		if err == nil && task.WorkspaceID == b.WorkspaceID {
-			visible = append(visible, row)
-		}
 	}
 	validation, err := h.Service.Repo.MaintenanceValidation(c.Request.Context(), b.ID, row.ID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		c.AbortWithStatus(503)
 		return
 	}
-	c.JSON(200, gin.H{"candidate": row, "grant": grant, "evidence": visible, "validation": validation})
+	review, err := h.Service.Repo.ImprovementReview(c.Request.Context(), b.ID, row.ID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		c.AbortWithStatus(503)
+		return
+	}
+	c.JSON(200, gin.H{"candidate": row, "grant": grant, "evidence": visible, "evidence_next_cursor": next, "validation": validation, "review": review})
 }

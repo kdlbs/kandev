@@ -16,6 +16,10 @@ func (r *Repository) migrateMaintenance() error {
  candidate_id TEXT PRIMARY KEY REFERENCES orchestration_improvements(id) ON DELETE CASCADE,
  validation_json TEXT NOT NULL, updated_at TIMESTAMP NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS idx_orchestration_maintenance_task ON orchestration_improvements(repair_task_id) WHERE repair_task_id<>''`,
+		`CREATE TABLE IF NOT EXISTS orchestration_improvement_reviews (
+ candidate_id TEXT PRIMARY KEY REFERENCES orchestration_improvements(id) ON DELETE CASCADE,
+ owner_user_id TEXT NOT NULL, state TEXT NOT NULL, evidence_json TEXT NOT NULL, created_at TIMESTAMP NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS idx_orchestration_friction_retention ON orchestration_friction(observed_at)`,
 	} {
 		if _, err := r.db.Exec(dialect.MustRenderSchema(r.db.DriverName(), statement)); err != nil {
 			return err

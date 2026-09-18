@@ -23,7 +23,7 @@ status: in_progress
 
 Extend the existing independent Orchestration runtime, not Office. First make intent and delivery durable; then add proportional routing, shared context and enforceable tools; then reconcile/resolve blockers and expose the central assistant. Add supervised workflow improvement and explicitly linked workspaces only after the single-workspace boundaries are tested.
 
-Implementation was explicitly requested after the design-package handoff. Tasks 01 through 08 are verified. Task 09 is in progress; tasks 10 and 11 remain pending. The subsequent binding-switch privacy regression was repaired after the user's explicit follow-up; the [ownership checkpoint](ownership-checkpoint.md) records the retained-owner boundary and passing checks. The [experiment report](experiments.md) records the pre-implementation baseline.
+Implementation was explicitly requested after the design-package handoff. Tasks 01 through 09 are verified; tasks 10 and 11 remain pending. The subsequent binding-switch privacy regression was repaired after the user's explicit follow-up; the [ownership checkpoint](ownership-checkpoint.md) records the retained-owner boundary and passing checks. The [experiment report](experiments.md) records the pre-implementation baseline.
 
 ## Continuation context
 
@@ -186,7 +186,7 @@ Execute sequentially in the primary conversation. Waves show dependencies only; 
 | 4 | [05 Enforced inspection](task-05-tool-authority.md) | Done |
 | 5 | [07 Native resolution and controls](task-07-input-resolution.md) | Done |
 | 6 | [08 Assistant interface](task-08-assistant-ui.md) | Done |
-| 7 | [09 Supervised improvements](task-09-workflow-improvements.md) | In progress |
+| 7 | [09 Supervised improvements](task-09-workflow-improvements.md) | Done |
 | 8 | [10 Workspace grants](task-10-workspace-grants.md) | Pending |
 | 9 | [11 Combined evidence](task-11-read-only-e2e.md) | Pending |
 
@@ -208,4 +208,4 @@ Delivery task 01 supplies the assistant rollout gate before any live candidate.
 
 ## Handoff checkpoint
 
-The original design-package handoff and subsequent ownership escalation were completed. The user explicitly requested the ownership repair, which is now implemented and verified; see [ownership-checkpoint.md](ownership-checkpoint.md). Tasks 01–08 are complete. Continue the maintenance review, closure and broker integration in task 09, then tasks 10–11 and delivery qualification.
+The original design-package handoff and subsequent ownership escalation were completed. The user explicitly requested the ownership repair, which is now implemented and verified; see [ownership-checkpoint.md](ownership-checkpoint.md). Tasks 01–09 are complete. Continue tasks 10–11 and delivery qualification.

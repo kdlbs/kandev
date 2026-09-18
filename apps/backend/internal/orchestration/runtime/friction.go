@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestration/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -37,7 +38,7 @@ func (s *Service) observeFriction(ctx context.Context, b *models.AssistantBindin
 		}
 		row.TaskID = task
 		row.AccountRevision, err = s.contextProfileRevision(ctx, b.WorkspaceID, row.ProfileID)
-		if err != nil {
+		if err != nil || !frictionMatchesProfile(row, byID[source.SessionID]) {
 			continue // A deleted or inaccessible execution identity is not regrouped.
 		}
 		if err = s.Repo.RecordFriction(ctx, b, row, s.attentionNow()); err != nil {
@@ -47,8 +48,16 @@ func (s *Service) observeFriction(ctx context.Context, b *models.AssistantBindin
 	return errors.Join(failures...)
 }
 
+func frictionMatchesProfile(row models.Friction, session *taskmodels.TaskSession) bool {
+	revision, err := time.Parse(time.RFC3339Nano, row.AccountRevision)
+	if err != nil || row.ObservedAt.IsZero() || row.ObservedAt.Before(revision) {
+		return false
+	}
+	return session == nil || session.StartedAt.IsZero() || !session.StartedAt.Before(revision)
+}
+
 func nativeFriction(source models.AttentionSource, session *taskmodels.TaskSession) (models.Friction, bool) {
-	if session == nil || (source.State != models.AttentionPending && (source.State != "resolved" || source.Friction == nil)) {
+	if session == nil || (source.State != models.AttentionPending && (source.State != statusResolved || source.Friction == nil)) {
 		return models.Friction{}, false
 	}
 	row := models.Friction{SessionID: session.ID, ProfileID: session.ExecutionProfileID,

@@ -61,16 +61,18 @@ Assistant mutations require `operation_id` and `expected_intent_revision`. Reuse
 
 The runtime CLI exposes `kandev objective list|create|update`. Delivery creation accepts `--mode execute|design` and an explicit permitted `--step`. Workflow defaults and repository-required design/review gates are not changed. Completion requires current evidence plus settled workers and required reviews; REVIEW alone is not completion.
 
-## Workflow maintenance foundation
+## Supervised workflow maintenance
 
-The maintenance backend is available behind the personal-assistant feature flag;
-the proposal/review interface and broker tools are still being completed. Lists
-and details use `GET /assistant/improvements` and
+Maintenance is available behind the personal-assistant feature flag, with proposal
+and review controls in the assistant's Details view. Lists and details use
+`GET /assistant/improvements` and
 `GET /assistant/improvements/:id`; current broker runs have equivalent
 `/runtime/improvements` read routes. Lists use bounded `limit` and opaque `after`
 cursors. Evidence contains typed native metadata, not private prompt bodies.
 Three matching incidents across two tasks in seven days create a proposal.
-Reading old native events again does not create new occurrences.
+Reading old native events again does not create new occurrences. Incidents are
+retained for 30 days; explicit human review receipts remain. Historical incidents
+from an earlier profile configuration are not reassigned to the current account.
 
 Only the owner can `PUT /assistant/improvements/:id/grant`, with
 `expected_binding_version`, `expected_revision`, `candidate_revision`,
@@ -81,6 +83,8 @@ Only the owner can `PUT /assistant/improvements/:id/grant`, with
 Docker isolation, resolves the immutable image and committed repository base,
 and refuses unsupported configurations. Expiry is at most seven days.
 `DELETE` on the grant route requires the current binding and grant revisions.
+`GET /assistant/maintenance-options` pages through native repository, ordinary
+workflow, safe entry-step and execution-profile choices without exposing secrets.
 
 `POST /assistant/improvements/:id/maintenance` and its `/runtime` counterpart
 accept `prepare`, `patch`, `check` or `commit`, plus operation ID, expected intent
@@ -89,12 +93,38 @@ and binding revisions, candidate revision and grant revision. Patch supplies
 native review task. A general agent cannot run that task. Checks run offline in
 a read-only container and can read the entire committed repository snapshot;
 only the exact granted files can be patched. Commit requires passing positive
-and negative checks for the same tree and grant revision.
+and negative checks for the same tree and grant revision. Any successful patch
+invalidates earlier validation. The named broker tools are `improvements`,
+`improvement`, `maintenance_file`, `maintenance_artifact` and `maintenance`.
 
 The resulting local commit is a prepared review artifact, not proof that the
 affected workflow recovered. Maintenance does not publish, create a PR, deploy,
 restart the application or modify the original checkout. Revocation blocks
 subsequent effects while preserving completed receipts.
+
+`GET /assistant/improvements/:id/evidence` returns a bounded page from that
+proposal's incident cohort. `GET .../:id/file` requires `path`,
+`expected_binding_version` and `grant_revision`. `GET .../:id/artifact` returns
+the complete local patch, base/commit/tree IDs, patch hash and matching check
+receipt. Current native read access permits human artifact review after revocation.
+Runtime file/artifact reads require the current grant and its revisions.
+
+`GET .../:id/successes` supplies later completed affected native task/session
+results, excluding unsettled workers or review gates. Human-only
+`POST .../:id/review` takes `expected_binding_version`, `expected_revision`,
+`action` (`rejected` or `resolved`) and, for resolution, `evidence` with
+`source_kind: "task_message"`, `task_id`, `session_id`, `source_id`. The backend
+revalidates the result and requires a prepared local repair before resolution.
+Model assertions, fewer permission prompts and old results are insufficient.
+A closed proposal retains its own evidence; a recurrence requires three new
+incidents rather than reopening the old review.
+
+Interrupted dispatch is shown as unknown. Human-only `POST .../:id/reconcile`
+accepts current binding/candidate revisions and can record an already created,
+validated local commit. It never repeats a patch, check, task creation or commit.
+An interrupted repair without a verifiable commit remains unknown and can be
+inspected or rejected. Grant, review and reconciliation routes are unavailable
+to the assistant broker.
 
 ## Memory and context
 

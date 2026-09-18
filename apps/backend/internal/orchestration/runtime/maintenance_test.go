@@ -16,6 +16,8 @@ import (
 
 type maintenanceFixtureSandbox struct {
 	prepares, patches, checks, commits int
+	reads                              int
+	artifact                           *models.MaintenanceReviewArtifact
 	beforePrepare                      func()
 }
 
@@ -33,7 +35,22 @@ func (f *maintenanceFixtureSandbox) Prepare(ctx context.Context, _ string, _ mod
 	return nil
 }
 func (f *maintenanceFixtureSandbox) Read(context.Context, models.MaintenanceGrant, string) (models.MaintenanceFile, error) {
-	return models.MaintenanceFile{}, nil
+	f.reads++
+	return models.MaintenanceFile{Content: "synthetic file"}, nil
+}
+
+func (f *maintenanceFixtureSandbox) Review(context.Context, models.MaintenanceGrant) (models.MaintenanceReviewArtifact, error) {
+	if f.artifact != nil {
+		return *f.artifact, nil
+	}
+	return models.MaintenanceReviewArtifact{Patch: "synthetic patch"}, nil
+}
+
+func (f *maintenanceFixtureManager) ValidateMaintenanceReview(context.Context, string, string) error {
+	return nil
+}
+func (f *maintenanceFixtureManager) ValidateMaintenanceSuccess(context.Context, string, models.Evidence, time.Time) error {
+	return nil
 }
 func (f *maintenanceFixtureSandbox) Patch(ctx context.Context, _ models.MaintenanceGrant, _ models.MaintenanceFile, guard maintenance.Guard) (models.MaintenanceArtifact, error) {
 	if err := guard(ctx); err != nil {

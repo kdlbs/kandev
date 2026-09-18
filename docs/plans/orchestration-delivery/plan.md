@@ -37,9 +37,12 @@ focused contributions to upstream without exposing private operations or history
 The exact base remains v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1`.
 The imported prototype already implements coordinator roles/assignments/chat,
 task delegation/callbacks, optional Automation delivery and backend assistant
-ownership/intake/objectives. Context work is partial. No central task view,
-assistant capability/authority/attention UI, live migration rehearsal or live
-cutover is claimed as complete. See the [full scope audit](../../review/orchestration/scope-audit.md).
+ownership/intake/objectives. Delivery 00–01, central-view 01–03 and assistant
+01–09 are now implemented and verified. Explicit workspace grants, combined
+assistant/provider qualification, the versioned candidate, live-data rehearsal
+and cutover remain unfinished. See the [workbench](../../../WORKBENCH.md) for
+current readiness and the [scope audit](../../review/orchestration/scope-audit.md)
+for the original imported baseline.
 
 This plan includes all remaining work identified in that audit. The related
 plugin contributes design ideas, not copied code or an installation dependency.
@@ -158,14 +161,15 @@ Their scope and acceptance still bind publication and rollout behavior.
 
 The [existing view plan](../workspace-coordinator-view/plan.md) is the delivery
 owner for its three work orders and 19 criteria. This plan references it rather
-than creating duplicate task definitions. All three remain pending.
+than creating duplicate task definitions. All three are complete with synthetic
+desktop/mobile screenshots and video.
 
 ### Personal assistant
 
 The [assistant plan](../personal-assistant/plan.md) owns its implementation records.
-Tasks 01/02 are done backend work and must not be redone. Task 03's remaining work
-and tasks 04–11 now have detailed continuation checklists, source boundaries,
-criterion references and verification. Their authoritative
+Tasks 01–09 are complete and must not be redone. Tasks 10–11 retain detailed
+continuation checklists, source boundaries, criterion references and verification.
+Their authoritative
 [requirements](../../specs/orchestration/requirements/personal-assistant.md) and
 [design](../../specs/orchestration/system-design/personal-assistant.md) replace the
 legacy generic specification.

@@ -80,7 +80,46 @@ These changes are in the same local commit. They are not a finished second produ
 | 10 Linked-workspace grants | **Pending** | No implemented general cross-workspace assistant observation/coordination/export grants. Workspace-scoped APIs do not imply these grants. |
 | 11 Read-only experiments/rollout | **Pending** | No complete assistant E2E experiment suite or live-provider readiness result. |
 
-See the [assistant plan](../../plans/personal-assistant/plan.md) and [task 03 results](../../plans/personal-assistant/task-03-memory-context.md). The latter is intentionally still `in_progress`. Real credential retrieval is not claimed; descriptors carry references and scope, and unavailable resolvers remain unavailable.
+This table preserves the audited import baseline. The continuation below and
+[assistant plan](../../plans/personal-assistant/plan.md) record subsequent delivery.
+Real credential retrieval is not claimed; descriptors carry references and scope,
+and unavailable resolvers remain unavailable.
+
+### Verified continuation through 2026-09-18
+
+The central Coordinator task view and assistant work orders 01–09 are now
+implemented. Their checked-in work orders contain commands, behavioral evidence
+and limits; the 476-path inventory below remains the original prototype inventory.
+
+- The central view filters/pages native tasks and all-session status, preserves
+  selection beside chat and works on desktop/phone with Office disabled.
+- Memory adds bounded scope-aware reads, revisioned confirmation/forgetting,
+  deterministic context and account/descriptor validation at delivery boundaries.
+- Capability discovery adds bounded native integration/plugin/MCP catalogs and
+  explicit conversation attachment without exporting credentials.
+- Assistant authority adds a separate restricted Claude ACP broker, enforced
+  provider/tool support, live mode/intent/configuration checks and honest unknown
+  operation receipts. Other execution paths remain explicitly unsupported.
+- Attention reconciles native question/permission/authentication/failure/result
+  sources across sessions, retains owner scope, repairs missed events and delivers
+  durable bounded wakes. Native input resolution, attributed remembered answers,
+  pause and per-session stop retain canonical Kandev gates and identities.
+- The app-level assistant provides retained private chat, objectives, attention,
+  memory/capability/activity controls and localized desktop/phone layouts.
+- Workflow maintenance adds redacted friction with threshold/deduplication and
+  account/time provenance, human exact-scope grants, one isolated native review
+  task, file CAS, offline constrained Docker checks and local Git artifacts.
+  Human review includes incident cohorts, native resource/result pickers,
+  revocation, bounded check output, complete patch download, verified subsequent
+  recovery, recurrence, retention and interrupted-operation reconciliation.
+- The independent personal-assistant toggle defaults off and preserves retained
+  conversation privacy with either feature disabled.
+
+Still unfinished: linked-workspace grants, combined assistant/provider evidence,
+candidate qualification, private live-data migration/rollback rehearsal, live
+pilot, dogfood evidence and focused upstream export. No live service cutover or
+public code PR is implied by these implementation checkpoints. See the
+[workbench](../../../WORKBENCH.md) for current review links.
 
 ### Shared infrastructure and v0.94.0 integration
 

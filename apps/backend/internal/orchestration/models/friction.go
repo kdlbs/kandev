@@ -89,3 +89,12 @@ type ImprovementCandidate struct {
 	PreparedAt      *time.Time `json:"prepared_at,omitempty" db:"prepared_at"`
 	ResolvedAt      *time.Time `json:"resolved_at,omitempty" db:"resolved_at"`
 }
+
+type ImprovementReview struct {
+	CandidateID  string    `json:"candidate_id" db:"candidate_id"`
+	OwnerUserID  string    `json:"owner_user_id" db:"owner_user_id"`
+	State        string    `json:"state" db:"state"`
+	Evidence     Evidence  `json:"evidence" db:"-"`
+	EvidenceJSON string    `json:"-" db:"evidence_json"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+}

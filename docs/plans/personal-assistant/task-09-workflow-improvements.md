@@ -1,7 +1,7 @@
 ---
 id: "09-workflow-improvements"
 title: "Supervised workflow improvement loop"
-status: in_progress
+status: done
 wave: 7
 depends_on: ["05-tool-authority","06-attention","07-input-resolution","08-assistant-ui"]
 plan: "plan.md"
@@ -109,7 +109,7 @@ cannot be established, offer the proposal only and document unsupported repair.
 
 ## Results
 
-In progress. The foundation includes typed native friction and original event
+Complete. The foundation includes typed native friction and original event
 times, deduplicated threshold aggregation, human-only revisioned grants,
 maintenance objectives and one native review task, private file CAS, qualified
 offline container checks, and validated local commit receipts. General task
@@ -122,10 +122,11 @@ operations, concurrent file CAS, revoked grants before effects, foreign owners,
 unknown gate provenance, source-time windowing and old-workspace visibility.
 Detailed final checkpoint verification is recorded below after checks complete.
 
-Remaining: proposal/grant/review UI, named broker tools, file/artifact inspection,
-human closure with subsequent native success, recurrence after closure,
-retention/recovery integration and combined browser coverage. This work order
-and its plan checkbox remain incomplete until those outcomes are verified.
+The proposal/grant/review UI, named broker tools, file/artifact inspection, human
+closure with subsequent native success, recurrence after closure and retention/
+recovery integration are complete. Desktop and phone browser flows exercise
+synthetic proposal evidence, the explicit grant form and persisted human rejection
+without creating a repair task. Cross-feature combined coverage remains task 11.
 
 ### Foundation checkpoint verification, 2026-09-18
 
@@ -149,3 +150,46 @@ rejection and unchanged source checkout. Runtime race checks passed in 21.5
 seconds. SQL guard, full specification lint and diff whitespace checks passed.
 No live service or real prompt history was used. Test repair containers are
 removed; the owned database fixture remains available for the next SQL slice.
+
+### Review completion verification, 2026-09-18
+
+Added human closure and review receipts, independently scoped recurrence evidence,
+bounded artifact/file reads, complete patch download, native resource/result
+pickers, five closed broker tools, durable unknown recovery and 30-day retention.
+Patching invalidates checks. Old account events cannot be regrouped, and native
+success under a changed account configuration cannot resolve an older candidate.
+The localized Details view includes the exact grant, revocation, validation,
+artifact and verified recovery controls.
+
+Behavioral red/green checks demonstrated old/new incident mixing on both engines,
+old profile-event regrouping, stale checks after patch, misuse of human review
+as general delegation authority and resolution under a changed account. All now
+pass. Artifact tests exercise actual private Git/Docker operations and apply the
+returned patch with `git apply --check`; bounded subprocess output cannot silently
+truncate evidence. Native recovery tests use persisted messages, sessions and gates.
+
+Verification with the repository toolchain and owned PostgreSQL/image fixtures:
+
+```sh
+# apps/backend
+GIN_MODE=release go test -race -tags fts5 -count=1 ./internal/orchestration/... ./internal/persistence/storeconformance
+GIN_MODE=release go test -tags fts5 -count=1 ./internal/backendapp ./cmd/agentctl -run 'TestAssistant|TestKandevAssistant'
+GIN_MODE=release go test -race -tags fts5 -count=1 ./internal/orchestration/runtime -run 'TestAssistant(Improvement|Maintenance|Friction|FeatureGate)'
+go run ./cmd/sqlguard ./internal
+# apps/web
+pnpm test app/assistant/maintenance-grant-form.test.tsx app/assistant/maintenance-review.test.tsx hooks/domains/orchestration/use-maintenance-mutations.test.ts
+pnpm run typecheck
+pnpm e2e:run --host --shards 1 --project chromium tests/orchestration/assistant-maintenance.spec.ts -- --retries=0
+pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/orchestration/mobile-assistant-maintenance.spec.ts -- --retries=0
+```
+
+Full Orchestration race and store conformance passed, including both-engine fresh,
+replay and previous-stable upgrades (store suite 134.6 seconds; runtime 19.1 seconds;
+actual maintenance sandbox 3.1 seconds). Native adapter/broker checks passed.
+The final account-resolution guard received its focused runtime race check.
+All five new UI tests passed; typecheck, scoped lint, SQL guard, specification,
+architecture and harness validation passed. Desktop and phone each passed one
+test with retries disabled (6.9 and 4.4 seconds). The initial desktop run exposed
+a fixture selector that skipped the Details tab; the test now waits for its
+accessible role on both layouts. No product response was mocked and no real
+prompt or live service was used. Real-provider qualification remains task 11.

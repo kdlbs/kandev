@@ -11,6 +11,8 @@ import (
 )
 
 const (
+	statusResolved       = "resolved"
+	revisionResponseKey  = "revision"
 	executionModeExecute = "execute"
 	taskIDKey            = "task_id"
 )
@@ -46,14 +48,7 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handler) {
 	assistant.PUT("/assistant", h.selectAssistant)
 	assistant.POST("/assistant/control", h.assistantControl)
 	assistant.GET("/assistant/objectives", h.objectives)
-	assistant.GET("/assistant/improvements", h.improvements)
-	assistant.GET("/runtime/improvements", h.improvements)
-	assistant.GET("/assistant/improvements/:id", h.improvement)
-	assistant.GET("/runtime/improvements/:id", h.improvement)
-	assistant.PUT("/assistant/improvements/:id/grant", h.saveMaintenanceGrant)
-	assistant.DELETE("/assistant/improvements/:id/grant", h.revokeMaintenanceGrant)
-	assistant.POST("/assistant/improvements/:id/maintenance", h.maintenanceAction)
-	assistant.POST("/runtime/improvements/:id/maintenance", h.maintenanceAction)
+	h.registerMaintenanceRoutes(assistant)
 	assistant.GET("/assistant/attention", h.attention)
 	assistant.GET("/assistant/attention/:id/input", h.attentionInput)
 	assistant.GET("/runtime/attention/:id/input", h.attentionInput)
@@ -474,4 +469,25 @@ func (h *Handler) runtimeTask(c *gin.Context) {
 		return
 	}
 	c.JSON(200, task)
+}
+
+func (h *Handler) registerMaintenanceRoutes(assistant *gin.RouterGroup) {
+	assistant.GET("/assistant/improvements", h.improvements)
+	assistant.GET("/assistant/maintenance-options", h.maintenanceOptions)
+	assistant.GET("/runtime/improvements", h.improvements)
+	assistant.GET("/assistant/improvements/:id", h.improvement)
+	assistant.GET("/runtime/improvements/:id", h.improvement)
+	assistant.GET("/assistant/improvements/:id/evidence", h.improvementEvidence)
+	assistant.GET("/runtime/improvements/:id/evidence", h.improvementEvidence)
+	assistant.PUT("/assistant/improvements/:id/grant", h.saveMaintenanceGrant)
+	assistant.DELETE("/assistant/improvements/:id/grant", h.revokeMaintenanceGrant)
+	assistant.POST("/assistant/improvements/:id/maintenance", h.maintenanceAction)
+	assistant.POST("/runtime/improvements/:id/maintenance", h.maintenanceAction)
+	assistant.GET("/assistant/improvements/:id/file", h.maintenanceFile)
+	assistant.GET("/runtime/improvements/:id/file", h.maintenanceFile)
+	assistant.GET("/assistant/improvements/:id/artifact", h.maintenanceArtifact)
+	assistant.GET("/runtime/improvements/:id/artifact", h.maintenanceArtifact)
+	assistant.POST("/assistant/improvements/:id/review", h.reviewImprovement)
+	assistant.POST("/assistant/improvements/:id/reconcile", h.reconcileMaintenance)
+	assistant.GET("/assistant/improvements/:id/successes", h.maintenanceSuccesses)
 }

@@ -1,4 +1,5 @@
 import type { ClarificationAnswer, ClarificationQuestion } from "@/lib/types/http";
+import type { Improvement } from "./assistant-maintenance-types";
 export type AssistantMode = "answer" | "inspect" | "design" | "execute";
 export type AssistantBinding = {
   id: string;
@@ -150,6 +151,7 @@ export type AssistantCredential = {
 };
 export type AssistantPage<T> = { entries: T[]; next_cursor: string };
 export type AssistantPages = {
+  improvements: Improvement;
   attention: AssistantAttention;
   objectives: AssistantObjective;
   memory: AssistantMemory;

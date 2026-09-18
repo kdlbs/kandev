@@ -66,6 +66,30 @@ type MaintenanceArtifact struct {
 	CommitOID string `json:"commit_oid"`
 }
 
+type MaintenanceReviewArtifact struct {
+	MaintenanceArtifact
+	Patch       string                 `json:"patch"`
+	PatchSHA256 string                 `json:"patch_sha256"`
+	Validation  *MaintenanceValidation `json:"validation,omitempty"`
+}
+
+type MaintenanceOption struct {
+	ID         string `json:"id"`
+	ResourceID string `json:"resource_id"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	WorkflowID string `json:"workflow_id,omitempty"`
+}
+
+type MaintenanceSuccess struct {
+	ID          string    `json:"id"`
+	TaskID      string    `json:"task_id"`
+	TaskTitle   string    `json:"task_title"`
+	SessionID   string    `json:"session_id"`
+	SourceID    string    `json:"source_id"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
 func (s MaintenanceScope) Validate() error {
 	for _, id := range []string{s.RepositoryID, s.WorkflowID, s.WorkflowStepID, s.ProfileID, s.Image} {
 		if id == "" || len(id) > 200 || strings.ContainsAny(id, "\x00\r\n") {

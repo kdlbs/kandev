@@ -11,11 +11,20 @@ import (
 	"time"
 )
 
-type boundedOutput struct{ bytes.Buffer }
+type boundedOutput struct {
+	buffer    bytes.Buffer
+	truncated bool
+}
+
+func (b *boundedOutput) Len() int       { return b.buffer.Len() }
+func (b *boundedOutput) String() string { return b.buffer.String() }
 
 func (b *boundedOutput) Write(p []byte) (int, error) {
+	if len(p) > 65536-b.Len() {
+		b.truncated = true
+	}
 	if b.Len() < 65536 {
-		_, _ = b.Buffer.Write(p[:min(len(p), 65536-b.Len())])
+		_, _ = b.buffer.Write(p[:min(len(p), 65536-b.Len())])
 	}
 	return len(p), nil
 }
@@ -36,6 +45,9 @@ func runCommand(ctx context.Context, dir, name string, args ...string) (string, 
 		code = exit.ExitCode()
 	} else if err != nil {
 		code = -1
+	}
+	if output.truncated {
+		return output.String(), code, errors.New("maintenance command output exceeded the evidence limit")
 	}
 	return output.String(), code, err
 }

@@ -36,6 +36,11 @@ func (s *Service) ReconcileAttention(ctx context.Context) error {
 	if now.Before(s.attentionNext) {
 		return nil
 	}
+	if s.attentionAfter == "" {
+		if err := s.Repo.PruneFriction(ctx, now); err != nil {
+			return err
+		}
+	}
 	targets, err := s.Repo.AttentionTargets(ctx, "", s.attentionAfter, attentionBatch)
 	if err != nil {
 		return err
@@ -165,7 +170,7 @@ func validateAttentionSources(sources []models.AttentionSource) error {
 		if seen[key] || s.SourceID == "" || len(s.SourceID) > 1024 || len(s.SessionID) > 200 || s.SourceRevision == "" || len(s.SourceRevision) > 256 {
 			return fmt.Errorf("invalid attention identity")
 		}
-		if !slices.Contains([]string{attentionKindQuestion, attentionKindPermission, attentionKindAuthentication, attentionKindFailure, "review", "result"}, s.Kind) || !slices.Contains([]string{models.AttentionPending, "resolved", "expired", statusUnknown, "inactive"}, s.State) {
+		if !slices.Contains([]string{attentionKindQuestion, attentionKindPermission, attentionKindAuthentication, attentionKindFailure, "review", "result"}, s.Kind) || !slices.Contains([]string{models.AttentionPending, statusResolved, "expired", statusUnknown, "inactive"}, s.State) {
 			return fmt.Errorf("invalid attention state")
 		}
 		seen[key] = true

@@ -36,7 +36,7 @@ generic material; original local snapshot/backup refs are not published.
 | Assistant attention | Implemented; all-session native sources, durable wakes, pause/expiry and owner-scoped updates verified |
 | Assistant resolution and controls | Implemented; native parity, attributed known answers, pause and per-session stop verified |
 | Assistant UI | Implemented; scoped chat, native decisions, memory controls, desktop/mobile and localization verified |
-| Assistant maintenance | Backend foundation implemented; typed incidents, explicit grants, isolated checks and local commit receipts. Review UI, closure/recovery and broker tools in progress |
+| Assistant maintenance | Implemented; typed incidents, explicit grants, isolated checks/commits, human review, verified native recovery, recurrence and desktop/mobile proposal flow |
 | Assistant workspace grants | Fully planned; implementation pending |
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
 | Actual live-data rehearsal and deployment | Pending; live service unchanged |

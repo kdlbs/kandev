@@ -16,7 +16,9 @@ actions. The central assistant already uses a restricted native broker.
 Only typed native events contribute to friction fingerprints. Preserve their
 occurrence times, account/profile revision and known origin; unknown provider
 classifier details remain unknown. Reconciliation does not turn an old request
-into a new incident. Retain bounded metadata without prompt bodies.
+into a new incident. Events that predate the current profile configuration are
+not attributed to its account revision. Retain bounded metadata without prompt
+bodies, pruning incidents after 30 days while keeping human review receipts.
 
 A human grant selects an accessible local repository, ordinary workflow and
 entry step without automatic actions, execution profile, exact files, local
@@ -62,10 +64,17 @@ and checks that can run without network access or writes to the repository.
 Owners must understand that approved checks can read the repository snapshot,
 including committed files outside the patch allowlist.
 
-Review presentation, artifact export, recurrence after closure and observed
-resolution remain required parts of the maintenance work order; implementing
-the executor alone does not complete that feature. Other executor families need
-equivalent enforcement and negative tests before being supported.
+The owner reviews typed incident evidence, the exact grant, bounded check output
+and a complete downloadable patch in the assistant details view. Resolution
+selects a later successful affected native session with a persisted agent result
+and settled workflow/review gates. Rejection or resolution closes that evidence
+cohort; a recurrence needs three new incidents and a separate proposal. Historical
+failures do not prevent a later verified recovery.
+
+Interrupted dispatch remains unknown. Human reconciliation can record an already
+created local commit only after checking its original base, exact tree and both
+validation receipts; it does not repeat an uncertain action. Other executor
+families need equivalent enforcement and negative tests before being supported.
 
 ## Alternatives Considered
 

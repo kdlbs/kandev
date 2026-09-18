@@ -74,7 +74,10 @@ func projectImprovement(ctx context.Context, tx *sqlx.Tx, row models.Friction, n
 		Tasks     int `db:"tasks"`
 	}
 	err := tx.GetContext(ctx, &count, tx.Rebind(`SELECT count(*) AS incidents,count(DISTINCT task_id) AS tasks
- FROM orchestration_friction WHERE binding_id=? AND fingerprint=? AND outcome='blocked' AND observed_at>=? AND observed_at<=?`), row.BindingID, row.Fingerprint, now.Add(-7*24*time.Hour), now)
+ FROM orchestration_friction WHERE binding_id=? AND fingerprint=? AND outcome='blocked' AND observed_at>=? AND observed_at<=?
+ AND observed_at>COALESCE((SELECT max(v.created_at) FROM orchestration_improvement_reviews v
+ JOIN orchestration_improvements c ON c.id=v.candidate_id WHERE c.binding_id=? AND c.fingerprint=?),?)`),
+		row.BindingID, row.Fingerprint, now.Add(-7*24*time.Hour), now, row.BindingID, row.Fingerprint, time.Unix(0, 0).UTC())
 	if err != nil || count.Incidents < 3 || count.Tasks < 2 {
 		return err
 	}
@@ -108,6 +111,24 @@ func (r *Repository) ImprovementEvidence(ctx context.Context, binding, fingerpri
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`SELECT * FROM orchestration_friction WHERE binding_id=? AND fingerprint=? AND id>? ORDER BY id LIMIT ?`), binding, fingerprint, after, min(max(limit, 1), 101))
 	return rows, err
 }
+
+func (r *Repository) CandidateEvidence(ctx context.Context, candidate *models.ImprovementCandidate, after string, limit int) ([]models.Friction, error) {
+	rows := []models.Friction{}
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`SELECT f.* `+candidateFriction+` AND f.id>? ORDER BY f.id LIMIT ?`),
+		candidate.BindingID, candidate.ID, candidate.CreatedAt.Add(-7*24*time.Hour), time.Unix(0, 0).UTC(), after, min(max(limit, 1), 101))
+	return rows, err
+}
+
+// Each human closure starts a new evidence cohort. Late delivery retains its
+// native event time instead of becoming evidence for an unrelated recurrence.
+const candidateFriction = `FROM orchestration_friction f
+ JOIN orchestration_improvements c ON c.binding_id=f.binding_id AND c.fingerprint=f.fingerprint
+ LEFT JOIN orchestration_improvement_reviews v ON v.candidate_id=c.id
+ WHERE f.binding_id=? AND c.id=? AND f.observed_at>=?
+ AND (v.created_at IS NULL OR f.observed_at<=v.created_at)
+ AND f.observed_at>COALESCE((SELECT max(previous.created_at) FROM orchestration_improvement_reviews previous
+ JOIN orchestration_improvements old ON old.id=previous.candidate_id
+ WHERE old.binding_id=c.binding_id AND old.fingerprint=c.fingerprint AND previous.created_at<c.created_at),?)`
 
 func (r *Repository) PruneFriction(ctx context.Context, now time.Time) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM orchestration_friction WHERE observed_at<?`), now.UTC().Add(-30*24*time.Hour))

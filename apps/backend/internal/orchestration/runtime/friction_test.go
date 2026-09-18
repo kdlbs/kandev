@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestration/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -34,6 +35,8 @@ func TestAssistantFrictionNativeObservations(t *testing.T) {
 	require.NoError(t, s.Repo.LinkObjectiveTask(ctx, models.ObjectiveTask{ObjectiveID: objectives[0].ID, TaskID: "worker-two", Role: "implementation", OperationID: "dispatch-two"}))
 	tasks.tasks["worker-two"] = &taskmodels.Task{ID: "worker-two", WorkspaceID: "ws"}
 	attention.sources = attention.sources[:1]
+	now := time.Now().UTC()
+	attention.sources[0].ObservedAt = &now
 	attention.sources[0].Summary = "CANARY_PRIVATE_PROMPT must never enter friction"
 	require.NoError(t, s.ReconcileAttentionTask(ctx, "worker"))
 	attention.sources[0].SourceRevision = "new-projection-of-same-request"
@@ -62,4 +65,21 @@ func TestAssistantFrictionNativeObservations(t *testing.T) {
 	rows, err = s.Repo.ImprovementCandidates(ctx, b.ID, "", 10)
 	require.NoError(t, err)
 	require.Empty(t, rows, "old workspace proposals must not follow a changed binding")
+}
+
+func TestAssistantFrictionDoesNotRegroupHistoricalProfileEvents(t *testing.T) {
+	s, db, b, attention := assistantAttentionFixture(t)
+	ctx := context.Background()
+	profile, err := s.Personas.Profiles.GetAgentProfile(ctx, "personal")
+	require.NoError(t, err)
+	old := profile.UpdatedAt.Add(-time.Minute)
+	s.Tasks = &frictionTasks{testTasks: s.Tasks.(*testTasks), sessions: map[string][]*taskmodels.TaskSession{
+		"worker": {{ID: "older", TaskID: "worker", AgentProfileID: "personal", StartedAt: old}},
+	}}
+	source := attention.sources[0]
+	source.ObservedAt = &old
+	require.NoError(t, s.observeFriction(ctx, b, "worker", []models.AttentionSource{source}))
+	var count int
+	require.NoError(t, db.Get(&count, `SELECT count(*) FROM orchestration_friction`))
+	require.Zero(t, count, "an old native incident must not be attributed to the current account revision")
 }

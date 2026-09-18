@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agent/runtimeauth"
@@ -81,7 +82,7 @@ func (h *Handler) createObjective(c *gin.Context) {
 		if err != nil || source.AuthorType != authorTypeUser || source.AuthorID != binding.OwnerUserID {
 			return nil, rejectOperation(422, "objective requires an owner-authored source comment")
 		}
-		if source.Source == "maintenance_grant" {
+		if strings.HasPrefix(source.Source, "maintenance_") {
 			return nil, rejectOperation(422, "maintenance confirmation cannot authorize a general delivery objective")
 		}
 		row := &models.Objective{BindingID: binding.ID, WorkspaceID: binding.WorkspaceID, SourceCommentID: req.Source, Title: req.Title, Mode: req.Mode, Status: statusActive, Acceptance: req.Acceptance, Evidence: []models.Evidence{}, IntentRevision: *req.ExpectedIntentRevision}

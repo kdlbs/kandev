@@ -59,6 +59,9 @@ func (s *Service) RecoverInterrupted(ctx context.Context) error {
 	if err := s.Repo.RecoverOperations(ctx); err != nil {
 		return err
 	}
+	if err := s.Repo.RecoverMaintenance(ctx); err != nil {
+		return err
+	}
 	rows, err := s.Repo.InterruptedRuns(ctx)
 	if err != nil {
 		return err

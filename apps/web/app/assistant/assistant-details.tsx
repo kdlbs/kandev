@@ -9,6 +9,7 @@ import {
 import { AssistantPanel } from "./assistant-panel";
 import { AssistantObjectives } from "./assistant-objectives";
 import { MemoryPanel } from "./memory-panel";
+import { AssistantImprovements } from "./assistant-improvements";
 function AssistantCapabilities({
   binding,
   revision,
@@ -127,6 +128,7 @@ export function AssistantDetails(props: { binding: AssistantBinding; revision: n
   return (
     <div className="space-y-6">
       <AssistantObjectives {...props} />
+      <AssistantImprovements {...props} />
       {[
         { key: "assistantMemory", content: <MemoryPanel {...props} /> },
         { key: "assistantActivity", content: <AssistantActivity {...props} /> },

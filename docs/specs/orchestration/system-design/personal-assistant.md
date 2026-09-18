@@ -21,8 +21,8 @@ requirements:
 This design completes the existing `internal/orchestration` assistant. Ownership,
 durable intake, objectives, context/credential metadata, capability discovery and
 enforced inspect mode, attention, native resolution and the app-level shell are
-implemented. The maintenance backend foundation is implemented; its review UI,
-closure/recovery and broker integration remain in progress. Workspace grants
+implemented. The maintenance preparation and human review loop is implemented,
+including artifact inspection, native-success closure and recovery. Workspace grants
 remain pending. The
 [workspace Coordinator view](coordinator-view.md) is a separate observation UI
 that may ship first. Its grouped task list is not an assistant attention ledger.
@@ -276,6 +276,21 @@ are limited to the granted files. General native agent dispatch and contribution
 fork preparation are unavailable to maintenance tasks. Grants are human-only and
 expire within seven days; binding, intent, profile/configuration and native access
 are rechecked before effects. Unsupported isolation leaves the proposal intact.
+
+Human review persists a terminal receipt and closes the candidate's incident
+cohort. Resolution requires a prepared artifact plus a later completed affected
+session, a persisted native result and satisfied native workflow/review gates.
+The UI offers only verified results; the backend rechecks before recording the
+decision. Three new matching incidents can open a separate recurrence. Repeated
+reads cannot re-age incidents, and old profile events cannot be relabeled with
+the current account configuration. Incidents expire after 30 days; review
+receipts and local artifacts preserve completed effects.
+
+Restart marks unfinished maintenance dispatch unknown. The owner can reconcile
+an existing exact-tree validated commit without replaying the action. A complete
+patch can be inspected/exported after revocation under current native read access;
+runtime file/artifact reads require the current grant. Named broker tools expose
+only inspection and the four closed preparation actions, never grant/review edits.
 
 ## Workspace grants
 

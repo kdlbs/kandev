@@ -29,6 +29,10 @@ func TestAssistantMaintenanceScopeNativeResources(t *testing.T) {
 	path, err := a.ValidateMaintenanceScope(ctx, "ws-1", scope)
 	require.NoError(t, err)
 	require.Equal(t, dir, path)
+	options, err := a.MaintenanceOptions(ctx, "ws-1")
+	require.NoError(t, err)
+	require.Contains(t, options, shared.MaintenanceOption{ID: "repository:repair-repo", ResourceID: "repair-repo", Kind: "repository", Name: "Sample"})
+	require.Contains(t, options, shared.MaintenanceOption{ID: "step:review", ResourceID: "review", Kind: "step", Name: "Review", WorkflowID: wf.ID})
 	_, err = a.ValidateMaintenanceScope(ctx, "foreign", scope)
 	require.Error(t, err)
 	template := "improve-kandev"
@@ -36,4 +40,10 @@ func TestAssistantMaintenanceScopeNativeResources(t *testing.T) {
 	require.NoError(t, a.taskRepo.UpdateWorkflow(ctx, wf))
 	_, err = a.ValidateMaintenanceScope(ctx, "ws-1", scope)
 	require.Error(t, err, "a local grant cannot enter contribution destination preparation")
+	options, err = a.MaintenanceOptions(ctx, "ws-1")
+	require.NoError(t, err)
+	for _, option := range options {
+		require.NotEqual(t, "workflow:"+wf.ID, option.ID)
+		require.NotEqual(t, "step:review", option.ID)
+	}
 }

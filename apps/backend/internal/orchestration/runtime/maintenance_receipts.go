@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestration/maintenance"
@@ -29,6 +30,9 @@ func (s *Service) commitMaintenance(ctx context.Context, b *models.AssistantBind
 		return nil, rejectOperation(422, "maintenance_checks_required")
 	}
 	artifact, err := s.Maintenance.Commit(ctx, g, guard)
+	if errors.Is(err, maintenance.ErrBoundary) {
+		return nil, rejectOperation(422, "maintenance_checks_required_for_current_tree")
+	}
 	if err != nil {
 		return artifact, err
 	}
