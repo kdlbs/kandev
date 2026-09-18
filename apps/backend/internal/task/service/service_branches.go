@@ -126,8 +126,8 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 }
 
 // materializeLegacyBranch adapts the legacy one-row worktree capability to
-// the batch commit path. The existing materializer owns its live/pre-launch
-// distinction, preserving add_branch's historical no-op-before-launch rule.
+// the batch commit path. materializeBranch resolves the effective environment
+// and preserves add_branch's historical no-op-before-launch rule.
 func (s *Service) materializeLegacyBranch(ctx context.Context, taskID string, batch *models.WorkspaceSourceBatch) (*WorkspaceSourceMaterializationResult, error) {
 	for _, source := range batch.Sources {
 		if source.Repository != nil {
@@ -296,29 +296,37 @@ func branchAddDuplicateError(
 
 // materializeBranch triggers the worktree manager + agentctl rescan.
 //
-// Pre-launch tasks (no task_environments row, or no materializer wired) keep
-// the legacy best-effort behaviour: failures are logged and the next session
-// launch will pick the worktree up via prepareMultiRepo. Returns nil in both
-// of those cases so the task_repositories row sticks around for the launcher
-// to act on.
+// Pre-launch tasks with no effective environment keep the legacy best-effort
+// behaviour: failures are logged and the next session launch will pick the
+// worktree up via prepareMultiRepo.
 //
 // Live worktree-executor tasks (already launched) surface the materialize
 // failure to the caller so AddBranchToTask can roll back the dangling
 // task_repositories row — leaving it in place produced the silent-success
 // orphan that the original bug report describes.
 func (s *Service) materializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error) {
+	// Resolve before materialization so lookup failures cannot silently demote
+	// a live task to pre-launch deferral. The selected identity is passed down
+	// so a racing session rebind fails closed.
+	resolved, resolveErr := s.resolveBranchMaterializationTarget(ctx, taskID)
+	if resolveErr != nil {
+		return nil, fmt.Errorf("resolve branch materialization environment: %w", resolveErr)
+	}
+	alreadyLaunched := resolved != nil
 	if s.branchMaterializer == nil {
+		if alreadyLaunched {
+			return nil, fmt.Errorf("materialize branch: live task has no branch materializer")
+		}
 		return nil, nil
 	}
-	// Snapshot launch state BEFORE MaterializeBranch so a caller-side cancel
-	// during materialize can't poison the post-failure check: launch state
-	// cannot change during the synchronous materialize call, but the DB
-	// query in taskAlreadyLaunched would fail with a context error if we
-	// asked after the fact — and that would silently demote a live-task
-	// rollback to a best-effort no-op, leaving the orphan row the PR exists
-	// to prevent.
-	alreadyLaunched := s.taskAlreadyLaunched(ctx, taskID)
-	result, err := s.branchMaterializer.MaterializeBranch(ctx, taskID, taskRepositoryID)
+	target := BranchMaterializationTarget{}
+	if resolved != nil {
+		target.TaskEnvironmentID = resolved.environment.ID
+		if resolved.session != nil {
+			target.SessionID = resolved.session.ID
+		}
+	}
+	result, err := s.branchMaterializer.MaterializeBranch(ctx, taskID, taskRepositoryID, target)
 	if err != nil {
 		if !alreadyLaunched {
 			s.logger.Warn("branch materialization failed; worktree will be created on next session launch",
@@ -337,22 +345,6 @@ func (s *Service) materializeBranch(ctx context.Context, taskID, taskRepositoryI
 		return nil, fmt.Errorf("materialize branch: live task did not create a worktree")
 	}
 	return result, nil
-}
-
-// taskAlreadyLaunched reports whether the task already has a task_environments
-// row whose executor type is fixed — the signal that an executor backend is
-// running and won't replay prepareMultiRepo for the new branch on its own.
-// Pre-launch tasks (no row, or no executor type yet) return false so a
-// materialize failure stays best-effort.
-func (s *Service) taskAlreadyLaunched(ctx context.Context, taskID string) bool {
-	if s.taskEnvironments == nil {
-		return false
-	}
-	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
-	if err != nil || env == nil {
-		return false
-	}
-	return env.ExecutorType != ""
 }
 
 // defaultRepositoryIDForTask resolves the implicit repository to use when
@@ -398,12 +390,16 @@ func (s *Service) requireWorktreeExecutorForBranchAdd(ctx context.Context, taskI
 	if s.taskEnvironments == nil {
 		return nil
 	}
-	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	target, err := s.resolveBranchMaterializationTarget(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("look up task environment: %w", err)
+		return err
 	}
-	if env == nil || env.ExecutorType == "" {
+	if target == nil {
 		return nil
+	}
+	env := target.environment
+	if env.ExecutorType == "" {
+		return fmt.Errorf("%w: task environment %s is not provisioned", models.ErrWorkspaceReuseUnsafe, env.ID)
 	}
 	if env.ExecutorType != string(models.ExecutorTypeWorktree) {
 		return fmt.Errorf(

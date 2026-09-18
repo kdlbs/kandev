@@ -240,6 +240,10 @@ func TestAddBranchToTask_AllowsWorktreeExecutor(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
+	svc.SetBranchMaterializer(&stubMaterializer{result: &BranchMaterializationResult{
+		WorktreePath:      "/tmp/task-env/frontend-feature-x",
+		TaskWorkspacePath: "/tmp/task-env",
+	}})
 
 	if _, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
 		TaskID:         task.ID,
@@ -690,19 +694,25 @@ func (p *stubProber) ProbeDefaultBranch(_ context.Context, provider, owner, name
 // stubMaterializer implements BranchMaterializer for tests; the err field
 // controls whether the materialize step succeeds.
 type stubMaterializer struct {
-	err    error
-	result *BranchMaterializationResult
-	calls  int
+	err        error
+	result     *BranchMaterializationResult
+	calls      int
+	lastTarget BranchMaterializationTarget
 }
 
-func (m *stubMaterializer) MaterializeBranch(_ context.Context, _ string, _ string) (*BranchMaterializationResult, error) {
+func (m *stubMaterializer) MaterializeBranch(
+	_ context.Context,
+	_, _ string,
+	target BranchMaterializationTarget,
+) (*BranchMaterializationResult, error) {
 	m.calls++
+	m.lastTarget = target
 	return m.result, m.err
 }
 
 // seedWorktreeTaskEnv attaches a worktree-executor task_environments row so
-// requireWorktreeExecutorForBranchAdd permits the call and taskAlreadyLaunched
-// reports the task as live. The environment carries inventory rows mirroring
+// requireWorktreeExecutorForBranchAdd permits the call and the effective
+// environment resolver reports the task as live. The inventory rows mirror
 // the task's existing task_repositories, since CreateTaskEnvironment now
 // requires a ready environment to carry inventory for a repo-backed task.
 func seedWorktreeTaskEnv(t *testing.T, repo interface {
@@ -953,7 +963,7 @@ func TestAddBranchToTask_MaterializeSkippedPreLaunchStillSucceeds(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	// No task_environments row → taskAlreadyLaunched reports false.
+	// No task_environments row means the effective environment is pre-launch.
 	mat := &stubMaterializer{err: fmt.Errorf("ignored on pre-launch tasks")}
 	svc.SetBranchMaterializer(mat)
 

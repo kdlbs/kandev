@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -88,7 +90,7 @@ func TestBranchMaterializer_PromotesWorkspacePathAndTriggersRescan(t *testing.T)
 		t.Fatalf("CreateTaskRepository: %v", err)
 	}
 
-	materialized, err := mat.MaterializeBranch(ctx, "task-1", tr.ID)
+	materialized, err := mat.MaterializeBranch(ctx, "task-1", tr.ID, taskservice.BranchMaterializationTarget{})
 	if err != nil {
 		t.Fatalf("MaterializeBranch: %v", err)
 	}
@@ -161,7 +163,7 @@ func TestBranchMaterializer_SecondBranchKeepsTaskRootPromoted(t *testing.T) {
 	if err := repoSqlite.CreateTaskRepository(ctx, tr2); err != nil {
 		t.Fatalf("CreateTaskRepository branch-2: %v", err)
 	}
-	if _, err := mat.MaterializeBranch(ctx, "task-1", tr2.ID); err != nil {
+	if _, err := mat.MaterializeBranch(ctx, "task-1", tr2.ID, taskservice.BranchMaterializationTarget{}); err != nil {
 		t.Fatalf("MaterializeBranch branch-2: %v", err)
 	}
 
@@ -173,7 +175,7 @@ func TestBranchMaterializer_SecondBranchKeepsTaskRootPromoted(t *testing.T) {
 	if err := repoSqlite.CreateTaskRepository(ctx, tr3); err != nil {
 		t.Fatalf("CreateTaskRepository branch-3: %v", err)
 	}
-	if _, err := mat.MaterializeBranch(ctx, "task-1", tr3.ID); err != nil {
+	if _, err := mat.MaterializeBranch(ctx, "task-1", tr3.ID, taskservice.BranchMaterializationTarget{}); err != nil {
 		t.Fatalf("MaterializeBranch branch-3: %v", err)
 	}
 
@@ -200,6 +202,175 @@ func TestBranchMaterializer_SecondBranchKeepsTaskRootPromoted(t *testing.T) {
 			t.Errorf("call %d workDir = %q, want %q", i, call.workDir, taskRoot)
 		}
 	}
+}
+
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.3
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.4
+func TestBranchMaterializer_InheritedSessionPersistsCanonicalInventory(t *testing.T) {
+	ctx := context.Background()
+	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)
+	repoSqlite := newMaterializerRepo(t)
+	worktreeMgr := newPersistingMaterializerWorktreeMgr(t, taskRoot, repoSqlite)
+	stub := &stubRescanner{}
+	mat := &branchMaterializer{
+		repo:        repoSqlite,
+		worktreeMgr: worktreeMgr,
+		rescanner:   stub,
+		logger:      newTestLogger(),
+	}
+
+	seedMaterializerTask(t, ctx, repoSqlite, repoPath, taskRoot, primaryPath)
+	branch := seedInheritedMaterializerChild(t, ctx, repoSqlite)
+
+	materialized, err := mat.MaterializeBranch(ctx, "task-child", branch.ID, taskservice.BranchMaterializationTarget{
+		SessionID: "session-child", TaskEnvironmentID: "env-1",
+	})
+	if err != nil {
+		t.Fatalf("MaterializeBranch inherited: %v", err)
+	}
+	wantPath := filepath.Join(taskRoot, "kandev-branch-inherited")
+	if materialized == nil || materialized.WorktreePath != wantPath || materialized.TaskWorkspacePath != taskRoot {
+		t.Fatalf("materialization result = %#v, want inherited sibling and task root", materialized)
+	}
+
+	env, err := repoSqlite.GetTaskEnvironment(ctx, "env-1")
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	var persisted *models.TaskEnvironmentRepo
+	for _, envRepo := range env.Repos {
+		if envRepo.RepositoryID == "repo-1" && envRepo.BranchSlug == "branch-inherited" {
+			persisted = envRepo
+			break
+		}
+	}
+	if persisted == nil || persisted.WorktreePath != wantPath {
+		t.Fatalf("canonical inherited inventory = %#v, want branch at %q", persisted, wantPath)
+	}
+	if len(stub.calls) != 1 || stub.calls[0].sessionID != "session-child" || stub.calls[0].workDir != taskRoot {
+		t.Fatalf("rescan calls = %#v, want inherited child session and task root", stub.calls)
+	}
+	if len(stub.notifyCalls) != 1 || stub.notifyCalls[0].TaskID != "task-child" || stub.notifyCalls[0].SessionID != "session-child" {
+		t.Fatalf("materialized notifications = %#v, want inherited child identity", stub.notifyCalls)
+	}
+}
+
+func TestBranchMaterializer_InheritedEnvironmentFailuresFailClosed(t *testing.T) {
+	now := time.Now().UTC()
+	archivedAt := now
+	ready := func() *models.TaskEnvironment {
+		return &models.TaskEnvironment{
+			ID: "env-parent", TaskID: "task-parent", ExecutorType: string(models.ExecutorTypeWorktree),
+			Status: models.TaskEnvironmentStatusReady, TaskDirName: "task-root",
+		}
+	}
+	tests := []struct {
+		name         string
+		environment  *models.TaskEnvironment
+		environmentE error
+		owner        *models.Task
+		ownerE       error
+	}{
+		{name: "missing environment", environmentE: taskrepo.ErrTaskEnvironmentNotFound},
+		{name: "unverifiable owner", environment: ready(), ownerE: context.Canceled},
+		{name: "archived owner", environment: ready(), owner: &models.Task{ID: "task-parent", ArchivedAt: &archivedAt}},
+		{name: "unprovisioned environment", environment: func() *models.TaskEnvironment {
+			env := ready()
+			env.Status = models.TaskEnvironmentStatusCreating
+			env.TaskDirName = ""
+			return env
+		}(), owner: &models.Task{ID: "task-parent"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &branchMaterializerRepoOverrides{
+				getTaskEnvironmentByTaskID: func(context.Context, string) (*models.TaskEnvironment, error) { return nil, nil },
+				getTaskEnvironment:         func(context.Context, string) (*models.TaskEnvironment, error) { return tt.environment, tt.environmentE },
+				getTask:                    func(context.Context, string) (*models.Task, error) { return tt.owner, tt.ownerE },
+			}
+			materializer := &branchMaterializer{repo: repo, logger: newTestLogger()}
+			session := &models.TaskSession{ID: "session-child", TaskID: "task-child", TaskEnvironmentID: "env-parent"}
+			if _, err := materializer.resolveMaterializationEnvironment(context.Background(), "task-child", session); !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+				t.Fatalf("resolveMaterializationEnvironment() error = %v, want ErrWorkspaceReuseUnsafe", err)
+			}
+		})
+	}
+}
+
+func TestBranchMaterializer_RejectsSessionReboundBeforeCreate(t *testing.T) {
+	ctx := context.Background()
+	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)
+	repoSqlite := newMaterializerRepo(t)
+	seedMaterializerTask(t, ctx, repoSqlite, repoPath, taskRoot, primaryPath)
+	branch := seedInheritedMaterializerChild(t, ctx, repoSqlite)
+	repo := &branchMaterializerRepoOverrides{branchMaterializerRepo: repoSqlite}
+	repo.listTaskSessions = func(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+		sessions, err := repoSqlite.ListTaskSessions(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		repo.listCalls++
+		if repo.listCalls > 1 {
+			for i, session := range sessions {
+				copy := *session
+				copy.TaskEnvironmentID = "env-rebound"
+				sessions[i] = &copy
+			}
+		}
+		return sessions, nil
+	}
+	materializer := &branchMaterializer{
+		repo: repo, worktreeMgr: newPersistingMaterializerWorktreeMgr(t, taskRoot, repoSqlite), logger: newTestLogger(),
+	}
+	_, err := materializer.MaterializeBranch(ctx, "task-child", branch.ID, taskservice.BranchMaterializationTarget{
+		SessionID: "session-child", TaskEnvironmentID: "env-1",
+	})
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("MaterializeBranch rebound error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if repo.listCalls != 2 {
+		t.Fatalf("session list calls = %d, want resolution plus immediate revalidation", repo.listCalls)
+	}
+	if _, statErr := os.Stat(filepath.Join(taskRoot, "kandev-branch-inherited")); !os.IsNotExist(statErr) {
+		t.Fatalf("rebound materialization created a worktree: %v", statErr)
+	}
+}
+
+type branchMaterializerRepoOverrides struct {
+	branchMaterializerRepo
+	getTask                    func(context.Context, string) (*models.Task, error)
+	getTaskEnvironment         func(context.Context, string) (*models.TaskEnvironment, error)
+	getTaskEnvironmentByTaskID func(context.Context, string) (*models.TaskEnvironment, error)
+	listTaskSessions           func(context.Context, string) ([]*models.TaskSession, error)
+	listCalls                  int
+}
+
+func (r *branchMaterializerRepoOverrides) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	if r.getTask != nil {
+		return r.getTask(ctx, id)
+	}
+	return r.branchMaterializerRepo.GetTask(ctx, id)
+}
+
+func (r *branchMaterializerRepoOverrides) GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error) {
+	if r.getTaskEnvironment != nil {
+		return r.getTaskEnvironment(ctx, id)
+	}
+	return r.branchMaterializerRepo.GetTaskEnvironment(ctx, id)
+}
+
+func (r *branchMaterializerRepoOverrides) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	if r.getTaskEnvironmentByTaskID != nil {
+		return r.getTaskEnvironmentByTaskID(ctx, taskID)
+	}
+	return r.branchMaterializerRepo.GetTaskEnvironmentByTaskID(ctx, taskID)
+}
+
+func (r *branchMaterializerRepoOverrides) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	if r.listTaskSessions != nil {
+		return r.listTaskSessions(ctx, taskID)
+	}
+	return r.branchMaterializerRepo.ListTaskSessions(ctx, taskID)
 }
 
 func TestTaskRepositoryBranchTemplatePrefersPolicySnapshot(t *testing.T) {
@@ -294,6 +465,28 @@ func newMaterializerWorktreeMgr(t *testing.T, taskRoot string) *worktree.Manager
 	return mgr
 }
 
+func newPersistingMaterializerWorktreeMgr(
+	t *testing.T,
+	taskRoot string,
+	repo *sqliterepo.Repository,
+) *worktree.Manager {
+	t.Helper()
+	db := sqlx.NewDb(repo.DB(), "sqlite3")
+	store, err := worktree.NewSQLiteStore(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	cfg := worktree.Config{Enabled: true, TasksBasePath: filepath.Dir(taskRoot), BranchPrefix: "feature/"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("worktree config: %v", err)
+	}
+	mgr, err := worktree.NewManager(cfg, store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	return mgr
+}
+
 // seedMaterializerTask inserts the task / workspace / repository /
 // task_environment rows the materializer relies on.
 func seedMaterializerTask(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, repoPath, taskRoot, primaryPath string) {
@@ -324,7 +517,7 @@ func seedMaterializerTask(t *testing.T, ctx context.Context, repo *sqliterepo.Re
 	}
 	now := time.Now().UTC()
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "session-1", TaskID: "task-1",
+		ID: "session-1", TaskID: "task-1", TaskEnvironmentID: "env-1",
 		State:     models.TaskSessionStateWaitingForInput,
 		StartedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -342,6 +535,43 @@ func seedMaterializerTask(t *testing.T, ctx context.Context, repo *sqliterepo.Re
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
+}
+
+func seedInheritedMaterializerChild(
+	t *testing.T,
+	ctx context.Context,
+	repo *sqliterepo.Repository,
+) *models.TaskRepository {
+	t.Helper()
+	now := time.Now().UTC()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-child", WorkspaceID: "ws-1", WorkflowID: "wf-1", ParentID: "task-1",
+		Title: "Inherited Child", Priority: "medium",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}); err != nil {
+		t.Fatalf("CreateTask child: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "tr-child-primary", TaskID: "task-child", RepositoryID: "repo-1",
+		BaseBranch: "main", Position: 0, Metadata: map[string]interface{}{},
+	}); err != nil {
+		t.Fatalf("CreateTaskRepository child primary: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-child", TaskID: "task-child", TaskEnvironmentID: "env-1",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession child: %v", err)
+	}
+	branch := &models.TaskRepository{
+		ID: "tr-child-branch", TaskID: "task-child", RepositoryID: "repo-1",
+		BaseBranch: "main", CheckoutBranch: "branch-inherited", Position: 1,
+		Metadata: map[string]interface{}{},
+	}
+	if err := repo.CreateTaskRepository(ctx, branch); err != nil {
+		t.Fatalf("CreateTaskRepository child branch: %v", err)
+	}
+	return branch
 }
 
 // runGit runs `git` in dir, failing the test on error. Inlined here (rather

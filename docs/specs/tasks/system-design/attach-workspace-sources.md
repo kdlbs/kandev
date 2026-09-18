@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001
 created: 2026-07-22
+updated: 2026-09-18
 owners:
   - kandev
 ---
@@ -17,7 +18,7 @@ This design record preserves the technical source for the capability mapped to R
 
 | Requirement | Design source |
 | --- | --- |
-| REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001 | Migrated legacy design detail below |
+| REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001 | Migrated legacy design detail below; [Legacy add-branch effective environment](#legacy-add-branch-effective-environment) |
 
 ## Migrated design source
 
@@ -112,6 +113,33 @@ Arbitrary folder attachments use `task_workspace_folders`:
 combines ordered `task_repositories` and `task_workspace_folders`; it does not replace repository
 identity or make folders participate in Git operations.
 
+## Legacy add-branch effective environment
+
+The legacy add-branch path resolves the environment that the selected task session actually uses.
+It first uses a task-owned `task_environments` row when one exists. Otherwise it selects the same
+most-recent eligible session used for live materialization and follows that session's
+`task_environment_id`. This fallback is required for `inherit_parent` and `shared_group` tasks,
+whose canonical environment is owned by another task.
+
+An inherited environment is usable only when the referenced row exists, its owner can be loaded,
+the owner is not archived, and its executor is `worktree`. The selected session must still be bound
+to that exact environment when materialization begins. The environment's `task_dir_name` and
+workspace data determine the Kandev-owned sibling root; a source checkout or manually discovered
+Git worktree is not a substitute for this canonical binding.
+
+Only a task with no task-owned environment and no eligible session bound to an environment is
+pre-launch. That state may persist the attachment and defer materialization. An eligible session
+with a missing, unresolved, unverifiable, archived-owner, unprovisioned, or non-worktree
+environment is an error, not a pre-launch signal.
+
+For a live call, the service and materializer must use one effective environment identity. The
+worktree store persists the new physical row in `task_environment_repos` under that identity, even
+when the environment belongs to a parent or workspace-group owner. Success requires the exact new
+worktree path and promoted task-root path. Any environment-resolution, ownership, executor,
+materialization, or canonical-inventory persistence failure compensates the new
+`task_repositories` attachment and any repository entity created by the call before an update is
+published.
+
 ## API surface
 
 `POST /api/v1/tasks/:id/workspace-sources`
@@ -184,10 +212,11 @@ while contradictory source identities remain conflicts. See ADR
 }
 ```
 
-`worktree_path` and `task_workspace_path` are omitted when a pre-launch attachment succeeds but
-materialization is intentionally deferred until the task launches. `agent_cwd_changed` is always
-false. A live call returns the materialized sibling path so the invoking agent can address it
-without inferring a directory name.
+`worktree_path` and `task_workspace_path` are omitted only when the task has no effective
+environment and pre-launch materialization is intentionally deferred until launch.
+`agent_cwd_changed` is always false. A live call, including one bound to an inherited environment,
+returns the materialized sibling path so the invoking agent can address it without inferring a
+directory name.
 
 ## Permissions
 
@@ -203,6 +232,8 @@ persisted in source URLs or copied into agent-visible metadata.
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A turn or tool call is active for batch attachment             | The UI disables the action when known; a racing batch request returns `409` without mutation.                                                       |
 | The invoking agent calls legacy add-branch during its turn     | The worktree is created and trackers refresh without stopping the active agent, terminals, or workspace processes.                                  |
+| A live child session is bound to a parent-owned or group-owned worktree environment | The branch is materialized into that exact environment and its canonical inventory; the call returns the sibling and task-root paths. |
+| A selected live session's inherited environment is missing, unverifiable, archived, unprovisioned, or not a worktree environment | The call fails and rolls back its new attachment; it is never reported as a deferred pre-launch success. |
 | Any source is invalid or contradicts an existing source identity | The full batch is rejected before persistence or materialization. Exact normalized retries are no-ops.                                             |
 | A host materializer fails                                      | New filesystem entries and source records are rolled back; existing task contents remain.                                                           |
 | A container/remote repository clone fails                      | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source.           |
@@ -284,6 +315,13 @@ persisted; every relaunch and resume of that task reuses the persisted name.
 - **GIVEN** a live legacy add-branch materialization, **WHEN** the MCP result returns, **THEN** it
   includes the absolute new `worktree_path`, the promoted `task_workspace_path`, and
   `agent_cwd_changed: false`.
+- **GIVEN** an `inherit_parent` or `shared_group` child whose active session is bound to a ready
+  parent-owned or group-owned worktree environment, **WHEN** it calls `add_branch_to_task_kandev`,
+  **THEN** the sibling worktree and matching `task_environment_repos` row are created under that
+  inherited environment and the exact paths are returned.
+- **GIVEN** that inherited environment cannot be resolved or validated, **WHEN** the child calls
+  `add_branch_to_task_kandev`, **THEN** the call fails without retaining the new
+  `task_repositories` row or publishing a successful task update.
 - **GIVEN** the original repository has no pending changes, **WHEN** a legacy add-branch call creates
   a sibling worktree, **THEN** Git status in the original repository does not report the sibling as
   an untracked or changed path.
@@ -358,5 +396,6 @@ persisted; every relaunch and resume of that task reuses the persisted name.
 
 See [Attach Workspace Sources plan](../../../plans/attach-workspace-sources/plan.md) and the
 [live add-branch compatibility repair plan](../../../plans/restore-live-add-branch/plan.md), plus the
+[inherited live add-branch repair plan](../../../plans/inherited-live-add-branch/plan.md), the
 [multi-repository chat file-link repair plan](../../../plans/multi-repo-chat-file-links/plan.md) and the
 [owned link target mismatch repair plan](../../../plans/owned-link-target-mismatch-repair/plan.md).

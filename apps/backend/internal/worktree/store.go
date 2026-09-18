@@ -180,6 +180,15 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	if envID == "" {
 		return fmt.Errorf("%w: session %s", ErrEnvironmentNotResolved, wt.SessionID)
 	}
+	if wt.TaskEnvironmentID != "" && wt.TaskEnvironmentID != envID {
+		return fmt.Errorf(
+			"%w: session %s moved from task environment %s to %s",
+			models.ErrWorkspaceReuseUnsafe,
+			wt.SessionID,
+			wt.TaskEnvironmentID,
+			envID,
+		)
+	}
 	if wt.Status == "" {
 		wt.Status = StatusActive
 	}
