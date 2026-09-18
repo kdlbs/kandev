@@ -146,6 +146,9 @@ surface.
   floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
   page-local Save/Cancel controls. Contributor `save` callbacks must reject on failure so the
   coordinator can report an error; `discard` must restore the contributor's authoritative baseline.
+  Capture the raw draft before awaiting; apply the canonical saved value only if the current draft
+  still matches that snapshot. Test normalized/fallback saves clear dirty state while in-flight edits
+  remain intact.
 - **Settings tabs:** use `components/settings/settings-tabs.tsx` in `SettingsPageHeader`; preserve drafts with validated URL `tab` state, map discovery fragments to the owning tab, and use 44px controls on phones and coarse pointers.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),

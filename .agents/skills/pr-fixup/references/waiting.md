@@ -92,6 +92,10 @@ If the REST fallback is also rate-limited or returns a transient 403/5xx, use
 the authenticated GitHub connector for one bounded exact-head snapshot, then
 refresh state; keep checks or review evidence blocked while any required data
 remains unknown.
+When the report says `blocked-required-statuses` or `INCOMPLETE EVIDENCE`, use
+that connector to fetch the current PR, exact-head workflow runs, compare or
+merge-base, and review threads. Recovered context does not prove clean: keep
+the fixup blocked while required-status policy or review evidence is unknown.
 
 ## Refresh after waiting
 

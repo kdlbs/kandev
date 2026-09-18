@@ -267,6 +267,10 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
   assert the absolute deviation after the asynchronous content appears. This
   attributes movement to the result rather than the initiating action and
   catches movement in either direction.
+- **Prove negative requests causally.** Keep a live request observer or counter
+  armed before the action and use `dwell(page, duration, "negative-assertion",
+  reason)` for the observation window. Do not use `waitForRequest` timeouts or
+  timeout exceptions as proof that a late request did not occur.
 - **Scroll-positioned markers.** For unread dividers, restore points, or search
   anchors, seed content taller than the viewport and assert the marker's bounds
   are inside the viewport after navigation. A short transcript's DOM-visible
