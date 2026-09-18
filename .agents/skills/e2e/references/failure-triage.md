@@ -10,6 +10,13 @@ matching manifest with `E2E_SHARD=<n> bash e2e/scripts/run-planned-shard.sh <man
 `--shard=N/14` is only approximate. Regenerate the manifest after source changes and never
 overlap another managed/raw E2E run. Then add pressure deliberately:
 
+Before replaying an archived manifest, check for inherited `KANDEV_FEATURES_*`
+environment variables. A raw host Playwright replay can bypass the managed
+runner's fixture-environment sanitizer and produce an invalid feature-gated
+failure. Prefer a fresh managed or runtime-container replay, or explicitly
+apply the fixture sanitizer; never treat a raw replay with inherited feature
+flags as CI evidence.
+
 1. Run the exact failed shard in the CI runtime image with CI env enabled:
    ```bash
    docker run --rm --ipc=host -v "$PWD":/work -w /work/apps/web \
@@ -34,13 +41,16 @@ overlap another managed/raw E2E run. Then add pressure deliberately:
 3. Preserve nearby test ordering when a single-test repeat stays green; run the full spec or shard with the same resource limits before declaring a flake non-reproducible.
 
 The config uses `failOnFlakyTests: !CI`: local runs fail on a flaky retry, while
-CI temporarily tolerates one. Either result is a failure signal for agents:
-reproduce it with `--retries=0` only after disabling any `test.describe.configure({ retries: 1 })` override; never
-rerun until it happens to pass. If isolated repeats stay green but the shard
-fails, binary-search preceding specs in one worker. The fix is complete only
-when the smallest reproducing sequence passes without retries.
+CI temporarily tolerates one. Either result is a failure signal for agents.
+Playwright CLI `--retries=0` does not override a test-level
+`test.describe.configure({ retries: 1 })`; temporarily set that describe retry
+to zero, regenerate the manifest after the source change, and run the exact
+shard with `--retries=0 --workers=1`. Restore the source change before reporting
+or committing. Never rerun until it happens to pass. If isolated repeats stay
+green but the shard fails, binary-search preceding specs in one worker. The fix
+is complete only when the smallest reproducing sequence passes without retries.
 
-Record the exact command, resource limits, repeat number, and failure artifact path. For an explicit no-flakes requirement, download `blob-report-*` with `gh run download <run-id> --pattern 'blob-report-*' --dir <tmp>` and run `python3 scripts/playwright-blob-audit <tmp>`; aggregate green is not flake-free. For a failed shard, inspect every `error-context.md` in its downloaded
+Record the exact command, resource limits, repeat number, and failure artifact path. For every PR E2E check, download every matching `blob-report-*` artifact with `gh run download <run-id> --pattern 'blob-report-*' --dir <tmp>` and run `python3 scripts/playwright-blob-audit <tmp>`; a green aggregate can hide first-attempt failures behind retries. Treat any retry, error result, failed or timed-out result, unexpected status, parse error, or missing expected artifact as incomplete evidence and a fixup blocker. Report passed and skipped results separately. For an explicit no-flakes requirement, this audit is mandatory even for a focused run. For a failed shard, inspect every `error-context.md` in its downloaded
 `test-results-<shard>` artifact and compare shared page-object waits with `main`
 before changing product code; the context can expose duplicate active terminals
 or a terminal stuck on "Starting terminal...".

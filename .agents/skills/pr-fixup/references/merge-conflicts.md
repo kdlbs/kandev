@@ -13,8 +13,18 @@ gh pr view <PR> --json number,url,baseRefName,headRefName,mergeable,mergeStateSt
 The `gh pr view --json` field is `baseRefName`, not `baseRefOid`; do not request
 the unsupported field. Resolve the base OID with `git ls-remote` or the base
 fields in `scripts/pr-state`. When exact OIDs are required, query `gh api repos/<owner>/<repo>/pulls/<PR> --jq '{base_sha:.base.sha,base_ref:.base.ref,head_sha:.head.sha,head_ref:.head.ref}'` and verify the fetched base tip matches `base_sha` before merging.
+Treat a helper-reported `base_head_oid` as a snapshot. Before fetch or
+`merge-tree`, compare it with `gh api repos/<owner>/<repo>/git/ref/heads/<baseRefName> --jq .object.sha` or `git ls-remote`; if they differ, refresh the helper and use the direct authoritative ref tip for fetch, `merge-tree`, and final evidence. When the live PR API's `base.sha` also differs from the current base-ref tip, record both SHAs, fetch or otherwise resolve each reported commit, and run the conflict check against both the reported base and the current tip before claiming conflict-free status. Verify both OIDs before a synthetic merge.
 
 Treat `mergeable:"CONFLICTING"` or `mergeStateStatus:"DIRTY"` as an actionable merge-conflict blocker. Treat `mergeable:"UNKNOWN"` as inconclusive: wait one short cadence and query again before deciding. States such as `BEHIND`, `BLOCKED`, `UNSTABLE`, or `HAS_HOOKS` may require an update or more CI/review work, but they are not by themselves proof of file-level conflicts.
+
+If a current-base merge exposes Go-lint violations in files outside the PR
+diff, run the CI-equivalent changed-scope check against the authoritative base,
+such as `golangci-lint run ./... --new-from-rev=<base> --timeout=5m`, and verify
+the violation paths before proceeding. Only when the violations are confirmed
+outside the changed scope and the scoped check passes may a local merge hook be
+run with `SKIP=go-lint`; record that hook omission and never use it to bypass
+lint for changed files.
 
 Always use the freshly queried `baseRefName`. GitHub can retarget a stacked child PR after its parent merges, so neither the Git upstream nor a base branch remembered from an earlier fixup round is authoritative.
 
@@ -59,6 +69,9 @@ merge. Recheck it immediately before pushing; use the explicit lease shown in
    exits ambiguously, inspect and report the hook result; do not bypass it just
    to finish the conflict resolution.
 3. If conflicts appear, inspect each conflicted file, preserve the intended behavior from both sides, remove all conflict markers, and stage only the resolved files. When the index has conflict stages, inspect the competing versions with `git show :2:<path>`, `git show :3:<path>`, and `git log -- <path>` (or compare the merge-base, current branch, and base branch versions when stages are unavailable). Do not choose ours/theirs merely to remove markers; preserve each side's behavioral invariant, compare analogous provider implementations and their tests, then run the focused test for the conflicted feature.
+   If `git show :2:<path>` or `:3:<path>` output will be copied, compared
+   byte-for-byte, or used to make a patch, run it through `rtk proxy` or
+   `rtk bash -lc`; ordinary RTK output is diagnostic only.
 4. Confirm the conflict is gone before continuing:
    ```bash
    git ls-files -u
@@ -138,6 +151,15 @@ Build the exact conflict-free synthetic merge without changing the PR branch.
 Use the overlapping paths and shared contracts to select focused checks.
 Disjoint paths can still interact through imports, schemas, or configuration.
 `git merge-tree --write-tree` returns a tree object;
+when a wrapper uses it only as a conflict-free predicate, redirect that stdout
+so the tree hash cannot be mistaken for a command result:
+
+```bash
+git fetch <base-remote> <baseRefName>
+git merge-tree --write-tree <base-remote>/<baseRefName> HEAD >/dev/null
+```
+
+Capture stdout explicitly when constructing the synthetic commit below. Then
 turn it into an unreachable merge commit and inspect it in a detached
 worktree:
 

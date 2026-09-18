@@ -22,6 +22,12 @@ The summary fields are:
   from timestamps.
 - `errors`: affected data is unknown; do not reconstruct it from memory.
 
+After every `scripts/pr-state --summary <PR>`, run
+`scripts/pr-resolve list <PR>` before declaring review state clear. The summary
+can show no visible current-head threads while the resolver still reports a
+hidden or out-of-head unresolved thread; fetch each listed body before replying
+or resolving it.
+
 Record `checks_head_sha`, `checks_snapshot_complete`, `failed_checks`,
 `pending_checks`, review counts, and the PR delivery fields
 (`pr.head_repository_owner`, `pr.head_repository_name`, `pr.head_ref_name`,

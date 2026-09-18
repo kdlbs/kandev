@@ -96,6 +96,14 @@ Push the already committed branch to its remote.
    example `git push git@github.com:<owner>/<repo>.git <branch>`, or tell the
    user the token needs `workflow` scope.
 
+   If both HTTPS and SSH pushes time out and an authorized GitHub connector
+   exposes Git database writes, preserve the tested tree by creating blobs for
+   the exact file contents, a tree from the known parent tree, and a commit with
+   the same parent and message, then fast-forward the existing branch ref. Fetch
+   that ref, verify its content and commit, and reset the local worktree only to
+   the fetched SHA. This can produce a different commit SHA, so all subsequent
+   checks and final evidence must use the fetched head.
+
 5. **Report** the pushed commit hash and branch.
 
 6. **If `--fixup`:** Continue with `/pr-fixup` in this conversation.

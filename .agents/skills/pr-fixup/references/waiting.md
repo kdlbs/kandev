@@ -15,6 +15,13 @@ one report. Do not run `pr-state` on a timer in the primary conversation.
   `--mode all-terminal --deadline-min <N>`.
 - Use `--mode first-failure` only when the user requests the first failure.
 
+Distinguish a post-creation hold from check monitoring. If the user asks to
+wait N minutes after creating the PR before starting fixup, record the PR
+creation time, wait in bounded chunks of 60 seconds or less with progress
+updates, and invoke `scripts/pr-await` only after that hold expires. Use
+`strict-deadline` when the user asks the waiter to monitor checks during the
+interval; do not use it to represent an unmonitored delay.
+
 The default deadline is 45 minutes and the default cadence is 60 seconds.
 Pass an explicit deadline for a user-specified limit. Use `--interval-sec <S>`
 when the user specifies a cadence. Pending matrix counts can grow as jobs appear.
@@ -33,6 +40,21 @@ Read the final tool result's `exit_code`, including for PTY/session commands.
 If exit 1 reports only base drift, use the advanced-base procedure in
 [merge-conflicts.md](merge-conflicts.md). Record its separate validation result.
 The helper's exit code remains 1 even when that validation succeeds.
+An `all-terminal` exit 1 can therefore show every check green, such as 59
+passed with 0 failed and 0 pending, when only the base relationship is stale.
+Treat that as a merge-result validation finding, not a CI failure; preserve the
+counts and validate against the live base before deciding what to change.
+
+Exit 2 can report zero pending and failed checks when the terminal rollup is
+still unconfirmed. Do not classify the wait as clean from those counts. Refresh
+`scripts/pr-state --summary <PR>`, `scripts/pr-resolve list <PR>`, and PR
+mergeability, then require the exact head, `checks_snapshot_complete=true`,
+empty failed and pending lists, no unresolved or hidden review threads, and
+`MERGEABLE`/`CLEAN` before calling it clean.
+
+The structured report can also say `outcome: deadline` with zero failures while
+E2E jobs remain pending. Treat that outcome as non-terminal, refresh PR state,
+and report the pending checks separately; a deadline is not a green result.
 
 If no user limit prevents further waiting, rerun after exit 2 with a larger
 deadline. Do not replace the waiter with timer-driven snapshots.
@@ -43,6 +65,14 @@ unconfirmed work, and 3 for blocked evidence.
 Exit 3 includes approval-required runs, access errors, unknown mergeability,
 incomplete snapshots, and unknown required-check policy. The reported toolchain
 versions are diagnostic context, not substitute evidence.
+If a transient `pr-state` or GitHub API timeout causes exit 3 or populates
+`errors` while checks are still progressing, treat the result as unavailable
+evidence. Rerun `scripts/pr-await` after transport recovers and require a
+terminal snapshot whose check SHA matches the current PR head before acting.
+If the REST fallback is also rate-limited or returns a transient 403/5xx, use
+the authenticated GitHub connector for one bounded exact-head snapshot, then
+refresh state; keep checks or review evidence blocked while any required data
+remains unknown.
 
 ## Refresh after waiting
 
@@ -73,7 +103,10 @@ Retain the session handle until the command ends. An interrupted waiter has no
 verdict. If the handle is lost, inspect and stop only its owned process tree
 before starting a replacement. Never launch duplicate monitors.
 
-Use the read-only `pr-poller` only when the user explicitly requests monitoring
-and `pr-await` is unavailable. Give it the user's deadline, or a 20-minute cap
-when no limit exists. Treat its output as provisional and refresh before acting.
+Use the read-only `pr-poller` when the user explicitly requests monitoring and
+`pr-await` is unavailable or exits 3 with a transient
+`blocked-required-statuses` policy lookup failure. Give it the user's deadline,
+or a 20-minute cap when no limit exists. Preserve exact-head matching and treat
+the result as provisional or blocked while required-status policy or review
+thread evidence is unknown; never report the PR clean from that fallback alone.
 Do not use interactive `gh pr checks --watch` in the primary conversation.

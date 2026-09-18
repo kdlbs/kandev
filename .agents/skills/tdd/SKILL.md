@@ -72,6 +72,10 @@ requirement into the test.
 
 For failure-path tests, inject the error at the boundary the production code claims to handle and exercise the real downstream call chain; do not short-circuit by mocking the handler under test.
 When production code has a defensive nil/fallback branch or sanitizes an internal error into a public error, inject that alternate return at the interface boundary and assert the public result plus absence of internal details or sensitive content.
+For a test asserting that a side effect does not occur, enable every prerequisite
+that would otherwise cause it and add a positive control with the same setup to
+prove the side effect is reachable. Observe the actual side effect, not a proxy
+that can remain unchanged.
 
 For parser, canonicalization, or sanitization tests, build fixtures from the
 producer's exact serialized shape. Include boundary cases such as optional
@@ -90,6 +94,15 @@ that omits the field, so a partial payload cannot silently discard an existing
 value.
 For MCP/API tool registration or mode-gated catalogs, add positive tests for
 intended modes and negative tests asserting tool absence in every excluded mode.
+For opt-in or feature-flagged implementations, exercise both the explicit
+enabled path and the disabled/default path; default-path coverage alone does
+not prove that the opt-in implementation is wired.
+
+When production behavior depends on an optional interface or type assertion, a
+pass-through fake that omits that capability is invalid coverage. Use the real
+implementation or a capability-complete fake, and assert the exact accepted
+content and trusted context at persistence and dispatch, including empty
+expansions and delayed or created-session paths.
 
 When content passes through multiple canonicalizers or a delayed/created-session
 path, test each handoff with distinct sentinels and assert exact equality at
@@ -116,6 +129,14 @@ epoch before every asynchronous request, inventory all callers, and use
 deferred response/event tests to prove ordering. React loading state does not
 serialize same-tick callbacks; use an immediate ref or shared in-flight promise
 when request identity must be single-flight.
+
+For fetch effects that depend on live store values such as message count, a
+dependency rerender is not lifecycle invalidation. Do not let an effect-local
+cleanup boolean be the only ownership guard: capture a session, connection, or
+attempt generation for response writes and loading finalization, and invalidate
+that generation only on the corresponding session/connection change or unmount.
+Add a red test that defers the response, triggers a same-session live-row
+rerender, and proves the pending state settles without overwriting newer UI.
 
 For hooks writing shared workspace or global caches, test the ownership matrix:
 a second consumer preserves valid cached data; an initiator unmount before a
@@ -202,6 +223,11 @@ a later patch.
 - When a change adds a bulk or action entry point, test that entry point directly,
   including its empty, partial, and success paths; coverage of a shared helper or
   neighboring single-item flow does not prove the new dispatch path works.
+- When an opt-in mode replaces a shared implementation, exercise the real
+  component with that mode enabled and production-shaped callbacks, while
+  keeping separate assertions for the default path. Conversion tests alone do
+  not prove mounted editor reconciliation, selection, undo, or insert-then-submit
+  behavior.
 
 **Don't test mock behavior:**
 - If your assertion checks a mock element (`*-mock` test ID, mock return value), you're testing the mock, not the code. Test real behavior or don't mock it.

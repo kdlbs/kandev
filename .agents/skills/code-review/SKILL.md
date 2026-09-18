@@ -183,9 +183,20 @@ Check every changed file for the following layers. Skip layers that don't apply 
   duplicate, and malformed-marker behavior before writing. Cleanup must no-op or
   fail closed when the body is not owned, and tests must cover each ownership
   boundary without retrying an unowned document.
+- For serve-time HTML rewriting or script injection, verify browser document
+  context rather than token presence alone. Valid HTML may omit `html`, `head`,
+  and `body`, and a script token may occur inside inert `template` or foreign
+  content. Cover scriptless omitted-wrapper documents and inert-content cases,
+  preserve stored artifact bytes, and verify that the served bootstrap executes.
 - Race conditions or concurrency issues in concurrent code
 - Async events carry an immutable identity when they can outlive the operation that created them; stale events cannot mutate a replacement operation
 - Locks protect only the atomic ownership boundary and are not held across unbounded I/O or a full asynchronous operation
+- When adding an RPC deadline, trace the actual transport, server operation, and
+  cleanup before the response. Compare nested timeout budgets, including
+  `context.WithoutCancel` cleanup; test successful work followed by stalled
+  cleanup. A client timeout or removed response-correlation ID does not stop
+  remote work or independent stream events, so fence late effects before
+  admitting successor work.
 - Synchronous callbacks cannot re-enter a lock they already need; moving publication asynchronous also requires an immutable value snapshot, clear shutdown ownership, and protection against a delayed event changing successor state
 - When a generation, token, or lease authorizes a side effect, validate and mutate within one critical section. Check every terminal path separately: success, raw error, cancellation, timeout, and disconnect.
 - Detached goroutines have immutable snapshots and a real happens-before relationship before reading state that can otherwise transition underneath them

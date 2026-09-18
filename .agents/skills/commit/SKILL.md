@@ -127,6 +127,9 @@ qualifies as a successful hook receipt.
    gone before reporting success.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
+   A failed hook can leave all intended changes staged. Keep the staged changes,
+   fix the reported lint issue, rerun the affected test, and retry the normal
+   commit; do not use `--no-verify` or amend to bypass the failure.
    When editing harness files such as `AGENTS.md`, `CLAUDE.md`, or skills, run
    the shared validation in
    `.agents/skills/harness-improvement/references/validation.md` before
