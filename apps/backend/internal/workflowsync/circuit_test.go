@@ -140,6 +140,32 @@ func TestSyncDueConfigs_EmptyFingerprintNeverResets(t *testing.T) {
 	assert.Empty(t, applier.calls, "an empty fingerprint must never reset an open circuit")
 }
 
+func TestSyncDueConfigs_CredentialChangeRespectsPollingDisabled(t *testing.T) {
+	clients := fakeFingerprintGitHubClients{
+		fakeGitHubClients: fakeGitHubClients{client: seededMockClient()},
+		fingerprint:       "active:1",
+	}
+	svc, applier := setupCircuitTestService(t, clients)
+	disabled := false
+	_, err := svc.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
+		RepoOwner:   "acme",
+		RepoName:    "flows",
+		PollEnabled: &disabled,
+	})
+	require.NoError(t, err)
+
+	// The first tick records the fingerprint baseline, but polling is disabled.
+	svc.SyncDueConfigs(context.Background())
+	assert.Empty(t, applier.calls)
+
+	// A rotated credential must not turn a manual-only config into an automatic
+	// sync. The explicit SyncWorkspace path remains available to the user.
+	clients.fingerprint = "active:2"
+	svc.githubClients = clients
+	svc.SyncDueConfigs(context.Background())
+	assert.Empty(t, applier.calls, "credential changes must not bypass PollEnabled")
+}
+
 // TestWorkflowSyncCircuitSummary_AggregatesByClass confirms the health
 // checker's data source counts only open circuits, grouped by class, with
 // no per-workspace identifiers leaking into the aggregate.

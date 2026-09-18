@@ -440,6 +440,10 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 			lock.Unlock()
 			continue
 		}
+		if !cfg.PollEnabled {
+			lock.Unlock()
+			continue
+		}
 		if !forceSync && !isSyncDue(cfg, now) {
 			lock.Unlock()
 			continue

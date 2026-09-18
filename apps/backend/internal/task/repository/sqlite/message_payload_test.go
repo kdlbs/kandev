@@ -97,18 +97,18 @@ func TestCreateMessageExternalizesLargeShellOutputAndRehydrates(t *testing.T) {
 	if got.PayloadDigest != msg.PayloadDigest {
 		t.Fatalf("persisted PayloadDigest = %q, want %q", got.PayloadDigest, msg.PayloadDigest)
 	}
-	if _, ok := models.ExtractShellExecOutput(got.Metadata); !ok {
-		t.Fatal("ExtractShellExecOutput reported ok=false for projected metadata; want ok=true with an empty body")
-	}
-	if output, _ := models.ExtractShellExecOutput(got.Metadata); output.Stdout != "" {
-		t.Fatalf("GetMessage returned a non-empty stdout body (%d bytes) before rehydration; expected only the projected summary", len(output.Stdout))
-	}
 	normalized, _ := got.Metadata["normalized"].(map[string]interface{})
 	shellExec, _ := normalized["shell_exec"].(map[string]interface{})
 	if shellExec == nil || shellExec["output"] == nil {
 		t.Fatalf("projected metadata missing shell_exec output summary: %+v", got.Metadata)
 	}
 	if summary, ok := shellExec["output"].(map[string]interface{}); ok {
+		if hasOutput, ok := summary["has_output"].(bool); !ok || !hasOutput {
+			t.Fatalf("projected summary lost output presence: %+v", summary)
+		}
+		if stdoutBytes, ok := summary["stdout_bytes"].(float64); !ok || int(stdoutBytes) != len(largeStdout) {
+			t.Fatalf("projected summary stdout_bytes = %v, want %d", summary["stdout_bytes"], len(largeStdout))
+		}
 		if _, hasStdout := summary["stdout"]; hasStdout {
 			t.Fatal("projected summary must not include the raw stdout body")
 		}
@@ -166,6 +166,107 @@ func TestUpdateMessagePreservesExternalizedProjectedPayload(t *testing.T) {
 	output, ok := models.ExtractShellExecOutput(got.Metadata)
 	if !ok || output.Stdout != largeStdout {
 		t.Fatalf("rehydrated stdout length = %d, want %d (ok=%v)", len(output.Stdout), len(largeStdout), ok)
+	}
+}
+
+func TestUpdateMessagePersistsNewExternalizedPayload(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-payload-update-new", "sess-payload-update-new", "turn-1")
+
+	message := newShellMessage("msg-payload-update-new", "sess-payload-update-new", "short", "")
+	message.TurnID = "turn-1"
+	if err := repo.CreateMessage(ctx, message); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	updated, err := repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage before update: %v", err)
+	}
+	largeStdout := strings.Repeat("n", largeMessagePayloadThresholdBytes+1)
+	updated.Metadata = shellOutputMetadata(largeStdout, "")
+	updated.Content = "completed"
+	if err := repo.UpdateMessage(ctx, updated); err != nil {
+		t.Fatalf("UpdateMessage: %v", err)
+	}
+
+	got, err := repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage after update: %v", err)
+	}
+	if got.PayloadDigest == "" {
+		t.Fatal("PayloadDigest was not persisted for large output added by an update")
+	}
+	if got.PayloadSize <= 0 {
+		t.Fatalf("PayloadSize = %d, want a positive stored payload size", got.PayloadSize)
+	}
+	if err := repo.RehydrateMessagePayload(ctx, got); err != nil {
+		t.Fatalf("RehydrateMessagePayload: %v", err)
+	}
+	output, ok := models.ExtractShellExecOutput(got.Metadata)
+	if !ok || output.Stdout != largeStdout {
+		t.Fatalf("rehydrated stdout length = %d, want %d (ok=%v)", len(output.Stdout), len(largeStdout), ok)
+	}
+}
+
+func TestUpdateMessageReplacesAndClearsExternalizedPayload(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-payload-update-replace", "sess-payload-update-replace", "turn-1")
+
+	firstOutput := strings.Repeat("a", largeMessagePayloadThresholdBytes+1)
+	message := newShellMessage("msg-payload-update-replace", "sess-payload-update-replace", firstOutput, "")
+	message.TurnID = "turn-1"
+	if err := repo.CreateMessage(ctx, message); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	firstDigest := message.PayloadDigest
+
+	updated, err := repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage before replacement: %v", err)
+	}
+	secondOutput := strings.Repeat("b", largeMessagePayloadThresholdBytes+2)
+	updated.Metadata = shellOutputMetadata(secondOutput, "")
+	if err := repo.UpdateMessage(ctx, updated); err != nil {
+		t.Fatalf("UpdateMessage with replacement: %v", err)
+	}
+
+	got, err := repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage after replacement: %v", err)
+	}
+	if got.PayloadDigest == "" || got.PayloadDigest == firstDigest {
+		t.Fatalf("replacement PayloadDigest = %q, want a new non-empty digest", got.PayloadDigest)
+	}
+	if err := repo.RehydrateMessagePayload(ctx, got); err != nil {
+		t.Fatalf("RehydrateMessagePayload after replacement: %v", err)
+	}
+	output, ok := models.ExtractShellExecOutput(got.Metadata)
+	if !ok || output.Stdout != secondOutput {
+		t.Fatalf("replacement stdout length = %d, want %d (ok=%v)", len(output.Stdout), len(secondOutput), ok)
+	}
+
+	updated, err = repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage before inline transition: %v", err)
+	}
+	updated.Metadata = shellOutputMetadata("small", "")
+	if err := repo.UpdateMessage(ctx, updated); err != nil {
+		t.Fatalf("UpdateMessage with inline output: %v", err)
+	}
+
+	got, err = repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage after inline transition: %v", err)
+	}
+	if got.PayloadDigest != "" || got.PayloadSize != 0 {
+		t.Fatalf("inline transition retained payload reference %q/%d", got.PayloadDigest, got.PayloadSize)
+	}
+	output, ok = models.ExtractShellExecOutput(got.Metadata)
+	if !ok || output.Stdout != "small" {
+		t.Fatalf("inline stdout = %q, want small (ok=%v)", output.Stdout, ok)
 	}
 }
 
