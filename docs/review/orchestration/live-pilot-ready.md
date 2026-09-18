@@ -5,8 +5,8 @@ migration/replay/rollback rehearsal completed before the authorized cutover.
 
 | Review item | Prepared result |
 | --- | --- |
-| Candidate | `0.94.0-orchestration.20260918.sha901e94e18` |
-| Source | `901e94e18` |
+| Candidate | `0.94.0-orchestration.20260918.sha2808579e7` |
+| Source | `2808579e7` |
 | Base | Exact v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1` |
 | Bundle | Six immutable binaries; [SHA-256 receipt](candidate-receipt.json) |
 | Qualification | [Completed checks and platform/provider limits](candidate-qualification.md) |
