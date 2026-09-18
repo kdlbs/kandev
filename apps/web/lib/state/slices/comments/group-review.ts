@@ -1,6 +1,11 @@
 import type { ReviewComment } from "./types";
 
-type FileGroup = { key: string; filePath: string; comments: ReviewComment[] };
+type FileGroup = {
+  key: string;
+  filePath: string;
+  repositoryName?: string;
+  comments: ReviewComment[];
+};
 
 function repositoryNamesById(comments: ReviewComment[]): Map<string, Set<string>> {
   const names = new Map<string, Set<string>>();
@@ -13,16 +18,14 @@ function repositoryNamesById(comments: ReviewComment[]): Map<string, Set<string>
   return names;
 }
 
-function fileGroupKey(comment: ReviewComment, names: Map<string, Set<string>>): string {
-  if (comment.repositoryName !== undefined) {
-    return JSON.stringify(["name", comment.repositoryName, comment.filePath]);
-  }
-  if (!comment.repositoryId) return JSON.stringify(["name", "", comment.filePath]);
-  const scopes = names.get(comment.repositoryId);
+function commentRepositoryName(
+  comment: ReviewComment,
+  names: Map<string, Set<string>>,
+): string | undefined {
+  if (comment.repositoryName !== undefined) return comment.repositoryName;
+  const scopes = comment.repositoryId ? names.get(comment.repositoryId) : undefined;
   // Legacy line rows lack scope names. Only bridge an unambiguous ID mapping.
-  return scopes?.size === 1
-    ? JSON.stringify(["name", [...scopes][0], comment.filePath])
-    : JSON.stringify(["id", comment.repositoryId, comment.filePath]);
+  return scopes?.size === 1 ? [...scopes][0] : undefined;
 }
 
 /**
@@ -33,17 +36,17 @@ export function groupCommentsByFile(comments: ReviewComment[]): FileGroup[] {
   const names = repositoryNamesById(comments);
   const byFile = new Map<string, FileGroup>();
   for (const comment of comments) {
-    const key = fileGroupKey(comment, names);
-    const filePath =
-      comment.repositoryName !== undefined
-        ? [comment.repositoryName, comment.filePath].filter(Boolean).join("/")
-        : comment.filePath;
+    const repositoryName = commentRepositoryName(comment, names);
+    const key =
+      repositoryName === undefined
+        ? JSON.stringify(["legacy", comment.repositoryId ?? null, comment.filePath])
+        : JSON.stringify(["name", repositoryName, comment.filePath]);
+    const filePath = [repositoryName, comment.filePath].filter(Boolean).join("/");
     const existing = byFile.get(key);
     if (existing) {
       existing.comments.push(comment);
-      if (filePath !== comment.filePath) existing.filePath = filePath;
     } else {
-      byFile.set(key, { key, filePath, comments: [comment] });
+      byFile.set(key, { key, filePath, repositoryName, comments: [comment] });
     }
   }
   return [...byFile.values()];

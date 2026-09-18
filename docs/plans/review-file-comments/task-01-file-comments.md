@@ -86,9 +86,9 @@ browser checks and run the two projects sequentially.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run lib/state/slices/comments hooks/domains/comments/use-pending-comments.test.ts hooks/domains/comments/use-run-comment.test.ts components/review components/task/chat/messages/review-comments-attachment.test.tsx)
+(cd apps/web && pnpm exec vitest run components/diff/use-diff-comments.test.ts components/task/task-changes-panel-comments.test.ts components/editors/scoped-editor-comments.test.ts lib/markdown/preview-comments.test.ts lib/state/slices/comments hooks/domains/comments/use-pending-comments.test.ts hooks/domains/comments/use-run-comment.test.ts components/review components/task/chat/messages/review-comments-attachment.test.tsx)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint components/review lib/state/slices/comments hooks/domains/comments components/task/use-review-dialog.ts components/task/chat/messages/review-comments-attachment.tsx)
+(cd apps/web && pnpm exec eslint components/diff/use-diff-comments.test.ts components/task/task-changes-panel-comments.test.ts components/editors/scoped-editor-comments.test.ts lib/markdown/preview-comments.test.ts components/review lib/state/slices/comments hooks/domains/comments components/task/use-review-dialog.ts components/task/chat/messages/review-comments-attachment.tsx)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run build:e2e)
 make build-backend
@@ -231,3 +231,11 @@ requirements reused criterion 003.8. Renumbered the later parked-banner criterio
 to 003.10 and updated its supersession/design references. Full spec lint and the
 catalog validation (1017 specifications) pass. This is a documentation identity
 repair; queued-session behavior is unchanged.
+
+Late review cleanup: composer grouping now shares the aggregate identity helper,
+separates unknown legacy scope from explicit root, and bridges ID-only feedback
+only when the repository-name mapping is unambiguous. Persisted legacy rows are
+unchanged. Three regression cases failed before the fix; 64 affected tests pass.
+Updated the verification commands with the previously omitted changed tests.
+Retained Escape cancellation across inline editor controls per the interaction
+contract; a button-focused regression verifies the draft cancels without saving.

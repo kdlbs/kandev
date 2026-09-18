@@ -1,3 +1,4 @@
+import { groupCommentsByFile } from "@/lib/state/slices/comments/group-review";
 import { useMemo } from "react";
 import { isReviewComment, useCommentsStore, type ReviewComment } from "@/lib/state/slices/comments";
 
@@ -8,15 +9,20 @@ export function usePendingReviewCommentsByFile(
   const byId = useCommentsStore((state) => state.byId);
   const pending = useCommentsStore((state) => state.pendingForChat);
   return useMemo(() => {
-    const groups: Record<string, ReviewComment[]> = {};
-    if (!sessionId) return groups;
-    for (const id of pending) {
+    if (!sessionId) return {};
+    const comments = pending.flatMap((id) => {
       const comment = byId[id];
-      if (!comment || !isReviewComment(comment) || comment.sessionId !== sessionId) continue;
-      const key = comment.repositoryName
-        ? JSON.stringify([comment.repositoryName, comment.filePath])
-        : comment.filePath;
-      (groups[key] ??= []).push(comment);
+      return comment && isReviewComment(comment) && comment.sessionId === sessionId
+        ? [comment]
+        : [];
+    });
+    const groups: Record<string, ReviewComment[]> = {};
+    for (const group of groupCommentsByFile(comments)) {
+      groups[group.key] = group.comments.map((comment) =>
+        comment.repositoryName === undefined && group.repositoryName !== undefined
+          ? { ...comment, repositoryName: group.repositoryName }
+          : comment,
+      );
     }
     return groups;
   }, [byId, pending, sessionId]);

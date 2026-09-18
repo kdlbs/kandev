@@ -122,7 +122,7 @@ it("groups root file feedback with line feedback for the same file", () => {
     status: "pending" as const,
     createdAt: "now",
   };
-  const groups = groupCommentsByFile([comment({ id: "line" }), wholeFile]);
+  const groups = groupCommentsByFile([comment({ id: "line", repositoryName: "" }), wholeFile]);
   expect(groups).toHaveLength(1);
   expect(groups[0].comments.map((c) => c.id)).toEqual(["line", "whole"]);
 });

@@ -44,7 +44,9 @@ New line comments also retain the optional repository name supplied by either
 diff viewer, the Monaco/CodeMirror file editors, or Markdown preview. Grouping, annotation selection, counts, composer navigation, and
 agent delivery use that explicit scope. Existing rows without a name retain
 legacy matching; ID-only rows bridge aggregate groups only when their mapping
-to an observed name is unambiguous.
+to an observed name is unambiguous. Aggregate composer groups keep unknown
+legacy scope separate from explicit workspace-root scope; inferred names are
+carried only in the presentation copy, without rewriting persisted rows.
 
 Existing store add/update/remove and hydration actions own persistence and
 pending IDs. No storage-key migration is needed. Old comments load unchanged.

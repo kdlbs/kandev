@@ -67,3 +67,13 @@ it("cancels a draft with Escape without creating feedback", () => {
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(useCommentsStore.getState().getPendingComments()).toEqual([]);
 });
+
+it("cancels the inline draft when Escape is pressed on its Add button", () => {
+  render(<Harness />);
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "Draft" } });
+  const add = screen.getByRole("button", { name: "Add" });
+  add.focus();
+  fireEvent.keyDown(add, { key: "Escape" });
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(useCommentsStore.getState().getPendingComments()).toEqual([]);
+});
