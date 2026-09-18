@@ -66,15 +66,14 @@ test.describe("Mobile routine catch-up policy control", () => {
     testPage,
     prCapture,
   }) => {
+    const routineName = "E2E Mobile Catch-up Detail Toggle";
     const routine = (await officeApi.createRoutine(officeSeed.workspaceId, {
-      name: "E2E Mobile Catch-up Detail Toggle",
+      name: routineName,
     })) as { id: string };
     expect(routine.id).toBeTruthy();
 
     await testPage.goto(`/office/routines/${routine.id}`);
-    await expect(
-      testPage.getByTestId("office-topbar").getByText("E2E Mobile Catch-up Detail Toggle").last(),
-    ).toBeVisible({
+    await expect(testPage.locator("main input").first()).toHaveValue(routineName, {
       timeout: 10_000,
     });
 
