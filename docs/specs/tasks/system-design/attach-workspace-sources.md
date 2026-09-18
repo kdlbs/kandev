@@ -116,10 +116,11 @@ identity or make folders participate in Git operations.
 ## Legacy add-branch effective environment
 
 The legacy add-branch path resolves the environment that the selected task session actually uses.
-It first uses a task-owned `task_environments` row when one exists. Otherwise it selects the same
-most-recent eligible session used for live materialization and follows that session's
-`task_environment_id`. This fallback is required for `inherit_parent` and `shared_group` tasks,
-whose canonical environment is owned by another task.
+It selects the most-recent eligible session used for live materialization and follows that
+session's `task_environment_id`. A task-owned `task_environments` row is the fallback only when no
+eligible session has an environment binding. Session-first resolution is required when a handoff
+or shared-group transition leaves an older task-owned row while the live session uses a different
+canonical environment.
 
 An inherited environment is usable only when the referenced row exists, its owner can be loaded,
 the owner is not archived, and its executor is `worktree`. The selected session must still be bound
@@ -134,11 +135,13 @@ environment is an error, not a pre-launch signal.
 
 For a live call, the service and materializer must use one effective environment identity. The
 worktree store persists the new physical row in `task_environment_repos` under that identity, even
-when the environment belongs to a parent or workspace-group owner. Success requires the exact new
-worktree path and promoted task-root path. Any environment-resolution, ownership, executor,
-materialization, or canonical-inventory persistence failure compensates the new
-`task_repositories` attachment and any repository entity created by the call before an update is
-published.
+when the environment belongs to a parent or workspace-group owner. The preflight identity is
+retained across attachment persistence and compared with a fresh resolution; disappearance or any
+session/environment change fails closed. Inventory persistence locks and revalidates the session
+binding in the same transaction as the physical row write. Success requires the exact new worktree
+path and promoted task-root path. Any environment-resolution, ownership, executor, materialization,
+or canonical-inventory persistence failure compensates the new `task_repositories` attachment and
+any repository entity created by the call before an update is published.
 
 ## API surface
 
@@ -171,6 +174,14 @@ published.
 The response returns the persisted source projection, the effective task workspace path, and the
 affected session IDs. Validation errors return `400`, ownership/not-found errors return `404`,
 contradictory duplicates or an active turn return `409`, and materialization failures return `422` after rollback. Exact normalized retries succeed as no-ops.
+
+A batch workspace-source request may commit while no eligible session exists. In that case the
+durable source remains attached, no live repository worktree is reported, and the next launch
+materializes the attachment. A task environment that is still creating or has no `task_dir_name`
+also returns an explicit deferred result so the launch path can finish provisioning first. These
+batch deferrals do not relax the legacy add-branch rule below: a target observed as live at
+preflight must remain live and materialize successfully or the new branch attachment is rolled
+back.
 
 The backend publishes `task.updated` with both `repositories` and `workspace_folders`, then emits a
 session-scoped workspace-sources update after agentctl has adopted the new workspace root. Clients

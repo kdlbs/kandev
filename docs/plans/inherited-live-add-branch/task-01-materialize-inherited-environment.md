@@ -100,6 +100,7 @@ git diff --check -- docs/specs docs/plans/inherited-live-add-branch
 - `apps/backend/internal/task/service/service_branches.go`
 - `apps/backend/internal/task/service/service_branches_test.go`
 - `apps/backend/internal/task/service/service_branches_inherited_test.go`
+- `apps/backend/internal/task/service/service_workspace_sources.go`
 - `apps/backend/internal/backendapp/branch_materializer.go`
 - `apps/backend/internal/backendapp/branch_materializer_test.go`
 - `apps/backend/internal/worktree/store.go`
@@ -144,12 +145,12 @@ git diff --check -- docs/specs docs/plans/inherited-live-add-branch
 ## Results
 
 Implemented effective environment resolution for legacy add-branch calls. The
-task service now follows the selected eligible session when a child has no
-task-owned environment, validates foreign ownership and executor support, and
-passes the exact session/environment identity to the materializer. The
-materializer revalidates that identity before Git creation, persists the
-worktree against the inherited environment, and the worktree store rejects a
-session rebind before canonical inventory persistence.
+task service now gives the selected eligible session precedence over a stale
+task-owned row, validates foreign ownership and executor support, and carries
+the exact session/environment identity across attachment persistence. The
+service and materializer revalidate that identity before Git creation, and the
+worktree store locks the session binding in the same transaction that persists
+the inherited environment's canonical inventory.
 
 TDD RED was established with three focused regressions:
 
@@ -158,6 +159,18 @@ TDD RED was established with three focused regressions:
   environment;
 - the worktree store accepted an expected environment after the session had
   moved to another environment.
+
+PR review fixup added RED coverage proving that:
+
+- a live session binding overrides an older task-owned environment;
+- a live target that disappears after preflight rolls back instead of becoming
+  a deferred pre-launch success;
+- owner lookup errors retain their repository cause; and
+- batch workspace sources defer while an environment is still provisioning.
+
+The shared batch commit wrapper now preserves the materializer's error identity
+alongside `ErrWorkspaceSourceMaterialize`, so an owner that disappears after
+preflight still reaches the add-branch MCP not-found classifier.
 
 All regressions are GREEN. Verification completed with:
 

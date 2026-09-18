@@ -8,6 +8,8 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-001.4
@@ -88,6 +90,82 @@ func TestAddBranchToTask_RejectsInheritedNonWorktreeEnvironmentBeforeInsert(t *t
 			t.Fatalf("unexpected task.updated after rejection: %+v", event)
 		}
 	}
+}
+
+func TestAddBranchToTask_LiveSessionBindingOverridesStaleOwnedEnvironment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	taskID := seedInheritedBranchTask(t, repo, string(models.ExecutorTypeWorktree))
+	now := time.Now().UTC()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-child-stale", TaskID: taskID, ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, TaskDirName: "stale-child", WorkspacePath: "/tmp/stale-child",
+		CreatedAt: now, UpdatedAt: now,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-child-stale-primary", RepositoryID: "repo-inherited", BranchSlug: "main", CreatedAt: now,
+		}},
+	}); err != nil {
+		t.Fatalf("create stale child environment: %v", err)
+	}
+	materializer := &stubMaterializer{result: &BranchMaterializationResult{
+		WorktreePath: "/tmp/inherited-task/app-feature-session", TaskWorkspacePath: "/tmp/inherited-task",
+	}}
+	svc.SetBranchMaterializer(materializer)
+
+	if _, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID: taskID, RepositoryID: "repo-inherited", BaseBranch: "main", CheckoutBranch: "feature/session",
+	}); err != nil {
+		t.Fatalf("AddBranchToTask: %v", err)
+	}
+	if materializer.lastTarget.SessionID != "session-child" || materializer.lastTarget.TaskEnvironmentID != "env-parent" {
+		t.Fatalf("materializer target = %+v, want live session binding env-parent", materializer.lastTarget)
+	}
+}
+
+func TestAddBranchToTask_LiveTargetDisappearingAfterPreflightRollsBack(t *testing.T) {
+	var sessions *vanishingBranchSessionRepository
+	svc, _, repo := createTestServiceWithSessionsRepo(t, func(base *sqliterepo.Repository) repository.SessionRepository {
+		sessions = &vanishingBranchSessionRepository{SessionRepository: base}
+		return sessions
+	})
+	ctx := context.Background()
+	taskID := seedInheritedBranchTask(t, repo, string(models.ExecutorTypeWorktree))
+	materializer := &stubMaterializer{}
+	svc.SetBranchMaterializer(materializer)
+	before, err := repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID: taskID, RepositoryID: "repo-inherited", BaseBranch: "main", CheckoutBranch: "feature/vanished",
+	})
+	if err == nil {
+		t.Fatal("AddBranchToTask accepted a live target that disappeared after preflight")
+	}
+	after, listErr := repo.ListTaskRepositories(ctx, taskID)
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("task repositories after disappearing target = %d, want %d", len(after), len(before))
+	}
+	if sessions.calls < 2 {
+		t.Fatalf("session list calls = %d, want preflight plus post-persist validation", sessions.calls)
+	}
+}
+
+type vanishingBranchSessionRepository struct {
+	repository.SessionRepository
+	calls int
+}
+
+func (r *vanishingBranchSessionRepository) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	r.calls++
+	if r.calls > 1 {
+		return nil, nil
+	}
+	return r.SessionRepository.ListTaskSessions(ctx, taskID)
 }
 
 func seedInheritedBranchTask(t *testing.T, repo interface {

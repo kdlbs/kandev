@@ -200,21 +200,9 @@ func (b *branchMaterializer) resolveMaterializationEnvironment(
 	taskID string,
 	session *models.TaskSession,
 ) (*models.TaskEnvironment, error) {
-	env, err := b.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("lookup task environment: %w", err)
-	}
-	if env == nil {
-		if session == nil || session.TaskEnvironmentID == "" {
-			return nil, nil
-		}
-		env, err = b.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
-		if err != nil {
-			return nil, fmt.Errorf("%w: inherited task environment %s could not be resolved: %v", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID, err)
-		}
-		if env == nil {
-			return nil, fmt.Errorf("%w: inherited task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
-		}
+	env, err := b.loadMaterializationEnvironment(ctx, taskID, session)
+	if err != nil || env == nil {
+		return env, err
 	}
 	if session == nil || session.TaskEnvironmentID != env.ID {
 		return nil, fmt.Errorf("%w: selected session is not bound to task environment %s", models.ErrWorkspaceReuseUnsafe, env.ID)
@@ -231,6 +219,28 @@ func (b *branchMaterializer) resolveMaterializationEnvironment(
 	return env, nil
 }
 
+func (b *branchMaterializer) loadMaterializationEnvironment(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (*models.TaskEnvironment, error) {
+	if session == nil || session.TaskEnvironmentID == "" {
+		env, err := b.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("lookup task environment: %w", err)
+		}
+		return env, nil
+	}
+	env, err := b.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: session task environment %s could not be resolved: %w", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID, err)
+	}
+	if env == nil {
+		return nil, fmt.Errorf("%w: session task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
+	}
+	return env, nil
+}
+
 func (b *branchMaterializer) validateMaterializationEnvironmentOwner(
 	ctx context.Context,
 	taskID string,
@@ -243,7 +253,10 @@ func (b *branchMaterializer) validateMaterializationEnvironmentOwner(
 		return nil
 	}
 	owner, err := b.repo.GetTask(ctx, env.TaskID)
-	if err != nil || owner == nil {
+	if err != nil {
+		return fmt.Errorf("%w: inherited task environment owner %s could not be verified: %w", models.ErrWorkspaceReuseUnsafe, env.TaskID, err)
+	}
+	if owner == nil {
 		return fmt.Errorf("%w: inherited task environment owner %s could not be verified", models.ErrWorkspaceReuseUnsafe, env.TaskID)
 	}
 	if owner.ArchivedAt != nil {

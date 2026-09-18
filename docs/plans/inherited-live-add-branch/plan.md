@@ -50,8 +50,9 @@ with permanent TDD coverage.
 
 ### In scope
 
-- Resolve the effective add-branch environment from the task-owned row or the
-  selected eligible session's `TaskEnvironmentID`.
+- Resolve the effective add-branch environment from the selected eligible
+  session's `TaskEnvironmentID`, falling back to the task-owned row only when
+  no eligible session is bound.
 - Validate that a foreign environment has a present, unarchived owner and uses
   the worktree executor.
 - Make the service's live/pre-launch decision and the materializer's target use
@@ -79,27 +80,31 @@ with permanent TDD coverage.
 ### Effective environment resolution
 
 Replace the task-owned-row boolean with a resolver that produces an explicit
-pre-launch or live result. A task-owned environment remains the first choice.
-When absent, select the most recently updated eligible task session using the
-materializer's existing state set and load its referenced environment by ID.
+pre-launch or live result. Select the most recently updated eligible task
+session using the materializer's existing state set and load its referenced
+environment by ID. Fall back to a task-owned environment only when that session
+has no environment binding, so an older owned row cannot override the runtime
+identity selected by a handoff or shared workspace transition.
 
 For a foreign environment, load its owner task and fail closed when the owner
 is missing, unreadable, or archived. Propagate repository errors instead of
 converting them into a false pre-launch result. Reject a resolved environment
 whose executor is not `worktree` before retaining a new attachment.
 
-Keep session and environment identity together through materialization. Before
-creating the worktree, verify that the selected session is still bound to the
-resolved environment and that the environment has the provisioned task-root
-identity required by the worktree manager.
+Keep session and environment identity together through materialization. Carry
+the preflight identity across attachment persistence, compare it with a fresh
+resolution, and reject disappearance or replacement before calling the
+materializer. Before creating the worktree, verify again that the selected
+session is still bound to the resolved environment and that the environment
+has the provisioned task-root identity required by the worktree manager.
 
 ### Canonical materialization and compensation
 
-Pass the selected session to the existing worktree manager. Its SQLite store
-derives `task_environment_repos.task_environment_id` from
-`task_sessions.task_environment_id`, so an inherited session writes into the
-parent-owned or group-owned canonical inventory without a second ownership
-model.
+Pass the selected session to the existing worktree manager. Its store locks
+and derives `task_environment_repos.task_environment_id` from
+`task_sessions.task_environment_id` in the inventory write transaction, so an
+inherited session writes into the parent-owned or group-owned canonical
+inventory without a second ownership model or a rebind race.
 
 Keep the current sibling creation, workspace-path promotion, agentctl rescan,
 and materialized-worktree event. A live success is complete only when the

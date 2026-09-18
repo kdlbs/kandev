@@ -270,9 +270,10 @@ func TestBranchMaterializer_InheritedEnvironmentFailuresFailClosed(t *testing.T)
 		environmentE error
 		owner        *models.Task
 		ownerE       error
+		wantCause    error
 	}{
 		{name: "missing environment", environmentE: taskrepo.ErrTaskEnvironmentNotFound},
-		{name: "unverifiable owner", environment: ready(), ownerE: context.Canceled},
+		{name: "unverifiable owner", environment: ready(), ownerE: context.Canceled, wantCause: context.Canceled},
 		{name: "archived owner", environment: ready(), owner: &models.Task{ID: "task-parent", ArchivedAt: &archivedAt}},
 		{name: "unprovisioned environment", environment: func() *models.TaskEnvironment {
 			env := ready()
@@ -292,8 +293,37 @@ func TestBranchMaterializer_InheritedEnvironmentFailuresFailClosed(t *testing.T)
 			session := &models.TaskSession{ID: "session-child", TaskID: "task-child", TaskEnvironmentID: "env-parent"}
 			if _, err := materializer.resolveMaterializationEnvironment(context.Background(), "task-child", session); !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 				t.Fatalf("resolveMaterializationEnvironment() error = %v, want ErrWorkspaceReuseUnsafe", err)
+			} else if tt.wantCause != nil && !errors.Is(err, tt.wantCause) {
+				t.Fatalf("resolveMaterializationEnvironment() error = %v, want preserved cause %v", err, tt.wantCause)
 			}
 		})
+	}
+}
+
+func TestBranchMaterializer_LiveSessionBindingOverridesStaleOwnedEnvironment(t *testing.T) {
+	bound := &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "task-parent", ExecutorType: string(models.ExecutorTypeWorktree),
+		Status: models.TaskEnvironmentStatusReady, TaskDirName: "task-root",
+	}
+	repo := &branchMaterializerRepoOverrides{
+		getTaskEnvironmentByTaskID: func(context.Context, string) (*models.TaskEnvironment, error) {
+			return &models.TaskEnvironment{
+				ID: "env-child-stale", TaskID: "task-child", ExecutorType: string(models.ExecutorTypeWorktree),
+				Status: models.TaskEnvironmentStatusReady, TaskDirName: "stale-root",
+			}, nil
+		},
+		getTaskEnvironment: func(context.Context, string) (*models.TaskEnvironment, error) { return bound, nil },
+		getTask:            func(context.Context, string) (*models.Task, error) { return &models.Task{ID: "task-parent"}, nil },
+	}
+	materializer := &branchMaterializer{repo: repo, logger: newTestLogger()}
+	session := &models.TaskSession{ID: "session-child", TaskID: "task-child", TaskEnvironmentID: "env-parent"}
+
+	got, err := materializer.resolveMaterializationEnvironment(context.Background(), "task-child", session)
+	if err != nil {
+		t.Fatalf("resolveMaterializationEnvironment: %v", err)
+	}
+	if got == nil || got.ID != "env-parent" {
+		t.Fatalf("resolved environment = %+v, want live session binding env-parent", got)
 	}
 }
 

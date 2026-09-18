@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // TestAddBranchToTask_HappyPath attaches a second branch to a task that
@@ -907,7 +909,7 @@ func TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 	seedWorktreeTaskEnv(t, repo, task.ID, "env-1")
-	mat := &stubMaterializer{err: fmt.Errorf("simulated git failure")}
+	mat := &stubMaterializer{err: fmt.Errorf("simulated git failure: %w", taskrepo.ErrTaskNotFound)}
 	svc.SetBranchMaterializer(mat)
 
 	beforeRows, _ := repo.ListTaskRepositories(ctx, task.ID)
@@ -923,6 +925,9 @@ func TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "simulated git failure") {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if !errors.Is(err, taskrepo.ErrTaskNotFound) {
+		t.Errorf("materialization error lost ErrTaskNotFound classification: %v", err)
 	}
 	if mat.calls != 1 {
 		t.Errorf("expected materializer to be called once, got %d", mat.calls)

@@ -138,17 +138,21 @@ func scanWorktreeRow(row rowScanner) (*Worktree, error) {
 	return wt, nil
 }
 
-// resolveEnvironmentID maps a session to its task environment. Returns ""
-// when the session has no environment yet (initial materialization happens
-// before the environment row exists).
-func (s *SQLiteStore) resolveEnvironmentID(ctx context.Context, sessionID string) (string, error) {
+// resolveEnvironmentIDTx maps and locks a session's task environment inside
+// the inventory write transaction. Returns "" when the session has no
+// environment yet (initial materialization happens before the row exists).
+func (s *SQLiteStore) resolveEnvironmentIDTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", nil
 	}
-	var envID string
-	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
+	query := `
 		SELECT COALESCE(task_environment_id, '')
-		FROM task_sessions WHERE id = ?`), sessionID).Scan(&envID)
+		FROM task_sessions WHERE id = ?`
+	if dialect.IsPostgres(s.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var envID string
+	err := tx.QueryRowContext(ctx, tx.Rebind(query), sessionID).Scan(&envID)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -173,7 +177,26 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	if wt.SessionID == "" {
 		return fmt.Errorf("session ID is required to persist worktree")
 	}
-	envID, err := s.resolveEnvironmentID(ctx, wt.SessionID)
+	if wt.Status == "" {
+		wt.Status = StatusActive
+	}
+	now := time.Now().UTC()
+	// A materialized worktree means the local branch is present again. Clear
+	// the prior compaction completion marker so a later archive can be
+	// evaluated independently after new commits.
+	wt.BranchCompactedAt = nil
+	if wt.CreatedAt.IsZero() {
+		wt.CreatedAt = now
+	}
+	if wt.UpdatedAt.IsZero() {
+		wt.UpdatedAt = now
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	envID, err := s.resolveEnvironmentIDTx(ctx, tx, wt.SessionID)
 	if err != nil {
 		return fmt.Errorf("resolve environment for worktree %s: %w", wt.ID, err)
 	}
@@ -189,27 +212,7 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 			envID,
 		)
 	}
-	if wt.Status == "" {
-		wt.Status = StatusActive
-	}
-	now := time.Now().UTC()
-	// A materialized worktree means the local branch is present again. Clear
-	// the prior compaction completion marker so a later archive can be
-	// evaluated independently after new commits.
-	wt.BranchCompactedAt = nil
-	if wt.CreatedAt.IsZero() {
-		wt.CreatedAt = now
-	}
-	if wt.UpdatedAt.IsZero() {
-		wt.UpdatedAt = now
-	}
 	wt.TaskEnvironmentID = envID
-
-	tx, err := s.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	var taskID string
 	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
