@@ -245,6 +245,58 @@ describe("useClarificationGroup — inactive response reconciliation", () => {
     expect(result.current.submitState).toBe("ok");
   });
 
+  it("expires unchanged siblings while preserving a newer restored row", async () => {
+    let resolveA: ((res: Response) => void) | null = null;
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (resolveA = resolve)),
+    );
+
+    const submitted = [
+      clarMessage({
+        id: "m-restored",
+        pendingId: "pA",
+        questionId: "q-restored",
+        index: 0,
+        total: 2,
+        updatedAt: "2026-05-04T00:00:00.000000001Z",
+      }),
+      clarMessage({
+        id: "m-sibling",
+        pendingId: "pA",
+        questionId: "q-sibling",
+        index: 1,
+        total: 2,
+        updatedAt: "2026-05-04T00:00:00.000000001Z",
+      }),
+    ];
+    const restored = {
+      ...submitted[0],
+      updated_at: "2026-05-04T00:00:00.000000002Z",
+      metadata: { ...submitted[0].metadata, status: "pending" as const },
+    };
+    mockMessagesBySession = { [submitted[0].session_id]: [restored, submitted[1]] };
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
+      initialProps: { msgs: submitted },
+    });
+
+    let pendingRequest!: Promise<void>;
+    await act(async () => {
+      pendingRequest = result.current.skipAll();
+    });
+    rerender({ msgs: [restored, submitted[1]] });
+
+    await act(async () => {
+      resolveA?.(new Response(null, { status: 409 }));
+      await pendingRequest;
+    });
+
+    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    expect(mockUpdateMessage).toHaveBeenCalledWith({
+      ...submitted[1],
+      metadata: { ...submitted[1].metadata, status: "expired" },
+    });
+  });
+
   it("does not normalize an invalid current timestamp as newer authority", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 409 }));
     const submitted = clarMessage({

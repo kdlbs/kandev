@@ -75,10 +75,11 @@ before changing only pending rows from the submitted bundle to local `expired`.
 Match message ID, session ID, and pending ID. Preserve current metadata and
 terminal siblings; never insert a missing row from the submitted snapshot.
 Use `isPendingClarificationMessage` for the existing legacy pending semantics.
-Compare `updated_at` before applying expiry so a newer authoritative restoration
-wins. If the request generation is stale while the same pending ID is current
-again, skip the cache write; an old bundle remains eligible for retirement while
-a different pending ID is active.
+Compare `updated_at` independently for each row before applying expiry so a newer
+authoritative restoration wins while unchanged pending siblings remain eligible.
+If the request generation is stale while the same pending ID is current again,
+skip the cache write; an old bundle remains eligible for retirement while a
+different pending ID is active.
 
 Keep response identity separate from current UI identity. An old request may
 retire its own stale rows but cannot change a replacement bundle's controls,
@@ -182,7 +183,7 @@ The review regressions also failed before the correction: the delayed restored
 bundle became `expired`, the A→B→A path wrote an expired row, and the expired
 overlay still claimed Escape. Each now passes.
 
-- Focused Vitest: 5 files, 95 tests.
+- Focused Vitest: 5 files, 96 tests.
 - Targeted ESLint: no errors or warnings.
 - Prettier, TypeScript typecheck, `make build-web`, `make build-backend`, and
   `git diff --check` passed.
@@ -194,8 +195,10 @@ overlay still claimed Escape. Each now passes.
 - Full specification lint passed after the pre-existing duplicate acceptance
   ID was corrected to `AC-TASKS-QUEUED-SESSION-OWNERSHIP-003.10`.
 - The review follow-up now compares message versions with `parseTurnTimestamp`,
-  preserving nanosecond ordering and rejecting malformed timestamps; companion
-  parking work orders reference the corrected `.003.10` criterion.
+  preserving nanosecond ordering and rejecting malformed timestamps. Expiry is
+  selective per row, so an unchanged pending sibling still retires beside a
+  newer restored row. Companion parking work orders reference the corrected
+  `.003.10` criterion.
 
 ## Related delivery records
 

@@ -378,7 +378,7 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
         ownAnswers,
       );
       safeApplyResolvedStatus(bundle, status, answersByQuestionId, updateMessage);
-    } else if (result.state === "expired" && !hasNewerAuthority) {
+    } else if (result.state === "expired") {
       safeApplyExpiredStatus({
         bundle,
         pendingId: requestPendingId,
@@ -475,6 +475,7 @@ function applyExpiredStatusToBundle({
     if (!current || current.session_id !== submitted.session_id) continue;
     const currentMeta = current.metadata as ClarificationRequestMetadata | undefined;
     if (currentMeta?.pending_id !== pendingId || !isPendingClarificationMessage(current)) continue;
+    if (hasNewerMessageVersion(current, submitted)) continue;
 
     update({
       ...current,

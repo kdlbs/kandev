@@ -55,10 +55,10 @@ and changing Escape/collapse into rejection.
    click X, and assert that no actionable stale question remains.
 3. Reconcile submitted rows using their latest message-cache values. Reuse
    `isPendingClarificationMessage`, including its missing-status compatibility.
-   Compare the latest `updated_at` with the submitted snapshot and preserve a
-   newer authoritative row. Fence cache expiry when the request generation is
-   stale and the same pending ID is current again; still retire an old bundle
-   while another pending ID is active.
+   Compare each latest `updated_at` with its submitted snapshot and preserve a
+   newer authoritative row while retiring unchanged pending siblings. Fence
+   cache expiry when the request generation is stale and the same pending ID is
+   current again; still retire an old bundle while another pending ID is active.
 4. Keep current request-generation checks for UI state and callbacks. Test a
    mixed bundle containing pending and terminal rows, plus an unrelated live bundle.
 5. Render the expired notice without response actions for static hosts. Prevent
@@ -166,9 +166,11 @@ correction, and pass after it.
 
 Validation passed:
 
-- Focused Vitest: 5 files, 95 tests.
+- Focused Vitest: 5 files, 96 tests.
 - Strict timestamp comparison preserves RFC3339Nano ordering and rejects
   malformed or Date-normalized values.
+- Selective expiry preserves a newer restored row while retiring an unchanged
+  pending sibling in the same bundle.
 - Targeted ESLint: no errors or warnings.
 - Prettier and TypeScript typecheck.
 - `make build-web` and `make build-backend`.
