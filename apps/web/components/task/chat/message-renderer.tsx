@@ -11,6 +11,7 @@ import { isLaunchStateRegression } from "@/lib/session-state";
 import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
 import { useTask } from "@/hooks/use-task";
+import { ChatMotionItem } from "./chat-motion";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
 import { StatusMessage } from "@/components/task/chat/messages/status-message";
@@ -487,5 +488,10 @@ export const MessageRenderer = memo(function MessageRenderer({
   };
   const adapter =
     adapters.find((entry) => entry.matches(comment, ctx)) ?? adapters[adapters.length - 1];
-  return adapter.render(comment, ctx);
+  const content = adapter.render(comment, ctx);
+  return isTaskDescription ? (
+    content
+  ) : (
+    <ChatMotionItem messageId={comment.id}>{content}</ChatMotionItem>
+  );
 });

@@ -281,6 +281,13 @@ type AgentExecution struct {
 	// asynchronously, so its transport-level gate alone cannot provide this.
 	promptMu                sync.Mutex
 	dispatchedPromptPending atomic.Bool
+	// Initial-prompt callbacks are installed before StartAgentProcess for
+	// model-switch launches. Lifecycle sends the initial prompt asynchronously,
+	// so they must be captured before startup begins and consumed once that
+	// prompt is accepted or fails before acceptance.
+	initialPromptDispatchCallback   func()
+	initialPromptFailureCallback    func()
+	initialPromptDispatchCallbackMu sync.Mutex
 
 	// Closed when the current SendPrompt returns, so CancelAgent can wait
 	// for the in-flight prompt to finish before the caller retries.
@@ -389,6 +396,23 @@ func (e *AgentExecution) setSessionInitialized(value bool) {
 	e.sessionInitializedMu.Lock()
 	e.sessionInitialized = value
 	e.sessionInitializedMu.Unlock()
+}
+
+func (e *AgentExecution) setInitialPromptDispatchCallbacks(onDispatched, onFailure func()) {
+	e.initialPromptDispatchCallbackMu.Lock()
+	e.initialPromptDispatchCallback = onDispatched
+	e.initialPromptFailureCallback = onFailure
+	e.initialPromptDispatchCallbackMu.Unlock()
+}
+
+func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(), func()) {
+	e.initialPromptDispatchCallbackMu.Lock()
+	onDispatched := e.initialPromptDispatchCallback
+	onFailure := e.initialPromptFailureCallback
+	e.initialPromptDispatchCallback = nil
+	e.initialPromptFailureCallback = nil
+	e.initialPromptDispatchCallbackMu.Unlock()
+	return onDispatched, onFailure
 }
 
 type activeTopLevelTool struct {

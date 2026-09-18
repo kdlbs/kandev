@@ -137,6 +137,7 @@ import (
 
 	// System pages (status / database / backups / logs / updates / about)
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 
 	// Database
@@ -707,9 +708,10 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
+	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
-		repos.SystemSettings, repos.RequiredStores)
+		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -911,7 +913,8 @@ func startAgentInfrastructure(
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
-		func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers, restoreCleanups, databaseQuiesce)
+		sessionCapacityEnvironment, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
+		restoreCleanups, databaseQuiesce)
 }
 
 // startOrchestratorAndAutomationConsumers establishes the startup chain in
@@ -974,6 +977,7 @@ func startGatewayAndServe(
 	msgCreator *messageCreatorAdapter,
 	repoCloner *repoclone.Cloner,
 	agentctlBinaryPath string,
+	sessionCapacityEnvironment sessioncapacity.Environment,
 	addCleanup func(func() error),
 	runCleanups func(),
 	cancelWorkers context.CancelFunc,
@@ -1180,15 +1184,17 @@ func startGatewayAndServe(
 		Commit:    Commit,
 		BuildTime: BuildTime,
 	}, systemsvc.Wiring{
-		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
-		DatabaseQuiesce:      databaseQuiesce,
-		RestoreQuiesce:       restoreQuiesce,
-		SystemSettings:       repos.SystemSettings,
-		RequiredStores:       repos.RequiredStores,
-		PersistenceHealth:    persistenceHealth,
-		MessageQueue:         orchestratorSvc.GetMessageQueue(),
-		MessageQueueConfig:   queueConfiguration(cfg),
-		TaskSessions:         repos.Task,
+		OrchestratorShutdown:       func() { _ = orchestratorSvc.Stop() },
+		DatabaseQuiesce:            databaseQuiesce,
+		RestoreQuiesce:             restoreQuiesce,
+		SystemSettings:             repos.SystemSettings,
+		RequiredStores:             repos.RequiredStores,
+		PersistenceHealth:          persistenceHealth,
+		MessageQueue:               orchestratorSvc.GetMessageQueue(),
+		MessageQueueConfig:         queueConfiguration(cfg),
+		SessionCapacity:            orchestratorSvc,
+		SessionCapacityEnvironment: sessionCapacityEnvironment,
+		TaskSessions:               repos.Task,
 		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
 			for _, id := range ids {
 				message, err := services.Task.GetMessage(eventCtx, id)
@@ -1474,8 +1480,15 @@ func initOfficeServices(
 
 	// Reconcile using the new infra package.
 	reconciler := officeinfra.NewReconciler(repos.Office, log)
-	reconciler.ReconcileAll(ctx)
+	reconcileSignal := reconciler.ReconcileAll(ctx)
 	log.Info("Office reconciliation complete")
+
+	// Startup scan (REQ-OFFICE-ROUTINE-ARMING-003): a read-only pass over
+	// every routine's schedule state, logged and counted for an unattended
+	// install. Launched after reconciliation so a trigger-less routine
+	// reconciliation would have fixed is not reported prematurely; does not
+	// block startup and cannot affect its result.
+	go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC())
 
 	// System skill sync. Upserts every embedded SKILL.md (the ones written
 	// to disk by EnsureBundledSkills above) into office_skills as

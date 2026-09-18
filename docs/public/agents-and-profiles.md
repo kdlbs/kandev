@@ -247,6 +247,11 @@ exclusive health probe before it becomes eligible again. This shared error
 classification is used by task/Kanban and Office routing, while the per-
 candidate policies are configured on dynamic profiles.
 
+When a task launch waits for session capacity, Kandev keeps the selected
+destination and retries it automatically. Inspecting another session does not
+resume a parked predecessor. Use an explicit **Resume** action or send a
+message for manual recovery. These actions can override the automatic ceiling.
+
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
 with an ambiguous result does not switch providers automatically. If no

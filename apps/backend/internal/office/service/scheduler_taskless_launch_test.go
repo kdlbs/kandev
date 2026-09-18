@@ -73,6 +73,62 @@ func TestSchedulerTick_TasklessRunFailsInsteadOfFinishing(t *testing.T) {
 	}
 }
 
+// TestSchedulerTick_WhitespaceOnlyTaskIDTreatedAsTaskless is the Review
+// round 3 regression test (R3REV-02): a run whose payload.task_id is
+// non-empty but whitespace-only (e.g. "   ") must be classified taskless
+// end-to-end, the same as an absent task_id, per the terminology REQ-003
+// and REQ-004 share ("absent, empty, or whitespace-only ... empty after
+// trimming"). Before the fix, extractTaskID returned the untrimmed value,
+// so checkoutTask's `taskID == ""` short-circuit never fired; the run
+// instead attempted an exact-match checkout against a task id that could
+// never exist and silently requeued (scheduled a retry) forever, rather
+// than reaching failTasklessRun's loud, immediate, correctly-classified
+// failure — exactly the "runs forever, does nothing, reports nothing"
+// pathology this card's WO-35 predecessor already fixed for the empty case.
+func TestSchedulerTick_WhitespaceOnlyTaskIDTreatedAsTaskless(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "coordinator-r3rev02",
+		WorkspaceID:        "ws-1",
+		Name:               "coordinator-r3rev02",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{"task_id":"   "}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if mock.callCount() != 0 {
+		t.Fatalf("expected 0 StartTask calls for a whitespace-only task_id, got %d", mock.callCount())
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("run count = %d, want 1", len(runs))
+	}
+	if runs[0].Status != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want %q — a whitespace-only task_id must be classified "+
+			"taskless and fail loudly on this tick, not silently requeue against a task id "+
+			"that can never exist", runs[0].Status, service.RunStatusFailed)
+	}
+	if runs[0].ErrorMessage == "" {
+		t.Error("expected a non-empty error_message explaining the run could not launch")
+	}
+}
+
 // TestSchedulerTick_TasklessRunRecordsTerminalShape is the Testing round 3
 // regression test. failTasklessRun calls repo.MarkRunFailed directly
 // (not through HandleAgentFailure), so it bypassed office_loop_terminal_total

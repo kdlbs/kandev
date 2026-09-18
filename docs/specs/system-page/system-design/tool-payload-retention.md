@@ -259,6 +259,29 @@ Payload bytes are not a prediction of compacted file bytes or backup duration.
 
 ## Settings surface and security
 
+### Status error recovery
+
+`useToolPayloadRetention` keeps status-read errors separate from action errors.
+A current successful GET clears only the status-read error. An action error
+takes display precedence and survives successful background reads. Explicit
+Refresh status and a new user action retain their existing dismissal behavior.
+Persisted operation failures remain part of the returned status.
+
+The existing lifetime epoch and mutation generation checks apply to both error
+channels. A stale GET cannot clear a newer error or overwrite a mutation result.
+Polling continues at the existing cadence without automatic mutation retries.
+The hook keeps its outward `error` contract for `RetentionError`.
+Draft ownership stays in `useToolPayloadRetentionDraft`.
+
+The [platform health design](../../platform/system-design/postgres-domain-store-parity.md#sqlite-maintenance-coordination)
+owns maintenance admission and readiness. The card does not infer database
+health from a local vacuum button state or suppress all HTTP 503 errors.
+Existing desktop and phone composition, focus behavior, and translated copy
+remain unchanged. The [fix package](../../../plans/vacuum-compaction-status/plan.md)
+defines regression coverage and the recovered-state preview.
+
+### Controls and permissions
+
 Add `ToolPayloadRetentionCard` beside existing retention settings, with its own
 `system:tool-payload-retention` save contributor. Reuse draft/save conflict
 handling, job status, backup list, and `useIsAdmin` conventions.

@@ -94,6 +94,16 @@ type admissionDecision struct {
 	handedOff       bool
 }
 
+// SessionCeilingObservation is a point-in-time view of the admission
+// controller. It is deliberately separate from a launch deferral so callers
+// can refresh displayed capacity without changing queue ownership or time.
+type SessionCeilingObservation struct {
+	InUse      int
+	Limit      int
+	ObservedAt time.Time
+	Known      bool
+}
+
 // sessionCeilingController is the single admission controller. Every mutation of
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
@@ -121,6 +131,20 @@ func newSessionCeilingController(ceiling int, lister admittedSessionLister, logg
 	}
 }
 
+// setCeiling changes the effective capacity without replacing the controller.
+// Reservations therefore remain owned by the launch that created them across
+// every Settings update.
+func (c *sessionCeilingController) setCeiling(ceiling int) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	previous := c.ceiling
+	c.ceiling = ceiling
+	c.mu.Unlock()
+	return previous != ceiling
+}
+
 // population returns the admitted session population.
 func (c *sessionCeilingController) population(ctx context.Context) (int, error) {
 	c.mu.Lock()
@@ -130,6 +154,73 @@ func (c *sessionCeilingController) population(ctx context.Context) (int, error) 
 		return 0, err
 	}
 	return c.populationLocked(counted), nil
+}
+
+func (c *sessionCeilingController) observation(ctx context.Context) (SessionCeilingObservation, error) {
+	if c == nil {
+		return SessionCeilingObservation{}, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	counted, err := c.countedRowsLocked(ctx)
+	observedAt := time.Now().UTC()
+	if c.now != nil {
+		observedAt = c.now().UTC()
+	}
+	observation := SessionCeilingObservation{
+		Limit:      c.ceiling,
+		ObservedAt: observedAt,
+		Known:      err == nil,
+	}
+	if err != nil {
+		return observation, err
+	}
+	observation.InUse = c.populationLocked(counted)
+	return observation, nil
+}
+
+// CurrentSessionCeilingObservation exposes the controller's current bounded
+// reading to composition-layer status projections. A population read failure
+// returns the ceiling and a Known=false observation so queue ownership can
+// still be displayed without claiming a count.
+func (s *Service) CurrentSessionCeilingObservation(ctx context.Context) (SessionCeilingObservation, error) {
+	if s == nil || s.sessionCeiling == nil {
+		return SessionCeilingObservation{}, nil
+	}
+	return s.sessionCeiling.observation(ctx)
+}
+
+// SetSessionCapacity applies the effective install-wide capacity to the
+// existing admission controller. A zero value disables refusal while keeping
+// the controller and its reservations alive for later re-enablement.
+func (s *Service) SetSessionCapacity(capacity int) {
+	if s == nil || s.sessionCeiling == nil {
+		return
+	}
+	changed := s.sessionCeiling.setCeiling(capacity)
+	if !changed {
+		return
+	}
+	if s.logger != nil {
+		s.logger.Info("session ceiling capacity applied",
+			zap.Int("ceiling", capacity),
+			zap.Bool("enabled", capacity != unlimitedSessionCeiling))
+	}
+	// A sweep both retries newly eligible work after an increase or disable and
+	// refreshes the task projection after any changed observation, including a
+	// decrease.
+	s.signalCeilingSweep()
+}
+
+// SessionCapacity returns the current effective limit for the live admission
+// controller. Zero means automatic launches are unlimited.
+func (s *Service) SessionCapacity() int {
+	if s == nil || s.sessionCeiling == nil {
+		return unlimitedSessionCeiling
+	}
+	s.sessionCeiling.mu.Lock()
+	defer s.sessionCeiling.mu.Unlock()
+	return s.sessionCeiling.ceiling
 }
 
 // countedRowsLocked reads the persisted half of the population. It is derived at
@@ -199,12 +290,30 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.ceiling == unlimitedSessionCeiling {
+		return c.admitUnlimitedLocked(req, origin)
+	}
 
 	counted, err := c.countedRowsLocked(ctx)
 	if err != nil {
 		return c.decideUnknownPopulationLocked(req, origin, err)
 	}
 	return c.decideLocked(req, origin, counted)
+}
+
+// admitUnlimitedLocked keeps launch ownership and callback accounting intact
+// while avoiding a population read that cannot affect an unlimited decision.
+func (c *sessionCeilingController) admitUnlimitedLocked(req admissionRequest, origin launchOrigin) admissionDecision {
+	decision := admissionDecision{admitted: true, ceiling: unlimitedSessionCeiling}
+	if req.sessionID != "" {
+		if _, held := c.reservations[req.sessionID]; held {
+			decision.reservationKey = req.sessionID
+			return decision
+		}
+	}
+	decision.reservationKey = c.reserveLocked(req.sessionID)
+	c.logDecision(req, origin, decision)
+	return decision
 }
 
 // decideLocked is the ordinary admission decision, taken against a population the
@@ -394,6 +503,9 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.ceiling == unlimitedSessionCeiling {
+		return c.admitUnlimitedLocked(req, origin)
+	}
 
 	counted, err := c.countedRowsLocked(ctx)
 	if err != nil {

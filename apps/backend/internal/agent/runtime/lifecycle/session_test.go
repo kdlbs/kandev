@@ -628,7 +628,6 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 		agentctl:      client,
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
 	}
-
 	agentConfig := &testAgent{
 		id:      "test-agent",
 		enabled: true,
@@ -1235,6 +1234,8 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 		agentctl:      client,
 		promptDoneCh:  make(chan PromptCompletionSignal, 1),
 	}
+	dispatched := make(chan struct{}, 1)
+	execution.setInitialPromptDispatchCallbacks(func() { dispatched <- struct{}{} }, nil)
 
 	agentConfig := &testAgent{
 		id:      "test-agent",
@@ -1260,7 +1261,11 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	}
 
 	// Wait for the prompt to be sent asynchronously
-	time.Sleep(500 * time.Millisecond)
+	select {
+	case <-dispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial prompt dispatch callback")
+	}
 
 	actions := mock.getActionLog()
 
