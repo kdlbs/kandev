@@ -159,5 +159,8 @@ read-only-source `VACUUM INTO` trial preserves committed WAL data and passes
 SQLite integrity checking without changing its source. These preparation probes
 do not constitute a live-data backup, migration or rollback rehearsal.
 
-The live service remains unchanged. Delivery 03 migration/rollback evidence is
-still required before live enablement.
+The subsequent [delivery 03 rehearsal](migration-rehearsal.md) now verifies the
+actual private SQLite copy, replay and matched rollback. It also identifies the
+row-ID limitation of a vacuumed snapshot and records the corrected online backup.
+The live service remains unchanged; its [prepared change](live-pilot-ready.md)
+awaits the explicit deployment instruction.

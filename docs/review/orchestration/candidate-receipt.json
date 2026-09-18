@@ -160,7 +160,7 @@
     "Execution qualified on Linux x86-64 only; other helpers cross-built but not executed",
     "Generic mock captures do not establish real-provider quality",
     "Restricted provider coverage is the separate Linux Claude ACP trial",
-    "No private-data migration or rollback result yet",
+    "Actual-data rehearsal is recorded separately in migration-receipt.json",
     "No live deployment or public PR"
   ],
   "initial_capture_failure": {

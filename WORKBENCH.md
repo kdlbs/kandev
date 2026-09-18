@@ -41,7 +41,8 @@ generic material; original local snapshot/backup refs are not published.
 | Independent assistant toggle | Implemented; default off, restart and admission matrix verified |
 | Combined assistant evidence | Complete; 168 affected race tests, 52 combined browser checks and the isolated real-provider read/denied-write trial pass. The [39-criterion evidence matrix](docs/review/orchestration/assistant-evidence.md) links inspected generic screenshots/video |
 | Packaged candidate qualification | Complete for Linux x86-64; [checks, frozen bundle and limits](docs/review/orchestration/candidate-qualification.md) |
-| Actual live-data rehearsal and deployment | Pending; live service unchanged |
+| Actual live-data rehearsal | Complete; [migration, replay, search, synthetic Coordinator and matched rollback](docs/review/orchestration/migration-rehearsal.md) |
+| Live deployment | [Exact candidate and service change prepared](docs/review/orchestration/live-pilot-ready.md); named-candidate deploy instruction pending. Live service unchanged |
 
 ## Development and contribution
 

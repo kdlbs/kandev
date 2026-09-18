@@ -41,8 +41,9 @@ ownership/intake/objectives. Delivery 00–01, central-view 01–03 and assistan
 01–11 are now implemented and verified, including the combined browser matrix,
 restricted provider trial and inspected synthetic media. Repository-wide
 candidate qualification is complete for Linux x86-64, including the immutable
-bundle and matching synthetic media. Live-data rehearsal and cutover remain
-unfinished. See the [workbench](../../../WORKBENCH.md) for
+bundle and matching synthetic media. The actual private-data migration, replay
+and matched rollback rehearsal also pass. The live change is prepared and awaits
+the named-candidate deployment instruction. See the [workbench](../../../WORKBENCH.md) for
 current readiness and the [scope audit](../../review/orchestration/scope-audit.md)
 for the original imported baseline.
 
@@ -149,7 +150,7 @@ session unless the user explicitly chooses another arrangement.
 - [x] [00 Private review publication](task-00-private-publication.md)
 - [x] [01 Independent assistant rollout gate](task-01-assistant-rollout-gate.md)
 - [x] [02 Candidate qualification](task-02-candidate-qualification.md)
-- [ ] [03 Private migration rehearsal](task-03-migration-rehearsal.md)
+- [x] [03 Private migration rehearsal](task-03-migration-rehearsal.md)
 - [ ] [04 Live coordinator pilot](task-04-live-pilot.md)
 - [ ] [05 Dogfood evidence](task-05-dogfood-evidence.md)
 - [ ] [06 Upstream contribution export](task-06-upstream-export.md)
@@ -253,10 +254,13 @@ The complete design package and implementation checkpoints are committed and
 published privately. Delivery 00–01, central-view 01–03 and assistant 01–11 are
 complete. Assistant task 11 records passing affected race checks, an isolated
 real-provider read/denied-write trial, the combined browser matrix and inspected
-synthetic media. Delivery 02 qualifies the frozen first candidate; delivery 03–06
-remain pending. Optional private CI is
+synthetic media. Delivery 02 qualifies the frozen first candidate and delivery 03
+verifies actual-data migration/replay/rollback, including the corrected online
+backup procedure. Delivery 04 has its exact service change and rollback packet
+prepared, pending the explicit deploy request; delivery 05–06 remain pending.
+Optional private CI is
 disabled. Live Kandev has not been changed.
 [The publication receipt](../../review/orchestration/publication.md) records source
 preservation, checks, normal hooks and verified remote refs. The user requested
-full implementation. Qualify the complete candidate and rehearse its migration
-and rollback before live cutover.
+full implementation. The next release action is the named-candidate live pilot,
+followed by the observed task cycle and focused contribution export.

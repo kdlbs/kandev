@@ -1,7 +1,7 @@
 ---
 id: "03-migration-rehearsal"
 title: "Private migration rehearsal"
-status: pending
+status: done
 wave: 5
 depends_on: ["02-candidate-qualification"]
 plan: "plan.md"
@@ -108,4 +108,20 @@ store/migration tests. Read operational docs before choosing backup commands.
 
 ## Results
 
-Pending. No actual live-data rehearsal is claimed by the prototype's fixture tests.
+Complete for candidate `0.94.0-orchestration.20260918.sha69753564d0d7` on the
+current SQLite installation. A consistent Online Backup API snapshot preserves
+implicit row IDs and all task/search mappings. Candidate migration, replay,
+Coordinator-only synthetic API/page checks and matched v0.94.0 rollback pass in
+network-isolated copies. Existing task/session/message history, ownership/auth
+records and references survive; no inherited agent work starts. The original
+key and all 21 claimed attachment blobs match in every restored home.
+
+The first vacuumed snapshot was rejected after application-level search checks
+found row-ID mismatches, reproduced by the unchanged original bundle. The
+replacement online backup and final cold-backup procedure avoid that issue.
+Rendered UI evidence uses the separately isolated generic candidate fixtures;
+no private copied page was captured. See the full
+[rehearsal record](../../review/orchestration/migration-rehearsal.md) and
+[redacted receipt](../../review/orchestration/migration-receipt.json).
+The live service remains unchanged. Its exact proposed override and rollback
+packet are staged; delivery 04 still requires the named-candidate deploy request.

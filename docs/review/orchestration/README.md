@@ -71,4 +71,18 @@ data. All eleven assistant work orders are complete; the combined browser matrix
 passes 52 checks and the final affected native filter passes 168 race tests.
 [Assistant screenshots and silent clip](media/assistant/README.md) use only
 generic fixtures and identify their clean source revision.
-This does not claim a qualified deployment bundle or a live-data upgrade.
+Those feature tests are separate from operational qualification below.
+
+## Qualified candidate and prepared live pilot
+
+The [candidate qualification](candidate-qualification.md) and
+[artifact receipt](candidate-receipt.json) identify the complete immutable Linux
+candidate and its matching refreshed media. The [private-data rehearsal](migration-rehearsal.md)
+and [redacted results](migration-receipt.json) verify migration, replay, search,
+Coordinator-only synthetic checks and matched original-bundle rollback.
+No private prompts, row contents or backups are in this packet.
+
+The [live-pilot packet](live-pilot-ready.md) names the exact candidate and staged
+service change. It awaits the deployment instruction required by the reviewed
+work order. Live Kandev remains unchanged, and no new public PR or comment has
+been published.

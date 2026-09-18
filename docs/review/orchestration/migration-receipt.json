@@ -1,0 +1,295 @@
+{
+  "status": "passed",
+  "date": "2026-09-18",
+  "candidate_source_commit": "69753564d0d7c0121e8681a72e5b4ce8c384a106",
+  "candidate_version": "0.94.0-orchestration.20260918.sha69753564d0d7",
+  "candidate_kandev_sha256": "49fb6a47d71c50a124094b91a2eb54b7da069de256d2b9ef669cd9c72e3916fb",
+  "base_commit": "bf819a0228e742d069c528293d848c985a4d1bd1",
+  "known_good_version": "v0.94.0",
+  "known_good_kandev_sha256": "922e4e0ec7d92e1621bad91ba7578b8840452c53a7c0d08cdef43a501f0fc745",
+  "backup": {
+    "bytes": 140050432,
+    "integrity_ok": true,
+    "method": "SQLite Online Backup API from mode=ro source",
+    "sha256": "a7dfd610141fb507d6ec95dda20bf9c37c26f9dcb873ca20a9e75703bddea4c1",
+    "sqlite_version": "3.45.1"
+  },
+  "retained_counts": {
+    "workspaces": 2,
+    "workflows": 3,
+    "workflow_steps": 14,
+    "tasks": 75,
+    "task_sessions": 69,
+    "task_session_messages": 20719,
+    "agent_profiles": 7,
+    "automations": 1,
+    "automation_runs": 19,
+    "task_message_attachments": 21
+  },
+  "copy_only_controls": {
+    "automations.enabled": 1,
+    "automation_triggers.enabled": 1,
+    "queue_session_state.auto_run": 8,
+    "workflow_steps.auto_archive_after_hours": 1
+  },
+  "phases": {
+    "migration": {
+      "mode": "migration",
+      "outcome": "passed",
+      "live_service_changed": false,
+      "auth_enabled": true,
+      "coordinator_enabled": false,
+      "assistant_enabled": false,
+      "provider_credentials_mounted": false,
+      "runtime_binary_hashes_verified": true,
+      "isolation": {
+        "network": "none",
+        "readonly_rootfs": true,
+        "published_ports": 0,
+        "docker_socket": false,
+        "host_data_mounted": false
+      },
+      "ready": {
+        "service": "kandev",
+        "status": "ok",
+        "version": "0.94.0-orchestration.20260918.sha69753564d0d7"
+      },
+      "startup_seconds": 3.084,
+      "security_probe": {
+        "external_connect": "ENETUNREACH",
+        "interfaces": [
+          "lo"
+        ],
+        "private_api_status": 401
+      },
+      "shutdown_seconds": 0.107,
+      "launcher_exit_code": 0,
+      "container_removed": true
+    },
+    "replay": {
+      "mode": "replay",
+      "outcome": "passed",
+      "live_service_changed": false,
+      "auth_enabled": true,
+      "coordinator_enabled": false,
+      "assistant_enabled": false,
+      "provider_credentials_mounted": false,
+      "runtime_binary_hashes_verified": true,
+      "isolation": {
+        "network": "none",
+        "readonly_rootfs": true,
+        "published_ports": 0,
+        "docker_socket": false,
+        "host_data_mounted": false
+      },
+      "ready": {
+        "service": "kandev",
+        "status": "ok",
+        "version": "0.94.0-orchestration.20260918.sha69753564d0d7"
+      },
+      "startup_seconds": 1.574,
+      "security_probe": {
+        "external_connect": "ENETUNREACH",
+        "interfaces": [
+          "lo"
+        ],
+        "private_api_status": 401
+      },
+      "shutdown_seconds": 0.101,
+      "launcher_exit_code": 0,
+      "container_removed": true
+    },
+    "rollback": {
+      "mode": "rollback",
+      "outcome": "passed",
+      "live_service_changed": false,
+      "auth_enabled": true,
+      "coordinator_enabled": false,
+      "assistant_enabled": false,
+      "provider_credentials_mounted": false,
+      "runtime_binary_hashes_verified": true,
+      "isolation": {
+        "network": "none",
+        "readonly_rootfs": true,
+        "published_ports": 0,
+        "docker_socket": false,
+        "host_data_mounted": false
+      },
+      "ready": {
+        "service": "kandev",
+        "status": "ok",
+        "version": "v0.94.0"
+      },
+      "startup_seconds": 1.868,
+      "security_probe": {
+        "external_connect": "ENETUNREACH",
+        "interfaces": [
+          "lo"
+        ],
+        "private_api_status": 401
+      },
+      "shutdown_seconds": 0.103,
+      "launcher_exit_code": 0,
+      "container_removed": true
+    },
+    "coordinator": {
+      "mode": "coordinator",
+      "outcome": "passed",
+      "live_service_changed": false,
+      "auth_enabled": false,
+      "coordinator_enabled": true,
+      "assistant_enabled": false,
+      "provider_credentials_mounted": false,
+      "runtime_binary_hashes_verified": true,
+      "isolation": {
+        "network": "none",
+        "readonly_rootfs": true,
+        "published_ports": 0,
+        "docker_socket": false,
+        "host_data_mounted": false
+      },
+      "ready": {
+        "service": "kandev",
+        "status": "ok",
+        "version": "0.94.0-orchestration.20260918.sha69753564d0d7"
+      },
+      "startup_seconds": 1.833,
+      "security_probe": {
+        "external_connect": "ENETUNREACH",
+        "interfaces": [
+          "lo"
+        ],
+        "private_api_status": 200
+      },
+      "synthetic_coordinator": {
+        "synthetic_workspace_created": true,
+        "synthetic_task_created": true,
+        "synthetic_role_created": true,
+        "retained_profile_reference_valid": true,
+        "conversation_open_idempotent": true,
+        "conversation_comments": 0,
+        "coordinator_page_status": 200,
+        "assistant_status": 404,
+        "agent_launch_requested": false,
+        "private_content_logged": false
+      },
+      "shutdown_seconds": 0.11,
+      "launcher_exit_code": 0,
+      "container_removed": true
+    }
+  },
+  "comparisons": {
+    "migration": {
+      "retained_history_and_ownership_match": true,
+      "expected_startup_deltas": [
+        "editors",
+        "executors_running",
+        "jira_configs",
+        "kandev_meta",
+        "sqlite_stat1",
+        "storage_temp_artifacts"
+      ],
+      "added_schema_tables": 25,
+      "integrity_ok": true,
+      "foreign_key_violations": 0
+    },
+    "replay": {
+      "retained_history_and_ownership_match": true,
+      "expected_startup_deltas": [
+        "editors",
+        "jira_configs",
+        "kandev_meta",
+        "storage_temp_artifacts"
+      ],
+      "added_schema_tables": 0,
+      "integrity_ok": true,
+      "foreign_key_violations": 0
+    },
+    "rollback": {
+      "retained_history_and_ownership_match": true,
+      "expected_startup_deltas": [
+        "editors",
+        "executors_running",
+        "jira_configs",
+        "kandev_meta",
+        "sqlite_stat1",
+        "storage_temp_artifacts"
+      ],
+      "added_schema_tables": 0,
+      "integrity_ok": true,
+      "foreign_key_violations": 0,
+      "fts": {
+        "native_tasks": 75,
+        "index_rows": 75,
+        "orphan_rows": 0,
+        "content_mismatches": 0,
+        "fts_integrity": "passed"
+      },
+      "no_new_agent_work": {
+        "runs": 0,
+        "queued_messages": 0,
+        "pending_moves": 0,
+        "task_sessions": 69,
+        "task_session_messages": 20719
+      }
+    },
+    "coordinator": {
+      "retained_primary_key_tables_checked": 214,
+      "only_user_setting_change": "new synthetic workspace last-used workflow",
+      "retained_user_identity_and_auth_columns_match": true,
+      "fts": {
+        "native_tasks": 77,
+        "index_rows": 77,
+        "orphan_rows": 0,
+        "content_mismatches": 0,
+        "fts_integrity": "passed"
+      },
+      "no_new_agent_work": {
+        "runs": 0,
+        "queued_messages": 0,
+        "pending_moves": 0,
+        "task_sessions": 69,
+        "task_session_messages": 20719
+      }
+    },
+    "migration_replay": {
+      "fts": {
+        "native_tasks": 75,
+        "index_rows": 75,
+        "orphan_rows": 0,
+        "content_mismatches": 0,
+        "fts_integrity": "passed"
+      },
+      "no_new_agent_work": {
+        "runs": 0,
+        "queued_messages": 0,
+        "pending_moves": 0,
+        "task_sessions": 69,
+        "task_session_messages": 20719
+      }
+    },
+    "restored_blobs_and_key_match": true,
+    "live_service_active": true
+  },
+  "backup_method_finding": {
+    "vacuum_snapshot_rejected": true,
+    "native_integrity_check_alone_insufficient": true,
+    "candidate_and_original_bundle_reproduce": true,
+    "rowid_mismatches_in_live_source": 0,
+    "online_backup_preserves_task_fts_mapping": true
+  },
+  "prepared_live_change": {
+    "staged": true,
+    "dropin_sha256": "226a7369f978def154cbce09fd1c970f474ca7da70587ac43b6ae9fe85d9ff1b",
+    "systemd_verify_exit_code": 0,
+    "installed": false,
+    "service_restarted": false
+  },
+  "boundaries": [
+    "Database, key, attachment and canvas-artifact recovery checked; source repositories and external provider state are separate recovery concerns",
+    "Authentication stayed enabled for migration, replay and rollback; only the no-network synthetic API branch disabled authentication",
+    "Private-copy Coordinator page and APIs checked; rendered desktop/mobile behavior uses the independent synthetic candidate capture runs",
+    "Existing integration health and process-presence fields change as expected in an environment with no network or original worker processes",
+    "No real provider work, live cutover, post-cutover observation or public PR in this receipt"
+  ]
+}

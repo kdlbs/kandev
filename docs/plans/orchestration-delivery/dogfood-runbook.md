@@ -51,7 +51,15 @@ update mechanism that could replace the custom bundle, and choose an explicit
 update policy for the pilot before cutover. Redact diagnostic
 exports. Read active/queued work through supported APIs, not an assumed table layout.
 
-Create a consistent backup using the installation's supported backup path. If no
+For this v0.94.0 SQLite installation, use the SQLite Online Backup API for the
+rehearsal snapshot and verify task/search row alignment as well as integrity.
+The [actual rehearsal](../../review/orchestration/migration-rehearsal.md) found that
+`VACUUM INTO` renumbers implicit task row IDs while retaining the old FTS row IDs;
+both original and candidate runtimes reproduce the mismatch. Do not use that
+snapshot as this pilot's rollback protection. The final live backup is a cold
+copy after all backend writers stop, verified before installing the override.
+
+Create a consistent backup using that verified method. If no
 online consistency mechanism is established, schedule the smallest explicit
 maintenance pause; do not copy a live SQLite file while ignoring its WAL. Back up
 the whole required data/config set, including database sidecars and blob/attachment
