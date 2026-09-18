@@ -112,6 +112,25 @@ type sshDockerConn struct {
 	exited   bool
 	closed   bool
 	waitOnce sync.Once
+
+	// stdinMu serializes stdin. x/crypto/ssh's sessionStdin is not safe for a
+	// concurrent Write and Close, and http.Transport drives exactly that: its
+	// write loop writes the request while its read loop closes the connection.
+	stdinMu     sync.Mutex
+	stdinClosed bool
+}
+
+// closeStdin half-closes the write side once. Repeat calls are a no-op rather
+// than a second Close on the channel, which is what CloseWrite followed by
+// Close would otherwise do.
+func (c *sshDockerConn) closeStdin() error {
+	c.stdinMu.Lock()
+	defer c.stdinMu.Unlock()
+	if c.stdinClosed {
+		return nil
+	}
+	c.stdinClosed = true
+	return c.stdin.Close()
 }
 
 func (c *sshDockerConn) Read(p []byte) (int, error) {
@@ -128,7 +147,16 @@ func (c *sshDockerConn) Read(p []byte) (int, error) {
 }
 
 func (c *sshDockerConn) Write(p []byte) (int, error) {
+	c.stdinMu.Lock()
+	if c.stdinClosed {
+		c.stdinMu.Unlock()
+		if cause := c.exitCause(); cause != nil {
+			return 0, cause
+		}
+		return 0, io.ErrClosedPipe
+	}
 	n, err := c.stdin.Write(p)
+	c.stdinMu.Unlock()
 	if err != nil {
 		if cause := c.exitCause(); cause != nil {
 			return n, cause
@@ -141,7 +169,7 @@ func (c *sshDockerConn) Write(p []byte) (int, error) {
 // response is still draining. http.Transport relies on this for request
 // bodies; closing the whole session instead truncates the response.
 func (c *sshDockerConn) CloseWrite() error {
-	return c.stdin.Close()
+	return c.closeStdin()
 }
 
 func (c *sshDockerConn) Close() error {
@@ -153,7 +181,7 @@ func (c *sshDockerConn) Close() error {
 	c.closed = true
 	c.mu.Unlock()
 
-	_ = c.stdin.Close()
+	_ = c.closeStdin()
 	// Closing the session unblocks a Wait that is not going to return on its
 	// own, so a remote command that ignores stdin EOF costs a bounded delay
 	// rather than stranding the caller's cleanup.
