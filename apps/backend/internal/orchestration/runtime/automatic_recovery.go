@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/kandev/kandev/internal/orchestration/models"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -64,7 +65,11 @@ func (s *Service) retryTurn(ctx context.Context, run *runmodels.Run, data map[st
 	// retry durable and paced, rebuilding execution and authority on each launch.
 	delays := []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, time.Minute, time.Minute}
 	retryAt := now.Add(delays[run.RetryCount])
-	_, err = s.Runs.RetryClaimedSession(ctx, run.ID, run.SessionID, run.RetryCount, retryAt)
+	changed, err := s.Runs.RetryClaimedSession(ctx, run.ID, run.SessionID, run.RetryCount, retryAt)
+	if changed {
+		retired, _ := s.retiredExecutions.LoadOrStore(run.ID, &sync.Map{})
+		retired.(*sync.Map).Store(failure.AgentExecutionID, struct{}{})
+	}
 	// A lost claim belongs to cancellation or a successor. Never finalize it.
 	return true, err
 }
@@ -77,6 +82,9 @@ func (s *Service) CancelRecovery(ctx context.Context, taskID, sessionID string) 
 	changed, err := s.Runs.CancelScheduledSessionRetry(ctx, sessionID)
 	if err != nil || !changed {
 		return false
+	}
+	if run, err := s.Runs.LatestRunForSession(ctx, sessionID); err == nil {
+		s.retiredExecutions.Delete(run.ID)
 	}
 	_ = s.Repo.SetRuntimeWorking(ctx, owner, false)
 	return true
@@ -91,4 +99,18 @@ func (s *Service) promptForRun(ctx context.Context, persona *models.AgentInstanc
 		return "", fmt.Errorf("original conversation request is unavailable for automatic recovery")
 	}
 	return run.AssembledPrompt, nil
+}
+
+// Delivery from retired executions can outlive teardown and session reuse.
+// The bounded set belongs to the live run; backend restart drops the old bus
+// and its pending deliveries, while durable queued retries remain claimable.
+func (s *Service) isRetiredExecution(data map[string]any) bool {
+	runID, _ := data["run_id"].(string)
+	executionID, _ := data["agent_execution_id"].(string)
+	retired, ok := s.retiredExecutions.Load(runID)
+	if !ok {
+		return false
+	}
+	_, ok = retired.(*sync.Map).Load(executionID)
+	return ok
 }

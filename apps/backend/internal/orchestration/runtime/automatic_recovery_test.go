@@ -184,3 +184,32 @@ func TestAutomaticRetryRequiresOriginalPrompt(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, launched)
 }
+
+func TestRecoveryIgnoresOldExecutionEvenWhenSessionIsReused(t *testing.T) {
+	s, db, task := newRuntime(t)
+	ctx := context.Background()
+	require.NoError(t, s.QueueTurn(ctx, "chief", task, "task_comment", "example", nil))
+	run, err := s.Runs.ClaimNextEligibleRun(ctx)
+	require.NoError(t, err)
+	require.NoError(t, s.Runs.UpdateRunRuntimeSnapshot(ctx, run.ID, "workspace_coordinator", run.Payload, "same-session"))
+	failure := watcher.AgentEventData{RunID: run.ID, TaskID: task, SessionID: "same-session", AgentID: "claude-acp", AgentExecutionID: "old-execution", PromptGeneration: 7, EvidenceKnown: true, ErrorMessage: refreshContention}
+	attempt, _, err := s.HandleFailure(ctx, failure)
+	require.NoError(t, err)
+	require.Equal(t, 1, attempt)
+	_, err = db.Exec(`UPDATE runs SET scheduled_retry_at=? WHERE id=?`, time.Now().Add(-time.Minute), run.ID)
+	require.NoError(t, err)
+	_, err = s.Runs.ClaimNextEligibleRun(ctx)
+	require.NoError(t, err)
+	// Teardown from the failed process can arrive after its successor is claimed.
+	for _, event := range []string{events.AgentStopped, events.AgentCompleted, events.AgentFailed} {
+		require.NoError(t, s.onEvent(ctx, bus.NewEvent(event, "test", failure)))
+		current, err := s.Runs.GetRunByID(ctx, run.ID)
+		require.NoError(t, err)
+		require.EqualValues(t, "claimed", current.Status, "stale execution event ended a successor")
+	}
+	failure.AgentExecutionID = "new-execution"
+	require.NoError(t, s.onEvent(ctx, bus.NewEvent(events.AgentCompleted, "test", failure)))
+	current, err := s.Runs.GetRunByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, "finished", current.Status)
+}

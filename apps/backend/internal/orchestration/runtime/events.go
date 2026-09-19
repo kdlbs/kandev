@@ -87,7 +87,7 @@ func (s *Service) finishTurn(ctx context.Context, event *bus.Event, data map[str
 	if err != nil || run == nil {
 		return nil
 	}
-	if !matchesClaimedTurn(event, data, run) {
+	if !matchesClaimedTurn(event, data, run) || s.isRetiredExecution(data) {
 		return nil
 	}
 	status := "finished"
@@ -104,6 +104,7 @@ func (s *Service) finishTurn(ctx context.Context, event *bus.Event, data map[str
 	if err := s.Runs.FinishRun(ctx, run.ID, status, nil); err != nil {
 		return err
 	}
+	s.retiredExecutions.Delete(run.ID)
 	return s.Repo.SetRuntimeWorking(ctx, owner, false)
 }
 func matchesClaimedTurn(event *bus.Event, data map[string]any, run *runmodels.Run) bool {

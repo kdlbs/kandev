@@ -39,6 +39,7 @@ type Launch struct {
 	Env                                              map[string]string
 }
 type Service struct {
+	retiredExecutions       sync.Map
 	RecoveryStarting        func(context.Context, string)
 	FailureHandlerInstalled bool
 	Maintenance             MaintenanceSandbox
@@ -117,6 +118,7 @@ func (s *Service) Process(ctx context.Context, run *runmodels.Run) (bool, error)
 	}
 	err = s.launch(ctx, run)
 	if err != nil {
+		s.retiredExecutions.Delete(run.ID)
 		_ = s.Runs.RecordFailure(ctx, run.ID, err.Error())
 		_ = s.Runs.FinishRun(ctx, run.ID, statusFailed, nil)
 		_ = s.Repo.SetRuntimeWorking(ctx, run.AgentProfileID, false)
@@ -129,6 +131,7 @@ func (s *Service) launch(ctx context.Context, run *runmodels.Run) error {
 		return err
 	}
 	if paused(a) {
+		s.retiredExecutions.Delete(run.ID)
 		return s.Runs.FinishRun(ctx, run.ID, "finished", nil)
 	}
 
