@@ -410,6 +410,16 @@ export function ChangesPanelHeaderLeft({
         <Button
           size="sm"
           variant="ghost"
+          className={`${PANEL_ACTION_BUTTON_CLASS} hidden @[350px]/changes-panel:inline-flex`}
+          aria-label={t("task:diff")}
+          onClick={onOpenDiffAll}
+        >
+          <IconGitMerge className="h-3 w-3" />
+          <span className="hidden @[420px]/changes-panel:inline">{t("task:diff")}</span>
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
           className={PANEL_ACTION_BUTTON_CLASS}
           aria-label={t(REVIEW_LABEL_KEY)}
           onClick={onOpenReview}

@@ -3,6 +3,7 @@ import type { SeedData } from "../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
+import { GitHelper, makeGitEnv } from "../helpers/git-helper";
 import { enableCanvasFeature, removeCanvas, seedTaskCanvas } from "./canvas/canvas-fixture";
 
 type HeaderGeometry = {
@@ -191,17 +192,23 @@ test.describe("shared panel toolbars", () => {
   test("folds narrow Changes and Browser actions into reachable menus", async ({
     testPage,
     apiClient,
+    backend,
     seedData,
   }) => {
     const session = await createToolbarTask(testPage, apiClient, seedData, "Narrow panel actions");
+    const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
+    git.createFile("narrow-toolbar-actions.ts", "export const narrowToolbarActions = true;\n");
 
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible();
+    await expect(session.changesFileRow("narrow-toolbar-actions.ts")).toBeVisible({
+      timeout: 15_000,
+    });
     await constrainDockviewPanel(session.changes, 240);
     await expect(session.changes.getByTestId("panel-header-overflow").first()).toBeVisible();
     await session.changes.getByTestId("panel-header-overflow").first().click();
-    await expect(testPage.getByRole("menuitem", { name: "Diff", exact: true })).toHaveCount(0);
-    await expect(testPage.getByRole("menuitem", { name: "Review", exact: true })).toHaveCount(0);
+    await expect(testPage.getByRole("menuitem", { name: "Diff", exact: true })).toBeVisible();
+    await expect(testPage.getByRole("menuitem", { name: "Review", exact: true })).toBeVisible();
     await testPage.keyboard.press("Escape");
     await expectHeadersAtHeight(session.changes, 30, "narrow Changes");
 

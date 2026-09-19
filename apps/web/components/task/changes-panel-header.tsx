@@ -169,6 +169,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
         <ChangesPanelHeaderLeft
           showDiffReview={showDiffReview}
           primaryOnly
+          onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
           onRequestWalkthrough={onRequestWalkthrough}
           requestWalkthroughDisabled={requestWalkthroughDisabled}
