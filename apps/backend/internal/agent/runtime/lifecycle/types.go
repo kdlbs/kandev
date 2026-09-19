@@ -1042,6 +1042,7 @@ type RepoLaunchSpec struct {
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution *models.RemoteContribution
+	CheckoutOptions    *models.RepositoryCheckoutOptions
 	WorktreeID         string // Existing worktree ID to reuse (skip creation if set)
 	// AllowBranchReplacement permits the explicit new-branch recovery action for
 	// this repository while retaining its environment record.
@@ -1196,6 +1197,7 @@ type LaunchRequest struct {
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution     *models.RemoteContribution
+	CheckoutOptions        *models.RepositoryCheckoutOptions
 	ComparisonTarget       *models.ComparisonTarget
 	WorktreeBranchPrefix   string // Branch prefix for worktree branches
 	WorktreeBranchTemplate string // Branch name template for worktree branches
@@ -1250,6 +1252,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
 		RemoteContribution:         r.RemoteContribution,
+		CheckoutOptions:            r.CheckoutOptions,
 		ComparisonTarget:           r.ComparisonTarget,
 		ContributionDestination:    r.ContributionDestination,
 		WorktreeID:                 r.WorktreeID,

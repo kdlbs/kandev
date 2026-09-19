@@ -1,3 +1,4 @@
+import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import { fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
 import type {
@@ -68,6 +69,7 @@ export async function createTask(
     workflow_step_id?: string;
     position?: number;
     repositories?: Array<{
+      checkout_options?: RepositoryCheckoutOptions;
       repository_id: string;
       branch_policy_id?: string;
       base_branch?: string;
@@ -140,6 +142,7 @@ export async function updateTask(
     position?: number;
     state?: Task["state"];
     repositories?: Array<{
+      checkout_options?: RepositoryCheckoutOptions;
       repository_id: string;
       base_branch?: string;
     }>;

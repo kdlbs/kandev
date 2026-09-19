@@ -323,20 +323,21 @@ type TaskDTO struct {
 }
 
 type TaskRepositoryDTO struct {
-	ID                            string                 `json:"id"`
-	TaskID                        string                 `json:"task_id"`
-	RepositoryID                  string                 `json:"repository_id"`
-	BaseBranch                    string                 `json:"base_branch"`
-	CheckoutBranch                string                 `json:"checkout_branch,omitempty"`
-	BranchPolicyID                string                 `json:"branch_policy_id,omitempty"`
-	BranchPolicyName              string                 `json:"branch_policy_name,omitempty"`
-	BranchPolicyBaseBranch        string                 `json:"branch_policy_base_branch,omitempty"`
-	BranchPolicyBranchTemplate    string                 `json:"branch_policy_branch_template,omitempty"`
-	BranchPolicyPullRequestTarget string                 `json:"branch_policy_pull_request_target,omitempty"`
-	Position                      int                    `json:"position"`
-	Metadata                      map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt                     time.Time              `json:"created_at"`
-	UpdatedAt                     time.Time              `json:"updated_at"`
+	CheckoutOptions               *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	ID                            string                            `json:"id"`
+	TaskID                        string                            `json:"task_id"`
+	RepositoryID                  string                            `json:"repository_id"`
+	BaseBranch                    string                            `json:"base_branch"`
+	CheckoutBranch                string                            `json:"checkout_branch,omitempty"`
+	BranchPolicyID                string                            `json:"branch_policy_id,omitempty"`
+	BranchPolicyName              string                            `json:"branch_policy_name,omitempty"`
+	BranchPolicyBaseBranch        string                            `json:"branch_policy_base_branch,omitempty"`
+	BranchPolicyBranchTemplate    string                            `json:"branch_policy_branch_template,omitempty"`
+	BranchPolicyPullRequestTarget string                            `json:"branch_policy_pull_request_target,omitempty"`
+	Position                      int                               `json:"position"`
+	Metadata                      map[string]interface{}            `json:"metadata,omitempty"`
+	CreatedAt                     time.Time                         `json:"created_at"`
+	UpdatedAt                     time.Time                         `json:"updated_at"`
 }
 
 // TaskWorkspaceFolderDTO is the API projection of a durable non-Git source.
@@ -938,6 +939,7 @@ func FromTaskWithSessionInfo(
 	var repositories []TaskRepositoryDTO
 	for _, repo := range task.Repositories {
 		repositories = append(repositories, TaskRepositoryDTO{
+			CheckoutOptions:               models.PublicRepositoryCheckoutOptions(repo.Metadata),
 			ID:                            repo.ID,
 			TaskID:                        repo.TaskID,
 			RepositoryID:                  repo.RepositoryID,

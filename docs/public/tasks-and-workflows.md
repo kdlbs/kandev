@@ -110,6 +110,35 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
    On mobile, the two non-primary actions are separate buttons labeled **Plan mode** and **Create only**; they have the same plan-mode and create-without-agent behavior.
 
+### Reduce downloads for a large remote repository
+
+In **New Task → Remote**, select a repository and open its gear (**Repository options**).
+These settings apply only to that repository row in this task.
+
+1. Choose **On demand** to download file contents as Git needs them while retaining
+   full commit history. **Standard** keeps the existing download behavior.
+2. Choose **Selected folders** and enter repository-relative directories, one per
+   line, for example `extensions/my-extension`. Include shared packages your work
+   needs. Up to 64 directories are supported; wildcards and parent paths are not.
+3. Select **Apply**. A summary below the repository shows the applied choices.
+   **Cancel** discards draft edits; **Reset** restores Standard and All folders.
+
+Advanced options are available for GitHub repositories using **Worktree** or
+**Local Docker** with the built-in preparation script and Kandev-managed Git
+credentials. Other preparation paths
+show an explanation and keep advanced controls disabled. On phones, the gear
+opens a drawer with the same settings.
+
+Selected folders use Git's directory-based sparse checkout: root and ancestor
+files remain available, and omitted files are not reported as deleted. Git can
+materialize additional files during conflict resolution. This is not an access
+restriction. Settings cannot change after the task environment is created;
+create a new task for a different scope. A new independent task starts with the
+default settings.
+
+These options reduce download and checkout work. They do not change the existing
+clone timeout or guarantee that every repository will finish within it.
+
 ### Branch policies
 
 Manage named branch policies in **Settings → Workspaces → _workspace_ → Repositories**. A policy

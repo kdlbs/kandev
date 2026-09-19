@@ -71,6 +71,7 @@ type repoInfo struct {
 	CheckoutBranch             string
 	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
 	RemoteContribution         *models.RemoteContribution
+	CheckoutOptions            *models.RepositoryCheckoutOptions
 	ContributionDestination    *models.ContributionDestination
 	ComparisonTarget           *models.ComparisonTarget
 	Position                   int
@@ -166,7 +167,12 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 func (e *Executor) resolveTaskRepoInfoForSession(
 	ctx context.Context, sessionID string, tr *models.TaskRepository,
 ) (*repoInfo, error) {
+	options, err := models.GetRepositoryCheckoutOptions(tr.Metadata)
+	if err != nil {
+		return nil, err
+	}
 	info := &repoInfo{
+		CheckoutOptions:  options,
 		TaskRepositoryID: tr.ID,
 		RepositoryID:     tr.RepositoryID,
 		BaseBranch:       tr.BaseBranch,
@@ -213,7 +219,10 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	}
 	e.resolvePRBaseForLaunch(ctx, tr, repo, info)
 
-	remoteRefState, err := e.ensureRepoLocalPathForSessionAndState(ctx, tr.TaskID, sessionID, repo)
+	// Task checkout modes select a separate cache without rewriting the repository record.
+	repoCopy := *repo
+	repo = &repoCopy
+	remoteRefState, err := e.ensureTaskCheckoutPath(ctx, tr.TaskID, sessionID, repo, options)
 	if err != nil {
 		return nil, err
 	}
@@ -250,12 +259,12 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		prNumber, checkoutBranch := info.PRNumber, info.CheckoutBranch
 		info.RefreshRepository = func(refreshCtx context.Context) error {
 			return e.refreshManagedRepositoryForSession(
-				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch,
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
 			)
 		}
 		info.RefreshRepositoryWithState = func(refreshCtx context.Context) (repoclone.RemoteRefState, error) {
 			return e.refreshManagedRepositoryForSessionWithState(
-				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch,
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
 			)
 		}
 	}
@@ -340,16 +349,16 @@ func isPluginManagedRepository(repo *models.Repository) bool {
 }
 
 func (e *Executor) refreshManagedRepositoryForSession(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string,
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string, options ...*models.RepositoryCheckoutOptions,
 ) error {
 	_, err := e.refreshManagedRepositoryForSessionWithState(
-		ctx, taskID, sessionID, repo, prNumber, checkoutBranch,
+		ctx, taskID, sessionID, repo, prNumber, checkoutBranch, options...,
 	)
 	return err
 }
 
 func (e *Executor) refreshManagedRepositoryForSessionWithState(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string,
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string, options ...*models.RepositoryCheckoutOptions,
 ) (repoclone.RemoteRefState, error) {
 	if e.repoCloner == nil || repo.LocalPath == "" {
 		return repoclone.RemoteRefStateUnknown, errors.New("managed repository refresh is unavailable")
@@ -379,6 +388,9 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 		)
 	}
 	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if len(options) > 0 {
+		request.CheckoutOptions = options[0]
+	}
 	if isGitHubRepository(repo) {
 		request.PRNumber = prNumber
 		request.CheckoutBranch = checkoutBranch

@@ -303,6 +303,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.preflightRepositorySelections(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.validateTaskCheckoutCapabilities(ctx, req); err != nil {
+		return nil, err
+	}
 	if err := s.validateTaskRepositoryPolicies(ctx, req.WorkspaceID, req.Repositories); err != nil {
 		return nil, err
 	}
@@ -732,9 +735,14 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 		if r == nil || r.RepositoryID == "" {
 			continue
 		}
+		options, err := models.GetRepositoryCheckoutOptions(r.Metadata)
+		if err != nil {
+			return err
+		}
 		inherited = append(inherited, TaskRepositoryInput{
-			RepositoryID: r.RepositoryID,
-			BaseBranch:   r.BaseBranch,
+			CheckoutOptions: options,
+			RepositoryID:    r.RepositoryID,
+			BaseBranch:      r.BaseBranch,
 		})
 	}
 	if len(inherited) > 0 {
@@ -1078,6 +1086,9 @@ func (s *Service) resolveTaskRepositoryRow(
 	ctx context.Context, workspaceID string, index int,
 	repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository,
 ) (*models.TaskRepository, error) {
+	if err := s.validateRepositoryCheckoutInput(ctx, workspaceID, repoInput); err != nil {
+		return nil, err
+	}
 	repoInput, err := normalizeContributionBindings(repoInput)
 	if err != nil {
 		return nil, err
@@ -1171,6 +1182,9 @@ func applyBranchPolicyBaseBranch(
 // buildTaskRepositoryMetadata assembles the row's metadata blob.
 func buildTaskRepositoryMetadata(repoInput TaskRepositoryInput) (map[string]interface{}, error) {
 	metadata := make(map[string]interface{})
+	if err := models.PutRepositoryCheckoutOptions(metadata, repoInput.CheckoutOptions); err != nil {
+		return nil, err
+	}
 	if prNum := resolvePRNumber(repoInput); prNum > 0 {
 		metadata["pr_number"] = prNum
 	}
@@ -1956,6 +1970,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		return nil, err
 	}
 	if req.Repositories != nil {
+		if err := s.preserveRepositoryCheckoutOptions(ctx, task, req.Repositories); err != nil {
+			return nil, err
+		}
 		if err := s.preflightRepositoryInputs(ctx, task.WorkspaceID, req.Repositories); err != nil {
 			return nil, err
 		}

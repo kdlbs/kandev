@@ -146,6 +146,7 @@ type Worktree struct {
 
 // CreateRequest contains the parameters for creating a new worktree.
 type CreateRequest struct {
+	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
 	// TaskID is the unique task identifier (required).
 	TaskID string
 

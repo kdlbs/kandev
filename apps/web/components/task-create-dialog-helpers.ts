@@ -434,8 +434,10 @@ function buildRemoteRepoPayloadRow(
 ): CreateTaskRepositoryPayload {
   const url = row.url.trim();
   const metadata = remoteRepoPRMetadata(row, url, prInfoByUrl);
-  if (metadata) return buildRemoteRepoPRPayload(row, url, metadata);
-  return buildPlainRemoteRepoPayload(row, url);
+  const payload = metadata
+    ? buildRemoteRepoPRPayload(row, url, metadata)
+    : buildPlainRemoteRepoPayload(row, url);
+  return row.checkoutOptions ? { ...payload, checkout_options: row.checkoutOptions } : payload;
 }
 
 function remoteRepoPRMetadata(

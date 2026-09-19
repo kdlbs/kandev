@@ -563,6 +563,7 @@ type LaunchAgentRequest struct {
 	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
@@ -617,6 +618,7 @@ type RepoSpec struct {
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string

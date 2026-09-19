@@ -127,6 +127,9 @@ func parseRemoteRefState(output string) (RemoteRefState, error) {
 func (c *Cloner) EnsureWorkspaceClonedWithCredentialRequestAndState(
 	ctx context.Context, request GitCredentialRequest, credentialOrigin, token string,
 ) (string, RemoteRefState, error) {
+	if hasCheckoutOptions(request) {
+		return c.ensureWorkspaceCheckoutCache(ctx, request, credentialOrigin, token)
+	}
 	targetPath, err := c.WorkspaceProviderRepositoryPath(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
 		request.ProviderRepositoryID, request.Owner, request.Name,

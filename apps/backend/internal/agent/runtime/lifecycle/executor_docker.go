@@ -820,6 +820,14 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 	if script == "" {
 		return "", nil
 	}
+	options, err := primaryCheckoutOptions(req.Metadata)
+	if err != nil {
+		return "", err
+	}
+	script, err = checkoutOptionsPrepareScript(script, options)
+	if err != nil {
+		return "", err
+	}
 	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
@@ -835,6 +843,8 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (strin
 		}
 		script += destinationScript
 	}
+
+	script += checkoutOptionsValidationScript(options)
 
 	resolver := scriptengine.NewResolver().
 		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).

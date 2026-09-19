@@ -104,6 +104,14 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		}
 	}
 
+	if hasSparseCheckout(ctx) {
+		if err := applySparseCheckout(ctx, worktreePath); err != nil {
+			return err
+		}
+		m.initSubmodules(ctx, worktreePath)
+		return nil
+	}
+
 	// Exclude submodule paths from checkout to avoid broken gitlink resolution.
 	// In worktrees, git resolves submodule git dirs relative to the worktree's
 	// git dir instead of the common dir, which fails.

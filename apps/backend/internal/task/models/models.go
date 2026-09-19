@@ -2819,14 +2819,15 @@ func (t *Task) ToAPI() *v1.Task {
 	var repositories []v1.TaskRepository
 	for _, repo := range t.Repositories {
 		repositories = append(repositories, v1.TaskRepository{
-			ID:           repo.ID,
-			TaskID:       repo.TaskID,
-			RepositoryID: repo.RepositoryID,
-			BaseBranch:   repo.BaseBranch,
-			Position:     repo.Position,
-			Metadata:     repo.Metadata,
-			CreatedAt:    repo.CreatedAt,
-			UpdatedAt:    repo.UpdatedAt,
+			CheckoutOptions: PublicRepositoryCheckoutOptions(repo.Metadata),
+			ID:              repo.ID,
+			TaskID:          repo.TaskID,
+			RepositoryID:    repo.RepositoryID,
+			BaseBranch:      repo.BaseBranch,
+			Position:        repo.Position,
+			Metadata:        repo.Metadata,
+			CreatedAt:       repo.CreatedAt,
+			UpdatedAt:       repo.UpdatedAt,
 		})
 	}
 

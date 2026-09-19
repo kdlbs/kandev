@@ -652,6 +652,13 @@ func startAgentInfrastructure(
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 	services.Task.SetAgentComparisonTargetPusher(lifecycleMgr)
 	services.Task.SetExecutorCapabilityProber(lifecycleMgr)
+	services.Task.SetRepositoryCheckoutCredentialPolicy(func(ctx context.Context, workspaceID string) (bool, error) {
+		if services.GitHub == nil {
+			return false, nil
+		}
+		policy, err := services.GitHub.DescribeTaskGitCredentialPolicy(ctx, workspaceID)
+		return policy.Mode == githubpkg.TaskGitCredentialsModeManaged, err
+	})
 
 	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,
 	// LSP, terminals) enforce per-user workspace scoping (opt-in auth). The
