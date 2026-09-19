@@ -40,6 +40,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
@@ -781,6 +782,9 @@ func registerRoutes(p routeParams) {
 	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
+	handoffSvc.SetCoordinatorAuthority(coordinator.New(p.taskRepo, func() bool {
+		return p.features.CoordinatorTaskAuthority
+	}))
 	p.taskSvc.SetAutoArchiveCoordinator(handoffSvc)
 	p.taskSvc.SetWorkflowTaskArchiveCoordinator(handoffSvc)
 	p.taskSvc.SetTaskLifecycleCoordinator(handoffSvc)
@@ -1341,6 +1345,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	}
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterRepositorySetRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
+	taskhandlers.RegisterCoordinatorGrantRoutes(p.router, p.taskRepo, p.taskSvc, p.log)
 	taskhandlers.RegisterRepositoryBranchPolicyRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
@@ -2016,6 +2021,9 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetAgentPermissionService(p.orchestratorSvc)
 	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
+	mcpHandlers.SetCoordinatorAuthority(coordinator.New(p.taskRepo, func() bool {
+		return p.features.CoordinatorTaskAuthority
+	}))
 	// list_pending_questions_kandev / answer_question_kandev (external MCP
 	// surface only). p.taskRepo already implements ClarificationBundleLister
 	// (ListUnresolvedClarificationBundles, FindMessagesByPendingID).

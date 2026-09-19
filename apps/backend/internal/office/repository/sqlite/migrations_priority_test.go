@@ -117,6 +117,59 @@ func TestMigrate_PriorityIntegerToText(t *testing.T) {
 	}
 }
 
+func TestMigrate_PriorityIntegerToTextRetainsCoordinatorTaskCompositeKey(t *testing.T) {
+	dbPath := t.TempDir() + "/test.db?_foreign_keys=on"
+	db, err := sqlx.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
+			workflow_id TEXT NOT NULL DEFAULT '',
+			workflow_step_id TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			state TEXT DEFAULT 'TODO',
+			priority INTEGER DEFAULT 0,
+			position INTEGER DEFAULT 0,
+			metadata TEXT DEFAULT '{}',
+			is_ephemeral INTEGER NOT NULL DEFAULT 0,
+			parent_id TEXT DEFAULT '',
+			archived_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			origin TEXT DEFAULT 'manual',
+			project_id TEXT DEFAULT '',
+			labels TEXT DEFAULT '[]',
+			identifier TEXT
+		);
+		CREATE UNIQUE INDEX uniq_tasks_workspace_id_id ON tasks(workspace_id, id);
+		CREATE TABLE workspace_coordinator_grants (
+			workspace_id TEXT NOT NULL PRIMARY KEY,
+			coordinator_task_id TEXT NOT NULL,
+			FOREIGN KEY (workspace_id, coordinator_task_id)
+				REFERENCES tasks(workspace_id, id) ON DELETE CASCADE
+		);
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+			VALUES ('coordinator', 'workspace', 'Coordinator', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+		INSERT INTO workspace_coordinator_grants (workspace_id, coordinator_task_id)
+			VALUES ('workspace', 'coordinator');
+	`); err != nil {
+		t.Fatalf("seed task and coordinator designation schema: %v", err)
+	}
+
+	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("init office repo (run migrations): %v", err)
+	}
+	if _, err := db.Exec(`UPDATE tasks SET title = 'Updated' WHERE id = 'coordinator'`); err != nil {
+		t.Fatalf("update task after priority migration: %v", err)
+	}
+}
+
 // TestMigrate_PriorityIdempotent verifies running the office init twice over
 // an already-migrated tasks table is a no-op.
 func TestMigrate_PriorityIdempotent(t *testing.T) {

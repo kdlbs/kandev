@@ -33,7 +33,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 }));
 
 const storeState = {
-  features: { office: false, canvases: false },
+  features: { office: false, canvases: false, coordinatorTaskAuthority: false },
   workspaces: {
     items: [
       { id: "w1", name: "Default Workspace", office_workflow_id: "" },
@@ -58,6 +58,7 @@ describe("WorkspaceSettingsShell — workspace switcher", () => {
     navigationMock.push = vi.fn();
     storeState.features.office = false;
     storeState.features.canvases = false;
+    storeState.features.coordinatorTaskAuthority = false;
     storeState.workspaces.activeId = "w1";
     storeState.setActiveWorkspace = vi.fn();
   });
@@ -178,6 +179,7 @@ describe("WorkspaceSettingsShell canvas navigation", () => {
     navigationMock.push = vi.fn();
     storeState.features.office = false;
     storeState.features.canvases = false;
+    storeState.features.coordinatorTaskAuthority = false;
     storeState.workspaces.activeId = "w1";
     storeState.setActiveWorkspace = vi.fn();
   });
@@ -205,5 +207,28 @@ describe("WorkspaceSettingsShell canvas navigation", () => {
     );
 
     expect(screen.queryByRole("link", { name: "Canvases" })).toBeNull();
+  });
+
+  it("shows the Coordinators tab only while coordinator authority is enabled", () => {
+    storeState.features.coordinatorTaskAuthority = true;
+    const { unmount } = render(
+      <WorkspaceSettingsShell workspaceId="w1" activeTab="coordinators">
+        <div />
+      </WorkspaceSettingsShell>,
+    );
+
+    expect(screen.getByRole("link", { name: "Coordinators" }).getAttribute("href")).toBe(
+      "/settings/workspaces/w1/coordinators",
+    );
+    unmount();
+
+    storeState.features.coordinatorTaskAuthority = false;
+    render(
+      <WorkspaceSettingsShell workspaceId="w1" activeTab="overview">
+        <div />
+      </WorkspaceSettingsShell>,
+    );
+
+    expect(screen.queryByRole("link", { name: "Coordinators" })).toBeNull();
   });
 });

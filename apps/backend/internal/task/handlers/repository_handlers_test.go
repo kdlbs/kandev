@@ -527,9 +527,13 @@ func newRepositoryHTTPTestRouterWithConfig(t *testing.T, discoveryConfig service
 	}
 	eventBus := bus.NewMemoryEventBus(log)
 	svc := service.NewService(service.Repos{
-		Workspaces:     repo,
-		RepoEntities:   repo,
-		DiscoveryRoots: repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		WorkspaceFolders: repo,
+		Workflows:        repo,
+		RepoEntities:     repo,
+		DiscoveryRoots:   repo,
 	}, eventBus, log, discoveryConfig)
 	router := gin.New()
 	NewRepositoryHandlers(svc, log).registerHTTP(router)

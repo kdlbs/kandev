@@ -336,7 +336,7 @@ describe("structural guard: workspace-cookie lookups stay scoped", () => {
   const readers = [
     "src/office-routes.tsx", // office boot: general then office family
     "src/kanban-route.tsx", // kanban boot: general family
-    "src/settings-routes.tsx", // settings boot: general family
+    "src/settings-routes-bootstrap.ts", // settings boot: general family
     "src/spa-routes.tsx", // generic boot re-hydration: general family
   ];
   const writer = "components/app-sidebar/app-sidebar-workspace-navigation.ts";
@@ -381,7 +381,11 @@ describe("structural guard: workspace-cookie lookups stay scoped", () => {
       "office-routes must read the general family before the office family",
     ).toBeLessThan(office);
     // Kanban and settings boot read only the general family.
-    for (const file of ["src/kanban-route.tsx", "src/settings-routes.tsx", "src/spa-routes.tsx"]) {
+    for (const file of [
+      "src/kanban-route.tsx",
+      "src/settings-routes-bootstrap.ts",
+      "src/spa-routes.tsx",
+    ]) {
       const source = compact(file);
       expect(
         source.includes("readActiveWorkspaceCookie()"),

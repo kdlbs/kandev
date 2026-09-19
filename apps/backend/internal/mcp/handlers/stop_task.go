@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -16,8 +16,9 @@ import (
 const stopTaskStatusKey = "status"
 
 type stopTaskRequest struct {
-	TaskID       string `json:"task_id"`
-	SenderTaskID string `json:"sender_task_id"`
+	TaskID          string `json:"task_id"`
+	SenderTaskID    string `json:"sender_task_id"`
+	SenderSessionID string `json:"sender_session_id"`
 }
 
 type stopTaskFailure struct {
@@ -34,15 +35,15 @@ func (h *Handlers) handleStopTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task lookup is not configured", nil)
 	}
 
-	principal, hasPrincipal := mcpscope.PrincipalFromContext(ctx)
-	automationCaller := hasPrincipal && principal.IsAutomation()
-	var sender *models.Task
-	if !automationCaller {
-		var lookupError *stopTaskFailure
-		sender, lookupError = h.lookupStopTask(ctx, msg, req.SenderTaskID, "sender")
-		if lookupError != nil {
-			return lookupError.response, lookupError.err
-		}
+	var provenanceOK bool
+	req.SenderTaskID, req.SenderSessionID, provenanceOK = canonicalMCPCaller(ctx, req.SenderTaskID, req.SenderSessionID)
+	if !provenanceOK {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "caller provenance does not match the active MCP session", nil)
+	}
+	var lookupError *stopTaskFailure
+	sender, lookupError := h.lookupStopTask(ctx, msg, req.SenderTaskID, "sender")
+	if lookupError != nil {
+		return lookupError.response, lookupError.err
 	}
 
 	target, lookupError := h.lookupStopTask(ctx, msg, req.TaskID, "target")
@@ -50,19 +51,22 @@ func (h *Handlers) handleStopTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return lookupError.response, lookupError.err
 	}
 
-	if automationCaller {
-		if target.ID == principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task not found", nil)
-		}
-	} else if !canStopTask(sender, target) {
+	decision, authErr := h.authorizeCoordinatorAction(ctx, sender, target, req.SenderSessionID, "stop_task", coordinator.CapabilityOrchestrate)
+	if authErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to authorize target task", nil)
+	}
+	if !decision.Allowed {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
-			"only a task's direct parent in the same workspace can stop it", nil)
+			"stopping requires a same-workspace direct parent or active granted coordinator scope", nil)
 	}
 	if h.taskStopper == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task stop is not configured", nil)
 	}
 
 	result, err := h.taskStopper.StopTaskForCoordinator(ctx, target.ID)
+	if finishErr := h.finishCoordinatorAction(ctx, decision, err); finishErr != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record task stop", nil)
+	}
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to stop target task", nil)
 	}

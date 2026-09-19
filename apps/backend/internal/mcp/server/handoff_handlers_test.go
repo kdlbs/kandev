@@ -94,3 +94,15 @@ func TestListRelatedTasks_ToolSchemaExposesVerbose(t *testing.T) {
 	assert.NotContains(t, required, "verbose")
 	assert.Contains(t, tool.Tool.Description, "verbose=true")
 }
+
+func TestListRelatedTasksForwardsTrustedCallerSession(t *testing.T) {
+	backend := &testBackend{response: relatedTasksResponse("description")}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	result := callTool(t, s, "list_related_tasks_kandev", map[string]interface{}{"task_id": "task-B"})
+	require.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "task-A", payload["caller_task_id"])
+	assert.Equal(t, "test-session", payload["caller_session_id"])
+}
