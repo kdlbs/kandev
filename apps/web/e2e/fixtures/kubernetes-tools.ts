@@ -36,6 +36,7 @@ const BACKEND_DIR = path.join(REPO_ROOT, "apps/backend");
 const WEB_DIST_DIR = path.join(REPO_ROOT, "apps/web/dist");
 const CONTROL_NAMESPACE = "kandev-e2e-control";
 const WORKLOAD_NAMESPACE = "kandev-e2e-workloads";
+const WORKLOAD_SERVICE_ACCOUNT = "kandev-workload";
 const HOST_SERVICE_ACCOUNT = "kandev-host";
 const IN_CLUSTER_SERVICE_ACCOUNT = "kandev-in-cluster";
 const RESTRICTED_SERVICE_ACCOUNT = "kandev-restricted";
@@ -277,7 +278,7 @@ function runKubectl(
   ).trim();
 }
 
-/** Declare workload identity before Pods can launch, without waiting for namespace reconciliation. */
+/** Create a fixture-owned workload identity independently of the namespace controller. */
 function workloadRBAC(): string {
   return `apiVersion: v1
 kind: Namespace
@@ -292,7 +293,7 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: default
+  name: ${WORKLOAD_SERVICE_ACCOUNT}
   namespace: ${WORKLOAD_NAMESPACE}
 ---
 apiVersion: v1
@@ -434,6 +435,7 @@ function podTemplate(image: string, overrides: PodTemplateOverrides = {}): strin
 kind: PodTemplate
 template:
   spec:${nodeSelector}
+    serviceAccountName: ${WORKLOAD_SERVICE_ACCOUNT}
     containers:
       - name: kandev-agent
         image: ${overrides.image ?? image}
