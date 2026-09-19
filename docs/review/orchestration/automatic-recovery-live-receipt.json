@@ -1,0 +1,23 @@
+{
+  "candidate": "0.94.0-orchestration.20260919.sha0521e64c651c",
+  "binaries_sha256": {
+    "agentctl-linux-amd64": "8748bf1ff0214e5be8e88c70450e41494217932ce1a2954e11a55b6d93abc939",
+    "agentctl-linux-arm64": "71630dd6258b6b550ae35060974edb6b5094a88dd0e81639cd09a14d05ef60cf",
+    "agentctl-darwin-arm64": "89bca2081ee365c9d890a8fb5b5e1367341d8e72d76fae9f74d3101fe57955fd",
+    "agentctl": "67f30d22df08a26fa937a125b343e159119af082d8213ecaede59e8289d31604",
+    "agentctl-darwin-amd64": "4a469c1c42bb01b368258e4573cd3244e29c3d370a9f8894ba5e2624a9ef772a",
+    "kandev": "7a86701117e9ef9069a4152349a35e423da6a7365912495a56dcc1fd77481ef9"
+  },
+  "backup_verified": true,
+  "outcome": "passed",
+  "health": {
+    "mode": "websocket+http",
+    "service": "kandev",
+    "status": "ok",
+    "version": "0.94.0-orchestration.20260919.sha0521e64c651c"
+  },
+  "auth_enforced": true,
+  "retained_rows_verified": true,
+  "source_commit": "0521e64c651c",
+  "synthetic_provider_recovery": "automatic-recovery-provider-receipt.json"
+}

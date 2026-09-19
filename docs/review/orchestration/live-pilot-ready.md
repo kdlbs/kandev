@@ -5,10 +5,10 @@ migration/replay/rollback rehearsal completed before the authorized cutover.
 
 | Review item | Prepared result |
 | --- | --- |
-| Candidate | `0.94.0-orchestration.20260918.sha2eaf7a892` |
-| Source | `2eaf7a892` |
+| Candidate | `0.94.0-orchestration.20260919.sha0521e64c651c` |
+| Source | `0521e64c651c` |
 | Base | Exact v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1` |
-| Bundle | Six immutable binaries; [current SHA-256 receipt](task-control-live-receipt.json) |
+| Bundle | Six immutable binaries; [current SHA-256 receipt](automatic-recovery-live-receipt.json) |
 | Qualification | [Completed checks and platform/provider limits](candidate-qualification.md) |
 | Data rehearsal | [Migration, replay, synthetic Coordinator APIs and matched rollback](migration-rehearsal.md) |
 | Service patch | Staged private override; merged user-unit validation passed |
@@ -49,4 +49,10 @@ data are included in this packet.
 The latest [task-control repair](task-control-fix.md) adds native create, edit,
 move, archive and delete controls to the existing workspace conversation. The
 packaged runtime passed a synthetic three-turn Claude chat trial before live
-cutover. [Current deployment receipt](task-control-live-receipt.json).
+cutover. [Task-control deployment receipt](task-control-live-receipt.json).
+
+The current [automatic recovery repair](automatic-recovery.md) handles safe
+transient failures after idle without manual Resume. The exact deployed binary
+passed an injected-failure Claude trial before cutover. The matched cold backup,
+health/version, authentication and retained-data checks all passed. See the
+[current deployment receipt](automatic-recovery-live-receipt.json).

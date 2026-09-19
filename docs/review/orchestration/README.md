@@ -88,3 +88,11 @@ The [live-pilot packet](live-pilot-ready.md) names the exact candidate and stage
 service change. It awaits the deployment instruction required by the reviewed
 work order. Live Kandev remains unchanged, and no new public PR or comment has
 been published.
+
+## Automatic recovery after idle
+
+The [automatic recovery repair](automatic-recovery.md) retries safe transient
+conversation failures before reporting a final error. Its isolated provider
+trial injects a refresh failure once and verifies recovery without manual Resume.
+The implementation and regression tests are on the private review branch; all
+requests in the evidence are generic examples.

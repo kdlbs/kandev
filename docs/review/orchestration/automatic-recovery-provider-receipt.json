@@ -1,0 +1,16 @@
+{
+  "outcome": "passed",
+  "synthetic_only": true,
+  "binary_sha256": "7a86701117e9ef9069a4152349a35e423da6a7365912495a56dcc1fd77481ef9",
+  "automatic_retries": 1,
+  "run_count": 1,
+  "reply_verified": true,
+  "retry_notice_cleared": true,
+  "fault": "synthetic OAuth refresh contention before provider prompt",
+  "teardown": {
+    "backend_exit": 0,
+    "credential_link_removed": true
+  },
+  "candidate": "0.94.0-orchestration.20260919.sha0521e64c651c",
+  "source_commit": "0521e64c651c"
+}

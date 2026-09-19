@@ -29,3 +29,34 @@ contain synthetic requests only. No user prompts or transcripts are included.
 
 No schema migration, provider package update, new API key or permission broadening
 is required. Public documentation: `docs/public/orchestration-personas.md` (how-to).
+
+## Qualification
+
+The final bundle passed an isolated Claude ACP trial. A local protocol proxy
+returned the production refresh-contention error for exactly one prompt without
+forwarding that prompt to the provider. Kandev queued the original run, showed
+its waiting state, relaunched automatically and received the expected generic
+response. There was one run, one retry, and no leftover retry notice. The fixture
+used a disposable workspace and generic request; it never loaded live chat
+history. See [provider receipt](automatic-recovery-provider-receipt.json).
+
+- Runtime, core orchestrator, routing classification, run repository and backend
+  application test suites passed.
+- Race checks passed for recovery, cancellation and existing transient-retry
+  paths; the complete Orchestrator runtime suite passed under the race detector
+  after the final change.
+- SQL guard and store conformance passed for the available SQLite environment.
+  PostgreSQL conformance was skipped because no test DSN was configured.
+- All commit hooks, including the full branch comparison for Go lint, passed.
+- Public docs validator tests passed; all 48 published pages validated.
+
+## Live deployment
+
+Deployed `0.94.0-orchestration.20260919.sha0521e64c651c` after the final provider
+trial passed and the live service had no active runs or sessions. The final cold
+backup passed database/key hash matching, integrity and foreign-key checks.
+Post-restart health reported the exact candidate; authentication remained
+required and all tracked conversation/history rows were retained. The previous
+bundle and matched backup remain available locally for rollback.
+
+[Deployment receipt](automatic-recovery-live-receipt.json).
