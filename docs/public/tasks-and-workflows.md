@@ -405,6 +405,20 @@ The preference only gates opening a task. Choosing **Start agent** (or a
 workflow step transition) always starts the agent as usual, and a failed or
 interrupted session still shows its recovery actions.
 
+## Answer clarification questions
+
+When an agent asks a clarification question, answer it from the question panel
+while the session is waiting. If the question becomes inactive before you
+answer, its entry remains in the conversation with **Answer as new message**.
+That action includes the question and your answer in a normal conversation
+message. It does not reopen the old tool request.
+
+Normal message rules still apply. An idle session receives the message; a busy
+session sends or queues it according to its current input mode. If delivery
+fails, the form keeps your answer so you can retry. **Close question** removes
+the answer surface without sending anything, while the question stays in the
+conversation history.
+
 ## Task dependencies
 
 A task can declare that it **depends on** one or more other tasks. This is a
