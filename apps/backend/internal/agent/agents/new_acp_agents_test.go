@@ -170,6 +170,14 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		installViaNpm:      false,
 		sessionDirTemplate: "{home}/.local/share/goose",
 	}},
+	{func() Agent { return NewMuseACP() }, acpAgentSpec{
+		id: "muse-acp", displayName: "Muse", detectBinaries: []string{"muse"},
+		expectedArgv:       []string{"npx", "--yes", "--prefer-offline", "@bex-co/muse-code-acp@0.6.1"},
+		inferenceArgv:      []string{"npx", "--yes", "--prefer-offline", "@bex-co/muse-code-acp@0.6.1"},
+		passthroughArgv:    []string{"muse"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.local/share/muse",
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {
