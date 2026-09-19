@@ -52,6 +52,8 @@ func newAgentErrorTransientTestService(
 // goroutine race — the marker's value is what's contractual, not the
 // interleaving that produces it. ---
 
+// TestDispatchKanbanAgentErrorTrigger_ConcurrentCancelDoesNotLeakMarker verifies
+// that a user cancellation cannot suppress a separately owned retry failure.
 func TestDispatchKanbanAgentErrorTrigger_ConcurrentCancelDoesNotLeakMarker(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -102,6 +104,8 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentCancelDoesNotLeakMarker(t *te
 // step1 the handler observed on entry. Reads the task fresh, after the
 // decision that used the earlier snapshot. ---
 
+// TestDispatchKanbanAgentErrorTrigger_ReadsPostReconciliationStep verifies that
+// recovery dispatch uses the workflow step persisted by failure reconciliation.
 func TestDispatchKanbanAgentErrorTrigger_ReadsPostReconciliationStep(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

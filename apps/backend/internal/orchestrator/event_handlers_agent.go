@@ -2446,6 +2446,8 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	}
 }
 
+// handleAgentFailedLocked reconciles a failure under the session guard and returns
+// recovery work that must run after that guard is released.
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) func(context.Context) {
 	data = s.withPromptAttemptEvidence(data)
 	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)

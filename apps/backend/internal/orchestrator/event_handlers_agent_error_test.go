@@ -458,6 +458,8 @@ func (r *agentErrorTaskLoadErrorRepo) GetTask(_ context.Context, _ string) (*mod
 
 // --- AC-A5/A7/A8/F2/F3/F4/F5/F6/B5: the guard sequence. ---
 
+// TestDispatchKanbanAgentErrorTrigger_Guards verifies dispatch suppression for
+// user cancellation and dispatch eligibility for recoverable agent failures.
 func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 	ctx := context.Background()
 

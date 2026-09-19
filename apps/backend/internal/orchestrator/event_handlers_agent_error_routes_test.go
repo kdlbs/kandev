@@ -22,6 +22,8 @@ import (
 // asserts the payload the engine receives (AC-D1/D2/D3), per this spec's
 // Verification text for AC-A1/A2. ---
 
+// TestDispatchKanbanAgentErrorTrigger_R1BusDrivenFailureDispatches verifies that
+// bus-delivered agent failures reach workflow recovery after cleanup.
 func TestDispatchKanbanAgentErrorTrigger_R1BusDrivenFailureDispatches(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -55,6 +57,8 @@ func TestDispatchKanbanAgentErrorTrigger_R1BusDrivenFailureDispatches(t *testing
 	}
 }
 
+// TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches verifies
+// workflow recovery for managed-runtime package resolution failures.
 func TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -94,6 +98,8 @@ func TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches(t 
 	}
 }
 
+// TestDispatchKanbanAgentErrorTrigger_R3AuthErrorDispatches verifies workflow
+// recovery for authentication failures during agent startup.
 func TestDispatchKanbanAgentErrorTrigger_R3AuthErrorDispatches(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -131,6 +137,8 @@ func TestDispatchKanbanAgentErrorTrigger_R3AuthErrorDispatches(t *testing.T) {
 	}
 }
 
+// TestDispatchKanbanAgentErrorTrigger_R4NoCachedPromptDispatches verifies that
+// a retry without a cached prompt falls back to workflow recovery.
 func TestDispatchKanbanAgentErrorTrigger_R4NoCachedPromptDispatches(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -168,6 +176,8 @@ func TestDispatchKanbanAgentErrorTrigger_R4NoCachedPromptDispatches(t *testing.T
 	}
 }
 
+// TestDispatchKanbanAgentErrorTrigger_R5SynchronousPromptErrorDispatches verifies
+// that a failed replacement prompt dispatches recovery only after completed teardown.
 func TestDispatchKanbanAgentErrorTrigger_R5SynchronousPromptErrorDispatches(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
