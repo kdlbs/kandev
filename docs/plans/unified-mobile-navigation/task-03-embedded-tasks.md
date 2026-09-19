@@ -225,3 +225,15 @@ three cases), `/tmp/pr3830-touch-browser.log` (oversized message),
 `/tmp/pr3830-touch-click-browser.log`, `/tmp/pr3830-touch-click-red.log`, and
 `/tmp/pr3830-touch-extract-unit.log`. Earlier failures remain in these logs;
 final cases are identified above rather than treating those runs as wholly green.
+
+### Second CI pass
+
+The full matrix found two remaining test entry points: a desktop spec that
+switches to phone width still used an ambiguous Changes button, and Quick Chat
+cancellation still used the retired home menu trigger. Scoped the Changes button
+to navigation and moved both Quick Chat cases to `app-nav-trigger`. The responsive
+case failed locally with the CI assertion before correction, then passed; both
+Quick Chat cases passed. Logs: `/tmp/pr3830-responsive-red.log`,
+`/tmp/pr3830-responsive-green.log`, and `/tmp/pr3830-quick-chat-green.log`.
+A temporary filename-anchored config avoided the worktree path's `mobile-`
+substring matching Playwright's desktop exclusion; it was removed after the run.
