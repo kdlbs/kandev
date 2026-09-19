@@ -43,6 +43,9 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 
+	// SSH executor reachability poller
+	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
+
 	// GitHub integration
 	azuredevopspkg "github.com/kandev/kandev/internal/azuredevops"
 	githubpkg "github.com/kandev/kandev/internal/github"
@@ -873,6 +876,36 @@ func startAgentInfrastructure(
 		log.Info("Office config sync poller started")
 	}
 
+	// Start SSH executor reachability poller: sweeps every eligible SSH
+	// executor on a configurable interval, probing reachability and
+	// persisting results through a hysteresis-owning write path. Wired with
+	// a publisher (state/reason changes reach WS clients) and registered as
+	// the task service's executor-save observer (a changed host resets the
+	// record and dispatches an off-cycle probe) so both the poller and the
+	// reachability HTTP routes below share the one running instance.
+	sshReachabilityPoller := startSSHReachabilityPoller(
+		ctx,
+		repos.Task,
+		cfg.Executors.SSHReachabilityIntervalSeconds,
+		log,
+		reachabilitypkg.NewPublisher(eventBus, log),
+		addRuntimeCleanup,
+	)
+	services.Task.SetExecutorSaveObserver(reachabilitypkg.NewSaveObserver(sshReachabilityPoller))
+
+	// Launch-time session.launch.warning producer (task 05): repos.Task
+	// already implements the narrow read accessor (same method used by the
+	// reachability HTTP routes). probingEnabled mirrors the poller's own
+	// effective interval so a configured 0 (disabled) keeps the warning
+	// gated on staleness alone. warningWindowSeconds is 3x the reachability
+	// package's own default interval, not the configured one, per
+	// AC-EXECUTORS-SSH-REACHABILITY-001.28.
+	lifecycleMgr.SetSSHReachabilityWarningPolicy(
+		repos.Task,
+		sshReachabilityPoller.EffectiveIntervalSeconds() != 0,
+		3*reachabilitypkg.DefaultIntervalSeconds,
+	)
+
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
 	if services.Plugins != nil {
@@ -914,7 +947,7 @@ func startAgentInfrastructure(
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
 		sessionCapacityEnvironment, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
-		restoreCleanups, databaseQuiesce)
+		restoreCleanups, databaseQuiesce, sshReachabilityPoller)
 }
 
 // startOrchestratorAndAutomationConsumers establishes the startup chain in
@@ -983,6 +1016,7 @@ func startGatewayAndServe(
 	cancelWorkers context.CancelFunc,
 	restoreCleanups []func() error,
 	databaseQuiesce func() error,
+	sshReachabilityPoller *reachabilitypkg.Poller,
 ) bool {
 	// ============================================
 	// WEBSOCKET GATEWAY
@@ -1319,7 +1353,7 @@ func startGatewayAndServe(
 	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, persistenceHealth)
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -2561,6 +2595,7 @@ func buildHTTPServer(
 	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	sshReachabilityPoller *reachabilitypkg.Poller,
 	persistenceHealth ...*requiredstores.Health,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
@@ -2691,6 +2726,7 @@ func buildHTTPServer(
 		planCoalesceWindowConfigured:  true,
 		homeDir:                       cfg.ResolvedHomeDir(),
 		interimSettingsInterlockToken: interimSettingsInterlockToken,
+		sshReachabilityPoller:         sshReachabilityPoller,
 		log:                           log,
 	})
 

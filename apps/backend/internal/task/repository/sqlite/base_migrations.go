@@ -415,6 +415,24 @@ func (r *Repository) runMigrations() error {
 	// allocated.
 	_ = r.migrate.Apply("workflow_step_entries.marker_positions", `ALTER TABLE workflow_step_entries ADD COLUMN marker_positions TEXT NOT NULL DEFAULT ''`)
 
+	// One row per SSH executor holding observed reachability — deliberately
+	// not columns on executors, which holds user-authored config and a
+	// user-controlled status switch. No foreign key: deletion is explicit
+	// (DeleteExecutor deletes the row in the same transaction as the soft
+	// delete), not a cascade.
+	_ = r.migrate.Apply("executor_reachability.table", `
+		CREATE TABLE IF NOT EXISTS executor_reachability (
+			executor_id          TEXT PRIMARY KEY,
+			state                TEXT NOT NULL DEFAULT 'unknown',
+			reason               TEXT NOT NULL DEFAULT '',
+			message              TEXT NOT NULL DEFAULT '',
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			host                 TEXT NOT NULL DEFAULT '',
+			checked_at           TIMESTAMP,
+			last_success_at      TIMESTAMP,
+			updated_at           TIMESTAMP NOT NULL
+		)`)
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.

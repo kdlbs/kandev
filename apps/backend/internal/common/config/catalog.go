@@ -110,6 +110,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: "launcher.webPort", EnvVars: []string{"KANDEV_WEB_PORT"}, Owner: "launcher", Default: "automatic"},
 	{Key: "launcher.healthTimeoutMs", EnvVars: []string{"KANDEV_HEALTH_TIMEOUT_MS"}, Owner: "launcher", Default: "45000"},
 	{Key: "launcher.noBrowser", EnvVars: []string{"KANDEV_NO_BROWSER"}, Owner: "launcher", Default: "false"},
+	{Key: "executors.sshReachabilityIntervalSeconds", EnvVars: []string{"KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS"}, Owner: "executors/reachability", Default: "60"},
 }
 
 var startupExclusions = []CatalogExclusion{

@@ -65,27 +65,28 @@ type configSelection struct {
 // AutomaticEnv during Unmarshal: legacy invalid environment values must retain
 // their fallback behavior instead of turning into typed-config startup errors.
 var yamlOnlyStartupKeys = map[string]struct{}{
-	"server.trustedProxies":              {},
-	"tasks.preparationTimeout":           {},
-	"credentials.file":                   {},
-	"limits.ghMaxConcurrent":             {},
-	"limits.gitMaxConcurrent":            {},
-	"limits.lspMaxConnections":           {},
-	"messageQueue.maxPerSession":         {},
-	"agentctl.idleTimeout":               {},
-	"agentctl.idleReaperInterval":        {},
-	"agentctl.notificationQueueCapacity": {},
-	"agentctl.recoveryDeadline":          {},
-	"agentctl.recoveryReadTimeout":       {},
-	"agentctl.recoveryReadRetries":       {},
-	"agentctl.unownedPeriod":             {},
-	"agentctl.detachedEventLimit":        {},
-	"planning.coalesceWindowMs":          {},
-	"office.schedulerTickMs":             {},
-	"observability.otlpEndpoint":         {},
-	"launcher.webPort":                   {},
-	"launcher.healthTimeoutMs":           {},
-	"launcher.noBrowser":                 {},
+	"server.trustedProxies":                    {},
+	"tasks.preparationTimeout":                 {},
+	"credentials.file":                         {},
+	"limits.ghMaxConcurrent":                   {},
+	"limits.gitMaxConcurrent":                  {},
+	"limits.lspMaxConnections":                 {},
+	"messageQueue.maxPerSession":               {},
+	"agentctl.idleTimeout":                     {},
+	"agentctl.idleReaperInterval":              {},
+	"agentctl.notificationQueueCapacity":       {},
+	"agentctl.recoveryDeadline":                {},
+	"agentctl.recoveryReadTimeout":             {},
+	"agentctl.recoveryReadRetries":             {},
+	"agentctl.unownedPeriod":                   {},
+	"agentctl.detachedEventLimit":              {},
+	"planning.coalesceWindowMs":                {},
+	"office.schedulerTickMs":                   {},
+	"observability.otlpEndpoint":               {},
+	"launcher.webPort":                         {},
+	"launcher.healthTimeoutMs":                 {},
+	"launcher.noBrowser":                       {},
+	"executors.sshReachabilityIntervalSeconds": {},
 }
 
 func isYAMLOnlyStartupKey(key string) bool {
@@ -311,6 +312,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	if !yamlKeys["launcher.noBrowser"] {
 		cfg.Launcher.NoBrowser = false
 	}
+	setDefaultInt("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60)
 }
 
 func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources map[string]SettingSource) {
@@ -340,6 +342,7 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyBoundedIntEnv("launcher.webPort", &cfg.Launcher.WebPort, 0, 1, 65535, envSnapshot, sources)
 	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
 	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
+	applyNonNegativeIntEnv("executors.sshReachabilityIntervalSeconds", &cfg.Executors.SSHReachabilityIntervalSeconds, 60, envSnapshot, sources)
 }
 
 func launcherHealthTimeoutDefault() int {

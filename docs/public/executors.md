@@ -442,6 +442,30 @@ Stop attempts to kill the session's remote `agentctl` and remove only the remote
 
 </details>
 
+### Reachability
+
+A background poller probes each active SSH executor's configured host on
+`executors.sshReachabilityIntervalSeconds` (default 60s; see
+[Configuration](configuration.md)) and records whether the TCP dial and SSH
+handshake succeeded. The result (reachable, unreachable with a failure
+reason, or unknown before the first probe) appears on the executor's
+**Settings > Executors > SSH** page, including the probed host, how long ago
+the last successful probe was (or that none has ever succeeded), and a manual
+**Probe now** action.
+
+If a task launches against a host currently recorded as unreachable, Kandev
+publishes a `session.launch.warning` event for the launched session. The task's
+chat panel shows an inline warning naming the host and the age of the last
+successful probe before the attempt proceeds. The gateway keeps the latest
+warning while the backend is running, so a later session subscriber receives
+it too. Workflow and dependency launches use the same event path.
+
+The probe deliberately does two things and no more: it reports what it
+observed, and it never blocks or delays a launch on that basis. It does not
+retry a failed connection immediately, and it does not move, reconfigure, or
+otherwise repair a host that has become unreachable or changed address;
+fixing the host or the connection settings remains an operator action.
+
 ## Lifecycle and cleanup
 
 The task environment reports `creating`, `ready`, `stopped`, or `failed`; individual execution records have finer states. Stop is deliberately not synonymous with destroy for resumable Docker, Kubernetes, and Sprites environments.

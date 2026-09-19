@@ -20,6 +20,7 @@ import { registerDiffsHandlers } from "@/lib/ws/handlers/diffs";
 import { registerExecutorsHandlers } from "@/lib/ws/handlers/executors";
 import { registerExecutorProfileHandlers } from "@/lib/ws/handlers/executor-profiles";
 import { registerExecutorPrepareHandlers } from "@/lib/ws/handlers/executor-prepare";
+import { registerSSHLaunchWarningHandlers } from "@/lib/ws/handlers/ssh-launch-warning";
 import { registerGitStatusHandlers } from "@/lib/ws/handlers/git-status";
 import { registerKanbanHandlers } from "@/lib/ws/handlers/kanban";
 import { registerSystemEventsHandlers } from "@/lib/ws/handlers/system-events";
@@ -59,6 +60,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerExecutorsHandlers(store),
     ...registerExecutorProfileHandlers(store),
     ...registerExecutorPrepareHandlers(store),
+    ...registerSSHLaunchWarningHandlers(store),
     ...registerAgentsHandlers(store),
     ...registerTaskSessionHandlers(store),
     ...registerAvailableCommandsHandlers(store),
