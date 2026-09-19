@@ -204,6 +204,9 @@ func (s *Service) prepareCanvasInstall(request InstallCanvasPackageRequest) (tra
 	if request.Package == nil || request.Package.Manifest == nil || request.Artifact.Digest == "" || s.repo == nil {
 		return nil, CreateCanvasRequest{}, fmt.Errorf("%w: package and artifact are required", ErrInvalidCanvas)
 	}
+	if err := validateInstallReceiptPackage(request.Receipt, request.Package); err != nil {
+		return nil, CreateCanvasRequest{}, err
+	}
 	if !request.Approved || strings.TrimSpace(request.Receipt.UserID) == "" {
 		return nil, CreateCanvasRequest{}, ErrInstallNotApproved
 	}
@@ -216,6 +219,22 @@ func (s *Service) prepareCanvasInstall(request InstallCanvasPackageRequest) (tra
 		return nil, CreateCanvasRequest{}, err
 	}
 	return store, createRequest, nil
+}
+
+func validateInstallReceiptPackage(receipt InstallReceipt, pkg *webapp.Package) error {
+	if receipt.PackageID != "" && receipt.PackageID != pkg.Manifest.ID {
+		return ErrPackageDigestMismatch
+	}
+	if receipt.Version != "" && receipt.Version != pkg.Manifest.Version {
+		return ErrPackageDigestMismatch
+	}
+	if receipt.Digest != "" && receipt.Digest != pkg.Digest {
+		return ErrPackageDigestMismatch
+	}
+	if receipt.PublisherProvenance != nil && (receipt.PublisherProvenance.PackageID != pkg.Manifest.ID || receipt.PublisherProvenance.Version != pkg.Manifest.Version) {
+		return ErrPackageDigestMismatch
+	}
+	return nil
 }
 
 func (s *Service) installCanvasPackageLocked(ctx context.Context, store transactionalAuthoringStore, createRequest CreateCanvasRequest, request InstallCanvasPackageRequest) (*InstallResult, LifecycleEvent, error) {
@@ -233,6 +252,9 @@ func (s *Service) installCanvasPackageLocked(ctx context.Context, store transact
 	receipt := request.Receipt
 	receipt.CanvasID = metadata.ID
 	receipt.WorkspaceID = metadata.WorkspaceID
+	receipt.ReleaseID = release.ID
+	receipt.PublisherProvenance = receipt.PublisherProvenance.Clone()
+	receipt.PublisherIdentity = receipt.PublisherProvenance.Identity()
 	if receipt.CreatedAt.IsZero() {
 		receipt.CreatedAt = now
 	}

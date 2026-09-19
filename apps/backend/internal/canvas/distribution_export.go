@@ -12,6 +12,7 @@ import (
 
 	plugininstances "github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 	"github.com/kandev/kandev/internal/plugins/webapp"
 )
 
@@ -39,6 +40,14 @@ type WorkspaceAuthorizer func(context.Context, string) error
 // path.
 type CatalogResolver interface {
 	ResolveCanvasPackage(context.Context, string, string, string, string) (string, string, error)
+}
+
+// CatalogPublisherResolver is the richer catalog contract used when canvas
+// installation can preserve host-created publisher provenance. The legacy
+// CatalogResolver remains supported for callers and test doubles that only
+// need the package and repository URLs.
+type CatalogPublisherResolver interface {
+	ResolveCanvasPackageWithProvenance(context.Context, string, string, string, string) (string, string, *provenance.InstallationProvenance, error)
 }
 
 type ExportMetadata struct {

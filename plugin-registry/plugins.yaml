@@ -15,6 +15,7 @@
 # Field reference (full contract in schema.json):
 #   id         required  MUST equal the plugin manifest `id`; unique in this file.
 #   repo       required  owner/name of the public GitHub repo that publishes releases.
+#   official   optional  maintainer-reviewed Kandev designation; valid only for kdlbs ownership.
 #   featured   optional  maintainer may pin an entry above star order (default false).
 #   categories optional  category tags used for filtering in the catalog.
 
@@ -25,24 +26,31 @@
 plugins:
   - id: kandev-session-cost
     repo: kdlbs/kandev-plugin-session-cost
+    official: true
     categories: [analytics]
   - id: kandev-provider-usage
     repo: kdlbs/kandev-plugin-provider-usage
+    official: true
     categories: [analytics]
   - id: kandev-plugin-kandy
     repo: kdlbs/kandev-plugin-kandy
+    official: true
     categories: [tools]
   - id: kandev-plugin-task-manager
     repo: kdlbs/kandev-plugin-task-manager
+    official: true
     categories: [tools]
   - id: kandev-plugin-slack
     repo: kdlbs/kandev-plugin-slack
+    official: true
     categories: [integrations, automation]
   - id: kandev-plugin-bitbucket
     repo: kdlbs/kandev-plugin-bitbucket
+    official: true
     categories: [integrations]
   - id: kandev-plugin-github-status
     repo: kdlbs/kandev-plugin-github-status
+    official: true
     categories: [tools]
   - id: kandev-plugin-tags
     repo: yattdev/kandev-plugin-tags
@@ -52,6 +60,7 @@ plugins:
     categories: [tools]
   - id: kandev-plugin-voice
     repo: kdlbs/kandev-plugin-voice
+    official: true
     categories: [tools]
   - id: kandev-plugin-youtrack
     repo: ahmedbally/kandev-plugin-youtrack

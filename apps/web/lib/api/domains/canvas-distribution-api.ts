@@ -1,5 +1,6 @@
 import { fetchBlob, fetchJson, type ApiRequestOptions } from "../client";
 import type { Canvas, CanvasPermissionReview } from "./canvas-api";
+import type { PublisherIdentity } from "@/lib/types/plugins";
 
 export type DistributionMetadata = {
   package_id?: string;
@@ -52,6 +53,7 @@ export type InstallReview = {
   origin_kind: "upload" | "url" | "registry";
   source_id?: string;
   repository_url?: string;
+  publisher_identity?: PublisherIdentity;
   expires_at: string;
 };
 

@@ -91,6 +91,12 @@ func (s *FSStore) writeRecord(record *Record) error {
 	if err := safePluginID(record.ID); err != nil {
 		return err
 	}
+	if record.PublisherProvenance != nil {
+		record.PublisherProvenance.SanitizePublicURLs()
+		if err := record.PublisherProvenance.Validate(); err != nil {
+			return fmt.Errorf("plugins: invalid publisher provenance: %w", err)
+		}
+	}
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return fmt.Errorf("create plugin store dir: %w", err)
 	}
@@ -159,6 +165,16 @@ func (s *FSStore) Get(id string) (*Record, error) {
 	if err := yaml.Unmarshal(data, &record); err != nil {
 		return nil, fmt.Errorf("unmarshal plugin record: %w", err)
 	}
+	if record.PublisherProvenance != nil {
+		record.PublisherProvenance.SanitizePublicURLs()
+	}
+	// Old records and malformed future evidence remain usable, but never
+	// project as verified. A valid projection is derived only from the
+	// persisted host-owned tuple.
+	if record.PublisherProvenance != nil && record.PublisherProvenance.Validate() != nil {
+		record.PublisherProvenance = nil
+	}
+	record.PublisherIdentity = record.PublisherProvenance.Identity()
 	return &record, nil
 }
 

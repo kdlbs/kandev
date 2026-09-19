@@ -26,6 +26,7 @@ import { useCanvasInstall } from "@/hooks/domains/canvas/use-canvas-install";
 import { canvasHref } from "@/lib/api/domains/canvas-api";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
 import { MarketplacePreviewGallery } from "./marketplace-preview-gallery";
+import { PluginPublisherIdentity } from "./plugin-publisher-identity";
 
 type InstallMode = "upload" | "url";
 
@@ -182,7 +183,11 @@ export function CanvasInstallDialog({
         </p>
       )}
       {install.review && !install.result && (
-        <InstallReviewCard review={install.review} workspaceName={workspaceName} />
+        <InstallReviewCard
+          review={install.review}
+          workspaceName={workspaceName}
+          sourceName={entry?.source_name}
+        />
       )}
       {install.result && (
         <div
@@ -265,9 +270,11 @@ export function CanvasInstallDialog({
 function InstallReviewCard({
   review,
   workspaceName,
+  sourceName,
 }: {
   review: NonNullable<ReturnType<typeof useCanvasInstall>["review"]>;
   workspaceName?: string;
+  sourceName?: string;
 }) {
   const { t } = useTranslation();
   const metadata = review.metadata;
@@ -283,11 +290,17 @@ function InstallReviewCard({
       data-testid="canvas-install-review"
     >
       <div>
-        <p className="font-medium">{t("plugins:packageVerified")}</p>
+        <p className="font-medium">{t("plugins:packageIntegrityVerified")}</p>
         <p className="text-sm text-muted-foreground">
           {metadata.display_name} · v{metadata.version}
         </p>
       </div>
+      <PluginPublisherIdentity
+        identity={review.publisher_identity}
+        sourceName={sourceName}
+        sourceOrigin={review.origin_kind}
+        author={metadata.author}
+      />
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("plugins:packageId")}</dt>
         <dd className="break-all font-mono">{metadata.package_id}</dd>
@@ -307,8 +320,6 @@ function InstallReviewCard({
         </dd>
         <dt className="text-muted-foreground">{t("canvases:description")}</dt>
         <dd>{metadata.description}</dd>
-        <dt className="text-muted-foreground">{t("canvases:author")}</dt>
-        <dd>{metadata.author}</dd>
         <dt className="text-muted-foreground">{t("canvases:license")}</dt>
         <dd>{metadata.license}</dd>
         <dt className="text-muted-foreground">{t("canvases:sourceMode")}</dt>

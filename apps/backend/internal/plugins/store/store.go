@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 )
 
 // Status values for a plugin registration, per the state machine in
@@ -57,6 +58,12 @@ type Record struct {
 	RestartCount int        `yaml:"restart_count" json:"restart_count"`
 	LastError    string     `yaml:"last_error,omitempty" json:"last_error,omitempty"`
 	LastErrorAt  *time.Time `yaml:"last_error_at,omitempty" json:"last_error_at,omitempty"`
+	// PublisherProvenance is host-owned evidence for the installed package.
+	// It is separate from the embedded manifest, which remains package input.
+	PublisherProvenance *provenance.InstallationProvenance `yaml:"publisher_provenance,omitempty" json:"publisher_provenance,omitempty"`
+	// PublisherIdentity is a derived API projection. It is never serialized to
+	// the filesystem and is rebuilt from PublisherProvenance on every read.
+	PublisherIdentity *provenance.PublisherIdentity `yaml:"-" json:"publisher_identity"`
 }
 
 // Store is the persistence interface for plugin installations and their

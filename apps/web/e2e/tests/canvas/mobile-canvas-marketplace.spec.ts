@@ -95,11 +95,15 @@ test.describe("Canvas marketplace on mobile", () => {
 
       const card = testPage.getByTestId(`canvas-marketplace-entry-${CANVAS_ENTRY.id}`);
       await expect(card).toBeVisible();
+      await expect(card.getByText("Unverified publisher", { exact: true })).toBeVisible();
+      await expect(card.getByText("Kandev Official", { exact: true }).first()).toBeVisible();
+      await expect(card.getByText(CANVAS_ENTRY.author, { exact: true }).first()).toBeVisible();
       expect((await card.boundingBox())?.width).toBeGreaterThan(280);
       await card.getByRole("button").first().tap();
 
       const detail = testPage.getByTestId(`canvas-marketplace-detail-${CANVAS_ENTRY.id}`);
       await expect(detail).toBeVisible();
+      await expect(detail.getByText("Unverified publisher", { exact: true })).toBeVisible();
       const install = detail.getByRole("button", { name: "Review and install", exact: true });
       await expect(install).toBeVisible();
       expect((await install.boundingBox())?.height).toBeGreaterThanOrEqual(44);

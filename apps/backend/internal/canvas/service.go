@@ -722,6 +722,7 @@ func (s *Service) buildCanvas(ctx context.Context, metadata CanvasMetadata, inst
 	canvas.ActiveReleaseError = release.ValidationError
 	canvas.EffectiveGrants = effectiveGrantProjection(instance, ReleasePermissionSummary(release), grants)
 	canvas.ActiveRelease = releaseMetadata(release, instance.ScopeKind, grants)
+	canvas.ActiveRelease.PublisherIdentity = s.publisherIdentityForRelease(ctx, release)
 	return canvas, nil
 }
 
@@ -743,6 +744,7 @@ func (s *Service) addPendingRelease(ctx context.Context, canvas *Canvas, instanc
 			continue
 		}
 		canvas.PendingRelease = releaseMetadata(release, scope, grants)
+		canvas.PendingRelease.PublisherIdentity = s.publisherIdentityForRelease(ctx, release)
 		break
 	}
 	return *canvas, nil

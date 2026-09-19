@@ -27,15 +27,22 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
     this.body = body;
-    this.errorCode =
-      body &&
-      typeof body === "object" &&
-      "error_code" in body &&
-      typeof (body as { error_code?: unknown }).error_code === "string"
-        ? (body as { error_code: string }).error_code
-        : undefined;
+    this.errorCode = readErrorCode(body);
     this.retryAfterSeconds = retryAfterSeconds;
   }
+}
+
+function readErrorCode(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  if ("error_code" in body && typeof (body as { error_code?: unknown }).error_code === "string") {
+    return (body as { error_code: string }).error_code;
+  }
+  // Some older backend endpoints use `code`; keep their structured errors
+  // available through the same normalized client property.
+  if ("code" in body && typeof (body as { code?: unknown }).code === "string") {
+    return (body as { code: string }).code;
+  }
+  return undefined;
 }
 
 function resolveUrl(pathOrUrl: string, baseUrl: string) {

@@ -17,6 +17,7 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { PluginConfigForm } from "./plugin-config-form";
 import { PluginManifestCard } from "./plugin-manifest-card";
+import { PluginPublisherVerification } from "./plugin-publisher-verification";
 import { PluginShortcutsCard } from "./plugin-shortcuts-card";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
@@ -24,7 +25,9 @@ import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
 import { PluginUninstallConfirmation } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginConfigForm } from "./use-plugin-config-form";
+import { usePluginPublisherVerification } from "./use-plugin-publisher-verification";
 import type { PluginRecord } from "@/lib/types/plugins";
+import { useAppStore } from "@/components/state-provider";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
@@ -43,7 +46,9 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
   const router = useRouter();
   const { isFinePointer } = useResponsiveBreakpoint();
   const actions = usePluginActions();
+  const verifyPublisher = useAppStore((state) => state.verifyPluginPublisher);
   const plugin = items.find((p) => p.id === pluginId) ?? null;
+  const publisherVerification = usePluginPublisherVerification(plugin, verifyPublisher);
   const [confirmingUninstall, setConfirmingUninstall] = useState(false);
   const uninstallAnchorRef = useRef<HTMLButtonElement>(null);
   const form = usePluginConfigForm(canManage ? plugin : null);
@@ -82,6 +87,14 @@ export function PluginDetail({ pluginId }: { pluginId: string }) {
         </>
       )}
       <PluginShortcutsCard plugin={plugin} plugins={items} />
+      <PluginPublisherVerification
+        plugin={plugin}
+        canManage={canManage}
+        busy={publisherVerification.busy}
+        error={publisherVerification.error}
+        success={publisherVerification.success}
+        onVerify={publisherVerification.verify}
+      />
       <PluginManifestCard plugin={plugin} />
 
       {canManage && (

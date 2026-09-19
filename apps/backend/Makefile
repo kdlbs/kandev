@@ -186,7 +186,7 @@ endif
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-plugin-package build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
 
 ## Default target
 all: build
@@ -261,6 +261,12 @@ build-agentctl:
 	@echo "Building agentctl..."
 	@$(call MKDIR,$(BUILD_DIR))
 	$(CGO_LOCALE) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
+
+## Build the native plugin package inspector used by registry admission.
+build-plugin-package:
+	@echo "Building plugin-package inspector..."
+	@$(call MKDIR,$(BUILD_DIR))
+	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/plugin-package$(EXE) ./cmd/plugin-package
 
 ## Build only the agentctl helpers needed by the development profile.
 build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)

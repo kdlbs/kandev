@@ -22,6 +22,7 @@ import { PluginUpdateStatus } from "./plugin-update-status";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginUpdateAction } from "./use-plugin-update-action";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import type { MarketplaceEntry } from "@/lib/types/plugins";
 
 /**
  * Operator UI to browse, install, enable, disable, uninstall, and update kandev
@@ -45,8 +46,8 @@ export function PluginsSettings() {
     updates.markUpdated,
   );
 
-  const handleMarketplaceInstall = async (url: string) => {
-    const result = await actions.marketplaceInstall(url);
+  const handleMarketplaceInstall = async (entry: MarketplaceEntry) => {
+    const result = await actions.marketplaceInstall(entry);
     if (result.ok) await updates.reload(result.pluginId);
     return result;
   };
@@ -96,7 +97,7 @@ export function PluginsSettings() {
         </TabsContent>
 
         <TabsContent value="browse">
-          <MarketplaceBrowser onInstallUrl={handleMarketplaceInstall} canManage={canManage} />
+          <MarketplaceBrowser onInstall={handleMarketplaceInstall} canManage={canManage} />
         </TabsContent>
 
         {canvasesEnabled && (

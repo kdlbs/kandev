@@ -18,6 +18,7 @@ import (
 	commonhttpmw "github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -114,6 +115,7 @@ func RegisterRoutes(
 	api.GET("/:id/config", ctrl.getConfig)
 	api.PATCH("/:id", authn.RequireAdmin(), ctrl.updateConfig)
 	api.PUT("/:id/auto-update", authn.RequireAdmin(), ctrl.setAutoUpdate)
+	api.POST("/:id/verify-publisher", authn.RequireAdmin(), ctrl.verifyPublisher)
 	api.DELETE("/:id", authn.RequireAdmin(), ctrl.uninstall)
 	api.POST("/:id/enable", authn.RequireAdmin(), ctrl.enable)
 	api.POST("/:id/disable", authn.RequireAdmin(), ctrl.disable)
@@ -160,11 +162,23 @@ func (c *Controller) installFromRequest(ctx *gin.Context) (*store.Record, error)
 			return nil, errBadRequest("failed to read uploaded package")
 		}
 		defer func() { _ = f.Close() }()
-		return c.svc.Install(ctx.Request.Context(), f)
+		return c.svc.InstallUploaded(ctx.Request.Context(), f)
 	}
 
 	var req InstallRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil || req.URL == "" {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		return nil, errBadRequest("invalid install payload")
+	}
+	if len(req.Publisher) > 0 || len(req.PublisherIdentity) > 0 {
+		return nil, errBadRequest("publisher evidence is host-owned")
+	}
+	if req.Catalog != nil {
+		if req.URL != "" || req.Catalog.SourceID == "" || req.Catalog.PackageID == "" || req.Catalog.ExpectedVersion == "" {
+			return nil, errBadRequest("invalid payload: provide either url or a complete catalog selector")
+		}
+		return c.svc.InstallFromCatalog(ctx.Request.Context(), *req.Catalog)
+	}
+	if req.URL == "" {
 		return nil, errBadRequest("invalid payload: url required (or a multipart \"package\" upload)")
 	}
 	return c.svc.InstallFromURL(ctx.Request.Context(), req.URL)
@@ -186,6 +200,18 @@ func (c *Controller) writeInstallError(ctx *gin.Context, err error) {
 	switch {
 	case errors.Is(err, pkgtar.ErrVersionExists):
 		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, marketplace.ErrCatalogUnavailable):
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error(), "code": PublisherCodeCatalogUnavailable})
+	case errors.Is(err, marketplace.ErrPluginListingStale):
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": PublisherCodeSelectionStale})
+	case errors.Is(err, marketplace.ErrPluginListingNotFound):
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error(), "code": PublisherCodeSelectionStale})
+	case errors.Is(err, ErrPublisherChanged):
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": PublisherCodeChanged})
+	case errors.Is(err, ErrAutomaticUpdateDowngrade):
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": PublisherCodeSelectionStale})
+	case errors.Is(err, ErrPackageIdentityMismatch):
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": PublisherCodePackageIdentityMismatch})
 	case errors.As(err, &badReq),
 		errors.Is(err, pkgtar.ErrManifestInvalid),
 		errors.Is(err, pkgtar.ErrMissingChecksums),
@@ -326,6 +352,42 @@ func (c *Controller) setAutoUpdate(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, rec)
+}
+
+func (c *Controller) verifyPublisher(ctx *gin.Context) {
+	var req VerifyPublisherRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.ExpectedInstallationID == "" || req.ExpectedVersion == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid publisher verification payload", "code": PublisherCodeInstalledChanged})
+		return
+	}
+	rec, err := c.svc.VerifyInstalledPublisher(ctx.Request.Context(), ctx.Param("id"), req.ExpectedInstallationID, req.ExpectedVersion)
+	if err != nil {
+		c.writePublisherError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, rec)
+}
+
+func (c *Controller) writePublisherError(ctx *gin.Context, err error) {
+	code := PublisherErrorCode(err)
+	if code == "" {
+		code = "publisher_verification_failed"
+	}
+	status := http.StatusConflict
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		status = http.StatusNotFound
+	case code == PublisherCodeCatalogUnavailable:
+		status = http.StatusServiceUnavailable
+	case code == PublisherCodePackageIdentityMismatch:
+		status = http.StatusBadRequest
+	case code == PublisherCodeVerificationFailed:
+		status = http.StatusInternalServerError
+	}
+	if status >= http.StatusInternalServerError {
+		c.log.Warn("plugin publisher verification error", zap.Error(err))
+	}
+	ctx.JSON(status, gin.H{"error": err.Error(), "code": code})
 }
 
 // writeLookupError maps common Service errors to HTTP status codes shared

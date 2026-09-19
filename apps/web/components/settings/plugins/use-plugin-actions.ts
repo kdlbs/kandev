@@ -11,6 +11,8 @@ import {
   disablePlugin,
   enablePlugin,
   getPlugin,
+  catalogInstallSelector,
+  installPluginFromCatalog,
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
@@ -23,7 +25,7 @@ import { buildHostApi } from "@/lib/plugins/host-api";
 import { loadPlugins, unloadPlugin } from "@/lib/plugins/host";
 import { summarizeSyncResult } from "@/lib/plugins/sync-summary";
 import type { InstallResult } from "@/lib/api/domains/plugins-api";
-import type { PluginRecord, PluginStatus, SyncError } from "@/lib/types/plugins";
+import type { MarketplaceEntry, PluginRecord, PluginStatus, SyncError } from "@/lib/types/plugins";
 import type { AppState } from "@/lib/state/store";
 
 function withStatus(plugin: PluginRecord, status: PluginStatus): PluginRecord {
@@ -235,10 +237,13 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // update action and the Browse tab) reconcile local update state without
   // also duplicating the toast.
   const marketplaceInstall = async (
-    url: string,
+    target: MarketplaceEntry | string,
   ): Promise<{ ok: boolean; error?: string; pluginId?: string }> => {
     try {
-      const result = await installPluginFromUrl(url);
+      const result =
+        typeof target === "string"
+          ? await installPluginFromUrl(target)
+          : await installPluginFromCatalog(catalogInstallSelector(target));
       await afterInstall(result);
       return { ok: true, pluginId: result.plugin.id };
     } catch (err) {

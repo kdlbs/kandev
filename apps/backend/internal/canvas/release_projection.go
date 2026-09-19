@@ -1,11 +1,13 @@
 package canvas
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
 
 	plugininstances "github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 )
 
 func releaseMetadata(release plugininstances.Release, scope string, grants []plugininstances.Grant) *ReleaseMetadata {
@@ -23,6 +25,7 @@ func releaseMetadata(release plugininstances.Release, scope string, grants []plu
 		MinKandevVersion:   seed.MinKandevVersion,
 		RepoURL:            seed.RepoURL,
 		PackageDigest:      release.PackageDigest,
+		PublisherIdentity:  provenance.NewUnverified(),
 		ValidationStatus:   release.ValidationStatus,
 		ValidationError:    release.ValidationError,
 		Permissions:        &permissions,
@@ -35,6 +38,21 @@ func releaseMetadata(release plugininstances.Release, scope string, grants []plu
 		ProtocolVersion:    release.ProtocolVersion,
 		CreatedAt:          release.CreatedAt,
 	}
+}
+
+func (s *Service) publisherIdentityForRelease(ctx context.Context, release plugininstances.Release) *provenance.PublisherIdentity {
+	if s == nil || s.repo == nil || release.ID == "" {
+		return provenance.NewUnverified()
+	}
+	receipt, err := s.repo.GetInstallReceiptForRelease(ctx, release.ID)
+	if err != nil || receipt.ReleaseID != release.ID || receipt.Digest != release.PackageDigest || receipt.PublisherProvenance == nil {
+		return provenance.NewUnverified()
+	}
+	seed := releaseManifestSeed(release.ManifestJSON)
+	if receipt.PublisherProvenance.PackageID != seed.PackageID || receipt.PublisherProvenance.Version != seed.Version {
+		return provenance.NewUnverified()
+	}
+	return receipt.PublisherProvenance.Identity()
 }
 
 type manifestSeed struct {

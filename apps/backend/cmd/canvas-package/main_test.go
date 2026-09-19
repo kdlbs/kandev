@@ -26,7 +26,7 @@ func TestRunInspectsDistributionPackageAsSafeJSON(t *testing.T) {
 	if descriptor.ID != "canvas-board" || descriptor.Version != "1.2.3" || descriptor.Kind != "canvas" {
 		t.Fatalf("descriptor = %+v", descriptor)
 	}
-	if descriptor.Digest == "" || len(descriptor.Files) == 0 {
+	if descriptor.Digest == "" || len(descriptor.Files) == 0 || len(descriptor.Categories) != 1 {
 		t.Fatalf("descriptor lacks package metadata: %+v", descriptor)
 	}
 }

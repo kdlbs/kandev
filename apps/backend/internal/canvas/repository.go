@@ -3,6 +3,7 @@ package canvas
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/plugins/provenance"
 )
 
 // Repository stores the canvas-owned metadata that is not part of a plugin
@@ -65,10 +67,12 @@ CREATE TABLE IF NOT EXISTS canvas_install_receipts (
   package_id TEXT NOT NULL,
   package_version TEXT NOT NULL,
   package_digest TEXT NOT NULL,
+  release_id TEXT,
   source_id TEXT NOT NULL DEFAULT '',
   repository_url TEXT NOT NULL DEFAULT '',
   origin_kind TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  publisher_provenance_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_canvas_install_receipts_workspace
   ON canvas_install_receipts(workspace_id, created_at, preparation_id);
@@ -78,42 +82,89 @@ func (r *Repository) GetInstallReceipt(ctx context.Context, preparationID, userI
 	if strings.TrimSpace(preparationID) == "" || strings.TrimSpace(userID) == "" {
 		return InstallReceipt{}, ErrInstallReceiptNotFound
 	}
-	var row struct {
-		PreparationID  string `db:"preparation_id"`
-		UserID         string `db:"user_id"`
-		CanvasID       string `db:"canvas_id"`
-		WorkspaceID    string `db:"workspace_id"`
-		PackageID      string `db:"package_id"`
-		PackageVersion string `db:"package_version"`
-		PackageDigest  string `db:"package_digest"`
-		SourceID       string `db:"source_id"`
-		RepositoryURL  string `db:"repository_url"`
-		OriginKind     string `db:"origin_kind"`
-		CreatedAt      string `db:"created_at"`
-	}
-	err := r.ro.GetContext(ctx, &row, r.ro.Rebind(`SELECT preparation_id, user_id, canvas_id, workspace_id, package_id, package_version, package_digest, source_id, repository_url, origin_kind, created_at FROM canvas_install_receipts WHERE preparation_id = ? AND user_id = ?`), preparationID, userID)
+	var row installReceiptRow
+	err := r.ro.GetContext(ctx, &row, r.ro.Rebind(installReceiptSelect+` WHERE preparation_id = ? AND user_id = ?`), preparationID, userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return InstallReceipt{}, ErrInstallReceiptNotFound
 	}
 	if err != nil {
 		return InstallReceipt{}, err
 	}
+	return row.receipt()
+}
+
+// GetInstallReceiptForRelease returns the receipt bound to one immutable
+// release. A canvas has one import receipt, but later local releases must not
+// inherit its publisher identity.
+func (r *Repository) GetInstallReceiptForRelease(ctx context.Context, releaseID string) (InstallReceipt, error) {
+	if strings.TrimSpace(releaseID) == "" {
+		return InstallReceipt{}, ErrInstallReceiptNotFound
+	}
+	var row installReceiptRow
+	err := r.ro.GetContext(ctx, &row, r.ro.Rebind(installReceiptSelect+` WHERE release_id = ?`), releaseID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InstallReceipt{}, ErrInstallReceiptNotFound
+	}
+	if err != nil {
+		return InstallReceipt{}, err
+	}
+	return row.receipt()
+}
+
+const installReceiptSelect = `SELECT preparation_id, user_id, canvas_id, workspace_id, package_id, package_version, package_digest, release_id, source_id, repository_url, origin_kind, created_at, publisher_provenance_json FROM canvas_install_receipts`
+
+type installReceiptRow struct {
+	PreparationID           string         `db:"preparation_id"`
+	UserID                  string         `db:"user_id"`
+	CanvasID                string         `db:"canvas_id"`
+	WorkspaceID             string         `db:"workspace_id"`
+	PackageID               string         `db:"package_id"`
+	PackageVersion          string         `db:"package_version"`
+	PackageDigest           string         `db:"package_digest"`
+	ReleaseID               sql.NullString `db:"release_id"`
+	SourceID                string         `db:"source_id"`
+	RepositoryURL           string         `db:"repository_url"`
+	OriginKind              string         `db:"origin_kind"`
+	CreatedAt               string         `db:"created_at"`
+	PublisherProvenanceJSON sql.NullString `db:"publisher_provenance_json"`
+}
+
+func (row installReceiptRow) receipt() (InstallReceipt, error) {
 	createdAt, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
 	if err != nil {
 		return InstallReceipt{}, err
 	}
-	return InstallReceipt{PreparationID: row.PreparationID, UserID: row.UserID, CanvasID: row.CanvasID, WorkspaceID: row.WorkspaceID, PackageID: row.PackageID, Version: row.PackageVersion, Digest: row.PackageDigest, SourceID: row.SourceID, RepositoryURL: row.RepositoryURL, OriginKind: row.OriginKind, CreatedAt: createdAt}, nil
+	provenanceValue := decodeReceiptProvenance(row.PublisherProvenanceJSON)
+	receipt := InstallReceipt{PreparationID: row.PreparationID, UserID: row.UserID, CanvasID: row.CanvasID, WorkspaceID: row.WorkspaceID, PackageID: row.PackageID, Version: row.PackageVersion, Digest: row.PackageDigest, ReleaseID: row.ReleaseID.String, SourceID: row.SourceID, RepositoryURL: row.RepositoryURL, OriginKind: row.OriginKind, CreatedAt: createdAt, PublisherProvenance: provenanceValue}
+	receipt.PublisherIdentity = provenanceValue.Identity()
+	return receipt, nil
 }
 
 func (r *Repository) CreateInstallReceiptTx(ctx context.Context, tx *sqlx.Tx, receipt InstallReceipt) error {
 	if strings.TrimSpace(receipt.PreparationID) == "" || strings.TrimSpace(receipt.UserID) == "" || strings.TrimSpace(receipt.CanvasID) == "" || strings.TrimSpace(receipt.WorkspaceID) == "" || strings.TrimSpace(receipt.PackageID) == "" || strings.TrimSpace(receipt.Version) == "" || strings.TrimSpace(receipt.Digest) == "" || strings.TrimSpace(receipt.OriginKind) == "" {
 		return ErrInstallInvalid
 	}
+	if receipt.PublisherProvenance != nil {
+		if err := receipt.PublisherProvenance.Validate(); err != nil {
+			return fmt.Errorf("%w: publisher provenance: %v", ErrInstallInvalid, err)
+		}
+	}
 	createdAt := receipt.CreatedAt.UTC()
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	_, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO canvas_install_receipts (preparation_id, user_id, canvas_id, workspace_id, package_id, package_version, package_digest, source_id, repository_url, origin_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), receipt.PreparationID, receipt.UserID, receipt.CanvasID, receipt.WorkspaceID, receipt.PackageID, receipt.Version, receipt.Digest, receipt.SourceID, receipt.RepositoryURL, receipt.OriginKind, createdAt.Format(time.RFC3339Nano))
+	var releaseID, publisherJSON any
+	if strings.TrimSpace(receipt.ReleaseID) != "" {
+		releaseID = receipt.ReleaseID
+	}
+	if receipt.PublisherProvenance != nil {
+		data, marshalErr := json.Marshal(receipt.PublisherProvenance)
+		if marshalErr != nil {
+			return fmt.Errorf("%w: marshal publisher provenance: %v", ErrInstallInvalid, marshalErr)
+		}
+		publisherJSON = string(data)
+	}
+	_, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO canvas_install_receipts (preparation_id, user_id, canvas_id, workspace_id, package_id, package_version, package_digest, release_id, source_id, repository_url, origin_kind, created_at, publisher_provenance_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), receipt.PreparationID, receipt.UserID, receipt.CanvasID, receipt.WorkspaceID, receipt.PackageID, receipt.Version, receipt.Digest, releaseID, receipt.SourceID, receipt.RepositoryURL, receipt.OriginKind, createdAt.Format(time.RFC3339Nano), publisherJSON)
 	return err
 }
 
@@ -189,7 +240,40 @@ func (r *Repository) initSchema() error {
 			return err
 		}
 	}
+	return r.ensureInstallReceiptColumns()
+}
+
+func (r *Repository) ensureInstallReceiptColumns() error {
+	columns, err := db.TableColumns(r.db, "canvas_install_receipts")
+	if err != nil {
+		return err
+	}
+	if !columns["release_id"] {
+		if _, err := r.db.Exec(`ALTER TABLE canvas_install_receipts ADD COLUMN release_id TEXT`); err != nil {
+			return fmt.Errorf("add canvas install receipt release_id: %w", err)
+		}
+	}
+	if !columns["publisher_provenance_json"] {
+		if _, err := r.db.Exec(`ALTER TABLE canvas_install_receipts ADD COLUMN publisher_provenance_json TEXT`); err != nil {
+			return fmt.Errorf("add canvas install receipt publisher provenance: %w", err)
+		}
+	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_canvas_install_receipts_release ON canvas_install_receipts(release_id)`); err != nil {
+		return fmt.Errorf("index canvas install receipt release_id: %w", err)
+	}
 	return nil
+}
+
+func decodeReceiptProvenance(raw sql.NullString) *provenance.InstallationProvenance {
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return nil
+	}
+	var value provenance.InstallationProvenance
+	if json.Unmarshal([]byte(raw.String), &value) != nil || value.Validate() != nil {
+		return nil
+	}
+	value.SanitizePublicURLs()
+	return &value
 }
 
 // Create persists metadata after the plugin instance admission has succeeded.

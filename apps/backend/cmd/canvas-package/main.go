@@ -21,6 +21,7 @@ type packageDescriptor struct {
 	DisplayName      string   `json:"display_name"`
 	Description      string   `json:"description"`
 	Author           string   `json:"author"`
+	Categories       []string `json:"categories"`
 	License          string   `json:"license"`
 	SourceMode       string   `json:"source_mode"`
 	MinKandevVersion string   `json:"min_kandev_version"`
@@ -100,6 +101,7 @@ func describePackage(pkg *webapp.Package) packageDescriptor {
 		DisplayName:      manifest.DisplayName,
 		Description:      manifest.Description,
 		Author:           manifest.Author,
+		Categories:       append([]string(nil), manifest.Categories...),
 		License:          manifest.Distribution.License,
 		SourceMode:       manifest.Distribution.SourceMode,
 		MinKandevVersion: manifest.MinKandevVersion,

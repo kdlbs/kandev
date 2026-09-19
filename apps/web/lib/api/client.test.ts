@@ -144,6 +144,25 @@ describe("ApiError response classification", () => {
     });
   });
 
+  it("normalizes legacy code fields for older endpoints", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "publisher changed", code: "publisher_changed" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(fetchJson("/api/plugins/example", { baseUrl: BACKEND_URL })).rejects.toMatchObject(
+      {
+        name: "ApiError",
+        errorCode: "publisher_changed",
+      },
+    );
+  });
+
   it("handles only the stale settings interlock response", async () => {
     vi.stubGlobal(
       "fetch",
