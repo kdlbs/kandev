@@ -14,6 +14,8 @@ export function CanvasHostFrame({
   setMenuOpen,
   desktopActions,
   desktopOverflowActions,
+  desktopOverflowMenuItems,
+  desktopOverflowPrimaryAction,
   mobileActionsButton,
   canvasBody,
   mobileActions,
@@ -26,6 +28,8 @@ export function CanvasHostFrame({
   setMenuOpen: (open: boolean) => void;
   desktopActions: ReactNode;
   desktopOverflowActions: ReactNode;
+  desktopOverflowMenuItems: ReactNode;
+  desktopOverflowPrimaryAction: ReactNode;
   mobileActionsButton: ReactNode;
   canvasBody: ReactNode;
   mobileActions: ReactNode;
@@ -58,7 +62,8 @@ export function CanvasHostFrame({
       scroll="none"
       topbarTestId="canvas-host-header"
       actions={isMobile ? mobileActionsButton : desktopActions}
-      overflowActions={isMobile ? null : desktopOverflowActions}
+      overflowMenuItems={isMobile ? null : desktopOverflowMenuItems}
+      overflowPrimaryAction={isMobile ? null : desktopOverflowPrimaryAction}
       contentTestId="canvas-route-content"
       showNavTrigger
     >

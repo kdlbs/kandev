@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DropdownMenu, DropdownMenuContent } from "@kandev/ui/dropdown-menu";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 
 const COPY: Record<string, string> = {
@@ -48,6 +49,7 @@ vi.mock("./canvas-lifecycle-dialogs", () => ({
 
 import {
   CanvasDesktopActions,
+  CanvasDesktopOverflowMenuItems,
   CanvasHostBody,
   CanvasHostHeader,
   CanvasHostStatePanel,
@@ -91,6 +93,45 @@ describe("canvas host action guidance", () => {
         "This canvas is archived. Restore it from workspace settings before changing it.",
       ),
     ).toBeTruthy();
+  });
+
+  it("describes disabled overflow actions to assistive technology", () => {
+    const workspaceCanvas = {
+      ...canvas,
+      scope_kind: "workspace" as const,
+      status: "archived" as const,
+    };
+    const taskCanvas = { ...canvas, active_release_status: "pending_permission" as const };
+
+    render(
+      <DropdownMenu open>
+        <DropdownMenuContent>
+          <CanvasDesktopOverflowMenuItems
+            canvas={workspaceCanvas}
+            editing={false}
+            onEdit={vi.fn()}
+            onPromote={vi.fn()}
+            onReleases={vi.fn()}
+            onShare={vi.fn()}
+          />
+          <CanvasDesktopOverflowMenuItems
+            canvas={taskCanvas}
+            editing={false}
+            onEdit={vi.fn()}
+            onPromote={vi.fn()}
+            onReleases={vi.fn()}
+            onShare={vi.fn()}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+
+    const edit = screen.getAllByRole("menuitem", { name: /Edit canvas/ })[0];
+    const promote = screen.getAllByRole("menuitem", { name: /Promote canvas/ })[0];
+    expect(edit.getAttribute("aria-describedby")).toBe("canvas-edit-overflow-help-canvas-1");
+    expect(promote.getAttribute("aria-describedby")).toBe("canvas-promote-overflow-help-canvas-1");
+    expect(screen.getByText(/archived.*changing it/i)).toBeTruthy();
+    expect(screen.getByText(/valid release/i)).toBeTruthy();
   });
 
   it("shows lifecycle descriptions in the mobile action drawer", () => {

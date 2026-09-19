@@ -32,7 +32,7 @@ The target runtime uses trusted same-origin iframes, not opaque-origin isolation
 It does not import package code into the SPA module registry.
 
 The [same-origin decision](../../../decisions/2026-09-19-trusted-same-origin-canvases.md)
-amends the browser trust boundary. Implementation is pending in the
+amends the browser trust boundary. Implementation is complete under the
 [same-origin delivery plan](../../../plans/canvas-same-origin-auth/plan.md).
 
 This design owns plugin instances, immutable releases, capability grants,

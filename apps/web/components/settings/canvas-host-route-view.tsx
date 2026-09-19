@@ -6,6 +6,8 @@ import { useTranslation } from "react-i18next";
 import {
   CanvasDesktopActions,
   CanvasDesktopOverflowActions,
+  CanvasDesktopOverflowMenuItems,
+  CanvasDesktopPrimaryAction,
   CanvasHostBody,
   CanvasHostDialogs,
   CanvasMobileActionsButton,
@@ -148,30 +150,37 @@ function CanvasHostRouteMobileActions({
   );
 }
 
+function createCanvasDesktopActions(canvas: Canvas | null, props: CanvasHostRouteViewProps) {
+  if (!canvas) {
+    return {
+      actions: null,
+      overflowActions: null,
+      overflowMenuItems: null,
+      overflowPrimaryAction: null,
+    };
+  }
+
+  const actionProps = {
+    canvas,
+    editing: props.editing,
+    onEdit: props.onEdit,
+    onPromote: props.onPromote,
+    onReleases: props.onReleases,
+    onShare: props.onShare,
+  };
+  return {
+    actions: <CanvasDesktopActions {...actionProps} />,
+    overflowActions: <CanvasDesktopOverflowActions {...actionProps} />,
+    overflowMenuItems: <CanvasDesktopOverflowMenuItems {...actionProps} omitPrimaryAction />,
+    overflowPrimaryAction: <CanvasDesktopPrimaryAction {...actionProps} />,
+  };
+}
+
 export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
   const { canvas, isMobile, menuOpen, setMenuOpen } = props;
   const { t } = useTranslation();
   const title = canvas?.title || t("canvases:canvas");
-  const desktopActions = canvas ? (
-    <CanvasDesktopActions
-      canvas={canvas}
-      editing={props.editing}
-      onEdit={props.onEdit}
-      onPromote={props.onPromote}
-      onReleases={props.onReleases}
-      onShare={props.onShare}
-    />
-  ) : null;
-  const desktopOverflowActions = canvas ? (
-    <CanvasDesktopOverflowActions
-      canvas={canvas}
-      editing={props.editing}
-      onEdit={props.onEdit}
-      onPromote={props.onPromote}
-      onReleases={props.onReleases}
-      onShare={props.onShare}
-    />
-  ) : null;
+  const desktopActions = createCanvasDesktopActions(canvas, props);
   const mobileActionsButton = isMobile ? (
     <CanvasMobileActionsButton menuOpen={menuOpen} onOpenActions={() => setMenuOpen(true)} />
   ) : null;
@@ -222,8 +231,10 @@ export function CanvasHostRouteView(props: CanvasHostRouteViewProps) {
       title={title}
       menuOpen={menuOpen}
       setMenuOpen={setMenuOpen}
-      desktopActions={desktopActions}
-      desktopOverflowActions={desktopOverflowActions}
+      desktopActions={desktopActions.actions}
+      desktopOverflowActions={desktopActions.overflowActions}
+      desktopOverflowMenuItems={desktopActions.overflowMenuItems}
+      desktopOverflowPrimaryAction={desktopActions.overflowPrimaryAction}
       mobileActionsButton={mobileActionsButton}
       canvasBody={canvasBody}
       mobileActions={mobileActions}

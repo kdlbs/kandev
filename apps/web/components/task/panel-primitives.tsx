@@ -27,7 +27,7 @@ const PANEL_ROOT_CLASS = "h-full min-h-0 flex flex-col bg-card text-card-foregro
 const PANEL_BAR_CLASS =
   "box-border flex min-w-0 items-center gap-1.5 px-2.5 shrink-0 border-border/80 bg-card/95 text-xs text-foreground";
 const PANEL_HEADER_BAR_CLASS =
-  "h-[1.875rem] min-h-[1.875rem] [@media(max-width:47.999rem)]:h-12 [@media(max-width:47.999rem)]:min-h-12 [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:min-h-12";
+  "h-[1.875rem] min-h-[1.875rem] [@media(max-width:47.999rem)]:h-12 [@media(max-width:47.999rem)]:min-h-12 [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:min-h-12 [@media(max-width:47.999rem)]:[&_button]:min-h-11 [@media(max-width:47.999rem)]:[&_button]:min-w-11 [@media(max-width:47.999rem)]:[&_a]:min-h-11 [@media(max-width:47.999rem)]:[&_a]:min-w-11 [@media(max-width:47.999rem)]:[&_[role=button]]:min-h-11 [@media(max-width:47.999rem)]:[&_[role=button]]:min-w-11 [@media(max-width:47.999rem)]:[&_input]:min-h-11 [@media(max-width:47.999rem)]:[&_select]:min-h-11 [@media(max-width:47.999rem)]:[&_textarea]:min-h-11 [@media(pointer:coarse)]:[&_button]:min-h-11 [@media(pointer:coarse)]:[&_button]:min-w-11 [@media(pointer:coarse)]:[&_a]:min-h-11 [@media(pointer:coarse)]:[&_a]:min-w-11 [@media(pointer:coarse)]:[&_[role=button]]:min-h-11 [@media(pointer:coarse)]:[&_[role=button]]:min-w-11 [@media(pointer:coarse)]:[&_input]:min-h-11 [@media(pointer:coarse)]:[&_select]:min-h-11 [@media(pointer:coarse)]:[&_textarea]:min-h-11";
 const PANEL_ACTION_CURSOR_CLASS =
   "[&_button:not(:disabled)]:cursor-pointer [&_[role=button]:not([aria-disabled=true])]:cursor-pointer";
 
@@ -42,7 +42,10 @@ function usePanelHeaderOverflow(
   const [overflowed, setOverflowed] = useState(false);
 
   useEffect(() => {
-    if (!overflowAt || typeof ResizeObserver === "undefined") return;
+    if (!overflowAt || typeof ResizeObserver === "undefined") {
+      setOverflowed(false);
+      return;
+    }
     const element = ref.current;
     if (!element) return;
     const measure = () => {

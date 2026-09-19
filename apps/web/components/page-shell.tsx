@@ -20,6 +20,10 @@ type PageShellProps = {
   leftActions?: ReactNode;
   actions?: ReactNode;
   overflowActions?: ReactNode;
+  /** Raw menu items shown only when the topbar action budget is exceeded. */
+  overflowMenuItems?: ReactNode;
+  /** Primary action retained beside the overflow menu at narrow widths. */
+  overflowPrimaryAction?: ReactNode;
   className?: string;
   showStatusTrigger?: boolean;
   /** `data-testid` on the topbar header (e2e anchors like `office-topbar`). */

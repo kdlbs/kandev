@@ -12,14 +12,19 @@ import {
 import { useTranslation } from "react-i18next";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Button } from "@kandev/ui/button";
-import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
-import { PanelHeaderBarSplit, PanelHeaderOverflowMenu } from "@/components/task/panel-primitives";
+import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { CanvasPage } from "@/components/plugins/canvas-page";
 import { canvasHref, type Canvas } from "@/lib/api/domains/canvas-api";
 import { CanvasMobileActionsButton } from "./canvas-host-actions";
+import { canvasLockHelp, canvasPromotionHelp } from "./canvas-host-desktop-actions";
 export { CanvasHostDialogs, CanvasMobileActionsButton } from "./canvas-host-actions";
+export {
+  CanvasDesktopActions,
+  CanvasDesktopOverflowActions,
+  CanvasDesktopOverflowMenuItems,
+  CanvasDesktopPrimaryAction,
+} from "./canvas-host-desktop-actions";
 
 export type CanvasHostState =
   | "loading_metadata"
@@ -58,49 +63,6 @@ const STATE_COPY: Record<CanvasHostState, { title: string; description: string }
   unavailable: { title: "canvases:unavailable", description: "canvases:unavailableDescription" },
   archived: { title: "canvases:archived", description: "canvases:archivedDescription" },
 };
-
-function canvasLockHelp(canvas: Canvas, t: (key: string) => string): string {
-  return canvas.status === "archived"
-    ? t("canvases:archivedCanvasActionHelp")
-    : t("canvases:disabledCanvasActionHelp");
-}
-
-function canvasPromotionHelp(canvas: Canvas, t: (key: string) => string): string {
-  if (canvas.status === "archived" || canvas.status === "disabled") {
-    return canvasLockHelp(canvas, t);
-  }
-  if (canvas.scope_kind === "task" && canvas.active_release_status === "valid") {
-    return t("canvases:promoteCanvasHelp");
-  }
-  return t("canvases:promoteCanvasUnavailable");
-}
-
-function CanvasDesktopActionTooltip({
-  description,
-  disabled,
-  testId,
-  children,
-}: {
-  description: string;
-  disabled: boolean;
-  testId: string;
-  children: ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={disabled ? "cursor-not-allowed" : undefined}
-          data-testid={testId}
-          tabIndex={disabled ? 0 : undefined}
-        >
-          {children}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{description}</TooltipContent>
-    </Tooltip>
-  );
-}
 
 function MobileCanvasAction({
   description,
@@ -170,147 +132,6 @@ export function CanvasHostBody({
         <CanvasHostStatePanel state={state} error={error} onRetry={onRetry} />
       )}
     </div>
-  );
-}
-
-export function CanvasDesktopActions({
-  canvas,
-  editing,
-  onEdit,
-  onPromote,
-  onReleases,
-  onShare,
-}: {
-  canvas: Canvas;
-  editing: boolean;
-  onEdit: () => void;
-  onPromote: () => void;
-  onReleases: () => void;
-  onShare: () => void;
-}) {
-  const { t } = useTranslation();
-  const lifecycleLocked = canvas.status === "archived" || canvas.status === "disabled";
-  const promoteAvailable = canvas.scope_kind === "task" && canvas.active_release_status === "valid";
-  const promoteDisabled = lifecycleLocked || !promoteAvailable;
-  const promoteDescription = canvasPromotionHelp(canvas, t);
-  return (
-    <div className="flex items-center gap-2">
-      {canvas.scope_kind === "workspace" && (
-        <CanvasDesktopActionTooltip
-          description={lifecycleLocked ? canvasLockHelp(canvas, t) : t("canvases:editCanvasHelp")}
-          disabled={editing || lifecycleLocked}
-          testId="canvas-action-edit-tooltip-trigger"
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            className="cursor-pointer"
-            disabled={editing || lifecycleLocked}
-            onClick={onEdit}
-          >
-            <IconEdit className="mr-1.5 h-3.5 w-3.5" />
-            {t("canvases:editCanvas")}
-          </Button>
-        </CanvasDesktopActionTooltip>
-      )}
-      <CanvasDesktopActionTooltip
-        description={t("canvases:releasesAndPermissionsHelp")}
-        disabled={false}
-        testId="canvas-action-releases-tooltip-trigger"
-      >
-        <Button variant="outline" size="sm" className="cursor-pointer" onClick={onReleases}>
-          <IconListDetails className="mr-1.5 h-3.5 w-3.5" />
-          {t("canvases:releasesAndPermissions")}
-        </Button>
-      </CanvasDesktopActionTooltip>
-      <CanvasDesktopActionTooltip
-        description={t("canvases:shareCanvasDescription")}
-        disabled={false}
-        testId="canvas-action-share-tooltip-trigger"
-      >
-        <Button variant="outline" size="sm" className="cursor-pointer" onClick={onShare}>
-          <IconShare3 className="mr-1.5 h-3.5 w-3.5" />
-          {t("canvases:shareCanvas")}
-        </Button>
-      </CanvasDesktopActionTooltip>
-      {canvas.scope_kind === "task" && (
-        <CanvasDesktopActionTooltip
-          description={promoteDescription}
-          disabled={promoteDisabled}
-          testId="canvas-action-promote-tooltip-trigger"
-        >
-          <Button
-            size="sm"
-            className="cursor-pointer"
-            disabled={promoteDisabled}
-            onClick={onPromote}
-          >
-            <IconSparkles className="mr-1.5 h-3.5 w-3.5" />
-            {t("canvases:promoteCanvas")}
-          </Button>
-        </CanvasDesktopActionTooltip>
-      )}
-    </div>
-  );
-}
-
-export function CanvasDesktopOverflowActions({
-  canvas,
-  editing,
-  onEdit,
-  onPromote,
-  onReleases,
-  onShare,
-}: {
-  canvas: Canvas;
-  editing: boolean;
-  onEdit: () => void;
-  onPromote: () => void;
-  onReleases: () => void;
-  onShare: () => void;
-}) {
-  const { t } = useTranslation();
-  const lifecycleLocked = canvas.status === "archived" || canvas.status === "disabled";
-  const promoteAvailable = canvas.scope_kind === "task" && canvas.active_release_status === "valid";
-  const promoteDisabled = lifecycleLocked || !promoteAvailable;
-  const promoteDescription = canvasPromotionHelp(canvas, t);
-  const editDescription = lifecycleLocked
-    ? canvasLockHelp(canvas, t)
-    : t("canvases:editCanvasHelp");
-
-  return (
-    <PanelHeaderOverflowMenu label={t("canvases:canvasActions")}>
-      {canvas.scope_kind === "workspace" && (
-        <DropdownMenuItem
-          className="cursor-pointer gap-2"
-          disabled={editing || lifecycleLocked}
-          title={editDescription}
-          onSelect={onEdit}
-        >
-          <IconEdit className="size-4" />
-          {t("canvases:editCanvas")}
-        </DropdownMenuItem>
-      )}
-      <DropdownMenuItem className="cursor-pointer gap-2" onSelect={onReleases}>
-        <IconListDetails className="size-4" />
-        {t("canvases:releasesAndPermissions")}
-      </DropdownMenuItem>
-      <DropdownMenuItem className="cursor-pointer gap-2" onSelect={onShare}>
-        <IconShare3 className="size-4" />
-        {t("canvases:shareCanvas")}
-      </DropdownMenuItem>
-      {canvas.scope_kind === "task" && (
-        <DropdownMenuItem
-          className="cursor-pointer gap-2"
-          disabled={promoteDisabled}
-          title={promoteDescription}
-          onSelect={onPromote}
-        >
-          <IconSparkles className="size-4" />
-          {t("canvases:promoteCanvas")}
-        </DropdownMenuItem>
-      )}
-    </PanelHeaderOverflowMenu>
   );
 }
 

@@ -197,8 +197,9 @@ The isolated web-app boundary has these rules:
 - The iframe is same-origin with Kandev. Canvas source is trusted with the
   viewing user's ordinary user-session authority, including same-origin
   cookies, browser storage, and host DOM access.
-- The app uses relative `./_kandev/v1` protocol paths. The app receives only
-  the Kandev data, events, state, and actions that the capability binding grants.
+- The app uses relative `./_kandev/v1` protocol paths. For these protocol
+  requests, the app receives only the Kandev data, events, state, and actions
+  that the capability binding grants.
   Cookies do not replace the capability URL or per-operation permission checks.
 - Kandev calculates effective access from the package declaration, instance
   grant, trusted task or workspace scope, and current caller authorization.
@@ -241,11 +242,11 @@ matching iframe. It loads a replacement only after a fresh metadata and
 runtime-binding check. Kandev runtime and protocol requests continue to
 revalidate on every request.
 
-Opaque origin storage is not a durable app store. `localStorage`,
-`sessionStorage`, IndexedDB, and service workers are unavailable. Use the
-canvas state protocol for small app-specific shared values and memory for
-temporary values. Do not copy task or workflow data into app state as a second
-source of truth.
+Browser storage is available to trusted same-origin canvas code according to
+normal browser and site storage policy. Treat it as user-session storage, not
+as the durable app store. Use the canvas state protocol for small app-specific
+shared values and memory for temporary values. Do not copy task or workflow
+data into app state as a second source of truth.
 
 The host renders canvas controls outside the iframe. Keep the backend and its
 HTTP, WebSocket, and MCP routes behind the deployment boundary described at

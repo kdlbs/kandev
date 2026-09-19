@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DropdownMenu, DropdownMenuContent } from "@kandev/ui/dropdown-menu";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { registerCanvasesHandlers } from "@/lib/ws/handlers/canvases";
 
@@ -11,6 +12,7 @@ const {
   mockListWorkspaceCanvases,
   mockPush,
   mockIsMobile,
+  mockRenderPageShellOverflow,
 } = vi.hoisted(() => ({
   mockGetCanvas: vi.fn(),
   mockGetCanvasRuntime: vi.fn(),
@@ -18,6 +20,7 @@ const {
   mockListWorkspaceCanvases: vi.fn(),
   mockPush: vi.fn(),
   mockIsMobile: { value: false },
+  mockRenderPageShellOverflow: { value: false },
 }));
 
 const FRAME_TEST_ID = "canvas-frame";
@@ -36,14 +39,23 @@ vi.mock("@/components/page-shell", () => ({
   PageShell: ({
     actions,
     children,
+    overflowMenuItems,
     topbarTestId,
   }: {
     actions?: ReactNode;
     children: ReactNode;
+    overflowMenuItems?: ReactNode;
     topbarTestId?: string;
   }) => (
     <div>
       <div data-testid={topbarTestId}>{mockIsMobile.value ? actions : null}</div>
+      {overflowMenuItems && mockRenderPageShellOverflow.value ? (
+        <DropdownMenu open>
+          <DropdownMenuContent data-testid="page-shell-overflow">
+            {overflowMenuItems}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
       {children}
     </div>
   ),
@@ -119,6 +131,7 @@ beforeEach(() => {
   mockListTaskCanvases.mockReset().mockResolvedValue({ canvases: [canvas] });
   mockListWorkspaceCanvases.mockReset().mockResolvedValue({ canvases: [] });
   mockIsMobile.value = false;
+  mockRenderPageShellOverflow.value = false;
   mockPush.mockReset();
 });
 
@@ -178,6 +191,16 @@ describe("CanvasHostRoute runtime recovery", () => {
         "/runtime/refreshed",
       );
     });
+  });
+
+  it("passes raw desktop overflow items to the standalone page shell", async () => {
+    mockRenderPageShellOverflow.value = true;
+    render(<CanvasHostRoute canvasId="canvas-1" />);
+
+    await waitFor(() => expect(screen.getByTestId(FRAME_TEST_ID)).toBeTruthy());
+
+    expect(screen.getByRole("menuitem", { name: "Releases and permissions" })).toBeTruthy();
+    expect(screen.queryByTestId("panel-header-overflow")).toBeNull();
   });
 
   it("refreshes the visible host when a canvas lifecycle event arrives", async () => {

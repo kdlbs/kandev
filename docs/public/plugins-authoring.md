@@ -150,7 +150,7 @@ the canvas recoverable after 15 seconds. Keep the entry document and its
 relative assets valid HTML, and make the app render its own loading and error
 states after startup.
 
-The frame is same-origin with Kandev and canvas source is trusted with the
+The frame is same-origin with Kandev and canvas code is trusted with the
 viewing user's ordinary user-session authority. It can use `localStorage`,
 `sessionStorage`, IndexedDB, same-origin cookies, and the host DOM. Keep
 Kandev protocol requests relative and do not copy capability URLs or tokens.
@@ -294,7 +294,7 @@ for the runtime boundary.
 | Small JSON object owned by this plugin    | Host state: GetState, SetState, DeleteState, ListState               | instance, workspace, task, or agent; survives restart/upgrade and is included in Kandev state backups | capabilities.state: true; values are JSON objects, not bare scalars             |
 | Canvas app shared state                   | Relative `./_kandev/v1/state` protocol                              | Canvas instance; survives restart while the instance remains                 | `state` grant, store app-specific shared values, not duplicate task data       |
 | Per-user browser/plugin storage           | host.storage: get/set/delete/list/subscribe                          | instance, workspace, task, session, or repository, scoped per user                                    | capabilities.user_state: true; set/delete accept ifUnmodifiedSince and writerId |
-| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Opaque origin blocks browser storage and service workers                        |
+| Temporary canvas app value                | JavaScript memory inside the iframe                                  | Current document only                                                         | Use browser storage for user-scoped client data; keep shared app values in canvas state |
 | Operator configuration                    | Host.GetConfig and manifest config_schema                            | Plugin-owned settings; config changes restart an active subprocess                                    | Ungated GetConfig; secret fields arrive cleartext in the subprocess             |
 | Plugin-owned credentials                  | Host.GetSecret/SetSecret/DeleteSecret, or secret: true config fields | Encrypted Kandev vault, namespaced to this plugin                                                     | capabilities.secrets: true; never log values                                    |
 | Files, caches, or plugin-managed database | KANDEV_PLUGIN_DATA_DIR                                               | Shared across versions, removed on uninstall                                                          | Write only below the injected directory; own schema, locking, and migrations    |

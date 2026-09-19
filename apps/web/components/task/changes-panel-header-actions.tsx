@@ -465,6 +465,7 @@ function ChangesPanelWalkthroughButton({
 }
 
 export type ChangesPanelHeaderActionProps = {
+  showDiffReview?: boolean;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
   onRequestWalkthrough?: () => void;
@@ -472,6 +473,7 @@ export type ChangesPanelHeaderActionProps = {
 };
 
 export function ChangesPanelHeaderOverflowActions({
+  showDiffReview = true,
   onOpenDiffAll,
   onOpenReview,
   onRequestWalkthrough,
@@ -483,22 +485,26 @@ export function ChangesPanelHeaderOverflowActions({
     : t(WALKTHROUGH_LABEL_KEY);
   return (
     <PanelHeaderOverflowMenu label={t("common:showMoreActions")}>
-      <DropdownMenuItem
-        className={ACTION_MENU_ITEM_CLASS}
-        disabled={!onOpenDiffAll}
-        onSelect={() => onOpenDiffAll?.()}
-      >
-        <IconGitMerge className="size-4" />
-        {t("task:diff")}
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        className={ACTION_MENU_ITEM_CLASS}
-        disabled={!onOpenReview}
-        onSelect={() => onOpenReview?.()}
-      >
-        <IconEye className="size-4" />
-        {t("task:filterStateReview")}
-      </DropdownMenuItem>
+      {showDiffReview && (
+        <>
+          <DropdownMenuItem
+            className={ACTION_MENU_ITEM_CLASS}
+            disabled={!onOpenDiffAll}
+            onSelect={() => onOpenDiffAll?.()}
+          >
+            <IconGitMerge className="size-4" />
+            {t("task:diff")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className={ACTION_MENU_ITEM_CLASS}
+            disabled={!onOpenReview}
+            onSelect={() => onOpenReview?.()}
+          >
+            <IconEye className="size-4" />
+            {t("task:filterStateReview")}
+          </DropdownMenuItem>
+        </>
+      )}
       {onRequestWalkthrough && (
         <DropdownMenuItem
           className={ACTION_MENU_ITEM_CLASS}

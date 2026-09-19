@@ -18,8 +18,8 @@ The selected same-origin mode treats this code as trusted by the viewing user.
 It does not provide browser isolation from the Kandev host.
 
 The [same-origin decision](../../../decisions/2026-09-19-trusted-same-origin-canvases.md)
-amends the original isolation contract. This draft describes the target behavior;
-implementation remains pending in the [delivery plan](../../../plans/canvas-same-origin-auth/plan.md).
+amends the original isolation contract. The runtime and proxy-verification
+implementation is complete under the [delivery plan](../../../plans/canvas-same-origin-auth/plan.md).
 The existing document path and requirement IDs remain stable.
 
 The Plugins system owns package validation, releases, instances, grants,

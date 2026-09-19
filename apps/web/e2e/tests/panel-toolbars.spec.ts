@@ -1,8 +1,9 @@
 import { expect, test } from "../fixtures/test-base";
 import type { SeedData } from "../fixtures/test-base";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
+import { enableCanvasFeature, removeCanvas, seedTaskCanvas } from "./canvas/canvas-fixture";
 
 type HeaderGeometry = {
   height: number;
@@ -38,8 +39,8 @@ async function createToolbarTask(
   return session;
 }
 
-async function readVisibleHeaderGeometry(page: Page): Promise<HeaderGeometry[]> {
-  return page.locator("[data-panel-header]:visible").evaluateAll((headers) =>
+async function readVisibleHeaderGeometry(panel: Locator): Promise<HeaderGeometry[]> {
+  return panel.locator("[data-panel-header]:visible").evaluateAll((headers) =>
     headers.map((header) => {
       const rect = header.getBoundingClientRect();
       const next = header.nextElementSibling;
@@ -58,15 +59,15 @@ async function readVisibleHeaderGeometry(page: Page): Promise<HeaderGeometry[]> 
   );
 }
 
-async function expectHeadersAtHeight(page: Page, expectedHeight: number, surface: string) {
+async function expectHeadersAtHeight(panel: Locator, expectedHeight: number, surface: string) {
   await expect
-    .poll(() => readVisibleHeaderGeometry(page), {
+    .poll(() => readVisibleHeaderGeometry(panel), {
       timeout: 15_000,
       message: `Waiting for a visible shared header in ${surface}`,
     })
     .not.toEqual([]);
 
-  const headers = await readVisibleHeaderGeometry(page);
+  const headers = await readVisibleHeaderGeometry(panel);
   expect(headers.length, `expected visible shared header in ${surface}`).toBeGreaterThan(0);
   for (const header of headers) {
     expect(
@@ -93,8 +94,8 @@ async function expectNoDocumentOverflow(page: Page, surface: string) {
     .toBe(true);
 }
 
-async function expectHeaderControlsContained(page: Page, surface: string) {
-  const violations = await page.locator("[data-panel-header]:visible").evaluateAll((headers) => {
+async function expectHeaderControlsContained(panel: Locator, surface: string) {
+  const violations = await panel.locator("[data-panel-header]:visible").evaluateAll((headers) => {
     const failures: string[] = [];
     for (const header of headers) {
       const headerRect = header.getBoundingClientRect();
@@ -125,7 +126,10 @@ async function expectHeaderControlsContained(page: Page, surface: string) {
 
 async function constrainDockviewPanel(panel: import("@playwright/test").Locator, width: number) {
   await panel.evaluate((element, panelWidth) => {
-    const target = element.closest<HTMLElement>(".dv-panel-view, .dv-panel") ?? element;
+    const target =
+      element.closest<HTMLElement>(".dv-panel-view, .dv-panel") ??
+      (element.hasAttribute("data-portal-panel") ? element.parentElement : element) ??
+      element;
     target.style.flex = `0 0 ${panelWidth}px`;
     target.style.minWidth = `${panelWidth}px`;
     target.style.width = `${panelWidth}px`;
@@ -142,12 +146,12 @@ test.describe("shared panel toolbars", () => {
 
     await session.clickTab("Files");
     await expect(session.files).toBeVisible();
-    await expectHeadersAtHeight(testPage, 30, "Files");
+    await expectHeadersAtHeight(session.files, 30, "Files");
     await expectNoDocumentOverflow(testPage, "Files");
 
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible();
-    await expectHeadersAtHeight(testPage, 30, "Changes");
+    await expectHeadersAtHeight(session.changes, 30, "Changes");
     await expectNoDocumentOverflow(testPage, "Changes");
 
     await session.addBrowserPanel();
@@ -155,7 +159,7 @@ test.describe("shared panel toolbars", () => {
     await session.browserAddressInput.fill(
       "https://example.test/a-very-long-preview-path-that-must-remain-in-the-toolbar-input",
     );
-    await expectHeadersAtHeight(testPage, 30, "Browser");
+    await expectHeadersAtHeight(session.browserPanel, 30, "Browser");
     await expectNoDocumentOverflow(testPage, "Browser");
   });
 
@@ -175,7 +179,7 @@ test.describe("shared panel toolbars", () => {
     );
     await session.clickTab("Files");
     await expect(session.files).toBeVisible();
-    await expectHeadersAtHeight(testPage, 30, "768px Files");
+    await expectHeadersAtHeight(session.files, 30, "768px Files");
     await expectNoDocumentOverflow(testPage, "768px Files");
   });
 
@@ -191,15 +195,16 @@ test.describe("shared panel toolbars", () => {
     await constrainDockviewPanel(session.changes, 240);
     await expect(session.changes.getByTestId("panel-header-overflow").first()).toBeVisible();
     await session.changes.getByTestId("panel-header-overflow").first().click();
-    await expect(testPage.getByRole("menuitem", { name: "Diff", exact: true })).toBeVisible();
+    await expect(testPage.getByRole("menuitem", { name: "Diff", exact: true })).toHaveCount(0);
+    await expect(testPage.getByRole("menuitem", { name: "Review", exact: true })).toHaveCount(0);
     await testPage.keyboard.press("Escape");
-    await expectHeadersAtHeight(testPage, 30, "narrow Changes");
+    await expectHeadersAtHeight(session.changes, 30, "narrow Changes");
 
     await session.addBrowserPanel();
     await expect(session.browserPanel).toBeVisible();
     await constrainDockviewPanel(session.browserPanel, 240);
     await expect(session.browserPanel.getByTestId("panel-header-overflow")).toBeVisible();
-    await expectHeadersAtHeight(testPage, 30, "narrow Browser");
+    await expectHeadersAtHeight(session.browserPanel, 30, "narrow Browser");
     await expectNoDocumentOverflow(testPage, "narrow panel actions");
   });
 
@@ -293,7 +298,10 @@ test.describe("shared panel toolbars", () => {
     const diffHeader = selector.locator("xpath=ancestor::*[@data-panel-header]");
     await constrainDockviewPanel(diffHeader, 240);
     await expect(selector).toBeVisible();
-    await expectHeaderControlsContained(testPage, "narrow multiple-PR Changes");
+    await expectHeaderControlsContained(
+      diffHeader.locator("xpath=.."),
+      "narrow multiple-PR Changes",
+    );
 
     const overflow = diffHeader.getByTestId("panel-header-overflow");
     await expect(overflow).toBeVisible();
@@ -305,6 +313,84 @@ test.describe("shared panel toolbars", () => {
     await expectNoDocumentOverflow(testPage, "narrow multiple-PR Changes");
   });
 
+  test("keeps narrow embedded canvas actions reachable beside the workbench", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let canvasId: string | undefined;
+    try {
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
+      canvasId = seeded.canvas.id;
+      const canvasPanel = testPage.getByTestId("canvas-host-panel");
+
+      await expect(canvasPanel).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("canvas-host-state")).toHaveText("Ready", {
+        timeout: 20_000,
+      });
+      await constrainDockviewPanel(canvasPanel, 240);
+
+      const overflow = canvasPanel.getByTestId("panel-header-overflow");
+      await expect(overflow).toBeVisible();
+      await overflow.click();
+      await expect(
+        testPage.getByRole("menuitem", { name: "Releases and permissions", exact: true }),
+      ).toBeVisible();
+      await expect(
+        testPage.getByRole("menuitem", { name: "Share canvas", exact: true }),
+      ).toBeVisible();
+      await expect(
+        testPage.getByRole("menuitem", { name: "Promote canvas", exact: true }),
+      ).toBeVisible();
+      await testPage.keyboard.press("Escape");
+
+      await expectHeaderControlsContained(canvasPanel, "narrow embedded canvas");
+      await expectNoDocumentOverflow(testPage, "narrow embedded canvas");
+    } finally {
+      if (canvasId) await removeCanvas(apiClient, canvasId);
+      await releaseFeature();
+    }
+  });
+
+  test("keeps a dirty editor save action and secondary actions reachable when narrow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await createToolbarTask(testPage, apiClient, seedData, "Narrow editor actions");
+
+    await session.clickTab("Files");
+    await expect(session.files).toBeVisible();
+    await session.fileTreeNode("walkthrough_base.txt").click();
+
+    const editor = testPage.locator(".monaco-editor:visible").first();
+    await expect(editor).toBeVisible({ timeout: 20_000 });
+    await editor.click();
+    await expect(editor.locator(".native-edit-context")).toBeFocused({ timeout: 5_000 });
+    await testPage.keyboard.press("End");
+    await testPage.keyboard.insertText("\n// toolbar coverage");
+
+    const editorPanel = testPage.locator('[data-portal-panel="preview:file-editor"]');
+    await expect(editorPanel.locator("[data-panel-header]:visible")).toHaveCount(1, {
+      timeout: 10_000,
+    });
+    await constrainDockviewPanel(editorPanel, 240);
+    const editorHeader = editorPanel.locator("[data-panel-header]:visible").first();
+    await expect(editorHeader.getByTestId("panel-header-overflow")).toBeVisible();
+    await expect(editorHeader.getByRole("button", { name: /Save/ })).toBeEnabled({
+      timeout: 10_000,
+    });
+    await expectHeaderControlsContained(editorPanel, "narrow dirty editor");
+
+    await editorHeader.getByTestId("panel-header-overflow").click();
+    await expect(testPage.getByRole("menuitem", { name: /word wrap/i })).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expectNoDocumentOverflow(testPage, "narrow dirty editor");
+  });
+
   test("uses touch geometry and contains controls at fine-pointer phone widths", async ({
     testPage,
     apiClient,
@@ -313,14 +399,16 @@ test.describe("shared panel toolbars", () => {
     await testPage.setViewportSize({ width: 390, height: 844 });
     expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(false);
     await createToolbarTask(testPage, apiClient, seedData, "Fine pointer phone toolbar");
+    const mobileFiles = testPage.getByTestId("files-panel");
+    const mobileChanges = testPage.getByTestId("mobile-changes-panel");
 
     for (const width of [390, 767]) {
       await testPage.setViewportSize({ width, height: 844 });
       await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
       await testPage.getByRole("button", { name: "Files", exact: true }).click();
       await expect(testPage.getByTestId("file-tree-scroll")).toBeVisible();
-      await expectHeadersAtHeight(testPage, 48, `${width}px fine-pointer Files`);
-      await expectHeaderControlsContained(testPage, `${width}px fine-pointer Files`);
+      await expectHeadersAtHeight(mobileFiles, 48, `${width}px fine-pointer Files`);
+      await expectHeaderControlsContained(mobileFiles, `${width}px fine-pointer Files`);
       await expect(testPage.getByRole("button", { name: "Search files", exact: true })).toHaveCSS(
         "height",
         "44px",
@@ -329,8 +417,8 @@ test.describe("shared panel toolbars", () => {
 
       await testPage.getByRole("button", { name: /Changes/ }).click();
       await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible();
-      await expectHeadersAtHeight(testPage, 48, `${width}px fine-pointer Changes`);
-      await expectHeaderControlsContained(testPage, `${width}px fine-pointer Changes`);
+      await expectHeadersAtHeight(mobileChanges, 48, `${width}px fine-pointer Changes`);
+      await expectHeaderControlsContained(mobileChanges, `${width}px fine-pointer Changes`);
       await expectNoDocumentOverflow(testPage, `${width}px fine-pointer Changes`);
     }
   });

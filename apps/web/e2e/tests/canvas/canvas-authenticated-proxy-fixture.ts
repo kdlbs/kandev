@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { request as httpRequest, type ClientRequest } from "node:http";
+import { request as httpRequest, type ClientRequest, type IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import { createServer as createTLSServer, type Server as TLSServer } from "node:https";
 import fs from "node:fs";
@@ -46,6 +46,7 @@ export async function startCanvasAuthenticatedProxy(
   const backend = new URL(backendURL);
   const observations: CanvasProxyObservation[] = [];
   const upstreamRequests = new Set<ClientRequest>();
+  const upstreamResponses = new Set<IncomingMessage>();
   const server = createTLSServer(
     {
       key: fs.readFileSync(certificate.keyPath),
@@ -81,6 +82,7 @@ export async function startCanvasAuthenticatedProxy(
         "x-forwarded-host": publicHost,
         "x-forwarded-proto": "https",
       };
+      let upstreamResponse: IncomingMessage | undefined;
       const upstream = httpRequest(
         {
           hostname: backend.hostname,
@@ -90,21 +92,23 @@ export async function startCanvasAuthenticatedProxy(
           headers,
         },
         (response) => {
+          upstreamResponse = response;
+          upstreamResponses.add(response);
+          response.once("close", () => upstreamResponses.delete(response));
           outgoing.writeHead(response.statusCode ?? 502, response.headers);
           outgoing.flushHeaders();
           response.once("error", (error) => {
             if (!outgoing.destroyed) outgoing.destroy(error);
-            if (!upstream.destroyed) upstream.destroy(error);
+            destroyUpstream(error);
           });
-          response.once("aborted", () => {
-            if (!upstream.destroyed) upstream.destroy();
-          });
+          response.once("aborted", () => destroyUpstream());
           response.pipe(outgoing);
         },
       );
       upstreamRequests.add(upstream);
       const destroyUpstream = (error?: Error) => {
         if (!upstream.destroyed) upstream.destroy(error);
+        if (upstreamResponse && !upstreamResponse.destroyed) upstreamResponse.destroy(error);
       };
       const destroyIncompleteUpstream = () => {
         if (!incoming.complete) destroyUpstream();
@@ -173,7 +177,7 @@ export async function startCanvasAuthenticatedProxy(
     observations: () => observations.map((observation) => ({ ...observation })),
     activeUpstreamRequests: () => upstreamRequests.size,
     close: async () => {
-      await closeServer(server, sockets, upstreamRequests);
+      await closeServer(server, sockets, upstreamRequests, upstreamResponses);
       fs.rmSync(certificate.directory, { recursive: true, force: true });
     },
   };
@@ -269,9 +273,11 @@ function closeServer(
   server: TLSServer,
   sockets: Set<Socket>,
   upstreamRequests: Set<ClientRequest>,
+  upstreamResponses: Set<IncomingMessage>,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     for (const request of upstreamRequests) request.destroy();
+    for (const response of upstreamResponses) response.destroy();
     for (const socket of sockets) socket.destroy();
     server.close((error) => (error ? reject(error) : resolve()));
   });

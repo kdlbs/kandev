@@ -155,6 +155,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
       }
       overflow={
         <ChangesPanelHeaderOverflowActions
+          showDiffReview={hasChanges || hasCommits || !!hasPRFiles}
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
           onRequestWalkthrough={onRequestWalkthrough}

@@ -80,6 +80,43 @@ async function expectNoOverflow(page: Page, surface: string) {
     .toBe(true);
 }
 
+async function expectTouchControls(page: Page, surface: string) {
+  const controls = await page.locator("[data-panel-header]:visible").evaluateAll((headers) => {
+    const measurements: Array<{
+      label: string;
+      tagName: string;
+      height: number;
+      width: number;
+    }> = [];
+    for (const header of headers) {
+      const candidates = header.querySelectorAll<HTMLElement>(
+        "button, a, input, select, textarea, [role='button']",
+      );
+      for (const control of candidates) {
+        const style = window.getComputedStyle(control);
+        if (style.display === "none" || style.visibility === "hidden") continue;
+        const rect = control.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        measurements.push({
+          label: control.getAttribute("aria-label") ?? control.textContent ?? control.tagName,
+          tagName: control.tagName,
+          height: rect.height,
+          width: rect.width,
+        });
+      }
+    }
+    return measurements;
+  });
+
+  expect(controls, `${surface} should render touch controls`).not.toEqual([]);
+  for (const control of controls) {
+    expect(control.height, `${surface} ${control.label} height`).toBeGreaterThanOrEqual(44);
+    if (!new Set(["INPUT", "SELECT", "TEXTAREA"]).has(control.tagName)) {
+      expect(control.width, `${surface} ${control.label} width`).toBeGreaterThanOrEqual(44);
+    }
+  }
+}
+
 test.describe("touch panel toolbars", () => {
   test("keeps the 390px phone panels contained and preserves task navigation", async ({
     testPage,
@@ -93,6 +130,7 @@ test.describe("touch panel toolbars", () => {
     await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     await expect(testPage.getByTestId("file-tree-scroll")).toBeVisible();
     await expectTouchHeaders(testPage, "390px Files");
+    await expectTouchControls(testPage, "390px Files");
 
     const searchButton = testPage.getByRole("button", { name: "Search files", exact: true });
     await expect(searchButton).toBeVisible();
@@ -102,6 +140,7 @@ test.describe("touch panel toolbars", () => {
     await testPage.getByRole("button", { name: /Changes/ }).tap();
     await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible();
     await expectTouchHeaders(testPage, "390px Changes");
+    await expectTouchControls(testPage, "390px Changes");
     await expectNoOverflow(testPage, "390px Changes");
 
     await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
@@ -120,6 +159,7 @@ test.describe("touch panel toolbars", () => {
     await testPage.getByRole("button", { name: "Files", exact: true }).tap();
     await expect(testPage.getByTestId("file-tree-scroll")).toBeVisible();
     await expectTouchHeaders(testPage, "767px Files");
+    await expectTouchControls(testPage, "767px Files");
     await expectNoOverflow(testPage, "767px Files");
 
     const taskHref = await testPage.url();
@@ -131,6 +171,7 @@ test.describe("touch panel toolbars", () => {
     expect(await tabletTestPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
     await expect(tabletTestPage.getByTestId("file-tree-scroll")).toBeVisible();
     await expectTouchHeaders(tabletTestPage, "900px Files");
+    await expectTouchControls(tabletTestPage, "900px Files");
     await expectNoOverflow(tabletTestPage, "900px Files");
   });
 });
