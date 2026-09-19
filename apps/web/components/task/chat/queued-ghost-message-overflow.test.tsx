@@ -6,6 +6,9 @@ import { QueuedGhostMessage } from "./queued-ghost-message";
 const PREVIEW_TEST_ID = "queue-entry-text";
 const EXPAND_TEST_ID = "queue-entry-expand";
 const REMOVE_TEST_ID = "queue-entry-remove";
+const QUEUED_TAIL = "queued-239";
+const EXPANDED_ATTRIBUTE = "true";
+const EXPANDED_DATA_ATTRIBUTE = "data-expanded";
 
 type Geometry = { scrollHeight: number; clientHeight: number };
 type ResizeListener = EventListenerOrEventListenerObject;
@@ -210,6 +213,23 @@ afterEach(() => {
 });
 
 describe("queued message rendered overflow measurement semantics", () => {
+  it("bounds Markdown in both collapsed and expanded states", () => {
+    geometry = () => ({ scrollHeight: 80, clientHeight: 44 });
+    const content = Array.from({ length: 240 }, (_, index) => `queued-${index}`).join("\n");
+    renderMessage(content);
+
+    const preview = screen.getByTestId(PREVIEW_TEST_ID);
+    expect(preview.textContent).not.toContain(QUEUED_TAIL);
+    expect(preview.querySelectorAll("br").length).toBeLessThanOrEqual(199);
+
+    fireEvent.click(screen.getByTestId(EXPAND_TEST_ID));
+
+    expect(screen.getByTestId(PREVIEW_TEST_ID).getAttribute(EXPANDED_DATA_ATTRIBUTE)).toBe(
+      EXPANDED_ATTRIBUTE,
+    );
+    expect(screen.getByTestId(PREVIEW_TEST_ID).textContent).not.toContain(QUEUED_TAIL);
+  });
+
   // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.9
   it("offers disclosure for short content that renders beyond the collapsed cap", () => {
     geometry = () => ({ scrollHeight: 45, clientHeight: 44 });
@@ -275,12 +295,14 @@ describe("queued message rendered overflow measurement semantics", () => {
     geometry = () => ({ scrollHeight: 80, clientHeight: 44 });
     renderMessage("x".repeat(120));
     fireEvent.click(screen.getByTestId(EXPAND_TEST_ID));
-    expect(screen.getByTestId(PREVIEW_TEST_ID).getAttribute("data-expanded")).toBe("true");
+    expect(screen.getByTestId(PREVIEW_TEST_ID).getAttribute(EXPANDED_DATA_ATTRIBUTE)).toBe(
+      EXPANDED_ATTRIBUTE,
+    );
 
     geometry = () => ({ scrollHeight: 40, clientHeight: 40 });
     emitWindowResize();
 
-    expect(screen.getByTestId(PREVIEW_TEST_ID).getAttribute("data-expanded")).toBe("false");
+    expect(screen.getByTestId(PREVIEW_TEST_ID).getAttribute(EXPANDED_DATA_ATTRIBUTE)).toBe("false");
     expect(screen.queryByTestId(EXPAND_TEST_ID)).toBeNull();
   });
 
@@ -502,7 +524,7 @@ describe("queued message rendered overflow reset and styling", () => {
         onRemove={() => undefined}
       />,
     );
-    expect(screen.getByTestId(PREVIEW_TEST_ID).getAttribute("data-expanded")).toBe("false");
+    expect(screen.getByTestId(PREVIEW_TEST_ID).getAttribute(EXPANDED_DATA_ATTRIBUTE)).toBe("false");
   });
 
   it("does not animate maximum-height changes", () => {

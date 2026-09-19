@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"testing"
@@ -15,7 +16,6 @@ import (
 	"github.com/kandev/kandev/internal/plugins/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // @covers AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
@@ -114,7 +114,6 @@ func TestConversationReadsRequireAuthenticationBeforeLookup(t *testing.T) {
 // @covers AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
 func TestConversationReadsRejectJournalFallbackForUnauthorizedLiveSession(t *testing.T) {
 	_, service := newTestRouter(t)
-	service.SetConversationJournalDB(newTestPool(t).Writer())
 	service.registry.Add(conversationPluginRecord("kandev-plugin-history", time.Now().UTC()))
 	router := registerPluginRoutesWithIdentity(
 		t,
@@ -135,23 +134,54 @@ func TestConversationReadsRejectJournalFallbackForUnauthorizedLiveSession(t *tes
 }
 
 type fakeConversationReader struct {
-	session  *taskmodels.TaskSession
-	messages []*taskmodels.Message
-	turns    []*taskmodels.Turn
-	hasMore  bool
-	request  taskservice.ListMessagesRequest
-	authErr  error
+	session              *taskmodels.TaskSession
+	sessionErr           error
+	messages             []*taskmodels.Message
+	turns                []*taskmodels.Turn
+	hasMore              bool
+	request              taskservice.ListMessagesRequest
+	sourceMessages       taskmodels.ConversationMessagePage
+	sourceTurns          taskmodels.ConversationTurnPage
+	sourceRevision       taskmodels.ConversationRevision
+	sourceMessageRequest taskmodels.ConversationMessagePageRequest
+	sourceTurnRequest    taskmodels.ConversationTurnPageRequest
+	sourceMessageReads   int
+	sourceTurnReads      int
+	sourceRevisionReads  int
 }
 
-func (f *fakeConversationReader) AuthorizeWorkspaceAccess(_ context.Context, _ string) error {
-	return f.authErr
+func (f *fakeConversationReader) AuthorizeWorkspaceAccess(context.Context, string) error {
+	return nil
 }
 
 func (f *fakeConversationReader) GetTaskSession(
 	_ context.Context,
 	_ string,
 ) (*taskmodels.TaskSession, error) {
-	return f.session, nil
+	return f.session, f.sessionErr
+}
+
+func TestConversationReadsClassifySessionLookupFailuresAsRetryable(t *testing.T) {
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", time.Now().UTC()))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		&fakeConversationReader{sessionErr: errors.New("database unavailable")},
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-1")
+	paths := []string{
+		"/api/plugins/kandev-plugin-history/conversation/task-sessions/session-1/messages",
+		"/api/plugins/kandev-plugin-history/conversation/task-sessions/session-1/turns",
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-1/messages?task_id=task-1",
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-1/turns?task_id=task-1",
+	}
+	for _, path := range paths {
+		response := doAuthedRequest(router, http.MethodGet, path, "", headers)
+		require.Equal(t, http.StatusInternalServerError, response.Code, path)
+		require.JSONEq(t, `{"error":{"code":"upstream_failure","message":"conversation service unavailable","retryable":true}}`, response.Body.String(), path)
+	}
 }
 
 func (f *fakeConversationReader) ListMessagesPaginated(
@@ -167,6 +197,151 @@ func (f *fakeConversationReader) ListTurnsBySession(
 	_ string,
 ) ([]*taskmodels.Turn, error) {
 	return f.turns, nil
+}
+
+func (f *fakeConversationReader) ReadConversationRevision(
+	_ context.Context,
+	_ string,
+) (taskmodels.ConversationRevision, error) {
+	f.sourceRevisionReads++
+	return f.sourceRevision, nil
+}
+
+func (f *fakeConversationReader) ReadConversationMessagesPage(
+	_ context.Context,
+	request taskmodels.ConversationMessagePageRequest,
+) (taskmodels.ConversationMessagePage, error) {
+	f.sourceMessageReads++
+	f.sourceMessageRequest = request
+	return f.sourceMessages, nil
+}
+
+func (f *fakeConversationReader) ReadConversationTurnsPage(
+	_ context.Context,
+	request taskmodels.ConversationTurnPageRequest,
+) (taskmodels.ConversationTurnPage, error) {
+	f.sourceTurnReads++
+	f.sourceTurnRequest = request
+	return f.sourceTurns, nil
+}
+
+func TestConversationSourceMessagesReturnRevisionBoundDTOs(t *testing.T) {
+	created := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	reader := &fakeConversationReader{
+		session: &taskmodels.TaskSession{ID: "session-source-http", TaskID: "task-source-http"},
+		sourceMessages: taskmodels.ConversationMessagePage{
+			Messages: []*taskmodels.Message{{
+				ID:            "message-source-http",
+				TaskSessionID: "session-source-http",
+				TaskID:        "task-source-http",
+				AuthorType:    taskmodels.MessageAuthorUser,
+				Content:       "<kandev-system>hidden</kandev-system>prompt",
+				CreatedAt:     created,
+				UpdatedAt:     created,
+			}},
+			Revision: 7,
+		},
+	}
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", created))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		reader,
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-source-http")
+
+	response := doAuthedRequest(
+		router,
+		http.MethodGet,
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-source-http/messages?task_id=task-source-http&author_type=user&limit=25&expected_revision=7",
+		"",
+		headers,
+	)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.JSONEq(t, `{"messages":[{"id":"message-source-http","taskId":"task-source-http","sessionId":"session-source-http","authorType":"user","type":"message","content":"prompt","createdAt":"2026-09-16T12:00:00Z","updatedAt":"2026-09-16T12:00:00Z"}],"hasMore":false,"cursor":null,"epoch":"`+service.conversationEpoch+`","revision":"7"}`, response.Body.String())
+	require.Equal(t, "session-source-http", reader.sourceMessageRequest.SessionID)
+	require.Equal(t, []string{"user"}, reader.sourceMessageRequest.Authors)
+}
+
+func TestConversationSourceReadsRequireMatchingRevision(t *testing.T) {
+	created := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	reader := &fakeConversationReader{
+		session:        &taskmodels.TaskSession{ID: "session-source-conflict", TaskID: "task-source-conflict"},
+		sourceMessages: taskmodels.ConversationMessagePage{Revision: 9},
+	}
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", created))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		reader,
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-source-conflict")
+	response := doAuthedRequest(
+		router,
+		http.MethodGet,
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-source-conflict/messages?expected_revision=8",
+		"",
+		headers,
+	)
+
+	require.Equal(t, http.StatusConflict, response.Code)
+	require.JSONEq(t, `{"error":{"code":"reconciliation_required","message":"conversation revision changed","retryable":true}}`, response.Body.String())
+}
+
+func TestConversationSourceRevisionUsesDecimalString(t *testing.T) {
+	created := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	reader := &fakeConversationReader{
+		session:        &taskmodels.TaskSession{ID: "session-source-revision-http", TaskID: "task-source-revision-http"},
+		sourceRevision: taskmodels.ConversationRevision{SessionID: "session-source-revision-http", Exists: true, Revision: 11},
+	}
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", created))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		reader,
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-source-revision-http")
+	response := doAuthedRequest(
+		router,
+		http.MethodGet,
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-source-revision-http/revision",
+		"",
+		headers,
+	)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	require.JSONEq(t, `{"epoch":"`+service.conversationEpoch+`","revision":"11"}`, response.Body.String())
+}
+
+func TestConversationSourceTurnsRejectMessageOnlyAuthorFilter(t *testing.T) {
+	created := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	reader := &fakeConversationReader{session: &taskmodels.TaskSession{ID: "session-source-turn-http", TaskID: "task-source-turn-http"}}
+	_, service := newTestRouter(t)
+	service.registry.Add(conversationPluginRecord("kandev-plugin-history", created))
+	router := registerPluginRoutesWithIdentity(
+		t,
+		service,
+		authn.Identity{UserID: "user_1", Role: authn.RoleMember},
+		reader,
+	)
+	headers := conversationReadHeaders(t, service, router, "kandev-plugin-history", "session-source-turn-http")
+	response := doAuthedRequest(
+		router,
+		http.MethodGet,
+		"/api/plugins/kandev-plugin-history/conversation/v2/task-sessions/session-source-turn-http/turns?author_type=user",
+		"",
+		headers,
+	)
+
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.JSONEq(t, `{"error":{"code":"invalid_query","message":"author_type is not supported for turns","retryable":false}}`, response.Body.String())
 }
 
 // @covers AC-PLUGINS-PROMPT-HISTORY-HOST-002.1
@@ -321,15 +496,16 @@ func TestConversationStreamGrantFirstPageRenewsQueryBoundCursor(t *testing.T) {
 		reader,
 	)
 	binding := conversationBindingToken(t, router, "kandev-plugin-history")
-	snapshot, _, _, err := service.MintSessionStreamGrant(
+	snapshot, err := service.conversationTokens.mintSnapshot(
 		"kandev-plugin-history",
 		"user_1",
 		conversationGeneration(installedAt),
 		"session-1",
-		"consumer-1",
+		nil,
 		"",
+		nil,
 		0,
-		0,
+		"consumer-1",
 	)
 	require.NoError(t, err)
 	headers := map[string]string{
@@ -476,6 +652,47 @@ func TestConversationContinuationRenewPreservesSnapshot(t *testing.T) {
 	require.WithinDuration(t, time.Now().UTC().Add(10*time.Minute), renewed.ExpiresAt, time.Second)
 }
 
+func TestConversationContinuationRenewAuthenticatesBeforeParsing(t *testing.T) {
+	installedAt := time.Date(2026, 9, 19, 15, 0, 0, 0, time.UTC)
+	service, _, _ := newTestService(t)
+	service.registry.Add(conversationPluginRecord("messages-plugin", installedAt))
+	service.registry.Add(&store.Record{
+		Manifest:    manifest.Manifest{ID: "non-conversation-plugin"},
+		Status:      StatusActive,
+		InstalledAt: installedAt,
+	})
+	router := registerPluginRoutesWithIdentity(
+		t, service, authn.Identity{UserID: "user_1", Role: authn.RoleMember}, &fakeConversationReader{},
+	)
+
+	for _, pluginID := range []string{"missing-plugin", "non-conversation-plugin"} {
+		response := doAuthedRequest(
+			router,
+			http.MethodPost,
+			"/api/plugins/"+pluginID+"/conversation/continuation/renew",
+			`{`,
+			map[string]string{"Content-Type": "application/json"},
+		)
+		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+		require.JSONEq(t, `{"error":{"code":"not_found","message":"plugin not found","retryable":false}}`, response.Body.String())
+	}
+
+	for _, binding := range []string{"", "invalid-binding"} {
+		response := doAuthedRequest(
+			router,
+			http.MethodPost,
+			"/api/plugins/messages-plugin/conversation/continuation/renew",
+			`{"cursor":"invalid","snapshot_token":"invalid"}`,
+			map[string]string{
+				"Content-Type":            "application/json",
+				"X-Kandev-Plugin-Binding": binding,
+			},
+		)
+		require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+		require.JSONEq(t, `{"error":{"code":"unauthenticated","message":"invalid conversation binding","retryable":false}}`, response.Body.String())
+	}
+}
+
 // @covers AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
 func TestConversationContinuationRenewRejectsExpiredTokens(t *testing.T) {
 	current := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -579,15 +796,16 @@ func conversationReadHeaders(
 	binding := conversationBindingToken(t, router, pluginID)
 	record, err := service.Get(pluginID)
 	require.NoError(t, err)
-	snapshot, _, _, err := service.MintSessionStreamGrant(
+	snapshot, err := service.conversationTokens.mintSnapshot(
 		pluginID,
 		"user_1",
 		conversationGeneration(record.InstalledAt),
 		sessionID,
-		"test-consumer",
+		nil,
 		"",
-		service.SessionEvents().Watermark(sessionID),
-		service.SessionEvents().Watermark(sessionID),
+		nil,
+		0,
+		"test-consumer",
 	)
 	require.NoError(t, err)
 	return map[string]string{
@@ -595,6 +813,8 @@ func conversationReadHeaders(
 		"X-Kandev-Snapshot-Token": snapshot,
 	}
 }
+
+func stringPtr(value string) *string { return &value }
 
 func TestFilterTurnsByTaskNarrowsMixedTaskSession(t *testing.T) {
 	turns := []*taskmodels.Turn{
@@ -610,136 +830,3 @@ func TestFilterTurnsByTaskNarrowsMixedTaskSession(t *testing.T) {
 		t.Fatalf("empty task filter must be a no-op, got %d", len(filtered))
 	}
 }
-
-type managedConversationBridgeStub struct {
-	descriptor  pluginsdk.AgentConversationDescriptor
-	resolveErr  error
-	dispatchErr error
-	dispatched  struct {
-		pluginID, workspaceID, conversationKey, content, occurrenceKey string
-	}
-}
-
-func (s *managedConversationBridgeStub) Ensure(context.Context, string, pluginsdk.AgentConversationSpec) (pluginsdk.AgentConversationDescriptor, string, error) {
-	return pluginsdk.AgentConversationDescriptor{}, "", nil
-}
-
-func (s *managedConversationBridgeStub) Dispatch(_ context.Context, pluginID, workspaceID, conversationKey, content, occurrenceKey string) (pluginsdk.AgentConversationDispatch, error) {
-	s.dispatched.pluginID = pluginID
-	s.dispatched.workspaceID = workspaceID
-	s.dispatched.conversationKey = conversationKey
-	s.dispatched.content = content
-	s.dispatched.occurrenceKey = occurrenceKey
-	if s.dispatchErr != nil {
-		return pluginsdk.AgentConversationDispatch{}, s.dispatchErr
-	}
-	return pluginsdk.AgentConversationDispatch{Status: "sent"}, nil
-}
-
-func (s *managedConversationBridgeStub) Delete(context.Context, string, string, string) (int32, error) {
-	return 0, nil
-}
-
-func (s *managedConversationBridgeStub) DeleteAllForPlugin(context.Context, string) (int32, error) {
-	return 0, nil
-}
-
-func (s *managedConversationBridgeStub) ResolveManagedConversation(context.Context, string, string, string) (pluginsdk.AgentConversationDescriptor, error) {
-	if s.resolveErr != nil {
-		return pluginsdk.AgentConversationDescriptor{}, s.resolveErr
-	}
-	return s.descriptor, nil
-}
-
-func managedConversationPluginRecord(id string, installedAt time.Time) *store.Record {
-	return &store.Record{
-		Manifest: manifest.Manifest{ID: id, Capabilities: manifest.Capabilities{AgentConversation: true}},
-		Status:   StatusActive, InstalledAt: installedAt,
-	}
-}
-
-func TestManagedConversationHandlersRequireManagedCapabilityAndBinding(t *testing.T) {
-	svc, _, _ := newTestService(t)
-	reader := &fakeConversationReader{}
-	bridge := &managedConversationBridgeStub{descriptor: pluginsdk.AgentConversationDescriptor{
-		TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1", ConversationKey: "coordinator",
-	}}
-	svc.SetAgentConversations(bridge)
-	router := registerPluginRoutesWithIdentity(t, svc, authn.Identity{UserID: "user_1", Role: authn.RoleMember}, reader)
-	svc.registry.Add(managedConversationPluginRecord("plugin-managed", time.Now().UTC()))
-
-	path := "/api/plugins/plugin-managed/conversation/managed/session-1?workspace_id=workspace-1"
-	missingBinding := doAuthedRequest(router, http.MethodGet, path, "", nil)
-	require.Equal(t, http.StatusUnauthorized, missingBinding.Code)
-
-	binding := conversationBindingToken(t, router, "plugin-managed")
-	headers := map[string]string{"X-Kandev-Plugin-Binding": binding, "Content-Type": "application/json"}
-	resolved := doAuthedRequest(router, http.MethodGet, path, "", headers)
-	require.Equal(t, http.StatusOK, resolved.Code, resolved.Body.String())
-	var managed managedConversationResponse
-	require.NoError(t, json.Unmarshal(resolved.Body.Bytes(), &managed))
-	require.Equal(t, "task-1", managed.TaskID)
-	require.Equal(t, "session-1", managed.SessionID)
-	require.Equal(t, "workspace-1", managed.WorkspaceID)
-	require.NotEmpty(t, managed.ManagedConversationToken)
-
-	dispatched := doAuthedRequest(router, http.MethodPost,
-		"/api/plugins/plugin-managed/conversation/managed/session-1/dispatch?workspace_id=workspace-1",
-		`{"content":"hello","occurrenceKey":"occ-1"}`, headers)
-	require.Equal(t, http.StatusOK, dispatched.Code, dispatched.Body.String())
-	require.JSONEq(t, `{"status":"sent"}`, dispatched.Body.String())
-	require.Equal(t, "plugin-managed", bridge.dispatched.pluginID)
-	require.Equal(t, "workspace-1", bridge.dispatched.workspaceID)
-	require.Equal(t, "coordinator", bridge.dispatched.conversationKey)
-	require.Equal(t, "hello", bridge.dispatched.content)
-	require.Equal(t, "occ-1", bridge.dispatched.occurrenceKey)
-
-	reader.authErr = assertErr{}
-	foreignWorkspace := doAuthedRequest(router, http.MethodGet, path, "", headers)
-	require.Equal(t, http.StatusNotFound, foreignWorkspace.Code)
-}
-
-func TestManagedConversationHandlersDoNotGrantTranscriptReads(t *testing.T) {
-	router, svc := newTestRouter(t)
-	svc.registry.Add(managedConversationPluginRecord("plugin-managed", time.Now().UTC()))
-	binding := conversationBindingToken(t, router, "plugin-managed")
-
-	response := doAuthedRequest(router, http.MethodGet,
-		"/api/plugins/plugin-managed/conversation/task-sessions/session-1/messages",
-		"", map[string]string{"X-Kandev-Plugin-Binding": binding})
-	require.Equal(t, http.StatusNotFound, response.Code)
-}
-
-func TestManagedConversationGrantReadsOnlyItsResolvedTranscript(t *testing.T) {
-	created := time.Now().UTC()
-	reader := &fakeConversationReader{
-		session:  &taskmodels.TaskSession{ID: "session-1", TaskID: "task-1"},
-		messages: []*taskmodels.Message{{ID: "message-1", TaskSessionID: "session-1", TaskID: "task-1", AuthorType: taskmodels.MessageAuthorUser, Content: "managed", CreatedAt: created}},
-	}
-	svc, _, _ := newTestService(t)
-	bridge := &managedConversationBridgeStub{descriptor: pluginsdk.AgentConversationDescriptor{TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1"}}
-	svc.SetAgentConversations(bridge)
-	svc.registry.Add(managedConversationPluginRecord("plugin-managed", created))
-	router := registerPluginRoutesWithIdentity(t, svc, authn.Identity{UserID: "user_1", Role: authn.RoleMember}, reader)
-	binding := conversationBindingToken(t, router, "plugin-managed")
-	resolved := doAuthedRequest(router, http.MethodGet, "/api/plugins/plugin-managed/conversation/managed/session-1?workspace_id=workspace-1", "", map[string]string{"X-Kandev-Plugin-Binding": binding})
-	require.Equal(t, http.StatusOK, resolved.Code, resolved.Body.String())
-	var descriptor managedConversationResponse
-	require.NoError(t, json.Unmarshal(resolved.Body.Bytes(), &descriptor))
-	record, err := svc.Get("plugin-managed")
-	require.NoError(t, err)
-	snapshot, _, _, err := svc.MintSessionStreamGrant("plugin-managed", "user_1", conversationGeneration(record.InstalledAt), "session-1", "consumer", "", 0, 0)
-	require.NoError(t, err)
-	headers := map[string]string{"X-Kandev-Plugin-Binding": binding, "X-Kandev-Snapshot-Token": snapshot, "X-Kandev-Managed-Conversation": descriptor.ManagedConversationToken}
-	page := doAuthedRequest(router, http.MethodGet, "/api/plugins/plugin-managed/conversation/task-sessions/session-1/messages?task_id=task-1", "", headers)
-	require.Equal(t, http.StatusOK, page.Code, page.Body.String())
-	require.Contains(t, page.Body.String(), "managed")
-
-	bridge.descriptor.TaskID = "replacement-task"
-	stale := doAuthedRequest(router, http.MethodGet, "/api/plugins/plugin-managed/conversation/task-sessions/session-1/messages?task_id=task-1", "", headers)
-	require.Equal(t, http.StatusNotFound, stale.Code, stale.Body.String())
-}
-
-type assertErr struct{}
-
-func (assertErr) Error() string { return "denied" }

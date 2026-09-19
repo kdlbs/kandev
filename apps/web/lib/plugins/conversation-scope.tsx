@@ -9,6 +9,7 @@ import { isRawSessionEvent } from "@/lib/ws/ordered-session-events";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { RawSessionEvent } from "@/lib/ws/client";
 import type { PluginConversationError } from "./types";
+import { SourceConversationScope } from "./conversation-source-scope";
 
 export type OrderedReady = {
   bindingToken: string;
@@ -19,10 +20,13 @@ export type OrderedReady = {
   resumeToken: string;
   consumerId: string;
   watermark: number;
+  source?: boolean;
+  epoch?: string;
+  revision?: string;
 };
 
-type Binding = Pick<OrderedReady, "bindingToken" | "generation" | "expiresAt">;
-type SnapshotKind = "messages" | "turns";
+export type Binding = Pick<OrderedReady, "bindingToken" | "generation" | "expiresAt">;
+export type SnapshotKind = "messages" | "turns";
 type ConversationEventListener = (event: RawSessionEvent) => boolean;
 type SnapshotKey = string;
 type OrderedSubscribeAck =
@@ -66,7 +70,16 @@ export type ConversationScope = {
   ): () => void;
   subscribeRebind(listener: RebindListener): () => void;
   isTerminal(): boolean;
-  commitSnapshot(kind: SnapshotKind, snapshotKey?: SnapshotKey): void;
+  commitSnapshot(
+    kind: SnapshotKind,
+    snapshotKey?: SnapshotKey,
+    epoch?: string,
+    revision?: string,
+  ): void;
+  setSourceSnapshot?(epoch: string | undefined, revision: string | undefined): void;
+  acceptChange?(value: unknown): void;
+  acceptTerminalRemoval?(): void;
+  readonly source?: boolean;
   invalidateSnapshot(kind: SnapshotKind, snapshotKey?: SnapshotKey): void;
   reconnect(): void;
   accept(event: RawSessionEvent): void;
@@ -93,7 +106,10 @@ export async function parseConversationResponse<T>(response: Response): Promise<
   );
 }
 
-export async function fetchBinding(pluginId: string, signal: AbortSignal): Promise<Binding> {
+export async function fetchConversationBinding(
+  pluginId: string,
+  signal: AbortSignal,
+): Promise<Binding> {
   const response = await fetch(pluginConversationUrl(pluginId, "/conversation/binding"), {
     credentials: "include",
     cache: "no-store",
@@ -214,12 +230,6 @@ class OrderedConversationScope implements ConversationScope {
     readonly managedConversationToken?: string,
   ) {
     this.signal = controller.signal;
-  }
-
-  private managedSubscribePayload(): Record<string, string> {
-    return this.managedConversationToken
-      ? { managed_conversation_token: this.managedConversationToken }
-      : {};
   }
 
   ready(): Promise<OrderedReady> {
@@ -436,11 +446,20 @@ class OrderedConversationScope implements ConversationScope {
   }
 
   private getBinding() {
-    const pending = (this.bindingPromise ??= fetchBinding(this.pluginId, this.signal));
+    const pending = (this.bindingPromise ??= fetchConversationBinding(this.pluginId, this.signal));
     return pending.catch((error: unknown) => {
       if (this.bindingPromise === pending) this.bindingPromise = null;
       throw error;
     });
+  }
+
+  private managedSubscriptionIdentity(): Record<string, string> {
+    return this.managedConversationToken
+      ? {
+          task_id: this.taskId,
+          managed_conversation_token: this.managedConversationToken,
+        }
+      : {};
   }
   private async initializeReady(): Promise<OrderedReady> {
     const binding = await this.getBinding();
@@ -465,8 +484,8 @@ class OrderedConversationScope implements ConversationScope {
       consumer_id: this.consumerId,
       plugin_id: this.pluginId,
       generation: binding.generation,
+      ...this.managedSubscriptionIdentity(),
       binding_token: binding.bindingToken,
-      ...this.managedSubscribePayload(),
     });
     if (!ack.success) throw ack.error;
     this.consumerId = ack.consumer_id;
@@ -493,7 +512,7 @@ class OrderedConversationScope implements ConversationScope {
       return Promise.resolve(current);
     }
     if (this.bindingRefreshPromise) return this.bindingRefreshPromise;
-    this.bindingPromise = fetchBinding(this.pluginId, this.signal);
+    this.bindingPromise = fetchConversationBinding(this.pluginId, this.signal);
     const pending = this.bindingPromise
       .then(async (binding) => {
         if (binding.generation !== current.generation) {
@@ -585,8 +604,8 @@ class OrderedConversationScope implements ConversationScope {
       consumer_id: this.consumerId,
       plugin_id: this.pluginId,
       generation: binding.generation,
+      ...this.managedSubscriptionIdentity(),
       binding_token: binding.bindingToken,
-      ...this.managedSubscribePayload(),
     });
     if (!ack.success) {
       this.consumerId = previousConsumerId;
@@ -648,8 +667,8 @@ class OrderedConversationScope implements ConversationScope {
       consumer_id: this.consumerId,
       plugin_id: this.pluginId,
       generation: ready.generation,
+      ...this.managedSubscriptionIdentity(),
       binding_token: ready.bindingToken,
-      ...this.managedSubscribePayload(),
       last_seen_sequence: this.acknowledgedSequence,
       resume_token: this.currentResumeToken,
       replace_cursor: true,
@@ -707,8 +726,8 @@ class OrderedConversationScope implements ConversationScope {
       consumer_id: this.consumerId,
       plugin_id: this.pluginId,
       generation: ready.generation,
+      ...this.managedSubscriptionIdentity(),
       binding_token: ready.bindingToken,
-      ...this.managedSubscribePayload(),
       last_seen_sequence: this.acknowledgedSequence,
       resume_token: this.currentResumeToken,
     });
@@ -766,21 +785,47 @@ export function PluginConversationScopeProvider({
     () => new AbortController(),
     [generation, managedConversationToken, pluginId, presentation, sessionId, taskId],
   );
+  const sourceTransport = typeof getWebSocketClient()?.on === "function";
   const scope = React.useMemo<ConversationScope>(
     () =>
-      new OrderedConversationScope(
-        pluginId,
-        taskId,
-        sessionId,
-        controller,
-        managedConversationToken,
-      ),
-    [controller, managedConversationToken, pluginId, sessionId, taskId],
+      sourceTransport
+        ? new SourceConversationScope(
+            pluginId,
+            taskId,
+            sessionId,
+            controller,
+            managedConversationToken,
+          )
+        : new OrderedConversationScope(
+            pluginId,
+            taskId,
+            sessionId,
+            controller,
+            managedConversationToken,
+          ),
+    [controller, managedConversationToken, pluginId, sessionId, sourceTransport, taskId],
   );
   React.useLayoutEffect(() => {
     const client = getWebSocketClient();
     let sawDisconnect = false;
-    const removeListener = client?.onRawSessionEvent((event) => scope.accept(event));
+    const removeListener = scope.source
+      ? client?.on("session.conversation.changed", (message) => {
+          scope.acceptChange?.(message.payload);
+        })
+      : client?.onRawSessionEvent((event) => scope.accept(event));
+    const removeTerminalListener = scope.source
+      ? client?.on("session.removed", (message) => {
+          const payload = message.payload;
+          if (
+            payload &&
+            typeof payload === "object" &&
+            "session_id" in payload &&
+            payload.session_id === sessionId
+          ) {
+            scope.acceptTerminalRemoval?.();
+          }
+        })
+      : undefined;
     const removeStatusListener = client?.onConnectionStatus((status) => {
       if (status !== "connected") {
         sawDisconnect = true;
@@ -793,6 +838,7 @@ export function PluginConversationScopeProvider({
     });
     return () => {
       removeListener?.();
+      removeTerminalListener?.();
       removeStatusListener?.();
       scope.close();
       controller.abort();

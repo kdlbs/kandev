@@ -13,10 +13,22 @@ export function SettingsRedirect({ to }: { to: string }) {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace(to);
+    router.replace(resolveSettingsRedirect(to));
   }, [router, to]);
 
   return null;
+}
+
+export function resolveSettingsRedirect(to: string): string {
+  if (typeof window === "undefined") return to;
+  const destination = new URL(to, window.location.href);
+  const current = new URL(window.location.href);
+  const query = new URLSearchParams(current.search);
+  for (const key of new Set(destination.searchParams.keys())) query.delete(key);
+  for (const [key, value] of destination.searchParams) query.append(key, value);
+  const search = query.toString();
+  const hash = destination.hash || (destination.searchParams.has("tab") ? "" : current.hash);
+  return `${destination.pathname}${search ? `?${search}` : ""}${hash}`;
 }
 
 /**

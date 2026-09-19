@@ -305,6 +305,22 @@ func (r *memoryRepository) InsertForSessionWithPolicy(
 	return r.insertLocked(msg, maxPerSession)
 }
 
+func (r *memoryRepository) InsertForSessionWithWorkflowEntry(
+	context.Context,
+	QueueSessionIdentity,
+	WorkflowEntryIdentity,
+	*QueuedMessage,
+	*QueueAttachmentClaim,
+	int,
+	*AutoMergePolicy,
+) error {
+	// The in-memory queue has no shared task repository or workflow-transition
+	// transaction, so accepting a captured entry would falsely claim to fence
+	// workflow moves. Callers must use the legacy path explicitly or provide a
+	// transactional queue repository.
+	return ErrQueueAdmissionUnavailable
+}
+
 // Restore reinserts a previously dequeued entry at its original FIFO position.
 func (r *memoryRepository) Restore(_ context.Context, msg *QueuedMessage, maxPerSession int) error {
 	r.mu.Lock()
@@ -1963,6 +1979,20 @@ func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 		return nil, false, err
 	}
 	return r.autoMergeCandidateIntoAboveLocked(candidate)
+}
+
+func (r *memoryRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
+	context.Context,
+	QueueSessionIdentity,
+	WorkflowEntryIdentity,
+	*QueuedMessage,
+	*QueueAttachmentClaim,
+	*AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	// Candidate folding is an admission mutation too. It needs the same
+	// shared task/queue transaction as insertion before it can honor an entry
+	// fence.
+	return nil, false, ErrQueueAdmissionUnavailable
 }
 
 func (r *memoryRepository) autoMergeCandidateIntoAboveLocked(candidate *QueuedMessage) (*QueuedMessage, bool, error) {

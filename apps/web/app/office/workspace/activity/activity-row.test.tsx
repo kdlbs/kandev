@@ -54,4 +54,21 @@ describe("ActivityRow", () => {
     const link = screen.getByRole("link", { name: "Run" });
     expect(link.getAttribute("href")).toBe("/office/agents/agent-7/runs/run-1");
   });
+
+  it("renders server-resolved actor and task labels while retaining task identifiers", () => {
+    render(
+      <ActivityRow
+        entry={activity({
+          actorName: "CEO",
+          targetName: "Build report",
+          targetIdentifier: "KAN-14",
+          action: "task_status_changed",
+          details: { new_status: "in_review" },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("CEO")).toBeTruthy();
+    expect(screen.getByText(/KAN-14 Build report/)).toBeTruthy();
+  });
 });

@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -30,6 +31,12 @@ type ConversationReader interface {
 	ListTurnsBySession(context.Context, string) ([]*taskmodels.Turn, error)
 }
 
+type conversationSourceReader interface {
+	ReadConversationRevision(context.Context, string) (taskmodels.ConversationRevision, error)
+	ReadConversationMessagesPage(context.Context, taskmodels.ConversationMessagePageRequest) (taskmodels.ConversationMessagePage, error)
+	ReadConversationTurnsPage(context.Context, taskmodels.ConversationTurnPageRequest) (taskmodels.ConversationTurnPage, error)
+}
+
 type workspaceConversationAuthorizer interface {
 	AuthorizeWorkspaceAccess(context.Context, string) error
 }
@@ -48,6 +55,13 @@ type conversationBindingResponse struct {
 	BindingToken string    `json:"bindingToken"`
 	Generation   int64     `json:"generation"`
 	ExpiresAt    time.Time `json:"expiresAt"`
+}
+
+type managedConversationResponse struct {
+	TaskID                   string `json:"taskId"`
+	SessionID                string `json:"sessionId"`
+	WorkspaceID              string `json:"workspaceId"`
+	ManagedConversationToken string `json:"managedConversationToken"`
 }
 
 type conversationMessageDTO struct {
@@ -104,6 +118,27 @@ type conversationTurnsResponse struct {
 	Turns []conversationTurnDTO `json:"turns"`
 }
 
+type conversationSourceMessagesResponse struct {
+	Messages []conversationMessageDTO `json:"messages"`
+	HasMore  bool                     `json:"hasMore"`
+	Cursor   *string                  `json:"cursor"`
+	Epoch    string                   `json:"epoch"`
+	Revision int64                    `json:"revision,string"`
+}
+
+type conversationSourceTurnsResponse struct {
+	Turns    []conversationTurnDTO `json:"turns"`
+	HasMore  bool                  `json:"hasMore"`
+	Cursor   *string               `json:"cursor"`
+	Epoch    string                `json:"epoch"`
+	Revision int64                 `json:"revision,string"`
+}
+
+type conversationSourceRevisionResponse struct {
+	Epoch    string `json:"epoch"`
+	Revision int64  `json:"revision,string"`
+}
+
 type conversationContinuationRenewRequest struct {
 	Cursor        string `json:"cursor"`
 	SnapshotToken string `json:"snapshot_token"`
@@ -129,79 +164,231 @@ func registerConversationRoutes(api *gin.RouterGroup, ctrl *Controller) {
 	api.GET("/:id/conversation/binding", ctrl.conversationBinding)
 	api.GET("/:id/conversation/managed/:sessionId", ctrl.managedConversation)
 	api.POST("/:id/conversation/managed/:sessionId/dispatch", ctrl.managedConversationDispatch)
+	api.GET("/:id/conversation/v2/task-sessions/:sessionId/messages", ctrl.conversationSourceMessages)
+	api.GET("/:id/conversation/v2/task-sessions/:sessionId/turns", ctrl.conversationSourceTurns)
+	api.GET("/:id/conversation/v2/task-sessions/:sessionId/revision", ctrl.conversationSourceRevision)
 	api.GET("/:id/conversation/task-sessions/:sessionId/messages", ctrl.conversationMessages)
 	api.GET("/:id/conversation/task-sessions/:sessionId/turns", ctrl.conversationTurns)
 	api.POST("/:id/conversation/continuation/renew", ctrl.conversationContinuationRenew)
 }
 
-type managedConversationResponse struct {
-	TaskID                   string `json:"taskId"`
-	SessionID                string `json:"sessionId"`
-	WorkspaceID              string `json:"workspaceId"`
-	ManagedConversationToken string `json:"managedConversationToken"`
-}
-
-func (c *Controller) managedConversation(ctx *gin.Context) {
-	descriptor, record, identity, ok := c.resolveManagedConversation(ctx)
-	if !ok {
+func (c *Controller) conversationSourceMessages(ctx *gin.Context) {
+	ctx.Header("Cache-Control", conversationNoStore)
+	record, identity, descriptor, managed, ok := c.authorizeTranscriptRequest(ctx)
+	if !ok || !c.validBinding(ctx, record, identity.UserID) {
 		return
 	}
-	token, err := c.conversationTokens.mintManagedConversation(record.ID, identity.UserID, conversationGeneration(record.InstalledAt), descriptor.WorkspaceID, descriptor.TaskID, descriptor.SessionID)
-	if err != nil {
+	reader, ok := c.conversationReader.(conversationSourceReader)
+	if !ok {
 		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
 		return
 	}
-	ctx.JSON(http.StatusOK, managedConversationResponse{TaskID: descriptor.TaskID, SessionID: descriptor.SessionID, WorkspaceID: descriptor.WorkspaceID, ManagedConversationToken: token})
-}
-
-func (c *Controller) managedConversationDispatch(ctx *gin.Context) {
-	descriptor, _, _, ok := c.resolveManagedConversation(ctx)
+	query, expected, cursorID, ok := c.parseSourceRequest(ctx, record, identity.UserID, true)
 	if !ok {
 		return
 	}
-	var request struct {
-		Content       string `json:"content"`
-		OccurrenceKey string `json:"occurrenceKey"`
-	}
-	if err := ctx.ShouldBindJSON(&request); err != nil || request.Content == "" {
-		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "content is required", false)
+	if managed && !c.applyManagedTaskScope(ctx, &query, descriptor) {
 		return
 	}
-	bridge := c.svc.agentConversationDeps()
-	dispatch, err := bridge.Dispatch(ctx.Request.Context(), ctx.Param("id"), descriptor.WorkspaceID, descriptor.ConversationKey, request.Content, request.OccurrenceKey)
-	if err != nil {
-		writeConversationError(ctx, http.StatusConflict, "upstream_failure", "managed conversation is unavailable", true)
+	sessionID := ctx.Param("sessionId")
+	page, err := reader.ReadConversationMessagesPage(ctx.Request.Context(), taskmodels.ConversationMessagePageRequest{
+		SessionID: sessionID,
+		TaskID:    query.taskID,
+		Authors:   query.authors,
+		Sort:      query.sort,
+		CursorID:  cursorID,
+		Limit:     query.limit,
+	})
+	if !c.writeConversationSourceReadError(ctx, err) {
 		return
 	}
-	// A dispatcher can decline an otherwise valid request when the managed
-	// session is busy. Return that status so the browser keeps the prompt
-	// instead of presenting an undelivered message as sent.
-	ctx.JSON(http.StatusOK, gin.H{"status": dispatch.Status})
+	if expected != nil && page.Revision != *expected {
+		writeConversationError(ctx, http.StatusConflict, "reconciliation_required", "conversation revision changed", true)
+		return
+	}
+	response := conversationSourceMessagesResponse{
+		Messages: make([]conversationMessageDTO, 0, len(page.Messages)),
+		HasMore:  page.HasMore,
+		Epoch:    c.svc.conversationEpoch,
+		Revision: page.Revision,
+	}
+	for _, message := range page.Messages {
+		response.Messages = append(response.Messages, conversationMessageModelToDTO(message))
+	}
+	if page.HasMore {
+		cursor, mintErr := c.conversationTokens.mintSourceCursor(
+			record.ID, identity.UserID, conversationGeneration(record.InstalledAt), sessionID,
+			query.taskID, query.sort, query.authors, page.CursorID, c.svc.conversationEpoch, query.limit,
+		)
+		if mintErr != nil {
+			writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+			return
+		}
+		response.Cursor = &cursor
+	}
+	ctx.JSON(http.StatusOK, response)
 }
 
-func (c *Controller) resolveManagedConversation(ctx *gin.Context) (pluginsdk.AgentConversationDescriptor, *store.Record, authn.Identity, bool) {
+func (c *Controller) conversationSourceTurns(ctx *gin.Context) {
 	ctx.Header("Cache-Control", conversationNoStore)
-	record, identity, ok := c.authorizeManagedConversationRequest(ctx)
+	record, identity, descriptor, managed, ok := c.authorizeTranscriptRequest(ctx)
 	if !ok || !c.validBinding(ctx, record, identity.UserID) {
-		return pluginsdk.AgentConversationDescriptor{}, nil, authn.Identity{}, false
+		return
 	}
-	workspaceID := ctx.Query("workspace_id")
-	authorizer, hasAuthorizer := c.conversationReader.(workspaceConversationAuthorizer)
-	if workspaceID == "" || !hasAuthorizer || authorizer.AuthorizeWorkspaceAccess(ctx.Request.Context(), workspaceID) != nil {
-		writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
-		return pluginsdk.AgentConversationDescriptor{}, nil, authn.Identity{}, false
+	reader, ok := c.conversationReader.(conversationSourceReader)
+	if !ok {
+		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+		return
 	}
-	bridge, available := c.svc.agentConversationDeps().(managedConversationResolver)
-	if !available || bridge == nil {
-		writeConversationError(ctx, http.StatusServiceUnavailable, "upstream_failure", "managed conversations unavailable", true)
-		return pluginsdk.AgentConversationDescriptor{}, nil, authn.Identity{}, false
+	query, expected, cursorID, ok := c.parseSourceRequest(ctx, record, identity.UserID, false)
+	if !ok {
+		return
 	}
-	descriptor, err := bridge.ResolveManagedConversation(ctx.Request.Context(), ctx.Param("id"), workspaceID, ctx.Param("sessionId"))
+	if managed && !c.applyManagedTaskScope(ctx, &query, descriptor) {
+		return
+	}
+	sessionID := ctx.Param("sessionId")
+	page, err := reader.ReadConversationTurnsPage(ctx.Request.Context(), taskmodels.ConversationTurnPageRequest{
+		SessionID: sessionID,
+		TaskID:    query.taskID,
+		Sort:      query.sort,
+		CursorID:  cursorID,
+		Limit:     query.limit,
+	})
+	if !c.writeConversationSourceReadError(ctx, err) {
+		return
+	}
+	if expected != nil && page.Revision != *expected {
+		writeConversationError(ctx, http.StatusConflict, "reconciliation_required", "conversation revision changed", true)
+		return
+	}
+	response := conversationSourceTurnsResponse{
+		Turns:    make([]conversationTurnDTO, 0, len(page.Turns)),
+		HasMore:  page.HasMore,
+		Epoch:    c.svc.conversationEpoch,
+		Revision: page.Revision,
+	}
+	for _, turn := range page.Turns {
+		response.Turns = append(response.Turns, conversationTurnModelToDTO(turn))
+	}
+	if page.HasMore {
+		cursor, mintErr := c.conversationTokens.mintSourceCursor(
+			record.ID, identity.UserID, conversationGeneration(record.InstalledAt), sessionID,
+			query.taskID, query.sort, nil, page.CursorID, c.svc.conversationEpoch, query.limit,
+		)
+		if mintErr != nil {
+			writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+			return
+		}
+		response.Cursor = &cursor
+	}
+	ctx.JSON(http.StatusOK, response)
+}
+
+func (c *Controller) conversationSourceRevision(ctx *gin.Context) {
+	ctx.Header("Cache-Control", conversationNoStore)
+	record, identity, _, _, ok := c.authorizeTranscriptRequest(ctx)
+	if !ok || !c.validBinding(ctx, record, identity.UserID) {
+		return
+	}
+	reader, ok := c.conversationReader.(conversationSourceReader)
+	if !ok {
+		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+		return
+	}
+	revision, err := reader.ReadConversationRevision(ctx.Request.Context(), ctx.Param("sessionId"))
+	if !c.writeConversationSourceReadError(ctx, err) {
+		return
+	}
+	if !revision.Exists {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return
+	}
+	ctx.JSON(http.StatusOK, conversationSourceRevisionResponse{Epoch: c.svc.conversationEpoch, Revision: revision.Revision})
+}
+
+func (c *Controller) applyManagedTaskScope(ctx *gin.Context, query *conversationMessageQuery, descriptor pluginsdk.AgentConversationDescriptor) bool {
+	if query.taskID != nil && *query.taskID != descriptor.TaskID {
+		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the managed conversation", false)
+		return false
+	}
+	query.taskID = &descriptor.TaskID
+	return true
+}
+
+func (c *Controller) parseSourceRequest(ctx *gin.Context, record *store.Record, userID string, allowAuthors bool) (conversationMessageQuery, *int64, string, bool) {
+	query, ok := parseConversationMessageQuery(ctx)
+	if !ok {
+		return conversationMessageQuery{}, nil, "", false
+	}
+	if !allowAuthors && len(query.authors) > 0 {
+		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "author_type is not supported for turns", false)
+		return conversationMessageQuery{}, nil, "", false
+	}
+	var expected *int64
+	if raw, exists := ctx.GetQuery("expected_revision"); exists {
+		revision, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || revision < 0 {
+			writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "expected_revision must be a nonnegative integer", false)
+			return conversationMessageQuery{}, nil, "", false
+		}
+		expected = &revision
+	}
+	sessionID := ctx.Param("sessionId")
+	if query.taskID != nil && c.conversationReader != nil && !c.validateSourceTaskQuery(ctx, sessionID, *query.taskID) {
+		return conversationMessageQuery{}, nil, "", false
+	}
+	if query.cursor == "" {
+		return query, expected, "", true
+	}
+	lastID, ok := c.parseSourceCursor(ctx, record, userID, query)
+	return query, expected, lastID, ok
+}
+
+func (c *Controller) validateSourceTaskQuery(ctx *gin.Context, sessionID, taskID string) bool {
+	session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
 	if err != nil {
-		writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
-		return pluginsdk.AgentConversationDescriptor{}, nil, authn.Identity{}, false
+		return c.writeConversationSourceReadError(ctx, err)
 	}
-	return descriptor, record, identity, true
+	if session == nil || session.ID != sessionID {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return false
+	}
+	if taskID != session.TaskID {
+		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the task session", false)
+		return false
+	}
+	return true
+}
+
+func (c *Controller) parseSourceCursor(ctx *gin.Context, record *store.Record, userID string, query conversationMessageQuery) (string, bool) {
+	sessionID := ctx.Param("sessionId")
+	claims, err := c.conversationTokens.parse(query.cursor)
+	if err != nil || claims.Kind != tokenKindCursor || claims.PluginID != record.ID ||
+		claims.UserID != userID || claims.Generation != conversationGeneration(record.InstalledAt) ||
+		claims.SessionID != sessionID || !equalOptionalString(claims.TaskID, query.taskID) ||
+		claims.Sort != query.sort || !equalStrings(claims.Authors, query.authors) ||
+		claims.Epoch != c.svc.conversationEpoch || claims.PageSize != query.limit || claims.LastID == "" {
+		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "invalid cursor", false)
+		return "", false
+	}
+	return claims.LastID, true
+}
+
+func (c *Controller) writeConversationSourceReadError(ctx *gin.Context, err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return false
+	}
+	if errors.Is(err, taskmodels.ErrConversationCursorStale) {
+		writeConversationError(ctx, http.StatusConflict, "reconciliation_required", "conversation cursor is stale", true)
+		return false
+	}
+	writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+	return false
 }
 
 func (c *Controller) conversationBinding(ctx *gin.Context) {
@@ -230,6 +417,78 @@ func (c *Controller) conversationBinding(ctx *gin.Context) {
 	})
 }
 
+func (c *Controller) managedConversation(ctx *gin.Context) {
+	descriptor, record, identity, ok := c.resolveManagedConversation(ctx)
+	if !ok {
+		return
+	}
+	token, err := c.conversationTokens.mintManagedConversation(
+		record.ID, identity.UserID, conversationGeneration(record.InstalledAt),
+		descriptor.WorkspaceID, descriptor.TaskID, descriptor.SessionID,
+	)
+	if err != nil {
+		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
+		return
+	}
+	ctx.JSON(http.StatusOK, managedConversationResponse{
+		TaskID: descriptor.TaskID, SessionID: descriptor.SessionID, WorkspaceID: descriptor.WorkspaceID,
+		ManagedConversationToken: token,
+	})
+}
+
+func (c *Controller) managedConversationDispatch(ctx *gin.Context) {
+	descriptor, _, _, ok := c.resolveManagedConversation(ctx)
+	if !ok {
+		return
+	}
+	var request struct {
+		Content       string `json:"content"`
+		OccurrenceKey string `json:"occurrenceKey"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil || request.Content == "" {
+		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "content is required", false)
+		return
+	}
+	dispatch, err := c.svc.agentConversationDeps().Dispatch(
+		ctx.Request.Context(), ctx.Param("id"), descriptor.WorkspaceID, descriptor.ConversationKey, request.Content, request.OccurrenceKey,
+	)
+	if err != nil {
+		writeConversationError(ctx, http.StatusConflict, "upstream_failure", "managed conversation is unavailable", true)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": dispatch.Status})
+}
+
+func (c *Controller) resolveManagedConversation(ctx *gin.Context) (pluginsdk.AgentConversationDescriptor, *store.Record, authn.Identity, bool) {
+	ctx.Header("Cache-Control", conversationNoStore)
+	record, identity, ok := c.authorizeManagedConversationRequest(ctx)
+	if !ok || !c.validBinding(ctx, record, identity.UserID) {
+		return pluginsdk.AgentConversationDescriptor{}, nil, authn.Identity{}, false
+	}
+	workspaceID := ctx.Query("workspace_id")
+	descriptor, ok := c.resolveManagedDescriptor(ctx, record, workspaceID, ctx.Param("sessionId"))
+	if !ok {
+		return pluginsdk.AgentConversationDescriptor{}, nil, authn.Identity{}, false
+	}
+	return descriptor, record, identity, true
+}
+
+func (c *Controller) resolveManagedDescriptor(ctx *gin.Context, record *store.Record, workspaceID, sessionID string) (pluginsdk.AgentConversationDescriptor, bool) {
+	authorizer, hasAuthorizer := c.conversationReader.(workspaceConversationAuthorizer)
+	bridge, available := c.svc.agentConversationDeps().(managedConversationResolver)
+	if workspaceID == "" || sessionID == "" || !hasAuthorizer || !available || bridge == nil ||
+		authorizer.AuthorizeWorkspaceAccess(ctx.Request.Context(), workspaceID) != nil {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
+		return pluginsdk.AgentConversationDescriptor{}, false
+	}
+	descriptor, err := bridge.ResolveManagedConversation(ctx.Request.Context(), record.ID, workspaceID, sessionID)
+	if err != nil || descriptor.WorkspaceID != workspaceID || descriptor.SessionID != sessionID || descriptor.TaskID == "" {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
+		return pluginsdk.AgentConversationDescriptor{}, false
+	}
+	return descriptor, true
+}
+
 func (c *Controller) conversationRecord(pluginID string) (*store.Record, bool) {
 	record, err := c.svc.Get(pluginID)
 	if err != nil || record.Status != StatusActive || !record.Capabilities.CanRead("messages") {
@@ -238,9 +497,6 @@ func (c *Controller) conversationRecord(pluginID string) (*store.Record, bool) {
 	return record, true
 }
 
-// conversationBindingRecord admits only capabilities that have a browser
-// conversation surface. A binding token still carries the plugin and user
-// identity; each endpoint applies its own capability gate before using it.
 func (c *Controller) conversationBindingRecord(pluginID string) (*store.Record, bool) {
 	record, err := c.svc.Get(pluginID)
 	if err != nil || record.Status != StatusActive || (!record.Capabilities.CanRead("messages") && !record.Capabilities.AgentConversation) {
@@ -252,20 +508,13 @@ func (c *Controller) conversationBindingRecord(pluginID string) (*store.Record, 
 //nolint:cyclop,goconst // This handler owns authorization, snapshot validation, pagination, and cursor minting.
 func (c *Controller) conversationMessages(ctx *gin.Context) {
 	ctx.Header("Cache-Control", conversationNoStore)
-	record, identity, descriptor, managed, ok := c.authorizeTranscriptRequest(ctx)
+	record, identity, ok := c.authorizeConversationRequest(ctx)
 	if !ok || !c.validBinding(ctx, record, identity.UserID) {
 		return
 	}
 	query, ok := parseConversationMessageQuery(ctx)
 	if !ok {
 		return
-	}
-	if managed {
-		if query.taskID != nil && *query.taskID != descriptor.TaskID {
-			writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the managed conversation", false)
-			return
-		}
-		query.taskID = &descriptor.TaskID
 	}
 	if c.conversationReader == nil {
 		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
@@ -277,11 +526,14 @@ func (c *Controller) conversationMessages(ctx *gin.Context) {
 		return
 	}
 	session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
-	if err != nil || session == nil || session.ID != sessionID {
-		if !c.svc.isSessionRemoved(sessionID) {
-			writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+	if err != nil {
+		if !c.writeConversationSourceReadError(ctx, err) {
 			return
 		}
+	}
+	if session == nil || session.ID != sessionID {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return
 	} else if query.taskID != nil && *query.taskID != session.TaskID {
 		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the task session", false)
 		return
@@ -299,20 +551,7 @@ func (c *Controller) conversationMessages(ctx *gin.Context) {
 	if !c.applyConversationMessageCursor(ctx, record, identity.UserID, sessionID, query, snapshot, &request) {
 		return
 	}
-	var messages []*taskmodels.Message
-	var hasMore bool
-	if c.svc.HasConversationJournal() {
-		cursorID := request.After
-		if query.sort == "desc" {
-			cursorID = request.Before
-		}
-		messages, hasMore, err = c.svc.conversationMessagesAt(
-			ctx.Request.Context(), sessionID, uint64(snapshot.Cutoff),
-			query.taskID, query.authors, query.sort, cursorID, query.limit,
-		)
-	} else {
-		messages, hasMore, err = c.conversationReader.ListMessagesPaginated(ctx.Request.Context(), request)
-	}
+	messages, hasMore, err := c.conversationReader.ListMessagesPaginated(ctx.Request.Context(), request)
 	if err != nil {
 		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
 		return
@@ -425,7 +664,7 @@ func (c *Controller) buildConversationMessagesResponse(
 //nolint:cyclop // Turn lookup supports primary, task-scoped, and fallback sources.
 func (c *Controller) conversationTurns(ctx *gin.Context) {
 	ctx.Header("Cache-Control", conversationNoStore)
-	record, identity, descriptor, managed, ok := c.authorizeTranscriptRequest(ctx)
+	record, identity, ok := c.authorizeConversationRequest(ctx)
 	if !ok || !c.validBinding(ctx, record, identity.UserID) {
 		return
 	}
@@ -434,7 +673,7 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 		return
 	}
 	sessionID := ctx.Param("sessionId")
-	snapshot, ok := c.validSnapshot(ctx, record, identity.UserID, sessionID)
+	_, ok = c.validSnapshot(ctx, record, identity.UserID, sessionID)
 	if !ok {
 		return
 	}
@@ -446,20 +685,16 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 		}
 		taskID = &rawTaskID
 	}
-	if managed {
-		if taskID != nil && *taskID != descriptor.TaskID {
-			writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the managed conversation", false)
-			return
-		}
-		taskID = &descriptor.TaskID
-	}
 	session, err := c.conversationReader.GetTaskSession(ctx.Request.Context(), sessionID)
-	sessionFound := err == nil && session != nil && session.ID == sessionID
-	if !sessionFound {
-		if !c.svc.isSessionRemoved(sessionID) {
-			writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+	if err != nil {
+		if !c.writeConversationSourceReadError(ctx, err) {
 			return
 		}
+	}
+	sessionFound := session != nil && session.ID == sessionID
+	if !sessionFound {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "task session not found", false)
+		return
 	} else if taskID != nil && *taskID != session.TaskID {
 		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "task_id does not match the task session", false)
 		return
@@ -470,15 +705,10 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 	} else if sessionFound {
 		scopedTaskID = &session.TaskID
 	}
-	var turns []*taskmodels.Turn
-	if c.svc.HasConversationJournal() {
-		turns, err = c.svc.conversationTurnsAt(ctx.Request.Context(), sessionID, uint64(snapshot.Cutoff), scopedTaskID)
-	} else {
-		// The no-journal fallback must honor the requested/inherited task
-		// scope like the journal branch: a session that ever accumulated
-		// mixed-task turn rows must not leak turns outside the validated task.
-		turns, err = loadFallbackTurns(ctx.Request.Context(), c.conversationReader, sessionID, *scopedTaskID)
-	}
+	// The source repository remains authoritative. The task scope is already
+	// validated against the session above, so filter the source result before
+	// mapping it to the public DTO.
+	turns, err := loadFallbackTurns(ctx.Request.Context(), c.conversationReader, sessionID, optionalStringValue(scopedTaskID))
 	if err != nil {
 		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
 		return
@@ -492,6 +722,16 @@ func (c *Controller) conversationTurns(ctx *gin.Context) {
 
 func (c *Controller) conversationContinuationRenew(ctx *gin.Context) {
 	ctx.Header("Cache-Control", conversationNoStore)
+	managedToken := ctx.GetHeader("X-Kandev-Managed-Conversation")
+	var record *store.Record
+	var identity authn.Identity
+	if managedToken == "" {
+		var ok bool
+		record, identity, ok = c.authorizeConversationRequest(ctx)
+		if !ok || !c.validBinding(ctx, record, identity.UserID) {
+			return
+		}
+	}
 	var request conversationContinuationRenewRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil ||
 		request.Cursor == "" ||
@@ -505,12 +745,25 @@ func (c *Controller) conversationContinuationRenew(ctx *gin.Context) {
 		writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "invalid continuation", false)
 		return
 	}
-	// Renewal has no session path parameter. Derive it from the signed
-	// continuation before applying the same managed identity boundary.
-	ctx.Params = append(ctx.Params, gin.Param{Key: "sessionId", Value: cursorClaims.SessionID})
-	record, identity, _, _, ok := c.authorizeTranscriptRequest(ctx)
-	if !ok || !c.validBinding(ctx, record, identity.UserID) {
-		return
+	if managedToken != "" {
+		if cursorClaims.TaskID == nil || snapshotClaims.TaskID == nil ||
+			*cursorClaims.TaskID != *snapshotClaims.TaskID || cursorClaims.SessionID == "" {
+			writeConversationError(ctx, http.StatusBadRequest, "invalid_query", "invalid continuation", false)
+			return
+		}
+		var ok bool
+		record, identity, ok = c.authorizeManagedConversationRequest(ctx)
+		if !ok {
+			return
+		}
+		_, err := c.svc.AuthorizeManagedConversationConsumer(
+			ctx.Request.Context(), record.ID, identity.UserID, conversationGeneration(record.InstalledAt),
+			ctx.GetHeader("X-Kandev-Plugin-Binding"), managedToken, *cursorClaims.TaskID, cursorClaims.SessionID,
+		)
+		if err != nil {
+			writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
+			return
+		}
 	}
 	if cursorClaims.PluginID != record.ID ||
 		cursorClaims.UserID != identity.UserID ||
@@ -537,40 +790,6 @@ func (c *Controller) conversationContinuationRenew(ctx *gin.Context) {
 	})
 }
 
-// authorizeTranscriptRequest preserves api_read:messages for ordinary routes.
-// A managed grant is an explicit, short-lived capability for the exact live
-// descriptor resolved after workspace access was checked.
-//
-//nolint:cyclop // This is the single boundary that selects the ordinary or managed authorization path.
-func (c *Controller) authorizeTranscriptRequest(ctx *gin.Context) (*store.Record, authn.Identity, pluginsdk.AgentConversationDescriptor, bool, bool) {
-	if ctx.GetHeader("X-Kandev-Managed-Conversation") == "" {
-		record, identity, ok := c.authorizeConversationRequest(ctx)
-		return record, identity, pluginsdk.AgentConversationDescriptor{}, false, ok
-	}
-	record, identity, ok := c.authorizeManagedConversationRequest(ctx)
-	if !ok || !c.validBinding(ctx, record, identity.UserID) {
-		return nil, authn.Identity{}, pluginsdk.AgentConversationDescriptor{}, true, false
-	}
-	claims, err := c.conversationTokens.parse(ctx.GetHeader("X-Kandev-Managed-Conversation"))
-	sessionID := ctx.Param("sessionId")
-	if err != nil || claims.Kind != tokenKindManaged || claims.PluginID != record.ID || claims.UserID != identity.UserID || claims.Generation != conversationGeneration(record.InstalledAt) || claims.SessionID != sessionID || claims.TaskID == nil || claims.WorkspaceID == "" {
-		writeConversationError(ctx, http.StatusUnauthorized, "unauthenticated", "invalid managed conversation grant", false)
-		return nil, authn.Identity{}, pluginsdk.AgentConversationDescriptor{}, true, false
-	}
-	authorizer, hasAuthorizer := c.conversationReader.(workspaceConversationAuthorizer)
-	bridge, available := c.svc.agentConversationDeps().(managedConversationResolver)
-	if !hasAuthorizer || !available || bridge == nil || authorizer.AuthorizeWorkspaceAccess(ctx.Request.Context(), claims.WorkspaceID) != nil {
-		writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
-		return nil, authn.Identity{}, pluginsdk.AgentConversationDescriptor{}, true, false
-	}
-	descriptor, err := bridge.ResolveManagedConversation(ctx.Request.Context(), record.ID, claims.WorkspaceID, sessionID)
-	if err != nil || descriptor.TaskID != *claims.TaskID || descriptor.WorkspaceID != claims.WorkspaceID || descriptor.SessionID != sessionID {
-		writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
-		return nil, authn.Identity{}, pluginsdk.AgentConversationDescriptor{}, true, false
-	}
-	return record, identity, descriptor, true, true
-}
-
 func (c *Controller) authorizeConversationRequest(
 	ctx *gin.Context,
 ) (*store.Record, authn.Identity, bool) {
@@ -587,13 +806,36 @@ func (c *Controller) authorizeConversationRequest(
 	return record, identity, true
 }
 
-// authorizeManagedConversationRequest deliberately does not accept
-// api_read:messages. Managed chat is authorized by the owning plugin's
-// agent_conversation capability; ordinary transcript endpoints retain their
-// narrower messages capability gate above.
-func (c *Controller) authorizeManagedConversationRequest(
-	ctx *gin.Context,
-) (*store.Record, authn.Identity, bool) {
+// authorizeTranscriptRequest accepts the legacy messages capability unless a
+// managed descriptor grant is supplied. A managed grant is scoped to one live
+// descriptor and is re-resolved on every read.
+func (c *Controller) authorizeTranscriptRequest(ctx *gin.Context) (*store.Record, authn.Identity, pluginsdk.AgentConversationDescriptor, bool, bool) {
+	if ctx.GetHeader("X-Kandev-Managed-Conversation") == "" {
+		record, identity, ok := c.authorizeConversationRequest(ctx)
+		return record, identity, pluginsdk.AgentConversationDescriptor{}, false, ok
+	}
+	record, identity, ok := c.authorizeManagedConversationRequest(ctx)
+	if !ok {
+		return nil, authn.Identity{}, pluginsdk.AgentConversationDescriptor{}, true, false
+	}
+	claims, err := c.conversationTokens.parse(ctx.GetHeader("X-Kandev-Managed-Conversation"))
+	if err != nil || claims.Kind != tokenKindManaged || claims.PluginID != record.ID || claims.UserID != identity.UserID ||
+		claims.Generation != conversationGeneration(record.InstalledAt) || claims.WorkspaceID == "" || claims.TaskID == nil ||
+		claims.SessionID == "" || claims.SessionID != ctx.Param("sessionId") {
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
+		return nil, authn.Identity{}, pluginsdk.AgentConversationDescriptor{}, true, false
+	}
+	descriptor, resolved := c.resolveManagedDescriptor(ctx, record, claims.WorkspaceID, claims.SessionID)
+	if !resolved || descriptor.TaskID != *claims.TaskID {
+		if resolved {
+			writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
+		}
+		return nil, authn.Identity{}, pluginsdk.AgentConversationDescriptor{}, true, false
+	}
+	return record, identity, descriptor, true, true
+}
+
+func (c *Controller) authorizeManagedConversationRequest(ctx *gin.Context) (*store.Record, authn.Identity, bool) {
 	identity, ok := authn.IdentityFromContext(ctx.Request.Context())
 	if !ok {
 		writeConversationError(ctx, http.StatusUnauthorized, "unauthenticated", "authentication required", false)
@@ -601,7 +843,7 @@ func (c *Controller) authorizeManagedConversationRequest(
 	}
 	record, err := c.svc.Get(ctx.Param("id"))
 	if err != nil || record.Status != StatusActive || !record.Capabilities.AgentConversation {
-		writeConversationError(ctx, http.StatusNotFound, "not_found", "plugin not found", false)
+		writeConversationError(ctx, http.StatusNotFound, "not_found", "managed conversation not found", false)
 		return nil, authn.Identity{}, false
 	}
 	return record, identity, true

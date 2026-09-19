@@ -671,6 +671,13 @@ func TestSeedMessageUserAuthorPersistsPromptIndex(t *testing.T) {
 	if created, ok := data["created_at"].(string); !ok || !strings.Contains(created, ".") {
 		t.Fatalf("event created_at = %#v, want RFC3339Nano fractional precision", data["created_at"])
 	}
+	receipt, ok := data["conversation_receipt"].(*models.ConversationMutationReceipt)
+	if !ok {
+		t.Fatalf("conversation_receipt = %T, want *models.ConversationMutationReceipt", data["conversation_receipt"])
+	}
+	if !receipt.Complete || receipt.Revision != receipt.BaseRevision+1 {
+		t.Fatalf("conversation_receipt = %+v, want one complete revision", receipt)
+	}
 }
 
 // TestSeedMessageDefaultsToAgentWithoutPromptIndex verifies that non-user seeded messages carry no prompt index.

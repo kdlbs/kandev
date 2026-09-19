@@ -70,6 +70,9 @@ func shellOutputFromMetadata(metadata map[string]any) (ShellExecOutputSnapshot, 
 		if !shellOK {
 			return ShellExecOutputSnapshot{}, false
 		}
+		if output, outputOK := shell["output"].(map[string]any); outputOK && isProjectedShellOutput(output) {
+			return ShellExecOutputSnapshot{}, false
+		}
 		return shellOutputFromMap(shell["output"]), true
 	default:
 		return ShellExecOutputSnapshot{}, false
@@ -102,6 +105,19 @@ func shellOutputFromMap(raw any) ShellExecOutputSnapshot {
 		result.ExitCode = &exitCode
 	}
 	return result
+}
+
+func isProjectedShellOutput(output map[string]any) bool {
+	if _, hasStdout := output["stdout"]; hasStdout {
+		return false
+	}
+	if _, hasStderr := output["stderr"]; hasStderr {
+		return false
+	}
+	_, hasOutput := output["has_output"]
+	_, hasStdoutBytes := output["stdout_bytes"]
+	_, hasStderrBytes := output["stderr_bytes"]
+	return hasOutput || hasStdoutBytes || hasStderrBytes
 }
 
 func shellOutputSummary(output ShellExecOutputSnapshot) map[string]any {

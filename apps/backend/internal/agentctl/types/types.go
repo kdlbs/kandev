@@ -121,6 +121,14 @@ type PermissionRequest struct {
 	Title      string             `json:"title"`
 	Options    []PermissionOption `json:"options"`
 
+	// ToolName is the optional programmatic identity supplied by ACP. It is
+	// retained for internal permission policy decisions and is never serialized
+	// into public permission snapshots.
+	ToolName *string `json:"-"`
+	// ToolMeta contains provider-specific ACP metadata used by adapter dialects.
+	// It is internal and must not be exposed through permission snapshots.
+	ToolMeta map[string]any `json:"-"`
+
 	// PendingID is the unique identifier for this permission request.
 	// If set by the adapter (e.g., OpenCode's "per_xxx" ID or Claude Code's requestID),
 	// the process manager will use this ID instead of generating a new one.

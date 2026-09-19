@@ -243,7 +243,14 @@ function TriggerConfigForm({
         <PluginEventConfig trigger={trigger} info={pluginInfo} onUpdate={onUpdate} dirty={dirty} />
       );
     case "webhook":
-      return <WebhookConfig automationId={automationId} workspaceId={workspaceId} />;
+      return (
+        <WebhookConfig
+          automationId={automationId}
+          workspaceId={workspaceId}
+          config={trigger.config}
+          onUpdate={onUpdate}
+        />
+      );
     default:
       return <p className="text-sm text-muted-foreground">{t("automations:unknownTriggerType")}</p>;
   }

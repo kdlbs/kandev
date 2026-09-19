@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,16 @@ import (
 const cursorRetriableStreamResetChunk = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
 
 const cursorRetriableStreamResetLeadingCanceledChunk = "Error: RetriableError: [canceled] HTTP/2 stream closed with error code CANCEL (0x8)"
+
+const cursorRetriablePingTimeoutChunk = "Error: RetriableError: [unavailable] PING timed out"
+
+const cursorRetriableConnectionStalledChunk = "Error: RetriableError: Connection stalled"
+
+const cursorRetriableContextCanceledChunk = "Error: RetriableError: context canceled"
+
+const cursorRetriableDeadlineExceededChunk = "Error: RetriableError: context deadline exceeded"
+
+const cursorRetriableCancelEscalatedChunk = "Error: RetriableError: cancel escalated"
 
 func cursorMessageNotification(sessionID, text string) acpsdk.SessionNotification {
 	return makeNotification(sessionID, acpsdk.SessionUpdate{
@@ -57,6 +68,47 @@ func TestCursorRetriableStreamResetSuppressesLeadingCanceledCurrentChunk(t *test
 	}
 }
 
+func TestCursorRetriableErrorSuppressesObservedDiagnostics(t *testing.T) {
+	for _, chunk := range []string{
+		cursorRetriablePingTimeoutChunk,
+		cursorRetriableConnectionStalledChunk,
+	} {
+		t.Run(chunk, func(t *testing.T) {
+			a, turn := newCursorPromptTurn(t, 7)
+
+			a.handleACPUpdate(cursorMessageNotification("session-1", chunk), 7)
+
+			if !turn.cursorRetriableFailure() {
+				t.Fatalf("Cursor diagnostic %q did not set retriable marker", chunk)
+			}
+			if events := drainEvents(a); len(events) != 0 {
+				t.Fatalf("Cursor diagnostic %q emitted %d events: %+v", chunk, len(events), events)
+			}
+		})
+	}
+}
+
+func TestCursorRetriableStreamResetUsesByteBoundsAndUnicodeWhitespace(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		suffix string
+		want   bool
+	}{
+		{name: "256 ASCII bytes", suffix: strings.Repeat("x", 256), want: true},
+		{name: "257 ASCII bytes", suffix: strings.Repeat("x", 257), want: false},
+		{name: "128 multibyte characters at 256 bytes", suffix: strings.Repeat("é", 128), want: true},
+		{name: "129 multibyte characters over 256 bytes", suffix: strings.Repeat("é", 129), want: false},
+		{name: "unicode whitespace only", suffix: "\u2003\u2003", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text := cursorRetriableStreamResetPrefix + " " + tc.suffix
+			if got := isCursorRetriableStreamReset(text); got != tc.want {
+				t.Fatalf("isCursorRetriableStreamReset(%q) = %v, want %v", tc.suffix, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCursorRetriableStreamResetRejectsUnrelatedEvidence(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -70,19 +122,9 @@ func TestCursorRetriableStreamResetRejectsUnrelatedEvidence(t *testing.T) {
 			text:       "The provider returned Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)",
 		},
 		{
-			name:       "unrelated explanation before fingerprint",
-			generation: 7,
-			text:       "Error: RetriableError: explanation for CANCEL (0x8)",
-		},
-		{
 			name:       "partial marker",
 			generation: 7,
 			text:       "Error: RetriableError:",
-		},
-		{
-			name:       "missing transport fingerprint",
-			generation: 7,
-			text:       "Error: RetriableError: provider is busy",
 		},
 		{
 			name:       "stale generation",
@@ -161,7 +203,7 @@ func TestCursorRetriableStreamResetNotClearedByToolUpdate(t *testing.T) {
 	}
 }
 
-func TestSendPromptCursorRetriableStreamResetSettlesAfterNotificationBarrier(t *testing.T) {
+func TestSendPromptCursorRetriableErrorSettlesAfterNotificationBarrier(t *testing.T) {
 	a, fake, conn := setupHandoffFakeAgent(t)
 	a.agentID = acpcompat.CursorAgentID
 	a.normalizer = NewNormalizer(acpcompat.CursorAgentID)
@@ -184,7 +226,7 @@ func TestSendPromptCursorRetriableStreamResetSettlesAfterNotificationBarrier(t *
 		t.Fatal("prompt did not reach the fake Cursor agent")
 	}
 
-	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"`+cursorRetriableStreamResetChunk+`"}}}`)
+	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"`+cursorRetriablePingTimeoutChunk+`"}}}`)
 	fake.releasePrompts()
 
 	select {
@@ -218,6 +260,69 @@ func TestSendPromptCursorRetriableStreamResetSettlesAfterNotificationBarrier(t *
 		providerError.ProviderID != acpcompat.CursorAgentID ||
 		providerError.Message != cursorRetriableStreamResetChunk {
 		t.Fatalf("provider error = %+v, want valid sanitized Cursor diagnostic", providerError)
+	}
+}
+
+func TestSendPromptCursorCancellationRetriableDiagnosticsRemainOrdinaryOutput(t *testing.T) {
+	for _, chunk := range []string{
+		cursorRetriableContextCanceledChunk,
+		cursorRetriableDeadlineExceededChunk,
+		cursorRetriableCancelEscalatedChunk,
+	} {
+		t.Run(chunk, func(t *testing.T) {
+			a, fake, conn := setupHandoffFakeAgent(t)
+			a.agentID = acpcompat.CursorAgentID
+			a.normalizer = NewNormalizer(acpcompat.CursorAgentID)
+			a.dialect = newACPDialect(acpcompat.CursorAgentID)
+
+			ctx := context.Background()
+			if err := a.Initialize(ctx); err != nil {
+				t.Fatalf("initialize: %v", err)
+			}
+			if _, err := a.NewSession(ctx, nil); err != nil {
+				t.Fatalf("new session: %v", err)
+			}
+			_ = drainEvents(a)
+
+			done := make(chan error, 1)
+			go func() { done <- a.Prompt(ctx, "try this", nil, 7) }()
+			select {
+			case <-fake.entered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("prompt did not reach the fake Cursor agent")
+			}
+
+			sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"`+chunk+`"}}}`)
+			fake.releasePrompts()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("Prompt returned error: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("prompt did not settle")
+			}
+
+			events := drainEvents(a)
+			var messageChunks, completes, errors int
+			for _, event := range events {
+				switch event.Type {
+				case streams.EventTypeMessageChunk:
+					messageChunks++
+					if event.Text != chunk {
+						t.Fatalf("message chunk = %q, want %q", event.Text, chunk)
+					}
+				case streams.EventTypeComplete:
+					completes++
+				case streams.EventTypeError:
+					errors++
+				}
+			}
+			if messageChunks != 1 || completes != 1 || errors != 0 {
+				t.Fatalf("events = %+v, want one ordinary chunk, one complete, and no error", events)
+			}
+		})
 	}
 }
 

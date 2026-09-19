@@ -24,6 +24,7 @@ import {
   parseConversationResponse,
   pluginConversationUrl,
   type ConversationScope,
+  type OrderedReady,
 } from "./conversation-scope";
 export { PluginConversationScopeProvider } from "./conversation-scope";
 
@@ -31,9 +32,17 @@ type MessagePage = {
   messages: PluginConversationMessage[];
   hasMore: boolean;
   cursor: string | null;
+  epoch?: string;
+  revision?: string;
 };
 
-type TurnsPage = { turns: PluginConversationTurn[] };
+type TurnsPage = {
+  turns: PluginConversationTurn[];
+  hasMore?: boolean;
+  cursor?: string | null;
+  epoch?: string;
+  revision?: string;
+};
 
 const EMPTY_MESSAGES: PluginSessionMessagesState = {
   messages: [],
@@ -322,7 +331,7 @@ async function fetchMessagePage({
   sort: "asc" | "desc";
   limit: number;
   cursor: string | null;
-  binding: { bindingToken: string; snapshotToken: string };
+  binding: Pick<OrderedReady, "bindingToken" | "snapshotToken" | "source" | "revision">;
 }): Promise<MessagePage> {
   const params = new URLSearchParams({ sort, limit: String(limit) });
   if (taskId !== null) params.set("task_id", taskId);
@@ -330,25 +339,94 @@ async function fetchMessagePage({
     params.append("author_type", author);
   }
   if (cursor) params.set("cursor", cursor);
-  const response = await fetch(
-    pluginConversationUrl(
-      scope.pluginId,
-      `/conversation/task-sessions/${encodeURIComponent(sessionId)}/messages?${params}`,
-    ),
-    {
-      credentials: "include",
-      cache: "no-store",
-      headers: {
-        "X-Kandev-Plugin-Binding": binding.bindingToken,
-        "X-Kandev-Snapshot-Token": binding.snapshotToken,
-        ...(scope.managedConversationToken
-          ? { "X-Kandev-Managed-Conversation": scope.managedConversationToken }
-          : {}),
-      },
-      signal: scope.signal,
-    },
-  );
+  if (binding.source && binding.revision !== undefined) {
+    params.set("expected_revision", binding.revision);
+  }
+  const path = binding.source
+    ? `/conversation/v2/task-sessions/${encodeURIComponent(sessionId)}/messages?${params}`
+    : `/conversation/task-sessions/${encodeURIComponent(sessionId)}/messages?${params}`;
+  const headers: Record<string, string> = {
+    "X-Kandev-Plugin-Binding": binding.bindingToken,
+  };
+  if (binding.snapshotToken) headers["X-Kandev-Snapshot-Token"] = binding.snapshotToken;
+  if (scope.managedConversationToken) {
+    headers["X-Kandev-Managed-Conversation"] = scope.managedConversationToken;
+  }
+  const response = await fetch(pluginConversationUrl(scope.pluginId, path), {
+    credentials: "include",
+    cache: "no-store",
+    headers,
+    signal: scope.signal,
+  });
   return parseConversationResponse<MessagePage>(response);
+}
+
+async function fetchTurnPage({
+  scope,
+  sessionId,
+  taskId,
+  binding,
+  cursor,
+}: {
+  cursor?: string;
+  scope: ConversationScope;
+  sessionId: string;
+  taskId: string | null;
+  binding: Pick<OrderedReady, "bindingToken" | "snapshotToken" | "source" | "revision">;
+}): Promise<TurnsPage> {
+  const params = new URLSearchParams({ limit: "100" });
+  if (cursor) params.set("cursor", cursor);
+  if (taskId !== null) params.set("task_id", taskId);
+  if (binding.source && binding.revision !== undefined) {
+    params.set("expected_revision", binding.revision);
+  }
+  const queryString = params.size ? `?${params}` : "";
+  const path = binding.source
+    ? `/conversation/v2/task-sessions/${encodeURIComponent(sessionId)}/turns${queryString}`
+    : `/conversation/task-sessions/${encodeURIComponent(sessionId)}/turns${queryString}`;
+  const headers: Record<string, string> = {
+    "X-Kandev-Plugin-Binding": binding.bindingToken,
+  };
+  if (binding.snapshotToken) headers["X-Kandev-Snapshot-Token"] = binding.snapshotToken;
+  if (scope.managedConversationToken) {
+    headers["X-Kandev-Managed-Conversation"] = scope.managedConversationToken;
+  }
+  const response = await fetch(pluginConversationUrl(scope.pluginId, path), {
+    credentials: "include",
+    cache: "no-store",
+    headers,
+    signal: scope.signal,
+  });
+  return parseConversationResponse<TurnsPage>(response);
+}
+
+async function fetchAllTurns(args: Parameters<typeof fetchTurnPage>[0]): Promise<TurnsPage> {
+  const first = await fetchTurnPage(args);
+  const turns = [...first.turns];
+  const cursors = new Set<string>();
+  let page = first;
+  while (page.hasMore) {
+    if (!page.cursor || cursors.has(page.cursor)) {
+      // i18n-exempt: internal protocol diagnostic rendered through structured API error handling.
+      throw new Error("Invalid conversation turn cursor");
+    }
+    cursors.add(page.cursor);
+    const binding = await args.scope.ready();
+    page = await fetchTurnPage({
+      ...args,
+      cursor: page.cursor,
+      binding: { ...binding, revision: first.revision },
+    });
+    if (page.epoch !== first.epoch || page.revision !== first.revision) {
+      // i18n-exempt: internal protocol diagnostic rendered through structured API error handling.
+      throw Object.assign(new Error("Conversation changed during pagination"), {
+        code: "reconciliation_required",
+        retryable: true,
+      });
+    }
+    turns.push(...page.turns);
+  }
+  return { ...first, turns, hasMore: false, cursor: null };
 }
 
 function mergeMessagePage(
@@ -449,7 +527,8 @@ function useMessagePageLoader({
           error: null,
           hasMore: page.hasMore,
         }));
-        scope.commitSnapshot("messages", snapshotKey);
+        scope.setSourceSnapshot?.(page.epoch, page.revision);
+        scope.commitSnapshot("messages", snapshotKey, page.epoch, page.revision);
         cursorRef.current = page.cursor;
         return additionCount;
       } catch (cause) {
@@ -800,28 +879,12 @@ function useSessionTurns(
     );
     try {
       const binding = await scope.ready();
-      const params = new URLSearchParams();
-      if (resolved.taskId !== null) params.set("task_id", resolved.taskId);
-      const queryString = params.size ? `?${params}` : "";
-      const response = await fetch(
-        pluginConversationUrl(
-          scope.pluginId,
-          `/conversation/task-sessions/${encodeURIComponent(sessionId)}/turns${queryString}`,
-        ),
-        {
-          credentials: "include",
-          cache: "no-store",
-          headers: {
-            "X-Kandev-Plugin-Binding": binding.bindingToken,
-            "X-Kandev-Snapshot-Token": binding.snapshotToken,
-            ...(scope.managedConversationToken
-              ? { "X-Kandev-Managed-Conversation": scope.managedConversationToken }
-              : {}),
-          },
-          signal: scope.signal,
-        },
-      );
-      const page = await parseConversationResponse<TurnsPage>(response);
+      const page = await fetchAllTurns({
+        scope,
+        sessionId,
+        taskId: resolved.taskId,
+        binding,
+      });
       if (turnsRequestRef.current !== requestId || scope.signal.aborted || scope.isTerminal()) {
         return;
       }
@@ -832,7 +895,8 @@ function useSessionTurns(
         hydrated: true,
         error: null,
       }));
-      scope.commitSnapshot("turns", snapshotKey);
+      scope.setSourceSnapshot?.(page.epoch, page.revision);
+      scope.commitSnapshot("turns", snapshotKey, page.epoch, page.revision);
     } catch (cause) {
       if (turnsRequestRef.current !== requestId || scope.signal.aborted || scope.isTerminal()) {
         return;

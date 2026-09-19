@@ -47,6 +47,8 @@ type conversationTokenClaims struct {
 	ConsumerID  string   `json:"consumer_id,omitempty"`
 	WireID      string   `json:"wire_id,omitempty"`
 	Sequence    uint64   `json:"sequence,omitempty"`
+	Epoch       string   `json:"epoch,omitempty"`
+	PageSize    int      `json:"page_size,omitempty"`
 	Nonce       string   `json:"nonce"`
 }
 
@@ -166,6 +168,24 @@ func (m *conversationTokenManager) mintSnapshot(
 		Generation: generation, ExpiresAt: m.now().UTC().Add(conversationTokenTTL).Unix(),
 		SessionID: sessionID, TaskID: taskID, Sort: sortOrder, Authors: authors,
 		Cutoff: cutoff, Fingerprint: fingerprint,
+	})
+}
+
+func (m *conversationTokenManager) mintSourceCursor(
+	pluginID, userID string,
+	generation int64,
+	sessionID string,
+	taskID *string,
+	sortOrder string,
+	authors []string,
+	lastID, epoch string,
+	pageSize int,
+) (string, error) {
+	return m.seal(conversationTokenClaims{
+		Version: 1, Kind: tokenKindCursor, PluginID: pluginID, UserID: userID,
+		Generation: generation, ExpiresAt: m.now().UTC().Add(conversationTokenTTL).Unix(),
+		SessionID: sessionID, TaskID: taskID, Sort: sortOrder, Authors: authors,
+		LastID: lastID, Epoch: epoch, PageSize: pageSize,
 	})
 }
 

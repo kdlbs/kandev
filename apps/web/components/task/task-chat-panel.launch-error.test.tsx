@@ -28,6 +28,10 @@ const priorTranscriptMessage = {
 } as unknown as Message;
 
 const appStoreState = {
+  connection: { status: "connected" },
+  kanbanMulti: { snapshots: {} },
+  kanban: { workflowId: null, tasks: [], steps: [] },
+  workflows: { items: [] },
   userSettings: {
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: false,
@@ -71,6 +75,8 @@ vi.mock("./panel-primitives", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof appStoreState) => unknown) => selector(appStoreState),
+  useOptionalAppStore: (selector: (state: typeof appStoreState) => unknown, fallback: unknown) =>
+    selector(appStoreState) ?? fallback,
   useAppStoreApi: () => ({
     getState: () => appStoreState,
   }),

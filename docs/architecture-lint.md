@@ -13,6 +13,7 @@ the GitHub Actions workflow only invokes those repository-owned entry points.
 | `ARCH-RUNTIME-IMPORT` | Production Go outside `internal/agent/runtime/` must not add direct imports of `runtime/lifecycle` or `runtime/agentctl`. | Depend on `internal/agent/runtime` or an explicitly approved low-level adapter. |
 | `ARCH-TASK-OFFICE-IMPORT` | Production Go under `internal/task/` must not add imports of `internal/office`. | The shared task model owns task concepts; Office consumes or adapts them. |
 | `ARCH-FRONTEND-ROOT-STATE-CAST` | `apps/web/lib/state/store.ts` must not add `as any` or `as unknown as` escapes. | Derive typed domain state, actions, and defaults. |
+| `ARCH-INBOX-HISTORY-ISOLATION` | A closed set of backend pending-action sinks must not reference the Inbox History read's exported entry points, and the Inbox History read/render modules must not reference the Needs-you sidebar-badge state or subscribe to an event stream. | Keep the additive History read (AC-UI-INBOX-HISTORY-001.5/.17/.22) out of the operational pending-action path in both directions. |
 
 Each rule owns its exact grandfathered finding set under `config/architecture-lint/`. A current
 finding absent from that rule's baseline fails. When cleanup removes a finding, the now-stale entry

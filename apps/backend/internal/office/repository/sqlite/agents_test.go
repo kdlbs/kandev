@@ -710,6 +710,61 @@ func TestUpdateAgentStatusFieldsIfCurrent_DoesNotOverwriteNewStatus(t *testing.T
 	}
 }
 
+// A status-only CAS can't tell a concurrent pause_reason change apart from
+// the reason it originally observed: status stays 'paused' the whole time,
+// so a status-only guard accepts the write either way. UnpauseAgentIfCurrent
+// closes that by gating on pause_reason too.
+func TestUnpauseAgentIfCurrent_RefusesWhenPauseReasonChanged(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	agent := fullAgentInstance("st-unpause-cas", "ws-1", "Unpause CAS")
+	if err := repo.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("CreateAgentInstance: %v", err)
+	}
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "paused", "Auto-paused: reason1"); err != nil {
+		t.Fatalf("pause agent: %v", err)
+	}
+
+	// A second, unrelated auto-pause lands while status stays 'paused'.
+	if err := repo.UpdateAgentStatusFields(ctx, agent.ID, "paused", "Auto-paused: reason2"); err != nil {
+		t.Fatalf("re-pause agent: %v", err)
+	}
+
+	changed, err := repo.UnpauseAgentIfCurrent(ctx, agent.ID, "Auto-paused: reason1", "idle")
+	if err != nil {
+		t.Fatalf("compare-and-set unpause: %v", err)
+	}
+	if changed {
+		t.Fatal("compare-and-set unpause = true, want false (pause_reason changed underneath it)")
+	}
+
+	got, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if got.Status != settingsmodels.AgentStatus("paused") || got.PauseReason != "Auto-paused: reason2" {
+		t.Fatalf("status/reason = %q/%q, want paused/Auto-paused: reason2 (newer reason preserved)",
+			got.Status, got.PauseReason)
+	}
+
+	// The observed reason still matches: the CAS succeeds, moving the
+	// agent to idle and clearing pause_reason.
+	changed, err = repo.UnpauseAgentIfCurrent(ctx, agent.ID, "Auto-paused: reason2", "idle")
+	if err != nil {
+		t.Fatalf("compare-and-set unpause (matching reason): %v", err)
+	}
+	if !changed {
+		t.Fatal("compare-and-set unpause (matching reason) = false, want true")
+	}
+	got, err = repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if got.Status != settingsmodels.AgentStatus("idle") {
+		t.Fatalf("status = %q, want idle", got.Status)
+	}
+}
+
 func TestClearAgentPauseReasonIfCurrent_PreservesStatus(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

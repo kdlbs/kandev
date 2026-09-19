@@ -7,12 +7,13 @@ import { WorkspaceAgentChat } from "./workspace-agent-chat";
 const transport = vi.hoisted(() => ({
   fetch: vi.fn(),
   messages: [{ id: "m-1", content: "existing transcript" }],
+  removed: false,
   transcriptError: null as { code: string } | null,
 }));
 
 vi.mock("@/lib/plugins/conversation-scope", () => ({
   pluginConversationUrl: (pluginId: string, path: string) => `/api/plugins/${pluginId}${path}`,
-  fetchBinding: () => Promise.resolve({ bindingToken: "binding-token" }),
+  fetchConversationBinding: () => Promise.resolve({ bindingToken: "binding-token" }),
   ConversationScopeContext: React.createContext({
     ready: () => Promise.resolve({ bindingToken: "binding-token" }),
   }),
@@ -23,7 +24,7 @@ vi.mock("@/lib/plugins/conversation-host", () => ({
     useSessionMessages: () => ({
       messages: transport.messages,
       loading: false,
-      removed: false,
+      removed: transport.removed,
       error: transport.transcriptError,
     }),
   },
@@ -34,6 +35,7 @@ describe("WorkspaceAgentChat", () => {
   beforeEach(() => {
     transport.fetch.mockReset();
     transport.transcriptError = null;
+    transport.removed = false;
     vi.stubGlobal("fetch", transport.fetch);
   });
 
@@ -253,6 +255,53 @@ describe("WorkspaceAgentChat", () => {
         "permission-denied",
       ),
     );
+  });
+
+  it("reports deleted when a live managed transcript removal arrives", async () => {
+    const onStatus = vi.fn();
+    transport.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          taskId: "task-1",
+          sessionId: "session-1",
+          workspaceId: "ws-1",
+          managedConversationToken: "managed-token",
+        }),
+        { status: 200 },
+      ),
+    );
+    const view = render(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="1"
+        onStatus={onStatus}
+      />,
+    );
+    await screen.findByTestId("workspace-agent-chat");
+    transport.removed = true;
+    transport.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          taskId: "task-1",
+          sessionId: "session-1",
+          workspaceId: "ws-1",
+          managedConversationToken: "managed-token",
+        }),
+        { status: 200 },
+      ),
+    );
+    view.rerender(
+      <WorkspaceAgentChat
+        pluginId="plugin-1"
+        workspaceId="ws-1"
+        conversationId="session-1"
+        resourceVersion="2"
+        onStatus={onStatus}
+      />,
+    );
+    await waitFor(() => expect(onStatus).toHaveBeenLastCalledWith("deleted"));
   });
 
   it("recovers from a terminal transcript failure when the managed conversation changes", async () => {

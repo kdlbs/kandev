@@ -1,5 +1,7 @@
 "use client";
 
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useCallback, useRef, type PointerEvent } from "react";
 import {
   DndContext,
@@ -23,8 +25,8 @@ const TOUCH_DRAG_DELAY_MS = 250;
 const TOUCH_DRAG_TOLERANCE = 5;
 
 export function SidebarViewChips() {
-  const views = useAppStore((s) => s.sidebarViews.views);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
   const setActive = useAppStore((s) => s.setSidebarActiveView);
   const reorderViews = useAppStore((s) => s.reorderSidebarViews);
   // Use MouseSensor (not PointerSensor) deliberately: this chip row lives in an

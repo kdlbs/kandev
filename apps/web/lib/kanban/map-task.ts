@@ -84,6 +84,7 @@ export type TaskLike = {
   primary_agent_profile_id?: string | null;
   labels?: string | string[] | null;
   is_remote_executor?: boolean;
+  is_from_office?: boolean;
   parent_id?: string | null;
   assignee_user_id?: string;
   updated_at?: string;
@@ -305,6 +306,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primaryAgentName: source.primary_agent_name ?? undefined,
     labels: pickLabels(source),
     assigneeUserId: pickAssignee(source.assignee_user_id),
+    isFromOffice: source.is_from_office,
     parentTaskId: source.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,

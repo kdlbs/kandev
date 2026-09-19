@@ -616,19 +616,37 @@ function useSessionResetAndCheck({
 
 type ManualResumeResponse = Awaited<ReturnType<typeof launchSession>>;
 
-function applyManualResumeResponse(
+function isManualResumeWaitingResponse(response: ManualResumeResponse): boolean {
+  return (
+    response.activation_disposition === "queued" || response.activation_disposition === "suppressed"
+  );
+}
+
+function applyManualResumeFailure(
+  response: ManualResumeResponse,
+  setters: ResumeStateSetter,
+): false {
+  setters.setResumptionState("error");
+  setters.setRecoveryFailure?.(null);
+  setters.setError(response.error ?? t("task:failedToResumeSession"));
+  return false;
+}
+
+function applyManualResumeWaiting(setters: ResumeStateSetter): false {
+  setters.setResumptionState("idle");
+  setters.setRecoveryFailure?.(null);
+  setters.setError(null);
+  setters.setNotice?.(null);
+  return false;
+}
+
+function applyManualResumeSuccess(
   response: ManualResumeResponse,
   taskId: string,
   sessionId: string,
   session: SessionLike,
   setters: ResumeStateSetter,
-): boolean {
-  if (!response.success) {
-    setters.setResumptionState("error");
-    setters.setRecoveryFailure?.(null);
-    setters.setError(response.error ?? t("task:failedToResumeSession"));
-    return false;
-  }
+): true {
   setters.setResumptionState("resumed");
   setters.setNotice?.(null);
   if (response.state) {
@@ -646,6 +664,18 @@ function applyManualResumeResponse(
   if (response.worktree_path) setters.setWorktreePath(response.worktree_path);
   if (response.worktree_branch) setters.setWorktreeBranch(response.worktree_branch);
   return true;
+}
+
+function applyManualResumeResponse(
+  response: ManualResumeResponse,
+  taskId: string,
+  sessionId: string,
+  session: SessionLike,
+  setters: ResumeStateSetter,
+): boolean {
+  if (!response.success) return applyManualResumeFailure(response, setters);
+  if (isManualResumeWaitingResponse(response)) return applyManualResumeWaiting(setters);
+  return applyManualResumeSuccess(response, taskId, sessionId, session, setters);
 }
 
 function handleManualResumeError(

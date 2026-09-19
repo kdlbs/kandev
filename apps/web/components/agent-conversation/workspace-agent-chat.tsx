@@ -10,7 +10,7 @@ import {
   pluginConversationUrl,
   PluginConversationScopeProvider,
   ConversationScopeContext,
-  fetchBinding,
+  fetchConversationBinding,
 } from "@/lib/plugins/conversation-scope";
 import { pluginConversationApi } from "@/lib/plugins/conversation-host";
 import type { WorkspaceAgentChatProps, WorkspaceAgentChatStatus } from "@kandev/plugin-sdk";
@@ -50,7 +50,7 @@ function useManagedDescriptor(
     }
     setDescriptor(null);
     setStatus("loading");
-    fetchBinding(pluginId, controller.signal)
+    fetchConversationBinding(pluginId, controller.signal)
       .then((binding) =>
         fetch(
           pluginConversationUrl(

@@ -36,7 +36,7 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
 
   const sourceCard = kanban.taskCard(task.id);
   const feederColumn = kanban.columnByStepId(feederStep.id);
-  await sourceCard.waitFor({ state: "visible" });
+  await expect(sourceCard).toBeVisible({ timeout: 30_000 });
   const sourceBox = await sourceCard.boundingBox();
   expect(sourceBox).not.toBeNull();
 
