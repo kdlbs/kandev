@@ -1,6 +1,12 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message, TaskSession } from "@/lib/types/http";
+import {
+  sessionId as toSessionId,
+  taskId as toTaskId,
+  type Message,
+  type TaskSession,
+} from "@/lib/types/http";
+import { useLateClarificationMessage } from "./use-late-clarification-message";
 
 const admissionMock = vi.hoisted(() => vi.fn());
 const fetchTaskSessionMock = vi.hoisted(() => vi.fn());
@@ -47,8 +53,8 @@ function deferred<T>() {
 function sourceMessage(pendingId: string): Message {
   return {
     id: `message-${pendingId}`,
-    task_id: TASK_ID,
-    session_id: SESSION_ID,
+    task_id: toTaskId(TASK_ID),
+    session_id: toSessionId(SESSION_ID),
     author_type: "agent",
     type: "clarification_request",
     content: "Choose one",
@@ -65,13 +71,13 @@ function sourceMessage(pendingId: string): Message {
         options: [{ option_id: "option-1", label: "Option one" }],
       },
     },
-  } as Message;
+  } as unknown as Message;
 }
 
 function sourceSession(): TaskSession {
   return {
-    id: SESSION_ID,
-    task_id: TASK_ID,
+    id: toSessionId(SESSION_ID),
+    task_id: toTaskId(TASK_ID),
     state: "IDLE",
     started_at: "2026-09-19T00:00:00Z",
     updated_at: "2026-09-19T00:00:00Z",
