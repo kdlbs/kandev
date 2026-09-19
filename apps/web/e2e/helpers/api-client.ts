@@ -14,6 +14,7 @@ import type {
   WorkflowSessionTarget,
   TaskPriority,
   SidebarTaskColorPatchApi,
+  WorkflowAgentOverrides,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
@@ -279,6 +280,7 @@ type CreateTaskOpts = {
   description?: string;
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: Record<string, string>;
   agent_profile_id?: string;
   /** Prepare a CREATED session without launching the agent. */
   prepare_session?: boolean;
@@ -350,6 +352,7 @@ function buildCreateTaskBody(
   };
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
+  setIf(body, "workflow_agent_overrides", options.workflow_agent_overrides);
   setIf(body, "priority", options.priority);
   setIf(body, "agent_profile_id", options.agent_profile_id);
   if (options.prepare_session) body.prepare_session = true;
@@ -386,6 +389,7 @@ type MessageAttachmentInput = {
 type OptionalAgentTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: Record<string, string>;
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
   executor_id?: string;
@@ -417,6 +421,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   if (!opts) return fields;
   setIf(fields, "workflow_id", opts.workflow_id);
   setIf(fields, "workflow_step_id", opts.workflow_step_id);
+  setIf(fields, "workflow_agent_overrides", opts.workflow_agent_overrides);
   setIf(fields, "repositories", pickRepositories(opts));
   setIf(fields, "executor_id", opts.executor_id);
   setIf(fields, "executor_profile_id", opts.executor_profile_id);
@@ -818,6 +823,7 @@ export class ApiClient {
       description?: string;
       workflow_id?: string;
       workflow_step_id?: string;
+      workflow_agent_overrides?: Record<string, string>;
       repository_ids?: string[];
       /** Full repository entries with optional checkout_branch / base_branch / pr_number. */
       repositories?: TaskRepositoryInput[];
@@ -2676,6 +2682,7 @@ export class ApiClient {
     primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
+    workflow_agent_overrides?: WorkflowAgentOverrides;
     wip_admitted?: boolean;
     queued_for_step_id?: string;
     priority?: TaskPriority;

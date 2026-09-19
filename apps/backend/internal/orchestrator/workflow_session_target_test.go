@@ -145,6 +145,34 @@ func TestRecordWorkflowSourceBindingIgnoresDelayedEntryAfterTaskMoves(t *testing
 	require.Equal(t, fixture.current.ID, binding.SessionID)
 }
 
+func TestWorkflowSessionTargetUsesTaskEffectiveSourceProfile(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	overrides, err := models.NewWorkflowAgentOverrides("wf1", []models.WorkflowAgentOverrideBinding{
+		{StepID: "step-a", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b"},
+	})
+	require.NoError(t, err)
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WorkflowAgentOverrides = overrides
+	require.NoError(t, fixture.repo.UpdateTask(ctx, task))
+
+	source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a"}
+	target := &wfmodels.WorkflowStep{
+		ID: "step-review", WorkflowID: "wf1", Position: 1,
+		SessionTarget: &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	session := &models.TaskSession{ID: "session-b", TaskID: "t1", AgentProfileID: "profile-b"}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, session))
+	require.NoError(t, fixture.svc.recordWorkflowSourceBinding(ctx, "t1", source, session))
+
+	resolution, err := fixture.svc.resolveWorkflowSessionTarget(ctx, "t1", target)
+	require.NoError(t, err)
+	require.Equal(t, session.ID, resolution.session.ID)
+	require.Equal(t, "profile-b", resolution.profileID)
+}
+
 func TestRecordWorkflowSourceBindingDoesNotOverwriteRevisitedSourceEntry(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)

@@ -14,6 +14,61 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func TestPreviewStepAgentProfileUsesTaskWorkflowOverride(t *testing.T) {
+	overrides, err := models.NewWorkflowAgentOverrides("workflow-1", []models.WorkflowAgentOverrideBinding{
+		{StepID: "implement", SourceProfileID: "profile-luna", ReplacementProfileID: "profile-terra"},
+	})
+	if err != nil {
+		t.Fatalf("create overrides: %v", err)
+	}
+	task := &models.Task{WorkflowID: "workflow-1", WorkflowAgentOverrides: overrides}
+	step := &wfmodels.WorkflowStep{ID: "implement", WorkflowID: "workflow-1", AgentProfileID: "profile-luna"}
+
+	profileID, err := (&Service{}).previewStepAgentProfile(context.Background(), step, task, false)
+	if err != nil {
+		t.Fatalf("previewStepAgentProfile: %v", err)
+	}
+	if profileID != "profile-terra" {
+		t.Fatalf("preview profile = %q, want profile-terra", profileID)
+	}
+}
+
+func TestPreviewWorkflowSessionTargetUsesTaskWorkflowOverride(t *testing.T) {
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	overrides, err := models.NewWorkflowAgentOverrides("wf1", []models.WorkflowAgentOverrideBinding{
+		{StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b"},
+	})
+	if err != nil {
+		t.Fatalf("create overrides: %v", err)
+	}
+	task, err := fixture.repo.GetTask(context.Background(), "t1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.WorkflowAgentOverrides = overrides
+	if err := fixture.repo.UpdateTask(context.Background(), task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	step := &wfmodels.WorkflowStep{
+		ID:            "pr",
+		WorkflowID:    "wf1",
+		Position:      1,
+		SessionTarget: &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: "implement"},
+	}
+	source := &wfmodels.WorkflowStep{ID: "implement", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a"}
+	fixture.stepGetter.steps[source.ID] = source
+
+	_, profileID, err := fixture.svc.resolvePreviewWorkflowSessionTarget(
+		context.Background(), "t1", task, step,
+	)
+	if err != nil {
+		t.Fatalf("resolvePreviewWorkflowSessionTarget: %v", err)
+	}
+	if profileID != "profile-b" {
+		t.Fatalf("preview source profile = %q, want profile-b", profileID)
+	}
+}
+
 func TestBuildWorkflowMovePreview_SelectsTheSameReusableSessionAsMove(t *testing.T) {
 	now := time.Now().UTC()
 	current := &models.TaskSession{

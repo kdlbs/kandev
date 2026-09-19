@@ -248,6 +248,12 @@ func initCoreTaskServices(
 			TaskActivity:      repos.Task,
 			SubagentContexts:  repos.Task,
 			Usage:             repos.Task,
+			AgentProfiles:     repos.AgentSettings,
+			AgentProfileExecutorValidator: taskAgentExecutorCompatibilityValidator{
+				profiles:        repos.AgentSettings,
+				agentRegistry:   agentRegistry,
+				dynamicResolver: dynamicResolver,
+			},
 		},
 		eventBus,
 		log,

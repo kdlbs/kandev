@@ -84,7 +84,16 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
+	// WorkflowAgentOverrides groups one replacement by source profile. The
+	// service expands it to fixed workflow-step bindings before insertion.
+	WorkflowAgentOverrides           map[string]string              `json:"workflow_agent_overrides,omitempty"`
+	normalizedWorkflowAgentOverrides *models.WorkflowAgentOverrides `json:"-"`
+	// ExecutorID and ExecutorProfileID are resolved by authenticated create
+	// adapters and are used to validate task-scoped replacement profiles before
+	// any task row is written.
+	ExecutorID        string                 `json:"-"`
+	ExecutorProfileID string                 `json:"-"`
+	DeferredLaunch    map[string]interface{} `json:"deferred_launch,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.

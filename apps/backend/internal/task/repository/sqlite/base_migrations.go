@@ -116,6 +116,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// Store task-local fixed-step profile substitutions after the workflow-FK
+	// rebuild so legacy databases cannot lose the column during that recreate.
+	_ = r.migrate.Apply("tasks.workflow_agent_overrides", `ALTER TABLE tasks ADD COLUMN workflow_agent_overrides TEXT`)
 	// Must run AFTER migrateTasksRemoveWorkflowFK: that migration recreates
 	// tasks from an explicit column list. Adding this column beforehand would
 	// have it silently dropped by the recreate on any database still carrying

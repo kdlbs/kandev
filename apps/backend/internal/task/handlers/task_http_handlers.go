@@ -755,28 +755,29 @@ type httpTaskRepositoryInput struct {
 }
 
 type httpCreateTaskRequest struct {
-	WorkspaceID       string                    `json:"workspace_id"`
-	WorkflowID        string                    `json:"workflow_id"`
-	WorkflowStepID    string                    `json:"workflow_step_id"`
-	Title             string                    `json:"title"`
-	Description       string                    `json:"description,omitempty"`
-	AutoTitle         bool                      `json:"auto_title,omitempty"`
-	Autopilot         bool                      `json:"autopilot,omitempty"`
-	Priority          string                    `json:"priority,omitempty"`
-	State             *v1.TaskState             `json:"state,omitempty"`
-	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position          int                       `json:"position,omitempty"`
-	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
-	StartAgent        bool                      `json:"start_agent,omitempty"`
-	PrepareSession    bool                      `json:"prepare_session,omitempty"`
-	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID        string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
-	PlanMode          bool                      `json:"plan_mode,omitempty"`
-	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID          string                    `json:"parent_id,omitempty"`
-	WorkspacePath     string                    `json:"workspace_path,omitempty"`
-	BlockedBy         []string                  `json:"blocked_by,omitempty"`
+	WorkspaceID            string                    `json:"workspace_id"`
+	WorkflowID             string                    `json:"workflow_id"`
+	WorkflowStepID         string                    `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                    `json:"title"`
+	Description            string                    `json:"description,omitempty"`
+	AutoTitle              bool                      `json:"auto_title,omitempty"`
+	Autopilot              bool                      `json:"autopilot,omitempty"`
+	Priority               string                    `json:"priority,omitempty"`
+	State                  *v1.TaskState             `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position               int                       `json:"position,omitempty"`
+	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent             bool                      `json:"start_agent,omitempty"`
+	PrepareSession         bool                      `json:"prepare_session,omitempty"`
+	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID             string                    `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                      `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
+	ParentID               string                    `json:"parent_id,omitempty"`
+	WorkspacePath          string                    `json:"workspace_path,omitempty"`
+	BlockedBy              []string                  `json:"blocked_by,omitempty"`
 	// StartWhenUnblocked records the agent start as an intent consumed by
 	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
 	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
@@ -969,6 +970,9 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkspaceID:                 body.WorkspaceID,
 		WorkflowID:                  body.WorkflowID,
 		WorkflowStepID:              body.WorkflowStepID,
+		WorkflowAgentOverrides:      body.WorkflowAgentOverrides,
+		ExecutorID:                  body.ExecutorID,
+		ExecutorProfileID:           body.ExecutorProfileID,
 		Title:                       title,
 		Description:                 description,
 		AutoTitle:                   body.AutoTitle,

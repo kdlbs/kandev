@@ -517,6 +517,7 @@ func (r *Repository) initTaskSchema() error {
 		workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_id TEXT NOT NULL DEFAULT '',
 		workflow_step_id TEXT NOT NULL DEFAULT '',
+		workflow_agent_overrides TEXT,
 		title TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',

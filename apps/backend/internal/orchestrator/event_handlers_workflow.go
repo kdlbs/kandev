@@ -2006,7 +2006,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		return
 	}
 
-	workflowAgentProfileID := s.resolveStepAgentProfile(ctx, step)
+	workflowAgentProfileID := s.resolveStepAgentProfileForTask(ctx, task, step)
 	agentProfileID := workflowAgentProfileID
 	if agentProfileID == "" {
 		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
@@ -2920,7 +2920,7 @@ func (s *Service) resolveStepPlanMode(ctx context.Context, session *models.TaskS
 // resolveStepAgentProfile returns the effective agent profile ID for a step.
 // Resolution order: step override -> workflow default -> empty (use current session's profile).
 func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
-	if step != nil && step.SessionTarget != nil {
+	if step == nil || step.SessionTarget != nil {
 		return ""
 	}
 	if step.AgentProfileID != "" {
@@ -2938,6 +2938,35 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 		}
 	}
 	return ""
+}
+
+// resolveStepAgentProfileForTask applies a task's fixed-step substitution
+// before the ordinary workflow profile resolution. Explicit session targets
+// remain authoritative and therefore never consult this map.
+func (s *Service) resolveStepAgentProfileForTask(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep) string {
+	if task != nil && step != nil && step.SessionTarget == nil && task.WorkflowID == step.WorkflowID {
+		if replacement, ok := task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID); ok {
+			return replacement
+		}
+	}
+	return s.resolveStepAgentProfile(ctx, step)
+}
+
+func (s *Service) resolveStepAgentProfileForTaskID(ctx context.Context, taskID string, step *wfmodels.WorkflowStep) (string, error) {
+	if taskID == "" {
+		return s.resolveStepAgentProfile(ctx, step), nil
+	}
+	if s.repo == nil {
+		return "", fmt.Errorf("task repository unavailable while resolving workflow profile for task %q", taskID)
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("load task %q while resolving workflow profile: %w", taskID, err)
+	}
+	if task == nil {
+		return "", fmt.Errorf("task %q not found while resolving workflow profile", taskID)
+	}
+	return s.resolveStepAgentProfileForTask(ctx, task, step), nil
 }
 
 // resolveStepProfileSessionStartPolicy returns the destination step's session
@@ -3805,7 +3834,10 @@ func (s *Service) prepareWorkflowStepSession(
 	if step.SessionTarget != nil {
 		return s.prepareExplicitWorkflowSession(ctx, taskID, session, step, sourceStep, entryIDs...)
 	}
-	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
+	effectiveProfile, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, step)
+	if err != nil {
+		return nil, false, err
+	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, session.AgentProfileID, startPolicy) {
 		requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile)
@@ -4010,7 +4042,10 @@ func (s *Service) preflightWorkflowStepCredentials(
 			ctx, task.WorkspaceID, taskID, targetSession.ExecutorID, targetSession.ExecutorProfileID,
 		)
 	}
-	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
+	effectiveProfile, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, targetStep)
+	if err != nil {
+		return err
+	}
 	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, currentSession.AgentProfileID, startPolicy) {
 		if effectiveProfile == "" || startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
