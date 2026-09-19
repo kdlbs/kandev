@@ -31,16 +31,30 @@ const remoteEngineHost = "http://docker.example.invalid"
 // daemon, so this fails instead of guessing.
 var ErrNilRemoteDialer = errors.New("docker: remote client requires a dialer")
 
+// RemoteTransport carries the Engine API to a remote daemon.
+//
+// Cause exists because the Engine API client does not preserve transport
+// causes. When a request fails with an error whose text names a local socket
+// dial, its request path substitutes a generic "cannot connect to the Docker
+// daemon" error that wraps nothing. A remote daemon reports its own socket
+// failures in that same wording, so the classified cause survives only where
+// the transport kept it. Cause reports the most recent one, or nil.
+type RemoteTransport struct {
+	Dial  DialContextFunc
+	Cause func() error
+}
+
 // NewRemoteClient creates a Docker client whose Engine API requests travel
-// through dial rather than a local socket or a TCP address.
-func NewRemoteClient(dial DialContextFunc, log *logger.Logger) (*Client, error) {
-	return newRemoteClientWithOptionOrder(dial, log, false)
+// through transport rather than a local socket or a TCP address.
+func NewRemoteClient(transport RemoteTransport, log *logger.Logger) (*Client, error) {
+	return newRemoteClientWithOptionOrder(transport, log, false)
 }
 
 // newRemoteClientWithOptionOrder builds the remote client, optionally
 // reversing the host/dialer option order. Only a test reverses it, to prove
 // the ordering below is the thing that makes the dialer effective.
-func newRemoteClientWithOptionOrder(dial DialContextFunc, log *logger.Logger, reversed bool) (*Client, error) {
+func newRemoteClientWithOptionOrder(transport RemoteTransport, log *logger.Logger, reversed bool) (*Client, error) {
+	dial := transport.Dial
 	if dial == nil {
 		return nil, ErrNilRemoteDialer
 	}
@@ -66,13 +80,35 @@ func newRemoteClientWithOptionOrder(dial DialContextFunc, log *logger.Logger, re
 	log.Info("Remote Docker client created", zap.String("transport", "dialer"))
 
 	return &Client{
-		cli:     cli,
-		storage: cli,
-		remover: cli,
-		builder: cli,
-		logger:  log,
-		config:  config.DockerConfig{Host: remoteEngineHost},
+		cli:         cli,
+		storage:     cli,
+		remover:     cli,
+		builder:     cli,
+		logger:      log,
+		config:      config.DockerConfig{Host: remoteEngineHost},
+		remoteCause: transport.Cause,
 	}, nil
+}
+
+// ExplainRemoteFailure restores the transport-level cause of err when the
+// Engine API client replaced it with a generic connection failure that wraps
+// nothing. Any other error, and any error on a client with no remote
+// transport, is returned unchanged.
+//
+// Only a connection failure is substituted: a daemon that answered and refused
+// the request has already reported the cause the user needs.
+func (c *Client) ExplainRemoteFailure(err error) error {
+	if err == nil || c.remoteCause == nil {
+		return err
+	}
+	if !client.IsErrConnectionFailed(err) {
+		return err
+	}
+	cause := c.remoteCause()
+	if cause == nil {
+		return err
+	}
+	return cause
 }
 
 // PingVersion pings the daemon and reports its API version, so a connection
@@ -80,7 +116,7 @@ func newRemoteClientWithOptionOrder(dial DialContextFunc, log *logger.Logger, re
 func (c *Client) PingVersion(ctx context.Context) (string, error) {
 	result, err := c.cli.Ping(ctx, client.PingOptions{})
 	if err != nil {
-		return "", fmt.Errorf("docker ping failed: %w", err)
+		return "", fmt.Errorf("docker ping failed: %w", c.ExplainRemoteFailure(err))
 	}
 	return result.APIVersion, nil
 }

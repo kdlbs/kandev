@@ -21,24 +21,56 @@ import (
 // daemon, which is why a missing command is its own reported cause.
 const dockerDialStdioCommand = "docker system dial-stdio"
 
-// NewSSHDockerDialer returns a dialer that carries the Docker Engine API over
-// an existing Kandev SSH connection.
+// NewSSHDockerDialer returns a transport that carries the Docker Engine API
+// over an existing Kandev SSH connection.
 //
 // This deliberately does not use the Docker CLI's connection helper, which
 // shells out to the system ssh binary. Kandev already owns native SSH dialing
 // with host-key pinning, IdentityAgent expansion, and ProxyJump, and a second
 // SSH implementation would not share any of it.
-func NewSSHDockerDialer(client *ssh.Client, log *logger.Logger) docker.DialContextFunc {
-	return func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return dialDockerOverSSH(ctx, client, log)
+func NewSSHDockerDialer(client *ssh.Client, log *logger.Logger) docker.RemoteTransport {
+	d := &sshDockerDialer{client: client, logger: log}
+	return docker.RemoteTransport{Dial: d.dial, Cause: d.cause}
+}
+
+// sshDockerDialer owns the connections it opens for one SSH client and retains
+// the classified cause of the last `docker system dial-stdio` command that
+// failed, because the Engine API client drops it from the error it returns.
+type sshDockerDialer struct {
+	client *ssh.Client
+	logger *logger.Logger
+
+	mu   sync.Mutex
+	last error
+}
+
+func (d *sshDockerDialer) dial(ctx context.Context, _, _ string) (net.Conn, error) {
+	return dialDockerOverSSH(ctx, d.client, d.logger, d.record)
+}
+
+// record keeps the newest failure and logs it, so the remote's own words reach
+// the operator even when a caller only sees the Engine API client's wording.
+func (d *sshDockerDialer) record(err error) {
+	if err == nil {
+		return
 	}
+	d.logger.Warn("remote docker: dial-stdio failed", zap.Error(err))
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.last = err
+}
+
+func (d *sshDockerDialer) cause() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.last
 }
 
 // The context bounds the dial itself. It deliberately does not bound the
 // returned connection: http.Transport pools connections across requests, so
 // tearing one down when its dialing request ends would close a connection
 // that later requests are still using.
-func dialDockerOverSSH(ctx context.Context, client *ssh.Client, log *logger.Logger) (net.Conn, error) {
+func dialDockerOverSSH(ctx context.Context, client *ssh.Client, log *logger.Logger, onExit func(error)) (net.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -76,6 +108,7 @@ func dialDockerOverSSH(ctx context.Context, client *ssh.Client, log *logger.Logg
 		stdout:  stdout,
 		stderr:  stderr,
 		logger:  log,
+		onExit:  onExit,
 	}, nil
 }
 
@@ -103,6 +136,9 @@ type sshDockerConn struct {
 	stdout  io.Reader
 	stderr  *syncBuffer
 	logger  *logger.Logger
+	// onExit reports the classified failure of the remote command to the
+	// dialer that opened this connection. Optional.
+	onExit func(error)
 
 	// closeWaitBudget overrides dialCloseWaitBudget; zero means the default.
 	closeWaitBudget time.Duration
@@ -235,6 +271,9 @@ func (c *sshDockerConn) wait() {
 		c.exited = true
 		c.exitErr = cause
 		c.mu.Unlock()
+		if cause != nil && c.onExit != nil {
+			c.onExit(cause)
+		}
 	})
 }
 

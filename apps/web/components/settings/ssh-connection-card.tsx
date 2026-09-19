@@ -477,6 +477,26 @@ function TestResultHeader({ success, totalMs }: { success: boolean; totalMs: num
   );
 }
 
+// Remediation copy per backend hint identifier. A hint that is absent from
+// this map renders nothing: it belongs to a backend this build has not caught
+// up with, and the raw identifier is not copy.
+const STEP_HINT_KEYS: Record<string, string> = {
+  remote_user_needs_docker_access: "executors:sshHintRemoteUserNeedsDockerAccess",
+  remote_host_needs_docker_cli: "executors:sshHintRemoteHostNeedsDockerCli",
+  remote_daemon_not_running: "executors:sshHintRemoteDaemonNotRunning",
+};
+
+function StepHint({ hint, slug }: { hint: string; slug: string }) {
+  const { t } = useTranslation();
+  const key = STEP_HINT_KEYS[hint];
+  if (!key) return null;
+  return (
+    <p data-testid={`ssh-test-step-${slug}-hint`} className="text-xs text-muted-foreground">
+      {t(key)}
+    </p>
+  );
+}
+
 function StepRow({ step }: { step: SSHTestStep }) {
   const slug = step.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return (
@@ -499,10 +519,11 @@ function StepRow({ step }: { step: SSHTestStep }) {
           <p className="text-xs text-muted-foreground truncate font-mono">{step.output}</p>
         )}
         {step.error && (
-          <p data-testid={`ssh-test-step-${slug}-error`} className="text-xs text-red-600 truncate">
+          <p data-testid={`ssh-test-step-${slug}-error`} className="text-xs text-red-600">
             {step.error}
           </p>
         )}
+        {step.hint && <StepHint hint={step.hint} slug={slug} />}
       </div>
     </div>
   );

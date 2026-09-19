@@ -94,6 +94,23 @@ and stderr of the `dial-stdio` command, which fails with a permission error when
 the SSH user is outside the `docker` group. That distinction is required by
 `AC-…-001.14` and is the most likely first-run failure.
 
+That classified cause cannot travel back inside the Engine API client's error.
+When a request fails with a transport error whose text names a unix socket dial,
+the client substitutes a generic "cannot connect to the Docker daemon at
+`<host>`" error that wraps nothing, and the remote Docker CLI reports its own
+socket failures in exactly that wording (`dial unix /var/run/docker.sock:
+connect: permission denied`). The substituted error also names the synthetic
+host, which is meaningless to the user. So the transport keeps the cause: the
+dialer retains the classified failure of the most recent `dial-stdio` command
+and logs it, and `Client.ExplainRemoteFailure` restores it when the Engine API
+client reports a connection failure. An error from a daemon that answered is
+never substituted, because it already names its own cause.
+
+Each failing step carries a `hint`: a stable identifier for the remediation,
+not copy. The connection card maps it to translated text and ignores an
+identifier it does not recognize, so a backend that adds a cause does not
+render a raw token in the UI.
+
 The trusted fingerprint is written to the executor `Config` as
 `host_fingerprint`, reusing the SSH executor's storage key and mismatch
 handling.

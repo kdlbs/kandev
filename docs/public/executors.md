@@ -32,6 +32,8 @@ Only administrators can create, edit, or test a Remote Docker executor, and only
 
 Remote Docker reaches its daemon over SSH, not over a daemon URL. The profile stores an SSH target, and Kandev rejects any value carrying a scheme, so `tcp://` is excluded by construction. An unsecured daemon port is remote root; `ssh://` needs no extra setup because Docker's SSH transport runs `docker system dial-stdio` over the connection you already have. The older stored fields `docker_host`, `docker_tls_verify`, and `docker_cert_path` are not used by this runtime.
 
+The connection test's **Docker daemon** step reports which of three different problems it hit, because each needs a different fix on the remote host. The SSH user cannot use the Docker socket: add that user to the `docker` group there, then test again over a new connection, since group membership applies from the next login. The host has no `docker` command: install the Docker CLI, which the SSH transport needs in addition to the daemon. The CLI ran but no daemon answered: start Docker on that host. Each failure shows the remote's own error alongside the fix.
+
 Choose Remote Docker over a single-node Kubernetes cluster when you want a container per task on one machine and do not otherwise run Kubernetes. Kubernetes covers the same ground and adds resource limits, admission control, and scheduling, but it asks for a storage provisioner, a namespace, RBAC, and a worker image built and pushed to a registry by digest. Remote Docker keeps the Docker executor's Dockerfile-and-build loop, with no registry in the basic case.
 
 ## Embedded VS Code availability

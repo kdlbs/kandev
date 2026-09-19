@@ -142,6 +142,25 @@ func TestSSHDockerDialerReportsMissingCLI(t *testing.T) {
 			stderr:   "permission denied while trying to connect to the Docker daemon socket",
 			want:     docker.ErrRemoteSocketAccessDenied,
 		},
+		{
+			// The stderr a real Docker CLI prints for a denied socket. Its
+			// "dial unix" text matches the Engine API client's local-socket
+			// heuristic, which replaces the error with a generic "cannot
+			// connect" that wraps nothing, so the cause has to survive
+			// outside the returned error.
+			name:     "socket permission denied reported as a unix dial failure",
+			exitCode: 1,
+			stderr:   "failed to open the raw stream connection: dial unix /var/run/docker.sock: connect: permission denied",
+			want:     docker.ErrRemoteSocketAccessDenied,
+		},
+		{
+			// The stderr a real Docker CLI prints when the daemon is not
+			// running. It carries the same masking text as the denial above.
+			name:     "daemon down reported as a unix dial failure",
+			exitCode: 1,
+			stderr:   "failed to open the raw stream connection: dial unix /var/run/docker.sock: connect: no such file or directory",
+			want:     docker.ErrRemoteDaemonUnreachable,
+		},
 	}
 
 	for _, tc := range tests {
@@ -160,8 +179,7 @@ func TestSSHDockerDialerReportsMissingCLI(t *testing.T) {
 			sshClient := server.dial(t)
 			defer func() { _ = sshClient.Close() }()
 
-			dial := NewSSHDockerDialer(sshClient, dialerTestLogger(t))
-			cli, err := docker.NewRemoteClient(dial, dialerTestLogger(t))
+			cli, err := docker.NewRemoteClient(NewSSHDockerDialer(sshClient, dialerTestLogger(t)), dialerTestLogger(t))
 			if err != nil {
 				t.Fatalf("NewRemoteClient: %v", err)
 			}
@@ -177,6 +195,16 @@ func TestSSHDockerDialerReportsMissingCLI(t *testing.T) {
 			if !errors.Is(pingErr, tc.want) {
 				t.Fatalf("Ping error = %v, want it to wrap %v", pingErr, tc.want)
 			}
+
+			// PingVersion is what the connection test calls, and its error
+			// is what selects the remediation the user is shown.
+			_, versionErr := cli.PingVersion(ctx)
+			if versionErr == nil {
+				t.Fatal("PingVersion succeeded against a failing remote command")
+			}
+			if !errors.Is(versionErr, tc.want) {
+				t.Fatalf("PingVersion error = %v, want it to wrap %v", versionErr, tc.want)
+			}
 		})
 	}
 }
@@ -189,11 +217,11 @@ func TestSSHDockerDialerRejectsClosedConnection(t *testing.T) {
 	_ = sshClient.Close()
 	server.Close()
 
-	dial := NewSSHDockerDialer(sshClient, dialerTestLogger(t))
+	transport := NewSSHDockerDialer(sshClient, dialerTestLogger(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := dial(ctx, "tcp", "docker.example.invalid:80"); err == nil {
+	if _, err := transport.Dial(ctx, "tcp", "docker.example.invalid:80"); err == nil {
 		t.Fatal("dial on a closed SSH connection = nil error, want error")
 	}
 }

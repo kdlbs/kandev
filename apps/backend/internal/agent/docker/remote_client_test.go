@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
@@ -93,7 +94,7 @@ func (l *singleConnListener) Addr() net.Addr { return l.conn.LocalAddr() }
 func TestNewRemoteClientPingsThroughDialer(t *testing.T) {
 	engine := newStubEngine(t, "1.51")
 
-	cli, err := NewRemoteClient(engine.dial(), testLogger(t))
+	cli, err := NewRemoteClient(RemoteTransport{Dial: engine.dial()}, testLogger(t))
 	if err != nil {
 		t.Fatalf("NewRemoteClient: %v", err)
 	}
@@ -110,8 +111,8 @@ func TestNewRemoteClientPingsThroughDialer(t *testing.T) {
 // TestNewRemoteClientRejectsNilDialer keeps a remote client from being
 // constructed without a transport, which would silently dial the local daemon.
 func TestNewRemoteClientRejectsNilDialer(t *testing.T) {
-	if _, err := NewRemoteClient(nil, testLogger(t)); err == nil {
-		t.Fatal("NewRemoteClient(nil) = nil error, want error")
+	if _, err := NewRemoteClient(RemoteTransport{}, testLogger(t)); err == nil {
+		t.Fatal("NewRemoteClient with no dialer = nil error, want error")
 	}
 }
 
@@ -136,7 +137,7 @@ func TestRemoteClientOptionOrder(t *testing.T) {
 		return engine.dial()(ctx, network, addr)
 	}
 
-	reversed, err := newRemoteClientWithOptionOrder(counting, testLogger(t), true)
+	reversed, err := newRemoteClientWithOptionOrder(RemoteTransport{Dial: counting}, testLogger(t), true)
 	if err != nil {
 		t.Fatalf("reversed option order should still construct: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestRemoteClientCorrectOrderUsesDialer(t *testing.T) {
 		return engine.dial()(ctx, network, addr)
 	}
 
-	cli, err := NewRemoteClient(counting, testLogger(t))
+	cli, err := NewRemoteClient(RemoteTransport{Dial: counting}, testLogger(t))
 	if err != nil {
 		t.Fatalf("NewRemoteClient: %v", err)
 	}
@@ -196,7 +197,7 @@ func TestRemoteClientCorrectOrderUsesDialer(t *testing.T) {
 func TestPingVersionReportsTheDaemonAPIVersion(t *testing.T) {
 	engine := newStubEngine(t, "1.51")
 
-	cli, err := NewRemoteClient(engine.dial(), testLogger(t))
+	cli, err := NewRemoteClient(RemoteTransport{Dial: engine.dial()}, testLogger(t))
 	if err != nil {
 		t.Fatalf("NewRemoteClient: %v", err)
 	}
@@ -211,5 +212,72 @@ func TestPingVersionReportsTheDaemonAPIVersion(t *testing.T) {
 	}
 	if version != "1.51" {
 		t.Fatalf("PingVersion = %q, want 1.51", version)
+	}
+}
+
+// TestExplainRemoteFailureRestoresTheTransportCause pins the reason the
+// transport keeps a cause at all. The Engine API client replaces a transport
+// error whose text names a unix socket dial with a generic "cannot connect"
+// error that wraps nothing, and a remote daemon reports its own socket
+// failures in exactly that wording, so without this the caller cannot tell a
+// denied socket from a dead daemon.
+func TestExplainRemoteFailureRestoresTheTransportCause(t *testing.T) {
+	cause := errors.New("remote user cannot access the Docker socket")
+	cli, err := NewRemoteClient(RemoteTransport{
+		Dial: func(context.Context, string, string) (net.Conn, error) {
+			return nil, errors.New("dial unix /var/run/docker.sock: connect: permission denied")
+		},
+		Cause: func() error { return cause },
+	}, testLogger(t))
+	if err != nil {
+		t.Fatalf("NewRemoteClient: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, pingErr := cli.PingVersion(ctx); !errors.Is(pingErr, cause) {
+		t.Fatalf("PingVersion error = %v, want it to wrap %v", pingErr, cause)
+	}
+}
+
+// TestExplainRemoteFailureLeavesDaemonErrorsAlone keeps the substitution
+// narrow. A daemon that answered and refused the request has already named the
+// cause, and replacing it with a stale transport failure would be a worse
+// error than the one the daemon gave.
+func TestExplainRemoteFailureLeavesDaemonErrorsAlone(t *testing.T) {
+	engine := newStubEngine(t, "1.51")
+	cli, err := NewRemoteClient(RemoteTransport{
+		Dial:  engine.dial(),
+		Cause: func() error { return errors.New("a failure from an earlier connection") },
+	}, testLogger(t))
+	if err != nil {
+		t.Fatalf("NewRemoteClient: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+
+	fromDaemon := errors.New("no such image")
+	if got := cli.ExplainRemoteFailure(fromDaemon); !errors.Is(got, fromDaemon) {
+		t.Fatalf("ExplainRemoteFailure(%v) = %v, want it unchanged", fromDaemon, got)
+	}
+	if got := cli.ExplainRemoteFailure(nil); got != nil {
+		t.Fatalf("ExplainRemoteFailure(nil) = %v, want nil", got)
+	}
+}
+
+// TestExplainRemoteFailureWithoutACause returns the Engine API client's own
+// error when the transport recorded nothing, rather than inventing one.
+func TestExplainRemoteFailureWithoutACause(t *testing.T) {
+	engine := newStubEngine(t, "1.51")
+	cli, err := NewRemoteClient(RemoteTransport{Dial: engine.dial()}, testLogger(t))
+	if err != nil {
+		t.Fatalf("NewRemoteClient: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+
+	original := errors.New("some transport failure")
+	if got := cli.ExplainRemoteFailure(original); !errors.Is(got, original) {
+		t.Fatalf("ExplainRemoteFailure(%v) = %v, want it unchanged", original, got)
 	}
 }

@@ -17,6 +17,12 @@ export interface SSHTestStep {
   success: boolean;
   output?: string;
   error?: string;
+  /**
+   * Stable identifier for the remediation this failure needs, not copy. The
+   * backend picks it from the typed cause; the card maps it to translated
+   * text and ignores an identifier it does not know.
+   */
+  hint?: string;
 }
 
 export interface SSHTestResult {
