@@ -1247,10 +1247,11 @@ type StepActionDTO struct {
 
 // MoveTaskResponse includes the task and the target workflow step info
 type MoveTaskResponse struct {
-	Task         TaskDTO                    `json:"task"`
-	WorkflowStep WorkflowStepDTO            `json:"workflow_step"`
-	MoveID       string                     `json:"move_id,omitempty"`
-	EntryOptions *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	Task                  TaskDTO                    `json:"task"`
+	WorkflowStep          WorkflowStepDTO            `json:"workflow_step"`
+	WorkflowEntryIdentity string                     `json:"workflow_entry_identity,omitempty"`
+	MoveID                string                     `json:"move_id,omitempty"`
+	EntryOptions          *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 	// Disposition reports how an MCP move_task call was resolved: "applied" when
 	// the move committed immediately, or "deferred" when it was recorded to run
 	// at the source session's turn-end. It lets an agent distinguish deferred

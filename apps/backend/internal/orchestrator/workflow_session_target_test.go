@@ -432,6 +432,42 @@ func TestWorkflowRouteRetryRecoversAfterLegacyCommitMetadataFailure(t *testing.T
 	require.Equal(t, workflowSessionRouteCommitted, committed.Phase)
 }
 
+func TestPromoteWorkflowSessionRouteUsesNonterminalGuardOnLegacyRepositories(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	destination := &models.TaskSession{
+		ID:             "workflow-terminal-destination",
+		TaskID:         "t1",
+		AgentProfileID: "profile-a",
+		State:          models.TaskSessionStateCompleted,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, destination))
+	route := models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-terminal-destination",
+		DestinationStepID: "step-review",
+		EntryIdentity:     "entry:00000000000000000031",
+		TargetKind:        string(wfmodels.WorkflowSessionTargetInitial),
+		AgentProfileID:    "profile-a",
+		DestinationID:     destination.ID,
+		Phase:             workflowSessionRoutePrepared,
+	}
+	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, route))
+
+	fixture.svc.repo = &failWorkflowRouteMetadataRepo{repoStore: fixture.repo}
+	promoted, err := fixture.svc.promoteWorkflowSessionRoute(ctx, "t1", destination, &route)
+	require.NoError(t, err)
+	require.False(t, promoted)
+
+	updatedDestination, err := fixture.repo.GetTaskSession(ctx, destination.ID)
+	require.NoError(t, err)
+	require.False(t, updatedDestination.IsPrimary)
+	updatedTask, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	updatedRoute, ok := models.LoadWorkflowSessionRoute(updatedTask.Metadata)
+	require.True(t, ok)
+	require.Equal(t, workflowSessionRoutePrepared, updatedRoute.Phase)
+}
+
 func TestPromoteWorkflowSessionRouteClearsSelectedDestinationParkingOnly(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -490,6 +526,37 @@ func TestPromoteWorkflowSessionRouteClearsSelectedDestinationParkingOnly(t *test
 	parking, sourceStillParked := models.LoadWorkflowParking(source.Metadata)
 	require.True(t, sourceStillParked)
 	require.Equal(t, sourceParking.Stamp, parking.Stamp, "promotion cleared the source marker instead of destination")
+}
+
+func TestReuseResolvedWorkflowSessionCommitsRouteForCurrentSession(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	route := &models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-current-session",
+		DestinationStepID: "step-review",
+		EntryIdentity:     "entry:00000000000000000022",
+		TargetKind:        string(wfmodels.WorkflowSessionTargetInitial),
+		AgentProfileID:    fixture.current.AgentProfileID,
+	}
+
+	reused, switched, err := fixture.svc.reuseResolvedWorkflowSession(
+		ctx,
+		"t1",
+		fixture.current,
+		fixture.current,
+		route,
+		models.WorkflowProfileSessionEndPolicyPark,
+	)
+	require.NoError(t, err)
+	require.False(t, switched)
+	require.Equal(t, fixture.current.ID, reused.ID)
+
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	committed, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, workflowSessionRouteCommitted, committed.Phase)
+	require.Equal(t, fixture.current.ID, committed.DestinationID)
 }
 
 func fixtureSessionState(t *testing.T, repo interface {

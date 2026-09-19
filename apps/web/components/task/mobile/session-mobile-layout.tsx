@@ -664,6 +664,20 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  const workflowFocusRequest = useAppStore((state) => {
+    const request = state.workflowSessionFocus.request;
+    return request && request.taskId === activeTaskId && request.sessionId === effectiveSessionId
+      ? request
+      : null;
+  });
+  const acknowledgeWorkflowSessionFocus = useAppStore(
+    (state) => state.acknowledgeWorkflowSessionFocus,
+  );
+  useEffect(() => {
+    if (!workflowFocusRequest) return;
+    handlePanelChangeAndClearSheet("chat");
+    acknowledgeWorkflowSessionFocus(workflowFocusRequest.requestId);
+  }, [acknowledgeWorkflowSessionFocus, handlePanelChangeAndClearSheet, workflowFocusRequest]);
   const [mobileScrollTarget, setMobileScrollTarget] = useState<PendingMessageScrollTarget | null>(
     null,
   );

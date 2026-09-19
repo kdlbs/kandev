@@ -3047,6 +3047,45 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 	validatedExisting *models.TaskSession,
 ) (*models.TaskSession, error) {
+	return s.switchSessionForStepWithPoliciesAndCandidateAndRoute(
+		ctx, taskID, currentSession, newAgentProfileID, startPolicy, endPolicy, validatedExisting, nil,
+	)
+}
+
+func (s *Service) resolveWorkflowSessionSwitchExisting(
+	ctx context.Context,
+	taskID, newAgentProfileID string,
+	currentSession *models.TaskSession,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+	validatedExisting *models.TaskSession,
+) *models.TaskSession {
+	if startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
+		return nil
+	}
+	if validatedExisting != nil {
+		return validatedExisting
+	}
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
+	if err != nil {
+		s.logger.Warn("failed to look up reusable session, falling through to create new",
+			zap.String("task_id", taskID),
+			zap.String("agent_profile_id", newAgentProfileID),
+			zap.Error(err))
+		return nil
+	}
+	return existing
+}
+
+func (s *Service) switchSessionForStepWithPoliciesAndCandidateAndRoute(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	newAgentProfileID string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+	endPolicy models.WorkflowProfileSessionEndPolicy,
+	validatedExisting *models.TaskSession,
+	workflowRoute *models.WorkflowSessionRoute,
+) (*models.TaskSession, error) {
 	startPolicy = models.NormalizeWorkflowProfileSessionStartPolicy(string(startPolicy))
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	s.logger.Info("switching session for workflow step agent profile change",
@@ -3056,21 +3095,9 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 		zap.String("new_profile", newAgentProfileID),
 		zap.String("profile_session_start_policy", string(startPolicy)),
 		zap.String("profile_session_end_policy", string(endPolicy)))
-	var existing *models.TaskSession
-	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
-		if validatedExisting != nil {
-			existing = validatedExisting
-		} else {
-			var lookupErr error
-			existing, lookupErr = s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
-			if lookupErr != nil {
-				s.logger.Warn("failed to look up reusable session, falling through to create new",
-					zap.String("task_id", taskID),
-					zap.String("agent_profile_id", newAgentProfileID),
-					zap.Error(lookupErr))
-			}
-		}
-	}
+	existing := s.resolveWorkflowSessionSwitchExisting(
+		ctx, taskID, newAgentProfileID, currentSession, startPolicy, validatedExisting,
+	)
 	targetSession := currentSession
 	if existing != nil {
 		targetSession = existing
@@ -3101,7 +3128,19 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 	}
 
 	if existing != nil {
-		reused, err := s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy)
+		var reused *models.TaskSession
+		var err error
+		if workflowRoute != nil {
+			route := *workflowRoute
+			route.DestinationID = existing.ID
+			route.Phase = workflowSessionRoutePrepared
+			if err := s.persistWorkflowSessionRoute(ctx, taskID, route); err != nil {
+				return nil, err
+			}
+			reused, err = s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy, &route)
+		} else {
+			reused, err = s.reuseSessionForStepWithEndPolicy(ctx, taskID, currentSession, existing, endPolicy)
+		}
 		if err == nil {
 			return reused, nil
 		}
@@ -3114,7 +3153,9 @@ func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
 			zap.String("agent_profile_id", newAgentProfileID))
 	}
 
-	return s.createNewSessionForStepWithEndPolicy(ctx, taskID, currentSession, newAgentProfileID, endPolicy)
+	return s.createNewSessionForStepWithEndPolicyAndRoute(
+		ctx, taskID, currentSession, newAgentProfileID, endPolicy, workflowRoute,
+	)
 }
 
 // findReusableSessionForProfile returns the most-recently-updated
@@ -3807,6 +3848,14 @@ func (s *Service) prepareWorkflowStepSession(
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
+	profileRoute := workflowProfileSessionRoute(
+		taskID,
+		session,
+		step,
+		effectiveProfile,
+		s.workflowEntryIdentity(ctx, taskID, entryIDs...),
+		startPolicy,
+	)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, session.AgentProfileID, startPolicy) {
 		requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile)
 		if err != nil {
@@ -3817,9 +3866,9 @@ func (s *Service) prepareWorkflowStepSession(
 				return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 			}
 			endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-			return s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, entryIDs...)
+			return s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, profileRoute, entryIDs...)
 		}
-		return s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, entryIDs...)
+		return s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, profileRoute, entryIDs...)
 	}
 	if sourceStep == nil {
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
@@ -3829,7 +3878,7 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-	newSession, err := s.switchSessionForStepWithPoliciesAndCandidate(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy, validatedExisting)
+	newSession, err := s.switchSessionForStepWithPoliciesAndCandidateAndRoute(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy, validatedExisting, profileRoute)
 	if err != nil {
 		return nil, false, err
 	}
@@ -3850,9 +3899,10 @@ func (s *Service) replaceExactModelWorkflowStepSession(
 	step *wfmodels.WorkflowStep,
 	profileID string,
 	endPolicy models.WorkflowProfileSessionEndPolicy,
+	workflowRoute *models.WorkflowSessionRoute,
 	entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
-	newSession, err := s.createNewSessionForStepWithEndPolicy(ctx, taskID, session, profileID, endPolicy)
+	newSession, err := s.createNewSessionForStepWithEndPolicyAndRoute(ctx, taskID, session, profileID, endPolicy, workflowRoute)
 	if err != nil {
 		return nil, false, err
 	}
@@ -3960,10 +4010,15 @@ func (s *Service) keepCurrentWorkflowStepSession(
 	taskID string,
 	session *models.TaskSession,
 	step *wfmodels.WorkflowStep,
+	workflowRoute *models.WorkflowSessionRoute,
 	entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
 	s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, session)
-	if !session.IsPrimary {
+	if workflowRoute != nil {
+		if err := s.promoteKeptWorkflowStepSession(ctx, taskID, session, workflowRoute); err != nil {
+			return nil, false, err
+		}
+	} else if !session.IsPrimary {
 		if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 			s.logger.Warn("failed to preserve session as primary for workflow step",
 				zap.String("task_id", taskID),
@@ -3978,6 +4033,28 @@ func (s *Service) keepCurrentWorkflowStepSession(
 		return nil, false, err
 	}
 	return session, false, nil
+}
+
+func (s *Service) promoteKeptWorkflowStepSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	workflowRoute *models.WorkflowSessionRoute,
+) error {
+	preparedRoute := *workflowRoute
+	preparedRoute.DestinationID = session.ID
+	preparedRoute.Phase = workflowSessionRoutePrepared
+	if err := s.persistWorkflowSessionRoute(ctx, taskID, preparedRoute); err != nil {
+		return err
+	}
+	promoted, err := s.promoteWorkflowSessionRoute(ctx, taskID, session, &preparedRoute)
+	if err != nil {
+		return err
+	}
+	if !promoted {
+		return errReusableSessionNoLongerActive
+	}
+	return nil
 }
 
 func (s *Service) preflightWorkflowStepCredentials(
@@ -4360,8 +4437,10 @@ func (s *Service) launchAfterOnEnterDispatch(
 					}
 					s.logger.Info("implicit profile switch: reused session terminalized before dispatch, creating replacement",
 						zap.String("task_id", taskID), zap.String("session_id", sessionID))
-					replacement, replacementErr := s.createNewSessionForStep(
+					replacementRoute := s.workflowReplacementRoute(asyncCtx, taskID, step.ID, sessionID)
+					replacement, replacementErr := s.createNewSessionForStepWithEndPolicyAndRoute(
 						asyncCtx, taskID, session, session.AgentProfileID,
+						models.WorkflowProfileSessionEndPolicyComplete, replacementRoute,
 					)
 					if replacementErr != nil {
 						s.logger.Error("failed to create replacement after terminalized profile switch",
@@ -4399,8 +4478,10 @@ func (s *Service) launchAfterOnEnterDispatch(
 						}
 						s.logger.Info("implicit profile switch: reused session terminalized during dispatch, creating replacement",
 							zap.String("task_id", taskID), zap.String("session_id", sessionID))
-						replacement, replacementErr := s.createNewSessionForStep(
+						replacementRoute := s.workflowReplacementRoute(asyncCtx, taskID, step.ID, sessionID)
+						replacement, replacementErr := s.createNewSessionForStepWithEndPolicyAndRoute(
 							asyncCtx, taskID, fresh, fresh.AgentProfileID,
+							models.WorkflowProfileSessionEndPolicyComplete, replacementRoute,
 						)
 						if replacementErr != nil {
 							s.logger.Error("failed to create replacement after terminalized dispatch",
@@ -4473,8 +4554,10 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 	}
 	s.logger.Info("creating fresh workflow session after reused session terminalized",
 		zap.String("task_id", taskID), zap.String("session_id", sessionID))
-	replacement, replacementErr := s.createNewSessionForStep(
+	replacementRoute := s.workflowReplacementRoute(ctx, taskID, step.ID, sessionID)
+	replacement, replacementErr := s.createNewSessionForStepWithEndPolicyAndRoute(
 		ctx, taskID, session, session.AgentProfileID,
+		models.WorkflowProfileSessionEndPolicyComplete, replacementRoute,
 	)
 	if replacementErr != nil {
 		s.logger.Error("failed to create replacement after reused session terminalized",

@@ -67,6 +67,12 @@ The preview is advisory. **Move here** checks routing, permissions, WIP, and
 current session state again when the move runs. A preview can therefore change
 while a turn is running or while another session becomes available.
 
+After you move an open task with **Move here**, Kandev follows the conversation
+committed for the destination step on desktop and phone. It waits for that
+conversation to become available, so a pending or failed move keeps the
+conversation you selected. If you select another conversation while routing is
+in progress, that selection stays active.
+
 ## Move a task with one-time entry options
 
 The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
