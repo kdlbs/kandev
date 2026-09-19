@@ -118,6 +118,8 @@ func (s *Service) ExactTaskProfileGeneration(ctx context.Context, taskID string)
 // AssignExactTaskProfile records and activates the next immutable profile
 // selection. The profile must be concrete, enabled, task-workspace scoped, and
 // unchanged at assignment time; later launch validation repeats those checks.
+//
+//nolint:cyclop // Strict validation branches intentionally fail closed at each boundary.
 func (s *Service) AssignExactTaskProfile(
 	ctx context.Context, request ExactTaskProfileAssignmentRequest,
 ) (*ExactProfileLaunchDecision, error) {

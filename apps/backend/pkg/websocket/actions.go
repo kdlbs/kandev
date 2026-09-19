@@ -450,6 +450,7 @@ const (
 	ActionMCPCreateTask                            = "mcp.create_task"
 	ActionMCPUpdateTask                            = "mcp.update_task"
 	ActionMCPAssignExactTaskProfile                = "mcp.assign_exact_task_profile"
+	ActionMCPHandoffCoordinatorPrimary             = "mcp.handoff_coordinator_primary"
 	ActionMCPGetTaskPRAutomation                   = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation                = "mcp.update_task_pr_automation"
 	ActionMCPReportPRAutoFixOutcome                = "mcp.report_pr_auto_fix_outcome"

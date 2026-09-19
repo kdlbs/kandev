@@ -8,6 +8,7 @@ import (
 var (
 	ErrExactProfileAssignmentGeneration   = errors.New("exact profile assignment generation rejected")
 	ErrExactProfileAssignmentInvalidInput = errors.New("invalid exact profile assignment input")
+	ErrCoordinatorHandoffConflict         = errors.New("coordinator handoff state changed")
 )
 
 // Exact-profile launch receipt outcomes.

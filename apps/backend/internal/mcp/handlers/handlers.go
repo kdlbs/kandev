@@ -156,6 +156,10 @@ type ExactTaskProfileAssigner interface {
 	AssignExactTaskProfile(ctx context.Context, request orchestrator.ExactTaskProfileAssignmentRequest) (*orchestrator.ExactProfileLaunchDecision, error)
 }
 
+type CoordinatorHandoffService interface {
+	HandoffCoordinatorPrimary(ctx context.Context, request orchestrator.CoordinatorHandoffRequest) (*orchestrator.CoordinatorHandoffResult, error)
+}
+
 type exactTaskProfileGenerationReader interface {
 	ExactTaskProfileGeneration(context.Context, string) (int64, error)
 }
@@ -350,10 +354,15 @@ type Handlers struct {
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc       AgentPermissionService
 	exactTaskProfileAssigner ExactTaskProfileAssigner
+	coordinatorHandoffSvc    CoordinatorHandoffService
 }
 
 func (h *Handlers) SetExactTaskProfileAssigner(assigner ExactTaskProfileAssigner) {
 	h.exactTaskProfileAssigner = assigner
+}
+
+func (h *Handlers) SetCoordinatorHandoffService(service CoordinatorHandoffService) {
+	h.coordinatorHandoffSvc = service
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -538,6 +547,7 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPAssignExactTaskProfile, h.handleAssignExactTaskProfile)
+	d.RegisterFunc(ws.ActionMCPHandoffCoordinatorPrimary, h.handleHandoffCoordinatorPrimary)
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)

@@ -19,16 +19,17 @@ import (
 // needs identity, role and state — not container IDs, worktree paths, or
 // profile snapshots.
 type taskSessionListEntry struct {
-	SessionID      string                   `json:"session_id"`
-	Name           string                   `json:"name,omitempty"`
-	State          models.TaskSessionState  `json:"state"`
-	IsPrimary      bool                     `json:"is_primary"`
-	IsCurrent      bool                     `json:"is_current"`
-	AgentProfileID string                   `json:"agent_profile_id,omitempty"`
-	StartedAt      time.Time                `json:"started_at"`
-	CompletedAt    *time.Time               `json:"completed_at,omitempty"`
-	UpdatedAt      time.Time                `json:"updated_at"`
-	ExactProfile   *taskSessionExactProfile `json:"exact_profile,omitempty"`
+	SessionID          string                   `json:"session_id"`
+	Name               string                   `json:"name,omitempty"`
+	State              models.TaskSessionState  `json:"state"`
+	IsPrimary          bool                     `json:"is_primary"`
+	IsCurrent          bool                     `json:"is_current"`
+	AgentProfileID     string                   `json:"agent_profile_id,omitempty"`
+	StartedAt          time.Time                `json:"started_at"`
+	CompletedAt        *time.Time               `json:"completed_at,omitempty"`
+	UpdatedAt          time.Time                `json:"updated_at"`
+	ExactProfile       *taskSessionExactProfile `json:"exact_profile,omitempty"`
+	QueueIncarnationID string                   `json:"queue_incarnation_id,omitempty"`
 }
 
 // taskSessionExactProfile is a bounded projection of the immutable launch
@@ -102,7 +103,7 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 			h.logger.Error("failed to load exact profile launch receipt", zap.Error(receiptErr))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 		}
-		entries = append(entries, taskSessionListEntry{
+		entry := taskSessionListEntry{
 			SessionID:      session.ID,
 			Name:           session.Name,
 			State:          session.State,
@@ -113,7 +114,11 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 			CompletedAt:    session.CompletedAt,
 			UpdatedAt:      session.UpdatedAt,
 			ExactProfile:   exactProfile,
-		})
+		}
+		if includeExactReceipt && session.TaskID == principal.CallerTaskID {
+			entry.QueueIncarnationID = session.QueueIncarnationID
+		}
+		entries = append(entries, entry)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{

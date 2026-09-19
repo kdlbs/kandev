@@ -99,7 +99,7 @@ func (r *Repository) UpsertExactProfileAssignment(ctx context.Context, assignmen
 // transaction. No caller can observe a newly accepted generation inactive, or
 // activate an assignment after another writer has superseded it.
 //
-//nolint:cyclop,funlen // The transaction's three generation states must stay together.
+//nolint:cyclop,funlen,gocognit // The transaction's three generation states must stay together.
 func (r *Repository) AssignExactProfileAssignment(ctx context.Context, assignment *models.ExactProfileAssignment) (bool, error) {
 	if err := validateExactProfileAssignment(assignment); err != nil {
 		return false, err

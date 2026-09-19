@@ -1892,6 +1892,12 @@ type TaskSession struct {
 	ExactProfileRevision   int64 `json:"exact_profile_revision,omitempty"`
 }
 
+// TaskSessionRouteStateCoordinatorHandoffFenced marks a predecessor whose
+// Coordinator authority moved to a verified successor. The row and transcript
+// remain available for continuity, but the old session may no longer dispatch
+// MCP mutations or reclaim task ownership.
+const TaskSessionRouteStateCoordinatorHandoffFenced = "coordinator_handoff_fenced"
+
 // ToAPI converts internal TaskSession to API type
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {

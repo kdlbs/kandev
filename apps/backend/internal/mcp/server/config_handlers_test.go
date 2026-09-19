@@ -131,6 +131,24 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.archive_task", ws.ActionMCPArchiveTask)
 	assert.Equal(t, "mcp.update_task_state", ws.ActionMCPUpdateTaskState)
 	assert.Equal(t, "mcp.assign_exact_task_profile", ws.ActionMCPAssignExactTaskProfile)
+	assert.Equal(t, "mcp.handoff_coordinator_primary", ws.ActionMCPHandoffCoordinatorPrimary)
+}
+
+func TestCoordinatorHandoffToolRequiresCanonicalCapability(t *testing.T) {
+	backend := &testBackend{}
+	task := New(backend, "session", "task", 10005, newTestLogger(t), "", false, ModeTask)
+	assert.NotContains(t, task.mcpServer.ListTools(), "handoff_coordinator_primary_kandev")
+
+	coordinator := NewWithProfile(backend, "session", "task", 10005, newTestLogger(t), "", false,
+		mcpprofile.New(mcpprofile.SurfaceKanbanTask,
+			[]mcpprofile.Capability{mcpprofile.CapabilityCoordinatorSessionHandoff}, nil))
+	assert.Contains(t, coordinator.mcpServer.ListTools(), "handoff_coordinator_primary_kandev")
+	properties := toolInputProperties(t, coordinator, "handoff_coordinator_primary_kandev")
+	for _, field := range []string{"task_id", "predecessor_session_id", "successor_session_id",
+		"predecessor_queue_incarnation_id", "successor_queue_incarnation_id",
+		"expected_agent_profile_id", "expected_model", "operation_id"} {
+		assert.Contains(t, properties, field)
+	}
 }
 
 func TestAssignExactTaskProfileToolRequiresConfigOrCoordinatorCapability(t *testing.T) {

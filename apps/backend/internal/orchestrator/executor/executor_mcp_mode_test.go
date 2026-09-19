@@ -27,11 +27,13 @@ func TestResolveTaskSessionMCPProfile_GrantsExactProfileOnlyToCanonicalCoordinat
 	profile, err := exec.resolveTaskSessionMCPProfile(context.Background(), "coordinator", repo.sessions["session"], false)
 	require.NoError(t, err)
 	require.True(t, profile.HasCapability(mcpprofile.CapabilityExactTaskProfileAssignment))
+	require.True(t, profile.HasCapability(mcpprofile.CapabilityCoordinatorSessionHandoff))
 
 	repo.repositories["repository"].LocalPath = t.TempDir()
 	profile, err = exec.resolveTaskSessionMCPProfile(context.Background(), "coordinator", repo.sessions["session"], false)
 	require.NoError(t, err)
 	require.False(t, profile.HasCapability(mcpprofile.CapabilityExactTaskProfileAssignment))
+	require.False(t, profile.HasCapability(mcpprofile.CapabilityCoordinatorSessionHandoff))
 }
 
 func TestResolveTaskSessionMCPProfile_SelectsSurfaceAndQuestionCapability(t *testing.T) {

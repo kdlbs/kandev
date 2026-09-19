@@ -696,6 +696,7 @@ type Service struct {
 
 	// Message queue service for queueing messages while agent is running
 	messageQueue          *messagequeue.Service
+	coordinatorHandoffMu  sync.Mutex
 	passthroughDispatchMu sync.Mutex
 	passthroughDispatches map[string]map[*passthroughDispatchToken]struct{}
 

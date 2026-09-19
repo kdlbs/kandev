@@ -396,6 +396,46 @@ func (s *Server) registerAssignExactTaskProfileTool() {
 	)
 }
 
+func (s *Server) registerCoordinatorHandoffTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("handoff_coordinator_primary_kandev",
+			mcp.WithDescription("Promote one already-bootstrapped exact-model sibling as this Coordinator task's sole primary. Preserves unread FIFO queue entries, future primary-targeted automation, and the durable task plan; fences but does not delete the predecessor. Requires list_task_sessions_kandev readback with model_verified=true and both queue incarnation IDs. Retry a lost response with the identical operation_id and arguments."),
+			mcp.WithReadOnlyHintAnnotation(false), mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true), mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("This canonical Coordinator task UUID")),
+			mcp.WithString("predecessor_session_id", mcp.Required(), mcp.Description("Current primary/current session ID")),
+			mcp.WithString("successor_session_id", mcp.Required(), mcp.Description("Idle sibling session with verified exact-profile launch receipt")),
+			mcp.WithString("predecessor_queue_incarnation_id", mcp.Required(), mcp.Description("Predecessor identity from list_task_sessions_kandev")),
+			mcp.WithString("successor_queue_incarnation_id", mcp.Required(), mcp.Description("Successor identity from list_task_sessions_kandev")),
+			mcp.WithString("expected_agent_profile_id", mcp.Required(), mcp.Description("Exact profile ID shown on the successor receipt")),
+			mcp.WithString("expected_model", mcp.Required(), mcp.Description("Exact effective model shown with model_verified=true")),
+			mcp.WithString("operation_id", mcp.Required(), mcp.Description("Caller-generated stable idempotency key; reuse unchanged after an uncertain response")),
+		),
+		s.wrapHandler("handoff_coordinator_primary_kandev", s.coordinatorHandoffHandler()),
+	)
+}
+
+func (s *Server) coordinatorHandoffHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		arguments := req.GetArguments()
+		if arguments == nil {
+			return mcp.NewToolResultError("arguments are required"), nil
+		}
+		keys := []string{"task_id", "predecessor_session_id", "successor_session_id",
+			"predecessor_queue_incarnation_id", "successor_queue_incarnation_id",
+			"expected_agent_profile_id", "expected_model", "operation_id"}
+		payload := make(map[string]interface{}, len(keys))
+		for _, key := range keys {
+			value, ok := arguments[key].(string)
+			if !ok || strings.TrimSpace(value) == "" {
+				return mcp.NewToolResultError(key + " is required"), nil
+			}
+			payload[key] = value
+		}
+		return s.forwardToBackend(ctx, ws.ActionMCPHandoffCoordinatorPrimary, payload)
+	}
+}
+
 func (s *Server) registerRemainingConfigTaskTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_kandev",

@@ -64,3 +64,21 @@ func TestScopePrincipalRejectsSessionFromAnotherTask(t *testing.T) {
 	_, err := resolver.ScopePrincipal(context.Background(), "automation-task", "session-1")
 	require.Error(t, err)
 }
+
+func TestScopePrincipalMarksCoordinatorHandoffPredecessorFenced(t *testing.T) {
+	resolver := &Resolver{tasks: principalLookup{
+		task:      &models.Task{ID: "coordinator-task", WorkspaceID: "workspace-1"},
+		workspace: &models.Workspace{ID: "workspace-1"},
+		session: &models.TaskSession{
+			ID:         "session-old",
+			TaskID:     "coordinator-task",
+			RouteState: models.TaskSessionRouteStateCoordinatorHandoffFenced,
+		},
+	}}
+
+	ctx, err := resolver.ScopePrincipal(context.Background(), "coordinator-task", "session-old")
+	require.NoError(t, err)
+	principal, ok := PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.True(t, principal.HandoffFenced)
+}

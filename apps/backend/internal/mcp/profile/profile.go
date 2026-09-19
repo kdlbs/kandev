@@ -31,6 +31,9 @@ const (
 	// CapabilityExactTaskProfileAssignment is granted only when the backend
 	// verifies that a Kanban task is the canonical workspace Coordinator.
 	CapabilityExactTaskProfileAssignment Capability = "exact-task-profile-assignment"
+	// CapabilityCoordinatorSessionHandoff is paired with exact profile
+	// selection only for the backend-verified canonical Coordinator.
+	CapabilityCoordinatorSessionHandoff Capability = "coordinator-session-handoff"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent

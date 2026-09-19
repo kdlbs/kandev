@@ -101,7 +101,10 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
 	if surface == mcpprofile.SurfaceKanbanTask && mcpscope.IsCanonicalCoordinatorTask(ctx, task, e.repo) {
-		capabilities = append(capabilities, mcpprofile.CapabilityExactTaskProfileAssignment)
+		capabilities = append(capabilities,
+			mcpprofile.CapabilityExactTaskProfileAssignment,
+			mcpprofile.CapabilityCoordinatorSessionHandoff,
+		)
 	}
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
