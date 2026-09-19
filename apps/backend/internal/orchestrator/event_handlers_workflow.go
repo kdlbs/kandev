@@ -381,6 +381,14 @@ type ProcessOnTurnStartResult struct {
 // ProcessOnTurnStart is the public API for triggering on_turn_start events.
 // Called by message handlers before sending a prompt to the agent.
 func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (ProcessOnTurnStartResult, error) {
+	return s.processOnTurnStartAdmission(ctx, taskID, sessionID, false)
+}
+
+func (s *Service) processOnTurnStartAdmission(
+	ctx context.Context,
+	taskID, sessionID string,
+	strict bool,
+) (ProcessOnTurnStartResult, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -394,6 +402,7 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	if err != nil {
 		return ProcessOnTurnStartResult{}, fmt.Errorf("load session for on_turn_start: %w", err)
 	}
+	s.clearInitialCreatePromptPassthroughForAcceptedUserTurn(ctx, session)
 	if isTerminalSessionState(session.State) {
 		return ProcessOnTurnStartResult{}, &executor.SessionStateSupersededError{
 			SessionID: session.ID,
@@ -417,7 +426,13 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	// transition has fired cancels the signal (re-open semantics). The
 	// user is continuing the conversation; this step is no longer "done".
 	s.clearPendingStepSignal(ctx, session)
-	s.processOnTurnStartViaEngine(ctx, taskID, session)
+	if strict {
+		if _, err := s.processOnTurnStartViaEngineResult(ctx, taskID, session); err != nil {
+			return ProcessOnTurnStartResult{}, fmt.Errorf("evaluate on_turn_start: %w", err)
+		}
+	} else {
+		s.processOnTurnStartViaEngine(ctx, taskID, session)
+	}
 	task, err = s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		// Do not let a read race turn an unknown admission state into an
@@ -4273,6 +4288,14 @@ func (s *Service) launchAfterOnEnterDispatch(
 
 	switch {
 	case hasAutoStart && isPassthrough && session.State != models.TaskSessionStateCreated:
+		if s.initialCreatePromptPassthroughQueuePending(ctx, sessionID) {
+			// Queue promotion enters the destination step before its queued
+			// creation prompt is delivered. Let the guarded queue worker send
+			// that prompt once; the destination's automatic prompt must not
+			// create a competing passthrough turn.
+			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+			return
+		}
 		// Started passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
@@ -5622,12 +5645,17 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 	references []v1.EntityReference,
 	takenMsg *messagequeue.QueuedMessage,
 	handoffText string,
+	initialCreatePromptPassthrough bool,
 ) {
+	queueCtx := ctx
+	if initialCreatePromptPassthrough {
+		queueCtx = withInitialCreatePromptPassthroughQueue(ctx)
+	}
 	promptQueued := false
 	if shouldQueueIfBusy && (isAgentAlreadyRunningError(launchErr) ||
 		isSessionBusyError(launchErr) || isTransientPromptError(launchErr)) {
 		if queueErr := s.queueAutoStartPrompt(
-			ctx, taskID, sessionID, prompt, planMode,
+			queueCtx, taskID, sessionID, prompt, planMode,
 			attachments, origin, userMessageRecorded, references, handoffText,
 		); queueErr != nil {
 			s.logger.Warn("failed to queue auto-start prompt after launch failure",
@@ -5667,6 +5695,11 @@ func (s *Service) autoStartStepPrompt(
 	// Track the original message so terminal failure paths can restore it
 	// instead of dropping the user's prompt or attachments on the floor.
 	takenMsg, mergedPrompt, attachments, references, queuedHandoff := s.takeAndMergeHandoffMessage(ctx, sessionID, prompt)
+	initialCreatePromptPassthrough := takenMsg != nil && initialCreatePromptPassthroughQueued(takenMsg.Metadata)
+	queueCtx := ctx
+	if initialCreatePromptPassthrough {
+		queueCtx = withInitialCreatePromptPassthroughQueue(ctx)
+	}
 	prompt = mergedPrompt
 	agentPrompt := AppendEntityReferenceContext(prompt, references)
 	effectiveAgentPrompt := s.effectivePromptForSession(sessionID, agentPrompt, planMode, session)
@@ -5707,7 +5740,7 @@ func (s *Service) autoStartStepPrompt(
 		// userMessageRecorded=false: recordAutoStartMessage has not run yet —
 		// the drain side (executeQueuedMessage) is responsible for inserting
 		// the chat-history row.
-		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false, references, handoffForQueue)
+		queued, err := s.queueAutoStartPromptIfRunning(queueCtx, taskID, session, prompt, planMode, attachments, origin, false, references, handoffForQueue)
 		if err != nil {
 			requeueTaken()
 			return err
@@ -5797,6 +5830,9 @@ func (s *Service) autoStartStepPrompt(
 	dispatchInputPresent := strings.TrimSpace(recordedPrompt) != "" ||
 		strings.TrimSpace(dispatchPrompt) != "" || len(attachments) > 0
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references, attachments)
+	if initialCreatePromptPassthrough && session.IsPassthrough && session.State != models.TaskSessionStateCreated {
+		s.armInitialCreatePromptPassthrough(ctx, session, s.initialCreatePromptCurrentTurnID(ctx, sessionID))
+	}
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -5853,7 +5889,7 @@ func (s *Service) autoStartStepPrompt(
 		launchCtx := withWorkflowStartPromptAttempt(ctx, workflowAttempt)
 		execution, err := s.startCreatedSessionWithComposedPrompt(
 			launchCtx, taskID, sessionID, session.AgentProfileID,
-			recordedPrompt, agentPrompt, true, planMode, true, attachments, references,
+			recordedPrompt, agentPrompt, true, planMode, true, initialCreatePromptPassthrough, attachments, references,
 		)
 		if execution == nil {
 			workflowAttempt.retire()
@@ -5867,6 +5903,7 @@ func (s *Service) autoStartStepPrompt(
 				ctx, taskID, sessionID, stepName, prompt, err,
 				planMode, shouldQueueIfBusy, userMsgRecorded,
 				attachments, origin, references, takenMsg, handoffForQueue,
+				initialCreatePromptPassthrough,
 			)
 		}
 		return err
@@ -5920,7 +5957,8 @@ func (s *Service) autoStartStepPrompt(
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
 			return s.fallbackFreshLaunchOnMissingExecution(
-				ctx, taskID, sessionID, recordedPrompt, true, dispatchPrompt, planMode, takenMsg, attachments, references,
+				ctx, taskID, sessionID, recordedPrompt, true, dispatchPrompt, planMode,
+				initialCreatePromptPassthrough, takenMsg, attachments, references,
 			)
 		}
 
@@ -5931,7 +5969,7 @@ func (s *Service) autoStartStepPrompt(
 		// chat row was successfully inserted above; a failed write passes false,
 		// letting the drain re-attempt insertion.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(queueCtx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -5946,7 +5984,7 @@ func (s *Service) autoStartStepPrompt(
 		if shouldQueueIfBusy {
 			// Pass userMsgRecorded so the drain skips CreateUserMessage only when
 			// the chat row was successfully inserted above by recordAutoStartMessage.
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(queueCtx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -5989,6 +6027,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	promptAlreadyComposed bool,
 	retryPrompt string,
 	planMode bool,
+	initialCreatePromptPassthrough bool,
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
@@ -6023,7 +6062,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	if promptAlreadyComposed {
 		_, launchErr = s.startCreatedSessionWithComposedPrompt(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
-			prompt, retryPrompt, true, planMode, true, attachments, references,
+			prompt, retryPrompt, true, planMode, true, initialCreatePromptPassthrough, attachments, references,
 		)
 	} else {
 		_, launchErr = s.StartCreatedSession(
@@ -6320,6 +6359,9 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 		return nil, fmt.Errorf("message queue is not configured")
 	}
 	meta := workflowMessageMetadata(planMode, origin, references)
+	if initialCreatePromptPassthroughQueueFromContext(ctx) {
+		meta[metaKeyInitialCreatePromptPassthrough] = true
+	}
 	if userMessageRecorded {
 		meta[metaKeyUserMessageRecorded] = true
 	}
@@ -7462,6 +7504,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("target step not found, skipping transition",
 			zap.String("step_id", result.ToStepID),
 			zap.Error(err))
@@ -7472,6 +7515,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	}
 	if sessionLifecycle {
 		if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
+			recordWorkflowTransitionError(ctx, err)
 			s.logger.Warn("target profile credential preflight failed, skipping transition",
 				zap.String("task_id", taskID),
 				zap.String("step_id", result.ToStepID),
@@ -7484,6 +7528,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 
 	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, result.FromStepID, "transition source")
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),
 			zap.Error(err))
@@ -7508,6 +7553,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	}
 	applied, err := commit(applyCtx)
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -7518,6 +7564,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		return false
 	}
 	if !applied {
+		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}
 
@@ -7581,6 +7628,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		// to the correct agent.
 		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, session, targetStep, fromStep)
 		if !ok {
+			recordWorkflowTransitionError(ctx, errors.New("workflow on_turn_start session preparation failed"))
 			return false
 		}
 		// A queued prompt has already claimed RUNNING before its turn-start
@@ -7656,31 +7704,40 @@ func (s *Service) launchProcessOnEnter(
 // actions. Falls back to the legacy method when the engine is not initialized.
 // Returns true if a step transition occurred.
 func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string, session *models.TaskSession) bool {
+	transitioned, _ := s.processOnTurnStartViaEngineResult(ctx, taskID, session)
+	return transitioned
+}
+
+func (s *Service) processOnTurnStartViaEngineResult(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (bool, error) {
 	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
-		return false
+		return false, nil
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to load task for on_turn_start",
 			zap.String("task_id", taskID), zap.Error(err))
-		return false
+		return false, err
 	}
 
 	if s.workflowEngine == nil {
-		return s.processOnTurnStart(ctx, task, session)
+		return s.processOnTurnStart(ctx, task, session), nil
 	}
 
 	if session.ID == "" || s.workflowStepGetter == nil {
-		return false
+		return false, nil
 	}
 
 	if task.WorkflowStepID == "" {
-		return false
+		return false, nil
 	}
 
 	// Skip workflow step actions for ephemeral tasks (quick chat) - they have no workflow
 	if task.IsEphemeral {
-		return false
+		return false, nil
 	}
 
 	state := s.buildMachineState(ctx, task, session)
@@ -7696,11 +7753,11 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
-		return false
+		return false, err
 	}
 
 	if !result.Transitioned {
-		return false
+		return false, nil
 	}
 
 	s.logger.Info("engine: on_turn_start transition",
@@ -7710,5 +7767,14 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 		zap.String("to_step_id", result.ToStepID))
 
 	// on_turn_start does NOT trigger on_enter (user's message is the next prompt).
-	return s.applyEngineTransitionWithMode(ctx, taskID, session, result, engine.TriggerOnTurnStart, "", transitionLifecycleOnTurnStart)
+	transitionCapture := &workflowTransitionErrorCapture{}
+	transitionCtx := withWorkflowTransitionErrorCapture(ctx, transitionCapture)
+	transitioned := s.applyEngineTransitionWithMode(transitionCtx, taskID, session, result, engine.TriggerOnTurnStart, "", transitionLifecycleOnTurnStart)
+	if transitionCapture.err != nil {
+		return false, transitionCapture.err
+	}
+	if !transitioned {
+		return false, errors.New("workflow on_turn_start transition was not applied")
+	}
+	return true, nil
 }

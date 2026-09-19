@@ -695,9 +695,11 @@ type Service struct {
 	watcher   *watcher.Watcher
 
 	// Message queue service for queueing messages while agent is running
-	messageQueue          *messagequeue.Service
-	passthroughDispatchMu sync.Mutex
-	passthroughDispatches map[string]map[*passthroughDispatchToken]struct{}
+	messageQueue                   *messagequeue.Service
+	passthroughDispatchMu          sync.Mutex
+	passthroughDispatches          map[string]map[*passthroughDispatchToken]struct{}
+	initialCreatePromptMu          sync.Mutex
+	initialCreatePromptPassthrough map[string]initialCreatePromptPassthroughEvidence
 
 	// autoStartOnCreateMu serializes the local ownership hand-off for the
 	// durable auto-start-on-create marker. The database marker survives a
@@ -2591,6 +2593,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 
 	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
 		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
+			s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turnID)
 			s.bindAcceptedDispatchTurn(sessionID, turnID)
 			return turnID, false, nil, nil
 		}
@@ -2602,6 +2605,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	}
 	if turn != nil {
 		s.activeTurns.Store(sessionID, turn.ID)
+		s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 		s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 		return turn.ID, false, nil, nil
 	}
@@ -2617,9 +2621,11 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 
 	if reserve {
 		s.reservedPromptTurns.Store(sessionID, newReservedPromptTurn(turn.ID))
+		s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 		return turn.ID, true, turn, nil
 	}
 	s.activeTurns.Store(sessionID, turn.ID)
+	s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 	s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 	return turn.ID, true, nil, nil
 }
@@ -4080,7 +4086,7 @@ func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID 
 		go func(profileID string) {
 			_, launchErr := s.startCreatedSessionWithComposedPrompt(
 				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", true, false, false, nil, nil,
+				"", "", true, false, false, false, nil, nil,
 			)
 			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
 				s.logger.Warn("failed to start session for durable queued prompt",
