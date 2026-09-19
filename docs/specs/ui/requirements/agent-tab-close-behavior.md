@@ -24,3 +24,8 @@ Mobile and tablet task session deletion behavior is unchanged. The responsive Se
 - **AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.3:** A hidden session remains available from **+ > Agents** and explicit reopening restores its existing conversation.
 - **AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.4:** Hidden records are scoped to their owning task, survive a same-tab reload, and are pruned only after that task's sessions are authoritative.
 - **AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.5:** Phone and tablet task views retain the existing Sessions picker and explicit deletion behavior.
+- **AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.6:** Ordinary active-session synchronization, rerenders, task switching, and a same-tab reload do not recreate an explicitly hidden panel.
+- **AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.7:** Hiding the active Agent panel adopts a visible session successor without reopening a hidden sibling.
+- **AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.8:** Newly created sessions still auto-open, and stale hidden records are pruned only after the owning task's session list proves the session no longer exists.
+- **AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.9:** Context-menu Delete, Close Others, and mobile Sessions picker behavior are unchanged by the preference.
+- **AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.10:** The responsive Task behavior Settings page may edit the preference and clearly states that it applies to desktop Agent tabs.
