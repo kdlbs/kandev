@@ -61,6 +61,7 @@ type EditorSurfaceProps = {
   onReset: () => void;
   onSetFocusedNodeId: (value: string | null) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
+  showHeader: boolean;
 };
 
 function SidebarLayoutEditorSurface({
@@ -90,12 +91,10 @@ function SidebarLayoutEditorSurface({
   onReset,
   onSetFocusedNodeId,
   t,
+  showHeader,
 }: EditorSurfaceProps) {
   const visibleNodes = projected.nodes.filter((node) => node.visible);
-  const activeFocusedNode = focusedNodeId
-    ? projected.nodes.find((node) => node.id === focusedNodeId)
-    : undefined;
-
+  const activeFocusedNode = projected.nodes.find((node) => node.id === focusedNodeId);
   if (isMobile && activeFocusedNode?.kind === "shortcuts") {
     return (
       <FocusedSidebarGroup
@@ -132,7 +131,6 @@ function SidebarLayoutEditorSurface({
       />
     );
   }
-
   return (
     <SidebarLayoutContent
       draft={draft}
@@ -162,11 +160,12 @@ function SidebarLayoutEditorSurface({
       onSetFocusedNodeId={onSetFocusedNodeId}
       t={t}
       isMobile={isMobile}
+      showHeader={showHeader}
     />
   );
 }
 
-export function SidebarLayoutEditor() {
+export function SidebarLayoutEditor({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const catalogState = useSidebarShortcutCatalog();
@@ -262,6 +261,7 @@ export function SidebarLayoutEditor() {
       onReset={onReset}
       onSetFocusedNodeId={setFocusedNodeId}
       t={t}
+      showHeader={!embedded}
     />
   );
 }

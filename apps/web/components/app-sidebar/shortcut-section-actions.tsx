@@ -83,7 +83,7 @@ export function ShortcutAction({
   const describedBy = description ? activityDescriptionId(shortcut, descriptionSuffix) : undefined;
   const baseClass = cn(
     "relative flex items-center gap-2 rounded-md text-left transition-colors",
-    mobile ? "min-h-11 min-w-11 px-3" : "h-7 min-w-7 px-1.5",
+    mobile ? "min-h-11 min-w-11 px-3 text-sm" : "h-7 min-w-7 px-1.5 text-[13px]",
     shortcut.available
       ? "cursor-pointer text-muted-foreground hover:bg-muted/60 hover:text-foreground"
       : "cursor-not-allowed text-muted-foreground/50",

@@ -1,9 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IconBrandGithub, IconList } from "@tabler/icons-react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { ProjectedSidebarNode } from "@/lib/sidebar/layout-projection";
 import type { ShortcutActivity } from "@/hooks/domains/sidebar/use-shortcut-activity";
 import { ShortcutSection } from "./shortcut-section";
+import { ShortcutAction } from "./shortcut-section-actions";
 
 afterEach(() => cleanup());
 
@@ -66,6 +68,16 @@ const activity: ShortcutActivity = { state: "running", loading: false, error: fa
 
 describe("ShortcutSection", () => {
   beforeEach(() => onActivateShortcutMock.mockReset());
+
+  it("uses the compact text size shared by expanded sidebar sections", () => {
+    render(
+      <TooltipProvider>
+        <ShortcutAction shortcut={node.shortcuts[0]} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId("sidebar-shortcut-github").className).toContain("text-[13px]");
+  });
 
   it("uses one ordered shortcut collection for header actions and expanded rows", () => {
     render(

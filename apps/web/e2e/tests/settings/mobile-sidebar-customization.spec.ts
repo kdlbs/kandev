@@ -60,7 +60,8 @@ test.describe("Sidebar customization on phone", () => {
     seedData,
   }) => {
     await seedMobileLayout(apiClient, seedData.workspaceId);
-    await testPage.goto("/settings/sidebar");
+    await testPage.goto("/settings/preferences/layouts?tab=sidebar");
+    await expect(testPage.getByRole("tab", { name: "Sidebar", exact: true })).toBeVisible();
 
     const group = testPage.getByTestId("sidebar-layout-node-group-1");
     await group.getByRole("button", { name: "Edit section", exact: true }).tap();

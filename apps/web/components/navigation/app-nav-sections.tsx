@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
 import { useTaskViewNavigation } from "./use-task-view-navigation";
 import { MobileSidebarLayoutNavigation } from "./mobile-sidebar-layout-navigation";
 import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
-import { SIDEBAR_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/preferences";
+import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 
 /**
  * Overlay-backed rows in the shared nav block (Task views, Improve Kandev, Health issues).
@@ -223,7 +223,7 @@ function UtilityNavSection({
         className={utilityRowClass}
         data-testid="mobile-customize-sidebar-button"
       >
-        <Link href={SIDEBAR_SETTINGS_HREF} onClick={onNavigate}>
+        <Link href={SIDEBAR_LAYOUT_TAB_HREF} onClick={onNavigate}>
           <IconLayoutList className="h-4 w-4 shrink-0" />
           {t("settings:sidebar")}
         </Link>

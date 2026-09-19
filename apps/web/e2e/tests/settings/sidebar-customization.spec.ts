@@ -50,6 +50,21 @@ async function addShortcut(page: Page, label: string) {
 }
 
 test.describe("Sidebar customization on desktop", () => {
+  test("opens from the Sidebar tab on the Layouts settings page", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await saveSidebarLayout(apiClient, seedData.workspaceId, defaultNodes([]));
+
+    await testPage.goto("/settings/preferences/layouts");
+    await expect(testPage.getByRole("tab", { name: "Sidebar", exact: true })).toBeVisible();
+    await testPage.getByRole("tab", { name: "Sidebar", exact: true }).click();
+
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/layouts\?tab=sidebar$/);
+    await expect(testPage.getByTestId("sidebar-layout-editor")).toBeVisible();
+  });
+
   test("adds four shortcuts, hides a destination, reorders a group, and persists the result", async ({
     testPage,
     apiClient,

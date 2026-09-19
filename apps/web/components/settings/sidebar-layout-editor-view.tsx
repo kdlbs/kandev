@@ -45,6 +45,7 @@ export type SidebarLayoutContentProps = {
   onSetFocusedNodeId: (value: string | null) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
   isMobile: boolean;
+  showHeader?: boolean;
 };
 
 export function SidebarLayoutContent({
@@ -75,14 +76,19 @@ export function SidebarLayoutContent({
   onSetFocusedNodeId,
   t,
   isMobile,
+  showHeader = true,
 }: SidebarLayoutContentProps) {
   return (
     <div className="min-w-0 space-y-6" data-testid="sidebar-layout-editor" data-mobile={isMobile}>
-      <SettingsPageHeader
-        title={t(SIDEBAR_LABEL_KEY)}
-        description={t("settings:sidebarDescription")}
-      />
-      <Separator />
+      {showHeader && (
+        <>
+          <SettingsPageHeader
+            title={t(SIDEBAR_LABEL_KEY)}
+            description={t("settings:sidebarDescription")}
+          />
+          <Separator />
+        </>
+      )}
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
         <SidebarLayoutNodesCard
           draft={draft}
