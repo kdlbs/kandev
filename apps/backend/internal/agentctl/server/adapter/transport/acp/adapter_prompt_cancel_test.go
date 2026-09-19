@@ -10,10 +10,12 @@ import (
 )
 
 func TestWaitForPromptRPCAfterCancel_Acknowledged(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
 	turn := &promptTurnState{rpcDone: make(chan struct{})}
 	close(turn.rpcDone)
 
-	if err := waitForPromptRPCAfterCancel(turn); err != nil {
+	if err := a.waitForPromptRPCAfterCancel(turn); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
 }
@@ -23,8 +25,10 @@ func TestWaitForPromptRPCAfterCancel_TimesOut(t *testing.T) {
 	promptCancelJoinTimeout = 20 * time.Millisecond
 	t.Cleanup(func() { promptCancelJoinTimeout = prev })
 
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
 	turn := &promptTurnState{rpcDone: make(chan struct{})}
-	err := waitForPromptRPCAfterCancel(turn)
+	err := a.waitForPromptRPCAfterCancel(turn)
 	if !errors.Is(err, ErrTurnCancelNotAcknowledged) {
 		t.Fatalf("expected ErrTurnCancelNotAcknowledged, got %v", err)
 	}
@@ -96,6 +100,38 @@ func TestWaitForPromptRPCAfterUserCancel_CompletesAfterAbort(t *testing.T) {
 			t.Fatalf("expected nil after rpc completed, got %v", err)
 		}
 	})
+}
+
+func TestWaitForPromptRPCAfterUserCancelUsesAdapterConfiguration(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+	a.cancelJoinTimeout = 40 * time.Millisecond
+	turn := &promptTurnState{endTurn: func(error) {}, rpcDone: make(chan struct{}), abortCh: make(chan struct{})}
+	close(turn.abortCh)
+
+	started := time.Now()
+	err := a.waitForPromptRPCAfterUserCancel(turn, "")
+	if !errors.Is(err, errPromptAbandonedAfterCancel) {
+		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 35*time.Millisecond {
+		t.Fatalf("adapter timeout elapsed = %s, want configured bound", elapsed)
+	}
+}
+
+func TestPromptCancelTimeoutUsesAdapterConfiguration(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+	a.cancelJoinTimeout = 40 * time.Millisecond
+	turn := &promptTurnState{rpcDone: make(chan struct{})}
+	started := time.Now()
+	err := a.waitForPromptRPCAfterCancel(turn)
+	if !errors.Is(err, ErrTurnCancelNotAcknowledged) {
+		t.Fatalf("expected ErrTurnCancelNotAcknowledged, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 35*time.Millisecond {
+		t.Fatalf("adapter timeout elapsed = %s, want configured bound", elapsed)
+	}
 }
 
 func TestRegisterPromptTurn_CancelCause(t *testing.T) {
@@ -170,7 +206,7 @@ func TestWaitForPromptRPCAfterCancel_CancelsPromptCtxOnTimeout(t *testing.T) {
 	defer a.clearPromptTurn(turn)
 	turn.rpcDone = make(chan struct{})
 
-	if err := waitForPromptRPCAfterCancel(turn); !errors.Is(err, ErrTurnCancelNotAcknowledged) {
+	if err := a.waitForPromptRPCAfterCancel(turn); !errors.Is(err, ErrTurnCancelNotAcknowledged) {
 		t.Fatalf("expected ErrTurnCancelNotAcknowledged, got %v", err)
 	}
 	if !errors.Is(context.Cause(ctx), ErrTurnCancelNotAcknowledged) {
