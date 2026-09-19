@@ -114,7 +114,7 @@ function MarkdownPreviewToolbar({
                 size="sm"
                 variant="ghost"
                 onClick={onTogglePreview}
-                className="h-11 w-11 p-0 cursor-pointer text-foreground sm:h-8 sm:w-8"
+                className="h-6 w-6 p-0 cursor-pointer text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
                 data-testid="markdown-preview-toggle"
               >
                 <IconCode className="h-4 w-4" />

@@ -192,12 +192,14 @@ same-origin frontend code and belong to the privileged plugin boundary.
 
 The isolated web-app boundary has these rules:
 
-- The iframe allows packaged scripts and forms. It does not allow same-origin
-  access, top-level navigation, or popups.
-- The browser gives the app an opaque origin. The app cannot use Kandev cookies,
-  host authentication headers, the host DOM, or an injected JavaScript API.
+- The iframe allows packaged scripts and forms, but it does not allow top-level
+  navigation or popups.
+- The iframe is same-origin with Kandev. Canvas source is trusted with the
+  viewing user's ordinary user-session authority, including same-origin
+  cookies, browser storage, and host DOM access.
 - The app uses relative `./_kandev/v1` protocol paths. The app receives only
-  the Kandev data, events, state, and actions that the host grants.
+  the Kandev data, events, state, and actions that the capability binding grants.
+  Cookies do not replace the capability URL or per-operation permission checks.
 - Kandev calculates effective access from the package declaration, instance
   grant, trusted task or workspace scope, and current caller authorization.
 - A new owner-created task canvas can use a recorded, single-use creation
@@ -210,6 +212,10 @@ The isolated web-app boundary has these rules:
   accepted.
 - Forms cannot submit to an external origin. The runtime policy sets
   `form-action 'none'`.
+- A reverse proxy must preserve same-origin cookies for runtime requests and
+  must not redirect runtime HTML or inject remote scripts into it. Cloudflare
+  Web Analytics and similar HTML injection must be excluded on the runtime
+  path because the runtime CSP allows only packaged scripts.
 - Kandev applies a response Content Security Policy to the entry and asset
   routes. The policy allows the response's exact same origin to frame the
   runtime. This supports a custom Kandev DNS name, IP address, port, or HTTPS

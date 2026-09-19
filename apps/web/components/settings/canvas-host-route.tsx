@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PageShell } from "@/components/page-shell";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
 import {
@@ -16,14 +15,8 @@ import {
 import { canvasErrorMessage } from "@/lib/api/domains/canvas-error-copy";
 import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
 import { useCanvasHostCanvases } from "./canvas-host-picker";
-import {
-  CanvasDesktopActions,
-  CanvasHostBody,
-  CanvasHostDialogs,
-  MobileCanvasActions,
-  type CanvasHostState,
-} from "./canvas-host-components";
-import { CanvasShareDialog } from "./canvas-share-dialog";
+import { type CanvasHostState } from "./canvas-host-components";
+import { CanvasHostRouteView } from "./canvas-host-route-view";
 
 function stateForCanvas(canvas: Canvas): CanvasHostState {
   if (canvas.status === "archived") return "archived";
@@ -392,7 +385,13 @@ async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void>
   }
 }
 
-export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
+export function CanvasHostRoute({
+  canvasId,
+  embedded = false,
+}: {
+  canvasId: string;
+  embedded?: boolean;
+}) {
   const { t } = useTranslation();
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
@@ -430,63 +429,35 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
     [canvasId, router],
   );
 
-  const title = canvas?.title || t("canvases:canvas");
-  const desktopActions = canvas ? (
-    <CanvasDesktopActions
+  return (
+    <CanvasHostRouteView
+      canvasId={canvasId}
+      embedded={embedded}
+      isMobile={isMobile}
       canvas={canvas}
+      hostCanvases={hostCanvases}
+      runtimeUrl={runtimeUrl}
+      state={state}
+      error={error}
+      menuOpen={menuOpen}
+      promotionOpen={promotionOpen}
+      releasesOpen={releasesOpen}
+      shareOpen={shareOpen}
       editing={editing}
+      setMenuOpen={setMenuOpen}
+      setPromotionOpen={setPromotionOpen}
+      setReleasesOpen={setReleasesOpen}
+      setShareOpen={setShareOpen}
       onEdit={() => void edit()}
       onPromote={() => setPromotionOpen(true)}
       onReleases={() => setReleasesOpen(true)}
       onShare={() => setShareOpen(true)}
+      onSelectCanvas={selectCanvas}
+      onRuntimeReady={markRuntimeReady}
+      onRuntimeError={markRuntimeUnavailable}
+      onRetry={load}
+      onPromotionCompleted={() => router.push(canvas ? canvasHref(canvas.id) : "/")}
+      onChanged={load}
     />
-  ) : null;
-
-  return (
-    <PageShell
-      title={title}
-      backHref="/"
-      backLabel={t("sidebar:home")}
-      scroll="none"
-      actions={!isMobile ? desktopActions : undefined}
-      contentTestId="canvas-route-content"
-      showNavTrigger
-    >
-      <CanvasHostBody
-        canvasId={canvasId}
-        title={title}
-        state={state}
-        isMobile={isMobile}
-        menuOpen={menuOpen}
-        runtimeUrl={runtimeUrl}
-        error={error}
-        onOpenActions={() => setMenuOpen(true)}
-        onRuntimeReady={markRuntimeReady}
-        onRuntimeError={markRuntimeUnavailable}
-        onRetry={load}
-      />
-      <MobileCanvasActions
-        canvas={canvas}
-        open={menuOpen}
-        onOpenChange={setMenuOpen}
-        onEdit={() => void edit()}
-        onPromote={() => setPromotionOpen(true)}
-        onReleases={() => setReleasesOpen(true)}
-        onShare={() => setShareOpen(true)}
-        editing={editing}
-        canvases={hostCanvases}
-        onSelectCanvas={selectCanvas}
-      />
-      <CanvasHostDialogs
-        canvas={canvas}
-        promotionOpen={promotionOpen}
-        onPromotionOpenChange={setPromotionOpen}
-        releasesOpen={releasesOpen}
-        onReleasesOpenChange={setReleasesOpen}
-        onPromotionCompleted={() => router.push(canvas ? canvasHref(canvas.id) : "/")}
-        onChanged={load}
-      />
-      <CanvasShareDialog canvas={canvas} open={shareOpen} onOpenChange={setShareOpen} />
-    </PageShell>
   );
 }
