@@ -29,6 +29,30 @@ func TestParseAcceptLanguageExcludesNegativeQValue(t *testing.T) {
 	}
 }
 
+func TestParseAcceptLanguageExcludesQValueAboveOne(t *testing.T) {
+	t.Parallel()
+	got := parseAcceptLanguage("zh-cn;q=2, en;q=1")
+	if len(got) != 1 || got[0] != "en" {
+		t.Fatalf("parseAcceptLanguage = %v, want only [en]: q>1 is outside HTTP quality's [0,1] range and must not outrank a valid entry", got)
+	}
+}
+
+func TestParseAcceptLanguageExcludesTrailingGarbageQValue(t *testing.T) {
+	t.Parallel()
+	got := parseAcceptLanguage("fr;q=1abc, en;q=0.5")
+	if len(got) != 1 || got[0] != "en" {
+		t.Fatalf("parseAcceptLanguage = %v, want only [en]: a numeric prefix followed by garbage must not parse as valid", got)
+	}
+}
+
+func TestParseAcceptLanguageExcludesNonFiniteQValue(t *testing.T) {
+	t.Parallel()
+	got := parseAcceptLanguage("fr;q=NaN, en;q=0.5")
+	if len(got) != 1 || got[0] != "en" {
+		t.Fatalf("parseAcceptLanguage = %v, want only [en]: NaN must not enter the priority sort", got)
+	}
+}
+
 func TestParseAcceptLanguageOrdersDescendingByQValue(t *testing.T) {
 	t.Parallel()
 	got := parseAcceptLanguage("en;q=0.3, zh-cn;q=0.9, pt-pt;q=0.6")

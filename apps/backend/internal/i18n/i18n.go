@@ -24,7 +24,9 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -159,9 +161,10 @@ func parseAcceptLanguage(header string) []string {
 
 // acceptLanguageQuality reads the q parameter from one Accept-Language
 // field's ";"-separated parameters, defaulting to 1.0 when none is present.
-// It reports ok=false for a q parameter present but unparseable, so the
-// caller excludes the tag instead of promoting a malformed value to the
-// highest priority.
+// It reports ok=false for a q parameter that is present but unparseable, not
+// a finite number, or outside HTTP quality's [0,1] range, so the caller
+// excludes the tag instead of promoting a malformed value to the highest
+// priority or letting it outrank well-formed entries.
 func acceptLanguageQuality(params []string) (float64, bool) {
 	q := 1.0
 	for _, field := range params {
@@ -169,9 +172,11 @@ func acceptLanguageQuality(params []string) (float64, bool) {
 		if !strings.HasPrefix(field, "q=") {
 			continue
 		}
-		if _, err := fmt.Sscanf(field, "q=%f", &q); err != nil {
+		parsed, err := strconv.ParseFloat(strings.TrimPrefix(field, "q="), 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 || parsed > 1 {
 			return 0, false
 		}
+		q = parsed
 	}
 	return q, true
 }
