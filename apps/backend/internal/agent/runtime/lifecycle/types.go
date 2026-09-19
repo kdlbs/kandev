@@ -146,6 +146,10 @@ type AgentExecution struct {
 	agentctlOverride          atomic.Pointer[agentctl.Client]
 	agentctlLifecycleMu       sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
+	// guardedTTYMu prevents a guarded TTY request from racing an execution
+	// stop, session reset, process restart, or workspace rebind. Those paths
+	// must acquire the same lock before replacing the active ACP principal.
+	guardedTTYMu sync.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
 	// in flight, fresh-session setup events are retained until the lifecycle
 	// manager has committed the new ACP session. A timed-out attempt discards
