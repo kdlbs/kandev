@@ -1620,7 +1620,17 @@ func registerSecondaryRoutes(
 
 	// Register office routes
 	if p.services.OfficeSvcs != nil {
-		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, p.log)
+		handoffDeps := buildHandoffDependencies(
+			p.taskSvc,
+			p.taskRepo,
+			workflowCtrl,
+			p.agentSettingsController,
+			p.orchestratorSvc,
+			p.services.OfficeSvcs.Dashboard,
+			p.authSvc,
+			p.log,
+		)
+		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
 }
@@ -2053,7 +2063,6 @@ func registerMCPAndDebugRoutes(
 	if handoffSvc != nil {
 		mcpHandlers.SetHandoffService(handoffSvc)
 	}
-
 	// Native code review. The runner owns background review passes, so it is
 	// started here and drained on shutdown; the orchestrator gets it too, which
 	// is what enables the run_code_review workflow step action.

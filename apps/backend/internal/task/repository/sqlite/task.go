@@ -1192,6 +1192,10 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		return "", 0, fmt.Errorf("%w: expected %q, task is now in %q",
 			ErrWorkflowResolutionConflict, expectedWorkflowID, fromWorkflowID)
 	}
+	metadata, err = r.preserveLiveHandoffProvenance(ctx, tx, task.ID, metadata)
+	if err != nil {
+		return "", 0, err
+	}
 	// Stamped after the transactional read/lock above, not before BeginTx: on
 	// Postgres, readTaskStepInTx's FOR UPDATE blocks until this transaction's
 	// turn to touch the row, so the timestamp now reflects true serialization

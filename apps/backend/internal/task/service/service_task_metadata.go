@@ -18,9 +18,9 @@ func cloneTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
 }
 
 // protectedTaskMetadataUpdate applies a generic metadata replacement while
-// keeping server-managed deferred-launch and step-handoff records owned by the
-// server. The HTTP PATCH surface may replace ordinary metadata, but it cannot
-// create, replace, or remove either record.
+// keeping server-managed deferred-launch, step-handoff, and task-handoff
+// records owned by the server. The HTTP PATCH surface may replace ordinary
+// metadata, but it cannot create, replace, or remove either record.
 func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map[string]interface{} {
 	updated := cloneTaskMetadata(requested)
 	if updated == nil {
@@ -36,5 +36,29 @@ func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 	} else {
 		delete(updated, models.MetaKeyStepHandoffCarry)
 	}
+	if source, ok := existing[models.MetaKeyHandoffSource]; ok {
+		updated[models.MetaKeyHandoffSource] = source
+	} else {
+		delete(updated, models.MetaKeyHandoffSource)
+	}
+	if handoffs, ok := existing[models.MetaKeyHandoffs]; ok {
+		updated[models.MetaKeyHandoffs] = handoffs
+	} else {
+		delete(updated, models.MetaKeyHandoffs)
+	}
 	return updated
+}
+
+// protectedTaskMetadataForCreate strips server-managed records from ordinary
+// task creation. The handoff path opts in after it has built and authorized the
+// provenance payload itself.
+func protectedTaskMetadataForCreate(metadata map[string]interface{}, trustedHandoff bool) map[string]interface{} {
+	created := cloneTaskMetadata(metadata)
+	delete(created, models.MetaKeyDeferredLaunch)
+	delete(created, models.MetaKeyStepHandoffCarry)
+	if !trustedHandoff {
+		delete(created, models.MetaKeyHandoffSource)
+		delete(created, models.MetaKeyHandoffs)
+	}
+	return created
 }
