@@ -52,6 +52,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     unreadDivider: false,
     agentGeneratedTaskTitles: true,
     autoFocusNewTasks: true,
+    agentTabCloseBehavior: "delete_session",
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -126,6 +127,12 @@ export function parseChangesPanelLayout(value: string | undefined): "flat" | "tr
 /** Parses the last-seen display format, defaulting to "absolute". */
 export function parseLastSeenDisplay(value: string | undefined): LastSeenDisplay {
   return value === "relative" ? "relative" : "absolute";
+}
+
+export function parseAgentTabCloseBehavior(
+  value: string | undefined,
+): "delete_session" | "hide_panel" {
+  return value === "hide_panel" ? "hide_panel" : "delete_session";
 }
 
 /** Parses the MCP task agent profile default, defaulting to "current_task". */
@@ -277,6 +284,11 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
     unreadDivider: s.unread_divider ?? current.unreadDivider,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
     autoFocusNewTasks: s.auto_focus_new_tasks ?? current.autoFocusNewTasks,
+    agentTabCloseBehavior: mapDefined(
+      s.agent_tab_close_behavior,
+      current.agentTabCloseBehavior,
+      parseAgentTabCloseBehavior,
+    ),
     mcpTaskAgentProfileDefault: mapDefined(
       s.mcp_task_agent_profile_default,
       current.mcpTaskAgentProfileDefault,

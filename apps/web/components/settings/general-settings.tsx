@@ -33,6 +33,7 @@ import { LanguageSettings } from "@/components/settings/language-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
 import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-generated-task-title-settings";
+import { AgentTabCloseBehaviorSettings } from "@/components/settings/agent-tab-close-behavior-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { TodoListPanelSettings } from "@/components/settings/todo-list-panel-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -250,6 +251,7 @@ export function TaskActionsSettings() {
           <CreationAutoFocusSettings />
           <MCPTaskAgentProfileDefaultSettings />
           <AgentGeneratedTaskTitleSettings />
+          <AgentTabCloseBehaviorSettings />
           <ArchiveConfirmationSettings />
           <UnreadDividerSettings />
           <SleepInhibitionSettings />

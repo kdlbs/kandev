@@ -38,4 +38,17 @@ describe("SessionTabCloseAction", () => {
 
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it("names the opt-in panel action without implying deletion", () => {
+    render(
+      <SessionTabCloseAction
+        sessionId="s1"
+        isDeleting={false}
+        closeBehavior="hide_panel"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Hide panel" })).not.toBeNull();
+  });
 });

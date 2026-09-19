@@ -104,6 +104,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                  *int
 	ChangesPanelLayout                *string
 	LastSeenDisplay                   *string
+	AgentTabCloseBehavior             *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
 	SidebarHoverEnabled               *bool
@@ -411,6 +412,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applyLastSeenDisplay(settings, req.LastSeenDisplay); err != nil {
+		return err
+	}
+	if err := applyAgentTabCloseBehavior(settings, req.AgentTabCloseBehavior); err != nil {
 		return err
 	}
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
@@ -892,6 +896,18 @@ func applyLastSeenDisplay(settings *models.UserSettings, value *string) error {
 		return errors.New("last_seen_display must be 'absolute' or 'relative'")
 	}
 	settings.LastSeenDisplay = v
+	return nil
+}
+
+func applyAgentTabCloseBehavior(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.AgentTabCloseBehaviorDeleteSession && v != models.AgentTabCloseBehaviorHidePanel {
+		return errors.New("agent_tab_close_behavior must be 'delete_session' or 'hide_panel'")
+	}
+	settings.AgentTabCloseBehavior = v
 	return nil
 }
 

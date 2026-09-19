@@ -5298,6 +5298,21 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.agent_tab_close_behavior",
+          "field_path": "agent_tab_close_behavior",
+          "label": "agent tab close behavior",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
           "key": "user_settings.sidebar_hover_enabled",
           "field_path": "sidebar_hover_enabled",
           "label": "sidebar hover enabled",
@@ -6257,6 +6272,7 @@
     ],
     "user_settings": [
       "agent_generated_task_titles",
+      "agent_tab_close_behavior",
       "app_status_bar_enabled",
       "app_status_bar_order",
       "auto_focus_new_tasks",
