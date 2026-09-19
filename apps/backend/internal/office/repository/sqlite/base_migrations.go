@@ -73,6 +73,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateRetentionIndexes(); err != nil {
 		return err
 	}
+	if err := r.migrateAssignmentWakeRateIndexes(); err != nil {
+		return err
+	}
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
@@ -189,6 +192,17 @@ func (r *Repository) migrateRetentionIndexes() error {
 		"idx_runs_retention",
 		`CREATE INDEX IF NOT EXISTS idx_runs_retention
 			ON runs(agent_profile_id, status, (COALESCE(finished_at, requested_at)) DESC, id DESC)`,
+	)
+}
+
+// migrateAssignmentWakeRateIndexes adds the portable prefix used by the
+// rolling assignment-wake count. The count deliberately has no status
+// predicate, so idx_run_status_requested cannot support its reason/time scan.
+func (r *Repository) migrateAssignmentWakeRateIndexes() error {
+	return r.migrate.Apply(
+		"idx_runs_assignment_rate_reason_requested",
+		`CREATE INDEX IF NOT EXISTS idx_runs_assignment_rate_reason_requested
+			ON runs(reason, requested_at)`,
 	)
 }
 

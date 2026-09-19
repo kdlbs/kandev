@@ -471,6 +471,7 @@ func (r *Repository) createRunTables() error {
 		finished_at TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
+	CREATE INDEX IF NOT EXISTS idx_runs_assignment_rate_reason_requested ON runs(reason, requested_at);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 	CREATE TABLE IF NOT EXISTS office_run_skills (

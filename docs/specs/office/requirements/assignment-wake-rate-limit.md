@@ -115,7 +115,8 @@ unattended workspace cannot spend without limit while nobody is watching.
   carry none.
 - **AC-OFFICE-ASSIGN-RATE-001.2:** The system shall admit at most `N`
   agent-initiated assignment wakes for one task within any rolling window of
-  duration `W`.
+  duration `W` in serial evaluation. Concurrent evaluation may exceed `N`;
+  see AC-OFFICE-ASSIGN-RATE-002.1.
 - **AC-OFFICE-ASSIGN-RATE-001.3:** The allowance shall be scoped to the task
   alone. Wakes for one task count against one allowance whichever agent is being
   assigned, so alternating assignment between two agents shall not yield two

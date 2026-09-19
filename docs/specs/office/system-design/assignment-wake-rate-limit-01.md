@@ -192,12 +192,14 @@ WHERE reason = 'task_assigned'
   AND <json_extract payload task_id>   = :taskID
   AND <json_extract payload actor_type> = 'agent'
   AND requested_at > :windowStart
+  AND requested_at <= :evaluationInstant
 ```
 
-`windowStart` is `now - W`, and the comparison is strictly greater-than, which
-is `AC-OFFICE-ASSIGN-RATE-001.11`'s half-open interval. `requested_at` is
-written by `queueRun` itself on every row, so it is the persisted request
-instant the window is measured against.
+`windowStart` is `evaluationInstant - W`. The lower comparison is strictly
+greater-than and the upper comparison is inclusive, which is
+`AC-OFFICE-ASSIGN-RATE-001.11`'s half-open interval. `requested_at` is written
+by `queueRun` itself on every row, so it is the persisted request instant the
+window is measured against.
 
 No `ORDER BY` appears here or anywhere else in this capability:
 `AC-OFFICE-ASSIGN-RATE-001.10` makes the decision explicitly order-independent,
