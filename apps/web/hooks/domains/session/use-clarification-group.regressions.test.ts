@@ -348,9 +348,12 @@ describe("useClarificationGroup — inactive response reconciliation", () => {
       .fn()
       .mockRejectedValueOnce(new Error("message unavailable"))
       .mockReturnValueOnce(retry.promise);
-    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
-      initialProps: { msgs: bundleA },
-    });
+    const { result, rerender } = renderHook(
+      ({ msgs }) => useClarificationGroup(msgs, undefined, onLateAnswer),
+      {
+        initialProps: { msgs: bundleA },
+      },
+    );
 
     await act(async () => {
       await result.current.submitCollected({
