@@ -87,6 +87,7 @@ export async function createOverrideTask(
     workflow_id: fixture.workflow.id,
     workflow_step_id: fixture.analysisStep.id,
     repository_ids: [seedData.repositoryId],
+    executor_profile_id: seedData.worktreeExecutorProfileId,
     workflow_agent_overrides: replacementProfileId
       ? { [fixture.profileA.id]: replacementProfileId }
       : undefined,

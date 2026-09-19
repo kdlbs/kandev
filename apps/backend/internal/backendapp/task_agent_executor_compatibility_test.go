@@ -21,6 +21,14 @@ func (r compatibilityAgentReaderStub) GetAgent(context.Context, string) (*settin
 	return r.agent, nil
 }
 
+type compatibilityProfileExecutionValidatorStub struct {
+	err error
+}
+
+func (v compatibilityProfileExecutionValidatorStub) ValidateProfile(context.Context, string) error {
+	return v.err
+}
+
 func newCompatibilityRegistry(t *testing.T, agent agents.Agent) *registry.Registry {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
@@ -63,4 +71,36 @@ func TestTaskAgentExecutorCompatibilityRejectsRemoteExecutionWithoutCredentials(
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "remote executor profile is required")
+}
+
+func TestTaskAgentExecutorCompatibilityAllowsValidatedDynamicProfile(t *testing.T) {
+	validator := taskAgentExecutorCompatibilityValidator{
+		profiles:        compatibilityAgentReaderStub{agent: &settingsmodels.Agent{Name: agents.DynamicAgentID}},
+		agentRegistry:   newCompatibilityRegistry(t, agents.NewDynamicAgent()),
+		dynamicResolver: compatibilityProfileExecutionValidatorStub{},
+	}
+
+	err := validator.ValidateAgentProfileForExecutor(
+		context.Background(),
+		&settingsmodels.AgentProfile{ID: "dynamic-profile", AgentID: agents.DynamicAgentID},
+		&models.Executor{ID: "local", Type: models.ExecutorTypeLocal, Status: models.ExecutorStatusActive},
+		nil,
+	)
+	require.NoError(t, err)
+}
+
+func TestTaskAgentExecutorCompatibilityRejectsDynamicProfileWithoutValidator(t *testing.T) {
+	validator := taskAgentExecutorCompatibilityValidator{
+		profiles:      compatibilityAgentReaderStub{agent: &settingsmodels.Agent{Name: agents.DynamicAgentID}},
+		agentRegistry: newCompatibilityRegistry(t, agents.NewDynamicAgent()),
+	}
+
+	err := validator.ValidateAgentProfileForExecutor(
+		context.Background(),
+		&settingsmodels.AgentProfile{ID: "dynamic-profile", AgentID: agents.DynamicAgentID},
+		&models.Executor{ID: "local", Type: models.ExecutorTypeLocal, Status: models.ExecutorStatusActive},
+		nil,
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "dynamic agent routing validator is unavailable")
 }

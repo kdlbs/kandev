@@ -9,7 +9,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/remoteauth"
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -17,11 +16,42 @@ import (
 type taskAgentExecutorCompatibilityValidator struct {
 	profiles        agentProfileCompatibilityReader
 	agentRegistry   *registry.Registry
-	dynamicResolver *agentruntime.ProfileExecutionResolver
+	dynamicResolver profileExecutionValidator
+}
+
+type profileExecutionValidator interface {
+	ValidateProfile(context.Context, string) error
 }
 
 type agentProfileCompatibilityReader interface {
 	GetAgent(ctx context.Context, id string) (*agentsettingsmodels.Agent, error)
+}
+
+func (v taskAgentExecutorCompatibilityValidator) validateAgentFamily(
+	ctx context.Context,
+	profile *agentsettingsmodels.AgentProfile,
+) (agents.Agent, error) {
+	if v.profiles == nil || v.agentRegistry == nil {
+		return nil, fmt.Errorf("agent compatibility registry is unavailable")
+	}
+	settingsAgent, err := v.profiles.GetAgent(ctx, profile.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("load agent family: %w", err)
+	}
+	if settingsAgent == nil {
+		return nil, fmt.Errorf("agent family is unavailable")
+	}
+	if settingsAgent.Name == agents.DynamicAgentID {
+		if v.dynamicResolver == nil {
+			return nil, fmt.Errorf("dynamic agent routing validator is unavailable")
+		}
+		return nil, nil
+	}
+	registeredAgent, ok := v.agentRegistry.Get(settingsAgent.Name)
+	if !ok || registeredAgent == nil || !registeredAgent.Enabled() || agents.IsVirtualAgent(registeredAgent) {
+		return nil, fmt.Errorf("agent family %q cannot execute", settingsAgent.Name)
+	}
+	return registeredAgent, nil
 }
 
 func (v taskAgentExecutorCompatibilityValidator) ValidateAgentProfileForExecutor(
@@ -41,19 +71,14 @@ func (v taskAgentExecutorCompatibilityValidator) ValidateAgentProfileForExecutor
 			return err
 		}
 	}
-	if v.profiles == nil || v.agentRegistry == nil {
-		return fmt.Errorf("agent compatibility registry is unavailable")
-	}
-	settingsAgent, err := v.profiles.GetAgent(ctx, profile.AgentID)
+	registeredAgent, err := v.validateAgentFamily(ctx, profile)
 	if err != nil {
-		return fmt.Errorf("load agent family: %w", err)
+		return err
 	}
-	if settingsAgent == nil {
-		return fmt.Errorf("agent family is unavailable")
-	}
-	registeredAgent, ok := v.agentRegistry.Get(settingsAgent.Name)
-	if !ok || registeredAgent == nil || !registeredAgent.Enabled() || agents.IsVirtualAgent(registeredAgent) {
-		return fmt.Errorf("agent family %q cannot execute", settingsAgent.Name)
+	if registeredAgent == nil {
+		// Dynamic profiles have already passed the runtime validator and resolve
+		// to a concrete candidate at launch.
+		return nil
 	}
 	if !models.IsRemoteExecutorType(executor.Type) {
 		return nil

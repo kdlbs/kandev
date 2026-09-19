@@ -1,8 +1,10 @@
 import { expect, test } from "../../fixtures/test-base";
+import type { Locator, Page } from "@playwright/test";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { KanbanPage } from "../../pages/kanban-page";
+import { dwell } from "../../helpers/causal-waits";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { SessionPage } from "../../pages/session-page";
 import {
   createOverrideTask,
   deleteFixtureTasks,
@@ -13,6 +15,22 @@ import {
 } from "./task-workflow-agent-overrides-helpers";
 
 useRegularMode();
+
+async function longPress(page: Page, target: Locator): Promise<void> {
+  await target.scrollIntoViewIfNeeded();
+  const bounds = await target.boundingBox();
+  if (!bounds) throw new Error("next-step button has no bounding box");
+
+  const cdp = await page.context().newCDPSession(page);
+  const x = bounds.x + bounds.width / 2;
+  const y = bounds.y + bounds.height / 2;
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y }],
+  });
+  await dwell(page, 600, "library-timer", "workflow move long-press threshold settles");
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
 
 test.describe("mobile: task-specific workflow agent overrides", () => {
   test("keeps touch controls usable and routes the selected profile", async ({
@@ -108,33 +126,45 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
         fixture.profileA.id,
       );
 
-      const tablet = new KanbanPage(tabletTestPage);
-      await tablet.goto();
-      const card = tablet.taskCard(runtimeTask.id);
-      await expect(card).toBeVisible({ timeout: 15_000 });
-      await card.tap();
-      const previewPanel = tabletTestPage.getByTestId("task-preview-panel");
-      await expect(previewPanel).toBeVisible({ timeout: 15_000 });
-      const trigger = previewPanel.getByTestId("workflow-stepper-minimal");
-      await trigger.tap();
-      const drawer = tabletTestPage.locator('[data-slot="drawer-content"][data-state="open"]');
-      await expect(drawer).toBeVisible();
-      const targetRow = drawer.getByTestId(
+      const tabletSession = new SessionPage(tabletTestPage);
+      await tabletTestPage.goto(`/t/${runtimeTask.id}`);
+      await tabletSession.waitForLoad();
+      const tabletStepper = tabletTestPage.getByTestId("workflow-stepper-minimal");
+      await expect(tabletStepper).toBeVisible();
+      await tabletStepper.tap();
+      const tabletDrawer = tabletTestPage.locator(
+        '[data-slot="drawer-content"][data-state="open"]',
+      );
+      await expect(tabletDrawer).toBeVisible();
+      const plannedTopbarRow = tabletDrawer.getByTestId(
         `workflow-step-disclosure-row-${fixture.implementStep.id}`,
       );
-      await expect(targetRow).toBeVisible();
-      await expect(targetRow.getByTestId("workflow-move-preview")).toContainText("mock-slow");
-      const move = targetRow.getByTestId(
+      await expect(plannedTopbarRow.getByTestId("workflow-move-preview")).toContainText(
+        "mock-slow",
+      );
+      const topbarMove = plannedTopbarRow.getByTestId(
         `workflow-step-disclosure-move-${fixture.implementStep.id}`,
       );
-      const moveBox = await move.boundingBox();
-      expect(moveBox).not.toBeNull();
-      if (!moveBox) throw new Error("mobile workflow move control has no layout box");
-      expect(moveBox.height).toBeGreaterThanOrEqual(44);
-      await targetRow
-        .getByTestId(`workflow-step-disclosure-move-${fixture.implementStep.id}`)
-        .tap();
+      const topbarMoveBox = await topbarMove.boundingBox();
+      expect(topbarMoveBox).not.toBeNull();
+      if (!topbarMoveBox) throw new Error("mobile workflow move control has no layout box");
+      expect(topbarMoveBox.height).toBeGreaterThanOrEqual(44);
+      await tabletTestPage.keyboard.press("Escape");
 
+      const phoneSession = new SessionPage(testPage);
+      await testPage.goto(`/t/${runtimeTask.id}`);
+      await phoneSession.waitForLoad();
+      const plannedAboveChatButton = testPage.getByTestId("proceed-next-step");
+      await expect(plannedAboveChatButton).toBeVisible();
+      await longPress(testPage, plannedAboveChatButton);
+      const plannedAboveChatOptions = testPage.getByTestId("workflow-move-options");
+      await expect(plannedAboveChatOptions).toBeVisible();
+      await expect(plannedAboveChatOptions.getByTestId("workflow-move-preview")).toContainText(
+        "mock-slow",
+      );
+      await plannedAboveChatOptions.getByRole("button", { name: "Cancel", exact: true }).click();
+
+      await apiClient.moveTask(runtimeTask.id, fixture.workflow.id, fixture.implementStep.id);
       await waitForWorkflowStep(apiClient, runtimeTask.id, fixture.implementStep.id);
       const replacementSessionId = await waitForNewWorkflowProfileSession(
         apiClient,
@@ -146,7 +176,39 @@ test.describe("mobile: task-specific workflow agent overrides", () => {
         .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
         .toBe(replacementSessionId);
       await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
+      await apiClient.moveTask(runtimeTask.id, fixture.workflow.id, fixture.reviewStep.id);
+      await waitForWorkflowStep(apiClient, runtimeTask.id, fixture.reviewStep.id);
+      await expect
+        .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
+        .toBe(initialSessionId);
+      await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
+
+      await tabletTestPage.reload();
+      await tabletSession.waitForLoad();
+      await tabletStepper.tap();
+      const actualTabletDrawer = tabletTestPage.locator(
+        '[data-slot="drawer-content"][data-state="open"]',
+      );
+      await expect(actualTabletDrawer).toBeVisible();
+      const actualTopbarRow = actualTabletDrawer.getByTestId(
+        `workflow-step-disclosure-row-${fixture.prStep.id}`,
+      );
+      await expect(actualTopbarRow.getByTestId("workflow-move-preview")).toContainText("mock-slow");
+      await tabletTestPage.keyboard.press("Escape");
+
+      await testPage.reload();
+      await phoneSession.waitForLoad();
+      const actualAboveChatButton = testPage.getByTestId("proceed-next-step");
+      await expect(actualAboveChatButton).toBeVisible();
+      await longPress(testPage, actualAboveChatButton);
+      const actualAboveChatOptions = testPage.getByTestId("workflow-move-options");
+      await expect(actualAboveChatOptions).toBeVisible();
+      await expect(actualAboveChatOptions.getByTestId("workflow-move-preview")).toContainText(
+        "mock-slow",
+      );
+      await actualAboveChatOptions.getByRole("button", { name: "Cancel", exact: true }).click();
       await assertNoDocumentHorizontalOverflow(tabletTestPage);
+      await assertNoDocumentHorizontalOverflow(testPage);
     } finally {
       await deleteFixtureTasks(apiClient, createdTaskIds);
       await apiClient.deleteWorkflow(fixture.workflow.id).catch(() => undefined);

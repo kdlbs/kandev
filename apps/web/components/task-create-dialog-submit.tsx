@@ -825,6 +825,7 @@ export function useTaskSubmitHandlers({
       createTaskWithFreshBranchRetry,
       isSessionMode,
       isEditMode,
+      workflowAgentOverrides,
       workflowAgentOverridesBlockedReason,
     ],
   );
@@ -1112,6 +1113,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingTask,
     blockedBy,
+    workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
   ]);
 

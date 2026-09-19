@@ -462,6 +462,8 @@ export function useTaskCreateDialogSetup(
     fs,
     data,
   );
+  const workflowAgentOverridesBlockedReason =
+    mode === "create" ? workflowAgentOverrideValidation.blockedReason : undefined;
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
@@ -474,13 +476,13 @@ export function useTaskCreateDialogSetup(
     editDependencies,
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
-    workflowAgentOverridesBlockedReason: workflowAgentOverrideValidation.blockedReason,
+    workflowAgentOverridesBlockedReason,
   });
   const { guardedHandleSubmit, handleKeyDown } = useDialogSubmitShortcut(
     submitHandlers.handleSubmit,
     resolvedProps.submitBlockedReason ??
       savedBaseSubmitBlockedReason ??
-      workflowAgentOverrideValidation.blockedReason,
+      workflowAgentOverridesBlockedReason,
     !isTaskStarted && computed.noCompatibleAgent,
   );
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);

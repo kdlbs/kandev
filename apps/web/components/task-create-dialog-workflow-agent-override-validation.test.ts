@@ -62,6 +62,30 @@ describe("workflow agent override submit validation", () => {
     expect(failed.blockedReason).toBeTruthy();
   });
 
+  it("does not block ordinary create while an unused workflow snapshot is loading or failed", () => {
+    const ordinary = { ...base, overrides: {} };
+    const loading = buildWorkflowAgentOverrideValidation({
+      ...ordinary,
+      snapshots: {
+        [WORKFLOW_ID]: {
+          workflowId: WORKFLOW_ID,
+          workflowName: "Workflow",
+          steps: [],
+          tasks: [],
+          isPlaceholder: true,
+        },
+      },
+      workspaceSnapshotRead: { workspaceId: WORKSPACE_ID, error: false },
+    });
+    const failed = buildWorkflowAgentOverrideValidation({
+      ...ordinary,
+      snapshots: {},
+      workspaceSnapshotRead: { workspaceId: WORKSPACE_ID, error: true },
+    });
+    expect(loading.blockedReason).toBeUndefined();
+    expect(failed.blockedReason).toBeUndefined();
+  });
+
   it("blocks an unavailable replacement in create mode and leaves edit mode unblocked", () => {
     const args = {
       ...base,

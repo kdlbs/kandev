@@ -39,7 +39,8 @@ test.describe("task-specific workflow agent overrides", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
+    await testPage.setViewportSize({ width: 1440, height: 900 });
     const fixture = await seedWorkflowAgentOverrideFixture(
       apiClient,
       seedData,
@@ -153,6 +154,75 @@ test.describe("task-specific workflow agent overrides", () => {
         "Use workflow profile",
       );
       await freshDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
+      const runtimeTask = await createOverrideTask(apiClient, seedData, fixture, {
+        title: "Desktop runtime override",
+        replacementProfileId: fixture.profileB.id,
+      });
+      createdTaskIds.push(runtimeTask.id);
+      const initialSessionId = await waitForNewWorkflowProfileSession(
+        apiClient,
+        runtimeTask.id,
+        fixture.profileA.id,
+      );
+      const sessionPage = new SessionPage(testPage);
+
+      await testPage.goto(`/t/${runtimeTask.id}`);
+      await sessionPage.waitForLoad();
+      const plannedTopbarStep = testPage.getByTestId("workflow-step-Implement");
+      await expect(plannedTopbarStep).toBeVisible();
+      await plannedTopbarStep.hover();
+      const plannedTopbarPopover = testPage.getByTestId("workflow-step-popover");
+      await expect(plannedTopbarPopover).toBeVisible();
+      await expect(plannedTopbarPopover.getByTestId("workflow-move-preview")).toContainText(
+        "mock-slow",
+      );
+      await testPage.mouse.move(0, 0);
+
+      const plannedAboveChatButton = testPage.getByTestId("proceed-next-step");
+      await expect(plannedAboveChatButton).toBeVisible();
+      await plannedAboveChatButton.hover();
+      const plannedAboveChatOptions = testPage.getByTestId("proceed-next-step-options");
+      await expect(plannedAboveChatOptions).toBeVisible();
+      await expect(plannedAboveChatOptions.getByTestId("workflow-move-preview")).toContainText(
+        "mock-slow",
+      );
+      await testPage.mouse.move(0, 0);
+      await plannedAboveChatButton.click();
+      await waitForWorkflowStep(apiClient, runtimeTask.id, fixture.implementStep.id);
+      await waitForNewWorkflowProfileSession(apiClient, runtimeTask.id, fixture.profileB.id, [
+        initialSessionId,
+      ]);
+      await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
+
+      await apiClient.moveTask(runtimeTask.id, fixture.workflow.id, fixture.reviewStep.id);
+      await waitForWorkflowStep(apiClient, runtimeTask.id, fixture.reviewStep.id);
+      await expect
+        .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
+        .toBe(initialSessionId);
+      await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
+      await testPage.reload();
+      await sessionPage.waitForLoad();
+
+      const actualTopbarStep = testPage.getByTestId("workflow-step-PR");
+      await expect(actualTopbarStep).toBeVisible();
+      await actualTopbarStep.hover();
+      const actualTopbarPopover = testPage.getByTestId("workflow-step-popover");
+      await expect(actualTopbarPopover).toBeVisible();
+      await expect(actualTopbarPopover.getByTestId("workflow-move-preview")).toContainText(
+        "mock-slow",
+      );
+      await testPage.mouse.move(0, 0);
+
+      const actualAboveChatButton = testPage.getByTestId("proceed-next-step");
+      await expect(actualAboveChatButton).toBeVisible();
+      await actualAboveChatButton.hover();
+      const actualAboveChatOptions = testPage.getByTestId("proceed-next-step-options");
+      await expect(actualAboveChatOptions).toBeVisible();
+      await expect(actualAboveChatOptions.getByTestId("workflow-move-preview")).toContainText(
+        "mock-slow",
+      );
+      await testPage.mouse.move(0, 0);
 
       const planned = await previewWorkflowMove(
         apiClient,

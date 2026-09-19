@@ -39,11 +39,13 @@ function resolveSnapshotState(args: {
 
 function blockedReasonForValidation(args: {
   isCreateMode: boolean;
+  hasSelectedOverride: boolean;
   error: boolean;
   loading: boolean;
   invalid: boolean;
 }) {
   if (!args.isCreateMode) return undefined;
+  if (!args.hasSelectedOverride) return undefined;
   if (args.error) return t("task:workflowAgentsLoadError");
   if (args.loading) return t("task:workflowAgentsLoading");
   return args.invalid ? t("task:workflowAgentsUnavailable") : undefined;
@@ -75,6 +77,9 @@ export function buildWorkflowAgentOverrideValidation(args: {
     replacementOptions: args.replacementOptions,
     overrides: args.overrides,
   });
+  const hasSelectedOverride = Object.values(args.overrides ?? {}).some(
+    (replacementProfileId) => replacementProfileId.trim() !== "",
+  );
   const invalid = !snapshotState.loading && rows.some((row) => !row.replacementAvailable);
   return {
     rows,
@@ -84,6 +89,7 @@ export function buildWorkflowAgentOverrideValidation(args: {
     invalid,
     blockedReason: blockedReasonForValidation({
       isCreateMode: args.isCreateMode,
+      hasSelectedOverride,
       error: snapshotState.error,
       loading: snapshotState.loading,
       invalid,

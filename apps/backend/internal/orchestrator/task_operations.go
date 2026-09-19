@@ -1319,9 +1319,13 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Fail before task-state or session mutations when the selected logical
 	// profile belongs to a disabled dynamic family. The workflow step may later
 	// override the caller profile, so repeat the check after that resolution.
-	preflightProfileID, err := s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
-	if err != nil {
-		return nil, err
+	preflightProfileID := agentProfileID
+	if !opts.ProfileExplicit || agentProfileID == "" {
+		var err error
+		preflightProfileID, err = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if s.profileExecutionResolver != nil {
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, preflightProfileID); err != nil {
