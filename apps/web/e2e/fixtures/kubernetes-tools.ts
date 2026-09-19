@@ -425,6 +425,7 @@ function serviceAccountKubeconfig(
   );
 }
 
+/** Render workload Pods with the fixture-owned identity and optional image or placement overrides. */
 function podTemplate(image: string, overrides: PodTemplateOverrides = {}): string {
   const nodeSelector = overrides.nodeSelector
     ? `\n    nodeSelector:\n${Object.entries(overrides.nodeSelector)
