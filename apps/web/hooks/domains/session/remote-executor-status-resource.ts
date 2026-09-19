@@ -1,3 +1,4 @@
+import { createRemoteExecutorStatusRefresh } from "./remote-executor-status-refresh";
 import { getKubernetesTaskSession } from "@/lib/api/domains/kubernetes-api";
 import { t } from "@/lib/i18n";
 import type { KubernetesSession } from "@/lib/types/http-kubernetes";
@@ -28,6 +29,7 @@ export type RemoteExecutorStatusSnapshot = {
 type Requester = (request: RemoteExecutorStatusRequest) => Promise<RemoteExecutorStatusData> | null;
 
 type Entry = {
+  request?: RemoteExecutorStatusRequest;
   snapshot: RemoteExecutorStatusSnapshot;
   promise: Promise<RemoteExecutorStatusSnapshot> | null;
   listeners: Set<() => void>;
@@ -104,22 +106,34 @@ function notify(entry: Entry): void {
   entry.listeners.forEach((listener) => listener());
 }
 
+function prune(entries: Map<string, Entry>, current: Entry): void {
+  const candidates = [...entries.entries()]
+    .filter(([, entry]) => entry !== current && !entry.promise && entry.listeners.size === 0)
+    .sort((left, right) => left[1].lastUsed - right[1].lastUsed);
+  for (const [scope] of candidates) {
+    if (entries.size <= MAX_ENTRIES) break;
+    entries.delete(scope);
+  }
+}
+
+function createEntry(): Entry {
+  return {
+    snapshot: EMPTY_SNAPSHOT,
+    promise: null,
+    listeners: new Set(),
+    completedAt: 0,
+    failed: false,
+    lastUsed: 0,
+  };
+}
+
 export function createRemoteExecutorStatusResource(requester: Requester = requestRemoteStatus) {
   const entries = new Map<string, Entry>();
   let usageCounter = 0;
+  const refresh = createRemoteExecutorStatusRefresh(SUCCESS_FRESHNESS_MS);
 
   function touch(entry: Entry): void {
     entry.lastUsed = ++usageCounter;
-  }
-
-  function prune(current: Entry): void {
-    const candidates = [...entries.entries()]
-      .filter(([, entry]) => entry !== current && !entry.promise && entry.listeners.size === 0)
-      .sort((left, right) => left[1].lastUsed - right[1].lastUsed);
-    for (const [scope] of candidates) {
-      if (entries.size <= MAX_ENTRIES) break;
-      entries.delete(scope);
-    }
   }
 
   function entryFor(scope: string): Entry {
@@ -128,14 +142,7 @@ export function createRemoteExecutorStatusResource(requester: Requester = reques
       touch(existing);
       return existing;
     }
-    const entry: Entry = {
-      snapshot: EMPTY_SNAPSHOT,
-      promise: null,
-      listeners: new Set(),
-      completedAt: 0,
-      failed: false,
-      lastUsed: 0,
-    };
+    const entry = createEntry();
     entries.set(scope, entry);
     touch(entry);
     return entry;
@@ -146,14 +153,20 @@ export function createRemoteExecutorStatusResource(requester: Requester = reques
     force = false,
   ): Promise<RemoteExecutorStatusSnapshot> | null {
     if (!isValidRemoteExecutorStatusRequest(request)) return null;
-    const entry = entryFor(remoteExecutorStatusScope(request));
+    const scope = remoteExecutorStatusScope(request);
+    const entry = entryFor(scope);
+    entry.request = request;
+    if (entry.listeners.size) activate(scope, entry);
     if (entry.promise) return entry.promise;
     const successIsFresh = Date.now() - entry.completedAt < SUCCESS_FRESHNESS_MS;
     if (!force && entry.snapshot.status && !entry.failed && successIsFresh) {
       return Promise.resolve(entry.snapshot);
     }
     const pending = requester(request);
-    if (!pending) return null;
+    if (!pending) {
+      refresh.settled(scope);
+      return null;
+    }
     entry.snapshot = { status: entry.snapshot.status, loading: true };
     notify(entry);
     const promise = pending
@@ -173,14 +186,27 @@ export function createRemoteExecutorStatusResource(requester: Requester = reques
         entry.completedAt = failed ? 0 : Date.now();
         touch(entry);
         notify(entry);
-        prune(entry);
+        prune(entries, entry);
         return snapshot;
       })
       .finally(() => {
         if (entry.promise === promise) entry.promise = null;
+        refresh.settled(scope);
       });
     entry.promise = promise;
     return promise;
+  }
+
+  function activate(scope: string, entry: Entry) {
+    if (!entry.request) return;
+    const request = entry.request;
+    refresh.activate(
+      scope,
+      () => void load(request, true),
+      entry.completedAt
+        ? entry.completedAt + SUCCESS_FRESHNESS_MS
+        : Date.now() + SUCCESS_FRESHNESS_MS,
+    );
   }
 
   return {
@@ -196,7 +222,11 @@ export function createRemoteExecutorStatusResource(requester: Requester = reques
       if (!scope) return () => undefined;
       const entry = entryFor(scope);
       entry.listeners.add(listener);
-      return () => entry.listeners.delete(listener);
+      activate(scope, entry);
+      return () => {
+        entry.listeners.delete(listener);
+        if (entry.listeners.size === 0) refresh.deactivate(scope);
+      };
     },
   };
 }
