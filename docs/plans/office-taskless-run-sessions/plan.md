@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-status: in_progress
+status: completed
 requirements:
   - REQ-OFFICE-TASKLESS-001
 system_design:
@@ -266,20 +266,52 @@ this plan had.
 
 ## Verification results
 
-Pending Task 01. Baseline receipt taken on
-`d355a672b1db624048f8ff87bc456a1729f78cb0`:
+All three work orders (Task 01, Task 05, Task 06) are implemented and
+committed on `feature/office-beta-reconcil-t74`: `026280e61` (all Go
+production and test changes) and `f234ea888` (spec docs + this plan
+directory). Build round 1 (`fed21f008`) fixed two test-fidelity findings from
+Review round 1 (routed-launcher reserve-before-failFor ordering; the
+interrupted-attempt-recovery test now drives the real
+`officeRunSessionLauncher.ReconcileRunSessions`). Testing round 2
+independently re-verified that fixup with no genuine defect found.
 
 ```text
-$ go test ./internal/backendapp/ -run 'TestRoutine_CronFire' -v -count=1
-=== RUN   TestRoutine_CronFire_HeavyRoutineReachesSession
---- PASS: TestRoutine_CronFire_HeavyRoutineReachesSession (0.09s)
-=== RUN   TestRoutine_CronFire_LightweightReachesSession
-    office_routine_cron_to_session_test.go:295: blocked on card 49894d63: the
-    lightweight (taskless) routine flow has no task_sessions row to assert on yet
---- SKIP: TestRoutine_CronFire_LightweightReachesSession (0.00s)
-PASS
-ok  	github.com/kandev/kandev/internal/backendapp	1.169s
+$ go test ./internal/office/... ./internal/backendapp/... -count=1
+[... every internal/office/* subpackage ok, 4 correctly report [no test files] ...]
+ok  	github.com/kandev/kandev/internal/office/service	6.548s
+ok  	github.com/kandev/kandev/internal/backendapp	23.008s
+ok  	github.com/kandev/kandev/internal/backendapp/ownershiplock	0.320s
+
+$ go test ./internal/office/service/... ./internal/backendapp/... -race -count=1
+ok  	github.com/kandev/kandev/internal/office/service	10.873s
+ok  	github.com/kandev/kandev/internal/backendapp	43.678s
+ok  	github.com/kandev/kandev/internal/backendapp/ownershiplock	4.839s
+
+$ golangci-lint run ./internal/office/... ./internal/backendapp/... --new-from-rev=d355a672b1db624048f8ff87bc456a1729f78cb0 --timeout=5m
+0 issues.
+$ golangci-lint run ./internal/office/... ./internal/backendapp/... --timeout=5m
+0 issues.
+
+$ git diff --name-only d355a672b...HEAD -- '*.go' | xargs gofmt -l
+(no output — clean)
 ```
+
+`make typecheck`, `make lint` (repo-wide `golangci-lint run ./...`), `make
+lint-format`, and `cd apps/web && pnpm run i18n:ratchet` all passed clean
+during Build (docs/backend-only change, no UI source touched). `git diff
+--stat -- apps/web` is empty on this branch, confirmed both at Build and at
+Testing round 2 — no E2E required.
+
+Five accepted gaps remain from the Round-6 Spec Review decision
+(`## Decision (human, round 6)` in the task's Kandev plan): AC `.3`
+retry/backoff parity does not hold on the direct taskless path (deliberate,
+WO-35 incident, not changed); no cross-run continuation-scope winner rule
+(Task 06 tests ordering within one run's attempts only); AC `.1`'s
+prompt/tools delivery clause stays an uncovered gap (Task 01 asserts the
+session seam only); the AC `.8` replay justification was corrected, no
+behavior change; the failed-summary-write run event is best-effort, matching
+`AppendRunEvent`'s existing log-and-swallow contract. None of these
+triggered a route-back to Spec or Spec Review.
 
 ## Risks
 
