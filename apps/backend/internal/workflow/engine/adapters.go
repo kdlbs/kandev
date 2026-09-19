@@ -40,6 +40,11 @@ const (
 	// outcome. Declared identically in internal/runs/service — both
 	// declarations MUST match.
 	QueueOutcomeNone QueueOutcome = ""
+	// QueueOutcomeRateLimited means an agent-initiated assignment wake was
+	// refused because its task's REQ-OFFICE-ASSIGN-RATE-001 allowance was
+	// already exhausted: no row was inserted and none was merged. Declared
+	// identically in internal/runs/service — both declarations MUST match.
+	QueueOutcomeRateLimited QueueOutcome = "rate_limited"
 )
 
 // QueueRunRequest is the typed payload the engine hands to RunQueueAdapter.

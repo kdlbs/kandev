@@ -50,6 +50,14 @@ const (
 	// queued row for the same agent, reason, and task bucket within the
 	// coalescing window, so nothing new was inserted.
 	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+	// QueueOutcomeRateLimited means an agent-initiated assignment wake was
+	// refused because its task's REQ-OFFICE-ASSIGN-RATE-001 allowance was
+	// already exhausted: no row was inserted and none was merged. Distinct
+	// from QueueOutcomeNone, which means no enqueue was attempted or the
+	// attempt errored — a caller must not infer a rate-limit refusal from
+	// an absence. Declared identically in internal/workflow/engine/adapters.go
+	// — both declarations MUST match.
+	QueueOutcomeRateLimited QueueOutcome = "rate_limited"
 )
 
 // QueueRunRequest carries everything the queue needs to insert a row.

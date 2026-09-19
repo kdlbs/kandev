@@ -153,6 +153,16 @@ const CoalesceWindowSeconds = 5
 // IdempotencyWindowHours is the deduplication window.
 const IdempotencyWindowHours = 24
 
+// AssignmentWakeAllowanceN and AssignmentWakeAllowanceWindow are the fixed
+// N and W of REQ-OFFICE-ASSIGN-RATE-001: at most N agent-initiated
+// assignment wakes admitted per task within any rolling window of duration
+// W. Fixed values of this capability rather than operator-configurable;
+// referenced by the tests rather than restated.
+const (
+	AssignmentWakeAllowanceN      = 5
+	AssignmentWakeAllowanceWindow = 10 * time.Minute
+)
+
 // TaskStarter launches agent sessions on behalf of the office scheduler.
 // Implemented by the orchestrator; the scheduler depends only on this interface.
 type TaskStarter interface {
@@ -355,6 +365,18 @@ func (ss *SchedulerService) queueRun(
 				zap.String("reason", reason))
 			return runsservice.QueueOutcomeCoalesced, nil
 		}
+	}
+
+	// Assignment wake rate limit (REQ-OFFICE-ASSIGN-RATE-001..003).
+	// Unconditional — unlike CoalesceRun above, this gate is not skipped
+	// when waveKey is set: the only reason in this codebase that sets a
+	// WaveKey is RunReasonTaskChildrenCompleted, never a task_assigned
+	// wake, but the gate does not rely on that coincidence to stay
+	// correct. It sits here, after the recent-duplicate lookup and the
+	// coalescing attempt and before CreateRun, so "admitted" means
+	// exactly "a row was inserted".
+	if refused := ss.checkAssignmentWakeAllowance(ctx, agentInstanceID, reason, payload); refused {
+		return runsservice.QueueOutcomeRateLimited, nil
 	}
 
 	var idemKeyPtr *string
