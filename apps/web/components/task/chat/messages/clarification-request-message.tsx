@@ -12,7 +12,10 @@ import type {
 import { useTranslation } from "react-i18next";
 import { ClarificationMarkdown } from "../clarification-markdown";
 import { ClarificationInputOverlay } from "../clarification-input-overlay";
-import type { LateClarificationSnapshot } from "@/hooks/use-late-clarification-message";
+import type {
+  LateClarificationSnapshot,
+  LateClarificationState,
+} from "@/hooks/use-late-clarification-message";
 import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
 
 type ClarificationRequestMessageProps = {
@@ -20,6 +23,8 @@ type ClarificationRequestMessageProps = {
   messages?: readonly Message[];
   onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
   lateAnswerSnapshot?: LateClarificationSnapshot | null;
+  lateAnswerState?: LateClarificationState;
+  onResetLateAnswer?: () => void;
   isCurrentTurn?: boolean;
 };
 
@@ -70,6 +75,8 @@ export function ClarificationRequestMessage({
   messages = [comment],
   onLateAnswer,
   lateAnswerSnapshot,
+  lateAnswerState,
+  onResetLateAnswer,
   isCurrentTurn = false,
 }: ClarificationRequestMessageProps) {
   const { t } = useTranslation();
@@ -172,7 +179,12 @@ export function ClarificationRequestMessage({
               variant="outline"
               size="sm"
               className="mt-2 min-h-11 cursor-pointer gap-1.5 md:min-h-0"
-              onClick={() => setIsAnswering(true)}
+              onClick={() => {
+                if (lateAnswerState?.status === "sent" || lateAnswerState?.status === "queued") {
+                  onResetLateAnswer?.();
+                }
+                setIsAnswering(true);
+              }}
               data-testid="clarification-answer-as-new-message"
             >
               <IconMessagePlus className="h-3.5 w-3.5" />
@@ -185,7 +197,8 @@ export function ClarificationRequestMessage({
                 messages={messages}
                 mode="late"
                 onLateAnswer={onLateAnswer}
-                initialAnswers={lateAnswerSnapshot?.answers}
+                initialAnswers={lateAnswerState?.snapshot?.answers ?? lateAnswerSnapshot?.answers}
+                lateAnswerState={lateAnswerState}
                 onResolved={() => {}}
                 shortcutScopeRef={answerScopeRef}
                 onDismiss={closeAnswerForm}

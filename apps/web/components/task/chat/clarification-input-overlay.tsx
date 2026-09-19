@@ -14,7 +14,10 @@ import {
   useClarificationGroup,
   type ClarificationOutcome,
 } from "@/hooks/domains/session/use-clarification-group";
-import type { LateClarificationSnapshot } from "@/hooks/use-late-clarification-message";
+import type {
+  LateClarificationSnapshot,
+  LateClarificationState,
+} from "@/hooks/use-late-clarification-message";
 import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import {
@@ -55,6 +58,8 @@ type ClarificationInputOverlayProps = {
   onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
   /** Restores a late-message draft after its inline form was removed. */
   initialAnswers?: readonly ClarificationAnswer[];
+  /** Shares late-message admission state across transcript and active hosts. */
+  lateAnswerState?: LateClarificationState;
 };
 
 type SingleQuestionMeta = {
@@ -638,6 +643,7 @@ export function ClarificationInputOverlay({
   onDismiss,
   onCollapse,
   collapseContentId,
+  lateAnswerState,
 }: ClarificationInputOverlayProps) {
   const { t } = useTranslation();
   const lateMode = mode === "late";
@@ -650,28 +656,36 @@ export function ClarificationInputOverlay({
     "idle",
   );
   const [lateSnapshot, setLateSnapshot] = useState<LateClarificationSnapshot | null>(null);
+  const sharedLateStatus = lateMode ? (lateAnswerState?.status ?? "idle") : "idle";
+  const effectiveLateStatus = sharedLateStatus === "idle" ? lateStatus : sharedLateStatus;
+  const effectiveLateSnapshot = lateMode
+    ? (lateAnswerState?.snapshot ?? lateSnapshot)
+    : lateSnapshot;
   const isSubmitting =
     group.submitState === "submitting" ||
     group.lateAnswerState === "sending" ||
-    lateStatus === "sending";
+    effectiveLateStatus === "sending";
   const lateInteraction = lateMode || group.lateAnswerState !== "idle";
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
   const [rawActiveIndex, setActiveIndex] = useState(0);
   useResetOverlayStateOnBundleChange(group.pendingId, setCustomDrafts, setActiveIndex);
-  const initialAnswersKey = JSON.stringify(initialAnswers ?? []);
+  const restoredAnswers = lateMode
+    ? (lateAnswerState?.snapshot?.answers ?? initialAnswers)
+    : initialAnswers;
+  const initialAnswersKey = JSON.stringify(restoredAnswers ?? []);
   useEffect(() => {
-    if (!initialAnswers || initialAnswers.length === 0) return;
-    for (const answer of initialAnswers) {
+    if (!restoredAnswers || restoredAnswers.length === 0) return;
+    for (const answer of restoredAnswers) {
       group.recordAnswer(answer.question_id, answer);
     }
     setCustomDrafts((current) => {
       const next = { ...current };
-      for (const answer of initialAnswers) {
+      for (const answer of restoredAnswers) {
         if (answer.custom_text !== undefined) next[answer.question_id] = answer.custom_text;
       }
       return next;
     });
-  }, [group.recordAnswer, initialAnswers, initialAnswersKey]);
+  }, [group.recordAnswer, initialAnswersKey, restoredAnswers]);
   // Clamp the active index to the current bundle size so late-arriving
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;
@@ -716,8 +730,8 @@ export function ClarificationInputOverlay({
     if (allAnswered) void submitAnswers();
   }, [allAnswered, submitAnswers]);
   const retryLateAnswerForm = useCallback(() => {
-    if (lateSnapshot) void submitLateAnswer();
-  }, [lateSnapshot, submitLateAnswer]);
+    if (effectiveLateSnapshot) void submitLateAnswer();
+  }, [effectiveLateSnapshot, submitLateAnswer]);
   const retryLateAnswer = lateMode ? retryLateAnswerForm : group.retryLateAnswer;
 
   // Gated on the same resolved `meta` that decides whether
@@ -731,7 +745,7 @@ export function ClarificationInputOverlay({
       group.submitState !== "expired" &&
       group.lateAnswerState !== "sent" &&
       group.lateAnswerState !== "queued" &&
-      (!lateInteraction || (lateStatus !== "sent" && lateStatus !== "queued")) &&
+      (!lateInteraction || (effectiveLateStatus !== "sent" && effectiveLateStatus !== "queued")) &&
       meta !== null,
     shortcutScopeRef,
   );
@@ -747,7 +761,7 @@ export function ClarificationInputOverlay({
   }
 
   if (
-    (lateMode && (lateStatus === "sent" || lateStatus === "queued")) ||
+    (lateMode && (effectiveLateStatus === "sent" || effectiveLateStatus === "queued")) ||
     (!lateMode && (group.lateAnswerState === "sent" || group.lateAnswerState === "queued"))
   ) {
     return (
@@ -757,7 +771,7 @@ export function ClarificationInputOverlay({
           className="flex min-h-11 items-center justify-between gap-3 px-4 py-2 text-sm text-muted-foreground"
         >
           <span>
-            {(lateMode ? lateStatus : group.lateAnswerState) === "sent"
+            {(lateMode ? effectiveLateStatus : group.lateAnswerState) === "sent"
               ? t("task:lateAnswerSent")
               : t("task:lateAnswerQueued")}
           </span>
@@ -796,7 +810,7 @@ export function ClarificationInputOverlay({
         <ClarificationStatusBanner state={group.submitState} onRetry={() => void group.retry()} />
       )}
       {lateInteraction &&
-        ((lateMode && lateStatus === "error") ||
+        ((lateMode && effectiveLateStatus === "error") ||
           (!lateMode && group.lateAnswerState === "error")) && (
           <ClarificationStatusBanner state="error" onRetry={retryLateAnswer} />
         )}

@@ -1266,6 +1266,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             agentDisconnected={session?.pending_action === null}
             onResolved={handleClarificationResolved}
             onLateAnswer={lateAnswer.send}
+            lateAnswerState={lateAnswer.state}
             shortcutScopeRef={panelRef}
             maxHeightVh={50}
           />

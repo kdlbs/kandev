@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
 vi.mock("@/lib/config", () => ({
@@ -55,6 +55,16 @@ function setupFetchMock() {
   mockMessagesBySession = {};
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("useClarificationGroup — malformed conflict responses", () => {
@@ -320,6 +330,106 @@ describe("useClarificationGroup — inactive response reconciliation", () => {
     expect(onLateAnswer).toHaveBeenCalledTimes(2);
     expect(onLateAnswer.mock.calls[1][0]).toEqual(onLateAnswer.mock.calls[0][0]);
     expect(result.current.lateAnswerState).toBe("queued");
+  });
+
+  it("ignores a late retry rejection after the bundle changes", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "not_active" }), { status: 409 }),
+    );
+    const bundleA = [
+      clarMessage({ id: "m-retry-a", pendingId: "pA", questionId: "qA", index: 0, total: 1 }),
+    ];
+    const bundleB = [
+      clarMessage({ id: "m-retry-b", pendingId: "pB", questionId: "qB", index: 0, total: 1 }),
+    ];
+    mockMessagesBySession = { [bundleA[0].session_id]: bundleA };
+    const retry = deferred<"sent">();
+    const onLateAnswer = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("message unavailable"))
+      .mockReturnValueOnce(retry.promise);
+    const { result, rerender } = renderHook(({ msgs }) => useClarificationGroup(msgs), {
+      initialProps: { msgs: bundleA },
+    });
+
+    await act(async () => {
+      await result.current.submitCollected({
+        qA: { question_id: "qA", selected_options: ["a"] },
+      });
+    });
+    expect(result.current.lateAnswerState).toBe("error");
+
+    let retryRequest!: Promise<void>;
+    await act(async () => {
+      retryRequest = result.current.retryLateAnswer();
+      await waitFor(() => expect(onLateAnswer).toHaveBeenCalledTimes(2));
+    });
+    rerender({ msgs: bundleB });
+
+    await act(async () => {
+      retry.reject(new Error("late failure"));
+      await retryRequest;
+    });
+
+    expect(result.current.lateAnswerState).toBe("idle");
+  });
+
+  it("ignores a late retry success after A leaves and returns as a new generation", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "not_active" }), { status: 409 }),
+    );
+    const bundleA = [
+      clarMessage({
+        id: "m-retry-generation-a",
+        pendingId: "pA",
+        questionId: "qA",
+        index: 0,
+        total: 1,
+      }),
+    ];
+    const bundleB = [
+      clarMessage({
+        id: "m-retry-generation-b",
+        pendingId: "pB",
+        questionId: "qB",
+        index: 0,
+        total: 1,
+      }),
+    ];
+    mockMessagesBySession = { [bundleA[0].session_id]: bundleA };
+    const retry = deferred<"sent">();
+    const onLateAnswer = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("message unavailable"))
+      .mockReturnValueOnce(retry.promise);
+    const onOutcome = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ msgs }) => useClarificationGroup(msgs, onOutcome, onLateAnswer),
+      { initialProps: { msgs: bundleA } },
+    );
+
+    await act(async () => {
+      await result.current.submitCollected({
+        qA: { question_id: "qA", selected_options: ["a"] },
+      });
+    });
+    let retryRequest!: Promise<void>;
+    await act(async () => {
+      retryRequest = result.current.retryLateAnswer();
+      await waitFor(() => expect(onLateAnswer).toHaveBeenCalledTimes(2));
+    });
+    rerender({ msgs: bundleB });
+    mockMessagesBySession = { [bundleA[0].session_id]: bundleA };
+    rerender({ msgs: bundleA });
+
+    await act(async () => {
+      retry.resolve("sent");
+      await retryRequest;
+    });
+
+    expect(result.current.lateAnswerState).toBe("idle");
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+    expect(onOutcome).not.toHaveBeenCalled();
   });
 
   it("expires unchanged siblings while preserving a newer restored row", async () => {

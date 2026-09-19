@@ -198,3 +198,24 @@ Validation passed:
   the lifecycle requirement heading.
 - Targeted ESLint reported no errors or warnings on changed frontend and E2E
   files.
+
+## Review remediation
+
+The code-review follow-up hardens late admission across the same source task,
+session, and clarification bundle. Retry completion now captures and checks the
+pending ID, request generation, and submitted bundle before every post-await
+state update, cache reconciliation, and outcome callback. A delayed retry from
+an older bundle cannot replace the state of a newer bundle or a returned
+generation.
+
+Late-message status, draft answers, and client admission identity now live in a
+module-owned external record shared by active, transcript, and Inbox hosts.
+When the source session or message cache is absent, the adapter hydrates them
+through the existing session APIs before ordinary send, steer, or queue
+admission derives its input mode. The regression coverage includes delayed
+failure across unmount/remount, active-to-transcript state sharing, missing
+Inbox caches, and A→B and A→B→A delayed retry races.
+
+This review was code-only by instruction. No local builds, typechecks, unit
+tests, browser tests, or E2E tests were run for the remediation. The normal
+commit hooks and `git diff --check` remain the applicable local checks.

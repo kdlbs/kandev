@@ -247,6 +247,19 @@ The review regressions also failed before the correction: the delayed restored
 bundle became `expired`, the A→B→A path wrote an expired row, and the expired
 overlay still claimed Escape. Each now passes.
 
+The later PR review found three follow-up defects in retry ownership, mounted
+late-message state, and Inbox source-session hydration. The remediation adds
+post-await pending ID, generation, and bundle guards; a shared source-keyed
+admission owner; and conditional session/message hydration before ordinary
+admission. New deterministic coverage records delayed retry rejection and
+success across bundle replacement, unmount/remount draft recovery, active to
+transcript sharing, and an Inbox send with empty source caches.
+
+The review was explicitly code-only. No local build, typecheck, unit, browser,
+or E2E command was run for that remediation. The normal commit hooks and
+`git diff --check` are recorded separately from the prior implementation
+validation below.
+
 - Task 02 focused Vitest: 8 files, 142 tests passed.
 - Targeted ESLint: no errors or warnings on changed frontend and E2E files.
 - Targeted Prettier, TypeScript typecheck, `make build-web`, `make build-backend`, and

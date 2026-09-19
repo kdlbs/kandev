@@ -247,6 +247,8 @@ function ClarificationRequestMessageAdapter({
       messages={bundle}
       onLateAnswer={lateAnswer.send}
       lateAnswerSnapshot={lateAnswer.state.snapshot}
+      lateAnswerState={lateAnswer.state}
+      onResetLateAnswer={lateAnswer.reset}
       isCurrentTurn={isCurrentTurn}
     />
   );

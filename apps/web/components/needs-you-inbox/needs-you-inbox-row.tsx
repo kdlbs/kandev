@@ -42,7 +42,10 @@ import {
 } from "@/lib/needs-you-inbox/row-presentation";
 import { resolveThreadSessionStatus } from "@/lib/threads/thread-session-status";
 import type { TaskSessionState } from "@/lib/types/http";
-import type { LateClarificationSnapshot } from "@/hooks/use-late-clarification-message";
+import type {
+  LateClarificationSnapshot,
+  LateClarificationState,
+} from "@/hooks/use-late-clarification-message";
 import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
 
 const SNOOZE_DURATIONS: ClarificationInboxSnoozeDuration[] = ["1h", "4h", "24h"];
@@ -172,9 +175,11 @@ function taskHrefForBundle(bundle: ClarificationInboxBundle): string {
 export function NeedsYouInboxRow({
   bundle,
   onLateAnswer,
+  lateAnswerState,
 }: {
   bundle: ClarificationInboxBundle;
   onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
+  lateAnswerState?: LateClarificationState;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -273,6 +278,7 @@ export function NeedsYouInboxRow({
           onResolved={() => {}}
           onOutcome={handleOutcome}
           onLateAnswer={onLateAnswer}
+          lateAnswerState={lateAnswerState}
           shortcutScopeRef={rowRef}
           maxHeightVh={50}
         />

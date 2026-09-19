@@ -126,6 +126,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         agentDisconnected={panelState.session?.pending_action === null}
         onResolved={handleClarificationResolved}
         onLateAnswer={lateAnswer.send}
+        lateAnswerState={lateAnswer.state}
         shortcutScopeRef={shortcutScopeRef}
         maxHeightVh={35}
       />

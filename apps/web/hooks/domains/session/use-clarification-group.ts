@@ -800,6 +800,8 @@ export function useClarificationGroup(
   const activePendingIdRef = useRef<string | null>(pendingId);
   activePendingIdRef.current = pendingId;
   const bundleStateKey = useMemo(() => clarificationBundleStateKey(messages), [messages]);
+  const activeBundleStateKeyRef = useRef(bundleStateKey);
+  activeBundleStateKeyRef.current = bundleStateKey;
 
   const getLatestMessage = useCallback(
     (sessionId: string, messageId: string) => {
@@ -837,28 +839,40 @@ export function useClarificationGroup(
     if (!snapshot || !onLateAnswer || !pendingId) return;
     const currentAnswers = Object.values(answersRef.current);
     const nextSnapshot = { ...snapshot, answers: currentAnswers };
+    const requestPendingId = pendingId;
+    const requestGeneration = requestGenerationRef.current;
+    const requestBundle = submitBundleRef.current.slice();
+    const requestBundleStateKey = bundleStateKey;
     lateAnswerSnapshotRef.current = nextSnapshot;
     setLateAnswerState("sending");
+    const ownsRetry = () =>
+      activePendingIdRef.current === requestPendingId &&
+      requestGenerationRef.current === requestGeneration &&
+      activeBundleStateKeyRef.current === requestBundleStateKey &&
+      lateAnswerSnapshotRef.current === nextSnapshot;
     try {
       const delivery = await onLateAnswer(nextSnapshot);
-      if (activePendingIdRef.current !== pendingId) return;
+      if (!ownsRetry()) return;
       setLateAnswerState(delivery);
+      if (!ownsRetry()) return;
       safeApplyExpiredStatus({
-        bundle: submitBundleRef.current,
-        pendingId,
-        requestGeneration: requestGenerationRef.current,
+        bundle: requestBundle,
+        pendingId: requestPendingId,
+        requestGeneration,
         activePendingIdRef,
         requestGenerationRef,
         getLatestMessage,
         update: storeApi.getState().updateMessage,
       });
+      if (!ownsRetry()) return;
       onOutcome?.({ kind: "late_message_admitted", delivery });
     } catch {
-      setLateAnswerState("error");
+      if (ownsRetry()) setLateAnswerState("error");
     }
   }, [
     activePendingIdRef,
     answersRef,
+    bundleStateKey,
     getLatestMessage,
     onLateAnswer,
     onOutcome,

@@ -10,7 +10,10 @@ import { ResizeHandle } from "./resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import type { ClarificationOutcome } from "@/hooks/domains/session/use-clarification-group";
-import type { LateClarificationSnapshot } from "@/hooks/use-late-clarification-message";
+import type {
+  LateClarificationSnapshot,
+  LateClarificationState,
+} from "@/hooks/use-late-clarification-message";
 import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
 
 type ClarificationPanelSectionProps = {
@@ -30,10 +33,11 @@ type ClarificationPanelSectionProps = {
    * its own visible ceiling.
    */
   maxHeightVh: number;
-  // Additive: forwarded straight through to ClarificationInputOverlay.
-  // Existing hosts (task chat, Quick Chat) leave this unset.
+  // Shared late-message state keeps the recovery surface available when a
+  // host unmounts and the transcript mounts a new form for the same bundle.
   onOutcome?: (outcome: ClarificationOutcome) => void;
   onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
+  lateAnswerState?: LateClarificationState;
 };
 function pendingIdFromMessages(messages: readonly Message[] | null | undefined): string | null {
   const first = messages?.[0];
@@ -72,6 +76,7 @@ export function ClarificationPanelSection({
   maxHeightVh,
   onOutcome,
   onLateAnswer,
+  lateAnswerState,
 }: ClarificationPanelSectionProps) {
   const { t } = useTranslation();
   const disclosure = useComposerDisclosureContext();
@@ -113,6 +118,7 @@ export function ClarificationPanelSection({
       onCollapse={() => setCollapsed(true)}
       onOutcome={onOutcome}
       onLateAnswer={onLateAnswer}
+      lateAnswerState={lateAnswerState}
       onResolved={onResolved}
       onToggleCollapse={() => setCollapsed((current) => !current)}
       questionCount={questionCount}
@@ -135,6 +141,7 @@ type ClarificationPanelContentProps = {
   onCollapse: () => void;
   onOutcome?: (outcome: ClarificationOutcome) => void;
   onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
+  lateAnswerState?: LateClarificationState;
   onResolved: () => void;
   onToggleCollapse: () => void;
   questionCount: number;
@@ -155,6 +162,7 @@ function ClarificationPanelContent({
   onCollapse,
   onOutcome,
   onLateAnswer,
+  lateAnswerState,
   onResolved,
   onToggleCollapse,
   questionCount,
@@ -228,6 +236,7 @@ function ClarificationPanelContent({
             onResolved={onResolved}
             onOutcome={onOutcome}
             onLateAnswer={onLateAnswer}
+            lateAnswerState={lateAnswerState}
             shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
             agentDisconnected={agentDisconnected}

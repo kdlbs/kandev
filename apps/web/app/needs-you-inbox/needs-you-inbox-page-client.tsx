@@ -105,7 +105,13 @@ function NeedsYouInboxList({
 
 function NeedsYouInboxRowWithLateAnswer({ bundle }: { bundle: ClarificationInboxBundle }) {
   const lateAnswer = useLateClarificationMessage(bundle.messages[0]);
-  return <NeedsYouInboxRow bundle={bundle} onLateAnswer={lateAnswer.send} />;
+  return (
+    <NeedsYouInboxRow
+      bundle={bundle}
+      onLateAnswer={lateAnswer.send}
+      lateAnswerState={lateAnswer.state}
+    />
+  );
 }
 
 // "Needs you" is the tab strip's default-selected tab, and this content,
