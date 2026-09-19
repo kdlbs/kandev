@@ -1,11 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"go.uber.org/zap"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,10 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository"
+	"go.uber.org/zap"
 )
 
 const (
@@ -263,6 +266,90 @@ func (s *AttachmentService) Open(ctx context.Context, ownerID, id string) (*mode
 		return nil, nil, fmt.Errorf("open attachment: %w", err)
 	}
 	return attachment, file, nil
+}
+
+// ValidatePreviewScreenshot verifies task-feedback screenshot bytes before the
+// repository changes their staged claim. Already claimed task-feedback bytes
+// are accepted so a lost create response can be retried idempotently.
+func (s *AttachmentService) ValidatePreviewScreenshot(
+	ctx context.Context,
+	ownerID, workspaceID, taskID, id string,
+) error {
+	attachment, file, err := s.Open(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	if err := validatePreviewScreenshotMetadata(attachment, ownerID, workspaceID, taskID); err != nil {
+		return err
+	}
+	return validatePreviewScreenshotFile(file, attachment.SizeBytes)
+}
+
+func validatePreviewScreenshotMetadata(
+	attachment *models.TaskMessageAttachment,
+	ownerID, workspaceID, taskID string,
+) error {
+	if !validPreviewScreenshotClaim(attachment, ownerID, workspaceID, taskID) {
+		return ErrAttachmentClaimConflict
+	}
+	if attachment.MimeType != "image/png" || attachment.Kind != "image" ||
+		attachment.DeliveryMode != attachmentDeliveryModePrompt {
+		return fmt.Errorf("%w: screenshot attachment metadata", previewfeedback.ErrCaptureInvalid)
+	}
+	if attachment.SizeBytes <= 0 || attachment.SizeBytes > previewfeedback.MaxScreenshotBytes {
+		return previewfeedback.ErrCaptureTooLarge
+	}
+	return nil
+}
+
+func validatePreviewScreenshotFile(file *os.File, expectedSize int64) error {
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect preview screenshot: %w", err)
+	}
+	if stat.Size() != expectedSize || stat.Size() > previewfeedback.MaxScreenshotBytes {
+		return fmt.Errorf("%w: screenshot byte count", previewfeedback.ErrCaptureInvalid)
+	}
+
+	var signature [8]byte
+	if _, err := io.ReadFull(file, signature[:]); err != nil ||
+		!bytes.Equal(signature[:], []byte("\x89PNG\r\n\x1a\n")) {
+		return fmt.Errorf("%w: invalid PNG signature", previewfeedback.ErrCaptureInvalid)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek preview screenshot: %w", err)
+	}
+	config, err := png.DecodeConfig(io.LimitReader(file, previewfeedback.MaxScreenshotBytes+1))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return fmt.Errorf("%w: invalid PNG metadata", previewfeedback.ErrCaptureInvalid)
+	}
+	if uint64(config.Width)*uint64(config.Height) > uint64(previewfeedback.MaxScreenshotPixels) {
+		return previewfeedback.ErrCaptureTooLarge
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek preview screenshot for decode: %w", err)
+	}
+	if _, err := png.Decode(io.LimitReader(file, previewfeedback.MaxScreenshotBytes+1)); err != nil {
+		return fmt.Errorf("%w: invalid PNG data", previewfeedback.ErrCaptureInvalid)
+	}
+	return nil
+}
+
+func validPreviewScreenshotClaim(
+	attachment *models.TaskMessageAttachment,
+	ownerID, workspaceID, taskID string,
+) bool {
+	if attachment == nil || attachment.OwnerID != ownerID || attachment.WorkspaceID != workspaceID {
+		return false
+	}
+	if attachment.State == models.AttachmentStateStaged {
+		return attachment.TaskID == "" && attachment.SessionID == "" &&
+			attachment.MessageID == "" && attachment.QueueID == ""
+	}
+	return attachment.State == models.AttachmentStateClaimed && attachment.TaskID == taskID &&
+		attachment.SessionID == "" && attachment.MessageID == "" && attachment.QueueID == ""
 }
 
 // OpenClaimed opens a descriptor for the internal lifecycle delivery path.

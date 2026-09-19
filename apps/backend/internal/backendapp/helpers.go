@@ -742,6 +742,10 @@ func registerRoutes(p routeParams) {
 	}
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
+	if attachments := p.taskSvc.AttachmentService(); attachments != nil {
+		planService.SetPreviewAttachmentCleaner(attachments)
+		planService.SetPreviewScreenshotValidator(attachments)
+	}
 	// Stamps each plan revision with the task's workflow step at write time.
 	planService.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: p.services.Workflow})
 	clarificationStore := clarification.NewStore(2 * time.Hour)

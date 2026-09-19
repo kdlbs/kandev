@@ -461,6 +461,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
       "task.plan.comments.changed",
       TaskPlanCommentEventPayload
     >;
+    "task.preview_feedback.changed": BackendMessage<
+      "task.preview_feedback.changed",
+      import("@/lib/types/http").TaskPreviewFeedbackSnapshot
+    >;
     "task.plan.revision.created": BackendMessage<
       "task.plan.revision.created",
       TaskPlanRevisionEventPayload

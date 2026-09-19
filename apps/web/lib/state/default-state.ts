@@ -19,6 +19,7 @@ import {
   defaultReviewState,
   defaultNeedsYouInboxState,
   defaultFailedInboxState,
+  defaultPreviewFeedbackState,
   defaultInboxHistoryState,
 } from "./slices";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
@@ -85,6 +86,7 @@ export const defaultState = {
   taskReview: defaultReviewState.taskReview,
   needsYouInbox: defaultNeedsYouInboxState.needsYouInbox,
   failedInbox: defaultFailedInboxState.failedInbox,
+  previewFeedback: defaultPreviewFeedbackState.previewFeedback,
   inboxHistory: defaultInboxHistoryState.inboxHistory,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,

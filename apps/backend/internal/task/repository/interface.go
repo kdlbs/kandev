@@ -19,6 +19,7 @@ var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
+var ErrTaskPreviewFeedbackChanged = repoerrors.ErrTaskPreviewFeedbackChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
@@ -365,6 +366,15 @@ type AttachmentRepository interface {
 	TransferMessageAttachments(ctx context.Context, taskID, oldSessionID, newSessionID string, attachmentIDs []string) error
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
+// PreviewFeedbackRepository stores one revisioned pending collection per task.
+type PreviewFeedbackRepository interface {
+	ListTaskPreviewFeedback(ctx context.Context, taskID string) (*models.TaskPreviewFeedbackSnapshot, error)
+	CreateTaskPreviewFeedback(ctx context.Context, item *models.TaskPreviewFeedback, ownerID, workspaceID string) (*models.TaskPreviewFeedbackSnapshot, error)
+	UpdateTaskPreviewFeedback(ctx context.Context, taskID, itemID, comment string, expectedVersion int64) (*models.TaskPreviewFeedbackSnapshot, error)
+	DeleteTaskPreviewFeedback(ctx context.Context, taskID, itemID string, expectedVersion int64) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
+	ClearTaskPreviewFeedback(ctx context.Context, taskID string, expectedRevision int64) (*models.TaskPreviewFeedbackSnapshot, []*models.TaskMessageAttachment, error)
 }
 
 // QueueAttachmentAdmissionRepository scopes provisional attachment claims to

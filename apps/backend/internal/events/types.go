@@ -116,12 +116,13 @@ const TaskStatusSummaryUpdated = "task.status_summary.updated"
 
 // Event types for task plans
 const (
-	TaskPlanCreated         = "task_plan.created"
-	TaskPlanUpdated         = "task_plan.updated"
-	TaskPlanDeleted         = "task_plan.deleted"
-	TaskPlanRevisionCreated = "task_plan.revision.created"
-	TaskPlanReverted        = "task_plan.reverted"
-	TaskPlanCommentsChanged = "task_plan.comments.changed"
+	TaskPlanCreated            = "task_plan.created"
+	TaskPlanUpdated            = "task_plan.updated"
+	TaskPlanDeleted            = "task_plan.deleted"
+	TaskPlanRevisionCreated    = "task_plan.revision.created"
+	TaskPlanReverted           = "task_plan.reverted"
+	TaskPlanCommentsChanged    = "task_plan.comments.changed"
+	TaskPreviewFeedbackChanged = "task.preview_feedback.changed"
 )
 
 // Event types for task walkthroughs (agent-authored guided code tours)

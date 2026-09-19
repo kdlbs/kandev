@@ -871,7 +871,13 @@ func claimMessageAttachmentTx(
 			ctx, tx, claim, taskID, sessionID, attachmentID, attachment, now,
 		)
 	case models.AttachmentStateClaimed:
-		return 0, validateClaimedMessageAttachment(attachment, taskID, sessionID)
+		if err := validateClaimedMessageAttachment(attachment, taskID, sessionID); err != nil {
+			return 0, err
+		}
+		if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+			return 0, models.ErrAttachmentTooLarge
+		}
+		return attachment.SizeBytes, nil
 	default:
 		return 0, models.ErrAttachmentClaimConflict
 	}
