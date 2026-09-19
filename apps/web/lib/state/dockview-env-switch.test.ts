@@ -297,7 +297,6 @@ describe("performEnvSwitch fast-path group survival", () => {
     );
     expect(order).toEqual(["add", "close"]);
   });
-
 });
 
 describe("performEnvSwitch fast-path sibling restoration", () => {
@@ -371,7 +370,6 @@ describe("performEnvSwitch fast-path sibling restoration", () => {
     );
     expect(closeStale).toHaveBeenCalledOnce();
   });
-
 });
 
 describe("performEnvSwitch fast-path hidden sibling restoration", () => {
@@ -382,12 +380,22 @@ describe("performEnvSwitch fast-path hidden sibling restoration", () => {
   it("does not restore a hidden sibling on the fast path", () => {
     vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
     vi.mocked(getEnvHiddenSessions).mockReturnValueOnce([SIBLING_SESSION_ID]);
-    type Panel = { id: string; api: { component: string; close: () => void }; group: { id: string; panels: Panel[] } };
+    type Panel = {
+      id: string;
+      api: { component: string; close: () => void };
+      group: { id: string; panels: Panel[] };
+    };
     const group = { id: CENTER_GROUP_ID, panels: [] as Panel[] };
     const panels: Panel[] = [];
     const remove = (id: string) => {
-      panels.splice(panels.findIndex((panel) => panel.id === id), 1);
-      group.panels.splice(group.panels.findIndex((panel) => panel.id === id), 1);
+      panels.splice(
+        panels.findIndex((panel) => panel.id === id),
+        1,
+      );
+      group.panels.splice(
+        group.panels.findIndex((panel) => panel.id === id),
+        1,
+      );
     };
     const stale: Panel = {
       id: OLD_SESSION_PANEL_ID,
@@ -397,7 +405,11 @@ describe("performEnvSwitch fast-path hidden sibling restoration", () => {
     panels.push(stale);
     group.panels.push(stale);
     const addPanel = vi.fn((options: { id: string; component: string }) => {
-      const panel: Panel = { id: options.id, api: { component: options.component, close: () => remove(options.id) }, group };
+      const panel: Panel = {
+        id: options.id,
+        api: { component: options.component, close: () => remove(options.id) },
+        group,
+      };
       panels.push(panel);
       group.panels.push(panel);
     });
