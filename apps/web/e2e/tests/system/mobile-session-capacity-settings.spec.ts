@@ -104,6 +104,20 @@ test("saves the agent-tab close preference with a touch-safe selector", async ({
   apiClient,
 }) => {
   const baselineBehavior = (await apiClient.getUserSettings()).settings.agent_tab_close_behavior;
+  const savedBehavior = baselineBehavior === "hide_panel" ? "hide_panel" : "delete_session";
+  const draftBehavior = savedBehavior === "hide_panel" ? "delete_session" : "hide_panel";
+  const behaviorLabel = (behavior: "delete_session" | "hide_panel") =>
+    behavior === "hide_panel" ? "Hide panel" : "Delete session";
+  let preferencePatchCount = 0;
+  const countPreferencePatches = (request: { method: () => string; url: () => string }) => {
+    if (
+      request.method() === "PATCH" &&
+      new URL(request.url()).pathname === "/api/v1/user/settings"
+    ) {
+      preferencePatchCount += 1;
+    }
+  };
+  testPage.on("request", countPreferencePatches);
   await testPage.setViewportSize({ width: 390, height: 844 });
 
   try {
@@ -127,7 +141,16 @@ test("saves the agent-tab close preference with a touch-safe selector", async ({
     expect(selectorBox!.height).toBeGreaterThanOrEqual(44);
 
     await selector.tap();
-    await testPage.getByRole("option", { name: "Hide panel" }).tap();
+    await testPage.getByRole("option", { name: behaviorLabel(draftBehavior) }).tap();
+    const saveBar = testPage.getByTestId("settings-floating-save");
+    await expect(saveBar).toBeVisible();
+    await saveBar.getByRole("button", { name: "Reset" }).tap();
+    await expect(selector).toHaveText(behaviorLabel(savedBehavior));
+    await expect(saveBar).not.toBeVisible();
+    expect(preferencePatchCount).toBe(0);
+
+    await selector.tap();
+    await testPage.getByRole("option", { name: behaviorLabel(draftBehavior) }).tap();
     await testPage
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Save changes" })
@@ -135,8 +158,12 @@ test("saves the agent-tab close preference with a touch-safe selector", async ({
     await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
 
     await testPage.reload();
-    await expect(card.getByRole("combobox")).toHaveText("Hide panel");
+    await expect(card.getByRole("combobox")).toHaveText(behaviorLabel(draftBehavior));
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
   } finally {
+    testPage.off("request", countPreferencePatches);
     await apiClient.saveUserSettings({ agent_tab_close_behavior: baselineBehavior });
   }
 });

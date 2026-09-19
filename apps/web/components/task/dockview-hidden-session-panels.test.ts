@@ -5,6 +5,7 @@ import {
   clearHiddenSessionPanel,
   hiddenSessionIdsFor,
   hideSessionPanel,
+  pruneHiddenSessionIds,
 } from "./dockview-hidden-session-panels";
 
 function makeApi(panelIds: string[] = []): {
@@ -60,5 +61,53 @@ describe("hidden session panels", () => {
     clearHiddenSessionPanel(api, "session-a");
 
     expect(hiddenSessionIdsFor(api)).toEqual(new Set());
+  });
+
+  // @covers AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.8
+  it("prunes a hidden session after its owner has an authoritative session list", () => {
+    const { api } = makeApi();
+    useDockviewStore.setState({ currentLayoutEnvId: "env-a" });
+    hideSessionPanel(api, "session-stale", "task-owner");
+
+    pruneHiddenSessionIds(api, () => ({
+      taskSessionsByTask: {
+        itemsByTaskId: { "task-owner": [] },
+        loadedByTaskId: { "task-owner": true },
+      },
+    }));
+
+    expect(hiddenSessionIdsFor(api)).toEqual(new Set());
+  });
+
+  // @covers AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.8
+  it("preserves a hidden session until its owner has an authoritative session list", () => {
+    const { api } = makeApi();
+    useDockviewStore.setState({ currentLayoutEnvId: "env-a" });
+    hideSessionPanel(api, "session-pending", "task-owner");
+
+    pruneHiddenSessionIds(api, () => ({
+      taskSessionsByTask: {
+        itemsByTaskId: { "task-owner": [] },
+        loadedByTaskId: { "task-owner": false },
+      },
+    }));
+
+    expect(hiddenSessionIdsFor(api)).toEqual(new Set(["session-pending"]));
+  });
+
+  // @covers AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.8
+  it("does not prune a hidden session from a foreign task's authoritative load", () => {
+    const { api } = makeApi();
+    useDockviewStore.setState({ currentLayoutEnvId: "env-a" });
+    hideSessionPanel(api, "session-owned", "task-owner");
+
+    pruneHiddenSessionIds(api, () => ({
+      taskSessionsByTask: {
+        itemsByTaskId: { "task-foreign": [] },
+        loadedByTaskId: { "task-foreign": true },
+      },
+    }));
+
+    expect(hiddenSessionIdsFor(api)).toEqual(new Set(["session-owned"]));
   });
 });
