@@ -38,6 +38,7 @@ signals, and task-scoped scheduling contracts.
 
 - [Initial task brief](requirements/initial-task-brief.md)
 
+- [Bounded Session History Storage](requirements/bounded-session-history.md)
 - [Task completion, conversation follow-ups, and workspace access](requirements/task-completion.md)
 
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
@@ -147,6 +148,7 @@ signals, and task-scoped scheduling contracts.
 
 ### System design
 
+- [Bounded Session History Storage](system-design/bounded-session-history.md)
 - [Initial task brief](system-design/initial-task-brief.md)
 
 - [Task completion, conversation follow-ups, and workspace access](system-design/task-completion.md)
