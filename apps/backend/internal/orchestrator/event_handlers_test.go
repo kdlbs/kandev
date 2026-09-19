@@ -409,15 +409,16 @@ type mockAgentManager struct {
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
 	// returned to simulate "no running agent".
-	setSessionModeCalls       []sessionModeCall
-	setSessionModeErr         error
-	mcpModeCalls              []sessionModeCall
-	setSessionModelCalls      []sessionModelCall
-	setSessionModelSupported  bool
-	setSessionModelErr        error
-	setSessionConfigCalls     []sessionConfigCall
-	setSessionConfigSupported bool
-	setSessionConfigErr       error
+	setSessionModeCalls               []sessionModeCall
+	setSessionModeErr                 error
+	mcpModeCalls                      []sessionModeCall
+	setSessionModelCalls              []sessionModelCall
+	setSessionModelSupported          bool
+	setSessionModelErr                error
+	setSessionConfigCalls             []sessionConfigCall
+	setSessionConfigSupported         bool
+	setSessionConfigErr               error
+	getPromptGenerationForSessionFunc func(context.Context, string) (uint64, error)
 }
 
 type sessionModelCall struct {
@@ -658,7 +659,10 @@ func (m *mockAgentManager) OwnsPromptActivity(
 		activityEpoch == m.currentPromptActivityEpoch.Load()
 }
 
-func (m *mockAgentManager) GetPromptGenerationForSession(_ context.Context, _ string) (uint64, error) {
+func (m *mockAgentManager) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
+	if m.getPromptGenerationForSessionFunc != nil {
+		return m.getPromptGenerationForSessionFunc(ctx, sessionID)
+	}
 	return m.currentPromptGeneration.Load(), nil
 }
 

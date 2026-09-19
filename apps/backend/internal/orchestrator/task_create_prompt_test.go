@@ -454,6 +454,69 @@ func TestInitialCreatePrompt_PassthroughEvidenceSurvivesPredecessorTerminalEvent
 		"the successor running event must still consume the initial admission evidence")
 }
 
+func TestInitialCreatePrompt_TerminalRetirementDoesNotReadPromptGeneration(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-create-retirement", "session-create-retirement", "step-backlog")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "session-create-retirement", models.TaskSessionStateWaitingForInput, "",
+	))
+	seedExecutorRunning(t, repo, "session-create-retirement", "task-create-retirement", "execution-create-retirement")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-backlog"] = &wfmodels.WorkflowStep{
+		ID: "step-backlog", WorkflowID: "wf1", Name: "Backlog",
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-create-retirement", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{
+		currentPromptExecutionID: "execution-create-retirement",
+		repoForExecutionLookup:   repo,
+	}
+	agentMgr.currentPromptGeneration.Store(1)
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	session, err := repo.GetTaskSession(ctx, "session-create-retirement")
+	require.NoError(t, err)
+	svc.activeTurns.Store(session.ID, "turn-create-retirement")
+	svc.armInitialCreatePromptPassthrough(ctx, session, "turn-create-retirement")
+
+	generationReadStarted := make(chan struct{})
+	releaseGenerationRead := make(chan struct{})
+	agentMgr.getPromptGenerationForSessionFunc = func(context.Context, string) (uint64, error) {
+		close(generationReadStarted)
+		<-releaseGenerationRead
+		return 1, nil
+	}
+	defer close(releaseGenerationRead)
+
+	retirementDone := make(chan struct{})
+	go func() {
+		svc.retireInitialCreatePromptPassthroughForEvent(ctx, watcher.AgentEventData{
+			TaskID:           "task-create-retirement",
+			SessionID:        session.ID,
+			AgentExecutionID: "execution-create-retirement",
+			PromptGeneration: 1,
+		})
+		close(retirementDone)
+	}()
+
+	select {
+	case <-retirementDone:
+	case <-time.After(time.Second):
+		select {
+		case <-generationReadStarted:
+			t.Fatal("terminal evidence retirement synchronously reread prompt generation")
+		default:
+			t.Fatal("terminal evidence retirement did not complete")
+		}
+	}
+	select {
+	case <-generationReadStarted:
+		t.Fatal("terminal evidence retirement must use the event identity")
+	default:
+	}
+}
+
 func TestInitialCreatePrompt_QueueReplayTransfersPassthroughEvidence(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

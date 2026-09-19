@@ -408,6 +408,26 @@ func initialCreatePromptGenerationMatches(expected, event, current uint64) bool 
 	return event != 0 || current == 0 || current == expected
 }
 
+func initialCreatePromptTerminalEventMatches(
+	evidence initialCreatePromptPassthroughEvidence,
+	data watcher.AgentEventData,
+	liveExecutionID, currentTurnID string,
+) bool {
+	if !initialCreatePromptExecutionMatches(evidence.ExecutionID, data.AgentExecutionID, liveExecutionID) {
+		return false
+	}
+	// Terminal lifecycle events are published while the lifecycle manager may
+	// still hold its prompt-generation lock. The event's generation is the
+	// authoritative identity when present; a zero-generation event still has
+	// the exact execution and current turn checks above, so do not synchronously
+	// query the manager and risk deadlocking the publisher.
+	if evidence.PromptGeneration != 0 && data.PromptGeneration != 0 &&
+		evidence.PromptGeneration != data.PromptGeneration {
+		return false
+	}
+	return evidence.TurnID == "" || currentTurnID == "" || evidence.TurnID == currentTurnID
+}
+
 func (s *Service) retireInitialCreatePromptPassthroughForEvent(
 	ctx context.Context,
 	data watcher.AgentEventData,
@@ -425,7 +445,6 @@ func (s *Service) retireInitialCreatePromptPassthroughForEvent(
 		liveExecutionID, _ = s.agentManager.GetExecutionIDForSession(ctx, data.SessionID)
 	}
 	currentTurnID := s.initialCreatePromptCurrentTurnID(ctx, data.SessionID)
-	currentGeneration := s.promptGenerationForSession(ctx, data.SessionID)
 
 	s.initialCreatePromptMu.Lock()
 	defer s.initialCreatePromptMu.Unlock()
@@ -436,11 +455,7 @@ func (s *Service) retireInitialCreatePromptPassthroughForEvent(
 	if !evidence.ExecutionBound {
 		return
 	}
-	if !initialCreatePromptExecutionMatches(evidence.ExecutionID, data.AgentExecutionID, liveExecutionID) ||
-		!initialCreatePromptGenerationMatches(evidence.PromptGeneration, data.PromptGeneration, currentGeneration) {
-		return
-	}
-	if evidence.TurnID != "" && currentTurnID != "" && evidence.TurnID != currentTurnID {
+	if !initialCreatePromptTerminalEventMatches(evidence, data, liveExecutionID, currentTurnID) {
 		return
 	}
 	delete(s.initialCreatePromptPassthrough, data.SessionID)
