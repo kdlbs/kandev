@@ -112,7 +112,7 @@ test.describe("compact desktop responsive layout", () => {
     await expect(kanban.viewTogglePipeline).toBeVisible();
 
     for (const step of seedData.steps) {
-      await expect(kanban.columnByStepId(step.id)).toBeAttached();
+      await expect(kanban.columnByStepId(step.id)).toBeAttached({ timeout: 15_000 });
     }
     const firstColumnBox = await kanban.columnByStepId(seedData.steps[0].id).boundingBox();
     expect(firstColumnBox).not.toBeNull();

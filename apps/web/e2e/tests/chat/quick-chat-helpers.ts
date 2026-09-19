@@ -153,6 +153,12 @@ export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
 export async function openQuickChatWithAgent(page: Page, navigateHome = true): Promise<Locator> {
   const dialog = await openQuickChatSetup(page, navigateHome);
   await startQuickChatFromSetup(dialog, page);
+  // The composer becomes usable before the session model catalog is hydrated.
+  // Wait for the model control as well so callers can immediately inspect or
+  // change the session configuration without racing that second readiness gate.
+  await expect(dialog.getByRole("button", { name: "Session model settings" })).toBeVisible({
+    timeout: 30_000,
+  });
   return dialog;
 }
 

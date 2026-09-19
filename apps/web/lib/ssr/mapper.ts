@@ -27,6 +27,31 @@ function resolveWorkspaceOrphaned(task: WorkflowSnapshot["tasks"][number]): bool
   return task.workspace_orphaned ?? false;
 }
 
+function snapshotWorkflowStep(step: WorkflowSnapshot["steps"][number]) {
+  return {
+    id: step.id,
+    title: step.name,
+    color: step.color ?? "bg-neutral-400",
+    position: step.position,
+    events: step.events,
+    allow_manual_move: step.allow_manual_move,
+    auto_advance_requires_signal: step.auto_advance_requires_signal,
+    prompt: step.prompt,
+    is_start_step: step.is_start_step,
+    show_in_command_panel: step.show_in_command_panel,
+    agent_profile_id: step.agent_profile_id,
+    session_target: step.session_target ?? null,
+    profile_session_start_policy: step.profile_session_start_policy,
+    profile_session_end_policy: step.profile_session_end_policy,
+    complete_task_on_enter: step.complete_task_on_enter,
+    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
+    wip_limit: step.wip_limit,
+    pull_from_step_id: step.pull_from_step_id ?? null,
+    stage_type: step.stage_type,
+    order_revision: step.order_revision,
+  };
+}
+
 function primaryExecutorFields(task: Task) {
   return {
     primaryExecutorId: task.primary_executor_id ?? undefined,
@@ -137,23 +162,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
     kanban: {
       workflowId: snapshot.workflow.id,
       isLoading: false,
-      steps: snapshot.steps.map((step) => ({
-        id: step.id,
-        title: step.name,
-        color: step.color ?? "bg-neutral-400",
-        position: step.position,
-        events: step.events,
-        allow_manual_move: step.allow_manual_move,
-        auto_advance_requires_signal: step.auto_advance_requires_signal,
-        prompt: step.prompt,
-        is_start_step: step.is_start_step,
-        show_in_command_panel: step.show_in_command_panel,
-        agent_profile_id: step.agent_profile_id,
-        wip_limit: step.wip_limit,
-        pull_from_step_id: step.pull_from_step_id ?? null,
-        stage_type: step.stage_type,
-        order_revision: step.order_revision,
-      })),
+      steps: snapshot.steps.map(snapshotWorkflowStep),
       tasks,
     },
   };

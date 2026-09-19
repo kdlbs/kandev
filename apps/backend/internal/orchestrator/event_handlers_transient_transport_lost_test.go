@@ -12,6 +12,8 @@ import (
 // production: the upstream provider connection drops mid-turn on prompt-send.
 const realPeerDisconnected = `{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`
 
+const cursorRetriableConnectionStalled = "Error: RetriableError: Connection stalled"
+
 func TestHandleTransientFailure_TransportLostSchedulesRetry(t *testing.T) {
 	svc, mc := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
@@ -42,6 +44,34 @@ func TestHandleTransientFailure_TransportLostSchedulesRetry(t *testing.T) {
 	// Must NOT be the red recovery banner.
 	if msg.metadata["recovery_actions"] == true {
 		t.Errorf("transient retry must not set recovery_actions=true (that is the red banner)")
+	}
+}
+
+func TestHandleTransientFailure_CursorRetriableErrorReplaySchedulesRetry(t *testing.T) {
+	svc, mc := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	armTransientPromptEvidence(svc)
+
+	took := svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-1",
+		AgentID:          "cursor-acp",
+		PromptGeneration: 7,
+		ErrorMessage:     cursorRetriableConnectionStalled,
+	})
+	if !took {
+		t.Fatal("handleTransientFailure = false, want true for Cursor RetriableError")
+	}
+
+	if _, ok := svc.transientRetries.Load("s1"); !ok {
+		t.Fatal("expected a transient retry entry for Cursor RetriableError")
+	}
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected 1 status message, got %d", len(mc.sessionMessages))
+	}
+	if got := mc.sessionMessages[0].metadata["failure_code"]; got != "agent_transport_lost" {
+		t.Errorf("failure_code = %v, want agent_transport_lost", got)
 	}
 }
 

@@ -6,6 +6,9 @@ import type {
   TaskOrigin,
   TaskPriority,
   TaskState as TaskStatus,
+  WorkflowProfileSessionEndPolicy,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowSessionTarget,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { BeginTaskRemovalInput, TaskRemovalState } from "@/lib/state/task-removal";
@@ -53,6 +56,11 @@ export type KanbanState = {
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
     agent_profile_id?: string;
+    session_target?: WorkflowSessionTarget | null;
+    profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+    profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+    complete_task_on_enter?: boolean;
+    cancel_triggers_turn_complete?: boolean;
     /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */
     wip_limit?: number;
     /** Optional upstream step used by automation to pull more work. */
@@ -156,6 +164,8 @@ export type KanbanState = {
     primaryAgentName?: string | null;
     labels?: string[];
     isRemoteExecutor?: boolean;
+    /** Backend-owned discriminator for task hierarchy rules. Absent means non-Office. */
+    isFromOffice?: boolean;
     /** Human assignee (user id). Independent of any agent assignment. */
     assigneeUserId?: string;
     parentTaskId?: string | null;

@@ -217,6 +217,11 @@ describe("useNextWorkflowStep visibility", () => {
     const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
 
     expect(result.current.proceedStepName).toBe("Work");
+    expect(result.current.proceedPreviewTarget).toEqual({
+      taskId: TASK_ID,
+      workflowId: WORKFLOW_ID,
+      workflowStepId: "work-step",
+    });
   });
 
   it("suppresses the next step for an ungated turn-complete move", () => {

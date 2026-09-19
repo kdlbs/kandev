@@ -1,6 +1,6 @@
 "use client";
 
-import type { Message, TaskPendingAction } from "@/lib/types/http";
+import type { ClarificationRequestMetadata, Message, TaskPendingAction } from "@/lib/types/http";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 import { extractKandevStem } from "./messages/kandev/parse";
 
@@ -130,6 +130,17 @@ export function hasPendingClarification(
   pendingAction: TaskPendingAction | null | undefined,
 ): boolean {
   return hasPendingClarificationMessage || pendingAction === "clarification";
+}
+
+export function shouldShowCancelAgent(
+  isWorking: boolean,
+  pendingClarification: Message | null | undefined,
+  sessionId: string | null,
+): boolean {
+  if (!sessionId) return false;
+  if (!pendingClarification) return isWorking;
+  return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
+    ?.agent_disconnected;
 }
 
 export type ShellExecPayload = {

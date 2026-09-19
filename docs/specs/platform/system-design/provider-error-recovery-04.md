@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-09-11
-updated: 2026-09-11
+updated: 2026-09-17
 owners:
   - Kandev
 ---
@@ -13,10 +13,11 @@ owners:
 ## Purpose and boundaries
 
 Part 1 defines the dynamic-routing continuation package's data model
-(`## Data model`). This part carries one subsection relocated from Part 1
-verbatim, unchanged, when Part 1 reached its file-size limit: the two
-sanitization tiers `routingerr` applies to the continuation package's carrier
-text before persistence.
+(`## Data model`). This part carries one subsection relocated from Part 1 when
+Part 1 reached its file-size limit, and extended since: the sanitization
+tiers `routingerr` applies to the continuation package's carrier text before
+persistence, and to the primary launch prompt `ContinuationPrompt` renders
+ahead of that package at each downstream launch.
 
 It does not change classification rules, policy values, retry ownership, or
 candidate ordering.
@@ -66,6 +67,41 @@ from the plain-text matching this replaced. Neither tier is a general secret
 scanner: a credential shaped like something not on that list (a
 vendor-specific token prefix, for example) survives the narrow tier unless it
 also matches a listed pattern.
+
+The primary launch prompt (`ConductorLaunch.Prompt`, rendered by
+`ContinuationPrompt` ahead of the continuation package on every attempt,
+including attempt 0, not only fallbacks) is the composed first-turn prompt
+built by `orchestrator.Service` (`task_operations.go`): the user's own text
+plus server-injected context — the `<kandev-system>` block carrying the
+task/session IDs and the MCP tool list, and, for config-mode sessions,
+injected config context. `Message.ToAPI` strips the `<kandev-system>` block
+before it reaches the UI bubble, so this is not simply text already shown to
+the user unredacted. It carries the same kind of long identifiers as
+`TaskDescription`/`PlanSummary`/`RepositorySummary` above (a file path, a
+commit SHA, a PR URL, a task UUID) plus the task/session UUIDs the
+`<kandev-system>` block itself injects, so it receives the same narrow
+credential-only tier, via `routingerr.SanitizeCredentialsUnbounded` rather
+than `SanitizeCredentials` — unbounded, because unlike the continuation
+fields it is not subject to `continuationFieldLimit` and must not be
+silently truncated. This is required for correctness, not only fidelity: the
+diagnostic tier's 32-plus-character catch-all would mangle the injected
+task/session UUIDs and break the fallback provider's MCP tool calls, which
+address the task by that UUID. Diagnostic-tier redaction (`routingerr.Sanitize`)
+is reserved for provider output and `FailureReason`, never for this field.
+
+#### Deferred provider prompt budget
+
+This contract intentionally does not set a byte cap for `ConductorLaunch.Prompt`.
+The direct message API limits one message to `MaxRenderedPromptBytes`, but the
+orchestrator adds workflow, plan, repository, configuration, and
+`<kandev-system>` context. Other launch paths can also provide a prompt. A
+future change must define an explicit token or byte budget for the complete
+composed prompt and the behavior when that budget is exceeded, such as
+compaction or a user-visible rejection. The budget must come from provider
+capability metadata, not from a provider-name branch in the routing conductor.
+Until that contract exists, provider context-window errors remain the
+downstream safety boundary. An arbitrary cap here could silently remove
+instructions or identifiers and would reintroduce the defect this design fixes.
 
 The key match is a substring match, not exact-name, so it also matches a key
 merely containing a keyword without naming a credential (`max_tokens`,

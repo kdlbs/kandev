@@ -64,6 +64,9 @@ type Repository interface {
 	ListInflightRunsForWorkspace(ctx context.Context, workspaceID string) ([]models.InflightRun, error)
 	ListLiveOfficeTaskIDsForWorkspace(ctx context.Context, workspaceID string) ([]string, error)
 	ListLiveRoutineTaskIDsForWorkspace(ctx context.Context, workspaceID string) ([]string, error)
+	ListLiveRunSessionsForWorkspace(ctx context.Context, workspaceID string) ([]models.RunSession, error)
+	RequestRunSessionCancellation(ctx context.Context, sessionID string) (bool, error)
+	FinishRunSession(ctx context.Context, sessionID string, state models.RunSessionState, errorMessage string) (bool, error)
 	CancelRunsForWorkspace(ctx context.Context, runIDs []string, reason string) (int64, error)
 	ReleaseCheckoutsForWorkspace(ctx context.Context, runIDs []string) error
 }
@@ -73,6 +76,13 @@ type Repository interface {
 // in this codebase (office/dashboard, office/service); this is the third.
 type TaskCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID string, reason string, force bool) error
+}
+
+// RunExecutionStopper stops a run-owned shared-runtime execution by its
+// exact execution identity. It is optional in fixtures and older startup
+// compositions, but production pause wiring supplies it.
+type RunExecutionStopper interface {
+	Stop(ctx context.Context, executionID string, reason string) error
 }
 
 // WorkspaceChecker resolves a workspace by id, used only for the
@@ -89,6 +99,7 @@ type WorkspaceChecker interface {
 type Service struct {
 	repo       Repository
 	canceller  TaskCanceller
+	runStopper RunExecutionStopper
 	workspaces WorkspaceChecker
 	logger     *logger.Logger
 }
@@ -96,6 +107,12 @@ type Service struct {
 // NewService constructs the pause service.
 func NewService(repo Repository, canceller TaskCanceller, workspaces WorkspaceChecker, log *logger.Logger) *Service {
 	return &Service{repo: repo, canceller: canceller, workspaces: workspaces, logger: log}
+}
+
+// SetRunExecutionStopper wires the shared runtime stop seam used by the
+// workspace halt sweep for taskless Office sessions.
+func (s *Service) SetRunExecutionStopper(stopper RunExecutionStopper) {
+	s.runStopper = stopper
 }
 
 // PauseState is the exported gate predicate every launch site consults.

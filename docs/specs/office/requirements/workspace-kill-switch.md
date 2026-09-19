@@ -10,20 +10,11 @@ owners:
 
 ## Overview
 
-Office runs unattended. Nobody is in the turn. There is no way to stop it.
-
-Existing controls are granular and incomplete: `office_routines.status` and
-`office_routine_triggers.enabled` are per-routine and per-trigger, and
-`agent_profiles.status = 'paused'` is per-agent. Halting a workspace today means
-N + M + K untransacted writes while the scheduler keeps claiming runs between
-them, and none covers the event-driven path: a comment, an assignment, an
-approval resolution or a webhook still queues a run after every routine is paused.
-
-This capability gives an operator one write that stops one workspace, records who
-stopped it and why, and is released only by explicit human action.
-`KANDEV_FEATURES_OFFICE` is no substitute: a rollout gate, not an operational
-control. Ownership, rejected alternatives and adjacent-contract boundaries are in
-the design.
+Office needs one workspace-scoped stop that records who stopped it and why,
+and requires explicit human release. Per-routine, per-trigger and per-agent
+controls cannot atomically stop all launch paths. Pausing routines alone still
+allows event-driven wakes. `KANDEV_FEATURES_OFFICE` is a rollout gate, not an
+operational control. The design records ownership and rejected alternatives.
 
 ## Terminology
 
@@ -35,7 +26,7 @@ the design.
   routine run, creating an Office `runs` row, or claiming a queued run and
   starting an agent for it.
 - **In-flight work:** an Office `runs` row in status `queued` or `claimed`, plus
-  any agent execution running for an Office task in the workspace. The `runs`
+  any agent execution running for an Office task or taskless Office run in the workspace. The `runs`
   table has no `running` status; `claimed` is the executing state.
 - **Halt sweep:** the cancellation of in-flight work when a pause is created.
 - **Gate:** the read of pause state at a launch point.
@@ -297,6 +288,10 @@ problem and cannot mistake a paused one for an idle one.
   that state and display what the server returned, so that a client holding a
   stale or unavailable state can be corrected without reloading the page.
 
+- **AC-OFFICE-KILL-SWITCH-006.14:** Workspace refresh and pause/resume actions shall be reachable from the Office topbar on every workspace route. Desktop shall display them alongside page actions. Phone shall offer a visible workspace-actions control when space is limited. Paused, stale and unavailable state shall remain visible below the topbar; moving controls shall retain confirmation, reason capture and partial-failure retry behavior. Refresh shall continue to refresh pause state.
+
+See [topbar composition](../system-design/workspace-topbar-actions.md).
+
 ## Out of scope
 
 - **A drain mode that lets in-flight work finish.** REQ-OFFICE-KILL-SWITCH-003
@@ -340,14 +335,8 @@ problem and cannot mistake a paused one for an idle one.
 
 ## Prior art
 
-**Wiki (our own prior reasoning).** Searched: vault
-`/Users/henry/Documents/henry/wiki`, QMD collection `wiki`, for kill switches,
-emergency stop, pausing autonomous agent loops. **Did not run**: no `qmd` on
-PATH, no `mcp__qmd__query`, every vault read returns `EPERM`. A tool
-failure, not an empty result.
-
-**saas-kb (what other products shipped).** Searched: `search_fsm_docs`,
-`category: "ai_sdlc"`. **Did not run**: no `saas-kb` MCP server.
+External prior-art sources were unavailable during the original design;
+the repository is the verified source below.
 
 **This repository**, the only leg with evidence. `office_task_tree_holds` is this
 shape one scope down: an authoritative hold record with release provenance, read

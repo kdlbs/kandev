@@ -54,6 +54,24 @@ describe("toSheetItem repository projection", () => {
 
     expect(item.priority).toBe("critical");
   });
+
+  it("marks active rows covered by a pending archive", () => {
+    const item = toSheetItem(task(), {
+      ...emptyCtx(),
+      pendingArchiveTaskIds: new Set(["t1"]),
+    });
+
+    expect(item.isPendingArchive).toBe(true);
+  });
+
+  it("does not mark confirmed archived rows as pending", () => {
+    const item = toSheetItem(task({ isArchived: true }), {
+      ...emptyCtx(),
+      pendingArchiveTaskIds: new Set(["t1"]),
+    });
+
+    expect(item.isPendingArchive).toBe(false);
+  });
 });
 
 describe("toSheetItem remote executor projection", () => {
@@ -73,5 +91,14 @@ describe("toSheetItem remote executor projection", () => {
     expect(item.remoteExecutorType).toBe("k8s");
     expect(item.remoteExecutorName).toBe("Cluster executor");
     expect(item.primarySessionId).toBe("session-1");
+  });
+});
+
+describe("toSheetItem Office identity projection", () => {
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("carries Office identity into the phone task drawer row", () => {
+    const item = toSheetItem(task({ isFromOffice: true }), emptyCtx());
+
+    expect(item.isFromOffice).toBe(true);
   });
 });

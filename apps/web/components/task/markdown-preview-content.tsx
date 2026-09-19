@@ -405,6 +405,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
     sessionId,
     taskId,
     repositoryId,
+    repositoryName,
     enabled: commentsEnabled,
     rootRef,
   });

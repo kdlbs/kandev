@@ -48,15 +48,55 @@ Workflow position and runtime state are different. Moving a card changes its wor
 
 During a move and while the destination agent is preparing or starting, the destination marker shows a spinner in the existing marker space. Open the existing step disclosure to see the lifecycle status and agent profile. On touch devices, these details appear in the existing **Move to** Drawer. A destination without auto-start settles after the move and remains available for a later agent start.
 
+Before an allowed move, the step disclosure can show a compact preview of the
+recipient and effective model. It identifies whether the move reuses the
+current session, reuses another named session, creates a new session, or leaves
+the task idle without a recipient when the destination has no launch turn. The
+second line shows the current model or an expected model change and counts
+additional settings changes. Use the info button for the session, profile, model,
+context reset, source-session disposition, and prompt dispatch information.
+In the condensed topbar workflow, each eligible step has a **Move here** button
+beside its name. A single line below summarizes the session and model. Expand
+the row's chevron for full transition details and one-time move options. Moving
+does not require expanding the row. The current step has a highlighted background.
+On touch devices, the same controls appear in the bottom drawer.
+The full stepper and the next-step button above chat retain the centered preview
+footer in their options popover or touch drawer.
+Changing the options refreshes that preview.
+The preview is advisory. **Move here** checks routing, permissions, WIP, and
+current session state again when the move runs. A preview can therefore change
+while a turn is running or while another session becomes available.
+
 ## Move a task with one-time entry options
 
 The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
+
+For a keyboard move, open the task and press `Cmd/Ctrl+K`, search for **Move to**, and
+press Enter. Choose the destination step, type any instructions, and press
+`Cmd/Ctrl+Enter` to move. In a step destination list, press `Cmd/Ctrl+Enter`
+to move immediately with defaults, or `Enter` to open options. This also works
+when choosing a step in another workflow. The same submit shortcut works in the existing move-options
+forms. Plain Enter in Instructions inserts a newline. Failed moves retain your
+instructions so you can correct and retry them.
 
 Available options are **Reset context**, **Instructions**, and **Skip step prompt**. The normalized one-time `entry_options` object carries `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. By default, instructions are appended after the destination step prompt. Skip step prompt suppresses the destination step's configured prompt (and its task-description fallback) for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. Reset context is additive, so it cannot disable a reset already required by the destination step. On touch devices the same controls open in a bottom Drawer.
 
 Moves keep the existing reachability, authorization, WIP, archive, workspace, and active-session rules. Reset runs when either the destination or override requests it, and instructions are appended once. An entry override that carries instructions requires an active target session or a destination step that auto-starts an agent. Pull-request draft versus ready-for-review behavior is not part of these move options; configure that in the PR step's normal automation.
 
 When the source agent is running, the move is deferred until its turn ends. The complete normalized options survive WIP admission, promotion, and backend restart, then apply once at destination entry. A plain move remains valid without a target session or auto-start, but agent-facing options are rejected when there is no recipient.
+
+## Task actions from the command palette
+
+While a task is open, `Cmd/Ctrl+K` offers the task actions available from its sidebar
+menu, including Pin/Unpin, Color, Priority, Edit, Rename, Create subtask, Nest under,
+Link, Move to, Send to workflow, Archive, and Delete. Detach and plugin actions
+appear when applicable. These commands target the open task, even when the search
+also shows other tasks. Duplicate remains disabled.
+
+Use arrow keys and Enter to choose an action or nested option. Back or Escape
+returns to the previous choices. Archive and Delete retain their confirmations.
+On phones, task overflow retains touch access; an attached keyboard can open the
+palette, whose choices also support touch.
 
 ## Prepare a workspace
 
@@ -584,6 +624,39 @@ destination queue. If the configured
 feeder is also full, creation returns a conflict. Ephemeral tasks are not
 counted.
 
+A queued task detail shows a **Workflow WIP limit** banner. It names the
+destination workflow and step, reports task counts, and links to that
+workflow's WIP settings when the destination identity is available. The
+banner can appear before the task has a session. A feeder's name or limit is
+never shown as the destination.
+
+A task can also show **Queued** after workflow entry selects a session but the
+global session capacity blocks automatic launch. This is a separate queue:
+WIP queueing waits before destination entry, while global capacity queueing
+keeps the selected session and retries it automatically. The task detail and
+task navigator identify this cause as **Global session limit**, state that it
+applies to all workspaces, and link to Settings > Task Behavior > Session
+capacity. They show the destination, the latest capacity observation, queue
+time, and retry state. They do not show a queue position or estimated start
+time. Capacity counts older than 40 seconds, or counts unavailable because the
+client is disconnected, are labelled stale while the destination remains
+visible. Opening a task or a parked predecessor does not start it. Use the
+explicit **Start** or **Resume** action, or send a message, to override the
+automatic ceiling for that conversation.
+
+The instance session capacity is disabled by default. An administrator can
+enable it in Settings > Task Behavior > Session capacity, enter a positive
+maximum, and save the change. The saved value applies to later automatic
+starts without a restart and persists across restarts. Disabling it retains
+the maximum for later use. Manual starts can exceed the limit. Workflow WIP
+limits remain separate and are checked before session capacity.
+
+`KANDEV_MAX_CONCURRENT_SESSIONS` is an optional startup override. A valid
+non-negative value takes precedence over the saved setting, and `0` disables
+the ceiling. When the override is present, Settings shows the effective value
+and prevents edits. Change the environment and restart Kandev to remove the
+override.
+
 Integration watchers use the same admission rule. For example, a GitHub review
 watch targeting a `Review` step with a limit of two admits at most two newly
 observed pull requests at a time. Pull requests that lose the capacity race
@@ -608,6 +681,8 @@ The child-completion event ignores archived and ephemeral children, does not ins
 Generic comment, blocker-resolution, approval, heartbeat, budget, and error triggers, plus participant quorum, belong to the in-progress Office workflow surface. They are not configurable regular-Kanban step events.
 
 When **On Turn Complete** moves a task, **Wait for agent completion signal** is available. With it enabled, a bare turn end leaves the task waiting; the agent must call `step_complete_kandev`. The call requires a summary and can include a handoff or blockers. It is idempotent within the step, runs asynchronously, and a user message sent before the transition is applied cancels that pending signal. Without the option, turn end counts as completion.
+
+If the task changes steps before the agent sends the signal, Kandev rejects the call and names both the turn's launch step and the current step. Retrying in that same turn cannot recover. End the turn and have the user resume the session, then satisfy the current step and call `step_complete_kandev` from the fresh turn. An operator can also use the normal manual workflow move after checking the work and destination. Waiting, reconnecting, or retrying the stale turn does not change its eligibility.
 
 **Run completion actions when a turn is cancelled** is available beneath a configured turn-complete transition. It applies only when a user explicitly presses **Cancel** on the active turn. The normal completion pipeline still applies, including `on_exit`, the configured transition, and the destination step's `on_enter` actions; an `auto_start_agent` action there can start another turn immediately. An eligible explicit cancellation bypasses the `auto_advance_requires_signal` / `step_complete_kandev` gate, but a pending clarification still blocks the transition. The setting does not turn other interruption or failure paths into completion events. When the setting is off, an explicit cancel leaves the task in its current step and ready for input.
 
@@ -711,7 +786,30 @@ and primary session are eligible, even if other feedback is still being
 restored. A recovered comment must finish its own browser-draft cleanup before
 it can be run.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+### Protect agent plan writes
+
+Every agent plan read returns an opaque `version`. The version changes after a
+title or content write. Comment and implementation-marker changes do not change
+the version.
+
+Use `expected_version` for a whole-document replacement. Kandev rejects the
+write when the stored version differs. The rejection happens before Kandev
+changes the title, content, history, or events.
+
+Kandev also rejects a replacement that looks like accidental truncation. Use
+`edit_task_plan_kandev` for a local text change. Set `allow_truncation` only
+when the reduction is intentional and the current version matches. Kandev
+keeps the previous snapshot in plan history.
+
+Use `update_task_plan_kandev` with `mode="append"` to add a section without
+reading the plan first. The server adds one blank line before the new section.
+Append is not idempotent, so a repeated call adds the section again.
+
+If an agent loses a write response, read the plan before retrying. Use the
+returned version as the next `expected_version`. Do not repeat a whole-document
+replacement with an old version.
 
 ## Arrange task panels
 
@@ -755,12 +853,14 @@ On a phone, archive uses a focused confirmation step in the open Tasks sheet,
 or a compact bottom sheet from a page. [Phone confirmation controls](mobile-remote-access.md#confirm-an-action-on-a-phone)
 explain how to review the action and return to your list without losing your place.
 
+After you confirm archive, the task stays in the active sidebar and phone task picker in a dimmed, busy state with a spinner while the request is pending. It disappears after a successful archive. If the request fails, the task returns to its normal state. Saved views that include archived tasks still show confirmed archives.
+
 Archive records the task as archived and removes it from active views immediately. Runtime stopping and physical cleanup then run in the background with a 60-second timeout. Cleanup is best-effort: a stop or deletion failure is logged and does not undo the archive, and Kandev preserves a runtime or environment when a nonterminal session cannot be stopped. Shared inherited environments and borrowed worktrees are also preserved while another active task still uses them.
 
 | Executor      | Archive cleanup                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |
-| Git worktree  | Attempts to remove the Kandev-owned worktree directory. It keeps the local task branch and leaves any existing remote branch untouched. Shared or borrowed worktrees can remain until their last active user is gone. |
+| Git worktree  | Attempts to remove the Kandev-owned worktree directory. It removes a managed local branch only when its exact head is already integrated; unpublished, external, ambiguous, shared, or borrowed work remains. Remote branches are untouched. |
 | Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                                               |
 | Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
 | Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
@@ -775,7 +875,7 @@ While a task is archived, Kandev shows its history but does not start its agent 
 
 If session startup or resume fails, Kandev keeps the failure as a chronological entry in that session's chat. The current unresolved entry provides the valid recovery actions. After recovery and later agent output, the entry remains in the chat with its details, while older entries have no stale controls. History loading and new messages keep the normal chat scroll position.
 
-If task or workspace preparation fails, Kandev shows one task error strip below the task header and above the session and Plan tabs. The strip stays visible when you switch sessions or tabs. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer. Kandev clears the strip after task recovery succeeds. If you archive the task during recovery, Kandev stops that recovery path and does not start a fallback restore. For worktree tasks, archive keeps the environment identity and the local branch. The next session recreates the worktree directory from that branch. Recovery is best-effort and does not rewrite ambiguous multi-row attachments for the same repository. If an external action or an older Kandev version removed the branch, Kandev also checks `origin`. If no branch exists, the next session starts from the base branch. Removed worktree directories, containers, and sandboxes are materialized again on a later launch rather than resumed in place.
+If task or workspace preparation fails, Kandev shows one task error strip below the task header and above the session and Plan tabs. The strip stays visible when you switch sessions or tabs. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer. Kandev clears the strip after task recovery succeeds. If you archive the task during recovery, Kandev stops that recovery path and does not start a fallback restore. For worktree tasks, archive keeps the environment identity and either retains the local branch or records its exact integrated head before safe compaction. The next session recreates the worktree directory and restores a missing managed branch from that exact head before trying `origin`. Recovery is best-effort and does not rewrite ambiguous multi-row attachments for the same repository. If neither exact local recovery nor a remote branch is available, the next session starts from the base branch. Removed worktree directories, containers, and sandboxes are materialized again on a later launch rather than resumed in place.
 
 Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 

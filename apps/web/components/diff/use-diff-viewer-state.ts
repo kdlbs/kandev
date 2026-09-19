@@ -282,6 +282,7 @@ type CommentHandlerOpts = {
   externalComments?: DiffComment[];
   data: FileDiffData;
   sessionId?: string;
+  repositoryName?: string;
   addComment: (range: SelectedLineRange, content: string) => DiffComment;
   removeComment: (commentId: string) => void;
   updateComment: (commentId: string, updates: DiffCommentUpdate) => void;
@@ -301,6 +302,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
     externalComments,
     data,
     sessionId,
+    repositoryName,
     addComment,
     removeComment,
     updateComment,
@@ -321,6 +323,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
       if (!selectedLines) return null;
       return buildDiffComment({
         filePath: data.filePath,
+        repositoryName,
         sessionId: sessionId || "",
         startLine: selectedLines.start,
         endLine: selectedLines.end,
@@ -328,7 +331,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
         text: content,
       });
     },
-    [selectedLines, data.filePath, sessionId],
+    [selectedLines, data.filePath, sessionId, repositoryName],
   );
 
   const submitComment = useCallback(
@@ -407,10 +410,11 @@ function useRevertBlock(
  * The session-scoped comment store for one file. Extracted from
  * useDiffViewerState to keep that hook under the function line cap.
  */
-function useInternalDiffComments(data: FileDiffData, sessionId?: string) {
+function useInternalDiffComments(data: FileDiffData, sessionId?: string, repositoryName?: string) {
   return useDiffComments({
     sessionId: sessionId || "",
     filePath: data.filePath,
+    repositoryName,
     diff: data.diff,
     newContent: data.newContent,
     oldContent: data.oldContent,
@@ -445,7 +449,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     updateComment,
     editingCommentId,
     setEditingComment,
-  } = useInternalDiffComments(data, sessionId);
+  } = useInternalDiffComments(data, sessionId, repo);
 
   const comments = externalComments || internalComments;
   const baseDiffMetadata = useDiffMetadata(data);
@@ -488,6 +492,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     externalComments,
     data,
     sessionId,
+    repositoryName: repo,
     addComment,
     removeComment,
     updateComment,

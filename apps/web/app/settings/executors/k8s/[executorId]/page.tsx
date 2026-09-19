@@ -58,11 +58,7 @@ export default function KubernetesExecutorPage({ executorId }: { executorId: str
       )?.profiles?.[0]?.id ?? null,
   );
   if (profileId) {
-    return (
-      <SettingsRedirect
-        to={executorProfileSettingsPath({ id: executorId, type: "k8s" }, profileId)}
-      />
-    );
+    return <SettingsRedirect to={executorProfileSettingsPath(profileId)} />;
   }
   return <KubernetesExecutorRecoveryPage executorId={executorId} />;
 }

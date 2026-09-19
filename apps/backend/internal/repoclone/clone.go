@@ -227,8 +227,13 @@ func (c *Cloner) WorkspaceProviderRepoPath(
 }
 
 // WorkspaceProviderRepositoryPath isolates managed clones using the provider's
-// opaque connection scope and immutable repository ID. Legacy callers that do
-// not yet carry both fields retain the origin/owner/name layout.
+// opaque connection scope and immutable repository ID. A non-empty scope
+// selects this isolated layout and requires a paired repository ID (the path
+// segment needs both to stay unique); a bare repository ID with no scope is
+// the normal shape for every built-in provider (GitHub, GitLab, Azure
+// DevOps) — none of them resolve a provider connection scope — so it falls
+// through to the legacy origin/owner/name layout below, same as when both
+// are empty.
 func (c *Cloner) WorkspaceProviderRepositoryPath(
 	workspaceID, provider, providerHost, providerScope, providerRepositoryID, owner, name string,
 ) (string, error) {
@@ -245,9 +250,9 @@ func (c *Cloner) WorkspaceProviderRepositoryPath(
 			return "", err
 		}
 	}
-	if providerScope != "" || providerRepositoryID != "" {
-		if strings.TrimSpace(providerScope) == "" || strings.TrimSpace(providerRepositoryID) == "" {
-			return "", errors.New("provider scope and repository ID must be supplied together")
+	if providerScope != "" {
+		if strings.TrimSpace(providerRepositoryID) == "" {
+			return "", errors.New("provider scope requires a paired repository ID")
 		}
 		return filepath.Join(
 			basePath, managedWorkspacesDir, workspaceID, provider, "_scopes",

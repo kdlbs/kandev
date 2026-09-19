@@ -125,6 +125,34 @@ func TestActionsCreateSubtaskDeniesWithoutCapability(t *testing.T) {
 	}
 }
 
+func TestActionsCreateSubtaskRefusesWildcardBoundRunDefaultParent(t *testing.T) {
+	// An omitted ParentTaskID defaults to runCtx.TaskID. A run whose payload
+	// injected task_id="*" stays task-bound with TaskID == WildcardTaskScope
+	// (context_builder.go#build), so the default here resolves to the
+	// sentinel itself and must be refused rather than treated as an
+	// ordinary bound parent task.
+	creator := &recordingTaskCreator{taskID: "created-task"}
+	actions := NewActions(ActionDependencies{Tasks: creator})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		TaskID:      WildcardTaskScope,
+		Capabilities: Capabilities{
+			CanCreateSubtasks: true,
+		},
+	}
+
+	_, err := actions.CreateSubtask(context.Background(), runCtx, CreateSubtaskInput{
+		Title: "child",
+	})
+	if !errors.Is(err, ErrTaskOutOfScope) {
+		t.Fatalf("error = %v, want ErrTaskOutOfScope — a wildcard-bound run must not create a subtask under the sentinel", err)
+	}
+	if len(creator.calls) != 0 {
+		t.Fatal("task creator should not be called when the resolved parent is the wildcard sentinel")
+	}
+}
+
 func TestActionsCreateSubtaskPreservesCallerIdentity(t *testing.T) {
 	creator := &recordingTaskCreator{
 		taskID: "created-task",
