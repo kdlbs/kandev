@@ -223,3 +223,10 @@ reproduced the functional issues.
 
 Validation: focused Go checkout/handler tests with race detection, web parser/chip
 and capability tests, TypeScript typecheck, i18n checks, and specification validation.
+
+The follow-up review's test-isolation finding was reproduced with inherited
+`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
+`GIT_OBJECT_DIRECTORY`, and `GIT_ALTERNATE_OBJECT_DIRECTORIES`. Checkout fixtures
+now clear those paths before setup; both lifecycle and repoclone checkout tests
+pass with all six variables pointing to invalid temporary paths. This changes
+only test isolation, so the production contract and screenshots are unchanged.

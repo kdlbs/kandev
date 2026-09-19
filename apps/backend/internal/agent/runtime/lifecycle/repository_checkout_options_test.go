@@ -39,6 +39,7 @@ func TestRepositoryCheckoutCapabilities(t *testing.T) {
 }
 
 func TestRepositoryCheckoutOptionsDockerPrimary(t *testing.T) {
+	isolateGitEnv(t)
 	root := t.TempDir()
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
 	source := filepath.Join(root, "source")
@@ -99,6 +100,7 @@ func TestRepositoryCheckoutOptionsDockerValidatesBeforeSetup(t *testing.T) {
 }
 
 func TestRepositoryCheckoutOptionsDockerMissingFolderSkipsSetup(t *testing.T) {
+	isolateGitEnv(t)
 	root := t.TempDir()
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(root, "gitconfig"))
 	source := filepath.Join(root, "source")
@@ -129,6 +131,7 @@ func TestRepositoryCheckoutOptionsDockerMissingFolderSkipsSetup(t *testing.T) {
 }
 
 func TestRepositoryCheckoutOptionsCloneDiagnosticsDoNotLeak(t *testing.T) {
+	isolateGitEnv(t)
 	root := t.TempDir()
 	git := filepath.Join(root, "git")
 	if err := os.WriteFile(git, []byte("#!/bin/sh\nif [ \"$1\" = clone ]; then echo 'https://user:fixture-secret@example.test/repo' >&2; exit 1; fi\n"), 0755); err != nil {
@@ -151,6 +154,7 @@ func TestRepositoryCheckoutOptionsCloneDiagnosticsDoNotLeak(t *testing.T) {
 }
 
 func TestRepositoryCheckoutOptionsDockerAcceptsUnfetchedSubmodule(t *testing.T) {
+	isolateGitEnv(t)
 	root := t.TempDir()
 	runIn(t, root, "git", "init", "-b", "main")
 	runIn(t, root, "git", "update-index", "--add", "--cacheinfo", "160000,1111111111111111111111111111111111111111,module")

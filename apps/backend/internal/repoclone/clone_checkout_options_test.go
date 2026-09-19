@@ -56,6 +56,7 @@ func TestAuthenticatedCloneCheckoutOptionsLazyRead(t *testing.T) {
 }
 
 func checkoutOptionsGitServer(t *testing.T) (string, string, string, *atomic.Bool) {
+	isolateCheckoutOptionsTestGitEnv(t)
 	t.Helper()
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
@@ -137,5 +138,19 @@ func TestAuthenticatedCloneCheckoutOptionsRetainsGitCryptKeys(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(cache, ".git", "git-crypt", "keys", "default"))
 	if err != nil || string(data) != "key-fixture" {
 		t.Fatalf("managed unlock state lost: %q %v", data, err)
+	}
+}
+
+func isolateCheckoutOptionsTestGitEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"} {
+		if value, exists := os.LookupEnv(key); exists {
+			t.Setenv(key, value)
+			if err := os.Unsetenv(key); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }
