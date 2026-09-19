@@ -567,6 +567,7 @@ export type WorkflowStepDTO = {
 export type MoveTaskResponse = {
   task: Task;
   workflow_step: WorkflowStepDTO;
+  workflow_entry_identity?: string;
   move_id?: string;
   entry_options?: {
     reset_context?: boolean;

@@ -97,6 +97,7 @@ export type MobileTaskListProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onBeforeMoveOptionsOpen?: () => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
@@ -341,6 +342,7 @@ function TaskSwitcherSurfaceContent({
     : data.retryArchivedTasks;
   const moveOptions = useMobileTaskMoveOptions({
     open,
+    activeTaskId: data.activeTaskId,
     stepsByWorkflowId: data.stepsByWorkflowId,
   });
   if (moveOptions.moveOptionsStep && moveOptions.request) {
@@ -392,6 +394,7 @@ function TaskSwitcherSurfaceContent({
             activeTaskId={data.activeTaskId}
             selectedTaskId={data.selectedTaskId}
             onSelectTask={actions.handleSelectTask}
+            onMoveToStep={presentation === "drawer" ? moveOptions.handleMove : undefined}
             onRequestMoveOptions={presentation === "drawer" ? moveOptions.handleRequest : undefined}
             onBeforeMoveOptionsOpen={
               presentation === "drawer" ? () => onOpenChange(false) : undefined
