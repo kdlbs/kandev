@@ -49,6 +49,11 @@ if [[ "${GH_FAIL_REVIEWS:-0}" == "1" && "$*" == *"pulls/123/reviews"* ]]; then
   exit 1
 fi
 
+if [[ "${GH_FAIL_RATE_LIMIT:-0}" == "1" && "$1" == "api" && "$2" == "graphql" ]]; then
+  echo "HTTP 429 Too Many Requests; Retry-After: 30; X-RateLimit-Reset: 123" >&2
+  exit 1
+fi
+
 if [[ "${GH_FAIL_GRAPHQL:-0}" == "1" && "$1" == "api" && "$2" == "graphql" ]]; then
   echo "graphql failed" >&2
   exit 1
@@ -1281,6 +1286,21 @@ test_graphql_failure_records_error_but_keeps_other_data() {
   pass "graphql failure records error but keeps other data"
 }
 
+test_rate_limit_details_are_preserved_in_errors() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_FAIL_RATE_LIMIT=1 PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "rate limit remains an error" 'any(.errors[]; .message | test("HTTP 429"))' "$json"
+  assert_jq "retry guidance is preserved" 'any(.errors[]; .message | test("Retry-After: 30"))' "$json"
+  assert_jq "reset guidance is preserved" 'any(.errors[]; .message | test("X-RateLimit-Reset: 123"))' "$json"
+  pass "rate-limit status and retry headers survive pr-state error handling"
+}
+
 test_graphql_pagination_collects_all_threads() {
   local tmp
   make_tmp_dir tmp
@@ -1804,6 +1824,7 @@ test_partial_failure_records_error_but_keeps_other_data
 test_pr_view_failure_with_non_numeric_ref_keeps_schema
 test_repo_failure_skips_review_threads
 test_graphql_failure_records_error_but_keeps_other_data
+test_rate_limit_details_are_preserved_in_errors
 test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state

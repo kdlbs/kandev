@@ -29,6 +29,15 @@ REST `expect.poll`, then correlate each post-action event by an active-to-settle
 transition, revision, or timestamp; `watchWs` does not buffer frames, so never
 attach a wait after a spinner or visibility assertion.
 
+## Geometry and sticky overlays
+
+For geometry or hit-target assertions on settings pages, scroll the target clear
+of sticky headers and fixed Save bars before a center-point
+`elementFromPoint` check. `scrollIntoViewIfNeeded()` can consider a control in
+view while an overlay covers its center; use explicit center scrolling when
+appropriate, retain the hit-test assertion, and distinguish a test scroll
+position issue from a control that user scrolling cannot reach.
+
 ## Automatic lifecycle evidence
 
 When a test proves automatic start, resume, or recovery, seed and assert the

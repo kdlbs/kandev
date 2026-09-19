@@ -149,6 +149,12 @@ matches `mobile-*.spec.ts` files, so another filename can produce no tests.
 After the interaction settles, assert the resulting state and exercise a later
 mouse or pen entry when the UI maintains hybrid-device pointer state.
 
+For keyboard or accessibility regressions, start from the real visible opener
+and use real keyboard input (`Tab`, `Enter`/`Space`, and control typeahead when
+applicable). Do not focus an inner target programmatically to bypass focus
+management; assert that the target is reachable from the opener, especially
+for portaled Radix menus.
+
 ### Visual alignment regressions
 
 For a UI change whose contract is a rendered size or alignment relationship,
@@ -175,6 +181,13 @@ contract is equality or alignment. For control-size regressions, read the mobile
 For computed colors, parse alpha/opacity semantically or assert a deliberate class/data contract; do not compare serialized `getComputedStyle` strings because browsers may return `rgba()`, `oklab()`, or `color()`.
 
 **Animation-aware geometry:** Before reading dialog or panel geometry, wait only for currently running Web Animations with finite `effect.getComputedTiming().iterations`; await `animation.finished.catch(() => undefined)` because Radix overlays can cancel animations during close or replacement. Never blanket-await infinite animations or use a fixed sleep; then read bounding boxes and assert the relationship.
+
+For virtualized viewport-edge assertions, require the first visible row's top
+to cover the content top. Assert the last visible row's bottom only when the
+content overflows; allow legitimate trailing space and end padding in short
+trees. Check adjacent gaps and overlaps, and include blank-top, blank-bottom,
+and short-tree fixtures. Do not assert the opposite edge after filtering rows
+to viewport intersection, because that can reject valid virtualization states.
 
 For narrow-width clipping or overlap regressions, visibility and containment
 are insufficient: assert a real hit target. Check `document.elementFromPoint()`
@@ -220,11 +233,21 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 - **Import paths from subdirectories** use `../../` (e.g., `from "../../fixtures/test-base"`).
 - **Standalone root files** are allowed for truly cross-cutting tests that don't fit any group.
 - **Extract shared helpers.** Extract helpers into a sibling `*-helpers.ts` file whenever they are used by multiple spec files, even when small; keep only scenario-specific setup in specs. Reusable page polling, seeding, and Dockview cleanup belong in the helper module.
+- **Keep pure unit tests out of `apps/web/e2e/tests/`.** Playwright discovery
+  imports files in that tree, so a Vitest file can fail discovery before any
+  browser test runs. Put pure Vitest tests beside the component or helper, and
+  after adding an E2E-adjacent helper test run:
+  `cd apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --project=containers --list --reporter=json`.
+  Require zero discovery errors before treating the E2E suite as runnable.
 
 ## Test quality guidelines
 
 - **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees; use `toContainText` or a dedicated locator when labels include metadata such as file sizes.
 - **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and Go boot-payload/client-store mismatches.
+- **Assert expected uniqueness.** Test IDs that represent one bounded preview, queue row, or other unique rendering must be checked with `toHaveCount(1)` (or an equivalent uniqueness assertion) before interaction; never use `.first()` to hide duplicate renders. For send-flow regressions, pair the visible UI assertion with persisted API/state evidence when `watchWs` is not the causal contract; an event-observer timeout alone does not prove that the send failed.
+- **Keep reload assertions on the backfill contract.** When a review or findings surface rehydrates from a backend/API snapshot, assert durable item state through that same snapshot after reload, then separately assert DOM anchoring, visibility, or scroll behavior. DOM presence before reload does not prove that page backfill restored the item or its anchor.
+- **Assert cancellation progress by its UI contract.** When cancellation exposes a translated `role="status"` such as `Cancelling...`, assert that status instead of a generic `Loading` label or spinner. Generic busy indicators can belong to an unrelated request and do not prove that cancellation progressed.
+- **Prove failure details while visible.** Assert the specific promised cause or recovery detail in the UI before dismissal and after reload; a persisted metadata field or generic error heading is not enough. Open details disclosures and check wrapping, containment, and overflow while the notice remains visible.
 - **Restore patched persisted settings.** When a test PATCHes user settings, capture the baseline and restore it in `test.afterEach`. The backend is worker-scoped, and `e2eReset` does not reset every persisted setting, including `system_metrics_display`; leaking one can affect later tests in the same worker. Fixtures are lazy: acquire `testPage` before setting a non-default persisted value in `beforeEach`, otherwise page initialization can reapply the default and silently undo setup. Verify with the focused test that depends on that setting.
 - **Restore patched shared persisted state.** The worker-scoped backend and
   `e2eReset` do not reset every seeded record. A test that creates or PATCHes a
@@ -245,13 +268,23 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
   assert the absolute deviation after the asynchronous content appears. This
   attributes movement to the result rather than the initiating action and
   catches movement in either direction.
+- **Prove negative requests causally.** Keep a live request observer or counter
+  armed before the action and use `dwell(page, duration, "negative-assertion",
+  reason)` for the observation window. Do not use `waitForRequest` timeouts or
+  timeout exceptions as proof that a late request did not occur.
 - **Scroll-positioned markers.** For unread dividers, restore points, or search
   anchors, seed content taller than the viewport and assert the marker's bounds
   are inside the viewport after navigation. A short transcript's DOM-visible
   marker does not prove initial scroll behavior; cover every renderer/viewport
   strategy selected at runtime.
+- **Prove later-turn acceptance.** Capture the pre-turn message/response count
+  and resumed runtime identity before the first pause. Wait for a new turn-
+  specific marker after provider acceptance, then assert that original identity
+  after cancellation and each follow-up; persisted text with `.last()` can match
+  an earlier turn and is not evidence that the later prompt was accepted.
 - **Nested Escape controls.** If an inner panel inside a Radix Dialog handles Escape, intercept the key in capture phase and call both `preventDefault()` and `stopPropagation()` before dismissing the inner panel. A bubble-phase window handler runs after Radix can dismiss the outer dialog. Add a regression that asserts the inner panel collapses while the outer dialog remains open.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
+- **Open API-created tasks directly.** After API setup creates a task, navigate to `/t/<task-id>` instead of clicking a Kanban card; card rendering and virtualization add unrelated failure surface. For virtualized file trees, do not retain source and target locators while rows can recycle. Dispatch `dragstart` with a page-owned `DataTransfer`, reveal the target, dispatch `drop`, and clean up the transfer state before asserting the result.
 
 ## Debugging failures
 
@@ -262,6 +295,7 @@ For failed specs, shard artifacts, or suspected contention, load
 
 - **Prefer `data-testid` selectors** over text-based locators. Text content can change when UI is updated (e.g., hiding a badge), breaking tests that match by text. Use `getByTestId()` or `locator("[data-testid='...']")` for stable targeting. When translated labels intentionally identify multiple routes, scope by stable `href` or a dedicated test ID rather than role/name alone.
 - **Scope Radix and responsive locators to the active instance.** Tooltips may use `instant-open`, `delayed-open`, or `open`; use `[data-slot="tooltip-content"]:not([data-state="closed"])`, then scope to the visible portal/popover/container and active ancestor. For routes with multiple surfaces, scope controls to the active container first; portal overlays must be selected by visible overlay or the trigger's `aria-controls`, not assumed descendants. For portaled pickers, locate the active visible `role=listbox` or picker container first, then scope `getByRole('option')` within it. Hidden mounts can make global locators match the wrong instance; do not use `.first()` to hide duplicates.
+- **Keep `has` locators relative to each candidate.** `locator(...).filter({ has: ... })` resolves the `has` locator beneath each candidate, so a container-scoped locator can never match a sibling or ancestor action. Use a relative CSS `:has(...)` selector or a locator rooted relative to the candidate row.
 - **Use exact dynamic labels and page objects:** `filter({ hasText })` is substring matching; for counts or sibling content, use a stable `data-*` attribute or `getByText(label, { exact: true })` and assert uniqueness. Prefer page object methods like `clickSessionChatTab()` (stable `data-testid`) over fragile text matches such as `sessionTabByText("1")`.
 - **Dropdown menus can detach** from the DOM when React re-renders the parent (e.g., WS events updating the sidebar). The `openSidebarMenuAndClick()` helper in `session-page.ts` retries the full open-click sequence on detachment — use this pattern for similar interactions.
 

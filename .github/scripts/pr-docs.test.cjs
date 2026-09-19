@@ -2168,6 +2168,35 @@ test('run reuses the snapshot used for the pending status', async () => {
   assert.deepEqual(statuses.map(status => status.state), ['pending', 'success']);
 });
 
+test('dry-run evaluates coverage and writes a summary without publishing statuses', async () => {
+  const statuses = [];
+  const summaries = [];
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B);
+    },
+    async listFiles() {
+      return [{ filename: 'docs/guide.md', status: 'modified' }];
+    },
+    async createCommitStatus(sha, status) {
+      statuses.push({ sha, ...status });
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: { PR_DOCS_DRY_RUN: '1' },
+    event: { pull_request: { number: 42 } },
+    eventName: 'pull_request_target',
+    writeSummary: summary => summaries.push(summary),
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(statuses, []);
+  assert.equal(summaries.length, 1);
+  assert.match(summaries[0], /PR documentation coverage/);
+});
+
 test('workflow dispatch reads the pull-request number from its input', async () => {
   const statuses = [];
   const client = {

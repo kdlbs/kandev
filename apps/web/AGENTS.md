@@ -141,11 +141,11 @@ surface.
   important exclusions, precedence, cost, or destructive consequences next to the control when they
   can affect the decision. Do not rely on tooltips, external documentation, or implementation terms
   alone to teach the setting.
-- **Settings save coordination:** settings surfaces with local unsaved state must register a
-  contributor with `useSettingsSaveContributor` (or use `SettingsPageTemplate`) so the shared
-  floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
-  page-local Save/Cancel controls. Contributor `save` callbacks must reject on failure so the
-  coordinator can report an error; `discard` must restore the contributor's authoritative baseline.
+- **Settings save coordination:** local unsaved surfaces register a contributor with
+  `useSettingsSaveContributor` (or `SettingsPageTemplate`) so shared **Save changes**, navigation guard,
+  and discard flow own persistence; do not add page-local Save/Cancel controls. Reject save failures;
+  discard restores the authoritative baseline. Capture raw draft before await; apply canonical only when
+  current draft matches; test normalized/fallback dirty clearing and in-flight edit preservation.
 - **Settings tabs:** use `components/settings/settings-tabs.tsx` in `SettingsPageHeader`; preserve drafts with validated URL `tab` state, map discovery fragments to the owning tab, and use 44px controls on phones and coarse pointers.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),

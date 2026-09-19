@@ -26,7 +26,7 @@ apps/
 - **E2E**: Playwright (`cd apps/web && pnpm e2e:run` or the guarded `pnpm e2e:raw`). Local runners enforce one worker per shard and a memory-aware shard budget; do not pass all-worker overrides or overlap full suites. The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers Docker, SSH, and Kind-backed Kubernetes executor scenarios — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
-- **Raw command output**: RTK display helpers are not byte-preserving; for output consumed by a parser, upload, patch, `xargs`, or byte comparison, use `rtk proxy` or `rtk bash -lc` and validate the raw result before consuming it. Repository scripts under `scripts/` and `.github/scripts/` are repo-root-relative; run them from the root or pass an explicit path.
+- **Raw command output**: RTK display helpers are not byte-preserving; for output consumed by a parser, upload, patch, `xargs`, or byte comparison, use `rtk proxy` or `rtk bash -lc` and validate the raw result before consuming it. Repository scripts under `scripts/` and `.github/scripts/` are repo-root-relative; run them from the root or pass an explicit path. When `functions.exec` starts parallel long-running commands, retain every returned `session_id` and poll each handle to completion; do not discard a handle and infer status from a duplicate run.
 
 ### Worktrees and commit hooks
 
@@ -183,7 +183,10 @@ For multiline Markdown issue or PR bodies, write the body to a file and pass it
 with the relevant `gh ... --body-file <path>` option. Do not send escaped
 newlines through `--body`; GitHub will render them literally.
 
-For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
+`gh pr edit` can print a Projects-classic warning and exit successfully without a mutation; read the live body back after every edit and verify the intended section.
+Use REST PATCH when it is absent, then refresh PR evidence because body edits can start new checks.
+
+For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call. In a shared worktree, a stale or locked `refs/remotes/origin/*` is not authoritative; read the remote SHA with `git ls-remote` and use an explicit `--force-with-lease=refs/heads/<branch>:<remote-sha>`.
 
 A branch in GitHub's merge queue cannot be updated; before an authorized fixup
 push, dequeue it, push the exact head, wait for required checks, and restore

@@ -155,6 +155,8 @@ else
 fi
 
 errors='[]'
+GH_ERROR_FILE="$(mktemp "${TMPDIR:-/tmp}/pr-state-gh-error-XXXXXX")"
+state_tmp_dir=''
 pr_json='{}'
 pr_view_succeeded=false
 checks_json='[]'
@@ -177,17 +179,46 @@ since_json='null'
 unresolved_review_thread_count=null
 filtered_review_thread_count=null
 
+cleanup_temp_files() {
+  rm -f "$GH_ERROR_FILE"
+  [[ -z "$state_tmp_dir" ]] || rm -rf "$state_tmp_dir"
+}
+trap cleanup_temp_files EXIT
+
+rate_limit_text() {
+  local text=$1
+  local lower
+  lower="$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == *'rate limit'* || "$lower" == *'secondary rate'* ||
+    "$lower" == *'secondary-rate'* || "$lower" == *'retry-after'* ||
+    "$lower" == *'x-ratelimit'* || "$lower" == *'http 429'* ||
+    "$lower" == *'status 429'* ]]
+}
+
+rate_limit_detail() {
+  local detail=''
+  [[ -s "$GH_ERROR_FILE" ]] || return 0
+  detail="$(tr '\r\n' '  ' <"$GH_ERROR_FILE" | cut -c1-500)"
+  rate_limit_text "$detail" || return 0
+  printf '%s' "$detail"
+}
+
 add_error() {
   local source=$1
   local message=$2
+  local detail
+  detail="$(rate_limit_detail)"
+  [[ -z "$detail" ]] || message="$message: $detail"
+  : >"$GH_ERROR_FILE"
   errors="$(jq -cn --argjson prev "$errors" --arg source "$source" --arg message "$message" \
     '$prev + [{source: $source, message: $message}]')"
 }
 
 gh_json() {
+  : >"$GH_ERROR_FILE"
   env -u GH_DEBUG -u GITHUB_DEBUG -u GH_TRACE -u GITHUB_TRACE \
     GH_PAGER=cat GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 \
-    gh "$@" 2>/dev/null
+    gh "$@" 2>"$GH_ERROR_FILE"
 }
 
 emit_comment_json() {
@@ -1141,10 +1172,6 @@ fi
 review_evidence_json="$(review_evidence_json "$opening_head_oid" "$closing_head_oid" "$checks_head_sha" "$reviews_known" "$reviews_api_json" "$is_cross_repository" "$trusted_workflow_json")"
 
 state_tmp_dir="$(mktemp -d)"
-cleanup_state_tmp() {
-  rm -rf "$state_tmp_dir"
-}
-trap cleanup_state_tmp EXIT
 
 printf '%s\n' "$pr_json" >"$state_tmp_dir/pr.json"
 printf '%s\n' "$since_json" >"$state_tmp_dir/since.json"
