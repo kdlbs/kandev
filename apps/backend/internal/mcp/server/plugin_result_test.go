@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/kandev/kandev/internal/mcp/plugintools"
@@ -36,4 +37,24 @@ func TestPluginToolPreservesStructuredResultAndErrorStatus(t *testing.T) {
 			require.Equal(t, "Check delivery before retrying.", result.Content[0].(mcplib.TextContent).Text)
 		})
 	}
+}
+
+func TestPluginToolErrorOmitsNilStructuredContent(t *testing.T) {
+	backend := &testBackend{response: map[string]any{
+		"text": "Check delivery before retrying.", "structured_content": nil, "is_error": true,
+	}}
+	server := New(backend, "session-1", "task-1", 10005, newTestLogger(t), "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "notifications", LocalName: "notify", ExposedName: plugintools.ExposedName("notifications", "notify"),
+		Description: "Notify a user", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	require.NoError(t, server.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition},
+	}))
+
+	result := callTool(t, server, definition.ExposedName, map[string]any{})
+	serialized, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.NotContains(t, string(serialized), `"structuredContent"`)
 }

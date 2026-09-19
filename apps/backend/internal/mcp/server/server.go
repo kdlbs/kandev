@@ -990,7 +990,9 @@ func (s *Server) registerPluginTools() {
 			}
 			if result.IsError {
 				response := mcp.NewToolResultError(result.Text)
-				response.StructuredContent = result.StructuredContent
+				if result.StructuredContent != nil {
+					response.StructuredContent = result.StructuredContent
+				}
 				return response, nil
 			}
 			if result.StructuredContent != nil {
