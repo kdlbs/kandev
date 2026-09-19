@@ -491,7 +491,12 @@ func TestHandleAddBranchToTask_RejectsMultipleLocators(t *testing.T) {
 
 type pathBranchMaterializer struct{}
 
-func (pathBranchMaterializer) MaterializeBranch(context.Context, string, string) (*service.BranchMaterializationResult, error) {
+func (pathBranchMaterializer) MaterializeBranch(
+	context.Context,
+	string,
+	string,
+	service.BranchMaterializationTarget,
+) (*service.BranchMaterializationResult, error) {
 	return &service.BranchMaterializationResult{WorktreePath: "/task/kandev-feature-source", TaskWorkspacePath: "/task"}, nil
 }
 

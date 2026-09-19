@@ -222,7 +222,18 @@ type BranchMaterializer interface {
 	// task_repositories row. Best-effort: when no active session exists yet
 	// the implementation may choose to no-op and let the next session launch
 	// create the worktree via the standard multi-repo prepare path.
-	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error)
+	MaterializeBranch(
+		ctx context.Context,
+		taskID, taskRepositoryID string,
+		target BranchMaterializationTarget,
+	) (*BranchMaterializationResult, error)
+}
+
+// BranchMaterializationTarget pins the live session/environment identity
+// selected by the task service so the materializer can reject a racing rebind.
+type BranchMaterializationTarget struct {
+	SessionID         string
+	TaskEnvironmentID string
 }
 
 // BranchMaterializationResult describes the live worktree created for a
@@ -730,8 +741,8 @@ func (s *Service) setCleanupDoneForTestHook(ch chan struct{}) {
 }
 
 // SetBranchMaterializer wires the mid-session worktree materializer for
-// AddBranchToTask. Optional — when unset, MCP add_branch only inserts the
-// task_repositories row and the worktree appears on next session launch.
+// AddBranchToTask. It may be unset for pre-launch tasks, whose worktrees are
+// created on the next session launch; live tasks require the materializer.
 func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 	s.branchMaterializer = m
 }
