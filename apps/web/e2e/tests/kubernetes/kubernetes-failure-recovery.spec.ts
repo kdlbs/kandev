@@ -10,6 +10,9 @@ import {
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
+// Repeated real-cluster setup can exhaust the job before failure artifacts are written.
+test.describe.configure({ retries: 0 });
+
 // @covers AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.1 through .4
 for (const restart of [false, true]) {
   const title = restart

@@ -277,6 +277,7 @@ function runKubectl(
   ).trim();
 }
 
+/** Declare workload identity before Pods can launch, without waiting for namespace reconciliation. */
 function workloadRBAC(): string {
   return `apiVersion: v1
 kind: Namespace
@@ -287,6 +288,12 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: ${WORKLOAD_NAMESPACE}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: ${WORKLOAD_NAMESPACE}
 ---
 apiVersion: v1
 kind: ServiceAccount
