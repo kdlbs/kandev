@@ -58,8 +58,13 @@ passthrough on the native CLI.
 - **AC-AGENTS-MUSE-ACP-003.1:** Remote authentication shall offer copying
   `~/.config/muse/auth.json` and setting `META_API_KEY`; login shall run
   `muse login`.
-- **AC-AGENTS-MUSE-ACP-003.2:** The install script shall run the official
-  `https://dev.meta.ai/install.sh` into the first writable absolute PATH
-  directory, fail when the download fails, and verify `muse --version`.
-- **AC-AGENTS-MUSE-ACP-003.3:** Native session resume shall be enabled with the
-  session root `{home}/.local/share/muse`.
+- **AC-AGENTS-MUSE-ACP-003.2:** On POSIX hosts, the install script shall run the
+  official `https://dev.meta.ai/install.sh` into the first writable absolute
+  PATH directory, fail when the download fails, and verify `muse --version`.
+  Windows shall expose no automated install action because the official
+  installer is a POSIX shell script.
+- **AC-AGENTS-MUSE-ACP-003.3:** Native session resume shall use Muse's default
+  `~/.local/share/muse` path. Kandev shall remove `XDG_CONFIG_HOME` and
+  `XDG_DATA_HOME` overrides from Muse processes and mount an isolated executor
+  home so both `~/.config/muse` credentials and `~/.local/share/muse` sessions
+  are available without mounting the real host home.

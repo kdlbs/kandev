@@ -23,7 +23,7 @@ persistence belong to the native `muse` executable the adapter spawns through
 |---|---|---|
 | Structured session, inference, capability probe | `npx --yes --prefer-offline @bex-co/muse-code-acp@<version>` | Managed npm runtime |
 | Passthrough, login, discovery | `muse`, `muse login`, `muse --version` | Native Muse CLI |
-| Install | official `install.sh` with `MUSE_INSTALL_DIR` | Muse installer |
+| Install on POSIX | official `install.sh` with `MUSE_INSTALL_DIR` | Muse installer |
 
 The adapter is registered in `managed_npm_runtime_versions.json`, so the
 existing pin updater, cache repair, and operator version selection apply to it
@@ -33,11 +33,12 @@ without new code. The `npx` probe command is already allow-listed.
 
 - MCP: ACP `session/new` servers (stdio and HTTP) are materialized by the
   adapter into a temporary Muse config overlay; no Kandev project file.
-- Credentials: `$XDG_CONFIG_HOME/muse/auth.json` (default `~/.config`) or
-  `META_API_KEY`, which takes priority.
-- Sessions: `$XDG_DATA_HOME/muse/sessions` (default `~/.local/share`),
-  resumed natively by the adapter and bind-mounted from
-  `{home}/.local/share/muse` to `/root/.local/share/muse`.
+- Credentials: `~/.config/muse/auth.json` or `META_API_KEY`, which takes
+  priority. Muse launch and login processes remove `XDG_CONFIG_HOME` and
+  `XDG_DATA_HOME` so these default paths remain stable.
+- Sessions: `~/.local/share/muse/sessions`, resumed natively by the adapter.
+  The executor mounts the isolated `{home}` directory at `/root`, which covers
+  both the credential and session trees without mounting the real host home.
 
 ## Failure and recovery
 
@@ -51,4 +52,5 @@ adapter's verified schema is reported by the adapter as an advisory
 
 The install script downloads to a temporary file so a failed download fails
 the job, installs only into an existing writable absolute PATH directory, and
-embeds no credentials. Remote auth copies only `auth.json`.
+embeds no credentials. Windows does not expose the POSIX install script. Remote
+auth copies only `auth.json`.

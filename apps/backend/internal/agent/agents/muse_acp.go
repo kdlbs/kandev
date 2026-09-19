@@ -4,6 +4,7 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"runtime"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -104,14 +105,18 @@ func (a *MuseACP) Runtime() *RuntimeConfig {
 		Env:            map[string]string{},
 		ResourceLimits: DefaultResourceLimits,
 		Protocol:       agent.ProtocolACP,
+		// Muse resolves both config and data through XDG variables. Kandev
+		// seeds the default paths into one isolated executor home, so remove
+		// profile and executor overrides before starting the adapter.
+		StripEnv: []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME"},
 		// The adapter forwards ACP session/new MCP servers (stdio and HTTP)
 		// into a temporary Muse config overlay, so no ProjectMCPStrategy.
 		SessionConfig: SessionConfig{
-			// Muse persists native sessions under $XDG_DATA_HOME/muse
-			// (default ~/.local/share/muse/sessions); the adapter resumes
-			// them through `muse serve` and replays history via `muse export`.
-			SessionDirTemplate:  "{home}/.local/share/muse",
-			SessionDirTarget:    "/root/.local/share/muse",
+			// Muse persists native sessions under ~/.local/share/muse by
+			// default. Mount the isolated executor home so both this data
+			// tree and ~/.config/muse/auth.json remain visible.
+			SessionDirTemplate:  "{home}",
+			SessionDirTarget:    "/root",
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 		},
@@ -146,12 +151,17 @@ func (a *MuseACP) RemoteAuth() *RemoteAuth {
 // ~/.config/muse/auth.json.
 func (a *MuseACP) LoginCommand() *LoginCommand {
 	return &LoginCommand{
-		Cmd:         []string{museBin, "login"},
+		Cmd:         []string{"env", "-u", "XDG_CONFIG_HOME", "-u", "XDG_DATA_HOME", museBin, "login"},
 		Description: "Sign in to Muse Code with your Meta account.",
 	}
 }
 
 func (a *MuseACP) InstallScript() string {
+	if runtime.GOOS == "windows" {
+		// The official installer is POSIX shell. Returning no script hides
+		// the install action on Windows instead of sending it to cmd.exe.
+		return ""
+	}
 	// Keep the installer in a temporary file so curl failures cannot be hidden
 	// by a successful bash exit status. MUSE_INSTALL_DIR points the official
 	// installer at the first writable absolute directory already on PATH, so

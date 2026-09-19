@@ -105,8 +105,8 @@ func TestMuseACP_RemoteAuth(t *testing.T) {
 
 func TestMuseACP_LoginCommand(t *testing.T) {
 	cmd := NewMuseACP().LoginCommand()
-	if cmd == nil || !slices.Equal(cmd.Cmd, []string{"muse", "login"}) {
-		t.Fatalf("LoginCommand() = %+v, want muse login", cmd)
+	if cmd == nil || !slices.Equal(cmd.Cmd, []string{"env", "-u", "XDG_CONFIG_HOME", "-u", "XDG_DATA_HOME", "muse", "login"}) {
+		t.Fatalf("LoginCommand() = %+v, want Muse login with XDG overrides removed", cmd)
 	}
 }
 
@@ -123,8 +123,11 @@ func TestMuseACP_SessionConfigAndMCPDelivery(t *testing.T) {
 	if !sc.NativeSessionResume || sc.CanRecover == nil || !*sc.CanRecover {
 		t.Errorf("SessionConfig = %+v, want native resume and recovery", sc)
 	}
-	if sc.SessionDirTarget != "/root/.local/share/muse" {
-		t.Errorf("SessionDirTarget = %q, want /root/.local/share/muse", sc.SessionDirTarget)
+	if sc.SessionDirTarget != "/root" {
+		t.Errorf("SessionDirTarget = %q, want /root", sc.SessionDirTarget)
+	}
+	if !slices.Equal(rt.StripEnv, []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME"}) {
+		t.Errorf("Runtime.StripEnv = %v, want XDG overrides removed", rt.StripEnv)
 	}
 	// The adapter forwards session/new MCP servers itself; a project file
 	// strategy would duplicate them.

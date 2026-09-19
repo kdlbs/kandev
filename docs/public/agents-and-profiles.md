@@ -43,13 +43,19 @@ which is not affiliated with Meta:
   needs Node.js 22 or later.
 - The adapter drives the native `muse` executable through `muse serve`; CLI
   Passthrough starts `muse` directly.
-- The Muse install action runs the official `https://dev.meta.ai/install.sh`
-  installer into the first writable directory on the backend's `PATH`.
+- On POSIX hosts, the Muse install action runs the official
+  `https://dev.meta.ai/install.sh` installer into the first writable directory
+  on the backend's `PATH`. Windows has no automated Muse install action because
+  the official installer is a POSIX shell script.
 
 Kandev detects Muse when `muse` is on the `PATH` of the backend process and
 responds to `--version`. Sign in with `muse login`, or set `META_API_KEY` for
 headless and remote executors. Muse keeps sessions under
 `~/.local/share/muse`, which Kandev uses for session resume.
+Kandev removes `XDG_CONFIG_HOME` and `XDG_DATA_HOME` overrides from Muse
+processes so credentials and sessions use these managed paths. Executors use an
+isolated home directory for both `~/.config/muse` and `~/.local/share/muse`; the
+real host home directory is not mounted.
 
 The adapter starts sessions on the `model` in Muse's
 `~/.config/muse/settings.json` and falls back to its own default otherwise,
@@ -81,7 +87,7 @@ The status shown on this page is authoritative for the current host. A CLI that 
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, and Pi agent cards. It updates the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards. It updates the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone

@@ -39,14 +39,17 @@ detection, install, login, and passthrough.
 - **MCP:** delivered through ACP `session/new`; the adapter writes stdio and
   HTTP servers into a temporary Muse config overlay. No `ProjectMCPStrategy`.
 - **Session resume:** native, via the adapter's `session/load`/resume over
-  `muse serve`. Session root `{home}/.local/share/muse`
-  (`$XDG_DATA_HOME/muse/sessions`).
+  `muse serve`. Muse uses the default `~/.local/share/muse` path. Kandev
+  removes `XDG_CONFIG_HOME` and `XDG_DATA_HOME` from Muse processes and mounts
+  the isolated `{home}` executor directory at `/root`, so credentials and
+  sessions stay inside Kandev-managed storage.
 - **Auth:** `muse login` (browser) writes `~/.config/muse/auth.json`, copied
   by the `files` remote-auth method. `META_API_KEY` is the headless `env`
   method and takes priority over stored auth.
-- **Install script:** downloads `https://dev.meta.ai/install.sh` to a
-  temporary file and runs it with `MUSE_INSTALL_DIR` set to the first
-  writable absolute PATH directory, then verifies `muse --version`.
+- **Install script:** on POSIX hosts, downloads `https://dev.meta.ai/install.sh`
+  to a temporary file and runs it with `MUSE_INSTALL_DIR` set to the first
+  writable absolute PATH directory, then verifies `muse --version`. Windows
+  exposes no automated install action because the installer is POSIX shell.
 - **Permissions:** empty settings; the adapter forwards Muse's approval
   requests (including per-stage shell approvals) to the ACP client, where
   agentctl's auto-approve policy applies.
@@ -78,7 +81,8 @@ Verified on macOS arm64 with Muse Code 1.3.0 (1.3.0-R3401.1) and adapter
   self-updates, so a newer host can drift from the adapter's pinned MSP
   schema (the adapter reports this as an advisory `hostCompatibility` entry).
 - Token usage and delegated workers are not reported by the adapter.
-- Windows is not covered: Muse's installer is POSIX shell.
+- Windows has no automated Muse installation because the official installer is
+  POSIX shell.
 
 ## Work orders
 
@@ -89,6 +93,8 @@ Verified on macOS arm64 with Muse Code 1.3.0 (1.3.0-R3401.1) and adapter
 - Unit: shared `newACPAgentSpecs` matrix (IDs, every command surface,
   detection, logos, session dir), `TestManagedNPMRuntimeContracts`, and
   `muse_acp_test.go` (installer behaviour, remote auth, login, resume/MCP).
+  Container configuration also verifies that the isolated Muse mount contains
+  both seeded credentials and native session data.
 - Manual: Settings > Agents detection, profile creation, a structured task
   with tool calls and an MCP tool, resume after restart, model/mode refresh,
   and passthrough.
