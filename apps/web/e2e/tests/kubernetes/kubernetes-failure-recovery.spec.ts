@@ -32,6 +32,7 @@ for (const restart of [false, true]) {
       env_vars: [],
     });
     try {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Kubernetes failure recovery",
@@ -85,7 +86,9 @@ for (const restart of [false, true]) {
       if (restart) await backend.restart();
       await testPage.goto(`/t/${task.id}`);
       await session.waitForLoad();
-      await session.recoveryResumeButton().click();
+      await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+      await session.recoveryResumeButton().click({ timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 90_000, requireEditable: true });
       await waitForTaskSessionState(apiClient, task.id, sessionId, "WAITING_FOR_INPUT", 90_000);
       const reply = restart ? "recovered-after-restart" : "recovered-after-failure";
       await apiClient.addUserMessage(task.id, sessionId, `e2e:message("${reply}")`);
@@ -101,6 +104,7 @@ for (const restart of [false, true]) {
       await waitForKubernetesResourceAbsent(cluster, "pod", pod.metadata.name);
       await waitForKubernetesResourceAbsent(cluster, "persistentvolumeclaim", claim.metadata.name);
     } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
       await apiClient.deleteExecutorProfile(profile.id);
     }
   });
