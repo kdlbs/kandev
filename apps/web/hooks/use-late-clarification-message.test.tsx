@@ -6,7 +6,10 @@ import {
   type Message,
   type TaskSession,
 } from "@/lib/types/http";
-import { useLateClarificationMessage } from "./use-late-clarification-message";
+import {
+  useLateClarificationMessage,
+  type LateClarificationSnapshot,
+} from "./use-late-clarification-message";
 
 const admissionMock = vi.hoisted(() => vi.fn());
 const fetchTaskSessionMock = vi.hoisted(() => vi.fn());
@@ -118,10 +121,10 @@ describe("useLateClarificationMessage", () => {
     state.messages.bySession[source.session_id] = [source];
     const firstDelivery = deferred<"sent">();
     admissionMock.mockReturnValueOnce(firstDelivery.promise).mockResolvedValueOnce("queued");
-    const snapshot = {
+    const snapshot: LateClarificationSnapshot = {
       messages: [source],
       answers: [{ question_id: QUESTION_ID, selected_options: ["option-1"] }],
-    } as const;
+    };
 
     const first = renderHook(() =>
       // eslint-disable-next-line react-hooks/rules-of-hooks -- renderHook callback is the hook under test.
@@ -160,10 +163,10 @@ describe("useLateClarificationMessage", () => {
     state.messages.bySession[source.session_id] = [source];
     const delivery = deferred<"sent">();
     admissionMock.mockReturnValueOnce(delivery.promise);
-    const snapshot = {
+    const snapshot: LateClarificationSnapshot = {
       messages: [source],
       answers: [{ question_id: QUESTION_ID, custom_text: "Keep this answer" }],
-    } as const;
+    };
 
     const active = renderHook(() => useLateClarificationMessage(source));
     const transcript = renderHook(() => useLateClarificationMessage(source));
@@ -189,10 +192,10 @@ describe("useLateClarificationMessage", () => {
       cursor: "",
     });
     admissionMock.mockResolvedValue("sent");
-    const snapshot = {
+    const snapshot: LateClarificationSnapshot = {
       messages: [source],
       answers: [{ question_id: QUESTION_ID, selected_options: ["option-1"] }],
-    } as const;
+    };
 
     const hook = renderHook(() => useLateClarificationMessage(source));
     await act(async () => {
