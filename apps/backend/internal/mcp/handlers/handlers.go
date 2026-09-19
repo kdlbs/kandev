@@ -4227,7 +4227,7 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	// Register the retry before reading its durable bundle. This ordering makes
 	// the handoff to Resolver linearizable: a concurrent durable answer either
 	// finds this waiter, or records that it already chose detached delivery.
-	retryPendingID := clarification.PendingIDForRequest(req.SessionID, req.RetryKey)
+	retryPendingID := clarification.PendingIDForRequest(req.SessionID, req.RetryKey, req.Questions, req.Context)
 	clarificationReq := &clarification.Request{
 		PendingID: retryPendingID,
 		SessionID: req.SessionID,

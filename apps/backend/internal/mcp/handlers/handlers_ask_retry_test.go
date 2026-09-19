@@ -100,7 +100,17 @@ func seedRetrySession(t *testing.T, ctx context.Context, svc *service.Service, r
 	require.NoError(t, err)
 	sess := &models.TaskSession{ID: "sess-" + suffix, TaskID: taskResult.Task.ID, IsPrimary: true, State: models.TaskSessionStateRunning}
 	require.NoError(t, repo.CreateTaskSession(ctx, sess))
-	return taskResult.Task.ID, sess.ID, clarification.PendingIDForRequest(sess.ID, retryTestKey)
+	return taskResult.Task.ID, sess.ID, clarification.PendingIDForRequest(sess.ID, retryTestKey, retryQuestions(t), "")
+}
+
+func retryQuestions(t *testing.T) []clarification.Question {
+	t.Helper()
+	payload, err := json.Marshal(retryTestQuestions)
+	require.NoError(t, err)
+	var questions []clarification.Question
+	require.NoError(t, json.Unmarshal(payload, &questions))
+	require.Empty(t, clarification.NormalizeAndValidateQuestions(questions))
+	return questions
 }
 
 // seedRetryMessage commits the durable question message an interrupted
@@ -492,6 +502,45 @@ func TestHandleAskUserQuestion_RetryReturnsRecordedAnswerWithoutWaiting(t *testi
 	assert.Equal(t, int32(0), creator.calls.Load())
 }
 
+func TestHandleAskUserQuestion_ReusedTransportRequestIDWithDifferentQuestionsCreatesNewBundle(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	taskID, sessionID, pendingID := seedRetrySession(t, ctx, svc, repo, "retry-reused-request-id")
+	seedRetryMessage(t, ctx, repo, taskID, sessionID, pendingID, "answered", map[string]interface{}{
+		"question_id": "q1", "selected_options": []interface{}{"opt-red"},
+	})
+
+	store := clarification.NewStore(time.Minute)
+	creator := &countingMessageCreator{}
+	h := NewHandlers(svc, nil, store, nil, creator, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	payload := retryAskPayload(sessionID, taskID)
+	payload["questions"] = []map[string]interface{}{{
+		"id": "q-next", "prompt": "Which size?",
+		"options": []map[string]interface{}{
+			{"label": "Small", "description": "S"},
+			{"label": "Large", "description": "L"},
+		},
+	}}
+
+	done := make(chan askUserQuestionResult, 1)
+	go func() {
+		resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, payload))
+		done <- askUserQuestionResult{response: resp, err: err}
+	}()
+
+	require.Eventually(t, func() bool { return len(store.ListPending()) == 1 }, time.Second, 5*time.Millisecond)
+	got := store.ListPending()[0]
+	assert.NotEqual(t, pendingID, got.PendingID, "a later call reusing a JSON-RPC id must not adopt an earlier bundle")
+	require.Len(t, got.Questions, 1)
+	assert.Equal(t, "q-next", got.Questions[0].ID)
+	assert.Equal(t, int32(1), creator.calls.Load(), "the later clarification must be published as its own visible bundle")
+
+	store.CancelSession(sessionID)
+	result := <-done
+	require.NoError(t, result.err)
+	assertWSError(t, result.response, ws.ErrorCodeInternalError)
+}
+
 func TestHandleAskUserQuestion_RetryReturnsDeliveryPendingRecordedOutcome(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -627,7 +676,7 @@ func TestHandleAskUserQuestion_WithoutRetryKeyUsesRandomIdentity(t *testing.T) {
 	got := store.ListPending()[0].PendingID
 	assert.NotEmpty(t, got)
 	assert.NotEqual(t, derived, got, "without a transport retry key the identity must stay random")
-	assert.NotEqual(t, clarification.PendingIDForRequest(sessionID, "test-id"), got, "the backend's own ws message id is not a retry identity")
+	assert.NotEqual(t, clarification.PendingIDForRequest(sessionID, "test-id", retryQuestions(t), ""), got, "the backend's own ws message id is not a retry identity")
 	store.CancelSession(sessionID)
 	wg.Wait()
 }

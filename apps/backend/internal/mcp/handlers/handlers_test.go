@@ -3173,7 +3173,13 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(store.ListPending()) == 1
 	}, time.Second, 5*time.Millisecond)
-	if got, want := store.ListPending()[0].PendingID, clarification.PendingIDForRequest(sess.ID, "conn-dedup/int64:1"); got != want {
+	questions := []clarification.Question{{
+		ID: "q1", Prompt: "What colour?", Options: []clarification.Option{
+			{ID: "q1_opt1", Label: "Red", Description: "R"},
+			{ID: "q1_opt2", Label: "Blue", Description: "B"},
+		},
+	}}
+	if got, want := store.ListPending()[0].PendingID, clarification.PendingIDForRequest(sess.ID, "conn-dedup/int64:1", questions, ""); got != want {
 		t.Fatalf("pending ID = %q, want transport retry identity %q", got, want)
 	}
 	store.CancelSession(sess.ID)

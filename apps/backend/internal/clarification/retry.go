@@ -1,6 +1,8 @@
 package clarification
 
 import (
+	"encoding/json"
+
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -8,17 +10,22 @@ import (
 )
 
 // PendingIDForRequest derives the durable identity of one ask_user_question
-// call from the Kandev session and the transport retry key the MCP server
-// attached to the call. The retry key must already be scoped to one MCP
-// connection so that JSON-RPC ids restarting on a new connection cannot alias
-// an earlier bundle; binding the session as well keeps the identity from
-// crossing sessions even if two connections reuse the same key. An empty
-// session or retry key returns empty so callers keep the random-ID behavior.
-func PendingIDForRequest(sessionID, retryKey string) string {
+// call from the Kandev session, the transport retry key, and the immutable
+// request payload. The retry key must already be scoped to one MCP connection
+// so JSON-RPC ids restarting on a new connection cannot alias an earlier
+// bundle. Including normalized questions and context also prevents a client
+// that later reuses a completed JSON-RPC id on that same connection from
+// adopting the old bundle. An empty session or retry key returns empty so
+// callers keep the random-ID behavior.
+func PendingIDForRequest(sessionID, retryKey string, questions []Question, context string) string {
 	if sessionID == "" || retryKey == "" {
 		return ""
 	}
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("kandev/clarification/"+sessionID+"/"+retryKey)).String()
+	payload, _ := json.Marshal(struct {
+		Questions []Question `json:"questions"`
+		Context   string     `json:"context"`
+	}{Questions: questions, Context: context})
+	return uuid.NewSHA1(uuid.NameSpaceURL, append([]byte("kandev/clarification/"+sessionID+"/"+retryKey+"/"), payload...)).String()
 }
 
 // RecordedOutcome reports the terminal state a bundle's durable messages

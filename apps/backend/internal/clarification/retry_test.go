@@ -10,17 +10,20 @@ import (
 )
 
 func TestPendingIDForRequest_IsStablePerSessionAndRetryKey(t *testing.T) {
-	first := PendingIDForRequest("session-a", "conn-1/int64:7")
+	questions := []Question{{ID: "q1", Prompt: "Which color?", Options: []Option{{ID: "red", Label: "Red"}, {ID: "blue", Label: "Blue"}}}}
+	first := PendingIDForRequest("session-a", "conn-1/int64:7", questions, "context")
 	require.NotEmpty(t, first, "expected a retry identity")
-	assert.Equal(t, first, PendingIDForRequest("session-a", "conn-1/int64:7"), "exact retry must map to the same identity")
-	assert.NotEqual(t, first, PendingIDForRequest("session-b", "conn-1/int64:7"), "identity must be scoped to the session")
-	assert.NotEqual(t, first, PendingIDForRequest("session-a", "conn-2/int64:7"), "a restarted id on another connection must not alias")
-	assert.NotEqual(t, first, PendingIDForRequest("session-a", "conn-1/int64:8"), "a different request on the same connection must not alias")
+	assert.Equal(t, first, PendingIDForRequest("session-a", "conn-1/int64:7", questions, "context"), "exact retry must map to the same identity")
+	assert.NotEqual(t, first, PendingIDForRequest("session-b", "conn-1/int64:7", questions, "context"), "identity must be scoped to the session")
+	assert.NotEqual(t, first, PendingIDForRequest("session-a", "conn-2/int64:7", questions, "context"), "a restarted id on another connection must not alias")
+	assert.NotEqual(t, first, PendingIDForRequest("session-a", "conn-1/int64:8", questions, "context"), "a different request on the same connection must not alias")
+	assert.NotEqual(t, first, PendingIDForRequest("session-a", "conn-1/int64:7", questions, "other context"), "a different request context must not alias")
+	assert.NotEqual(t, first, PendingIDForRequest("session-a", "conn-1/int64:7", []Question{{ID: "q1", Prompt: "Which size?", Options: questions[0].Options}}, "context"), "different questions must not alias")
 }
 
 func TestPendingIDForRequest_EmptyInputsKeepRandomStoreIdentity(t *testing.T) {
-	assert.Empty(t, PendingIDForRequest("session-a", ""))
-	assert.Empty(t, PendingIDForRequest("", "conn-1/int64:7"))
+	assert.Empty(t, PendingIDForRequest("session-a", "", nil, ""))
+	assert.Empty(t, PendingIDForRequest("", "conn-1/int64:7", nil, ""))
 }
 
 func retryBundleMessage(id string, index int, status string, response map[string]any) *taskmodels.Message {

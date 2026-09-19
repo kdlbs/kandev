@@ -892,11 +892,12 @@ The bundle's `pending_id` is the durable identity of the visible question group.
 carrying an `ask_user_question_kandev` call is interrupted or times out while the call is waiting,
 the question remains durably recorded. It stays visible and answerable while its bundle belongs to
 the session's current turn and the session is non-terminal. When the agent re-sends the same
-JSON-RPC request (same request id) within the same MCP session, Kandev maps the retry to the bundle
-its interrupted call created: no second question is published, the bundle is marked attached again
-if the interruption had detached it, and a previously recorded answer, rejection, or cancellation
-is reconciled instead of opening another wait. A superseded bundle or a bundle on a completed,
-failed, or cancelled session is reported as no longer active.
+JSON-RPC request (same request id, normalized questions, and context) within the same MCP session,
+Kandev maps the retry to the bundle its interrupted call created: no second question is published,
+the bundle is marked attached again if the interruption had detached it, and a previously recorded
+answer, rejection, or cancellation is reconciled instead of opening another wait. Reusing a
+completed request id for different question content creates a new bundle. A superseded bundle or a
+bundle on a completed, failed, or cancelled session is reported as no longer active.
 
 Registration and answer delivery use one atomic handoff. If an answer commits during retry
 reconciliation, it either reaches the re-registered tool waiter or continues through detached
