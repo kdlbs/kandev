@@ -55,8 +55,8 @@ const (
 	// already exhausted: no row was inserted and none was merged. Distinct
 	// from QueueOutcomeNone, which means no enqueue was attempted or the
 	// attempt errored — a caller must not infer a rate-limit refusal from
-	// an absence (AC-OFFICE-ASSIGN-RATE-003.5). Declared identically in
-	// internal/workflow/engine/adapters.go — both declarations MUST match.
+	// an absence. Declared identically in internal/workflow/engine/adapters.go
+	// — both declarations MUST match.
 	QueueOutcomeRateLimited QueueOutcome = "rate_limited"
 )
 

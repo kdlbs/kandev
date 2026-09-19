@@ -48,8 +48,7 @@ var (
 	// assignmentRateLimitTotal counts REQ-OFFICE-ASSIGN-RATE-003 refusals
 	// and degraded admissions by a closed three-value "reason" label
 	// (allowance_exhausted, count_read_failed, task_unattributed) — never a
-	// task, agent, workspace, session or run identifier
-	// (AC-OFFICE-ASSIGN-RATE-003.2).
+	// task, agent, workspace, session or run identifier.
 	assignmentRateLimitTotal = expvar.NewMap("office_assignment_rate_limit_total")
 )
 

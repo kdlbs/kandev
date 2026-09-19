@@ -115,8 +115,8 @@ func ReportKeylessEnqueue(reason string, cause KeylessCause, detail string) {
 		zap.String("detail", detail))
 }
 
-// Reason labels for office_assignment_rate_limit_total — the closed
-// three-value set AC-OFFICE-ASSIGN-RATE-003.1 requires.
+// Reason labels for office_assignment_rate_limit_total — a closed
+// three-value set.
 const (
 	assignmentRateLimitReasonAllowanceExhausted = "allowance_exhausted"
 	assignmentRateLimitReasonCountReadFailed    = "count_read_failed"
@@ -125,9 +125,10 @@ const (
 
 // ReportAssignmentRateLimitRefused records a wake refused because its
 // task's REQ-OFFICE-ASSIGN-RATE-001 allowance was already exhausted:
-// counts reason="allowance_exhausted", logs at Warn with the fields
-// AC-OFFICE-ASSIGN-RATE-003.3 names, and returns QueueOutcomeRateLimited.
-// The caller must not insert a row for this wake.
+// counts reason="allowance_exhausted", logs at Warn with the task,
+// assignee, acting-agent, observed-count and allowance fields, and
+// returns QueueOutcomeRateLimited. The caller must not insert a row for
+// this wake.
 func ReportAssignmentRateLimitRefused(
 	taskID, assigneeAgentProfileID, actingAgentID string, observedCount, allowance int,
 ) QueueOutcome {
@@ -142,10 +143,10 @@ func ReportAssignmentRateLimitRefused(
 }
 
 // ReportAssignmentRateLimitCountReadFailed records a degraded admission
-// caused by a failed window-count read (AC-OFFICE-ASSIGN-RATE-002.2):
-// counts reason="count_read_failed" and logs at Warn without an observed
-// count, which the failed read did not produce. The wake is still
-// admitted — this reports the degradation, it does not decide it.
+// caused by a failed window-count read: counts reason="count_read_failed"
+// and logs at Warn without an observed count, which the failed read did
+// not produce. The wake is still admitted — this reports the
+// degradation, it does not decide it.
 func ReportAssignmentRateLimitCountReadFailed(
 	taskID, assigneeAgentProfileID, actingAgentID string, allowance int, err error,
 ) {
@@ -159,9 +160,9 @@ func ReportAssignmentRateLimitCountReadFailed(
 }
 
 // ReportAssignmentRateLimitUnattributed records a degraded admission
-// caused by an otherwise in-scope wake whose task could not be determined
-// (AC-OFFICE-ASSIGN-RATE-002.3): counts reason="task_unattributed" and
-// logs at Warn without a task identifier, which is by definition the
+// caused by an otherwise in-scope wake whose task could not be
+// determined: counts reason="task_unattributed" and logs at Warn
+// without a task identifier, which is by definition the
 // value that could not be determined. actingAgentID is logged only when
 // non-empty. The wake is still admitted.
 func ReportAssignmentRateLimitUnattributed(actingAgentID string, allowance int) {

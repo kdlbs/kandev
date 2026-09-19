@@ -156,9 +156,8 @@ const IdempotencyWindowHours = 24
 // AssignmentWakeAllowanceN and AssignmentWakeAllowanceWindow are the fixed
 // N and W of REQ-OFFICE-ASSIGN-RATE-001: at most N agent-initiated
 // assignment wakes admitted per task within any rolling window of duration
-// W. Fixed values of this capability rather than operator-configurable
-// (AC-OFFICE-ASSIGN-RATE-002.6); referenced by the tests rather than
-// restated.
+// W. Fixed values of this capability rather than operator-configurable;
+// referenced by the tests rather than restated.
 const (
 	AssignmentWakeAllowanceN      = 5
 	AssignmentWakeAllowanceWindow = 10 * time.Minute
@@ -375,7 +374,7 @@ func (ss *SchedulerService) queueRun(
 	// wake, but the gate does not rely on that coincidence to stay
 	// correct. It sits here, after the recent-duplicate lookup and the
 	// coalescing attempt and before CreateRun, so "admitted" means
-	// exactly "a row was inserted" (AC-OFFICE-ASSIGN-RATE-001.5).
+	// exactly "a row was inserted".
 	if refused := ss.checkAssignmentWakeAllowance(ctx, agentInstanceID, reason, payload); refused {
 		return runsservice.QueueOutcomeRateLimited, nil
 	}

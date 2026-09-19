@@ -13,10 +13,10 @@ import (
 // predicate": reason == task_assigned, actor_type == "agent", and the
 // wake names a task. Evaluated in that order because a wake failing step
 // 2 is out of scope and must never reach step 3's counted unattributed
-// case (AC-OFFICE-ASSIGN-RATE-002.3).
+// case.
 type assignmentWakePredicate struct {
 	// inScope is true once steps 1 and 2 both pass: this is an
-	// agent-initiated assignment wake, per AC-OFFICE-ASSIGN-RATE-001.1.
+	// agent-initiated assignment wake.
 	inScope bool
 	// taskAttributed is true once step 3 also passes: the wake names a
 	// task the allowance can be scoped to.
@@ -36,8 +36,8 @@ type assignmentWakePredicate struct {
 // count scans. An unparseable payload carries no readable actor_type
 // either, so it fails step 2 and is classified out of scope, exactly
 // like a payload whose actor_type is merely absent or not "agent" —
-// never counted as unattributed, which AC-OFFICE-ASSIGN-RATE-002.3
-// reserves for a wake already shown to be in scope.
+// never counted as unattributed, which is reserved for a wake already
+// shown to be in scope.
 func classifyAssignmentWake(reason, payload string) assignmentWakePredicate {
 	if reason != RunReasonTaskAssigned {
 		return assignmentWakePredicate{}
@@ -55,7 +55,7 @@ func classifyAssignmentWake(reason, payload string) assignmentWakePredicate {
 
 	// A task cannot be determined when the identifier is absent, null,
 	// empty, or present but not a string; those shapes are treated
-	// identically (AC-OFFICE-ASSIGN-RATE-002.3).
+	// identically.
 	v, present := raw["task_id"]
 	if !present || v == nil {
 		return pred
