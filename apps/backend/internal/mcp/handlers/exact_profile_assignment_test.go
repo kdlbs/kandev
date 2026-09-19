@@ -5,65 +5,90 @@ import (
 	"encoding/json"
 	"testing"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/require"
 )
 
-func TestHandleAssignExactTaskProfileForwardsGuardedRequest(t *testing.T) {
+func TestHandleAssignExactTaskProfileForwardsGuardedCoordinatorRequest(t *testing.T) {
+	ctx := context.Background()
+	taskSvc, repo, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace", Name: "Workspace"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow", WorkspaceID: "workspace", Name: "Workflow"}))
+	for _, step := range []*wfmodels.WorkflowStep{
+		{ID: "step-done", WorkflowID: "workflow", Name: "Done"},
+		{ID: "step-work", WorkflowID: "workflow", Name: "Work"},
+	} {
+		require.NoError(t, workflowRepo.CreateStep(ctx, step))
+	}
+	for _, task := range []*models.Task{
+		{ID: "coordinator", WorkspaceID: "workspace", WorkflowID: "workflow", WorkflowStepID: "step-done", State: v1.TaskStateCompleted},
+		{ID: "target", WorkspaceID: "workspace", WorkflowID: "workflow", WorkflowStepID: "step-done", State: v1.TaskStateCompleted},
+	} {
+		require.NoError(t, repo.CreateTask(ctx, task))
+	}
 	assigner := &recordingExactTaskProfileAssigner{}
-	h := NewHandlers(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, testLogger(t))
+	h := NewHandlers(taskSvc, workflowCtrl, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 	h.SetExactTaskProfileAssigner(assigner)
 	payload, err := json.Marshal(map[string]interface{}{
-		"task_id": "task-1", "agent_profile_id": "profile-1", "generation": 2,
+		"task_id": "target", "agent_profile_id": "profile-sol", "expected_model": "gpt-5.6-sol",
+		"expected_task_state": v1.TaskStateCompleted, "expected_workflow_step_id": "step-done",
+		"target_workflow_step_id": "step-work", "expected_assignment_generation": 0,
+		"sender_task_id": "coordinator", "sender_session_id": "coordinator-session",
 	})
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
+	require.NoError(t, err)
+	principal := mcpscope.WithPrincipal(ctx, mcpscope.Principal{
+		AutomationID: "automation", WorkspaceID: "workspace", CallerTaskID: "coordinator",
+		CallerSessionID: "coordinator-session", Surface: mcpprofile.SurfaceAutomation,
+	})
 
-	if _, err := h.handleAssignExactTaskProfile(mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{CallerTaskID: "task-1", CallerSessionID: "session-1"}), &ws.Message{
+	response, err := h.handleAssignExactTaskProfile(principal, &ws.Message{
 		ID: "request-1", Action: ws.ActionMCPAssignExactTaskProfile, Payload: payload,
-	}); err != nil {
-		t.Fatalf("handle assignment: %v", err)
-	}
-	if assigner.taskID != "task-1" || assigner.profileID != "profile-1" || assigner.generation != 2 {
-		t.Fatalf("assignment = (%q, %q, %d)", assigner.taskID, assigner.profileID, assigner.generation)
-	}
+	})
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Equal(t, orchestrator.ExactTaskProfileAssignmentRequest{
+		TaskID: "target", AgentProfileID: "profile-sol", ExpectedModel: "gpt-5.6-sol", Generation: 1,
+		ExpectedWorkflowID: "workflow", ExpectedWorkflowStepID: "step-done", ExpectedTaskState: v1.TaskStateCompleted,
+	}, assigner.request)
 }
 
 type recordingExactTaskProfileAssigner struct {
-	taskID, profileID string
-	generation        int64
+	request orchestrator.ExactTaskProfileAssignmentRequest
 }
 
 func (a *recordingExactTaskProfileAssigner) AssignExactTaskProfile(
-	_ context.Context, taskID, profileID string, generation int64,
+	_ context.Context, request orchestrator.ExactTaskProfileAssignmentRequest,
 ) (*orchestrator.ExactProfileLaunchDecision, error) {
-	a.taskID, a.profileID, a.generation = taskID, profileID, generation
-	return &orchestrator.ExactProfileLaunchDecision{AgentProfileID: profileID, Generation: generation}, nil
+	a.request = request
+	return &orchestrator.ExactProfileLaunchDecision{
+		AgentProfileID: request.AgentProfileID, Generation: request.Generation,
+		Revision: 42, Model: request.ExpectedModel, Changed: true,
+	}, nil
 }
 
-func TestHandleAssignExactTaskProfileRejectsForeignCallerTask(t *testing.T) {
-	assigner := &recordingExactTaskProfileAssigner{}
+func TestHandleAssignExactTaskProfileRejectsOrdinaryCrossTaskCaller(t *testing.T) {
 	h := NewHandlers(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, testLogger(t))
-	h.SetExactTaskProfileAssigner(assigner)
+	h.SetExactTaskProfileAssigner(&recordingExactTaskProfileAssigner{})
 	payload, err := json.Marshal(map[string]interface{}{
-		"task_id": "task-foreign", "agent_profile_id": "profile-1", "generation": 1,
+		"task_id": "task-foreign", "agent_profile_id": "profile-sol", "expected_model": "gpt-5.6-sol",
+		"expected_task_state": v1.TaskStateCompleted, "expected_workflow_step_id": "step-done",
+		"target_workflow_step_id": "step-work", "expected_assignment_generation": 0,
+		"sender_task_id": "ordinary", "sender_session_id": "ordinary-session",
 	})
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	response, err := h.handleAssignExactTaskProfile(
-		mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{CallerTaskID: "task-1", CallerSessionID: "session-1"}),
-		&ws.Message{ID: "request-foreign", Action: ws.ActionMCPAssignExactTaskProfile, Payload: payload},
-	)
-	if err != nil {
-		t.Fatalf("handle assignment: %v", err)
-	}
-	if response == nil || response.Type != ws.MessageTypeError {
-		t.Fatalf("response = %#v, want authorization error", response)
-	}
-	if assigner.taskID != "" {
-		t.Fatalf("assigner called for foreign task %q", assigner.taskID)
-	}
+	require.NoError(t, err)
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		WorkspaceID: "workspace", CallerTaskID: "ordinary", CallerSessionID: "ordinary-session",
+		Surface: mcpprofile.SurfaceKanbanTask,
+	})
+	response, err := h.handleAssignExactTaskProfile(ctx, &ws.Message{
+		ID: "request-foreign", Action: ws.ActionMCPAssignExactTaskProfile, Payload: payload,
+	})
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
 }

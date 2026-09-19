@@ -153,11 +153,15 @@ type TaskRepository interface {
 // ExactTaskProfileAssigner records a validated, generation-guarded concrete
 // profile selection for a task.
 type ExactTaskProfileAssigner interface {
-	AssignExactTaskProfile(ctx context.Context, taskID, agentProfileID string, generation int64) (*orchestrator.ExactProfileLaunchDecision, error)
+	AssignExactTaskProfile(ctx context.Context, request orchestrator.ExactTaskProfileAssignmentRequest) (*orchestrator.ExactProfileLaunchDecision, error)
 }
 
 type exactTaskProfileGenerationReader interface {
 	ExactTaskProfileGeneration(context.Context, string) (int64, error)
+}
+
+type exactProfileLaunchReceiptReader interface {
+	ExactProfileLaunchReceipt(context.Context, string, string) (*models.ExactProfileLaunchReceipt, error)
 }
 
 // RemoteContributionService resolves provider URLs before task creation and

@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -98,6 +99,9 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	}
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
+	}
+	if surface == mcpprofile.SurfaceKanbanTask && mcpscope.IsCanonicalCoordinatorTask(ctx, task, e.repo) {
+		capabilities = append(capabilities, mcpprofile.CapabilityExactTaskProfileAssignment)
 	}
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }

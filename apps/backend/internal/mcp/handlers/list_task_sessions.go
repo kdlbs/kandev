@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -18,15 +19,30 @@ import (
 // needs identity, role and state — not container IDs, worktree paths, or
 // profile snapshots.
 type taskSessionListEntry struct {
-	SessionID      string                  `json:"session_id"`
-	Name           string                  `json:"name,omitempty"`
-	State          models.TaskSessionState `json:"state"`
-	IsPrimary      bool                    `json:"is_primary"`
-	IsCurrent      bool                    `json:"is_current"`
-	AgentProfileID string                  `json:"agent_profile_id,omitempty"`
-	StartedAt      time.Time               `json:"started_at"`
-	CompletedAt    *time.Time              `json:"completed_at,omitempty"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	SessionID      string                   `json:"session_id"`
+	Name           string                   `json:"name,omitempty"`
+	State          models.TaskSessionState  `json:"state"`
+	IsPrimary      bool                     `json:"is_primary"`
+	IsCurrent      bool                     `json:"is_current"`
+	AgentProfileID string                   `json:"agent_profile_id,omitempty"`
+	StartedAt      time.Time                `json:"started_at"`
+	CompletedAt    *time.Time               `json:"completed_at,omitempty"`
+	UpdatedAt      time.Time                `json:"updated_at"`
+	ExactProfile   *taskSessionExactProfile `json:"exact_profile,omitempty"`
+}
+
+// taskSessionExactProfile is a bounded projection of the immutable launch
+// receipt. Failure text is deliberately excluded because provider errors can
+// carry transport details or credentials.
+type taskSessionExactProfile struct {
+	AgentProfileID        string `json:"agent_profile_id"`
+	Generation            int64  `json:"generation"`
+	ProfileRevision       int64  `json:"profile_revision"`
+	Model                 string `json:"model"`
+	Outcome               string `json:"outcome"`
+	InferenceStarted      bool   `json:"inference_started"`
+	SubstitutionPerformed bool   `json:"substitution_performed"`
+	ModelVerified         bool   `json:"model_verified"`
 }
 
 type listTaskSessionsRequest struct {
@@ -78,7 +94,14 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 	}
 
 	entries := make([]taskSessionListEntry, 0, len(sessions))
+	principal, _ := mcpscope.PrincipalFromContext(ctx)
+	includeExactReceipt := h.isCanonicalCoordinator(ctx, principal)
 	for _, session := range sessions {
+		exactProfile, receiptErr := h.projectExactProfileReceipt(ctx, req.TaskID, session.ID, includeExactReceipt)
+		if receiptErr != nil {
+			h.logger.Error("failed to load exact profile launch receipt", zap.Error(receiptErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
+		}
 		entries = append(entries, taskSessionListEntry{
 			SessionID:      session.ID,
 			Name:           session.Name,
@@ -89,6 +112,7 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 			StartedAt:      session.StartedAt,
 			CompletedAt:    session.CompletedAt,
 			UpdatedAt:      session.UpdatedAt,
+			ExactProfile:   exactProfile,
 		})
 	}
 
@@ -97,4 +121,25 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 		"sessions": entries,
 		keyTotal:   len(entries),
 	})
+}
+
+func (h *Handlers) projectExactProfileReceipt(
+	ctx context.Context, taskID, sessionID string, include bool,
+) (*taskSessionExactProfile, error) {
+	reader, ok := h.exactTaskProfileAssigner.(exactProfileLaunchReceiptReader)
+	if !include || !ok {
+		return nil, nil
+	}
+	receipt, err := reader.ExactProfileLaunchReceipt(ctx, taskID, sessionID)
+	if err != nil || receipt == nil {
+		return nil, err
+	}
+	return &taskSessionExactProfile{
+		AgentProfileID: receipt.AgentProfileID, Generation: receipt.Generation,
+		ProfileRevision: receipt.ProfileRevision.UnixNano(), Model: receipt.Model,
+		Outcome: receipt.Outcome, InferenceStarted: receipt.InferenceStarted,
+		SubstitutionPerformed: receipt.SubstitutionDone,
+		ModelVerified: receipt.Outcome == models.ExactProfileLaunchOutcomeApplied &&
+			receipt.InferenceStarted && !receipt.SubstitutionDone && receipt.Model != "",
+	}, nil
 }

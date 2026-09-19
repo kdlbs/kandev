@@ -116,6 +116,33 @@ func TestAssignExactProfileAssignmentActivatesAtomically(t *testing.T) {
 	}
 }
 
+func TestAssignExactProfileAssignmentRejectsTaskLaneChangeAtomically(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	ctx := context.Background()
+	assignment.SourceWorkflowID = "workflow-1"
+	assignment.SourceWorkflowStepID = "step-expected"
+	assignment.SourceTaskState = "TODO"
+
+	result, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE tasks SET workflow_id = ?, workflow_step_id = ?, state = ? WHERE id = ?
+	`), assignment.SourceWorkflowID, "step-changed", assignment.SourceTaskState, assignment.TaskID)
+	if err != nil {
+		t.Fatalf("move task fixture: %v", err)
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
+		t.Fatalf("move task fixture rows = %d, %v", rows, rowsErr)
+	}
+
+	changed, err := repo.AssignExactProfileAssignment(ctx, assignment)
+	if !errors.Is(err, models.ErrExactProfileAssignmentGeneration) || changed {
+		t.Fatalf("assignment after lane change = (%v, %v), want fenced rejection", changed, err)
+	}
+	stored, getErr := repo.GetExactProfileAssignment(ctx, assignment.TaskID)
+	if getErr != nil || stored != nil {
+		t.Fatalf("stored assignment = %#v, %v; want nil", stored, getErr)
+	}
+}
+
 func TestActivateExactProfileAssignmentRejectsStaleGeneration(t *testing.T) {
 	repo, assignment := newExactProfileAssignmentRepo(t)
 	if _, err := repo.UpsertExactProfileAssignment(context.Background(), assignment); err != nil {

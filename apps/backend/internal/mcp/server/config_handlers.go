@@ -353,15 +353,7 @@ func (s *Server) registerConfigExecutorTools() {
 // --- Task config tools ---
 
 func (s *Server) registerConfigTaskTools() {
-	s.mcpServer.AddTool(
-		mcp.NewTool("assign_exact_task_profile_kandev",
-			mcp.WithDescription("Assign a concrete enabled agent profile to a task for its next exact-profile launch. The assignment is generation guarded and fails rather than falling back if the profile changes."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
-			mcp.WithString("agent_profile_id", mcp.Required(), mcp.Description("Concrete agent profile ID")),
-			mcp.WithNumber("generation", mcp.Required(), mcp.Description("Next assignment generation")),
-		),
-		s.wrapHandler("assign_exact_task_profile_kandev", s.assignExactTaskProfileHandler()),
-	)
+	s.registerAssignExactTaskProfileTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_tasks_kandev",
 			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
@@ -381,6 +373,30 @@ func (s *Server) registerConfigTaskTools() {
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
+	s.registerRemainingConfigTaskTools()
+}
+
+func (s *Server) registerAssignExactTaskProfileTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("assign_exact_task_profile_kandev",
+			mcp.WithDescription("Select one enabled exact agent profile/model for future starts of a same-workspace task. The write is generation-, state-, lane-, and active-writer-guarded. It does not move the task, resume a session, or start inference. Pass generation 0 when no assignment exists; retry a lost response with the same generation and values."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("Exact same-workspace target task UUID")),
+			mcp.WithString("agent_profile_id", mcp.Required(), mcp.Description("Enabled profile UUID to assign")),
+			mcp.WithString("expected_model", mcp.Required(), mcp.Description("Exact current model ID expected on the profile")),
+			mcp.WithString("expected_task_state", mcp.Required(), mcp.Description("Exact current task state returned by list_tasks_kandev")),
+			mcp.WithString("expected_workflow_step_id", mcp.Required(), mcp.Description("Exact current lane ID returned by list_tasks_kandev")),
+			mcp.WithString("target_workflow_step_id", mcp.Required(), mcp.Description("Lane in which the exact selection will be used")),
+			mcp.WithNumber("expected_assignment_generation", mcp.Required(), mcp.Description("Current assignment generation; use 0 when absent")),
+		),
+		s.wrapHandler("assign_exact_task_profile_kandev", s.assignExactTaskProfileHandler()),
+	)
+}
+
+func (s *Server) registerRemainingConfigTaskTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_kandev",
 			mcp.WithDescription("Delete a task permanently."),
@@ -429,21 +445,30 @@ func (s *Server) registerConfigTaskTools() {
 
 func (s *Server) assignExactTaskProfileHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
-		if err != nil {
-			return mcp.NewToolResultError("task_id is required"), nil
+		arguments, ok := req.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("arguments are required"), nil
 		}
-		profileID, err := req.RequireString("agent_profile_id")
-		if err != nil {
-			return mcp.NewToolResultError("agent_profile_id is required"), nil
+		required := []string{
+			"task_id", "agent_profile_id", "expected_model", "expected_task_state",
+			"expected_workflow_step_id", "target_workflow_step_id",
 		}
-		generation := req.GetFloat("generation", 0)
-		if generation < 1 || generation != float64(int64(generation)) {
-			return mcp.NewToolResultError("generation must be a positive integer"), nil
+		payload := map[string]interface{}{
+			"sender_task_id": s.taskID, "sender_session_id": s.sessionID,
 		}
-		return s.forwardToBackend(ctx, ws.ActionMCPAssignExactTaskProfile, map[string]interface{}{
-			"task_id": taskID, "agent_profile_id": profileID, "generation": int64(generation),
-		})
+		for _, key := range required {
+			value, present := arguments[key].(string)
+			if !present || strings.TrimSpace(value) == "" {
+				return mcp.NewToolResultError(key + " is required"), nil
+			}
+			payload[key] = value
+		}
+		generation, present := arguments["expected_assignment_generation"].(float64)
+		if !present || generation < 0 || generation != float64(int64(generation)) {
+			return mcp.NewToolResultError("expected_assignment_generation must be a non-negative integer"), nil
+		}
+		payload["expected_assignment_generation"] = int64(generation)
+		return s.forwardToBackend(ctx, ws.ActionMCPAssignExactTaskProfile, payload)
 	}
 }
 

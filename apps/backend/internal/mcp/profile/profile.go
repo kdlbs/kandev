@@ -28,6 +28,9 @@ const (
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
 	CapabilityCanvas         Capability = "canvas-authoring"
+	// CapabilityExactTaskProfileAssignment is granted only when the backend
+	// verifies that a Kanban task is the canonical workspace Coordinator.
+	CapabilityExactTaskProfileAssignment Capability = "exact-task-profile-assignment"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent

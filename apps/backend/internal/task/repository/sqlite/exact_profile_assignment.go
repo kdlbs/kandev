@@ -139,11 +139,22 @@ func (r *Repository) AssignExactProfileAssignment(ctx context.Context, assignmen
 			INSERT INTO task_exact_profile_assignments (
 				task_id, workspace_id, agent_profile_id, profile_revision, generation,
 				source_workflow_id, source_workflow_step_id, source_task_state, active, created_at, updated_at
-			) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-			WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ?)
+		) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		WHERE EXISTS (
+			SELECT 1 FROM tasks
+			WHERE id = ? AND workspace_id = ?
+				AND (? = '' OR workflow_id = ?)
+				AND (? = '' OR workflow_step_id = ?)
+				AND (? = '' OR state = ?)
+				AND archived_at IS NULL
+		)
 		`), assignment.TaskID, assignment.WorkspaceID, assignment.AgentProfileID, assignment.ProfileRevision,
 			assignment.Generation, assignment.SourceWorkflowID, assignment.SourceWorkflowStepID, assignment.SourceTaskState,
-			dialect.BoolToInt(true), assignment.CreatedAt, assignment.UpdatedAt, assignment.TaskID, assignment.WorkspaceID)
+			dialect.BoolToInt(true), assignment.CreatedAt, assignment.UpdatedAt,
+			assignment.TaskID, assignment.WorkspaceID,
+			assignment.SourceWorkflowID, assignment.SourceWorkflowID,
+			assignment.SourceWorkflowStepID, assignment.SourceWorkflowStepID,
+			assignment.SourceTaskState, assignment.SourceTaskState)
 		if execErr != nil {
 			return false, fmt.Errorf("insert exact profile assignment: %w", execErr)
 		}
@@ -161,6 +172,32 @@ func (r *Repository) AssignExactProfileAssignment(ctx context.Context, assignmen
 		if !current.Active {
 			return false, models.ErrExactProfileAssignmentGeneration
 		}
+		result, execErr := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_exact_profile_assignments SET updated_at = updated_at
+			WHERE task_id = ? AND generation = ? AND active = ?
+				AND EXISTS (
+					SELECT 1 FROM tasks
+					WHERE id = ? AND workspace_id = ?
+						AND (? = '' OR workflow_id = ?)
+						AND (? = '' OR workflow_step_id = ?)
+						AND (? = '' OR state = ?)
+						AND archived_at IS NULL
+				)
+		`), assignment.TaskID, assignment.Generation, dialect.BoolToInt(true),
+			assignment.TaskID, assignment.WorkspaceID,
+			assignment.SourceWorkflowID, assignment.SourceWorkflowID,
+			assignment.SourceWorkflowStepID, assignment.SourceWorkflowStepID,
+			assignment.SourceTaskState, assignment.SourceTaskState)
+		if execErr != nil {
+			return false, fmt.Errorf("verify exact profile assignment replay: %w", execErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return false, rowsErr
+		}
+		if rows != 1 {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
 		if err := tx.Commit(); err != nil {
 			return false, fmt.Errorf("commit exact profile assignment replay: %w", err)
 		}
@@ -171,9 +208,21 @@ func (r *Repository) AssignExactProfileAssignment(ctx context.Context, assignmen
 			SET workspace_id = ?, agent_profile_id = ?, profile_revision = ?, generation = ?,
 				source_workflow_id = ?, source_workflow_step_id = ?, source_task_state = ?, active = ?, updated_at = ?
 			WHERE task_id = ? AND generation = ?
+				AND EXISTS (
+					SELECT 1 FROM tasks
+					WHERE id = ? AND workspace_id = ?
+						AND (? = '' OR workflow_id = ?)
+						AND (? = '' OR workflow_step_id = ?)
+						AND (? = '' OR state = ?)
+						AND archived_at IS NULL
+				)
 		`), assignment.WorkspaceID, assignment.AgentProfileID, assignment.ProfileRevision, assignment.Generation,
 			assignment.SourceWorkflowID, assignment.SourceWorkflowStepID, assignment.SourceTaskState,
-			dialect.BoolToInt(true), assignment.UpdatedAt, assignment.TaskID, current.Generation)
+			dialect.BoolToInt(true), assignment.UpdatedAt, assignment.TaskID, current.Generation,
+			assignment.TaskID, assignment.WorkspaceID,
+			assignment.SourceWorkflowID, assignment.SourceWorkflowID,
+			assignment.SourceWorkflowStepID, assignment.SourceWorkflowStepID,
+			assignment.SourceTaskState, assignment.SourceTaskState)
 		if execErr != nil {
 			return false, fmt.Errorf("replace exact profile assignment: %w", execErr)
 		}
