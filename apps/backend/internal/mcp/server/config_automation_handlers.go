@@ -10,6 +10,7 @@ import (
 
 const createAutomationSchema = `{
  "type":"object",
+ "additionalProperties":false,
  "required":["workspace_id","name"],
  "properties":{
   "workspace_id":{"type":"string","minLength":1,"description":"Authorized workspace ID, from workspace discovery."},

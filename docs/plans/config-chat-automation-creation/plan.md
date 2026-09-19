@@ -49,6 +49,8 @@ Run from the repository root after TDD implementation:
 
 ```sh
 (cd apps/backend && go test ./internal/mcp/... ./internal/backendapp ./internal/automation -count=1)
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -74,3 +76,11 @@ Creation can make enabled triggers eligible to fire immediately. The existing
 service can return a persisted automation with fewer triggers after a storage
 failure; inspect returned state and avoid automatic retries. No new CRUD suite,
 external tool exposure, storage transaction, flag or UI is included.
+
+## PR review remediation
+
+Made the advertised schema's root reject unknown fields explicitly, matching
+existing shared runtime validation. Added a regression for both discovery and
+the misspelled `max_concurrent_run` argument. Added public-doc test/validation
+commands to the repeatable verification blocks. Product behavior and ownership
+remain unchanged. Targeted verification is recorded after the checks complete.

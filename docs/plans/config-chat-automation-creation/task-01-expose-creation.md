@@ -49,6 +49,8 @@ Use `/tdd` and the backend testing reference. Add failing cases listed in the
 
 ```sh
 (cd apps/backend && go test ./internal/mcp/... ./internal/backendapp ./internal/automation -count=1)
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -103,3 +105,11 @@ TDD evidence: initial catalog/argument tests failed because the tool was absent;
 the backend registration test failed because the action was absent. Both passed
 after implementation. No delegation, commit, push, or PR was performed.
 
+
+## PR review remediation
+
+Made the advertised schema's root reject unknown fields explicitly, matching
+existing shared runtime validation. Added a regression for both discovery and
+the misspelled `max_concurrent_run` argument. Added public-doc test/validation
+commands to the repeatable verification blocks. Product behavior and ownership
+remain unchanged. Targeted verification is recorded after the checks complete.

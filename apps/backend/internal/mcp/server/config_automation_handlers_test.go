@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"encoding/json"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 // @covers AC-OFFICE-CONFIG-AUTOMATION-001.1
@@ -52,4 +54,19 @@ func TestConfigAutomationInvalidArguments(t *testing.T) {
 		assert.True(t, result.IsError)
 		assert.Empty(t, backend.lastAction)
 	}
+}
+
+func TestConfigAutomationSchemaRejectsUnknownFields(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+	tool, ok := s.mcpServer.ListTools()["create_automation_kandev"]
+	require.True(t, ok)
+	var schema map[string]interface{}
+	require.NoError(t, json.Unmarshal(tool.Tool.RawInputSchema, &schema))
+	assert.Equal(t, false, schema["additionalProperties"])
+	result := callTool(t, s, "create_automation_kandev", map[string]interface{}{
+		"workspace_id": "ws", "name": "Daily", "max_concurrent_run": 2,
+	})
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
 }
