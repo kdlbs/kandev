@@ -393,9 +393,9 @@ type TurnRepository interface {
 	// inserts the turn row in the same transaction, taking the same lock
 	// readTaskStepInTx takes for step moves, so the stamp reflects a state
 	// serialized against concurrent movers of the same task rather than a
-	// plain unlocked read taken before the insert. A task-step read failure
-	// (missing task, transient error) degrades to an unstamped turn rather
-	// than failing turn creation. Returns whether the stamp was applied.
+	// plain unlocked read taken before the insert. A missing task or step
+	// produces an unstamped turn; authority and step-read errors abort the
+	// transaction. Returns whether the stamp was applied.
 	CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (stamped bool, err error)
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)

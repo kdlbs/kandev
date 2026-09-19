@@ -109,9 +109,11 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 		return nil, fmt.Errorf("%w: environment %s is claimed by operation %s", ErrBusy, req.TaskEnvironmentID, claim.OperationID)
 	}
 
-	if busy, err := environmentHasConsumers(ctx, db, tx, req.TaskEnvironmentID, req.SessionID); err != nil {
+	snapshot, err := loadAdmissionSnapshot(ctx, db, tx, req.TaskEnvironmentID, req.SessionID)
+	if err != nil {
 		return nil, err
-	} else if busy {
+	}
+	if ClassifyAdmission(snapshot) == models.TaskEnvironmentAdmissionLiveBlocker {
 		return nil, fmt.Errorf("%w: environment %s has a live session or runtime", ErrBusy, req.TaskEnvironmentID)
 	}
 
@@ -362,27 +364,54 @@ func loadEnvironmentIdentity(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, envi
 	return ownerTaskID, generation, executorType, nil
 }
 
-func environmentHasConsumers(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID, requestingSessionID string) (bool, error) {
-	var sessionExists, runtimeExists bool
+func loadAdmissionSnapshot(
+	ctx context.Context,
+	db *sqlx.DB,
+	tx *sqlx.Tx,
+	environmentID string,
+	requestingSessionID string,
+) (models.TaskEnvironmentAdmissionSnapshot, error) {
+	snapshot := models.TaskEnvironmentAdmissionSnapshot{}
 	if err := tx.QueryRowContext(ctx, db.Rebind(`
-		SELECT EXISTS (
-			SELECT 1 FROM task_sessions
-			WHERE task_environment_id = ? AND id <> ?
-			  AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
-		)
-	`), environmentID, requestingSessionID).Scan(&sessionExists); err != nil {
-		return false, err
+		SELECT COALESCE(materialization_session_id, '')
+		FROM task_environments
+		WHERE id = ?
+	`), environmentID).Scan(&snapshot.MaterializationSessionID); err != nil {
+		return snapshot, err
 	}
-	if err := tx.QueryRowContext(ctx, db.Rebind(`
-		SELECT EXISTS (
-			SELECT 1 FROM executors_running er
-			JOIN task_sessions ts ON ts.id = er.session_id
-			WHERE ts.task_environment_id = ?
-		)
-	`), environmentID).Scan(&runtimeExists); err != nil {
-		return false, err
+
+	rows, err := tx.QueryContext(ctx, db.Rebind(`
+		SELECT ts.id, ts.state,
+			EXISTS (
+				SELECT 1 FROM task_session_turns turn
+				WHERE turn.task_session_id = ts.id AND turn.completed_at IS NULL
+			),
+			CASE WHEN er.session_id IS NULL THEN FALSE ELSE TRUE END,
+			COALESCE(er.status, '')
+		FROM task_sessions ts
+		LEFT JOIN executors_running er ON er.session_id = ts.id
+		WHERE ts.task_environment_id = ? AND ts.id <> ?
+		ORDER BY ts.id
+	`), environmentID, requestingSessionID)
+	if err != nil {
+		return snapshot, err
 	}
-	return sessionExists || runtimeExists, nil
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		consumer := models.TaskEnvironmentAdmissionConsumer{}
+		if err := rows.Scan(
+			&consumer.SessionID,
+			&consumer.SessionState,
+			&consumer.HasActiveTurn,
+			&consumer.HasExecutor,
+			&consumer.ExecutorStatus,
+		); err != nil {
+			return snapshot, err
+		}
+		snapshot.Consumers = append(snapshot.Consumers, consumer)
+	}
+	return snapshot, rows.Err()
 }
 
 func loadClaim(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (*models.TaskEnvironmentRecoveryClaim, error) {

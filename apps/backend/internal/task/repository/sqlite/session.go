@@ -30,59 +30,17 @@ type taskSessionExecutor interface {
 
 // CreateTurn creates a new turn
 func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
-	stampTurnDefaults(turn)
-	return r.insertTurnWithSessionLock(ctx, turn)
+	_, _, err := r.createTurnTx(ctx, turn, createTurnTxOptions{})
+	return err
 }
 
 // CreateTurnWithStepStamp is documented on the TurnRepository interface. It
-// reads the task's current step inside a transaction that takes the same
-// readTaskStepInTx lock a step move takes, so the read and the turn insert
-// are serialized against concurrent movers of the same task row rather than
-// racing a plain unlocked GetTask against a later, separate insert. A
-// failure to open a transaction or read the step degrades to a plain,
-// unstamped insert — see the spec's failure-modes table: turn creation must
-// never fail because telemetry could not be resolved.
+// reads the current workflow step and inserts the turn under the same task,
+// environment, and session authority. A missing step or payload task remains
+// an unstamped turn; authority and step-read errors abort the transaction.
 func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
-	stampTurnDefaults(turn)
-
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, r.insertTurnWithSessionLock(ctx, turn)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
-		return false, err
-	}
-	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx, turn.TaskID)
-	if stepErr != nil {
-		_ = tx.Rollback()
-		committed = true
-		return false, r.insertTurnWithSessionLock(ctx, turn)
-	}
-
-	stamped := false
-	if found && stepID != "" {
-		if turn.Metadata == nil {
-			turn.Metadata = map[string]interface{}{}
-		}
-		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
-		stamped = true
-	}
-
-	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	committed = true
-	return stamped, nil
+	stamped, _, err := r.createTurnTx(ctx, turn, createTurnTxOptions{stampStep: true})
+	return stamped, err
 }
 
 // stampTurnDefaults fills in the ID/timestamp defaults CreateTurn and
@@ -119,30 +77,6 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt)
 	return err
-}
-
-// insertTurnWithSessionLock serializes successor-turn creation with every
-// current-turn clarification decision on PostgreSQL. SQLite's writer pool
-// already provides the equivalent serialization.
-func (r *Repository) insertTurnWithSessionLock(ctx context.Context, turn *models.Turn) error {
-	if !dialect.IsPostgres(r.db.DriverName()) {
-		return r.insertTurnRow(ctx, r.db, turn)
-	}
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin turn creation: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
-		return err
-	}
-	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit turn creation: %w", err)
-	}
-	return nil
 }
 
 // DeleteTurnIfUnreferenced removes a rejected pre-dispatch turn only while it
