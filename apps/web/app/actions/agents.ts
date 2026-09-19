@@ -109,11 +109,15 @@ export async function createAgentProfileAction(
     kind?: AgentProfileKind;
     fallback_model?: string;
     auto_fallback?: boolean;
+    require_exact_model?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
+    provider_kind?: string;
+    provider_base_url?: string;
+    provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
     dynamic?: DynamicProfilePayload;
   } & ProfilePermissions,
@@ -136,6 +140,7 @@ export async function updateAgentProfileAction(
     kind?: AgentProfileKind;
     fallback_model?: string;
     auto_fallback?: boolean;
+    require_exact_model?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     allow_indexing?: boolean;
@@ -144,6 +149,9 @@ export async function updateAgentProfileAction(
     enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
+    provider_kind?: string;
+    provider_base_url?: string;
+    provider_api_key_secret_id?: string;
     env_vars?: ProfileEnvVar[];
     dynamic?: DynamicProfilePayload;
   },

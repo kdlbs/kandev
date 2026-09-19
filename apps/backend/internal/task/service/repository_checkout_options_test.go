@@ -108,3 +108,24 @@ func TestRepositoryCheckoutCapabilitiesRejectExecutorCredentials(t *testing.T) {
 		t.Fatalf("unexpected credential capability: %+v", capabilities)
 	}
 }
+
+func TestRepositoryCheckoutOptionsRejectAmbiguousAttachment(t *testing.T) {
+	rows := []*models.TaskRepository{
+		{RepositoryID: "repo", BaseBranch: "main"},
+		{RepositoryID: "repo", BaseBranch: "release"},
+	}
+	if _, err := matchingRepositoryCheckoutOptions(TaskRepositoryInput{RepositoryID: "repo"}, rows); err == nil {
+		t.Fatal("ambiguous replacement silently discards checkout policy")
+	}
+}
+
+func TestRepositoryCheckoutOptionsPreservedWhenBranchChanges(t *testing.T) {
+	metadata := map[string]interface{}{}
+	if err := models.PutRepositoryCheckoutOptions(metadata, &models.RepositoryCheckoutOptions{Version: 1, DownloadMode: models.DownloadOnDemand}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := matchingRepositoryCheckoutOptions(TaskRepositoryInput{RepositoryID: "repo", BaseBranch: "new"}, []*models.TaskRepository{{RepositoryID: "repo", BaseBranch: "old", Metadata: metadata}})
+	if err != nil || got == nil || got.DownloadMode != models.DownloadOnDemand {
+		t.Fatalf("branch change lost options: %v %v", got, err)
+	}
+}

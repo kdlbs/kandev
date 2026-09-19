@@ -42,7 +42,7 @@ describe("task-only repository checkout options", () => {
       [2, 3],
     );
     expect(parseCheckoutDirectories(" app\napp\nshared files ")).toEqual({
-      directories: ["app", "shared files"],
+      directories: [" app", "app", "shared files "],
     });
     for (const value of ["../secret", "/app", "app//child", "app/*", "app\\child"])
       expect(parseCheckoutDirectories(value)).toHaveProperty("error");

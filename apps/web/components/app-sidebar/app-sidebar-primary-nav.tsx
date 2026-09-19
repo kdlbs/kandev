@@ -69,6 +69,7 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
           badge={needsYouInboxCount}
           badgeSuffix={needsYouInboxHasMore ? "+" : undefined}
           collapsed={collapsed}
+          testId="sidebar-needs-you-inbox"
         />
       )}
       {workspaceId && collapsed && (

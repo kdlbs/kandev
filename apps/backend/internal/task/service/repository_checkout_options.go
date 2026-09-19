@@ -86,7 +86,10 @@ func matchingRepositoryCheckoutOptions(input TaskRepositoryInput, existing []*mo
 			return models.GetRepositoryCheckoutOptions(row.Metadata)
 		}
 	}
-	if matches == 1 && input.BaseBranch == "" && input.CheckoutBranch == "" {
+	if matches > 1 {
+		return nil, errors.New("ambiguous repository attachment: specify base and checkout branches")
+	}
+	if matches == 1 {
 		return models.GetRepositoryCheckoutOptions(candidate.Metadata)
 	}
 	return nil, nil

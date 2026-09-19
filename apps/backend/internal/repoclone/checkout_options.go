@@ -48,6 +48,9 @@ func (c *Cloner) ensureWorkspaceCheckoutCache(ctx context.Context, request GitCr
 	if err := c.ensureCheckoutCache(ctx, path, identity, auth); err != nil {
 		return path, RemoteRefStateUnknown, err
 	}
+	if err := c.preserveCheckoutGitCrypt(ctx, request, path, cloneURL); err != nil {
+		return path, RemoteRefStateUnknown, err
+	}
 	state, err := c.remoteRefState(ctx, cloneURL, auth)
 	return path, state, err
 }
@@ -120,4 +123,29 @@ func (c *Cloner) checkoutCachePath(request GitCredentialRequest, options *models
 	}
 	sum := sha256.Sum256([]byte(standardPath))
 	return filepath.Join(base, managedWorkspacesDir, request.WorkspaceID, "_checkout_modes", hex.EncodeToString(sum[:]), options.DownloadMode+"-v1"), nil
+}
+
+// The normal managed clone remains the owner of unlock keys and revocation.
+func (c *Cloner) preserveCheckoutGitCrypt(ctx context.Context, request GitCredentialRequest, cache, origin string) error {
+	standard, err := c.WorkspaceProviderRepositoryPath(request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope, request.ProviderRepositoryID, request.Owner, request.Name)
+	if err != nil {
+		return err
+	}
+	keys := filepath.Join(standard, ".git", "git-crypt")
+	if _, err := os.Stat(keys); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := c.verifyOriginURLLocked(ctx, standard, origin); err != nil {
+		return err
+	}
+	destination := filepath.Join(cache, ".git", "git-crypt")
+	if target, err := os.Readlink(destination); err == nil && target == keys {
+		return nil
+	}
+	if err := os.Symlink(keys, destination); err != nil {
+		return fmt.Errorf("retain managed git-crypt state: %w", err)
+	}
+	return nil
 }

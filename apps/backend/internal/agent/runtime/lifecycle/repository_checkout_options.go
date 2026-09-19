@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -28,8 +30,7 @@ func checkoutOptionsPrepareScript(script string, options *models.RepositoryCheck
 	lines := []string{
 		`checkout_log=$(mktemp)`,
 		`trap 'rm -f "$checkout_log"' EXIT`,
-		"if ! " + clone + ` 2>"$checkout_log"; then cat "$checkout_log" >&2; exit 1; fi`,
-		`cat "$checkout_log" >&2`,
+		"if ! " + clone + ` 2>"$checkout_log"; then echo 'Repository clone failed. Check remote access and retry.' >&2; exit 1; fi`,
 		`if grep -qi 'filtering not recognized' "$checkout_log"; then echo 'Server does not support on-demand downloads' >&2; exit 1; fi`,
 		"cd {{workspace.path}}",
 	}
@@ -79,7 +80,28 @@ func checkoutOptionsValidationScript(options *models.RepositoryCheckoutOptions) 
 	}
 	lines := []string{"\ncd {{workspace.path}}"}
 	for _, directory := range options.SparseDirectories {
-		lines = append(lines, `[ "$(git cat-file -t `+shellQuote("HEAD:"+directory)+`)" = tree ] || { echo 'Selected folder is unavailable at this revision' >&2; exit 1; }`)
+		lines = append(lines, `case "$(git --literal-pathspecs ls-tree -d HEAD -- `+shellQuote(directory)+` | cut -d ' ' -f 1)" in 040000|160000) ;; *) echo 'Selected folder is unavailable at this revision' >&2; exit 1 ;; esac`)
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// checkoutCredentialEnvironment excludes profile controls from host Git commands.
+func checkoutCredentialEnvironment(env map[string]string) map[string]string {
+	result := make(map[string]string)
+	for _, key := range append([]string{githubauth.CredentialHelperPathEnv, githubauth.CredentialCLIShimDirEnv}, managedGitCredentialBrokerEnvKeys...) {
+		if value, ok := env[key]; ok {
+			result[key] = value
+		}
+	}
+	filtered, err := gitconfigenv.Filter(env, func(index int, entries []gitconfigenv.Entry) bool {
+		entry := entries[index]
+		if isManagedSetupScriptGitHelper(index, entries) {
+			return true
+		}
+		return strings.HasPrefix(entry.Key, "credential.https://") && strings.HasSuffix(entry.Key, ".useHttpPath") && entry.Value == boolStringTrue
+	})
+	if err == nil {
+		gitconfigenv.CopyIndexed(result, filtered)
+	}
+	return result
 }

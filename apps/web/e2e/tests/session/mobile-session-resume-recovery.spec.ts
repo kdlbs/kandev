@@ -6,8 +6,12 @@ import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import {
   cleanupDelayedResumeFixture,
+  countResumeBootMessages,
   createFailOnResumeProfile,
+  readSessionMessageIdsContaining,
+  readSessionRuntimeIdentity,
   seedDelayedResumeFixture,
+  waitForNewSessionMessage,
   waitForSessionReady,
 } from "../../helpers/session-resume-prompt-queue";
 import {
@@ -101,12 +105,122 @@ test.describe("mobile: delayed resume cancellation", () => {
       await cleanupDelayedResumeFixture(apiClient, fixture);
     }
   });
+
+  test("pausing an accepted lazy resume preserves the runtime for later turns", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(150_000);
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Mobile accepted lazy resume pause recovery",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      if (!task.session_id) throw new Error("mobile accepted lazy resume task has no session_id");
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      await session.waitForChatIdle({ timeout: 30_000 });
+
+      await backend.restart();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
+        timeout: 60_000,
+      });
+
+      const resumeBootsBeforeMessage = await countResumeBootMessages(apiClient, task.session_id);
+
+      // Provider output proves that the resumed prompt crossed acceptance
+      // before the touch cancellation is sent.
+      await session.sendMessageViaButton("/slow 8s");
+      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      const initialRuntimeIdentity = await readSessionRuntimeIdentity(
+        apiClient,
+        task.id,
+        task.session_id,
+      );
+      await session.cancelAgentButton().tap();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for mobile accepted lazy resume cancellation",
+        timeout: 30_000,
+      });
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      const resumeBootsAfterFirstPause = await countResumeBootMessages(apiClient, task.session_id);
+      expect(resumeBootsAfterFirstPause).toBe(resumeBootsBeforeMessage + 1);
+
+      const slowResponseMessageIdsBeforeSecond = await readSessionMessageIdsContaining(
+        apiClient,
+        task.session_id,
+        "Running slow response",
+      );
+      expect(slowResponseMessageIdsBeforeSecond.size).toBeGreaterThan(0);
+      await session.sendMessageViaButton("/slow 8s");
+      await waitForNewSessionMessage(
+        apiClient,
+        task.session_id,
+        slowResponseMessageIdsBeforeSecond,
+        "Running slow response",
+      );
+      await session.cancelAgentButton().tap();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for the later mobile accepted pause",
+        timeout: 30_000,
+      });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+
+      await session.sendMessageViaButton("/e2e:simple-message");
+      await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile accepted lazy resume pause");
+    } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
+    }
+  });
 });
 
 test.describe("mobile: failed resume recovery", () => {
   test.describe.configure({ retries: 1 });
 
-  test("failed saved-session load returns a usable recovery card", async ({
+  test("failed saved-session load retains a usable recovery entry", async ({
     testPage,
     apiClient,
     seedData,
@@ -133,14 +247,15 @@ test.describe("mobile: failed resume recovery", () => {
       await fixture.session.recoveryResumeButton().tap();
       await expect(fixture.session.recoveryResumeButton()).toBeVisible();
       // The resume endpoint waits through provider startup before it returns;
-      // keep the card usable throughout that failed-load path and ensure the
-      // old permanently pending label never replaces the recovery action.
+      // keep the persisted recovery entry usable throughout that failed-load
+      // path and ensure the old permanently pending label never replaces it.
       await expect(testPage.getByText(/Resume session requested/i)).toHaveCount(0, {
         timeout: 15_000,
       });
+      await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 90_000 });
       await expect(
         fixture.session.activeChat().getByTestId("session-bootstrap-recovery-card"),
-      ).toBeVisible({ timeout: 90_000 });
+      ).toHaveCount(0);
       await assertNoDocumentHorizontalOverflow(testPage, "mobile failed resume recovery");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => undefined);

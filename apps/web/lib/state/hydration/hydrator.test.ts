@@ -425,6 +425,46 @@ describe("mergeInitialState — sidebar views from boot settings", () => {
   });
 });
 
+describe("hydrateState — settings agent profiles", () => {
+  it("normalizes fallback fields from nested boot hydration", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        settingsAgents: {
+          items: [
+            {
+              profiles: [
+                {
+                  id: "explicit-profile",
+                  fallback_model: "provider/model",
+                  auto_fallback: false,
+                },
+                {
+                  id: "automatic-profile",
+                  fallback_model: "",
+                  auto_fallback: true,
+                },
+              ],
+            },
+          ],
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.settingsAgents.items[0]?.profiles).toMatchObject([
+      {
+        id: "explicit-profile",
+        fallbackModel: "provider/model",
+        autoFallback: false,
+      },
+      {
+        id: "automatic-profile",
+        fallbackModel: "",
+        autoFallback: true,
+      },
+    ]);
+  });
+});
+
 describe("hydrateState — user settings revisions", () => {
   it("applies a newer boot snapshot after an earlier websocket update", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
@@ -465,6 +505,85 @@ describe("hydrateState — user settings revisions", () => {
       revision: 3,
       appStatusBarEnabled: true,
     });
+  });
+});
+
+describe("hydrateState — agent profile revisions", () => {
+  it("keeps a newer websocket profile snapshot over route bootstrap", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.agentProfiles = {
+        version: 1,
+        items: [
+          {
+            id: "live-profile",
+            label: "Live profile",
+            agent_id: "agent-1",
+            agent_name: "Agent",
+            cli_passthrough: false,
+            inference_capable: true,
+          },
+        ],
+      };
+      draft.settingsAgents.items = [
+        {
+          id: "agent-1",
+          name: "Agent",
+          profiles: [],
+        } as never,
+      ];
+      hydrateState(draft, {
+        settingsAgents: { items: [] },
+        agentProfiles: {
+          version: 0,
+          items: [],
+        },
+        settingsData: { agentsLoaded: true },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.agentProfiles).toMatchObject({
+      version: 1,
+      items: [{ id: "live-profile" }],
+    });
+    expect(result.settingsAgents.items).toHaveLength(1);
+    expect(result.settingsData.agentsLoaded).toBe(false);
+  });
+
+  it("applies a fresh snapshot captured at the current generation", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.agentProfiles = {
+        version: 1,
+        items: [
+          {
+            id: "stale-profile",
+            label: "Stale profile",
+            agent_id: "agent-1",
+            agent_name: "Agent",
+            cli_passthrough: false,
+            inference_capable: true,
+          },
+        ],
+      };
+      draft.settingsAgents.items = [
+        {
+          id: "agent-1",
+          name: "Agent",
+          profiles: [{ id: "stale-profile" }],
+        } as never,
+      ];
+      hydrateState(draft, {
+        settingsAgents: { items: [] },
+        agentProfiles: {
+          version: 1,
+          items: [],
+        },
+        settingsData: { agentsLoaded: true },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.agentProfiles).toEqual({ version: 1, items: [] });
+    expect(result.settingsAgents.items).toEqual([]);
+    expect(result.settingsData.agentsLoaded).toBe(true);
   });
 });
 

@@ -67,9 +67,146 @@ const MAX_TOTAL_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_CHANGED_FILES = 3000;
 const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_REQUEST_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 250;
+const MAX_RETRY_SLEEP_MS = 180_000;
+const SECONDARY_RATE_LIMIT_DELAYS_MS = [60_000, 120_000];
 const NO_DOCS_LABEL = 'no-docs-allow';
 const STATUS_CONTEXT = 'PR documentation coverage';
 const GITHUB_API = 'https://api.github.com';
+
+function defaultSleep(delay) {
+  return new Promise(resolve => setTimeout(resolve, delay));
+}
+
+function defaultLog(message) {
+  console.error(message);
+}
+
+function responseHeader(response, name) {
+  if (typeof response?.headers?.get === 'function') {
+    return response.headers.get(name) ?? undefined;
+  }
+  if (!response?.headers || typeof response.headers !== 'object') {
+    return undefined;
+  }
+  const key = Object.keys(response.headers).find(header =>
+    header.toLowerCase() === name.toLowerCase(),
+  );
+  return key === undefined ? undefined : String(response.headers[key]);
+}
+
+function retryAfterDelay(response) {
+  const value = responseHeader(response, 'retry-after');
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : undefined;
+  }
+  const timestamp = Date.parse(trimmed);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
+}
+
+function primaryRateLimitResetDelay(response) {
+  const remaining = Number(responseHeader(response, 'x-ratelimit-remaining'));
+  if (!Number.isFinite(remaining) || remaining > 0) {
+    return undefined;
+  }
+  const reset = Number(responseHeader(response, 'x-ratelimit-reset'));
+  if (!Number.isFinite(reset) || reset <= 0) {
+    return undefined;
+  }
+  return Math.max(0, reset * 1000 - Date.now());
+}
+
+function isGraphqlRateLimitPayload(payload) {
+  return Array.isArray(payload?.errors)
+    && payload.errors.some(error => error?.type === 'RATE_LIMITED');
+}
+
+function isRateLimitResponse(response, payload, requestClass) {
+  if (requestClass === 'merge-queue' && isGraphqlRateLimitPayload(payload)) {
+    return true;
+  }
+  if (response?.status === 429) {
+    return true;
+  }
+  if (response?.status !== 403) {
+    return false;
+  }
+  const remaining = Number(responseHeader(response, 'x-ratelimit-remaining'));
+  return (
+    (Number.isFinite(remaining) && remaining <= 0)
+    || responseHeader(response, 'retry-after') !== undefined
+    || /rate limit|secondary rate limit|abuse detection|temporarily unavailable/i.test(
+      String(payload?.message ?? ''),
+    )
+  );
+}
+
+function isRetryableResponse(response, payload, requestClass) {
+  const status = response?.status;
+  return (
+    status === 408
+    || status === 429
+    || (Number.isInteger(status) && status >= 500 && status <= 599)
+    || isRateLimitResponse(response, payload, requestClass)
+  );
+}
+
+function retryPlan(response, payload, attemptIndex, category, requestClass) {
+  const rateLimited = isRateLimitResponse(response, payload, requestClass);
+  const serverDelay = retryAfterDelay(response);
+  if (serverDelay !== undefined) {
+    return { delay: serverDelay, reason: 'server-wait' };
+  }
+  if (rateLimited) {
+    const resetDelay = primaryRateLimitResetDelay(response);
+    if (resetDelay !== undefined) {
+      return { delay: resetDelay, reason: 'primary-rate-limit-reset' };
+    }
+    return {
+      delay: SECONDARY_RATE_LIMIT_DELAYS_MS[attemptIndex] ?? MAX_RETRY_SLEEP_MS,
+      reason: 'secondary-rate-limit-fallback',
+    };
+  }
+  if (category === 'transport' || category === 'timeout' || isRetryableResponse(response, payload)) {
+    return {
+      delay: Math.min(RETRY_BASE_DELAY_MS * (2 ** attemptIndex), 5_000),
+      reason: 'short-exponential-backoff',
+    };
+  }
+  return undefined;
+}
+
+function requestClassForEndpoint(endpoint, method) {
+  const pathname = endpoint.split('?', 1)[0];
+  if (method === 'POST' && pathname.includes('/statuses/')) {
+    return 'commit-status';
+  }
+  if (pathname.includes('/pulls/') && pathname.endsWith('/files')) {
+    return 'changed-files';
+  }
+  if (pathname === '/search/code') {
+    return 'code-search';
+  }
+  if (pathname === '/graphql') {
+    return 'merge-queue';
+  }
+  if (pathname.includes('/pulls/')) {
+    return 'pull-request';
+  }
+  return 'github-api';
+}
+
+function transportCategory(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError'
+    ? 'timeout'
+    : 'transport';
+}
 
 function normalizeRepoPath(value) {
   if (typeof value !== 'string' || value.length === 0) {
@@ -94,6 +231,9 @@ function normalizeRepoPath(value) {
 function pathExemption(pathname) {
   if (pathname === 'docs' || pathname.startsWith('docs/')) {
     return 'documentation tree';
+  }
+  if (pathname === 'plugin-registry/plugins.yaml') {
+    return 'canonical plugin registry source';
   }
   if (/\.(?:md|mdx|markdown)$/i.test(pathname)) {
     return 'Markdown file';
@@ -775,7 +915,14 @@ function requirePullRequestNumber(value) {
 }
 
 class GitHubClient {
-  constructor({ owner, repo, token, fetchImpl = globalThis.fetch } = {}) {
+  constructor({
+    owner,
+    repo,
+    token,
+    fetchImpl = globalThis.fetch,
+    sleepImpl = defaultSleep,
+    logImpl = defaultLog,
+  } = {}) {
     if (typeof owner !== 'string' || typeof repo !== 'string' || owner === '' || repo === '') {
       throw new Error('GitHub repository owner and name are required');
     }
@@ -785,16 +932,28 @@ class GitHubClient {
     if (typeof fetchImpl !== 'function') {
       throw new Error('fetch implementation is required');
     }
+    if (typeof sleepImpl !== 'function') {
+      throw new Error('sleep implementation is required');
+    }
+    if (typeof logImpl !== 'function') {
+      throw new Error('log implementation is required');
+    }
     this.owner = owner;
     this.repo = repo;
     this.token = token;
     this.fetchImpl = fetchImpl;
+    this.sleepImpl = sleepImpl;
+    this.logImpl = logImpl;
+    this.sleptMs = 0;
   }
 
-  async request(endpoint, { method = 'GET', body } = {}) {
+  async request(endpoint, { method = 'GET', body, requestClass: requestedClass } = {}) {
     if (typeof endpoint !== 'string' || !endpoint.startsWith('/')) {
       throw new Error('GitHub endpoint must be an absolute API path');
     }
+    const requestClass = typeof requestedClass === 'string' && requestedClass.length > 0
+      ? requestedClass
+      : requestClassForEndpoint(endpoint, method);
     const headers = {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${this.token}`,
@@ -803,51 +962,252 @@ class GitHubClient {
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
-    const timeoutSignal = typeof AbortSignal === 'function'
-      && typeof AbortSignal.timeout === 'function'
-      ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-      : undefined;
-    let response;
-    try {
-      response = await this.fetchImpl(`${GITHUB_API}${endpoint}`, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-        ...(timeoutSignal ? { signal: timeoutSignal } : {}),
-      });
-    } catch (error) {
-      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-        throw new Error(`GitHub API request timed out after ${REQUEST_TIMEOUT_MS}ms`);
-      }
-      throw error;
-    }
-    if (!response || typeof response.text !== 'function') {
-      throw new Error('GitHub API returned an invalid response');
-    }
-    const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
-      throw new Error(`GitHub API response exceeds the ${MAX_RESPONSE_BYTES}-byte limit`);
-    }
-    let payload = null;
-    if (text.length > 0) {
+
+    const statusForLog = response => Number.isInteger(response?.status)
+      ? `HTTP ${response.status}`
+      : 'none';
+    const log = message => {
       try {
-        payload = JSON.parse(text);
+        this.logImpl(message);
       } catch {
-        throw new Error('GitHub API returned invalid JSON');
+        // Diagnostics must not hide the request result.
       }
+    };
+    const terminalError = ({
+      category,
+      response,
+      attempt,
+      outcome,
+      message,
+      nextDelay,
+    }) => {
+      const status = statusForLog(response);
+      const diagnostic = [
+        `class=${requestClass}`,
+        `category=${category}`,
+        `status=${status}`,
+        `attempts=${attempt}`,
+        `outcome=${outcome}`,
+        ...(nextDelay === undefined ? [] : [`next_delay_ms=${nextDelay}`]),
+      ].join(' ');
+      log(`GitHub API request stopped: ${diagnostic}`);
+      if (message) {
+        return new Error(`${message} (${diagnostic})`);
+      }
+      return new Error(`GitHub API request failed (${diagnostic})`);
+    };
+    const waitBeforeRetry = async ({ response, category, attempt, plan }) => {
+      const remainingMs = MAX_RETRY_SLEEP_MS - this.sleptMs;
+      if (plan.delay > remainingMs) {
+        return false;
+      }
+      log(
+        `GitHub API request retry: class=${requestClass} category=${category} `
+        + `status=${statusForLog(response)} attempt=${attempt + 1}/${MAX_REQUEST_ATTEMPTS} `
+        + `delay_ms=${plan.delay} reason=${plan.reason}`,
+      );
+      try {
+        await this.sleepImpl(plan.delay);
+      } catch {
+        throw terminalError({
+          category: 'sleep',
+          response,
+          attempt: attempt + 1,
+          outcome: 'retry-aborted',
+        });
+      }
+      this.sleptMs += plan.delay;
+      return true;
+    };
+
+    for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
+      const timeoutSignal = typeof AbortSignal === 'function'
+        && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+        : undefined;
+      let response;
+      try {
+        response = await this.fetchImpl(`${GITHUB_API}${endpoint}`, {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          ...(timeoutSignal ? { signal: timeoutSignal } : {}),
+        });
+      } catch (error) {
+        const category = transportCategory(error);
+        const plan = retryPlan(undefined, undefined, attempt, category, requestClass);
+        if (attempt + 1 < MAX_REQUEST_ATTEMPTS && plan) {
+          if (await waitBeforeRetry({ category, attempt, plan })) {
+            continue;
+          }
+          throw terminalError({
+            category,
+            attempt: attempt + 1,
+            outcome: 'wait-budget-exhausted',
+            nextDelay: plan.delay,
+          });
+        }
+        throw terminalError({
+          category,
+          attempt: attempt + 1,
+          message: category === 'timeout'
+            ? `GitHub API request timed out after ${REQUEST_TIMEOUT_MS}ms`
+            : undefined,
+          outcome: 'retry-exhausted',
+        });
+      }
+      if (!response || typeof response.text !== 'function') {
+        throw terminalError({
+          category: 'protocol',
+          attempt: attempt + 1,
+          message: 'GitHub API returned an invalid response',
+          outcome: 'permanent',
+        });
+      }
+
+      let text;
+      try {
+        text = await response.text();
+      } catch (error) {
+        const retryable = response.ok || isRetryableResponse(response, undefined, requestClass);
+        const category = retryable ? transportCategory(error) : 'http';
+        const plan = retryable
+          ? retryPlan(response, undefined, attempt, category, requestClass)
+          : undefined;
+        if (retryable && attempt + 1 < MAX_REQUEST_ATTEMPTS && plan) {
+          if (await waitBeforeRetry({ response, category, attempt, plan })) {
+            continue;
+          }
+          throw terminalError({
+            category,
+            response,
+            attempt: attempt + 1,
+            outcome: 'wait-budget-exhausted',
+            nextDelay: plan.delay,
+          });
+        }
+        throw terminalError({
+          category,
+          response,
+          attempt: attempt + 1,
+          outcome: retryable ? 'retry-exhausted' : 'permanent',
+        });
+      }
+      if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
+        throw terminalError({
+          category: 'response-too-large',
+          response,
+          attempt: attempt + 1,
+          message: `GitHub API response exceeds the ${MAX_RESPONSE_BYTES}-byte limit`,
+          outcome: 'permanent',
+        });
+      }
+      let payload = null;
+      if (text.length > 0) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          const retryable = !response.ok && isRetryableResponse(response, undefined, requestClass);
+          // The body is unavailable after parsing fails, so headers are the only signal.
+          const category = isRateLimitResponse(response, undefined, requestClass)
+            ? 'rate-limit'
+            : response.status >= 500
+              ? 'server'
+              : 'protocol';
+          const plan = retryable
+            ? retryPlan(response, undefined, attempt, category, requestClass)
+            : undefined;
+          if (
+            retryable
+            && attempt + 1 < MAX_REQUEST_ATTEMPTS
+            && plan
+          ) {
+            if (await waitBeforeRetry({ response, category, attempt, plan })) {
+              continue;
+            }
+            throw terminalError({
+              category,
+              response,
+              attempt: attempt + 1,
+              outcome: 'wait-budget-exhausted',
+              nextDelay: plan.delay,
+            });
+          }
+          throw terminalError({
+            category,
+            response,
+            attempt: attempt + 1,
+            message: response.ok
+              ? 'GitHub API returned invalid JSON'
+              : `GitHub API request failed with HTTP ${response.status}: invalid JSON`,
+            outcome: retryable ? 'retry-exhausted' : 'permanent',
+          });
+        }
+      }
+      if (response.ok && isRateLimitResponse(response, payload, requestClass)) {
+        const category = 'rate-limit';
+        const plan = retryPlan(response, payload, attempt, category, requestClass);
+        if (attempt + 1 < MAX_REQUEST_ATTEMPTS && plan) {
+          if (await waitBeforeRetry({ response, category, attempt, plan })) {
+            continue;
+          }
+          throw terminalError({
+            category,
+            response,
+            attempt: attempt + 1,
+            outcome: 'wait-budget-exhausted',
+            nextDelay: plan.delay,
+          });
+        }
+        throw terminalError({
+          category,
+          response,
+          attempt: attempt + 1,
+          outcome: 'retry-exhausted',
+        });
+      }
+      if (!response.ok) {
+        const category = isRateLimitResponse(response, payload, requestClass)
+          ? 'rate-limit'
+          : response.status >= 500
+            ? 'server'
+            : 'http';
+        const plan = retryPlan(response, payload, attempt, category, requestClass);
+        if (
+          attempt + 1 < MAX_REQUEST_ATTEMPTS
+          && isRetryableResponse(response, payload, requestClass)
+          && plan
+        ) {
+          if (await waitBeforeRetry({ response, category, attempt, plan })) {
+            continue;
+          }
+          throw terminalError({
+            category,
+            response,
+            attempt: attempt + 1,
+            outcome: 'wait-budget-exhausted',
+            nextDelay: plan.delay,
+          });
+        }
+        throw terminalError({
+          category,
+          response,
+          attempt: attempt + 1,
+          message: `GitHub API request failed with HTTP ${response.status}`,
+          outcome: isRetryableResponse(response, payload, requestClass)
+            ? 'retry-exhausted'
+            : 'permanent',
+        });
+      }
+      return payload;
     }
-    if (!response.ok) {
-      const detail =
-        payload && typeof payload.message === 'string' ? `: ${payload.message.slice(0, 200)}` : '';
-      throw new Error(`GitHub API request failed with HTTP ${response.status}${detail}`);
-    }
-    return payload;
   }
 
   async getPullRequest(number) {
     requirePullRequestNumber(number);
     const pullRequest = await this.request(
       `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/pulls/${number}`,
+      { requestClass: 'pull-request' },
     );
     if (!pullRequest || pullRequest.number !== number) {
       throw new Error('GitHub returned a pull request with the wrong number');
@@ -876,6 +1236,7 @@ class GitHubClient {
     for (let page = 1; page <= 30; page += 1) {
       const pageFiles = await this.request(
         `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/pulls/${number}/files?per_page=100&page=${page}`,
+        { requestClass: 'changed-files' },
       );
       if (!Array.isArray(pageFiles)) {
         throw new Error('GitHub changed-file response is not a list');
@@ -919,6 +1280,7 @@ class GitHubClient {
     const encodedPath = normalized.split('/').map(encodeURIComponent).join('/');
     const response = await this.request(
       `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
+      { requestClass: 'file-content' },
     );
     if (typeof response?.path !== 'string' || normalizeRepoPath(response.path) !== normalized) {
       throw new Error(`${normalized} response has a mismatched returned path`);
@@ -949,6 +1311,7 @@ class GitHubClient {
     const encodedPath = normalized.split('/').map(encodeURIComponent).join('/');
     const response = await this.request(
       `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
+      { requestClass: 'directory-listing' },
     );
     if (!Array.isArray(response)) {
       throw new Error(`${normalized} is not a directory listing`);
@@ -973,6 +1336,7 @@ class GitHubClient {
     const query = `"${text}" repo:${this.owner}/${this.repo} path:${normalizedDirectory}`;
     const response = await this.request(
       `/search/code?q=${encodeURIComponent(query)}&per_page=100`,
+      { requestClass: 'code-search' },
     );
     if (
       !response
@@ -1008,6 +1372,7 @@ class GitHubClient {
       `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/statuses/${sha}`,
       {
         method: 'POST',
+        requestClass: 'commit-status',
         body: {
           state: status.state,
           context: STATUS_CONTEXT,
@@ -1021,6 +1386,7 @@ class GitHubClient {
   async graphql(query, variables) {
     const response = await this.request('/graphql', {
       method: 'POST',
+      requestClass: 'merge-queue',
       body: { query, variables },
     });
     if (Array.isArray(response?.errors) && response.errors.length > 0) {
@@ -1117,36 +1483,88 @@ function isMissingResourceError(error) {
   return /\bHTTP 404\b/.test(String(error?.message ?? error));
 }
 
-async function loadCoverageContents({ client, changedFiles, headSha }) {
+function hasRequirementHeading(content, requirementId) {
+  return typeof content === 'string' && requirementHeadingPattern(requirementId).test(content);
+}
+
+function changedRequirementSources(changedFiles, requirementDirectory) {
+  const sources = new Map();
+  const prefix = `${requirementDirectory}/`;
+  for (const change of changedFiles ?? []) {
+    const currentPath = typeof change === 'string' ? change : change?.filename;
+    if (typeof currentPath !== 'string') {
+      continue;
+    }
+    let normalizedCurrent;
+    try {
+      normalizedCurrent = normalizeRepoPath(currentPath);
+    } catch {
+      continue;
+    }
+    const status = typeof change === 'string' ? undefined : change?.status;
+    const headPath = status === 'removed' ? undefined : normalizedCurrent;
+    let basePath = normalizedCurrent;
+    if (status === 'renamed' && typeof change.previous_filename === 'string') {
+      try {
+        basePath = normalizeRepoPath(change.previous_filename);
+      } catch {
+        basePath = undefined;
+      }
+    }
+    const normalizedHead = headPath && headPath.startsWith(prefix) && headPath.endsWith('.md')
+      ? headPath
+      : undefined;
+    const normalizedBase = basePath && basePath.startsWith(prefix) && basePath.endsWith('.md')
+      ? basePath
+      : undefined;
+    if (!normalizedHead && !normalizedBase) {
+      continue;
+    }
+    const key = normalizedHead ?? `base:${normalizedBase}`;
+    if (!sources.has(key)) {
+      sources.set(key, { basePath: normalizedBase, headPath: normalizedHead });
+    }
+  }
+  return [...sources.values()];
+}
+
+async function loadCoverageContents({ client, changedFiles, headSha, baseSha }) {
   if (!classifyChangedFiles(changedFiles).requiresCoverage) {
     return {};
   }
   const contents = {};
-  const loaded = new Set();
+  const loaded = new Map();
   const requirementSearches = new Map();
   const requirementDirectories = new Map();
   let documentCount = 0;
   let totalBytes = 0;
-  async function load(pathname) {
+  async function load(pathname, ref, targetContents) {
     const normalized = normalizeRepoPath(pathname);
-    if (loaded.has(normalized)) {
-      return contents[normalized];
+    const cacheKey = `${ref}\u0000${normalized}`;
+    if (loaded.has(cacheKey)) {
+      const content = loaded.get(cacheKey);
+      if (targetContents) {
+        targetContents[normalized] = content;
+      }
+      return content;
     }
     if (documentCount >= MAX_DOCUMENTS) {
       throw new Error(`Referenced documents exceed the ${MAX_DOCUMENTS}-document limit`);
     }
     let content;
     try {
-      content = await client.getFile(normalized, headSha);
+      content = await client.getFile(normalized, ref);
     } catch (error) {
       if (!isMissingResourceError(error)) {
         throw error;
       }
     }
-    loaded.add(normalized);
+    loaded.set(cacheKey, content);
     documentCount += 1;
+    if (targetContents) {
+      targetContents[normalized] = content;
+    }
     if (typeof content !== 'string' || content.trim().length === 0) {
-      contents[normalized] = undefined;
       return undefined;
     }
     const size = Buffer.byteLength(content, 'utf8');
@@ -1157,12 +1575,11 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
     if (totalBytes > MAX_TOTAL_DOCUMENT_BYTES) {
       throw new Error(`Referenced documents exceed the ${MAX_TOTAL_DOCUMENT_BYTES}-byte total limit`);
     }
-    contents[normalized] = content;
     return content;
   }
 
   for (const workOrderPath of selectChangedWorkOrders(changedFiles)) {
-    const workOrderContent = await load(workOrderPath);
+    const workOrderContent = await load(workOrderPath, headSha, contents);
     if (workOrderContent === undefined) {
       continue;
     }
@@ -1178,7 +1595,7 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
     } catch {
       continue;
     }
-    const planContent = await load(planPath);
+    const planContent = await load(planPath, headSha, contents);
     if (planContent === undefined) {
       continue;
     }
@@ -1201,7 +1618,7 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
       }
     }
     for (const designPath of designPaths) {
-      const designContent = await load(designPath);
+      const designContent = await load(designPath, headSha, contents);
       if (designContent === undefined) {
         continue;
       }
@@ -1222,19 +1639,44 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
       }
       const requirementDirectory = `docs/specs/${system}/requirements`;
       const requirementPaths = new Set();
-      const changedRepositoryPaths = changedPaths(changedFiles).paths;
-      for (const pathname of changedRepositoryPaths) {
-        if (pathname.startsWith(`${requirementDirectory}/`) && pathname.endsWith('.md')) {
-          requirementPaths.add(pathname);
+      const baseContentByHeadPath = new Map();
+      for (const source of changedRequirementSources(changedFiles, requirementDirectory)) {
+        if (source.headPath) {
+          requirementPaths.add(source.headPath);
+          await load(source.headPath, headSha, contents);
+        }
+        if (source.basePath) {
+          const baseContent = await load(source.basePath, baseSha);
+          if (source.headPath) {
+            baseContentByHeadPath.set(source.headPath, baseContent);
+          }
         }
       }
-      const unresolvedRequirementIds = [];
       const workOrderRequirements = new Set(workOrder.requirements ?? []);
       const referencedRequirementIds = designRequirements.filter(requirementId =>
         workOrderRequirements.has(requirementId)
       );
+      const verifiedRequirementIds = new Set();
+      for (const requirementId of referencedRequirementIds) {
+        const definitions = requirementDefinitions(contents, requirementId, system);
+        if (definitions.length !== 1) {
+          continue;
+        }
+        const definition = definitions[0];
+        const baseContent = baseContentByHeadPath.get(definition.pathname);
+        if (
+          hasRequirementHeading(definition.content, requirementId)
+          && hasRequirementHeading(baseContent, requirementId)
+        ) {
+          verifiedRequirementIds.add(requirementId);
+        }
+      }
+      const unresolvedRequirementIds = [];
       if (typeof client.searchCode === 'function') {
         for (const requirementId of referencedRequirementIds) {
+          if (verifiedRequirementIds.has(requirementId)) {
+            continue;
+          }
           const searchKey = JSON.stringify([requirementDirectory, requirementId]);
           if (!requirementSearches.has(searchKey)) {
             requirementSearches.set(
@@ -1251,7 +1693,9 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
           }
         }
       } else {
-        unresolvedRequirementIds.push(...referencedRequirementIds);
+        unresolvedRequirementIds.push(
+          ...referencedRequirementIds.filter(requirementId => !verifiedRequirementIds.has(requirementId)),
+        );
       }
       if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {
         if (!requirementDirectories.has(requirementDirectory)) {
@@ -1277,7 +1721,7 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
         }
       }
       for (const pathname of requirementPaths) {
-        const requirementContent = await load(pathname);
+        const requirementContent = await load(pathname, headSha, contents);
         if (requirementContent === undefined) {
           continue;
         }
@@ -1318,6 +1762,7 @@ async function evaluatePullRequestSnapshot({ client, pullRequest, expectedHeadSh
   }
   const changedFiles = await client.listFiles(pullRequest.number, pullRequest.changed_files);
   const fileContents = await loadCoverageContents({
+    baseSha: pullRequest.base.sha,
     changedFiles,
     client,
     headSha: pullRequest.head.sha,
@@ -1328,16 +1773,24 @@ async function evaluatePullRequestSnapshot({ client, pullRequest, expectedHeadSh
   };
 }
 
-async function evaluatePullRequest({ client, pullNumber, expectedHeadSha, maxAttempts = 3 } = {}) {
+async function evaluatePullRequest({
+  client,
+  pullNumber,
+  expectedHeadSha,
+  maxAttempts = 3,
+  initialPullRequest,
+} = {}) {
   requirePullRequestNumber(pullNumber);
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5) {
     throw new Error('maxAttempts must be an integer from 1 through 5');
   }
   let lastMetadata;
+  let firstSnapshot = initialPullRequest;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     let pullRequest;
     try {
-      pullRequest = await client.getPullRequest(pullNumber);
+      pullRequest = firstSnapshot ?? await client.getPullRequest(pullNumber);
+      firstSnapshot = undefined;
       const before = resultMetadata(pullRequest);
       if (expectedHeadSha && pullRequest.head.sha !== expectedHeadSha) {
         return errorCoverageResult(
@@ -1734,6 +2187,7 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
       });
       result = await evaluatePullRequest({
         client: apiClient,
+        initialPullRequest: current,
         pullNumber,
       });
       await publishResult(apiClient, result.headSha ?? pendingSha, result, targetUrl);

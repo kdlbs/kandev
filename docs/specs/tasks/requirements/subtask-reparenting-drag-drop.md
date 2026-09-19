@@ -5,6 +5,7 @@ created: 2026-08-04
 owners:
   - kandev
 ---
+
 # Subtask re-parenting by drag and drop Requirements
 
 ## Overview
@@ -15,11 +16,30 @@ This document is the migrated task-system source for the capability. The source 
 
 ### REQ-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001: Subtask re-parenting by drag and drop
 
-**Intent:** Preserve the observable task or workflow behavior recorded by the legacy specification.
+**Intent:** Let users re-parent tasks from the sidebar menu or drag gesture while presenting every
+eligible target that is already visible in the task group.
 
 #### Acceptance criteria
 
-- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.1:** The sidebar `Nest under` submenu and the
+  drag nest zones shall derive their targets from the same rendered task group and the same
+  eligibility rules.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.2:** When an eligible same-workflow target is
+  visible in the rendered task group, the target shall remain available while workflow snapshots
+  are loading, refreshing, or temporarily incomplete; the submenu shall show `No other tasks` only
+  when that rendered group has no eligible target.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.3:** For non-Office tasks, an eligible target shall
+  be a root task, and a task that already has children shall have no nest target, preserving the
+  one-level Kanban hierarchy.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4:** When the subject or target is an Office task,
+  the UI shall allow arbitrary-depth re-parenting while excluding the subject, its current parent,
+  and its descendants, including descendants whose intermediate ancestors are hidden by the active
+  sidebar view. The backend remains authoritative for self, cycle, archive, workspace, and
+  concurrency validation. Live project assignment and removal shall update the cached Office
+  identity in both directions.
+- **AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.5:** Desktop sidebar and mobile task-switcher
+  presentations shall use the same menu and drag eligibility without changing their existing
+  pointer, touch, focus, dismissal, or scrolling behavior.
 
 ## Migrated source detail
 
@@ -31,7 +51,13 @@ Users can detach a subtask or nest a task under another via context-menu actions
 
 - The sidebar task tree (desktop sidebar and the mobile task switcher sheet) lets a user re-parent a task by dragging its row onto another row's **nest drop zone**.
 - The result is strictly equivalent to choosing `Un-nest (remove parent)` then `Nest under <target>` from the task's context menu: the task's parent becomes the target, and a task whose workspace mode is `inherit_parent` ends with mode `shared_group` — its materialized workspace and workspace-group membership are unchanged.
-- Drop targets are exactly the candidates the context menu offers (the `computeNestCandidates` rules): same-workflow root tasks in the visible group, excluding the dragged task, its current parent, and any subtask (which also excludes the task's own descendants). A task that already has children offers no nest targets.
+- Drop targets are exactly the candidates the context menu offers (the `computeNestCandidates`
+  rules) from the same-workflow tasks in the rendered group. The complete unfiltered task
+  hierarchy is used only to validate ancestry and depth, so filtering an intermediate ancestor
+  cannot expose a descendant as a target. Every mode excludes the subject and its current parent.
+  Kanban candidates must be roots and a Kanban subject with children has no targets. Office
+  candidates may be at any depth, and an Office subject may keep its descendants, but its
+  descendants are excluded as targets so the UI cannot offer a known cycle.
 - While a drag with valid targets is active, candidate rows show a nest drop zone (a left-edge strip) with a `Nest under <title>` affordance. Dropping on a zone re-parents; dropping between rows keeps the existing sibling-reorder behavior; any other drop is a no-op.
 - Re-parenting is a single API call on the existing canonical path (`PATCH /api/v1/tasks/:id` with `parent_id`), which already rejects self-parenting, missing/archived/cross-workspace targets, descendant cycles, and one-level-depth violations for kanban tasks.
 - The sidebar `Nest under` menu, the Office parent picker, the WS task-update path, and the Office dashboard PATCH all share the same composite semantics: any effective parent change normalizes an `inherit_parent` workspace mode to `shared_group`.
@@ -56,11 +82,18 @@ No new endpoint. Reuses and extends existing contracts:
 
 - `PATCH /api/v1/tasks/:id` with `parent_id` (non-empty nests; `""` un-nests) — already validated by `Service.resolveParentID` (self, existence, archived, same workspace, descendant cycle) and `validateReparentDepth` (one-level kanban limit, Office trees exempt). **Behavior addition:** when the effective parent changes, `inherit_parent` workspace mode is normalized to `shared_group` (mirroring the detach operation). Success returns the updated task DTO; invalid targets map to `400`; missing task to `404`.
 - `PATCH /api/v1/office/tasks/:id` with non-empty `parent_id` — same normalization added for parity; empty parent continues to route through the canonical detach operation.
-- WS `task.updated` payload unchanged: `parent_id` is always present (nil when cleared), and `metadata` carries the normalized workspace mode.
+- WS `task.updated` includes an explicit `is_from_office` boolean so either Office-identity
+  transition clears or establishes the cached value. `parent_id` is always present (nil when
+  cleared), and `metadata` carries the normalized workspace mode. Office project reassignment
+  publishes this canonical event after the write.
 
 ## Failure modes
 
-- **Invalid target** (self, descendant, subtask, archived, missing, cross-workspace, or depth violation): the UI filters these targets out before a drop can land, so a drop outside every nest zone is a no-op. If a request is nevertheless rejected by the backend (e.g. a valid-zone target became invalid between render and drop), the UI keeps the task in its original tree position, rolls back the optimistic update, and shows a request-error toast.
+- **Invalid target** (self, descendant, archived, missing, cross-workspace, or a Kanban depth
+  violation): the UI filters known-invalid targets before a drop can land, so a drop outside every
+  nest zone is a no-op. If a request is nevertheless rejected by the backend (for example, a
+  valid-zone target became invalid between render and drop), the UI keeps the task in its original
+  tree position, rolls back the optimistic update, and shows a request-error toast.
 - **Persistence failure**: no successful response is returned; the UI rolls back to the original tree.
 - **Concurrent submissions** are safe: setting the same parent twice is idempotent, and the optimistic update is reconciled by the authoritative `task.updated` event.
 - **No valid targets**: the drag offers no nest zones; only reorder remains possible.
@@ -70,8 +103,22 @@ No new endpoint. Reuses and extends existing contracts:
 - **GIVEN** a subtask `C` under parent `A` and a root task `B` in the same workflow, **WHEN** the user drags `C` onto `B`'s nest drop zone, **THEN** `C`'s parent becomes `B`, the sidebar shows `C` nested under `B`, and no reload occurs.
 - **GIVEN** an `inherit_parent` subtask `C` under `A`, **WHEN** `C` is dragged onto root `B`'s nest zone, **THEN** `C`'s persisted workspace mode is `shared_group` and its workspace-group membership is unchanged.
 - **GIVEN** a root task with no children, **WHEN** it is dragged onto another root's nest zone, **THEN** it becomes that root's subtask.
-- **GIVEN** a task that already has children, **WHEN** it is dragged, **THEN** no row offers a nest drop zone (reorder only).
-- **GIVEN** a drag over a subtask row or over a task in a different workflow, **WHEN** the pointer rests on the row, **THEN** no nest drop zone is offered.
+- **GIVEN** a Kanban task that already has children, **WHEN** it is dragged, **THEN** no row offers a nest drop zone (reorder only).
+- **GIVEN** a Kanban drag over a subtask row or a drag over a task in a different workflow, **WHEN** the pointer rests on the row, **THEN** no nest drop zone is offered.
+- **GIVEN** an Office task that already has a child and another eligible Office task in the same
+  rendered group, **WHEN** the user opens `Nest under` or starts a re-parent drag, **THEN** the
+  other task is offered and the resulting Office tree may be deeper than one level.
+- **GIVEN** an eligible target is visible while the stored multi-workflow snapshot is temporarily
+  incomplete, **WHEN** the user opens `Nest under`, **THEN** the visible target is offered instead
+  of a disabled `No other tasks` row.
+- **GIVEN** an Office task and one of its descendants, **WHEN** the menu or drag targets are shown,
+  **THEN** that descendant is not offered as a parent.
+- **GIVEN** a sidebar filter hides the intermediate task between an Office subject and a visible
+  descendant, **WHEN** the menu or drag targets are shown, **THEN** the visible descendant is still
+  excluded as a parent.
+- **GIVEN** a Kanban task is assigned to or removed from an Office project, **WHEN** the canonical
+  `task.updated` event arrives, **THEN** open sidebar caches immediately adopt the explicit new
+  Office identity without a reload.
 - **GIVEN** a subtask dragged toward its current parent, **WHEN** the pointer rests on that parent row, **THEN** no nest drop zone is offered.
 - **GIVEN** a drag dropped between two sibling rows, **WHEN** the drop lands outside every nest zone, **THEN** the siblings reorder as before.
 - **GIVEN** a drop that lands outside every nest zone, **WHEN** the drop completes, **THEN** the task keeps its original parent and no request is sent (a plain no-op); a request-error toast appears only when a valid-zone drop's request is rejected by the backend.
@@ -91,4 +138,5 @@ No new endpoint. Reuses and extends existing contracts:
 
 ## Implementation plan
 
-See [the implementation plan](../../../plans/subtask-reparenting-drag-drop/plan.md).
+See the original [drag-and-drop implementation plan](../../../plans/subtask-reparenting-drag-drop/plan.md)
+and the [Nest under candidate correction plan](../../../plans/fix-nest-under-candidates/plan.md).

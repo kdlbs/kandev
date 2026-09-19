@@ -47,3 +47,9 @@ Focused Go suites for the coordinator, MCP handler/server, GitHub, and GitLab
 packages, plus race-enabled focused tests for identity, authorization,
 idempotency, rollback, detach, and projection behavior. Public documentation
 validation via `Validate public docs`.
+
+## Successor package
+
+The [provider-neutral MCP plan](../provider-neutral-change-request-mcp/plan.md)
+uses PR #3506's merged implementation as its baseline. This completed package
+retains its historical scope and results; it does not track the successor's work.

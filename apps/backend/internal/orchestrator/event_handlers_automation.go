@@ -38,7 +38,7 @@ type AutomationService interface {
 // integration stubs that exercise legacy events remain source-compatible.
 type automationRunBinding interface {
 	GetRun(ctx context.Context, id string) (*automation.AutomationRun, error)
-	BindRunTask(ctx context.Context, runID, taskID string) error
+	BindRunTask(ctx context.Context, runID, taskID, repositoryReason string) error
 	BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action automation.ThreadAction, reason string) error
 	MarkRunTerminal(ctx context.Context, runID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
 	MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
@@ -258,6 +258,30 @@ func (s *Service) handleAutomationTriggered(ctx context.Context, event *bus.Even
 		return nil
 	}
 
+	if evt.TriggerType == automation.TriggerTypePluginEvent {
+		delivery, ok := s.automationService.(interface {
+			ClaimPluginWebhookRun(context.Context, string) (bool, error)
+			CompletePluginWebhookRun(context.Context, string) error
+		})
+		if !ok {
+			return fmt.Errorf("plugin webhook dispatch unavailable")
+		}
+		go func() {
+			claimed, err := delivery.ClaimPluginWebhookRun(context.Background(), evt.RunID)
+			if err != nil {
+				s.logger.Error("webhook dispatch claim failed", zap.Error(err))
+				return
+			}
+			if !claimed {
+				return
+			}
+			s.createAutomationTask(context.Background(), evt)
+			if err := delivery.CompletePluginWebhookRun(context.Background(), evt.RunID); err != nil {
+				s.logger.Error("webhook dispatch completion failed", zap.Error(err))
+			}
+		}()
+		return nil
+	}
 	go s.createAutomationTask(context.Background(), evt)
 	return nil
 }
@@ -277,8 +301,11 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		return
 	}
 
-	// Interpolate prompt with trigger data.
-	prompt := automation.InterpolatePrompt(a.Prompt, evt.TriggerType, evt.TriggerData)
+	// Interpolate prompt with trigger data. The agent-prompt variant quotes
+	// webhook payload values so untrusted text can't be mistaken for prompt
+	// syntax; display titles (RenderRunDisplayTitle) stay on the unquoted
+	// InterpolatePrompt so a fence can't leak into a truncated title.
+	prompt := automation.InterpolateAgentPrompt(a.Prompt, evt.TriggerType, evt.TriggerData)
 	if prompt == "" {
 		prompt = fmt.Sprintf("Automation '%s' triggered by %s", a.Name, evt.TriggerType)
 	}
@@ -305,7 +332,7 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		metadata[models.MetaKeyAutomationTargetTaskID] = triggerData.TaskID
 	}
 
-	task, continuationSession, action, reason, taskErr := s.prepareAutomationTask(
+	task, continuationSession, action, reasons, taskErr := s.prepareAutomationTask(
 		ctx, a, evt, title, prompt, metadata,
 	)
 	if taskErr != nil {
@@ -316,7 +343,7 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 	// The run row is the record that this firing happened and carries its exact
 	// concurrency accounting. Hidden tasks are reachable only through that row;
 	// visible normal tasks also remain available through ordinary task lists.
-	if err := s.recordSuccessRun(ctx, evt, task.ID); err != nil {
+	if err := s.recordSuccessRun(ctx, evt, task.ID, reasons.Repository); err != nil {
 		s.logger.Error("failed to record automation run; abandoning the firing",
 			zap.String("automation_id", a.ID),
 			zap.String("task_id", task.ID),
@@ -329,7 +356,7 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 
 	// Associate PR with task for github_pr triggers (same as PR Watcher).
 	if evt.TriggerType == automation.TriggerTypeGitHubPR {
-		if repositories := s.resolveAutomationRepository(ctx, a, evt); len(repositories) > 0 {
+		if repositories, _ := s.resolveAutomationRepository(ctx, a, evt); len(repositories) > 0 {
 			s.associateAutomationPR(ctx, task.ID, repositories[0].RepositoryID, evt.TriggerData)
 		}
 	}
@@ -340,7 +367,7 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		zap.String("trigger_type", string(evt.TriggerType)))
 
 	if continuationSession != nil {
-		s.dispatchAutomationContinuation(ctx, a, task, continuationSession, prompt, metadata, evt.RunID, action, reason)
+		s.dispatchAutomationContinuation(ctx, a, task, continuationSession, prompt, metadata, evt.RunID, action, reasons.Thread)
 		return
 	}
 
@@ -348,7 +375,17 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 	// it, so the trigger has to be the start signal. A workflow step's
 	// auto_start_agent setting is irrelevant here because the automation
 	// trigger is the start signal for both hidden runs and visible normal tasks.
-	s.autoStartAutomationTaskForRun(ctx, a, task, task.WorkflowStepID, evt.RunID, action, reason)
+	s.autoStartAutomationTaskForRun(ctx, a, task, task.WorkflowStepID, evt.RunID, action, reasons.Thread)
+}
+
+// automationRunReasons carries both disposition tokens recorded for a firing
+// in one struct rather than as two adjacent bare string returns — two bare
+// strings threaded through prepareAutomationTask/createAutomationTask are
+// compiler-indistinguishable, so a transposed pair would compile silently
+// and corrupt the audit trail.
+type automationRunReasons struct {
+	Thread     string
+	Repository string
 }
 
 func (s *Service) prepareAutomationTask(
@@ -357,9 +394,9 @@ func (s *Service) prepareAutomationTask(
 	evt *automation.AutomationTriggeredEvent,
 	title, prompt string,
 	metadata map[string]interface{},
-) (*models.Task, *models.TaskSession, automation.ThreadAction, string, error) {
+) (*models.Task, *models.TaskSession, automation.ThreadAction, automationRunReasons, error) {
 	action := automation.ThreadActionCreated
-	reason := "new task created for automation run"
+	reasons := automationRunReasons{Thread: "new task created for automation run"}
 	taskMode := a.TaskMode
 	if taskMode == "" {
 		taskMode = automation.TaskModeAutomationRun
@@ -381,7 +418,7 @@ func (s *Service) prepareAutomationTask(
 	var task *models.Task
 	var continuationSession *models.TaskSession
 	if a.ContinuationPolicy == automation.ContinuationPolicyReuseThread {
-		task, continuationSession, reason = s.findAutomationContinuation(ctx, a, evt)
+		task, continuationSession, reasons.Thread = s.findAutomationContinuation(ctx, a, evt)
 		if task != nil {
 			action = automation.ThreadActionResumed
 		} else if a.ContinuationTaskID != "" {
@@ -389,10 +426,16 @@ func (s *Service) prepareAutomationTask(
 		}
 	}
 	if task != nil {
-		return task, continuationSession, action, reason, nil
+		// No repository resolution happens on this path (site 395 below never
+		// executes), so the token is set here: the firing's disposition is
+		// genuinely "inherited from the continued task", recorded on this new
+		// run's own row. Highest-precedence, short-circuiting token.
+		reasons.Repository = repositoryContinuationReused
+		return task, continuationSession, action, reasons, nil
 	}
 
-	repositories := s.resolveAutomationRepository(ctx, a, evt)
+	repositories, repoReason := s.resolveAutomationRepository(ctx, a, evt)
+	reasons.Repository = repoReason
 	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
@@ -404,24 +447,24 @@ func (s *Service) prepareAutomationTask(
 		Origin:         taskOrigin,
 	})
 	if err != nil {
-		return nil, nil, action, reason, fmt.Errorf("create automation task: %w", err)
+		return nil, nil, action, reasons, fmt.Errorf("create automation task: %w", err)
 	}
 	if a.ContinuationPolicy != automation.ContinuationPolicyReuseThread {
-		return task, nil, action, reason, nil
+		return task, nil, action, reasons, nil
 	}
 	state, ok := s.automationService.(automationContinuationState)
 	if !ok {
 		s.deleteAbandonedTask(ctx, a.ID, task.ID)
-		return nil, nil, action, reason, fmt.Errorf("automation continuation state is unavailable")
+		return nil, nil, action, reasons, fmt.Errorf("automation continuation state is unavailable")
 	}
 	if err := state.SetContinuationTaskID(ctx, a.ID, task.ID); err != nil {
 		s.deleteAbandonedTask(ctx, a.ID, task.ID)
-		return nil, nil, action, reason, err
+		return nil, nil, action, reasons, err
 	}
 	if action == automation.ThreadActionReplaced {
-		reason = "previous continuation was unavailable; created a replacement task"
+		reasons.Thread = "previous continuation was unavailable; created a replacement task"
 	}
-	return task, nil, action, reason, nil
+	return task, nil, action, reasons, nil
 }
 
 // automationContinuationMetadataSnapshot records the values that a firing
@@ -627,7 +670,7 @@ func continuationProfilesMatch(a *automation.Automation, task *models.Task) bool
 }
 
 func (s *Service) continuationRepositoriesMatch(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent, task *models.Task) bool {
-	expected := s.resolveAutomationRepository(ctx, a, evt)
+	expected, _ := s.resolveAutomationRepository(ctx, a, evt)
 	if sameAutomationRepositoryIDs(task.Repositories, expected) {
 		return true
 	}
@@ -797,7 +840,7 @@ func (s *Service) promptAutomationContinuation(
 	session *models.TaskSession,
 	prompt string,
 ) (automation.RunDispatch, error) {
-	result, err := s.PromptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true)
+	result, err := s.promptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{})
 	if err != nil {
 		return automation.RunDispatch{}, err
 	}
@@ -898,24 +941,130 @@ func (s *Service) startAutomationTask(
 	return automation.RunDispatch{TaskID: task.ID, SessionID: execution.SessionID, TurnID: execution.TurnID}, nil
 }
 
+// Repository-selector disposition tokens (A5's wire format). A bare token is
+// self-explanatory; selectorNoMatch and selectorAmbiguous carry the resolved
+// selector value appended as "<token>: <value>" (tokenWithValue).
+const (
+	repositoryContinuationReused = "repository_continuation_reused"
+	repositorySelectorUnresolved = "selector_unresolved"
+	repositoryNoneConfigured     = "repository_none_configured"
+	repositoryLoadFailed         = "repository_load_failed"
+	repositorySelectorAmbiguous  = "selector_ambiguous"
+	repositorySelectorNoMatch    = "selector_no_match"
+)
+
 // resolveAutomationRepository determines the repositories for an
-// automation-triggered task. For github_pr triggers, it always extracts
-// repo info from the trigger data — the PR's own repo is the only sensible
-// choice when responding to a PR event, so the automation's RepositoryIDs
-// are ignored. For other triggers (scheduled, webhook), it prefers the
-// automation's explicit repository/base-branch pairs. An empty selection is
-// repository-free and never falls back to workspace ordering.
+// automation-triggered task, and the disposition token (if any) to record
+// when a declared webhook repository selector produced no binding. For
+// github_pr triggers, it always extracts repo info from the trigger data —
+// the PR's own repo is the only sensible choice when responding to a PR
+// event — and the payload never reaches resolveGitHubPRTriggerRepository for
+// any other trigger type: a webhook firing must select only among the
+// automation's own already-configured repositories, never an arbitrary
+// owner/name resolved from attacker-controlled payload data (the webhook
+// route is secured only by a shared secret, not session auth).
 func (s *Service) resolveAutomationRepository(
 	ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent,
-) []ReviewTaskRepository {
+) ([]ReviewTaskRepository, string) {
 	if evt.TriggerType == automation.TriggerTypeGitHubPR {
-		return s.resolveGitHubPRTriggerRepository(ctx, a.WorkspaceID, evt.TriggerData)
+		return s.resolveGitHubPRTriggerRepository(ctx, a.WorkspaceID, evt.TriggerData), ""
 	}
-	if len(a.Repositories) == 0 && len(a.RepositoryIDs) == 0 {
-		return nil
+	resolved, outcome := s.resolveExplicitRepositories(ctx, configuredAutomationRepositories(a))
+	selectorPath, declared := webhookRepositorySelectorPath(a, evt)
+	if !declared {
+		return resolved, ""
 	}
-	return s.resolveExplicitRepositories(ctx, configuredAutomationRepositories(a))
+	// A declared selector with an empty path is still a commitment (the
+	// WebhookRepositorySelector doc comment): matchRepositoryBySelector's own
+	// automation.ResolvePayloadPath("", ...) call already returns ok=false for
+	// an empty path, so routing it through the same match path fails closed
+	// (selector_unresolved) instead of the "no selector declared" shortcut
+	// above, which binds every configured repository.
+	return matchRepositoryBySelector(resolved, outcome, selectorPath, evt.TriggerData)
 }
+
+// webhookRepositorySelectorPath returns the declared repository.selector_path
+// for the exact trigger that fired and whether a selector was declared at
+// all (Repository non-nil) — distinct from an empty declared path, which
+// must still fail closed rather than being treated as "no selector". Returns
+// declared=false when no selector is declared, the trigger config can't be
+// read, or the firing trigger type is not webhook (a selector is a
+// webhook-only concept).
+func webhookRepositorySelectorPath(a *automation.Automation, evt *automation.AutomationTriggeredEvent) (path string, declared bool) {
+	if evt.TriggerType != automation.TriggerTypeWebhook {
+		return "", false
+	}
+	for _, t := range a.Triggers {
+		if t.ID != evt.TriggerID {
+			continue
+		}
+		var cfg automation.WebhookTriggerConfig
+		if err := json.Unmarshal(t.Config, &cfg); err != nil || cfg.Repository == nil {
+			return "", false
+		}
+		return cfg.Repository.SelectorPath, true
+	}
+	return "", false
+}
+
+// matchRepositoryBySelector resolves a declared selector's value against the
+// payload and matches it, exactly and case-sensitively, against each already
+// -resolved repository's Name. Exactly one match binds; zero or more than one
+// binds nothing. Precedence (first-applicable, total): unresolved selector >
+// none configured > load failure that leaves nothing certain > ambiguous >
+// no match.
+func matchRepositoryBySelector(
+	resolved []ReviewTaskRepository, outcome repositoryLoadOutcome, selectorPath string, triggerData json.RawMessage,
+) ([]ReviewTaskRepository, string) {
+	value, ok := automation.ResolvePayloadPath(triggerData, selectorPath)
+	if !ok {
+		return nil, repositorySelectorUnresolved
+	}
+	if outcome == outcomeNoneConfigured {
+		return nil, repositoryNoneConfigured
+	}
+	matches := make([]ReviewTaskRepository, 0, 1)
+	for _, r := range resolved {
+		if r.Name == value {
+			matches = append(matches, r)
+		}
+	}
+	if outcome == outcomeStoreUnavailable || (outcome == outcomePartialFailure && len(matches) != 1) {
+		return nil, repositoryLoadFailed
+	}
+	switch len(matches) {
+	case 1:
+		return matches, ""
+	case 0:
+		return nil, tokenWithValue(repositorySelectorNoMatch, value)
+	default:
+		return nil, tokenWithValue(repositorySelectorAmbiguous, value)
+	}
+}
+
+// tokenWithValue implements A5's wire format for a value-bearing disposition
+// token: token, colon, one space, then the trimmed resolved value truncated
+// to 200 runes (not bytes, so a truncated multi-byte character can't produce
+// invalid UTF-8).
+func tokenWithValue(token, value string) string {
+	runes := []rune(value)
+	if len(runes) > 200 {
+		runes = runes[:200]
+	}
+	return token + ": " + string(runes)
+}
+
+// repositoryLoadOutcome reports how resolveExplicitRepositories' load
+// attempt went, independent of any selector matching a caller may perform
+// against the result.
+type repositoryLoadOutcome int
+
+const (
+	outcomeOK repositoryLoadOutcome = iota
+	outcomeNoneConfigured
+	outcomeStoreUnavailable
+	outcomePartialFailure
+)
 
 // resolveExplicitRepositories loads each configured repository and produces one
 // ReviewTaskRepository entry per resolvable pair, in order. Canonical bindings
@@ -924,17 +1073,22 @@ func (s *Service) resolveAutomationRepository(
 // than aborting the whole firing, so one bad repository does not sink the others.
 func (s *Service) resolveExplicitRepositories(
 	ctx context.Context, repositories []automation.AutomationRepository,
-) []ReviewTaskRepository {
+) ([]ReviewTaskRepository, repositoryLoadOutcome) {
+	if len(repositories) == 0 {
+		return nil, outcomeNoneConfigured
+	}
 	store, ok := s.repo.(repoStore)
 	if !ok {
-		return nil
+		return nil, outcomeStoreUnavailable
 	}
 	resolved := make([]ReviewTaskRepository, 0, len(repositories))
+	anyFailed := false
 	for _, configured := range repositories {
 		repo, err := store.GetRepository(ctx, configured.RepositoryID)
 		if err != nil || repo == nil {
 			s.logger.Warn("failed to load explicit automation repository",
 				zap.String("repository_id", configured.RepositoryID), zap.Error(err))
+			anyFailed = true
 			continue
 		}
 		baseBranch := configured.BaseBranch
@@ -946,11 +1100,15 @@ func (s *Service) resolveExplicitRepositories(
 		}
 		resolved = append(resolved, ReviewTaskRepository{
 			RepositoryID:   repo.ID,
+			Name:           repo.Name,
 			BaseBranch:     baseBranch,
 			CheckoutBranch: baseBranch,
 		})
 	}
-	return resolved
+	if anyFailed {
+		return resolved, outcomePartialFailure
+	}
+	return resolved, outcomeOK
 }
 
 func configuredAutomationRepositories(a *automation.Automation) []automation.AutomationRepository {
@@ -1057,19 +1215,12 @@ func (s *Service) recordFailedRun(ctx context.Context, evt *automation.Automatio
 	if s.markExactAutomationRunTerminal(ctx, evt.RunID, "", "", false, errMsg) {
 		return
 	}
-	// github_pr_merged pre-task-failure rows must NOT consume the dedup key so
-	// that a later event for the same PR can retry. All recordFailedRun call
-	// sites are pre-task-creation, so blanking is always correct for this type.
-	failDedupKey := evt.DedupKey
-	if evt.TriggerType == automation.TriggerTypeGitHubPRMerged {
-		failDedupKey = ""
-	}
 	run := &automation.AutomationRun{
 		AutomationID: evt.AutomationID,
 		TriggerID:    evt.TriggerID,
 		TriggerType:  evt.TriggerType,
 		Status:       automation.RunStatusFailed,
-		DedupKey:     failDedupKey,
+		DedupKey:     automation.PreTaskCreationDedupKey(evt.TriggerType, evt.DedupKey),
 		TriggerData:  evt.TriggerData,
 		ErrorMessage: errMsg,
 	}
@@ -1124,7 +1275,7 @@ func (s *Service) clearAbandonedContinuation(ctx context.Context, automationID, 
 }
 
 func (s *Service) recordSuccessRun(
-	ctx context.Context, evt *automation.AutomationTriggeredEvent, taskID string,
+	ctx context.Context, evt *automation.AutomationTriggeredEvent, taskID, repositoryReason string,
 ) error {
 	if s.automationService == nil {
 		return nil
@@ -1134,16 +1285,17 @@ func (s *Service) recordSuccessRun(
 		if !ok {
 			return fmt.Errorf("automation service cannot bind admitted run %s", evt.RunID)
 		}
-		return binding.BindRunTask(ctx, evt.RunID, taskID)
+		return binding.BindRunTask(ctx, evt.RunID, taskID, repositoryReason)
 	}
 	run := &automation.AutomationRun{
-		AutomationID: evt.AutomationID,
-		TriggerID:    evt.TriggerID,
-		TriggerType:  evt.TriggerType,
-		TaskID:       taskID,
-		Status:       automation.RunStatusTaskCreated,
-		DedupKey:     evt.DedupKey,
-		TriggerData:  evt.TriggerData,
+		AutomationID:     evt.AutomationID,
+		TriggerID:        evt.TriggerID,
+		TriggerType:      evt.TriggerType,
+		TaskID:           taskID,
+		Status:           automation.RunStatusTaskCreated,
+		DedupKey:         evt.DedupKey,
+		TriggerData:      evt.TriggerData,
+		RepositoryReason: repositoryReason,
 	}
 	return s.automationService.RecordRun(ctx, run)
 }

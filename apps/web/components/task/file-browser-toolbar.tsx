@@ -12,6 +12,7 @@ import {
   IconPlus,
   IconUpload,
   IconDots,
+  IconLoader2,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -58,7 +59,9 @@ type FileBrowserToolbarProps = {
   expandedPathsSize: number;
   onCopyPath: (text: string) => void;
   onStartCreate?: () => void;
-  onOpenFolder: () => void;
+  onOpenFolder: (opener?: HTMLButtonElement) => void;
+  isOpeningFolder?: boolean;
+  isFolderDisabled?: boolean;
   onStartSearch: () => void;
   onCollapseAll: () => void;
   showCreateButton: boolean;
@@ -210,18 +213,53 @@ function CreateMenu({
   );
 }
 
+function OpenWorkspaceFolderMenuItem({
+  isOpening,
+  disabled,
+  onSelect,
+}: {
+  isOpening?: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenuItem
+      className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+      disabled={disabled || isOpening}
+      aria-busy={isOpening}
+      onSelect={onSelect}
+    >
+      {isOpening ? (
+        <IconLoader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+      ) : (
+        <IconFolderOpen className="h-3.5 w-3.5" aria-hidden />
+      )}
+      {t("task:openWorkspaceFolder")}
+    </DropdownMenuItem>
+  );
+}
+
 function WorkspaceActionsMenu({
   onAddSources,
   onOpenFolder,
+  isOpeningFolder,
+  isFolderDisabled,
   addSourcesButtonRef,
   addSourcesDisabledReason,
 }: Pick<
   FileBrowserToolbarProps,
-  "onAddSources" | "onOpenFolder" | "addSourcesButtonRef" | "addSourcesDisabledReason"
+  | "onAddSources"
+  | "onOpenFolder"
+  | "isOpeningFolder"
+  | "isFolderDisabled"
+  | "addSourcesButtonRef"
+  | "addSourcesDisabledReason"
 >) {
   const { t } = useTranslation();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const openSourcesAfterCloseRef = useRef(false);
+  const openFolderAfterCloseRef = useRef(false);
   const restoreMobileFocusAfterDrawerClose = useMobileDrawerFocusRestoration(triggerRef);
   const setTriggerRef = useCallback(
     (node: HTMLButtonElement | null) => {
@@ -260,6 +298,13 @@ function WorkspaceActionsMenu({
         align="end"
         className="w-72"
         onCloseAutoFocus={(event) => {
+          if (openFolderAfterCloseRef.current) {
+            event.preventDefault();
+            openFolderAfterCloseRef.current = false;
+            triggerRef.current?.focus();
+            onOpenFolder(triggerRef.current ?? undefined);
+            return;
+          }
           if (!openSourcesAfterCloseRef.current) return;
           event.preventDefault();
           openSourcesAfterCloseRef.current = false;
@@ -284,13 +329,13 @@ function WorkspaceActionsMenu({
             )}
           </span>
         </DropdownMenuItem>
-        <DropdownMenuItem
-          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
-          onSelect={onOpenFolder}
-        >
-          <IconFolderOpen className="h-3.5 w-3.5" />
-          {t("task:openWorkspaceFolder")}
-        </DropdownMenuItem>
+        <OpenWorkspaceFolderMenuItem
+          isOpening={isOpeningFolder}
+          disabled={isFolderDisabled}
+          onSelect={() => {
+            openFolderAfterCloseRef.current = true;
+          }}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -304,6 +349,8 @@ export function FileBrowserToolbar({
   onCopyPath,
   onStartCreate,
   onOpenFolder,
+  isOpeningFolder,
+  isFolderDisabled,
   onStartSearch,
   onCollapseAll,
   showCreateButton,
@@ -346,6 +393,8 @@ export function FileBrowserToolbar({
           <WorkspaceActionsMenu
             onAddSources={onAddSources}
             onOpenFolder={onOpenFolder}
+            isOpeningFolder={isOpeningFolder}
+            isFolderDisabled={isFolderDisabled}
             addSourcesButtonRef={addSourcesButtonRef}
             addSourcesDisabledReason={addSourcesDisabledReason}
           />

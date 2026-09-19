@@ -533,7 +533,7 @@ function ChatTabContent({
   taskId: string | null;
   showRequestChangesTooltip: boolean;
   onDismissTooltip: () => void;
-  onOpenFile: (filePath: string) => void;
+  onOpenFile: (filePath: string, repositoryName?: string) => void;
 }) {
   const { t } = useTranslation();
   if (!activeTaskId) {

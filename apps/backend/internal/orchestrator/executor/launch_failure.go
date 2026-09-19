@@ -102,6 +102,8 @@ func (e *Executor) buildLastAgentError(
 	return models.LastAgentError{
 		Message:    classification.message,
 		OccurredAt: occurredAt,
+		Scope:      models.ErrorScopeSession,
+		Phase:      models.LaunchErrorPhaseBootstrap,
 		Code:       classification.code,
 		Details:    details,
 		RecoveryActions: func() []string {
@@ -167,6 +169,7 @@ func (e *Executor) buildBootstrapLastAgentError(
 	return models.LastAgentError{
 		Message:          classification.message,
 		OccurredAt:       occurredAt,
+		Scope:            models.ErrorScopeSession,
 		AgentExecutionID: agentExecutionID,
 		ExecutionID:      agentExecutionID,
 		Phase:            models.LaunchErrorPhaseBootstrap,
@@ -306,8 +309,8 @@ func (e *Executor) bootstrapFailureExpectation(
 
 // commitBootstrapFailure commits the correlated failure projection and the
 // FAILED transition through the atomic orchestrator callback or repository
-// capability. Legacy test stores retain the older CAS plus state-transition
-// fallback, but the production SQL repository uses the guarded commit.
+// capability. Stores without an execution-fenced commit fail closed so a
+// bootstrap failure cannot overwrite a successor execution.
 func (e *Executor) commitBootstrapFailure(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
@@ -352,43 +355,7 @@ func (e *Executor) commitBootstrapFailure(
 		return true, models.TaskSessionStateFailed, nil
 	}
 
-	// Legacy stores cannot atomically fence the executor row and session write.
-	// Keep their existing behavior for focused test doubles and older adapters;
-	// the production repository always takes the guarded path above.
-	writer, supportsCAS := e.repo.(sessionMetadataErrorCASWriter)
-	var persisted bool
-	if supportsCAS {
-		if expectedStamp != "" {
-			persisted, err = writer.SetSessionMetadataKeyIfStamp(
-				ctx,
-				sessionID,
-				models.SessionMetaKeyLastAgentError,
-				expectedStamp,
-				errorValue,
-			)
-		} else {
-			persisted, err = writer.SetSessionMetadataKeyIfAbsent(
-				ctx,
-				sessionID,
-				models.SessionMetaKeyLastAgentError,
-				errorValue,
-			)
-		}
-	} else {
-		err = e.repo.SetSessionMetadataKey(
-			ctx, sessionID, models.SessionMetaKeyLastAgentError, errorValue,
-		)
-		persisted = err == nil
-	}
-	if err != nil {
-		return false, session.State, err
-	}
-	if !persisted {
-		return false, session.State, nil
-	}
-
-	changed, finalState, err := e.transitionSessionState(
-		ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message,
+	return false, session.State, fmt.Errorf(
+		"bootstrap failure requires an execution-fenced repository commit",
 	)
-	return changed, finalState, err
 }

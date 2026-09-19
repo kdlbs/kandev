@@ -261,13 +261,17 @@ type fakeTaskRepo struct {
 	tasks            map[string]*models.Task
 	children         map[string][]string // parentID -> ordered child IDs
 	taskEnvironments map[string]*models.TaskEnvironment
+	// taskEnvironmentErrs injects a lookup failure for one environment ID so a
+	// test can distinguish a positively absent row from an uncertain signal.
+	taskEnvironmentErrs map[string]error
 }
 
 func newFakeTaskRepo() *fakeTaskRepo {
 	return &fakeTaskRepo{
-		tasks:            map[string]*models.Task{},
-		children:         map[string][]string{},
-		taskEnvironments: map[string]*models.TaskEnvironment{},
+		tasks:               map[string]*models.Task{},
+		children:            map[string][]string{},
+		taskEnvironments:    map[string]*models.TaskEnvironment{},
+		taskEnvironmentErrs: map[string]error{},
 	}
 }
 
@@ -472,6 +476,9 @@ func (f *fakeTaskRepo) SetTaskWorkspaceMetadataIfUnchanged(
 func (f *fakeTaskRepo) GetTaskEnvironment(_ context.Context, id string) (*models.TaskEnvironment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err, ok := f.taskEnvironmentErrs[id]; ok {
+		return nil, err
+	}
 	return f.taskEnvironments[id], nil
 }
 
@@ -686,6 +693,20 @@ func (r *phase4TaskRepo) UpdateTask(context.Context, *models.Task) error {
 func (r *phase4TaskRepo) UpdateTaskWithExplicitPosition(context.Context, *models.Task) error {
 	r.panicNotUsed("UpdateTaskWithExplicitPosition")
 	return nil
+}
+func (r *phase4TaskRepo) UpdateTaskPreservingDeferredLaunch(context.Context, *models.Task) error {
+	r.panicNotUsed("UpdateTaskPreservingDeferredLaunch")
+	return nil
+}
+func (r *phase4TaskRepo) GetTaskDeferredLaunch(context.Context, string) (map[string]interface{}, interface{}, error) {
+	r.panicNotUsed("GetTaskDeferredLaunch")
+	return nil, nil, nil
+}
+func (r *phase4TaskRepo) SetTaskDeferredLaunchIfUnchanged(
+	context.Context, string, interface{}, map[string]interface{},
+) (bool, bool, error) {
+	r.panicNotUsed("SetTaskDeferredLaunchIfUnchanged")
+	return false, false, nil
 }
 func (r *phase4TaskRepo) DeleteTask(context.Context, string) error {
 	r.panicNotUsed("DeleteTask")

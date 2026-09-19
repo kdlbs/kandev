@@ -40,7 +40,7 @@ template:
             test -n "$iface"
             mtu=$(cat "/sys/class/net/$iface/mtu")
             test "$mtu" -ge 576
-            exec dockerd --host=unix:///run/docker/docker.sock --group=1000 --mtu="$mtu" --default-network-opt=bridge=com.docker.network.driver.mtu="$mtu" --storage-driver=overlay2
+            exec dockerd --host=unix:///run/docker/docker.sock --group=1000 --mtu="$mtu" --default-network-opt=bridge=com.docker.network.driver.mtu="$mtu" --storage-driver=overlay2 --exec-opt native.cgroupdriver=cgroupfs --cgroup-parent=docker
         securityContext:
           runAsUser: 0
           runAsGroup: 0

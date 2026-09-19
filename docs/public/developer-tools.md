@@ -205,6 +205,14 @@ re-picks their engine and language: preferences are not carried over.
 
 ## Files and editor integrations
 
+To open a task folder in your file manager, select **Open folder** beside the IDE control in the task toolbar. On a phone, use **Files → Workspace actions → Open workspace folder**. For tasks with several worktrees, choose the repository and branch to open.
+
+This opens Finder on macOS, the default file manager on Linux, or Explorer on Windows on the machine running Kandev. A browser connected to a remote Kandev instance does not open that folder on your own device. The host needs a desktop session and an available file manager.
+
+The folder action is disabled when the host folder-opening command is unavailable
+(`open` on macOS, `xdg-open` on Linux, or `explorer` on Windows), or while its
+availability is unknown. The repository picker is also unavailable in that case.
+
 > **Security:** Embedded VS Code runs code-server with `--auth none` inside the task environment. Use it only with a trusted executor and network boundary.
 
 <details>

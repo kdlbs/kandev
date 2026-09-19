@@ -495,6 +495,18 @@ func (c *Client) readUpdatesStream(
 			c.logger.Warn("failed to parse agent event", zap.Error(err))
 			continue
 		}
+		if event.Type == streams.EventTypeSessionModels {
+			// Keep the snapshot on the client as well as in the lifecycle
+			// callback. A staged replacement client has no published execution
+			// state yet, so its asynchronous catalog must remain available to the
+			// bounded startup-policy wait.
+			c.setLastSessionModelState(&streams.SessionModelState{
+				CurrentModelID:       event.CurrentModelID,
+				Models:               event.SessionModels,
+				ConfigOptions:        event.ConfigOptions,
+				ConfigOptionsSettled: eventDataBool(event.Data, "config_options_settled"),
+			})
+		}
 
 		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
 		// Hand off to the ordered worker rather than running handler inline.
@@ -691,6 +703,11 @@ func extractMCPRequestCorrelation(payload json.RawMessage) (sessionID string, pe
 		pendingID = v
 	}
 	return sessionID, pendingID
+}
+
+func eventDataBool(data map[string]any, key string) bool {
+	value, ok := data[key].(bool)
+	return ok && value
 }
 
 // CloseUpdatesStream closes the agent events stream connection.

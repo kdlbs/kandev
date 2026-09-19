@@ -1,3 +1,4 @@
+import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 /* eslint-disable max-lines -- session state intentionally keeps its coordinated actions together. */
 import type { StateCreator } from "zustand";
 import { original } from "immer";
@@ -74,6 +75,12 @@ function applyMessageMeta(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
   for (const key of Object.keys(source)) {
+    if (
+      key === "metadata" &&
+      payloadRetentionMarker(target.metadata) &&
+      !payloadRetentionMarker(source.metadata)
+    )
+      continue;
     if (source[key] !== undefined) {
       target[key] = source[key];
     }
@@ -89,6 +96,10 @@ function mergeMessageAtIndex(messages: Message[], message: Message): void {
     message as unknown as Record<string, unknown>,
   );
   messages[index] = merged;
+}
+
+function isTransientRetryNotice(message: Message): boolean {
+  return message.type === "status" && message.metadata?.retrying === true;
 }
 
 /** Return a new messages array with the message matching `messageId` removed. */
@@ -286,7 +297,10 @@ function buildMessageActions(set: ImmerSet) {
       meta?: Parameters<SessionSlice["setMessages"]>[2],
     ) =>
       set((draft) => {
-        draft.messages.bySession[sessionId] = messages;
+        draft.messages.bySession[sessionId] = reconcileMessages(
+          draft.messages.bySession[sessionId],
+          messages,
+        );
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
       }),
@@ -314,8 +328,15 @@ function buildMessageActions(set: ImmerSet) {
     updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
       set((draft) => {
         for (const message of messages) {
-          const sessionMessages = draft.messages.bySession[message.session_id];
-          if (sessionMessages) mergeMessageAtIndex(sessionMessages, message);
+          let sessionMessages = draft.messages.bySession[message.session_id];
+          if (!sessionMessages && isTransientRetryNotice(message)) {
+            sessionMessages = draft.messages.bySession[message.session_id] = [];
+          }
+          if (sessionMessages) {
+            const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
+            if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
+            else if (isTransientRetryNotice(message)) sessionMessages.push(message);
+          }
           updatePromptMessage(draft, message);
         }
       }),

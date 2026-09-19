@@ -97,7 +97,11 @@ func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 // missing credentials), but the worktree is still usable for non-submodule files.
 func (m *Manager) initSubmodules(ctx context.Context, dir string) {
 	cmd, err := m.scopedSubmoduleUpdateCmd(ctx, dir)
-	if err != nil || cmd == nil {
+	if err != nil {
+		m.logger.Warn("failed to discover sparse-checkout submodules", zap.String("dir", dir), zap.Error(err))
+		return
+	}
+	if cmd == nil {
 		return
 	}
 	output, err := runGitCmdCombinedOutput(ctx, cmd)

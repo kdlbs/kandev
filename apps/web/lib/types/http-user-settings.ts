@@ -187,6 +187,7 @@ export type UserSettings = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_views_by_workspace?: Record<string, SidebarWorkspaceStateApi>;
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
@@ -214,6 +215,8 @@ export type UserSettings = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_hover_enabled?: boolean;
+  sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   quick_chat_tab_order_by_workspace?: Record<string, string[]>;
@@ -263,6 +266,12 @@ export type UserSettingsUpdatePayload = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_view_state?: {
+    workspace_id: string;
+    views?: SidebarViewApi[];
+    active_view_id?: string;
+    draft?: SidebarViewDraftApi | null;
+  };
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
@@ -290,6 +299,8 @@ export type UserSettingsUpdatePayload = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_hover_enabled?: boolean;
+  sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   quick_chat_tab_order_by_workspace?: Record<string, string[]>;
@@ -297,4 +308,10 @@ export type UserSettingsUpdatePayload = {
   workflow_ids_with_auto_hide_empty_steps?: string[];
   kanban_sort?: string;
   kanban_priority_filter_tokens?: string[];
+};
+
+export type SidebarWorkspaceStateApi = {
+  views: SidebarViewApi[];
+  active_view_id: string;
+  draft: SidebarViewDraftApi | null;
 };

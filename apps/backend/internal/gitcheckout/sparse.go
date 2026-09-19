@@ -22,7 +22,8 @@ func ApplySparse(ctx context.Context, path string, options *models.RepositoryChe
 		if err != nil {
 			return fmt.Errorf("inspect selected checkout directory: %w", err)
 		}
-		if !strings.HasPrefix(string(out), "040000 tree ") || !strings.HasSuffix(string(out), "\t"+directory+"\x00") {
+		directoryLike := strings.HasPrefix(string(out), "040000 tree ") || strings.HasPrefix(string(out), "160000 commit ")
+		if !directoryLike || !strings.HasSuffix(string(out), "\t"+directory+"\x00") {
 			return &DirectoryError{Directory: directory}
 		}
 	}

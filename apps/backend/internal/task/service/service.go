@@ -149,6 +149,15 @@ type ParkedProjectionCanceller interface {
 	ClearParkedProjectionOnSessionTerminated(ctx context.Context, taskID, sessionID string, newState models.TaskSessionState)
 }
 
+// SessionCeilingReleaser releases the orchestrator's session-ceiling
+// reservation for a session cancelled through a task service-owned bulk path
+// (archive's batch session cancellation, delete's cascaded session removal),
+// neither of which passes through the orchestrator's own persistence
+// funnels. Releasing a session that held no reservation is a defined no-op.
+type SessionCeilingReleaser interface {
+	ReleaseCeilingReservation(sessionID string)
+}
+
 // TaskRowLivenessProber classifies an executors_running row's backing-process
 // liveness in a runtime-aware way (a local process check is never applied to a
 // remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
@@ -213,7 +222,18 @@ type BranchMaterializer interface {
 	// task_repositories row. Best-effort: when no active session exists yet
 	// the implementation may choose to no-op and let the next session launch
 	// create the worktree via the standard multi-repo prepare path.
-	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error)
+	MaterializeBranch(
+		ctx context.Context,
+		taskID, taskRepositoryID string,
+		target BranchMaterializationTarget,
+	) (*BranchMaterializationResult, error)
+}
+
+// BranchMaterializationTarget pins the live session/environment identity
+// selected by the task service so the materializer can reject a racing rebind.
+type BranchMaterializationTarget struct {
+	SessionID         string
+	TaskEnvironmentID string
 }
 
 // BranchMaterializationResult describes the live worktree created for a
@@ -406,6 +426,7 @@ type Service struct {
 	taskLifecycleCoordinator        TaskLifecycleCoordinator
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
+	statusSummaryLaunchQueue        TaskStatusSummaryLaunchQueueReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
 	queuedPromptCounter             QueuedPromptCounter
 	eventBus                        bus.EventBus
@@ -413,15 +434,17 @@ type Service struct {
 	discoveryConfig                 RepositoryDiscoveryConfig
 	discoveryCacheMu                sync.Mutex
 	discoveryCache                  map[string]discoveryCacheEntry
+	discoveryRootCache              map[string]discoveryRootCacheEntry
 	discoveryFlights                map[string]*discoveryFlight
 	discoveryNow                    func() time.Time
-	discoveryScanRoot               func(context.Context, string, int) ([]LocalRepository, error)
+	discoveryScanRoot               func(context.Context, string, int) (repositoryDiscoveryScanResult, error)
 	filesystemWarnings              *fsdiagnostics.WarningLimiter
 	worktreeCleanup                 WorktreeCleanup
 	canvasCleanup                   CanvasCleanup
 	executionStopper                TaskExecutionStopper
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
+	sessionCeilingReleaser          SessionCeilingReleaser
 	rowLivenessProber               TaskRowLivenessProber
 	contextWindowResetter           func(context.Context, string) error
 	cleanupActivity                 TaskResourceCleanupActivityGate
@@ -689,6 +712,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
 		discoveryCache:        make(map[string]discoveryCacheEntry),
+		discoveryRootCache:    make(map[string]discoveryRootCacheEntry),
 		discoveryFlights:      make(map[string]*discoveryFlight),
 		discoveryNow:          time.Now,
 		discoveryScanRoot:     scanRootForRepos,
@@ -718,8 +742,8 @@ func (s *Service) setCleanupDoneForTestHook(ch chan struct{}) {
 }
 
 // SetBranchMaterializer wires the mid-session worktree materializer for
-// AddBranchToTask. Optional — when unset, MCP add_branch only inserts the
-// task_repositories row and the worktree appears on next session launch.
+// AddBranchToTask. It may be unset for pre-launch tasks, whose worktrees are
+// created on the next session launch; live tasks require the materializer.
 func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 	s.branchMaterializer = m
 }
@@ -774,6 +798,12 @@ func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCance
 // orchestrator's per-session state-transition chokepoint.
 func (s *Service) SetParkedProjectionCanceller(canceller ParkedProjectionCanceller) {
 	s.parkedProjectionCanceller = canceller
+}
+
+// SetSessionCeilingReleaser wires session-ceiling release (orchestrator) for
+// the same task service-owned bulk paths SetParkedProjectionCanceller covers.
+func (s *Service) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
+	s.sessionCeilingReleaser = releaser
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe

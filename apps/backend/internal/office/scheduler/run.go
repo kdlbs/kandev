@@ -42,15 +42,7 @@ var ErrRoutingNotSupported = errors.New("routing not supported by task starter")
 // model is the base profile's CLIFlags + AutoApprove booleans, not a
 // preset-by-name. Per-provider permission overrides would require
 // re-modelling that surface and are deferred.
-type RouteOverride struct {
-	ExecutionProfileID string
-	ProviderID         string
-	Model              string
-	Tier               string
-	Mode               string
-	Flags              []string
-	Env                map[string]string
-}
+type RouteOverride = service.RouteOverride
 
 // LaunchContext is an alias for service.LaunchContext so dispatch
 // callsites inside this package can spell the type without re-imports.
@@ -195,6 +187,7 @@ type SchedulerService struct {
 	logger                  *logger.Logger
 	svc                     *service.Service
 	taskStarter             TaskStarter
+	runSessionLauncher      service.RunSessionLauncher
 	resolver                *routing.Resolver
 	eb                      bus.EventBus
 	apiBaseURL              string
@@ -246,6 +239,11 @@ func NewSchedulerService(
 // SetTaskStarter wires the orchestrator task starter.
 func (ss *SchedulerService) SetTaskStarter(ts TaskStarter) {
 	ss.taskStarter = ts
+}
+
+// SetRunSessionLauncher wires the Office-owned taskless launch seam.
+func (ss *SchedulerService) SetRunSessionLauncher(launcher service.RunSessionLauncher) {
+	ss.runSessionLauncher = launcher
 }
 
 // SetResolver wires the routing resolver. When set, dispatch goes through

@@ -261,6 +261,42 @@ func TestFSStore_Get_LegacyRecordDefaultsFailureDiagnostics(t *testing.T) {
 	}
 }
 
+func TestFSStore_Get_LegacyUtilityMarkerLoadsWithoutAuthority(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+	const id = "kandev-plugin-legacy"
+	legacyRecord := []byte(`id: kandev-plugin-legacy
+api_version: 1
+version: "1.0.0"
+display_name: Test Plugin
+status: registered
+install_path: /tmp/kandev-plugin-legacy
+signed: false
+legacy_utility_agent_fallback: true
+`)
+	if err := os.WriteFile(filepath.Join(dir, id+".yml"), legacyRecord, 0o600); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+
+	got, err := s.Get(id)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.ID != id {
+		t.Fatalf("Get().ID = %q, want %q", got.ID, id)
+	}
+	if err := s.Save(got); err != nil {
+		t.Fatalf("Save() migrated record: %v", err)
+	}
+	rewritten, err := os.ReadFile(filepath.Join(dir, id+".yml"))
+	if err != nil {
+		t.Fatalf("read migrated record: %v", err)
+	}
+	if strings.Contains(string(rewritten), "legacy_utility_agent_fallback") {
+		t.Fatalf("migrated record retained the retired utility marker: %s", rewritten)
+	}
+}
+
 func TestFSStore_SetConfigThenGetConfig_RoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	s := NewFSStore(dir)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // RemoteRefState describes what an authenticated remote advertised after a
@@ -188,6 +189,13 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequestAndState(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
 		request.ProviderRepositoryID, request.Owner, request.Name,
 	)
+	if err == nil && hasCheckoutOptions(request) {
+		options, validationErr := models.NormalizeRepositoryCheckoutOptions(request.CheckoutOptions)
+		if validationErr != nil {
+			return RemoteRefStateUnknown, validationErr
+		}
+		targetPath, err = c.checkoutCachePath(request, options)
+	}
 	if err != nil {
 		return RemoteRefStateUnknown, err
 	}

@@ -317,6 +317,8 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 		return update, err
 	}
 
+	wt.enrichSymlinkMetadata(ctx, &update)
+
 	// Enrich file info with diff data (additions, deletions, and actual diff content)
 	if err := wt.enrichWithDiffData(ctx, &update, prior); err != nil {
 		return update, err
@@ -930,12 +932,12 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 		fileInfo.Status = fileStatusDeleted
 		fileInfo.Staged = true
 		update.Deleted = append(update.Deleted, filePath)
-	case workTreeStatus == 'M':
+	case workTreeStatus == 'M' || workTreeStatus == 'T':
 		// Modified in worktree - unstaged modification
 		fileInfo.Status = fileStatusModified
 		fileInfo.Staged = false
 		update.Modified = append(update.Modified, filePath)
-	case indexStatus == 'M':
+	case indexStatus == 'M' || indexStatus == 'T':
 		// Modified and staged (no worktree changes)
 		fileInfo.Status = fileStatusModified
 		fileInfo.Staged = true
@@ -967,7 +969,7 @@ func (wt *WorkspaceTracker) applyPorcelainLine(line string, update *types.GitSta
 func porcelainChangeFacet(status byte, oldPath string) *types.FileChangeFacet {
 	change := &types.FileChangeFacet{OldPath: oldPath}
 	switch status {
-	case 'M':
+	case 'M', 'T':
 		change.Status = fileStatusModified
 	case 'A':
 		change.Status = "added"

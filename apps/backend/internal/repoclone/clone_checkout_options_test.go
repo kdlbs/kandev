@@ -31,6 +31,9 @@ func TestAuthenticatedCloneCheckoutOptionsLazyRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := cloner.RefreshWorkspaceRepositoryWithCredentialRequestAndState(context.Background(), request, path, "", ""); err != nil {
+		t.Fatalf("refresh option-specific cache: %v", err)
+	}
 	objects := checkoutOptionsGit(t, path, "cat-file", "--batch-all-objects", "--batch-check=%(objectname)")
 	if strings.Contains(objects, firstBlob) || strings.Contains(objects, secondBlob) {
 		t.Fatal("on-demand clone downloaded historical file contents")
@@ -105,4 +108,34 @@ func checkoutOptionsGit(t *testing.T, directory string, args ...string) string {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 	return string(out)
+}
+
+func TestAuthenticatedCloneCheckoutOptionsRetainsGitCryptKeys(t *testing.T) {
+	origin, _, _, _ := checkoutOptionsGitServer(t)
+	t.Setenv("GIT_SSL_NO_VERIFY", "true")
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+	cloner.SetGitCredentialProvider(&recordingCredentialProvider{password: "fixture-token"})
+	request := GitCredentialRequest{WorkspaceID: "workspace", Provider: "github", ProviderHost: origin, CloneURL: origin + "/repo.git", Owner: "acme", Name: "repo"}
+	standard, err := cloner.EnsureWorkspaceClonedWithCredentialRequest(context.Background(), request, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := filepath.Join(standard, ".git", "git-crypt", "keys")
+	if err := os.MkdirAll(keys, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keys, "default"), []byte("key-fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(`{"checkout_options":{"version":1,"download_mode":"on_demand"}}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := cloner.EnsureWorkspaceClonedWithCredentialRequest(context.Background(), request, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(cache, ".git", "git-crypt", "keys", "default"))
+	if err != nil || string(data) != "key-fixture" {
+		t.Fatalf("managed unlock state lost: %q %v", data, err)
+	}
 }

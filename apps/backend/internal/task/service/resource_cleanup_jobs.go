@@ -57,18 +57,29 @@ type persistedTaskAttachment struct {
 	StorageKey string `json:"storage_key"`
 }
 
+// persistedWorktreeBranchMetadata carries internal branch-cleanup state
+// through the durable cleanup snapshot. Worktree hides these fields from
+// public JSON, but an archive job must restore them after a process restart.
+type persistedWorktreeBranchMetadata struct {
+	BranchCompactedAt *time.Time `json:"branch_compacted_at,omitempty"`
+	BranchOwner       string     `json:"branch_owner,omitempty"`
+	IntegrationRef    string     `json:"integration_ref,omitempty"`
+	RecoveryHeadSHA   string     `json:"recovery_head_sha,omitempty"`
+}
+
 type taskResourceCleanupSnapshot struct {
-	Sessions               []*models.TaskSession     `json:"sessions,omitempty"`
-	Worktrees              []*worktree.Worktree      `json:"worktrees,omitempty"`
-	WorktreeHeadOIDs       map[string]string         `json:"worktree_head_oids,omitempty"`
-	WorktreeTaskDirNames   map[string]string         `json:"worktree_task_dir_names,omitempty"`
-	DiscardWorktreeChanges bool                      `json:"discard_worktree_changes,omitempty"`
-	StopTargets            []persistedTaskStopTarget `json:"stop_targets,omitempty"`
-	TaskEnvironment        *models.TaskEnvironment   `json:"task_environment,omitempty"`
-	Attachments            []persistedTaskAttachment `json:"attachments,omitempty"`
-	WorkspaceID            string                    `json:"workspace_id,omitempty"`
-	DeleteEnvironmentRow   bool                      `json:"delete_environment_row,omitempty"`
-	LegacyWorktreeCleanup  bool                      `json:"legacy_worktree_cleanup,omitempty"`
+	Sessions               []*models.TaskSession                      `json:"sessions,omitempty"`
+	Worktrees              []*worktree.Worktree                       `json:"worktrees,omitempty"`
+	WorktreeHeadOIDs       map[string]string                          `json:"worktree_head_oids,omitempty"`
+	WorktreeTaskDirNames   map[string]string                          `json:"worktree_task_dir_names,omitempty"`
+	WorktreeBranchMetadata map[string]persistedWorktreeBranchMetadata `json:"worktree_branch_metadata,omitempty"`
+	DiscardWorktreeChanges bool                                       `json:"discard_worktree_changes,omitempty"`
+	StopTargets            []persistedTaskStopTarget                  `json:"stop_targets,omitempty"`
+	TaskEnvironment        *models.TaskEnvironment                    `json:"task_environment,omitempty"`
+	Attachments            []persistedTaskAttachment                  `json:"attachments,omitempty"`
+	WorkspaceID            string                                     `json:"workspace_id,omitempty"`
+	DeleteEnvironmentRow   bool                                       `json:"delete_environment_row,omitempty"`
+	LegacyWorktreeCleanup  bool                                       `json:"legacy_worktree_cleanup,omitempty"`
 	// SSHTaskDirs records the remote task directories this task launched into.
 	// Additive and absent-tolerant: a job row written by an older backend
 	// decodes with an empty list and reclaims nothing.
@@ -130,11 +141,13 @@ func (s *Service) persistTaskResourceCleanup(
 		})
 	}
 	worktreeTaskDirNames := captureWorktreeTaskDirNames(worktrees)
+	worktreeBranchMetadata := captureWorktreeBranchMetadata(worktrees)
 	snapshot := taskResourceCleanupSnapshot{
 		Sessions:               sessions,
 		Worktrees:              worktrees,
 		WorktreeHeadOIDs:       worktreeHeadOIDs,
 		WorktreeTaskDirNames:   worktreeTaskDirNames,
+		WorktreeBranchMetadata: worktreeBranchMetadata,
 		DiscardWorktreeChanges: envCleanup.discardWorktreeChanges,
 		StopTargets:            persistStopTargets(stopTargets),
 		Attachments:            persistedAttachments,
@@ -200,6 +213,32 @@ func captureWorktreeTaskDirNames(worktrees []*worktree.Worktree) map[string]stri
 		return nil
 	}
 	return names
+}
+
+func captureWorktreeBranchMetadata(worktrees []*worktree.Worktree) map[string]persistedWorktreeBranchMetadata {
+	if len(worktrees) == 0 {
+		return nil
+	}
+	metadata := make(map[string]persistedWorktreeBranchMetadata, len(worktrees))
+	for _, wt := range worktrees {
+		if wt == nil || wt.ID == "" {
+			continue
+		}
+		if wt.BranchOwner == "" && wt.IntegrationRef == "" &&
+			wt.RecoveryHeadSHA == "" && wt.BranchCompactedAt == nil {
+			continue
+		}
+		metadata[wt.ID] = persistedWorktreeBranchMetadata{
+			BranchCompactedAt: wt.BranchCompactedAt,
+			BranchOwner:       wt.BranchOwner,
+			IntegrationRef:    wt.IntegrationRef,
+			RecoveryHeadSHA:   wt.RecoveryHeadSHA,
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }
 
 func persistStopTargets(targets []taskStopTarget) []persistedTaskStopTarget {
@@ -476,6 +515,12 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 	for _, wt := range snapshot.Worktrees {
 		if wt == nil {
 			continue
+		}
+		if metadata, found := snapshot.WorktreeBranchMetadata[wt.ID]; found {
+			wt.BranchCompactedAt = metadata.BranchCompactedAt
+			wt.BranchOwner = metadata.BranchOwner
+			wt.IntegrationRef = metadata.IntegrationRef
+			wt.RecoveryHeadSHA = metadata.RecoveryHeadSHA
 		}
 		if snapshot.WorktreeHeadOIDs != nil {
 			cleanupHeadOID, found := snapshot.WorktreeHeadOIDs[wt.ID]
@@ -992,6 +1037,7 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 		return cancelPrepared(err)
 	}
 	worktreeTaskDirNames := captureWorktreeTaskDirNames(worktrees)
+	worktreeBranchMetadata := captureWorktreeBranchMetadata(worktrees)
 	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
 	if err != nil {
 		return cancelPrepared(fmt.Errorf("lookup task environment for cleanup: %w", err))
@@ -1001,8 +1047,11 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 		return cancelPrepared(fmt.Errorf("list remote task directories for cleanup snapshot: %w", err))
 	}
 	snapshot := taskResourceCleanupSnapshot{
-		Sessions: sessions, Worktrees: worktrees, WorktreeHeadOIDs: worktreeHeadOIDs,
+		Sessions:               sessions,
+		Worktrees:              worktrees,
+		WorktreeHeadOIDs:       worktreeHeadOIDs,
 		WorktreeTaskDirNames:   worktreeTaskDirNames,
+		WorktreeBranchMetadata: worktreeBranchMetadata,
 		StopTargets:            persistStopTargets(stopTargets),
 		TaskEnvironment:        taskEnv,
 		DeleteEnvironmentRow:   deleteEnvironmentRow,

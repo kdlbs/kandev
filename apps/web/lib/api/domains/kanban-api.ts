@@ -282,6 +282,62 @@ export type WorkflowMoveResponse = MoveTaskResponse & {
   entry_options?: WorkflowMoveEntryOptions;
 };
 
+export type WorkflowMovePreviewOutcome =
+  | "reuse_current"
+  | "reuse_other"
+  | "create_new"
+  | "no_session"
+  | "unknown";
+export type WorkflowMovePreviewApplicability = "planned" | "unchanged" | "skipped" | "unknown";
+export type WorkflowMovePreviewSourceDisposition = "keep" | "park" | "complete" | "unknown";
+export type WorkflowMovePreviewDispatch =
+  | "prompt"
+  | "no_prompt"
+  | "deferred"
+  | "no_session"
+  | "unknown";
+
+export type WorkflowMovePreviewModelValue = {
+  id?: string;
+  label?: string;
+  known: boolean;
+  mode?: string;
+  config_options?: Record<string, string>;
+};
+
+export type WorkflowMovePreviewResponse = {
+  task_id: string;
+  workflow_step_id: string;
+  source_session_id?: string;
+  evaluated_at: string;
+  outcome: WorkflowMovePreviewOutcome;
+  recipient?: {
+    session_id?: string;
+    session_name?: string;
+    profile_id?: string;
+    profile_name?: string;
+    agent_family?: string;
+  };
+  model: {
+    before: WorkflowMovePreviewModelValue;
+    after: WorkflowMovePreviewModelValue;
+    before_source?: string;
+    after_source?: string;
+  };
+  changes?: Array<{
+    key: string;
+    label: string;
+    before?: string;
+    after?: string;
+    applicability: WorkflowMovePreviewApplicability;
+  }>;
+  context_reset: boolean;
+  context_reset_state: WorkflowMovePreviewApplicability;
+  source_disposition: WorkflowMovePreviewSourceDisposition;
+  dispatch: WorkflowMovePreviewDispatch;
+  notices?: Array<{ code: string; params?: Record<string, string> }>;
+};
+
 /**
  * Converts form values into the wire contract. Blank text has no one-shot
  * effect, and an absent/empty object keeps the legacy destination-only body.
@@ -314,6 +370,24 @@ export async function moveTask(
 
   return fetchJson<WorkflowMoveResponse>(`/api/v1/tasks/${taskId}/move`, {
     ...options,
+    init: { method: "POST", body: JSON.stringify(requestPayload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function previewWorkflowMove(
+  taskId: string,
+  payload: MoveTaskPayload,
+  options?: ApiRequestOptions,
+): Promise<WorkflowMovePreviewResponse> {
+  const { entry_options, ...destination } = payload;
+  const normalizedEntryOptions = normalizeWorkflowMoveEntryOptions(entry_options);
+  const requestPayload = normalizedEntryOptions
+    ? { ...destination, entry_options: normalizedEntryOptions }
+    : destination;
+
+  return fetchJson<WorkflowMovePreviewResponse>(`/api/v1/tasks/${taskId}/move-preview`, {
+    ...options,
+    cache: "no-store",
     init: { method: "POST", body: JSON.stringify(requestPayload), ...(options?.init ?? {}) },
   });
 }

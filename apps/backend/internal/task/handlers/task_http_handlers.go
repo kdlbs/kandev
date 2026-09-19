@@ -931,9 +931,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			body.Metadata = make(map[string]interface{})
 		}
 		body.Metadata[models.MetaKeyAgentProfileID] = body.AgentProfileID
-		if body.ExecutorProfileID != "" {
-			body.Metadata[models.MetaKeyExecutorProfileID] = body.ExecutorProfileID
+	}
+	if body.ExecutorProfileID != "" {
+		if body.Metadata == nil {
+			body.Metadata = make(map[string]interface{})
 		}
+		body.Metadata[models.MetaKeyExecutorProfileID] = body.ExecutorProfileID
 	}
 
 	title := strings.TrimSpace(body.Title)

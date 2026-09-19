@@ -23,13 +23,13 @@ func withCheckoutOptions(ctx context.Context, req CreateRequest) (context.Contex
 		return ctx, err
 	}
 	env := os.Environ()
-	keys := make([]string, 0, len(req.ScriptEnv))
-	for key := range req.ScriptEnv {
+	keys := make([]string, 0, len(req.CheckoutEnv))
+	for key := range req.CheckoutEnv {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		env = append(env, key+"="+req.ScriptEnv[key])
+		env = append(env, key+"="+req.CheckoutEnv[key])
 	}
 	return context.WithValue(ctx, checkoutContextKey{}, checkoutContext{options: options, env: env}), nil
 }

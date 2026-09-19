@@ -101,6 +101,9 @@ type GitStatusUpdate struct {
 // one change between HEAD and the index plus another between the index and the
 // working tree.
 type FileChangeFacet struct {
+	// IsSymlink describes the destination entry, or the source for a deletion.
+	IsSymlink *bool `json:"is_symlink,omitempty"`
+
 	// Status indicates the layer status: "modified", "added", "deleted", or "renamed".
 	Status string `json:"status"`
 
@@ -122,6 +125,9 @@ type FileChangeFacet struct {
 
 // FileInfo represents detailed information about a file's git status.
 type FileInfo struct {
+	// IsSymlink describes the destination entry, or the source for a deletion.
+	IsSymlink *bool `json:"is_symlink,omitempty"`
+
 	// Path is the file path relative to workspace root.
 	Path string `json:"path"`
 

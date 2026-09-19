@@ -5,7 +5,7 @@ export function parseCheckoutDirectories(value: string): {
   error?: true;
   errorLines?: number[];
 } {
-  const lines = value.split("\n").map((line) => line.trim());
+  const lines = value.split(/\r?\n/u);
   const directories = [...new Set(lines.filter(Boolean))];
   const errorLines = lines.flatMap((line, index) =>
     line && invalidDirectory(line) ? [index + 1] : [],

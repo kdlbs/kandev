@@ -39,9 +39,13 @@ var ErrNotFound = errors.New("plugin not found")
 type Record struct {
 	manifest.Manifest `yaml:",inline"`
 
-	Status      string `yaml:"status" json:"status"`
-	InstallPath string `yaml:"install_path" json:"install_path"`
-	Signed      bool   `yaml:"signed" json:"signed"`
+	Status string `yaml:"status" json:"status"`
+	// InstallationID is a Host-minted opaque principal for the installed
+	// plugin. It is persisted with the record and never derived from the
+	// plugin id, package digest, workspace, or install path.
+	InstallationID string `yaml:"installation_id,omitempty" json:"installation_id,omitempty"`
+	InstallPath    string `yaml:"install_path" json:"install_path"`
+	Signed         bool   `yaml:"signed" json:"signed"`
 	// AutoUpdate is the operator's per-plugin auto-update override. It is a
 	// tri-state: nil means "inherit the instance-wide default"
 	// (Service.AutoUpdateDefault), true forces auto-update on for this plugin,

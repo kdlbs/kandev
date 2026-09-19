@@ -91,23 +91,70 @@ function isRecoveryMessage(message: Message): boolean {
   return metadata?.recovery_actions === true;
 }
 
+function recoveryMessageStamp(message: Message): string | null {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  for (const key of ["recovery_stamp", "error_stamp", "failure_stamp"]) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return null;
+}
+
 function deduplicateRecoveryMessages(messages: Message[]): Message[] {
-  let lastRecoveryIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    if (isRecoveryMessage(messages[index])) {
-      lastRecoveryIndex = index;
-      break;
+  const seenStamps = new Set<string>();
+  return messages.filter((message) => {
+    if (!isRecoveryMessage(message)) return true;
+    const stamp = recoveryMessageStamp(message);
+    if (!stamp || seenStamps.has(stamp)) return !stamp;
+    seenStamps.add(stamp);
+    return true;
+  });
+}
+
+function agentPlanCorrelationKey(message: Message): string | null {
+  if (message.type !== "agent_plan") return null;
+  const metadata = message.metadata as { tool_call_id?: unknown } | undefined;
+  const toolCallId = metadata?.tool_call_id;
+  return typeof toolCallId === "string" && toolCallId.startsWith("agent-plan:") ? toolCallId : null;
+}
+
+function collapseCorrelatedAgentPlans(messages: Message[]): Message[] {
+  const latestIndexByCorrelation = new Map<string, number>();
+  for (const [index, message] of messages.entries()) {
+    const correlation = agentPlanCorrelationKey(message);
+    if (correlation) latestIndexByCorrelation.set(correlation, index);
+  }
+  if (latestIndexByCorrelation.size === 0) return messages;
+  return messages.filter((message, index) => {
+    const correlation = agentPlanCorrelationKey(message);
+    return !correlation || latestIndexByCorrelation.get(correlation) === index;
+  });
+}
+
+function collapseLegacyAgentPlanPrefixes(messages: Message[]): Message[] {
+  const collapsed: Message[] = [];
+  for (const message of messages) {
+    const previous = collapsed[collapsed.length - 1];
+    const isLegacyPrefix =
+      previous?.type === "agent_plan" &&
+      message.type === "agent_plan" &&
+      !agentPlanCorrelationKey(previous) &&
+      !agentPlanCorrelationKey(message) &&
+      Boolean(previous.turn_id) &&
+      previous.turn_id === message.turn_id &&
+      previous.content !== message.content &&
+      message.content.startsWith(previous.content);
+    if (isLegacyPrefix) {
+      collapsed[collapsed.length - 1] = message;
+    } else {
+      collapsed.push(message);
     }
   }
-  if (lastRecoveryIndex === -1) return messages;
-  const hasLaterActivity = messages
-    .slice(lastRecoveryIndex + 1)
-    .some((message) => message.type === "message" || message.type === "content");
-  return messages.filter((message, index) => {
-    if (!isRecoveryMessage(message)) return true;
-    if (hasLaterActivity) return false;
-    return index === lastRecoveryIndex;
-  });
+  return collapsed;
+}
+
+function collapseAgentPlanSnapshots(messages: Message[]): Message[] {
+  return collapseLegacyAgentPlanPrefixes(collapseCorrelatedAgentPlans(messages));
 }
 
 export function isAgentBootResumeMessage(message: Message): boolean {
@@ -316,7 +363,9 @@ function findActiveClarification(
   messages: Message[],
   scope?: PendingClarificationScope,
 ): Message | undefined {
-  return findPendingClarification(messages, scope) ?? undefined;
+  const pending = findPendingClarification(messages, scope);
+  const metadata = pending?.metadata as ClarificationRequestMetadata | undefined;
+  return metadata?.agent_disconnected === true ? undefined : (pending ?? undefined);
 }
 
 function isClarificationVisible(
@@ -356,10 +405,12 @@ export function filterVisibleMessages(
     if (message.type === "permission_request") return isPermissionVisible(message, toolCallIds);
     return false;
   });
-  return collapseTodoSnapshotsPerTurn(
-    dropSupersededEmptyTurnNotices(
-      deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
-      messages,
+  return collapseAgentPlanSnapshots(
+    collapseTodoSnapshotsPerTurn(
+      dropSupersededEmptyTurnNotices(
+        deduplicateAgentBootResumes(deduplicateRecoveryMessages(filtered)),
+        messages,
+      ),
     ),
   );
 }

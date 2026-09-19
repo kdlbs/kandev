@@ -208,3 +208,18 @@ Raycast repository has not been recloned. Individual work orders own commands.
   and Git cone semantics; do not infer dependency completeness.
 - Partial cloning can still be slow. The existing five-minute limit remains until
   a separate preparation-lifecycle package changes it.
+
+### PR review remediation
+
+Merged current main and retained both translation additions. Review fixes separate
+managed checkout credentials from setup-script environment, validate Docker scopes
+before setup, preserve attachment policy across branch changes, reject ambiguous
+replacement attachments, retain git-crypt unlock state, accept exact submodule
+scopes, preserve path whitespace, persist executor-only task defaults, and suppress
+credential-bearing clone diagnostics. Aggregate-review fixes also resolve the
+mode-specific path during refresh, normalize reuse identities, log submodule
+discovery errors, and correct capability translations. Targeted regressions
+reproduced the functional issues.
+
+Validation: focused Go checkout/handler tests with race detection, web parser/chip
+and capability tests, TypeScript typecheck, i18n checks, and specification validation.

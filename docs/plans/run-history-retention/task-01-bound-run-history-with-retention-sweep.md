@@ -74,7 +74,7 @@ Add `internal/office/retention`: a settings-backed sweep that ages out
 interval, a per-owner floor, status-only live/history classification, a preview
 pass before first deletion, engine-identical behavior on SQLite and PostgreSQL,
 and a `GET`/`PUT /api/v1/system/retention` operator surface with a matching
-Settings > System > Data & Logs card.
+Settings > System > Storage > Office retention card.
 
 ## In scope
 
@@ -89,7 +89,7 @@ Settings > System > Data & Logs card.
   `office_run_skills`) in the same transaction as their parent run.
 - `health.Issue` warnings for approaching the backlog cap and for count/sweep
   failure; a one-time preview per table before any row is deleted.
-- `RetentionSettingsCard` on Settings > System > Data & Logs: policy, retained
+- `RetentionSettingsCard` on Settings > System > Storage > Office retention: policy, retained
   counts, preview/backlog state, last sweep, errors.
 - Expression indexes serving the sweep's filter/order on both engines.
 
@@ -166,7 +166,7 @@ None.
 - Implemented `internal/office/retention` (settings store, `Sweeper`,
   `Scheduler`, `CensusTracker`, PostgreSQL advisory lock with SQLite
   equivalent, `Handler` for `GET`/`PUT /api/v1/system/retention`) plus the
-  `RetentionSettingsCard` on Settings > System > Data & Logs.
+  `RetentionSettingsCard` on Settings > System > Storage > Office retention.
 - Full backend gauntlet green: `go build ./...`, `go vet`, `gofmt -l`,
   `go test -race ./internal/office/retention/...` (SQLite), the
   PostgreSQL-gated suite against a real scratch instance (125 tests, 0

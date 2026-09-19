@@ -207,6 +207,17 @@ credential-free readiness marker inside `.git`. Task worktrees keep a separate
 options marker in their private Git directory. Reuse compares that marker and
 preserves uncommitted work. Remote siblings use staged agentctl materialization.
 Local Docker prepares its provisional container before publishing readiness.
+Folder validation follows target-revision checkout and precedes repository setup
+and contribution-destination configuration. Host checkout commands receive only
+managed credential environment and scoped credential configuration, separately
+from the profile environment passed to setup scripts. Ambiguous duplicate
+repository updates without branch identity are rejected rather than losing policy.
+Single-attachment branch changes preserve the policy. Exact submodule paths are
+valid sparse targets; directory text preserves leading and trailing spaces.
+Option-specific host caches retain normal managed clones as the owner of git-crypt
+unlock keys through a verified-origin link, and detect filters in committed
+attributes before materialization. Clone diagnostics are withheld from task logs
+because Git tracing can expose credential-bearing URLs.
 
 Container sink validation runs the generated built-in preparation script in the
 existing `kandev-agent:e2e` image. Its local authenticated Git server tests sparse

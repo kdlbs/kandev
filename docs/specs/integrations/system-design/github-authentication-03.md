@@ -160,10 +160,14 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 - **GIVEN** a broker-enabled managed task whose login profile replaces its inherited `PATH`,
   **WHEN** Git requests GitHub HTTPS credentials, **THEN** the configured helper invokes the
   instance-owned `agentctl` directly and does not search or fall through to an ambient helper.
-- **GIVEN** a broker-enabled Local or Worktree task whose checkout or setup script invokes Git
-  before the task instance is created, **WHEN** Git requests GitHub HTTPS credentials, **THEN** the
+- **GIVEN** a broker-enabled Local or Worktree task whose Kandev-owned checkout invokes Git before
+  the task instance is created, **WHEN** Git requests GitHub HTTPS credentials, **THEN** the
   configured helper invokes the standalone launcher's absolute `agentctl` executable without
   consulting `PATH` or an ambient helper.
+- **GIVEN** a Local or Worktree per-repository setup script, **WHEN** Kandev builds its environment,
+  **THEN** the script receives resolved profile and repository values, user-owned indexed Git
+  configuration, and Kandev's managed build cache, but receives no managed broker capability,
+  Kandev-generated Git credential helper, or managed `gh` shim routing.
 - **GIVEN** a broker-enabled Docker or Sprites task whose prepare script clones before `agentctl`
   starts, **WHEN** Git requests GitHub HTTPS credentials during that clone, **THEN** the configured
   helper invokes the already-installed absolute executor binary and redeems the task lease without

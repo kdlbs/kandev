@@ -162,9 +162,12 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			req.Metadata = make(map[string]interface{})
 		}
 		req.Metadata[models.MetaKeyAgentProfileID] = req.AgentProfileID
-		if req.ExecutorProfileID != "" {
-			req.Metadata[models.MetaKeyExecutorProfileID] = req.ExecutorProfileID
+	}
+	if req.ExecutorProfileID != "" {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
 		}
+		req.Metadata[models.MetaKeyExecutorProfileID] = req.ExecutorProfileID
 	}
 
 	title := strings.TrimSpace(req.Title)
