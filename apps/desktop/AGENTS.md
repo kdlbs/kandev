@@ -34,7 +34,7 @@ Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-des
 - Native menus emit versioned `kandev-desktop-v1-*` events for SPA-owned context and navigation.
   Updater, notification, and external-link operations use narrow generated Tauri commands scoped
   to the owned loopback WebView; do not grant the SPA direct plugin permissions.
-- Desktop launches force `KANDEV_SERVER_HOST=127.0.0.1`, prefer a stable desktop port with random fallback, and pass `KANDEV_BUNDLE_DIR` to the native launcher.
+- Desktop launches default `KANDEV_SERVER_HOST` to `127.0.0.1`; they retain an inherited host only when it contains both loopback and a validated Tailscale address. They prefer a stable desktop port with random fallback and pass `KANDEV_BUNDLE_DIR` to the native launcher.
 - Desktop launches set `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true` so the owned backend suppresses
   only its duplicate System notification provider.
 - `KANDEV_DESKTOP_RUNTIME_DIR` is a test/development override for runtime resources.
