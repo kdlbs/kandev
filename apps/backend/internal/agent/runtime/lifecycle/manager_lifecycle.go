@@ -53,6 +53,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	// AC-EXECUTORS-SURVIVAL-002.8) before recovery contacts any control
 	// server, and hand them to every runtime's RecoverInstances unchanged.
 	records, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
+	m.runRecoveryErr = listErr
 	if listErr != nil {
 		// A failed read leaves the record set unknown, which is not the same
 		// thing as empty. AC-EXECUTORS-SURVIVAL-002.6 stops a live instance
@@ -113,6 +114,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		var err error
 		recovered, err = m.executorRegistry.RecoverAll(recoveryCtx, records)
 		if err != nil {
+			m.runRecoveryErr = err
 			m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
 		}
 	}

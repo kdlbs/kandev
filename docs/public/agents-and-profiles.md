@@ -7,6 +7,8 @@ description: "Install agent CLIs and create profiles for models, modes, flags, s
 
 An **agent** is Kandev's integration with a coding-agent CLI. A **profile** is its reusable launch configuration. Create separate profiles when model, credentials, or permissions need different trust boundaries.
 
+The composer model picker shows the session's agent CLI logo beside the selected model and beside **Model** in the open popover. This identifies the CLI running the session, even when it supports models from several vendors.
+
 Agent authentication is separate from repository and integration credentials.
 
 ## Quick path
@@ -168,6 +170,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | CLI flags                    | Enabled entries are tokenized and appended to the ACP launch command.                                                                                            |
 | Command prefix               | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                             |
 | Environment                  | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                |
+| Provider                     | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                 |
 | CLI passthrough              | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                               |
 | Enabled                      | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                         |
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
@@ -182,6 +185,18 @@ return environment values or MCP credentials; use references or the existing
 interactive credential flow when a secret is required.
 
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
+
+### Use an OpenAI-compatible provider
+
+Open the **Provider** section in a profile that supports this feature. Select
+**OpenAI-compatible provider**, enter the absolute router base URL, and select
+an optional global API-key secret. Enter the model ID that the router accepts.
+The model field is free text because the router owns the model catalogue.
+
+Kandev sends the provider URL and optional bearer key through the ACP gateway
+authentication request when a new process starts. A running process keeps its
+existing provider settings until it restarts. CLI passthrough cannot use this
+provider because that path does not run the ACP authentication handshake.
 
 Configuration options are resolved for the model selected in the profile. An
 agent can therefore show a different option set for each model. If a model
@@ -231,6 +246,11 @@ backoff, or until its trusted reset time when one is available. Kandev runs an
 exclusive health probe before it becomes eligible again. This shared error
 classification is used by task/Kanban and Office routing, while the per-
 candidate policies are configured on dynamic profiles.
+
+When a task launch waits for session capacity, Kandev keeps the selected
+destination and retries it automatically. Inspecting another session does not
+resume a parked predecessor. Use an explicit **Resume** action or send a
+message for manual recovery. These actions can override the automatic ceiling.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
@@ -369,6 +389,8 @@ Literal values remain in profile configuration. A secret reference avoids copyin
 ## Permissions and unattended work
 
 In a structured ACP session, the agent can present a permission request and its available responses. With **Auto-approve all permissions** disabled, a person chooses a response in the session. With it enabled, the runtime selects the first allow-once or allow-always response without waiting. If the agent supplies no allow response, Kandev selects its first response even when that response is not approval; with no responses, it cancels.
+
+Claude ACP also has a narrower built-in rule. When the agent uses the host-injected `kandev` MCP server, Kandev automatically selects an offered allow-once response, or allow-always when allow-once is not offered, even when **Auto-approve all permissions** is disabled. This covers every tool on that server, including task creation, task deletion, and plan changes. It is not a saved approval decision and is recreated for each task or Quick Chat session. Kandev still enforces MCP authentication, task and session authorization, user-question barriers, and workflow gates. Shell commands, file operations, third-party tools, and ambiguous requests keep the normal permission flow.
 
 An external MCP client can also list live pending requests for an authorized task and submit one
 exact option originally offered by the agent. The request-generation ID prevents an old approval

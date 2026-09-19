@@ -585,7 +585,7 @@ func (s *Service) commitWorkspaceSourceBatch(ctx context.Context, task *models.T
 		var err error
 		materialized, err = materialize(ctx, task.ID, batch)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrWorkspaceSourceMaterialize, err)
+			return nil, fmt.Errorf("%w: %w", ErrWorkspaceSourceMaterialize, err)
 		}
 		if s.workspaceSourceMaterializer != nil && materialized == nil {
 			return nil, fmt.Errorf("%w: empty materialization result", ErrWorkspaceSourceMaterialize)

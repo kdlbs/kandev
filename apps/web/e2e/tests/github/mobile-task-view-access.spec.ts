@@ -12,7 +12,9 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
   const { settings } = await apiClient.getUserSettings();
-  expect(typeof settings.sidebar_active_view_id).toBe("string");
+  expect(typeof settings.sidebar_views_by_workspace[seedData.workspaceId].active_view_id).toBe(
+    "string",
+  );
   const view = {
     id: "github-mobile-task-view",
     name: "My mobile tasks",
@@ -21,7 +23,13 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     group: "none",
     collapsedGroups: [],
   };
-  await apiClient.saveUserSettings({ sidebar_views: [view], sidebar_active_view_id: view.id });
+  await apiClient.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: seedData.workspaceId,
+      views: [view],
+      active_view_id: view.id,
+    },
+  });
   const task = await apiClient.seedTask(seedData.workspaceId, "Task reachable from GitHub", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -73,8 +81,12 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await expect(titleInput).toHaveValue("Draft survives phone rotation");
   } finally {
     await apiClient.saveUserSettings({
-      sidebar_views: (settings.sidebar_views ?? []) as unknown[],
-      sidebar_active_view_id: settings.sidebar_active_view_id as string,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: (settings.sidebar_views_by_workspace[seedData.workspaceId].views ?? []) as unknown[],
+        active_view_id: settings.sidebar_views_by_workspace[seedData.workspaceId]
+          .active_view_id as string,
+      },
     });
   }
 });

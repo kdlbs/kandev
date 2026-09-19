@@ -108,6 +108,7 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
           </div>
           <div data-testid="toolbar-item-model">
             <ModelSelector
+              showAgentIcon
               sessionId={props.sessionId}
               triggerClassName="max-w-[56vw] min-w-0 overflow-hidden"
             />

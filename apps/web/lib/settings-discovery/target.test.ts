@@ -67,6 +67,24 @@ describe("settings target registry", () => {
 
     expect(reveal).toHaveBeenCalledTimes(2);
   });
+
+  it("waits for a hidden target until its owning tab is visible", () => {
+    const reveal = vi.fn();
+    const registry = createSettingsTargetRegistry(reveal);
+    const panel = document.createElement("div");
+    panel.hidden = true;
+    const target = document.createElement("div");
+    panel.appendChild(target);
+    document.body.appendChild(panel);
+
+    registry.register("backups", target);
+    expect(registry.request("backups")).toBe(false);
+    expect(reveal).not.toHaveBeenCalled();
+
+    panel.hidden = false;
+    registry.register("backups", target);
+    expect(reveal).toHaveBeenCalledWith(target);
+  });
 });
 
 describe("revealSettingsTarget", () => {

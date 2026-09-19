@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -276,11 +277,12 @@ func (si *SchedulerIntegration) resolveRunProject(
 	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 		return "", projectResolutionUnparseable
 	}
-	if parsed.TaskID == "" {
+	taskID := strings.TrimSpace(parsed.TaskID)
+	if taskID == "" {
 		return "", projectResolutionNone
 	}
 
-	info, err := si.svc.repo.GetTaskBasicInfo(ctx, parsed.TaskID)
+	info, err := si.svc.repo.GetTaskBasicInfo(ctx, taskID)
 	if err != nil {
 		return "", projectResolutionLookupError
 	}

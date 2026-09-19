@@ -1217,6 +1217,10 @@ export class ApiClient {
 
   async getUserSettings(): Promise<{
     settings: {
+      sidebar_views_by_workspace: Record<
+        string,
+        { views: Array<Record<string, unknown>>; active_view_id: string; draft: unknown }
+      >;
       workspace_id?: string;
       workflow_filter_id?: string;
       terminal_link_behavior?: string;
@@ -1244,7 +1248,6 @@ export class ApiClient {
     agent_generated_task_titles?: boolean;
     agent_tab_close_behavior?: "delete_session" | "hide_panel";
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
-    sidebar_active_view_id?: string;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
     show_scroll_to_start?: boolean;
@@ -1260,9 +1263,12 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     default_utility_agent_profile_id?: string;
-    sidebar_views?: unknown[];
-    sidebar_active_view_id?: string;
-    sidebar_draft?: unknown;
+    sidebar_view_state?: {
+      workspace_id: string;
+      views?: unknown[];
+      active_view_id?: string;
+      draft?: unknown;
+    };
     thread_views?: unknown[];
     thread_active_view_id?: string;
     thread_view_draft?: unknown;
@@ -1663,6 +1669,35 @@ export class ApiClient {
     if (opts.source !== undefined) payload.source = opts.source;
     if (opts.createdAt !== undefined) payload.created_at = opts.createdAt;
     return this.request("POST", "/api/v1/_test/comments", payload);
+  }
+
+  /**
+   * Inserts an office_routine_triggers row directly, bypassing the public
+   * create-trigger endpoint's cron validation. The public endpoint always
+   * persists a schedulable, enabled trigger with a computed next_run_at, so
+   * it cannot produce trigger_invalid, trigger_unscheduled, or
+   * trigger_disabled; this seed is the only way an E2E fixture reaches
+   * every REQ-OFFICE-ROUTINE-ARMING-001 schedule state.
+   */
+  async seedRoutineTrigger(opts: {
+    routineId: string;
+    kind: "cron" | "webhook" | "manual";
+    cronExpression?: string;
+    timezone?: string;
+    enabled?: boolean;
+    nextRunAt?: string;
+    lastFiredAt?: string;
+  }): Promise<{ trigger_id: string }> {
+    const payload: Record<string, unknown> = {
+      routine_id: opts.routineId,
+      kind: opts.kind,
+    };
+    if (opts.cronExpression !== undefined) payload.cron_expression = opts.cronExpression;
+    if (opts.timezone !== undefined) payload.timezone = opts.timezone;
+    if (opts.enabled !== undefined) payload.enabled = opts.enabled;
+    if (opts.nextRunAt !== undefined) payload.next_run_at = opts.nextRunAt;
+    if (opts.lastFiredAt !== undefined) payload.last_fired_at = opts.lastFiredAt;
+    return this.request("POST", "/api/v1/_test/routine-triggers", payload);
   }
 
   // --- GitHub Mock Control ---
@@ -2517,6 +2552,7 @@ export class ApiClient {
       id: string;
       task_id: string;
       queue_incarnation_id: string;
+      agent_execution_id?: string;
       agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
@@ -3824,6 +3860,7 @@ type WorkspaceRoutingConfig = {
   provider_order: string[];
   default_tier: string;
   provider_profiles: Record<string, RoutingProviderProfile>;
+  role_tiers?: Record<string, string>;
   [key: string]: unknown;
 };
 
@@ -3848,7 +3885,7 @@ function routingWorkspaceIDs(body: string): string[] {
   }
 }
 
-function removeRoutingProfileReferences(
+export function removeRoutingProfileReferences(
   config: WorkspaceRoutingConfig,
   profileId: string,
 ): WorkspaceRoutingConfig | undefined {
@@ -3879,8 +3916,18 @@ function removeRoutingProfileReferences(
   if (!removed) return undefined;
 
   const updatedConfig = { ...config, provider_profiles: providerProfiles };
+  const roleTiers = config.role_tiers
+    ? Object.fromEntries(
+        Object.entries(config.role_tiers).filter(
+          ([, tier]) =>
+            tier === "" ||
+            tierMappedOnAnyProvider(tier, updatedConfig.provider_order, providerProfiles),
+        ),
+      )
+    : undefined;
   return {
     ...updatedConfig,
+    ...(roleTiers ? { role_tiers: roleTiers } : {}),
     enabled: config.enabled && routingConfigCanStayEnabled(updatedConfig),
   };
 }
@@ -3900,6 +3947,17 @@ function routingConfigCanStayEnabled(config: WorkspaceRoutingConfig): boolean {
       config.provider_profiles[providerID]?.execution_profile_ids?.[config.default_tier] !==
       undefined,
   );
+}
+
+function tierMappedOnAnyProvider(
+  tier: string,
+  providerOrder: string[],
+  providerProfiles: Record<string, RoutingProviderProfile>,
+): boolean {
+  return providerOrder.some((providerID) => {
+    const executionProfileID = providerProfiles[providerID]?.execution_profile_ids?.[tier];
+    return typeof executionProfileID === "string" && executionProfileID !== "";
+  });
 }
 
 // --- Jira / Linear mock payload types ---

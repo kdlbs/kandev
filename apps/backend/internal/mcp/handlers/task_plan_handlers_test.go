@@ -188,7 +188,19 @@ func TestMCPPlanActionsRequireContent(t *testing.T) {
 	t.Run("update", func(t *testing.T) {
 		out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 			`{"task_id":"`+mcpPlanTaskID+`"}`))
-		assertMCPPlanError(t, out, err, ws.ErrorCodeValidation, "content is required")
+		if err != nil {
+			t.Fatalf("handleUpdateTaskPlan returned error: %v", err)
+		}
+		if out.Type != ws.MessageTypeError {
+			t.Fatalf("message type = %q, want %q", out.Type, ws.MessageTypeError)
+		}
+		var payload ws.ErrorPayload
+		if jsonErr := json.Unmarshal(out.Payload, &payload); jsonErr != nil {
+			t.Fatalf("unmarshal error payload: %v", jsonErr)
+		}
+		if payload.Code != ws.ErrorCodeValidation || payload.Details["reason"] != "plan_content_required" || payload.Details["write_applied"] != false {
+			t.Fatalf("error payload = %#v, want content-required validation with no write", payload)
+		}
 	})
 }
 
@@ -296,15 +308,18 @@ func TestMCPPlanActionsRejectOversizedContent(t *testing.T) {
 func TestMCPPlanUpdateReportsMissingTask(t *testing.T) {
 	h, repo := newMCPPlanTestHandlersWithRepo(t)
 	ctx := context.Background()
-	if _, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+	created, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
 		TaskID: mcpPlanTaskID, Content: "initial", CreatedBy: "agent",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 	h.planService = service.NewPlanService(&missingTaskOnPlanWriteRepo{Repository: repo}, nil, h.logger)
 
 	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
-		`{"task_id":"`+mcpPlanTaskID+`","content":"updated"}`))
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanTaskID, "content": "updated", "expected_version": created.Plan.WriteVersion,
+		})))
 	assertMCPPlanError(t, out, err, ws.ErrorCodeNotFound, "Task not found")
 	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
 		t.Fatalf("error payload leaks storage details: %s", out.Payload)
@@ -333,6 +348,7 @@ func (r *missingTaskOnPlanWriteRepo) WritePlanRevision(
 func TestMCPPlanActionsSucceed(t *testing.T) {
 	h := newMCPPlanTestHandlers(t)
 	ctx := context.Background()
+	var version string
 
 	t.Run("get with no plan returns an empty object", func(t *testing.T) {
 		out, err := h.handleGetTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPGetTaskPlan,
@@ -361,6 +377,10 @@ func TestMCPPlanActionsSucceed(t *testing.T) {
 		if plan["created_by"] != "agent" {
 			t.Errorf("created_by = %v, want agent", plan["created_by"])
 		}
+		version, _ = plan["version"].(string)
+		if version == "" {
+			t.Fatal("create response omitted version")
+		}
 	})
 
 	t.Run("get", func(t *testing.T) {
@@ -376,7 +396,9 @@ func TestMCPPlanActionsSucceed(t *testing.T) {
 
 	t.Run("update", func(t *testing.T) {
 		out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
-			`{"task_id":"`+mcpPlanTaskID+`","content":"step two"}`))
+			mustMarshalPlanPayload(t, map[string]any{
+				"task_id": mcpPlanTaskID, "content": "step two", "expected_version": version,
+			})))
 		if err != nil {
 			t.Fatalf("handleUpdateTaskPlan: %v", err)
 		}

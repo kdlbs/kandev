@@ -710,6 +710,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"lspStatusLocation":                 usermodels.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"savedLayouts":                      settings.SavedLayouts,
 		"sidebarViews":                      mapSidebarViews(settings.SidebarViews),
+		"sidebarViewsByWorkspace":           settings.SidebarViewsByWorkspace,
 		"sidebarActiveViewId":               nullString(settings.SidebarActiveViewID),
 		"sidebarDraft":                      mapSidebarDraft(settings.SidebarDraft),
 		"threadViews":                       mapThreadViews(settings.ThreadViews),

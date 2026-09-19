@@ -188,6 +188,7 @@ export type UserSettings = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_views_by_workspace?: Record<string, SidebarWorkspaceStateApi>;
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
@@ -267,6 +268,12 @@ export type UserSettingsUpdatePayload = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_view_state?: {
+    workspace_id: string;
+    views?: SidebarViewApi[];
+    active_view_id?: string;
+    draft?: SidebarViewDraftApi | null;
+  };
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
@@ -303,4 +310,10 @@ export type UserSettingsUpdatePayload = {
   workflow_ids_with_auto_hide_empty_steps?: string[];
   kanban_sort?: string;
   kanban_priority_filter_tokens?: string[];
+};
+
+export type SidebarWorkspaceStateApi = {
+  views: SidebarViewApi[];
+  active_view_id: string;
+  draft: SidebarViewDraftApi | null;
 };

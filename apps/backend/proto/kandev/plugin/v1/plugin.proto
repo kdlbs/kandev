@@ -426,6 +426,23 @@ message Task {
   string project_id = 28;
   // Caller-supplied create-idempotency key, empty when the task holds none.
   string external_id = 29;
+  // Dependency projection derived from task_blockers, matching what the
+  // kanban board already shows. A read that cannot resolve the dependency
+  // graph reports blocked=true, blocked_reason="unknown", and empty edge
+  // lists rather than a false "unblocked".
+  bool blocked = 30;
+  string blocked_reason = 31; // "pending" | "failed" | "unknown" | ""
+  // Predecessors this task waits on, and dependents waiting on this task.
+  // Each list is capped per task; the matching *_truncated flag reports
+  // whether entries beyond the cap were omitted.
+  repeated TaskDependencyRef depends_on = 32;
+  repeated TaskDependencyRef blocks = 33;
+  bool depends_on_truncated = 34;
+  bool blocks_truncated = 35;
+  // Whether this task is configured to auto-start once every predecessor in
+  // depends_on resolves. Always false when blocked_reason is "unknown",
+  // regardless of the underlying stored configuration.
+  bool start_when_unblocked = 36;
 }
 message TaskRepository {
   string id = 1;
@@ -460,6 +477,20 @@ message TaskPullRequest {
   int32 deletions = 17;
   string author_login = 18;
   optional string closed_at = 19; // RFC3339
+}
+// TaskDependencyRef is one edge end in a task's dependency projection: a
+// predecessor entry in depends_on, or a dependent entry in blocks.
+message TaskDependencyRef {
+  string id = 1;
+  // Redacted to "" on a canvas surface when the referenced task falls
+  // outside the caller's scope; id and status still identify and describe
+  // the edge without exposing the other task's content.
+  string title = 2;
+  string state = 3; // TaskState enum value as a string, stable; "" when redacted
+  // DependencyStatusForTask's verdict: "resolved" | "failed" | "pending".
+  // Always "" on a blocks entry, since status describes a predecessor's
+  // progress toward unblocking this task, not this task's own state.
+  string status = 4;
 }
 
 message TaskFilter {

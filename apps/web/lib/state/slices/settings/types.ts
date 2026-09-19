@@ -1,3 +1,4 @@
+import type { SidebarWorkspaceStateApi } from "@/lib/types/http-user-settings";
 import type {
   Agent,
   AgentProfile,
@@ -448,6 +449,7 @@ export type UserSettingsState = {
   lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
+  sidebarViewsByWorkspace: Record<string, SidebarWorkspaceStateApi>;
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
   threadViews: ThreadView[];

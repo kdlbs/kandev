@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { IconChevronDown } from "@tabler/icons-react";
@@ -72,6 +72,13 @@ export function usableConfigOptions(
   );
 }
 
+// Providers such as Copilot send description === name; showing it would
+// duplicate the label, so fall back to the id (when it differs) instead.
+function optionDescription(item: { value: string; name: string; description?: string }) {
+  if (item.description && item.description !== item.name) return item.description;
+  return item.value !== item.name ? item.value : undefined;
+}
+
 export function configOptionToModelOptions(
   option: SelectConfigOption | undefined,
 ): ModelSelectorOption[] {
@@ -84,7 +91,7 @@ export function configOptionToModelOptions(
       {
         id: item.value,
         name: item.name,
-        description: item.description ?? (item.value !== item.name ? item.value : undefined),
+        description: optionDescription(item),
       },
     ];
   });
@@ -187,6 +194,7 @@ export type ModelConfigSelectorProps = {
   popoverAlign?: "start" | "center" | "end";
   popoverSide?: "top" | "bottom";
   triggerClassName?: string;
+  providerIcon?: ReactNode;
   triggerSummary?: "all" | "changed";
   configBaseline?: Record<string, string>;
   /** Optional suffix appended to the trigger's model label (e.g. "(fallback)"). */
@@ -203,7 +211,13 @@ export type ModelConfigSelectorProps = {
 
 type ModelConfigSelectorTriggerProps = Pick<
   ModelConfigSelectorProps,
-  "ariaLabel" | "disabled" | "placeholder" | "triggerClassName" | "triggerTitle" | "variant"
+  | "ariaLabel"
+  | "disabled"
+  | "placeholder"
+  | "triggerClassName"
+  | "triggerTitle"
+  | "variant"
+  | "providerIcon"
 > & {
   label: string;
   details?: TriggerDetail[];
@@ -217,6 +231,7 @@ function ModelConfigSelectorTrigger({
   placeholder,
   triggerClassName,
   triggerTitle,
+  providerIcon,
   variant,
 }: ModelConfigSelectorTriggerProps) {
   const compact = variant === "compact";
@@ -234,6 +249,7 @@ function ModelConfigSelectorTrigger({
         disabled={disabled}
         title={triggerTitle}
       >
+        {providerIcon}
         <span className="truncate">{label || placeholder}</span>
         <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
       </Button>
@@ -279,6 +295,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   popoverAlign = "end",
   popoverSide = "bottom",
   triggerClassName: customTriggerClassName,
+  providerIcon,
   triggerSummary = "all",
   configBaseline,
   currentModelSuffix,
@@ -334,6 +351,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         triggerClassName={customTriggerClassName}
         triggerTitle={triggerTitle}
         variant={variant}
+        providerIcon={providerIcon}
       />
       <PopoverContent
         align={popoverAlign}
@@ -341,6 +359,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         className="w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100vh-1rem))] gap-2 overflow-hidden p-2"
       >
         <ModelConfigSelectorContent
+          providerIcon={providerIcon}
           activeConfig={activeConfig}
           modelOptions={modelOptions}
           currentModelValue={currentModelValue}

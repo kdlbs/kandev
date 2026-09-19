@@ -211,7 +211,7 @@ export function ToolPayloadRetentionCard() {
     <SettingsCard
       discoveryTargetId={SYSTEM_SETTINGS_TARGETS.toolPayloadRetention}
       data-testid="tool-payload-retention-card"
-      className="min-w-0 max-w-3xl"
+      className="min-w-0"
     >
       <SettingsCardHeader
         title={t("system:toolPayload.title")}

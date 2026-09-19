@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
@@ -65,9 +65,10 @@ export function buildSessionCommands(
   isAgentRunning: boolean | undefined,
   cancelTurn: () => void,
   t: TFunction,
+  options: { suppressCancel?: boolean } = {},
 ): CommandItem[] {
   const items: CommandItem[] = [];
-  if (isAgentRunning)
+  if (isAgentRunning && !options.suppressCancel)
     items.push({
       id: "session-cancel",
       label: t("common:commandCancelTurn"),
@@ -195,8 +196,6 @@ type TaskCommandOptions = {
   openNewAgent: () => void;
   openSubtask: () => void;
   requestArchive: () => void;
-  archiveConfirmation?: ReactNode;
-  onArchiveConfirmationDismiss?: () => void;
 };
 
 export function buildTaskCommands({
@@ -206,8 +205,6 @@ export function buildTaskCommands({
   openNewAgent,
   openSubtask,
   requestArchive,
-  archiveConfirmation,
-  onArchiveConfirmationDismiss,
 }: TaskCommandOptions): CommandItem[] {
   if (!activeTaskId) return [];
   const items: CommandItem[] = [
@@ -238,9 +235,6 @@ export function buildTaskCommands({
       icon: <IconArchive className="size-3.5" />,
       keywords: searchKeywords(t, "common:commandArchiveTaskKeywords"),
       action: requestArchive,
-      keepOpen: true,
-      confirmation: archiveConfirmation,
-      onConfirmationDismiss: onArchiveConfirmationDismiss,
     });
   }
   return items;
@@ -347,7 +341,7 @@ function useArchiveCommandConfirmation(archive: ReturnType<typeof useTaskArchive
   return (
     <TaskArchiveConfirmation
       open
-      inline
+      forceDialog
       anchorRef={archiveAnchorRef}
       taskId={archive.target.id}
       taskTitle={archive.target.title}
@@ -360,6 +354,14 @@ function useArchiveCommandConfirmation(archive: ReturnType<typeof useTaskArchive
       confirmTestId="palette-archive-confirm"
     />
   );
+}
+
+function useActiveTaskTitle(): string {
+  return useAppStore((s) => {
+    const id = s.tasks.activeTaskId;
+    if (!id) return "";
+    return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
+  });
 }
 
 export function SessionCommands({
@@ -377,16 +379,11 @@ export function SessionCommands({
   const gitWithFeedback = useGitWithFeedback();
 
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const activeTaskTitle = useAppStore((s) => {
-    const id = s.tasks.activeTaskId;
-    if (!id) return "";
-    return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
-  });
-
+  const activeTaskTitle = useActiveTaskTitle();
+  const isQuickChatOpen = useAppStore((s) => s.quickChat.isOpen);
   const dialogs = useCommandDialogState();
   const { openNewAgent, openSubtask } = dialogs;
   const cancelTurn = useCancelTurn(sessionId);
-
   const runGitWithFeedback = useCallback(
     async (
       operation: () => Promise<{ success: boolean; output: string; error?: string }>,
@@ -401,13 +398,14 @@ export function SessionCommands({
   const archive = useTaskArchiveConfirm(activeTaskId);
   const { requestArchive } = archive;
   const archiveConfirmation = useArchiveCommandConfirmation(archive);
-
   // Session-scoped commands need a live session; task-scoped ones only need the
   // task, so they stay available while a session is still being ensured.
   const commands = useMemo<CommandItem[]>(() => {
     const sessionScoped = sessionId
       ? [
-          ...buildSessionCommands(isAgentRunning, cancelTurn, t),
+          ...buildSessionCommands(isAgentRunning, cancelTurn, t, {
+            suppressCancel: isQuickChatOpen,
+          }),
           ...(hasWorktree
             ? buildGitCommands({
                 git,
@@ -431,8 +429,6 @@ export function SessionCommands({
         openNewAgent,
         openSubtask,
         requestArchive,
-        archiveConfirmation,
-        onArchiveConfirmationDismiss: archive.closeConfirm,
       }),
     ];
     return items.map((cmd) => ({ ...cmd, priority: 0 }));
@@ -444,6 +440,7 @@ export function SessionCommands({
     cancelTurn,
     baseBranch,
     isAgentRunning,
+    isQuickChatOpen,
     hasWorktree,
     isPassthrough,
     isTaskArchived,
@@ -454,8 +451,6 @@ export function SessionCommands({
     openNewAgent,
     openSubtask,
     requestArchive,
-    archiveConfirmation,
-    archive.closeConfirm,
   ]);
 
   useRegisterCommands(commands);
@@ -463,10 +458,13 @@ export function SessionCommands({
   if (!activeTaskId) return null;
 
   return (
-    <SessionCommandDialogs
-      activeTaskId={activeTaskId}
-      activeTaskTitle={activeTaskTitle}
-      dialogs={dialogs}
-    />
+    <>
+      <SessionCommandDialogs
+        activeTaskId={activeTaskId}
+        activeTaskTitle={activeTaskTitle}
+        dialogs={dialogs}
+      />
+      {archiveConfirmation}
+    </>
   );
 }

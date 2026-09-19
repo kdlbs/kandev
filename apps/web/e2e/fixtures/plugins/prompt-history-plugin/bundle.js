@@ -34,7 +34,7 @@
  * a tiny listener set, so it survives across route navigations (the page
  * component unmounts/remounts as the user navigates away and back).
  */
-/* eslint-disable max-lines, max-lines-per-function, sonarjs/no-duplicate-string -- The fixture is the literal self-contained, dependency-free browser bundle exercised and hashed by E2E. */
+/* eslint-disable max-lines, max-lines-per-function -- The fixture is the literal self-contained, dependency-free browser bundle exercised and hashed by E2E. */
 (function () {
   var moduleCount = 0;
   var listeners = new Set();
@@ -70,6 +70,9 @@
     return count;
   }
 
+  var FIXTURE_REPOSITORY_ID = "fixture-repository";
+  var FIXTURE_HELLO_PATH = "/plugins/e2e-hello";
+  var FIXTURE_SIDEBAR_SECTION = "sidebar-footer";
   var PROVIDER_ID = "fixture-source-control";
   var PULL_REQUEST_URL =
     "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42";
@@ -77,8 +80,8 @@
 
   function fixtureRepository() {
     return {
-      id: "fixture-repository",
-      repositoryId: "fixture-repository",
+      id: FIXTURE_REPOSITORY_ID,
+      repositoryId: FIXTURE_REPOSITORY_ID,
       owner: "TEAM",
       ownerOrProject: "TEAM",
       name: "fixture",
@@ -731,14 +734,14 @@
       registry.registerNavItem({
         id: "e2e-hello",
         label: "Hello E2E",
-        path: "/plugins/e2e-hello",
+        path: FIXTURE_HELLO_PATH,
         section: "main",
       });
       registry.registerNavItem({
         id: "e2e-insights-tools",
         label: "E2E Insights Tools",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       // Three more sidebar-footer items so this one plugin install alone
       // produces P = 4 (budget MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3, plus one
@@ -754,22 +757,22 @@
       registry.registerNavItem({
         id: "e2e-insights-tools-2",
         label: "E2E Overflow Item 2",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       registry.registerNavItem({
         id: "e2e-insights-tools-3",
         label: "E2E Overflow Item 3",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
       registry.registerNavItem({
         id: "e2e-insights-tools-4",
         label: "E2E Overflow Item 4",
-        path: "/plugins/e2e-hello",
-        section: "sidebar-footer",
+        path: FIXTURE_HELLO_PATH,
+        section: FIXTURE_SIDEBAR_SECTION,
       });
-      registry.registerRoute("/plugins/e2e-hello", PluginPage);
+      registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
       registry.registerComponent("app-status-bar-left", StatusSlot);
@@ -801,7 +804,7 @@
             providerId: PROVIDER_ID,
             providerHost: "bitbucket.example.test",
             ownerOrProject: "TEAM",
-            repositoryId: "fixture-repository",
+            repositoryId: FIXTURE_REPOSITORY_ID,
             repositoryName: "fixture",
             cloneUrl: REPOSITORY_URL,
             defaultBranch: "main",
@@ -835,7 +838,7 @@
               title: "Bitbucket Pull Request #42",
               url: PULL_REQUEST_URL,
               connectionScope: "https://bitbucket.example.test",
-              repositoryId: "fixture-repository",
+              repositoryId: FIXTURE_REPOSITORY_ID,
               changeRequestNumber: 42,
               state: "OPEN",
               statusBadge: { label: "Open" },
@@ -847,7 +850,7 @@
               title: "Bitbucket Pull Request #43",
               url: "https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/43",
               connectionScope: "https://bitbucket.example.test",
-              repositoryId: "fixture-repository",
+              repositoryId: FIXTURE_REPOSITORY_ID,
               changeRequestNumber: 43,
               state: "OPEN",
               statusBadge: { label: "Open" },

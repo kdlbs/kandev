@@ -149,7 +149,7 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
 		}
 	}
 
-	intent, err := s.recordProfileSwitchStopIntent(ctx, currentSession.ID, executionID)
+	intent, err := s.recordProfileSwitchStopIntent(ctx, taskID, currentSession.ID, executionID)
 	if err != nil {
 		releaseTeardownClaim()
 		return false, "", err
@@ -164,12 +164,12 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
 		nil,
 	)
 	if err != nil {
-		s.clearParkedProfileSwitchIntent(ctx, currentSession.ID, intent.Stamp)
+		s.clearWorkflowParkingMarker(ctx, currentSession.ID, intent.Stamp)
 		releaseTeardownClaim()
 		return false, "", fmt.Errorf("park workflow profile session %q: %w", currentSession.ID, err)
 	}
 	if !changed && finalState != models.TaskSessionStateWaitingForInput {
-		s.clearParkedProfileSwitchIntent(ctx, currentSession.ID, intent.Stamp)
+		s.clearWorkflowParkingMarker(ctx, currentSession.ID, intent.Stamp)
 		releaseTeardownClaim()
 		return false, "", fmt.Errorf("park workflow profile session %q: state changed to %s", currentSession.ID, finalState)
 	}
@@ -211,27 +211,41 @@ func (s *Service) loadProfileSwitchParkCandidate(
 	return currentSession, executionID, nil
 }
 
-// recordProfileSwitchStopIntent stamps the exact execution before the source
-// state changes. The marker is consumed by delayed terminal callbacks and is
-// cleared only when the state transition cannot be committed.
+// recordProfileSwitchStopIntent stamps the workflow ownership before the
+// source state changes. The parking marker is written even without a live
+// runtime, so passive inspection can distinguish a deliberately parked
+// predecessor from a session that simply became idle after a restart.
 func (s *Service) recordProfileSwitchStopIntent(
 	ctx context.Context,
-	sessionID string,
+	taskID, sessionID string,
 	executionID string,
 ) (models.WorkflowProfileSwitchStopIntent, error) {
-	if executionID == "" {
-		return models.WorkflowProfileSwitchStopIntent{}, nil
-	}
-	if _, ok := s.repo.(workflowProfileSwitchStopIntentRemover); !ok {
-		return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
-	}
-	if _, ok := s.repo.(workflowProfileSwitchStopIntentMarker); !ok {
-		return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
+	if executionID != "" {
+		if _, ok := s.repo.(workflowProfileSwitchStopIntentRemover); !ok {
+			return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
+		}
+		if _, ok := s.repo.(workflowProfileSwitchStopIntentMarker); !ok {
+			return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("parked workflow profile switch requires stamped session metadata support")
+		}
 	}
 
-	intent := models.WorkflowProfileSwitchStopIntent{
-		ExecutionID: executionID,
-		Stamp:       uuid.NewString(),
+	stamp := uuid.NewString()
+	parking := models.WorkflowParking{
+		Stamp:           stamp,
+		ParkedAt:        time.Now().UTC(),
+		SourceSessionID: sessionID,
+	}
+	task, taskErr := s.repo.GetTask(ctx, taskID)
+	if taskErr == nil && task != nil {
+		s.populateWorkflowParkingFromRoute(ctx, task, &parking)
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyWorkflowParking, parking); err != nil {
+		return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("record parked workflow profile session: %w", err)
+	}
+
+	intent := models.WorkflowProfileSwitchStopIntent{ExecutionID: executionID, Stamp: stamp}
+	if executionID == "" {
+		return intent, nil
 	}
 	if err := s.repo.SetSessionMetadataKey(
 		ctx,
@@ -239,9 +253,35 @@ func (s *Service) recordProfileSwitchStopIntent(
 		models.SessionMetaKeyWorkflowProfileSwitchStopIntent,
 		intent,
 	); err != nil {
+		s.clearWorkflowParkingMarker(ctx, sessionID, stamp)
 		return models.WorkflowProfileSwitchStopIntent{}, fmt.Errorf("record parked workflow profile switch: %w", err)
 	}
 	return intent, nil
+}
+
+func (s *Service) populateWorkflowParkingFromRoute(
+	ctx context.Context,
+	task *models.Task,
+	parking *models.WorkflowParking,
+) {
+	if task == nil || parking == nil {
+		return
+	}
+	route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !ok {
+		return
+	}
+	parking.WorkflowStepID = route.DestinationStepID
+	parking.RouteOperationID = route.OperationID
+	parking.EntryIdentity = route.EntryIdentity
+	parking.DestinationID = route.DestinationID
+	if s.workflowStepGetter == nil {
+		return
+	}
+	step, stepErr := s.workflowStepGetter.GetStep(ctx, route.DestinationStepID)
+	if stepErr == nil && step != nil {
+		parking.WorkflowID = step.WorkflowID
+	}
 }
 
 func (s *Service) stopParkedWorkflowProfileSession(ctx context.Context, sessionID, executionID string) {
@@ -255,7 +295,11 @@ func (s *Service) stopParkedWorkflowProfileSession(ctx context.Context, sessionI
 	}
 }
 
-func (s *Service) clearParkedProfileSwitchIntent(ctx context.Context, sessionID, stamp string) {
+// clearWorkflowParkingMarker removes only the current parking projection. The
+// execution stop-intent tombstone is intentionally retained so a delayed
+// terminal callback, including one delivered after restart, remains fenced to
+// the execution that was deliberately stopped.
+func (s *Service) clearWorkflowParkingMarker(ctx context.Context, sessionID, stamp string) {
 	if strings.TrimSpace(stamp) == "" {
 		return
 	}
@@ -264,13 +308,11 @@ func (s *Service) clearParkedProfileSwitchIntent(ctx context.Context, sessionID,
 		return
 	}
 	if _, err := remover.RemoveSessionMetadataKeyIfStamp(
-		ctx,
-		sessionID,
-		models.SessionMetaKeyWorkflowProfileSwitchStopIntent,
-		stamp,
+		ctx, sessionID, models.SessionMetaKeyWorkflowParking, stamp,
 	); err != nil {
-		s.logger.Warn("failed to clear abandoned parked workflow profile switch intent",
+		s.logger.Warn("failed to clear workflow parking marker",
 			zap.String("session_id", sessionID),
+			zap.String("metadata_key", models.SessionMetaKeyWorkflowParking),
 			zap.Error(err))
 	}
 }

@@ -36,14 +36,16 @@ const (
 )
 
 type Service struct {
-	repo          store.Repository
-	recentUseRepo store.AgentProfileRecentUseRepository
-	eventBus      bus.EventBus
-	logger        *logger.Logger
-	defaultUser   string
+	sidebarWorkspaceAccess func(context.Context) ([]string, error)
+	repo                   store.Repository
+	recentUseRepo          store.AgentProfileRecentUseRepository
+	eventBus               bus.EventBus
+	logger                 *logger.Logger
+	defaultUser            string
 }
 
 type UpdateUserSettingsRequest struct {
+	SidebarViewState                  *models.SidebarWorkspacePatch
 	WorkspaceID                       *string
 	KanbanViewMode                    *string
 	StartupPage                       *string
@@ -165,7 +167,7 @@ func (s *Service) GetUserSettings(ctx context.Context) (*models.UserSettings, er
 	if err != nil {
 		return nil, err
 	}
-	return settings, nil
+	return s.getSidebarWorkspaceSettings(ctx, settings)
 }
 
 // PreferredShell returns the user's configured shell.
@@ -199,6 +201,30 @@ func (s *Service) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, 
 // validates each group, persists the result under expected-revision CAS, and
 // publishes the settings update event.
 func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSettingsRequest) (*models.UserSettings, error) {
+	scopedReq, err := s.scopeLegacySidebarPatch(req)
+	if err != nil {
+		return nil, err
+	}
+	req = scopedReq
+	var sidebarWorkspaceIDs []string
+	if s.sidebarWorkspaceAccess != nil {
+		sidebarWorkspaceIDs, err = s.sidebarWorkspaceAccess(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := s.validateSidebarWorkspacePatch(ctx, req, sidebarWorkspaceIDs); err != nil {
+		return nil, err
+	}
+	if s.sidebarWorkspaceAccess != nil {
+		settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.getSidebarWorkspaceSettings(ctx, settings, sidebarWorkspaceIDs); err != nil {
+			return nil, err
+		}
+	}
 	var taskCreatePatch *models.TaskCreateLastUsed
 	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
 		taskCreatePatch = req.TaskCreateLastUsed
@@ -209,6 +235,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		// mutating them in place. In-place mutation would alias before and make
 		// DeepEqual miss the write.
 		before := *settings
+		if err := applySidebarWorkspacePatch(settings, req); err != nil {
+			return false, err
+		}
 		if err := applyBasicSettings(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
@@ -243,11 +272,18 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 		}
 		return !reflect.DeepEqual(*settings, before), nil
-	}, taskCreatePatch)
+	}, taskCreatePatch, &sidebarWorkspaceIDs)
 	if err != nil {
 		return nil, err
 	}
-	return settings, nil
+	projected, err := s.getSidebarWorkspaceSettings(ctx, settings, sidebarWorkspaceIDs)
+	if err == nil {
+		return projected, nil
+	}
+	// The CAS write has already committed. Keep the response successful while
+	// omitting the scoped projection until the next authorized settings read.
+	s.logger.Warn("sidebar workspace response projection failed", zap.Error(err))
+	return withoutSidebarWorkspaceState(settings), nil
 }
 
 // applySidebarTaskColorAutomation replaces the complete personal automatic
@@ -286,6 +322,7 @@ func (s *Service) updateUserSettingsCAS(
 	ctx context.Context,
 	apply func(*models.UserSettings) (bool, error),
 	taskCreatePatch *models.TaskCreateLastUsed,
+	sidebarWorkspaceIDs *[]string,
 ) (*models.UserSettings, error) {
 	userID := s.settingsUserID(ctx)
 	var lastErr error
@@ -305,7 +342,11 @@ func (s *Service) updateUserSettingsCAS(
 		}
 		updated, err := s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch, settings.Revision)
 		if err == nil {
-			s.publishUserSettingsEvent(ctx, updated)
+			if sidebarWorkspaceIDs != nil {
+				s.publishUserSettingsEvent(ctx, updated, *sidebarWorkspaceIDs)
+			} else {
+				s.publishUserSettingsEvent(ctx, updated)
+			}
 			return updated, nil
 		}
 		if !errors.Is(err, store.ErrUserSettingsRevisionConflict) {
@@ -1080,10 +1121,33 @@ func validateUserPreferenceBlob(field string, value json.RawMessage) error {
 
 // publishUserSettingsEvent broadcasts the full settings snapshot on the
 // UserSettingsUpdated event bus topic so connected clients stay in sync.
-func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
+func (s *Service) projectSidebarSettingsForEvent(
+	ctx context.Context,
+	settings *models.UserSettings,
+	provided ...[]string,
+) (*models.UserSettings, bool) {
+	if s.sidebarWorkspaceAccess == nil {
+		return settings, true
+	}
+	ids, err := s.resolveSidebarWorkspaceIDs(ctx, provided...)
+	if err != nil {
+		s.logger.Warn("sidebar workspace projection failed", zap.Error(err))
+		return settings, false
+	}
+	return projectSidebarWorkspaces(settings, ids), true
+}
+
+func addSidebarWorkspaceState(data map[string]interface{}, settings *models.UserSettings, include bool) {
+	if include {
+		data["sidebar_views_by_workspace"] = settings.SidebarViewsByWorkspace
+	}
+}
+
+func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings, provided ...[]string) {
 	if s.eventBus == nil || settings == nil {
 		return
 	}
+	settings, includeSidebarWorkspaceState := s.projectSidebarSettingsForEvent(ctx, settings, provided...)
 	data := map[string]interface{}{
 		"user_id":                                  settings.UserID,
 		"workspace_id":                             settings.WorkspaceID,
@@ -1157,6 +1221,20 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}
+	s.publishUserSettingsEventData(ctx, data, settings, includeSidebarWorkspaceState)
+}
+
+func (s *Service) publishUserSettingsEventData(
+	ctx context.Context,
+	data map[string]interface{},
+	settings *models.UserSettings,
+	includeSidebarWorkspaceState bool,
+) {
+	addSidebarWorkspaceState(data, settings, includeSidebarWorkspaceState)
+	s.emitUserSettingsEvent(ctx, data)
+}
+
+func (s *Service) emitUserSettingsEvent(ctx context.Context, data map[string]interface{}) {
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))
 	}
@@ -1227,6 +1305,6 @@ func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) err
 		}
 		settings.DefaultEditorID = ""
 		return true, nil
-	}, nil)
+	}, nil, nil)
 	return err
 }

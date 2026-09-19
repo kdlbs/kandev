@@ -813,5 +813,8 @@
   "sidebarHoverDelayError": "请输入 0 到 5000 之间的整数。",
   "discoveryAliasesSidebarHover": "侧边栏 悬停 显示 延迟 等待 鼠标 触控板",
   "autoFocusNewTasks": "自动聚焦新任务",
-  "autoFocusNewTasksHelp": "自动打开新创建的任务。关闭此选项可保留当前视图。任务和代理仍会按要求启动。"
+  "autoFocusNewTasksHelp": "自动打开新创建的任务。关闭此选项可保留当前视图。任务和代理仍会按要求启动。",
+  "chatAnimations": "聊天动画",
+  "chatAnimationsDescription": "在此设备上为新文本、新聊天项目和滚动添加动画。遵循减少动态效果的偏好设置。",
+  "discoveryAliasesChatMotion": "聊天 动画 平滑滚动 文本 动态效果"
 }

@@ -1,0 +1,17 @@
+sqlite_version=3.51.1
+["table","conversation_journal_meta"]
+["table","conversation_message_versions"]
+["table","conversation_session_events"]
+["table","conversation_session_streams"]
+["table","conversation_turn_versions"]
+["trigger","conversation_message_delete"]
+["trigger","conversation_message_insert"]
+["trigger","conversation_message_update"]
+["trigger","conversation_session_delete"]
+["trigger","conversation_turn_complete"]
+["trigger","conversation_turn_delete"]
+["trigger","conversation_turn_insert"]
+task_session_messages=50000
+conversation_message_versions=100000
+conversation_turn_versions=0
+conversation_session_events=100000

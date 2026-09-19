@@ -1,17 +1,21 @@
 import { createRef } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import type { Window as HappyDOMWindow } from "happy-dom";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatInputBody, type ChatInputBodyProps } from "./chat-input-body";
-import { shouldShowCancelAgent } from "./chat-input-container";
+import { shouldShowCancelAgent } from "./types";
 
 const tipTapPropsMock = vi.hoisted(() => vi.fn());
+const MOCK_TIPTAP_INPUT_TEST_ID = "mock-tiptap-input";
+const initialWidth = window.innerWidth;
+const viewport = (window as unknown as HappyDOMWindow).happyDOM;
 const CHAT_INPUT_GLOW_TEST_ID = "chat-input-glow";
 
 vi.mock("./tiptap-input", () => ({
   TipTapInput: (props: unknown) => {
     tipTapPropsMock(props);
-    return <div data-testid="mock-tiptap-input" />;
+    return <div data-testid={MOCK_TIPTAP_INPUT_TEST_ID} />;
   },
 }));
 
@@ -25,6 +29,7 @@ vi.mock("./context-items/context-zone", () => ({
 
 afterEach(() => {
   cleanup();
+  viewport.setWindowSize({ width: initialWidth });
   tipTapPropsMock.mockClear();
 });
 
@@ -152,7 +157,9 @@ describe("ChatInputBody", () => {
       expect.objectContaining({ entityReferencesEnabled: false }),
     );
   });
+});
 
+describe("ChatInputBody focus hint", () => {
   it("reserves right-side editable space while the focus hint is visible", () => {
     render(
       <TooltipProvider>
@@ -162,7 +169,50 @@ describe("ChatInputBody", () => {
 
     expect(screen.getByText("to focus")).toBeTruthy();
     expect(screen.getByTestId("chat-input-editor-shell").className).not.toContain("pr-28");
-    expect(screen.getByTestId("mock-tiptap-input").parentElement?.className).toContain("pr-28");
+    expect(screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID).parentElement?.className).toContain(
+      "pr-28",
+    );
+  });
+
+  // @covers AC-UI-COMPOSER-FOCUS-HINT-001.1, AC-UI-COMPOSER-FOCUS-HINT-001.2
+  it.each([393, 767, 768, 1024])("matches focus hint and padding to viewport width %i", (width) => {
+    viewport.setWindowSize({ width });
+    render(
+      <TooltipProvider>
+        <ChatInputBody {...props({ showFocusHint: true })} />
+      </TooltipProvider>,
+    );
+
+    const hint = screen.queryByText("to focus");
+    const editor = screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID);
+    expect(hint !== null).toBe(width >= 768);
+    expect(editor.parentElement?.classList.contains("pr-28")).toBe(width >= 768);
+
+    act(() => viewport.setWindowSize({ width: width < 768 ? 768 : 767 }));
+    expect(screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID)).toBe(editor);
+    expect(screen.queryByText("to focus") !== null).toBe(width < 768);
+    expect(editor.parentElement?.classList.contains("pr-28")).toBe(width < 768);
+  });
+
+  // @covers AC-UI-COMPOSER-FOCUS-HINT-001.3
+  it("keeps the editor and draft when resizing across the phone boundary", () => {
+    const inputProps = props();
+    inputProps.editorAreaProps.value = "Draft to preserve";
+    const body = (
+      <TooltipProvider>
+        <ChatInputBody {...inputProps} />
+      </TooltipProvider>
+    );
+    viewport.setWindowSize({ width: 768 });
+    render(body);
+    const editor = screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID);
+
+    act(() => viewport.setWindowSize({ width: 767 }));
+
+    expect(screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID)).toBe(editor);
+    expect(tipTapPropsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ value: "Draft to preserve" }),
+    );
   });
 
   it("does not reserve focus-hint space when the hint is hidden", () => {
@@ -173,7 +223,9 @@ describe("ChatInputBody", () => {
     );
 
     expect(screen.getByTestId("chat-input-editor-shell").className).not.toContain("pr-28");
-    expect(screen.getByTestId("mock-tiptap-input").parentElement?.className).not.toContain("pr-28");
+    expect(screen.getByTestId(MOCK_TIPTAP_INPUT_TEST_ID).parentElement?.className).not.toContain(
+      "pr-28",
+    );
   });
 });
 
@@ -200,8 +252,20 @@ describe("shouldShowCancelAgent", () => {
       attachedClarification,
       true,
     ],
-    ["keeps cancel for a running session without clarification", true, null, true],
-  ])("%s", (_name, isAgentBusy, pendingClarification, expected) => {
-    expect(shouldShowCancelAgent(isAgentBusy, pendingClarification)).toBe(expected);
+    ["shows cancel for a generating session with direct input", true, null, true],
+    ["shows cancel for background work with direct input", true, null, true],
+    ["shows cancel while the session is starting", true, null, true],
+    ["shows cancel while the executor is preparing", true, null, true],
+    ["hides cancel for an idle session", false, null, false],
+  ])("%s", (_name, isWorking, pendingClarification, expected, sessionId = "session-1") => {
+    expect(shouldShowCancelAgent(isWorking, pendingClarification, sessionId)).toBe(expected);
+  });
+
+  it("hides cancel when the session identity is missing", () => {
+    expect(shouldShowCancelAgent(true, null, null)).toBe(false);
+  });
+
+  it("retains the connected clarification override while the session is settled", () => {
+    expect(shouldShowCancelAgent(false, attachedClarification, "session-1")).toBe(true);
   });
 });
