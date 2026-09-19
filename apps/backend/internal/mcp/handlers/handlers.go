@@ -265,6 +265,7 @@ type UserSettingsProvider interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
+	automationCreator      AutomationCreator
 	taskSvc                *service.Service
 	workflowCtrl           *workflowctrl.Controller
 	clarificationSvc       ClarificationService
@@ -571,6 +572,7 @@ func (h *Handlers) registerTaskQuestionHandlers(d *guardedMCPDispatcher) {
 }
 
 func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPCreateAutomation, h.handleCreateAutomation)
 	if h.settingsRegistry != nil {
 		h.registerSettingsHandlers(d)
 	}

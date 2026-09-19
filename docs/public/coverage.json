@@ -505,19 +505,22 @@
         "apps/backend/internal/automation/service.go",
         "apps/backend/internal/automation/webhook.go",
         "apps/backend/internal/automation/webhook_filters.go",
-        "apps/backend/internal/mcp/server/server.go"
+        "apps/backend/internal/mcp/server/server.go",
+        "apps/backend/internal/mcp/server/config_automation_handlers.go"
       ],
       "tests": [
         "apps/backend/internal/automation/service_test.go",
         "apps/backend/internal/automation/webhook_test.go",
         "apps/backend/internal/automation/webhook_filters_test.go",
-        "apps/backend/internal/mcp/server/server_test.go"
+        "apps/backend/internal/mcp/server/server_test.go",
+        "apps/backend/internal/mcp/server/config_automation_integration_test.go"
       ],
       "settingsRoutes": [
         "/settings/automations",
         "/settings/external-mcp"
       ],
       "mcpTools": [
+        "create_automation_kandev",
         "get_mcp_config_kandev",
         "update_mcp_config_kandev",
         "list_shared_prompts_kandev",
