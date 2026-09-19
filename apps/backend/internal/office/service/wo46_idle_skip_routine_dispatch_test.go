@@ -70,6 +70,54 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 	}
 }
 
+// TestIdleSkip_RoutineDispatchEventWithSkipIdleRuns_NotSkipped pins
+// AC-OFFICE-TASKLESS-001.3's second sentence from the idle-skip gate's
+// side: a manual or webhook fire (reason=routine_dispatch_event) must not
+// be idle-skipped even when the assignee has SkipIdleRuns=true and zero
+// actionable tasks — the same shape that idle-skips a periodic
+// routine_dispatch_cron fire in
+// TestIdleSkip_RoutineDispatchNoTasks_Skipped above. checkIdleSkip's
+// IsPeriodicTasklessWake guard is what should distinguish them; nothing
+// before this test drove RunReasonRoutineDispatchEvent through the
+// scheduler to prove it.
+func TestIdleSkip_RoutineDispatchEventWithSkipIdleRuns_NotSkipped(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		WorkspaceID:        "ws-3",
+		Name:               "idle-worker-routine-dispatch-event",
+		Role:               models.AgentRoleWorker,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if !agent.SkipIdleRuns {
+		t.Fatalf("worker role should default to SkipIdleRuns=true")
+	}
+	// No tasks assigned: this is the exact condition that idle-skips a
+	// routine_dispatch_cron fire for this same agent shape.
+
+	if _, err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchEvent, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	entries, err := svc.ListActivity(ctx, "ws-3", 50)
+	if err != nil {
+		t.Fatalf("list activity: %v", err)
+	}
+	for _, e := range entries {
+		if e.Action == "run_idle_skipped" {
+			t.Error("manual/webhook fire (routine_dispatch_event) must not be idle-skipped")
+		}
+	}
+}
+
 // TestIdleSkip_RoutineDispatch_CoordinatorNotSkipped is the complementary
 // case to TestIdleSkip_RoutineDispatchNoTasks_Skipped (PR #2973 review
 // round 1, github-actions suggestion): a coordinator (CEO role) defaults to
