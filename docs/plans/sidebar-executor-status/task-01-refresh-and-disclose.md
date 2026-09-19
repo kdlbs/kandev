@@ -75,7 +75,7 @@ The new primitive test file is created by this work order.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run hooks/domains/session/remote-executor-status-resource.test.ts components/task/remote-cloud-tooltip.test.tsx components/task/remote-cloud-tooltip-primitives.test.tsx)
+(cd apps/web && pnpm exec vitest run hooks/domains/session/remote-executor-status-transport.test.ts hooks/domains/session/remote-executor-status-resource.test.ts components/task/remote-cloud-tooltip.test.tsx components/task/remote-cloud-tooltip-primitives.test.tsx)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=3072 pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && PATH=/usr/local/go/bin:$PATH pnpm e2e:run --host --project=chromium tests/settings/kubernetes-task-environment.spec.ts -- --retries=0)
@@ -120,7 +120,7 @@ Implementation and targeted verification complete.
 - RED: no-interaction refresh, automatic retry, and visibility-return tests
   failed on stale/missing status. The real Tooltip regression failed because
   the DOM trigger had no `aria-describedby` linkage.
-- GREEN: the listed focused Vitest command passes 26 tests in 3 files.
+- GREEN: the listed focused Vitest command passes 27 tests in 4 files.
 - Changed-file ESLint with `--max-warnings=0` passes.
 - Fresh managed production build passes. Desktop Chromium E2E: 1/1, 4.3 seconds;
   mobile Chrome E2E: 1/1, 5.7 seconds; both with `--retries=0`. These verify
@@ -140,3 +140,13 @@ Implementation and targeted verification complete.
   typecheck remains an explicit validation limitation for CI.
   Managed E2E instances and the isolated user preview were stopped; the main
   instance was untouched. Generated typecheck crash dumps were removed.
+
+### PR review remediation
+
+Greptile identified obsolete queued WebSocket reads during outages. The default
+requester now treats a disconnected client as unavailable transport. The new
+transport regression failed with four offline requests before the guard, then
+passed with zero offline reads and a healthy result after reconnect. All 27
+focused tests and changed-file ESLint pass. No UI, API or public-doc contract
+changed; the system design records the transport guard. Remote CI/review
+verification remains pending for the remediation commit.

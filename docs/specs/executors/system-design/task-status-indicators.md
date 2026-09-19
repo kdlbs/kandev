@@ -32,7 +32,9 @@ Manage the visibility listener only while active consumers exist. No new timer
 for the authoritative external-status path or an invalid scope.
 
 Retain `getKubernetesTaskSession` for Kubernetes and `task.session.status` for
-other remote executors. No backend schema or persistence change is required.
+other remote executors. A disconnected WebSocket is unavailable transport: skip
+the read and retry on the existing schedule without queuing obsolete requests.
+No backend schema or persistence change is required.
 
 ## Responsive disclosure
 

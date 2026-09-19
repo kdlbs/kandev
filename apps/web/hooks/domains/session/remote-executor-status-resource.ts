@@ -79,12 +79,12 @@ function requestRemoteStatus(
   if (executorType === "k8s" && executorId) {
     return getKubernetesTaskSession(executorId, taskId, sessionId).then(projectKubernetesStatus);
   }
-  return (
-    getWebSocketClient()?.request<RemoteExecutorStatusData>(
-      "task.session.status",
-      { task_id: taskId, session_id: sessionId },
-      10000,
-    ) ?? null
+  const client = getWebSocketClient();
+  if (client?.getStatus() !== "connected") return null;
+  return client.request<RemoteExecutorStatusData>(
+    "task.session.status",
+    { task_id: taskId, session_id: sessionId },
+    10000,
   );
 }
 
