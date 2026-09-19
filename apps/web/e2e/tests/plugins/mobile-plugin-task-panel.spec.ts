@@ -47,7 +47,7 @@ test.describe("Mobile plugin task panel", () => {
     await session.waitForLoad();
 
     // Mobile groups all plugin panels behind one bounded bottom-nav action.
-    const panelsNavButton = testPage.getByRole("button", { name: "Panels" });
+    const panelsNavButton = testPage.getByRole("button", { name: "Panels", exact: true });
     await expect(panelsNavButton).toBeVisible({ timeout: 15_000 });
     expect((await panelsNavButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await panelsNavButton.tap();
@@ -106,7 +106,9 @@ test.describe("Mobile plugin task panel", () => {
     await expect(testPage.getByTestId("mobile-prompt-history-option")).toBeVisible();
     await testPage.keyboard.press("Escape");
     await expect(testPage.getByRole("dialog", { name: "Panels" })).toHaveCount(0);
-    await expect(testPage.getByRole("button", { name: "Chat" })).toHaveClass(/text-primary/);
+    await expect(testPage.getByRole("button", { name: "Chat", exact: true })).toHaveClass(
+      /text-primary/,
+    );
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

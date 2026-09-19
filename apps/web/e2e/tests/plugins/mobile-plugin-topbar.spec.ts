@@ -1,4 +1,5 @@
 import path from "node:path";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import {
@@ -75,6 +76,7 @@ test.describe("Mobile listing menu actions", () => {
       await expect(plugin).toHaveAccessibleName(`Hello ${pluginPage}`);
       await expect(metrics).toBeVisible();
       await expect(metrics.getByLabel(/^CPU /)).toBeVisible();
+      await waitForFiniteAnimations(menu);
       for (const target of [
         plugin,
         menu.getByTestId("mobile-quick-chat-button"),

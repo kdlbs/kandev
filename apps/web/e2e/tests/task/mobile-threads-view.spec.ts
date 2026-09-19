@@ -546,6 +546,7 @@ test.describe("Mobile Threads view", () => {
     const geometryDrawer = testPage.getByTestId("threads-mobile-view-drawer");
     await expect(geometryDrawer).toBeVisible();
     await expect(geometryDrawer.getByTestId("threads-mobile-view-list")).toBeVisible();
+    await waitForFiniteAnimations(geometryDrawer);
     const buttons = geometryDrawer.locator("button:visible");
     const buttonCount = await buttons.count();
     for (let index = 0; index < buttonCount; index += 1) {

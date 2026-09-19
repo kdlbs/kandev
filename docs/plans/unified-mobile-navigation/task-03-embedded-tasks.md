@@ -195,3 +195,33 @@ Review verification logs: `/tmp/pr3830-merge-unit.log`,
 `/tmp/pr3830-merge-e2e.log`, `/tmp/pr3830-context-red.log`,
 `/tmp/pr3830-final-unit.log`, `/tmp/pr3830-picker-red.log`,
 `/tmp/pr3830-picker-green.log`, and `/tmp/pr3830-review-e2e.log`.
+
+## CI follow-up
+
+- Updated phone tests that still targeted the retired hamburger task picker,
+  separate Task views action, or home-only menu container.
+- Matched bottom navigation independently of the task title. Changes selectors
+  retain support for the numeric badge in their accessible name.
+- Waited for drawer animations before checking touch geometry, used the existing
+  virtual-tree reveal helper for offscreen files, and disabled queue auto-run in
+  the oversized-message preview test so completion cannot remove its subject.
+- Browser verification exposed a repository-source menu touch race: opening on
+  pointer-down or pointer-up could select the first item with the same touch's
+  synthetic click. The menu now opens on that click; desktop pointer and keyboard
+  activation retain Radix behavior. Extracted the existing menu into its own
+  component to keep the dialog within the file-size limit. No public contract or
+  copy changes are needed: choosing a source still requires selecting an item.
+- Final focused navigation run: 15 phone tests passed, including every reported
+  obsolete-picker failure, Changes panel cases, workspace views, archive recovery,
+  Office nesting, and workflow session focus/queue ownership.
+- Additional final browser cases passed: oversized-message previews, source
+  attachment and persistence, no-cursor file opening, saved-view geometry, and
+  terminal bottom spacing. The new touch regression failed before both event
+  ordering corrections; the final component suite passed all 15 tests.
+- TypeScript, focused ESLint, and the frontend E2E build passed.
+
+Evidence: `/tmp/pr3830-ci-mobile-final.log`, `/tmp/pr3830-ci-extra.log` (the final
+three cases), `/tmp/pr3830-touch-browser.log` (oversized message),
+`/tmp/pr3830-touch-click-browser.log`, `/tmp/pr3830-touch-click-red.log`, and
+`/tmp/pr3830-touch-extract-unit.log`. Earlier failures remain in these logs;
+final cases are identified above rather than treating those runs as wholly green.

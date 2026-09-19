@@ -18,7 +18,7 @@ test("uses nested task commands and the move drawer on a phone", async ({
     seedData,
     "Mobile palette actions",
   );
-  await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible();
+  await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible();
   await testPage.keyboard.press("Control+k");
   const palette = testPage.getByRole("dialog").filter({ has: testPage.getByRole("combobox") });
   const search = palette.getByRole("combobox");

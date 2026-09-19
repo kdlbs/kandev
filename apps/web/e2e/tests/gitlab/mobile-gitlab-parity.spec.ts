@@ -477,7 +477,10 @@ test.describe("Mobile GitLab parity", () => {
     ).toBeVisible({
       timeout: 45_000,
     });
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
     const changes = testPage.getByTestId("mobile-changes-panel");
     const createMR = changes.getByTestId("commits-repo-create-pr");
     await expect(createMR).toBeVisible();
