@@ -165,7 +165,11 @@ test.describe("Mobile changes panel", () => {
     await closeButton.tap();
 
     await expandSection(testPage, "commits-section");
-    await testPage.locator("[data-testid^='commit-row-']").first().tap();
+    await testPage
+      .locator("[data-testid^='commit-row-']")
+      .first()
+      .getByRole("button", { name: "Open commit" })
+      .tap();
     await expect(testPage.getByText("Commit Changes")).toBeVisible({ timeout: 10_000 });
     await closeButton.tap();
   });
@@ -457,7 +461,7 @@ test.describe("Mobile changes panel", () => {
     await expect(testPage.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
-    await row.tap();
+    await row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`).tap();
 
     await expect(testPage.getByText("Commit Changes")).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByLabel("Commit Changes").getByText(remoteMessage)).toBeVisible({

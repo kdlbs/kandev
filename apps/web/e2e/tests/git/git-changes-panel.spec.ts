@@ -964,12 +964,16 @@ test.describe("Git Changes Panel", () => {
     const commitRow = testPage.getByTestId(`commit-row-${sha.slice(0, 7)}`);
     await expect(commitRow).toBeVisible({ timeout: 10_000 });
 
-    // Click the commit to open its diff
-    await commitRow.click();
+    // Use the explicit action to open the historical commit detail.
+    await commitRow.getByTestId(`commit-open-${sha.slice(0, 7)}`).click();
 
     // The diff view should open showing the commit message and file changes
     // Look for the commit message (which uniquely identifies this diff view)
-    await expect(session.changes.getByText("Add diff test file")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByTestId("commit-detail-content").getByText("Add diff test file"),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Additionally verify the diff shows the actual file content (lines added).
     // Pierre Diffs renders in a shadow DOM — check all diffs-container elements
@@ -1122,9 +1126,9 @@ test.describe("Git Changes Panel", () => {
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
     await row.hover();
-    await expect(row.getByRole("button")).toHaveCount(0);
+    await expect(row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`)).toBeVisible();
 
-    await row.click();
+    await row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`).click();
     await expect(testPage.getByText(remoteMessage).last()).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByText("Remote Author")).toBeVisible({ timeout: 10_000 });
     await testPage.waitForFunction(
@@ -2615,7 +2619,7 @@ test.describe("Git Changes Panel", () => {
     await testPage.keyboard.press("Enter");
     await expect(providerToggle).toHaveAttribute("aria-expanded", "false");
     await localToggle.focus();
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       if (await providerToggle.evaluate((element) => document.activeElement === element)) break;
       await testPage.keyboard.press("Tab");
     }

@@ -9,57 +9,9 @@ import type { useMultiSelect } from "@/hooks/use-multi-select";
 import { FileRow } from "./changes-panel-file-row";
 import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
+import { buildChangesTree, type ChangesTreeNode } from "./changes-file-tree-model";
 
-type TreeNode = {
-  name: string;
-  path: string;
-  isDir: boolean;
-  children?: TreeNode[];
-  file?: ChangedFile;
-};
-
-/**
- * Build a hierarchical tree from a flat list of changed files. Single-child
- * directory chains stay separate nodes — useTree's `chainCollapse` merges them
- * into one row at render time.
- */
-function buildChangesTree(files: ChangedFile[]): TreeNode[] {
-  const root: TreeNode = { name: "", path: "", isDir: true, children: [] };
-  for (const file of files) {
-    // Defensive: a malformed entry (e.g. a legacy DB-snapshot replay without
-    // a path field) must not crash the whole route — skip it. Callers already
-    // backfill `path` from the map key, so this only fires on data that is
-    // broken at the source.
-    if (!file.path) continue;
-    const parts = file.path.split("/");
-    let current = root;
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      const isLast = i === parts.length - 1;
-      const partPath = parts.slice(0, i + 1).join("/");
-      if (isLast) {
-        current.children!.push({ name: part, path: file.path, isDir: false, file });
-      } else {
-        let child = current.children!.find((c) => c.isDir && c.name === part);
-        if (!child) {
-          child = { name: part, path: partPath, isDir: true, children: [] };
-          current.children!.push(child);
-        }
-        current = child;
-      }
-    }
-  }
-  return sortNodes(root.children ?? []);
-}
-
-function sortNodes(nodes: TreeNode[]): TreeNode[] {
-  return nodes
-    .sort((a, b) => {
-      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    })
-    .map((n) => (n.isDir && n.children ? { ...n, children: sortNodes(n.children) } : n));
-}
+type TreeNode = ChangesTreeNode;
 
 const GET_PATH = (n: TreeNode) => n.path;
 const GET_CHILDREN = (n: TreeNode) => n.children;

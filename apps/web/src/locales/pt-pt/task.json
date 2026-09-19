@@ -1080,6 +1080,7 @@
   "openEditor": "Abrir o editor",
   "openEntityReference": "Abrir {{label}}: {{title}}",
   "openFile": "Abrir ficheiro",
+  "openCommit": "Abrir commit",
   "openImage": "Abrir {{alt}}",
   "openInAdvancedView": "Abrir na vista avançada",
   "openInBrowserPanel": "Abrir no painel do navegador",

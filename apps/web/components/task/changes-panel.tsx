@@ -11,7 +11,11 @@ import {
 } from "./changes-panel-helpers";
 import { useChangesPanelData, buildChangesPanelBodyProps } from "./changes-panel-data";
 import { ChangesPanelBody } from "./changes-panel-body";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+  OpenDiffOptions,
+} from "./changes-diff-target";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import {
   consumeContributionComparisonRequest,
@@ -24,7 +28,10 @@ export { filterUnpushedCommits, mergeCommits, separateCommitHistories };
 type ChangesPanelProps = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
+  onOpenCommitDetail?: (
+    target: CommitDetailTarget,
+    fileNavigation?: CommitFileNavigationRequest,
+  ) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
 };

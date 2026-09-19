@@ -5,16 +5,14 @@ import { IconAlertCircle, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { PanelRoot, PanelBody } from "./panel-primitives";
-import { FileDiffViewer } from "@/components/diff";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useCommitDetail } from "@/hooks/domains/session/use-commit-detail";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
-import { formatRelativeTime } from "@/lib/utils";
-import type { FileInfo } from "@/lib/state/store";
-import type { CommitDetailTarget } from "./changes-diff-target";
+import type { CommitDetailTarget, CommitFileNavigationRequest } from "./changes-diff-target";
+import { CommitDetailContent, type CommitDetailHeaderCommit } from "./commit-detail-content";
 
 type CommitDetailPanelProps = {
   panelId: string;
@@ -23,8 +21,9 @@ type CommitDetailPanelProps = {
 
 type CommitDiffViewProps = {
   target: CommitDetailTarget;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, repo?: string) => void;
   wordWrap?: boolean;
+  fileNavigation?: CommitFileNavigationRequest | null;
 };
 
 function isCommitDetailTarget(value: unknown): value is CommitDetailTarget {
@@ -60,21 +59,21 @@ function targetFromParams(params: Record<string, unknown>): CommitDetailTarget {
   };
 }
 
-function getInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
-
-function useSortedFileEntries(files: Record<string, FileInfo> | null): [string, FileInfo][] {
-  return useMemo(() => {
-    if (!files) return [];
-    return Object.entries(files).sort(([a], [b]) => a.localeCompare(b));
-  }, [files]);
+function fileNavigationFromParams(
+  params: Record<string, unknown>,
+): CommitFileNavigationRequest | undefined {
+  const value = params.fileNavigation;
+  if (!value || typeof value !== "object") return undefined;
+  const navigation = value as { path?: unknown; token?: unknown };
+  if (
+    typeof navigation.path !== "string" ||
+    navigation.path.length === 0 ||
+    typeof navigation.token !== "number" ||
+    !Number.isFinite(navigation.token)
+  ) {
+    return undefined;
+  }
+  return { path: navigation.path, token: navigation.token };
 }
 
 function useActiveCommit(target: CommitDetailTarget) {
@@ -94,15 +93,28 @@ function headerCommit(
   target: CommitDetailTarget,
   localCommit: ReturnType<typeof useActiveCommit>,
   remoteCommit: ReturnType<typeof useCommitDetail>["commit"],
-) {
+): CommitDetailHeaderCommit | undefined {
   if (target.source === "github" && remoteCommit) {
     return {
-      author_name: remoteCommit.author_name || remoteCommit.author_login,
-      commit_message: remoteCommit.message,
-      committed_at: remoteCommit.author_date,
+      authorName: remoteCommit.author_name || remoteCommit.author_login,
+      commitMessage: remoteCommit.message,
+      committedAt: remoteCommit.author_date,
+      repositoryName: target.repositoryName ?? target.repo,
     };
   }
-  return localCommit;
+  if (!localCommit) return undefined;
+  return {
+    authorName: localCommit.author_name,
+    commitMessage: localCommit.commit_message,
+    committedAt: localCommit.committed_at,
+    repositoryName: localCommit.repository_name,
+  };
+}
+
+function commitTargetKey(target: CommitDetailTarget, sessionId?: string | null): string {
+  const sessionKey = sessionId ?? "";
+  if (target.source === "local") return `local:${sessionKey}:${target.repo ?? ""}:${target.sha}`;
+  return `github:${sessionKey}:${target.workspaceId}:${target.owner}/${target.repo}:${target.sha}`;
 }
 
 /** Standalone commit diff viewer — no dockview dependencies. */
@@ -110,12 +122,13 @@ export const CommitDiffView = memo(function CommitDiffView({
   target,
   onOpenFile,
   wordWrap = DEFAULT_DIFF_WORD_WRAP,
+  fileNavigation,
 }: CommitDiffViewProps) {
   const { t } = useTranslation();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const localCommit = useActiveCommit(target);
   const { files, commit: remoteCommit, loading, error, refetch } = useCommitDetail(target);
   const commit = headerCommit(target, localCommit, remoteCommit);
-  const fileEntries = useSortedFileEntries(files);
 
   if (loading) {
     return (
@@ -128,18 +141,16 @@ export const CommitDiffView = memo(function CommitDiffView({
   if (error) return <CommitDetailErrorState error={error} onRetry={refetch} />;
 
   return (
-    <div className="overflow-y-auto">
-      <div className="p-3">{commit && <CommitHeader commit={commit} commitSha={target.sha} />}</div>
-      <CommitFileList
-        fileEntries={fileEntries}
-        loading={loading}
-        onOpenFile={target.source === "local" ? onOpenFile : undefined}
-        baseRef={target.source === "local" ? `${target.sha}^` : undefined}
-        repo={target.source === "local" ? target.repo : undefined}
-        remote={target.source === "github"}
-        wordWrap={wordWrap}
-      />
-    </div>
+    <CommitDetailContent
+      key={commitTargetKey(target, activeSessionId)}
+      target={target}
+      fileEntries={files ? Object.entries(files) : []}
+      commit={commit}
+      sessionId={activeSessionId}
+      initialWordWrap={wordWrap}
+      onOpenFile={target.source === "local" ? onOpenFile : undefined}
+      fileNavigation={fileNavigation}
+    />
   );
 });
 
@@ -149,20 +160,21 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
 }: CommitDetailPanelProps) {
   const { t } = useTranslation();
   const target = targetFromParams(params);
+  const fileNavigation = fileNavigationFromParams(params);
   const { openFile } = usePanelActions();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const localCommit = useActiveCommit(target);
   const { files, commit: remoteCommit, loading, error, refetch } = useCommitDetail(target);
   const commit = headerCommit(target, localCommit, remoteCommit);
-  const fileEntries = useSortedFileEntries(files);
 
   // Update tab title via dockview API stored in portal manager
   useEffect(() => {
     if (commit) {
       const shortSha = target.sha.slice(0, 7);
       const msg =
-        commit.commit_message.length > 30
-          ? commit.commit_message.slice(0, 30) + "..."
-          : commit.commit_message;
+        commit.commitMessage.length > 30
+          ? commit.commitMessage.slice(0, 30) + "..."
+          : commit.commitMessage;
       setPanelTitle(panelId, `${shortSha} ${msg}`);
     }
   }, [commit, panelId, target.sha]);
@@ -192,52 +204,19 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
   return (
     <PanelRoot>
       <PanelBody padding={false} scroll>
-        <div className="p-3">
-          {commit && <CommitHeader commit={commit} commitSha={target.sha} />}
-        </div>
-        <CommitFileList
-          fileEntries={fileEntries}
-          loading={loading}
+        <CommitDetailContent
+          key={commitTargetKey(target, activeSessionId)}
+          target={target}
+          fileEntries={files ? Object.entries(files) : []}
+          commit={commit}
+          sessionId={activeSessionId}
           onOpenFile={target.source === "local" ? openFile : undefined}
-          baseRef={target.source === "local" ? `${target.sha}^` : undefined}
-          repo={target.source === "local" ? target.repo : undefined}
-          remote={target.source === "github"}
+          fileNavigation={fileNavigation}
         />
       </PanelBody>
     </PanelRoot>
   );
 });
-
-/** Commit metadata header with author and message */
-function CommitHeader({
-  commit,
-  commitSha,
-}: {
-  commit: { author_name: string; commit_message: string; committed_at: string };
-  commitSha: string;
-}) {
-  return (
-    <div className="mb-4 pb-3 border-b border-border">
-      <div className="flex items-start gap-3">
-        <div className="flex items-center justify-center size-8 rounded-full bg-muted text-xs font-semibold text-muted-foreground shrink-0">
-          {getInitials(commit.author_name)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground leading-snug">
-            {commit.commit_message}
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            {commit.author_name}
-            <span className="mx-1.5">&middot;</span>
-            {formatRelativeTime(commit.committed_at)}
-            <span className="mx-1.5">&middot;</span>
-            <code className="font-mono text-[11px]">{commitSha.slice(0, 7)}</code>
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function CommitDetailErrorState({
   error,
@@ -264,59 +243,6 @@ function CommitDetailErrorState({
         {t("system:featureTogglesRetry")}
       </Button>
     </div>
-  );
-}
-
-/** List of file diffs in a commit */
-function CommitFileList({
-  fileEntries,
-  loading,
-  onOpenFile,
-  baseRef,
-  repo,
-  remote,
-  wordWrap,
-}: {
-  fileEntries: [string, FileInfo][];
-  loading: boolean;
-  onOpenFile?: (path: string) => void;
-  baseRef?: string;
-  repo?: string;
-  remote: boolean;
-  wordWrap?: boolean;
-}) {
-  const { t } = useTranslation();
-  if (fileEntries.length === 0 && !loading) {
-    return (
-      <div className="text-sm text-muted-foreground text-center py-8">
-        {t("task:noFilesInThisCommit")}
-      </div>
-    );
-  }
-
-  return (
-    <>
-      {fileEntries.map(([path, file]) => (
-        <div key={path} className="mb-2">
-          {file.diff ? (
-            <FileDiffViewer
-              filePath={path}
-              diff={file.diff}
-              status={file.status}
-              onOpenFile={onOpenFile}
-              enableExpansion={!remote}
-              baseRef={baseRef}
-              repo={remote ? undefined : repo}
-              wordWrap={wordWrap}
-            />
-          ) : (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
-              {t("task:binaryOrEmptyDiff", { path })}
-            </div>
-          )}
-        </div>
-      ))}
-    </>
   );
 }
 
