@@ -7,6 +7,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { mockFolderAvailability } from "../../helpers/open-task-folder";
 
 const WORKSPACE_SOURCES_PATH = /^\/api\/v1\/tasks\/[^/]+\/workspace-sources$/;
 
@@ -93,6 +94,13 @@ async function waitForWorkspaceReady(
 }
 
 test.describe("Attach local workspace sources", () => {
+  test.beforeEach(async ({ testPage }) => {
+    await mockFolderAvailability(testPage, true);
+    await testPage.route("**/api/v1/task-sessions/*/open-folder", (route) =>
+      route.fulfill({ json: { success: true } }),
+    );
+  });
+
   test("adds a local repository and folder successively, scopes Changes to Git, and persists", async ({
     testPage,
     apiClient,

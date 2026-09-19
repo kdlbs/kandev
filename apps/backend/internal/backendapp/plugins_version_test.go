@@ -130,7 +130,7 @@ func provideTestServices(t *testing.T, version string) (*Services, *config.Confi
 		}
 	})
 
-	services, _, err := provideServices(cfg, log, repos, pool, bus.NewMemoryEventBus(log), agentRegistry, version)
+	services, _, err := provideServices(context.Background(), cfg, log, repos, pool, bus.NewMemoryEventBus(log), agentRegistry, version)
 	if err != nil {
 		t.Fatalf("provideServices: %v", err)
 	}

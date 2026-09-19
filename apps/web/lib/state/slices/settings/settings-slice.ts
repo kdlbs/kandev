@@ -268,9 +268,12 @@ function createCoreActions(
       set((draft) => {
         draft.agentProfiles.items = profiles;
       }),
-    setEditors: (editors) =>
+    setEditors: (editors, folderOpeningAvailable) =>
       set((draft) => {
         draft.editors.items = editors;
+        if (folderOpeningAvailable !== undefined) {
+          draft.editors.folderOpeningAvailable = folderOpeningAvailable;
+        }
         draft.editors.loaded = true;
       }),
     setEditorsLoading: (loading) =>

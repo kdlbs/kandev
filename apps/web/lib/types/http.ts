@@ -759,6 +759,7 @@ export type EditorOption = {
 };
 
 export type EditorsResponse = {
+  folder_opening_available?: boolean;
   editors: EditorOption[];
 };
 
