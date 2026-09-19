@@ -546,7 +546,7 @@ describe("resolveSessionTabSyncTarget", () => {
   });
 });
 
-describe("runAutoSessionTabEffect", () => {
+describe("hidden session panels", () => {
   it("does not rematerialize an explicitly hidden active session", () => {
     const sessionId = "session-hidden";
     const { api } = makeReorderingAutoSessionApi();
@@ -576,7 +576,9 @@ describe("runAutoSessionTabEffect", () => {
     expect(api.getPanel(`session:${activeSessionId}`)).not.toBeNull();
     expect(api.getPanel(`session:${hiddenSiblingId}`)).toBeNull();
   });
+});
 
+describe("runAutoSessionTabEffect", () => {
   it("keeps chat active when replacing its placeholder beside a Plan tab", () => {
     const sessionId = "session-current";
     const { api, activePanelId } = makeReorderingAutoSessionApi();
