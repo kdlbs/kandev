@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
@@ -52,11 +52,15 @@ type TaskLayoutProps = {
 };
 
 export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
+  const [pickerWorkspaceId, setPickerWorkspaceId] = useState(props.workspaceId);
+  if (props.workspaceId && props.workspaceId !== pickerWorkspaceId) {
+    setPickerWorkspaceId(props.workspaceId);
+  }
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
       <ResponsiveTaskLayout {...props} />
       <ResponsiveTaskPicker
-        key={props.workspaceId}
+        key={pickerWorkspaceId}
         workspaceId={props.workspaceId}
         workflowId={props.workflowId}
       />

@@ -1,5 +1,8 @@
 "use client";
 
+import { useArchivedTaskState } from "@/components/task/task-archived-context";
+import { useOptionalPortForwardingVisibility } from "@/components/task/port-forwarding-visibility-provider";
+
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
@@ -196,6 +199,8 @@ function listingPageForPath(pathname: string) {
 
 function MobileTaskOutlet({ close }: { close: () => void }) {
   const register = useMobileTaskNavigationOutlet();
+  const archivedState = useArchivedTaskState();
+  const portForwarding = useOptionalPortForwardingVisibility();
   const selection = useWorkbenchTaskSelection();
   const router = useRouter();
   const element = useRef<HTMLDivElement>(null);
@@ -207,9 +212,17 @@ function MobileTaskOutlet({ close }: { close: () => void }) {
     [router, selection],
   );
   useEffect(() => {
-    if (element.current) register({ element: element.current, close, navigate, selection });
+    if (element.current)
+      register({
+        element: element.current,
+        close,
+        navigate,
+        selection,
+        archivedState,
+        portForwarding,
+      });
     return () => register(null);
-  }, [register, close, navigate, selection]);
+  }, [register, close, navigate, selection, archivedState, portForwarding]);
   return <section ref={element} data-testid="mobile-navigation-tasks" />;
 }
 

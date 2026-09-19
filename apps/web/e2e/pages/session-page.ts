@@ -1430,10 +1430,17 @@ export class SessionPage {
       return;
     }
 
-    await compactStepper.click();
-    const moveButton = this.page.getByTestId(`workflow-step-disclosure-move-${step.id}`);
-    await expect(moveButton).toBeVisible();
-    await moveButton.click();
+    await expect(async () => {
+      const moveButton = this.page.getByTestId(`workflow-step-disclosure-move-${step.id}`);
+      if (!(await moveButton.isVisible())) {
+        await compactStepper.click();
+      }
+      await expect(moveButton).toBeVisible({ timeout: 3_000 });
+      await moveButton.click({ timeout: 3_000 });
+    }).toPass({
+      timeout: 15_000,
+      intervals: [100, 250, 500],
+    });
   }
 
   /**

@@ -665,5 +665,8 @@ test.describe("Mobile Threads view", () => {
       .poll(async () => (await apiClient.getUserSettings()).settings.thread_active_view_id)
       .toBe("view-all-threads");
     await expect(trigger).toBeFocused();
+    await trigger.tap();
+    await expect(drawer.getByTestId("threads-mobile-view-list")).toBeVisible();
+    await expect(drawer.getByTestId("threads-view-editor")).toHaveCount(0);
   });
 });

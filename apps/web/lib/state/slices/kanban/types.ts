@@ -6,9 +6,19 @@ import type {
   TaskOrigin,
   TaskPriority,
   TaskState as TaskStatus,
+  WorkflowProfileSessionEndPolicy,
+  WorkflowProfileSessionStartPolicy,
+  WorkflowSessionTarget,
+  WorkflowAgentOverrides,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { BeginTaskRemovalInput, TaskRemovalState } from "@/lib/state/task-removal";
+import type {
+  WorkflowSessionFocusCancelScope,
+  WorkflowSessionFocusState,
+  WorkflowSessionFocusStart,
+  WorkflowSessionFocusTaskProjection,
+} from "@/lib/state/workflow-session-focus";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -53,6 +63,11 @@ export type KanbanState = {
     is_start_step?: boolean;
     show_in_command_panel?: boolean;
     agent_profile_id?: string;
+    session_target?: WorkflowSessionTarget | null;
+    profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
+    profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+    complete_task_on_enter?: boolean;
+    cancel_triggers_turn_complete?: boolean;
     /** Maximum concurrent tasks allowed in this step. 0 or undefined means unlimited. */
     wip_limit?: number;
     /** Optional upstream step used by automation to pull more work. */
@@ -82,6 +97,7 @@ export type KanbanState = {
     // wrong workflow. Ephemeral tasks are filtered out before this point.
     workflowId: string;
     workflowStepId: string;
+    workflowAgentOverrides?: WorkflowAgentOverrides;
     title: string;
     description?: string;
     autopilot?: boolean;
@@ -156,6 +172,8 @@ export type KanbanState = {
     primaryAgentName?: string | null;
     labels?: string[];
     isRemoteExecutor?: boolean;
+    /** Backend-owned discriminator for task hierarchy rules. Absent means non-Office. */
+    isFromOffice?: boolean;
     /** Human assignee (user id). Independent of any agent assignment. */
     assigneeUserId?: string;
     parentTaskId?: string | null;
@@ -316,6 +334,8 @@ export type KanbanSliceState = {
   workspaceContextGeneration: number;
   workspaceContextRead: WorkspaceContextReadState;
   tasks: TaskState;
+  /** Browser-local one-shot focus handoff for an explicitly moved task. */
+  workflowSessionFocus: WorkflowSessionFocusState;
   /** Browser-local removal intent. It is deliberately excluded from hydration. */
   taskRemoval: TaskRemovalState;
 };
@@ -351,6 +371,18 @@ export type KanbanSliceActions = {
   // it explicitly after checking no non-terminal manual pin should be preserved.
   setActiveSessionAuto: (taskId: string, sessionId: string) => void;
   clearActiveSession: () => void;
+  beginWorkflowSessionFocus: (input: WorkflowSessionFocusStart) => number | null;
+  bindWorkflowSessionFocus: (input: {
+    requestId: number;
+    presentationToken: number;
+    entryIdentity: string;
+  }) => void;
+  reconcileWorkflowSessionFocus: (
+    taskId: string,
+    responseProjection?: WorkflowSessionFocusTaskProjection,
+  ) => void;
+  cancelWorkflowSessionFocus: (scope?: WorkflowSessionFocusCancelScope) => void;
+  acknowledgeWorkflowSessionFocus: (requestId: number) => void;
   // setResumeSkipped records/clears the resume-skipped marker for a session.
   // Recording is guarded at the call site (the session-resumption hook reads
   // the live session row with typed store access), so a stale status response

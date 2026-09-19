@@ -41,7 +41,9 @@ import {
 } from "@/components/settings/agent-profile-duplicate-action";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
+import { ProviderSection } from "@/components/settings/profile-edit/provider-section";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { providerConfigInvalidReasonKey } from "@/lib/settings/provider-config-validation";
 
 export {
   ProfileEnvVarsEditor,
@@ -56,6 +58,7 @@ import type {
   PermissionSetting,
   PassthroughConfig,
 } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
 import { useAppStore } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
@@ -77,6 +80,28 @@ type ProfileEditorProps = {
   passthroughConfig: PassthroughConfig | null;
   initialMcpConfig?: AgentProfileMcpConfig | null;
 };
+
+function toProfileFormData(
+  profile: AgentProfile,
+  permissionSettings: Record<string, PermissionSetting>,
+): ProfileFormData {
+  const permissionValues = profilePermissionValues(profile, permissionSettings);
+  return {
+    name: profile.name,
+    model: profile.model,
+    fallback_model: profile.fallbackModel ?? "",
+    auto_fallback: profile.autoFallback ?? false,
+    require_exact_model: profile.requireExactModel ?? false,
+    mode: profile.mode ?? "",
+    config_options: profile.configOptions ?? {},
+    auto_approve: permissionValues.auto_approve,
+    allow_indexing: permissionValues.allow_indexing,
+    cli_passthrough: profile.cliPassthrough,
+    cli_flags: profile.cliFlags ?? [],
+    command_prefix: profile.commandPrefix ?? "",
+    provider_kind: profile.providerKind ?? "",
+  };
+}
 
 type ProfileEditorHeaderProps = {
   agentName: string;
@@ -240,8 +265,6 @@ function ProfileSettingsCard({
   const handleFormChange = (patch: Partial<ProfileFormData>) => {
     onDraftChange(toAgentProfilePatch(patch));
   };
-  const permissionValues = profilePermissionValues(draft, permissionSettings);
-  const savedPermissionValues = profilePermissionValues(savedProfile, permissionSettings);
 
   return (
     <SettingsCard
@@ -256,32 +279,8 @@ function ProfileSettingsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <ProfileFormFields
-          profile={{
-            name: draft.name,
-            model: draft.model,
-            fallback_model: draft.fallbackModel ?? "",
-            auto_fallback: draft.autoFallback ?? false,
-            mode: draft.mode ?? "",
-            config_options: draft.configOptions ?? {},
-            auto_approve: permissionValues.auto_approve,
-            allow_indexing: permissionValues.allow_indexing,
-            cli_passthrough: draft.cliPassthrough,
-            cli_flags: draft.cliFlags ?? [],
-            command_prefix: draft.commandPrefix ?? "",
-          }}
-          baselineProfile={{
-            name: savedProfile.name,
-            model: savedProfile.model,
-            fallback_model: savedProfile.fallbackModel ?? "",
-            auto_fallback: savedProfile.autoFallback ?? false,
-            mode: savedProfile.mode ?? "",
-            config_options: savedProfile.configOptions ?? {},
-            auto_approve: savedPermissionValues.auto_approve,
-            allow_indexing: savedPermissionValues.allow_indexing,
-            cli_passthrough: savedProfile.cliPassthrough,
-            cli_flags: savedProfile.cliFlags ?? [],
-            command_prefix: savedProfile.commandPrefix ?? "",
-          }}
+          profile={toProfileFormData(draft, permissionSettings)}
+          baselineProfile={toProfileFormData(savedProfile, permissionSettings)}
           onChange={handleFormChange}
           modelConfig={modelConfig}
           permissionSettings={permissionSettings}
@@ -329,7 +328,7 @@ type ProfileEditorBodyProps = {
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   initialMcpConfig?: AgentProfileMcpConfig | null;
   onToastError: (error: unknown) => void;
   onModelConfigResolutionPendingChange: (pending: boolean) => void;
@@ -369,6 +368,13 @@ function ProfileEditorBody({
         onChange={(next) => updateDraft({ cliFlags: next })}
         permissionSettings={permissionSettings}
         discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "cli-flags")}
+      />
+
+      <ProviderSection
+        draft={draft}
+        savedProfile={savedProfile}
+        secrets={secrets}
+        onChange={updateDraft}
       />
 
       <ProfileEnvVarsSection
@@ -455,14 +461,26 @@ function ProfileEditor({
     toast,
     onUtilityConflict: setUtilityConflict,
   });
+  const providerInvalidKey = providerConfigInvalidReasonKey({
+    providerKind: draft.providerKind,
+    providerBaseUrl: draft.providerBaseUrl,
+    providerApiKeySecretId: draft.providerApiKeySecretId,
+    model: draft.model,
+    cliPassthrough: draft.cliPassthrough,
+  });
   useSettingsSaveContributor({
     id: `agent-profile:${draft.id}`,
     revision: JSON.stringify(draft),
     isDirty,
-    canSave: Boolean(draft.name.trim()) && !modelConfigResolutionPending && !hasExternalConflict,
+    canSave:
+      Boolean(draft.name.trim()) &&
+      !modelConfigResolutionPending &&
+      !hasExternalConflict &&
+      !providerInvalidKey,
     invalidReason: hasExternalConflict
       ? t("agents:profileExternalChangeInvalidReason")
-      : profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t),
+      : (profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t) ??
+        (providerInvalidKey ? t(providerInvalidKey) : undefined)),
     save: () => handleSave(),
     discard: discardProfileDraft,
   });

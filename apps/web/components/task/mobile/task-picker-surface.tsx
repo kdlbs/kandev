@@ -19,7 +19,7 @@ export function InlineTaskHeader({
     <div className="flex items-center gap-2 border-t border-border pt-4">
       <Button
         variant="ghost"
-        className="h-11 min-w-11 flex-1 justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
+        className="cursor-pointer h-11 min-w-11 flex-1 justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
         aria-expanded={expanded}
         aria-controls="mobile-navigation-task-body"
         data-testid="mobile-navigation-tasks-toggle"
@@ -34,7 +34,7 @@ export function InlineTaskHeader({
       </Button>
       <Button
         variant="ghost"
-        className="size-11 shrink-0 text-muted-foreground hover:text-foreground"
+        className="cursor-pointer size-11 shrink-0 text-muted-foreground hover:text-foreground"
         onClick={onNewTask}
         aria-label={t("task:newTask")}
       >

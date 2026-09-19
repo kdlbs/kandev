@@ -6,6 +6,7 @@ requirements:
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004
+  - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005
 ---
 
 # Workflow Step Agent Start Ownership System Design
@@ -26,6 +27,7 @@ The design preserves runtime configuration through the existing reset contract. 
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002` | [Active-turn reset flow](#active-turn-reset-flow), [Bounded predecessor wait](#bounded-predecessor-wait), [Reset failure containment](#reset-failure-containment) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003` | [Prompt fallback ownership](#prompt-fallback-ownership), [Prompt-history contract](#prompt-history-contract), [Workflow-entry prompt flow](#workflow-entry-prompt-flow) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004` | [Creation destination routing](#creation-destination-routing) |
+| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005` | [Asynchronous launch prompt preservation](#asynchronous-launch-prompt-preservation) |
 
 ## Components and responsibilities
 
@@ -268,6 +270,81 @@ This repair does not reconcile sessions that became stuck before the new boundar
 The prompt counter and fallback claim are durable across backend restarts. A
 restart cannot make an earlier task description eligible for another fallback
 dispatch, and deleting/recreating a session ID starts a new prompt boundary.
+
+## Asynchronous launch prompt preservation
+
+This extension belongs to the task system because workflow entry owns the pending input.
+The [implementation package](../../../plans/workflow-async-start-prompt-preservation/plan.md)
+delivers the design and its regression matrix.
+
+### Capture before asynchronous admission
+
+`autoStartStepPrompt` already separates recorded content, agent content, references, attachments, and completion handoff text.
+Capture the queue-form input before `startCreatedSessionWithComposedPrompt` admits the launch.
+Use a private, immutable attempt envelope in the orchestrator, carried through the launch context.
+Existing executor context propagation preserves values through `context.WithoutCancel` and dynamic launch paths.
+The executor need not interpret the prompt envelope or import workflow composition types.
+
+The envelope includes task, session, workflow step, unique launch token, initial turn identity, and the queue-form input.
+Bind the turn identity in `startCreatedSession` before `launchPreparedSessionWithDynamicFallback` starts asynchronous work.
+Copy mutable slices and metadata. Preserve the actual `userMsgRecorded` result rather than assuming that transcript persistence succeeded.
+Do not recover from the mutable `lastTurnPrompt` cache or select the latest transcript row.
+Neither source binds all workflow metadata to the failed attempt.
+
+An attempt-local completion claim permits one preservation operation.
+Synchronous rejection retires the envelope and retains `handleCreatedAutoStartLaunchFailure` as its sole queue owner.
+Success retires the envelope without queue insertion. Context lifetime bounds retention after the launch callback returns.
+Dynamic fallback attempts must not independently preserve the same logical prompt while another candidate can still start.
+Only the final accepted startup failure can consume the preservation claim.
+
+### Preserve through the accepted failure path
+
+Extend `handleAgentStartFailed` after its cancellation, terminal-session, and execution checks.
+Under the existing cancellation guard, validate the captured turn and workflow entry before queue persistence.
+An execution ID alone is insufficient when successive attempts reuse a prepared execution.
+Reject superseded attempts, completed or cancelled sessions, archived tasks, and missing sessions.
+Queue admission must retain the existing session-incarnation and purge-generation protections.
+Do not treat the unconditional `onAgentProcessStartFailed` notification as evidence that a failure passed these guards.
+
+Persist the envelope using the existing message-queue service and workflow metadata format.
+Extract persistence from `queueAutoStartPrompt` so this call does not run `scheduleAutoResumeForWorkflowQueue`.
+Preservation must not start a replacement before failure cleanup finishes.
+Leave the user's `auto_run` policy unchanged.
+After explicit recovery, existing boot-ready admission can drain the entry when all eligibility checks pass.
+
+The queue contains the composed visible workflow input, with entity references and completion handoff in their existing metadata fields.
+It must not contain a second injected Kandev system block or independently restored copy of an already-merged handoff.
+`executeQueuedMessage` continues to honor `user_message_recorded` and compose dispatch context through the existing path.
+The queue uses its existing storage, attachment ownership, capacity limits, transfer rules, and restart recovery.
+No new table, public payload, or provider API is required.
+
+### Failure and recovery boundaries
+
+The original error continues through auth, managed-runtime, or generic bootstrap handling.
+The [launch recovery design](task-launch-failure-recovery.md) remains authoritative for safe errors, stamps, history, and recovery authorization.
+`RecoverTaskLaunch` already routes session-owned retry through `RecoverSession` on the same session.
+Recovery boots the session and lets the existing queue drain send its preserved input.
+Do not send the same prompt as both a launch description and a queue entry.
+
+A queue write failure does not mask the original startup failure.
+The attempt-owned preservation path retries queue admission once while its
+claim remains current. It releases the claim only after that retry fails, so a
+later callback can retry only with the same launch ownership. Log a separate
+bounded preservation diagnostic with task, session, execution, and attempt
+identity, without input text or attachment contents.
+The existing persistent launch error remains the visible recovery signal.
+No frontend layout or copy changes are required by this package.
+
+The guarantee starts when a live failure callback accepts ownership and persists the queue entry.
+A process crash before that point is excluded. Successful process startup is not proof of exactly-once provider execution after an ambiguous prompt error.
+Post-start prompt failures keep their separate correlated terminal path and do not use this replay mechanism.
+
+### Verification
+
+Use controlled startup barriers to prove preservation after the launch call already returned success.
+Cover duplicate callbacks, replacement execution, same-execution successor turn, terminal races, and dynamic fallback ownership.
+Exercise real queue persistence and the service recovery-to-boot-ready-to-dispatch path.
+Verify one transcript row, one delivered prompt, preserved metadata, paused queues, and restart after queue persistence.
 
 ## Observability
 

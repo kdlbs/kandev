@@ -24,6 +24,11 @@ export {
   createNeedsYouInboxSlice,
   defaultNeedsYouInboxState,
 } from "./needs-you-inbox/needs-you-inbox-slice";
+export { createFailedInboxSlice, defaultFailedInboxState } from "./failed-inbox/failed-inbox-slice";
+export {
+  createInboxHistorySlice,
+  defaultInboxHistoryState,
+} from "./inbox-history/inbox-history-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -104,6 +109,20 @@ export type {
   NeedsYouInboxReadStatus,
   NeedsYouInboxBootSeed,
 } from "./needs-you-inbox/types";
+export type {
+  FailedInboxSlice,
+  FailedInboxSliceActions,
+  FailedInboxSliceState,
+  FailedInboxWorkspaceState,
+  FailedInboxReadStatus,
+} from "./failed-inbox/types";
+export type {
+  InboxHistorySlice,
+  InboxHistorySliceActions,
+  InboxHistorySliceState,
+  InboxHistoryWorkspaceState,
+  InboxHistoryReadStatus,
+} from "./inbox-history/types";
 
 // Re-export commonly used types from each domain
 export type {

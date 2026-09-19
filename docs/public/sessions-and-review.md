@@ -81,7 +81,7 @@ When you queue a prompt, Kandev records a submission identity before it reports 
 
 A full queue, invalid content or attachment, identity conflict, or unavailable session shows a **Message not sent** error and keeps the draft and attachments. If delivery remains uncertain, Kandev shows **Message send status unknown** and keeps them for inspection. A confirmed admission clears only the submitted draft; a failed queue refresh does not turn an accepted admission into a failure.
 
-Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
+Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. This includes a turn that Auto-run delivered from the FIFO queue after its prompt handoff completes. The handoff remains protected while it is completing, so a concurrent Send Now conflict keeps the rows pending for retry. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
@@ -255,9 +255,29 @@ the desktop/tablet bottom bar or phone Status drawer. Configure the plugin under
 Provider Usage**. Kandev hides the context ring rather than presenting
 impossible data when reported use exceeds the reported window.
 
+## Control chat animations
+
+Open **Settings > Preferences > Appearance** and change **Chat animations**.
+The setting is on by default and controls incoming text, new chat items, and
+smooth scrolling on this device. Choose **Save changes** to keep the choice
+across reloads, or **Reset** to discard the preview.
+
+Your device's reduced-motion preference disables these effects even when the
+switch is on. Turning chat animations off keeps content visible immediately
+and leaves the session's auto-scroll preference unchanged. Scroll up to read
+history without being pulled back by incoming content. Rich-output chart
+animations have their own Appearance setting.
+
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.
+
+Symbolic links have a link icon beside their filename in workspace **Staged**
+and **Unstaged** rows, including untracked links. Opening a readable link shows
+**Symlink** beside its path in the file editor. These indicators are also visible
+on phones. In **Files**, symbolic links use a link icon in place of the usual
+file or folder icon. Each Changes row identifies the entry in that change layer; a deleted
+link keeps its marker. Opening and saving files follows the existing behavior.
 
 Changes are grouped by repository and then by state:
 
@@ -318,7 +338,9 @@ During review you can:
 
 Reviewed state is stored per session. Kandev also stores the diff hash: if the file changes after you review it, the file becomes stale and unreviewed. By default, manually scrolling past a file marks it reviewed; file-selection jumps in Review do not. Use the review toolbar to disable **Auto-mark reviewed on scroll**. Review does not embed walkthrough steps in its diff list; follow a saved walkthrough from its launcher and file editor.
 
-Pending inline comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent and close the review dialog. If the agent is busy, normal session queuing applies. The UI clears pending comments immediately after starting the fire-and-forget send; if that request later fails, it shows an error but does not restore them. Copy important feedback before sending. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
+**Whole-file feedback:** Select **Comment on file** in a file header, or in its file actions menu on a phone. Add feedback without selecting lines, including for deleted, renamed, or non-text files. Saved comments appear above the diff, where you can edit or delete them. File comments join line comments in **Fix comments** and the chat composer.
+
+Pending line and file comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent and close the review dialog. If the agent is busy, normal session queuing applies. The UI clears pending comments immediately after starting the fire-and-forget send; if that request later fails, it shows an error but does not restore them. Copy important feedback before sending. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
 
 ## Generate a walkthrough
 

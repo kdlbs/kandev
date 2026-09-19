@@ -393,14 +393,22 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.logger.Error("failed to update task metadata", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
 
-	s.PublishTaskUpdated(ctx, task)
+	// Reload rather than publish/return the pre-write snapshot: the
+	// preserving update can win a concurrent ceiling CAS on deferred_launch,
+	// and that field lives only in the database row from this point on.
+	current, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	s.PublishTaskUpdated(ctx, current)
 	s.logger.Debug("task metadata updated", zap.String("task_id", id), zap.Any("metadata", metadata))
-	return task, nil
+	return current, nil
 }
 
 // MoveTaskResult contains the result of a MoveTask operation.
@@ -412,6 +420,9 @@ type MoveTaskResult struct {
 	// this call's earlier pre-move snapshot — see Task.FromStepID's doc.
 	FromStepID   string
 	Transitioned bool
+	// WorkflowEntryIdentity identifies the committed workflow-step entry that
+	// accepted this move. Empty when the write did not transition the task.
+	WorkflowEntryIdentity string
 	// MoveID correlates the one-shot entry options carried on the transient
 	// move marker with the target-step entry. Empty for an option-less move.
 	MoveID string
@@ -724,6 +735,10 @@ func (s *Service) MoveTaskWithOptions(
 	resultFromWorkflowID := task.FromWorkflowID
 	resultFromStepID := task.FromStepID
 	resultTransitioned := task.WorkflowStepTransitionID != 0
+	workflowEntryIdentity := ""
+	if resultTransitioned && task.WorkflowStepTransitionID > 0 {
+		workflowEntryIdentity = fmt.Sprintf("entry:%020d", task.WorkflowStepTransitionID)
+	}
 	if resultTransitioned && resultFromWorkflowID == "" {
 		// Keep compatibility with repository implementations that predate the
 		// transient source-workflow field. SQLite populates it from the write
@@ -789,7 +804,14 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{Task: task, FromStepID: resultFromStepID, Transitioned: resultTransitioned, MoveID: moveID, EntryOptions: entryOptions}
+	result := &MoveTaskResult{
+		Task:                  task,
+		FromStepID:            resultFromStepID,
+		Transitioned:          resultTransitioned,
+		WorkflowEntryIdentity: workflowEntryIdentity,
+		MoveID:                moveID,
+		EntryOptions:          entryOptions,
+	}
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
@@ -1316,7 +1338,7 @@ func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task
 		}
 		return task.WIPAdmitted, nil
 	}
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		return false, err
 	}
 	return task.WIPAdmitted, nil

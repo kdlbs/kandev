@@ -64,6 +64,21 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 		State:     sessionState,
 		StartedAt: now,
 		UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyMCPAttachmentState: streams.MCPAttachmentHistory{
+				Version: streams.MCPAttachmentSchemaVersion,
+				Current: streams.MCPAttachmentAttempt{
+					AttemptID: "test-attachment-" + sessionID,
+					Servers: []streams.MCPServerAttachment{{
+						Name:   "kandev",
+						Source: streams.MCPServerSourceKandev,
+						Tools: []streams.MCPToolSummary{{
+							Name: "report_change_request_auto_fix_outcome_kandev",
+						}},
+					}},
+				},
+			},
+		},
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create session: %v", err)
@@ -3419,7 +3434,7 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 	promptAccepted := make(chan promptCall, 2)
 	turnComplete := make(chan struct{})
 	var retryAcceptedOnce sync.Once
-	agentMgr := &mockAgentManager{
+	baseAgentMgr := &mockAgentManager{
 		isAgentRunning:         true,
 		repoForExecutionLookup: repo,
 		promptAgentFunc: func(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
@@ -3432,6 +3447,15 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 			}
 			return &executor.PromptResult{}, nil
 		},
+	}
+	// Keep the provider call blocked after it has entered the turn, but fire
+	// the dispatch callback at that acceptance boundary. The base mock invokes
+	// its callback only after promptAgentFunc returns, which would hold the
+	// admission guard until turnComplete and make this test exercise the mock's
+	// ordering rather than the provider contract.
+	agentMgr := &callbackAfterPromptEntryAgentManager{
+		mockAgentManager: baseAgentMgr,
+		promptEntries:    []<-chan struct{}{retryAccepted},
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
@@ -4729,6 +4753,12 @@ type mockMessageCreator struct {
 	thinkingWrites            int
 	toolCallWrites            int
 	toolUpdateWrites          int
+	lastToolUpdateID          string
+	lastToolUpdateTitle       string
+	lastToolUpdateType        string
+	agentPlanUpserts          int
+	lastAgentPlanToolCallID   string
+	lastAgentPlanContent      string
 	userMessageErr            error
 	idempotentUserMessages    map[string]struct{}
 	permissionClaimFn         func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
@@ -4792,8 +4822,25 @@ func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, stri
 	return nil
 }
 
-func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+func (m *mockMessageCreator) UpdateToolCallMessage(
+	_ context.Context,
+	_, toolCallID, _, _, _, _, title, _, msgType string,
+	_ *streams.NormalizedPayload,
+) error {
 	m.toolUpdateWrites++
+	m.lastToolUpdateID = toolCallID
+	m.lastToolUpdateTitle = title
+	m.lastToolUpdateType = msgType
+	return nil
+}
+
+func (m *mockMessageCreator) UpsertAgentPlanMessage(
+	_ context.Context,
+	_, sourceToolCallID, _, content, _ string,
+) error {
+	m.agentPlanUpserts++
+	m.lastAgentPlanToolCallID = sourceToolCallID
+	m.lastAgentPlanContent = content
 	return nil
 }
 
@@ -4822,6 +4869,7 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, messageID, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -4841,6 +4889,9 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		metadata:      metadata,
 		requestsInput: requestsInput,
 	})
+	if m.sessionMessageDone != nil {
+		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
+	}
 	return nil
 }
 
@@ -7335,7 +7386,7 @@ func TestEnsureSessionRunning_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 		t.Fatalf("failed to reload session: %v", err)
 	}
 
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "office tasks must be restarted through Office")
 	assert.False(t, startAgentProcessCalled)
@@ -7363,7 +7414,7 @@ func TestEnsureSessionRunning_OfficeWaitingForInputFailsClosed(t *testing.T) {
 
 	session, err := repo.GetTaskSession(ctx, "session1")
 	require.NoError(t, err)
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "office tasks must be resumed through Office")
 	assert.False(t, launchCalled)
@@ -7429,7 +7480,7 @@ func TestEnsureSessionRunning_WaitingForInputUsesResumePath(t *testing.T) {
 	}
 
 	// Should fail because there is no executor running record (resume path)
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	if err == nil {
 		t.Fatal("expected error for WAITING_FOR_INPUT session without executor record")
 	}
@@ -7460,7 +7511,7 @@ func TestEnsureSessionRunning_CreatedWithoutExecutionUsesResumePath(t *testing.T
 
 	// AgentExecutionID is empty → should NOT take prepared workspace path
 	// Should fail with "not resumable" because no executor running record
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	if err == nil {
 		t.Fatal("expected error for CREATED session without executor record")
 	}

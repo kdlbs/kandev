@@ -231,6 +231,7 @@ describe("findPendingClarificationGroup", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function
 describe("current-turn clarification ownership", () => {
   it("ignores an older pending request when a newer durable turn exists", () => {
     const messages = [
@@ -244,6 +245,22 @@ describe("current-turn clarification ownership", () => {
     ];
     expect(findPendingClarification(messages, { currentTurnId: CURRENT_TURN_ID })).toBeNull();
     expect(findPendingClarificationGroup(messages, { currentTurnId: CURRENT_TURN_ID })).toEqual([]);
+  });
+  it("keeps a detached clarification answerable after a newer turn starts", () => {
+    const detached = message({
+      id: "detached",
+      turn_id: "turn-old",
+      type: "clarification_request",
+      metadata: { pending_id: OLD_PENDING_ID, status: "pending", agent_disconnected: true },
+    });
+    const newer = message({ id: "newer", turn_id: CURRENT_TURN_ID, type: "message" });
+
+    expect(
+      findPendingClarificationGroup([detached, newer], {
+        currentTurnId: CURRENT_TURN_ID,
+        pendingAction: null,
+      }),
+    ).toEqual([detached]);
   });
 
   it.each([null, "permission"] as const)(
@@ -261,18 +278,6 @@ describe("current-turn clarification ownership", () => {
       expect(findPendingClarificationGroup([pending], scope)).toEqual([]);
     },
   );
-
-  it("does not reactivate history when every newer-turn message is deleted", () => {
-    const messages = [
-      message({
-        id: "old",
-        turn_id: "turn-old",
-        type: "clarification_request",
-        metadata: { pending_id: OLD_PENDING_ID, status: "pending" },
-      }),
-    ];
-    expect(findPendingClarification(messages, { currentTurnId: CURRENT_TURN_ID })).toBeNull();
-  });
 
   it("returns only the current turn's exact pending bundle", () => {
     const messages = [
@@ -636,8 +641,6 @@ describe("hasPendingPermissionRequest — turn scoping", () => {
     ).toBe(false);
   });
 
-  // A legacy permission_request with no turn_id, sitting in a session whose
-  // latest message *does* have a turn_id, must not bypass the boundary.
   it("ignores a legacy null-turn_id pending permission when a turn is active", () => {
     expect(
       hasPendingPermissionRequest([

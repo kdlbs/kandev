@@ -167,3 +167,31 @@ Final browser result: 64 distinct mobile scenarios passed across the main run
 and the final 14-case Threads/header rerun (60/64 initially, with all four
 failures corrected). Both compact-desktop Chromium cases passed. The temporary
 filename-anchored browser config was removed. Total: 66 distinct browser cases.
+
+
+## PR review follow-up
+
+- Reconciled current-main task move callbacks and workspace-scoped saved-view
+  settings with the embedded task menu.
+- Bridged archived-task and port-forwarding page context through the app-menu
+  outlet, preserving the current archived task in views that exclude archives.
+- Retained the task-picker key during transient null workspace metadata; a
+  different resolved workspace still resets its drafts.
+- Added explicit pointer styling to the new interactive section controls and
+  reconciled the older task-view/chrome documents with the embedded menu.
+- Regression unit tests failed first for lost context and picker draft loss,
+  then passed after the fixes. The focused task picker/menu run passed 30 tests,
+  and the layout regression suite passed 4 tests. Merge validation passed 57
+  unit tests and 20 phone browser scenarios covering embedded navigation,
+  sidebar saved views, and task moves. Typecheck, focused ESLint, specification,
+  documentation, and merged harness checks passed.
+- Final managed phone regressions passed (2 tests): the embedded current archived
+  task remains visible, and deleting a Threads saved view then reopening options
+  starts on the view list. The latter disproves the reported stale editor:
+  closing the outer drawer unmounts its controls, resetting local editor state.
+- Removed the duplicate integration spec entry and completed requirement mapping.
+
+Review verification logs: `/tmp/pr3830-merge-unit.log`,
+`/tmp/pr3830-merge-e2e.log`, `/tmp/pr3830-context-red.log`,
+`/tmp/pr3830-final-unit.log`, `/tmp/pr3830-picker-red.log`,
+`/tmp/pr3830-picker-green.log`, and `/tmp/pr3830-review-e2e.log`.

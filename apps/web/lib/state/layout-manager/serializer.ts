@@ -20,6 +20,7 @@ import {
   RIGHT_BOTTOM_GROUP,
 } from "./constants";
 import { panelTitle } from "./panel-title";
+import { canonicalPluginPanelTitle } from "./plugin-panels";
 
 /** Canonical English, because `normalizePanel` produces a stored LayoutState. */
 // i18n-exempt: canonical English persisted in saved layouts, compared when restoring.
@@ -227,7 +228,11 @@ function panelFromDockviewPanel(panel: any): LayoutPanel {
     component: panel.view?.contentComponent ?? panel.id,
     // CAPTURE direction: dockview holds the localized title, and this result is
     // what gets persisted, so a registry panel goes back to canonical English.
-    title: canonicalPanelTitle(panel.id, panel.view?.contentComponent) ?? panel.title ?? panel.id,
+    title:
+      canonicalPluginPanelTitle(panel.id) ??
+      canonicalPanelTitle(panel.id, panel.view?.contentComponent) ??
+      panel.title ??
+      panel.id,
     ...(panel.view?.tabComponent ? { tabComponent: panel.view.tabComponent } : {}),
     ...(panel.params ? { params: panel.params as Record<string, unknown> } : {}),
   };

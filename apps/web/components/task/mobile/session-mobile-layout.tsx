@@ -26,7 +26,11 @@ import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
-import type { ReviewItemSummary } from "@/lib/plugins/types";
+import type {
+  PluginOpenMessageResult,
+  PluginSessionKind,
+  ReviewItemSummary,
+} from "@/lib/plugins/types";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { reviewItemId, useReviewItemSelection } from "../review-selection";
 import { PluginTaskPanel } from "../plugin-task-panel";
@@ -34,6 +38,9 @@ import { PromptHistoryPanelContent } from "../prompt-history-panel-content";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
 import { useTranslation } from "react-i18next";
+import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import { LaunchQueueStatus } from "../launch-queue-status";
+import { WipQueueStatus } from "../wip-queue-status";
 
 export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
@@ -118,6 +125,7 @@ function MobileChatPanelContent({
   isVisible: boolean;
 }) {
   const { t } = useTranslation();
+  const launchStatusSummary = useTaskStatusSummary(activeTaskId, undefined);
   if (!activeTaskId) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -127,6 +135,8 @@ function MobileChatPanelContent({
   }
   return (
     <div className="flex-1 min-h-0 flex flex-col">
+      <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
+      <WipQueueStatus taskId={activeTaskId} />
       <div className="flex items-center px-1 py-2">
         <MobileSessionsPicker taskId={activeTaskId} sessionId={effectiveSessionId} fullWidth />
       </div>
@@ -146,6 +156,8 @@ function MobileChatPanelContent({
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}
           onPendingScrollConsumed={onScrollTargetConsumed}
+          hideLaunchQueueStatus
+          hideWipQueueStatus
         />
       )}
     </div>
@@ -164,7 +176,7 @@ type MobilePanelAreaProps = {
   handleClearSelectedDiff: () => void;
   handleOpenFile: (file: OpenFileTab) => void;
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void;
-  onNavigateToPrompt: (messageId: string) => void;
+  onNavigateToPrompt: (messageId: string) => PluginOpenMessageResult;
   onScrollTargetConsumed?: (messageId: string) => void;
   mobileScrollTarget: PendingMessageScrollTarget | null;
   topNavHeight: string;
@@ -186,6 +198,26 @@ export function terminalPaddingBottom(
   return keyboardOpen
     ? `calc(${bottomOffset + KEYBAR_HEIGHT_PX}px - ${bottomNavHeight} - env(safe-area-inset-bottom, 0px))`
     : `${KEYBAR_HEIGHT_PX}px`;
+}
+
+function MobileTerminalPanel({
+  sessionId,
+  paddingBottom,
+}: {
+  sessionId: string | null;
+  paddingBottom: string;
+}) {
+  return (
+    <div
+      data-testid="terminal-panel"
+      className="flex-1 min-h-0 flex flex-col px-2"
+      style={{ paddingBottom }}
+    >
+      <SessionPanelContent className="p-0 flex-1 min-h-0 flex flex-col">
+        <MobileTerminalPane key={sessionId} sessionId={sessionId} />
+      </SessionPanelContent>
+    </div>
+  );
 }
 
 export function MobilePanelArea({
@@ -210,7 +242,6 @@ export function MobilePanelArea({
   onSelectReview,
 }: MobilePanelAreaProps) {
   const { keyboardOpen, bottomOffset } = useVisualViewportOffset();
-  const terminalPadding = terminalPaddingBottom(keyboardOpen, bottomOffset, bottomNavHeight);
   return (
     <div
       className="flex flex-col"
@@ -266,15 +297,10 @@ export function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "terminal" && (
-        <div
-          data-testid="terminal-panel"
-          className="flex-1 min-h-0 flex flex-col px-2"
-          style={{ paddingBottom: terminalPadding }}
-        >
-          <SessionPanelContent className="p-0 flex-1 min-h-0 flex flex-col">
-            <MobileTerminalPane key={effectiveSessionId} sessionId={effectiveSessionId} />
-          </SessionPanelContent>
-        </div>
+        <MobileTerminalPanel
+          sessionId={effectiveSessionId}
+          paddingBottom={terminalPaddingBottom(keyboardOpen, bottomOffset, bottomNavHeight)}
+        />
       )}
       <MobileReviewPanel
         currentMobilePanel={currentMobilePanel}
@@ -282,7 +308,10 @@ export function MobilePanelArea({
         selectedReview={selectedReview}
         onSelectReview={onSelectReview}
       />
-      <MobilePluginPanel currentMobilePanel={currentMobilePanel} />
+      <MobilePluginPanel
+        currentMobilePanel={currentMobilePanel}
+        onOpenMessage={onNavigateToPrompt}
+      />
     </div>
   );
 }
@@ -307,7 +336,13 @@ function MobilePlanPanel({
  * plugin-contributed nav entries. A non-plugin id (the common case) is a
  * no-op, so this stays a single trailing branch instead of one per plugin.
  */
-function MobilePluginPanel({ currentMobilePanel }: { currentMobilePanel: MobileSessionPanel }) {
+function MobilePluginPanel({
+  currentMobilePanel,
+  onOpenMessage,
+}: {
+  currentMobilePanel: MobileSessionPanel;
+  onOpenMessage: (messageId: string) => PluginOpenMessageResult;
+}) {
   const parsed = parsePluginPanelId(currentMobilePanel);
   if (!parsed) return null;
   return (
@@ -317,6 +352,7 @@ function MobilePluginPanel({ currentMobilePanel }: { currentMobilePanel: MobileS
         panelKey={parsed.panelKey}
         panelId={currentMobilePanel}
         presentation="mobile"
+        onOpenMessage={onOpenMessage}
       />
     </div>
   );
@@ -530,6 +566,8 @@ export function useMobilePanelHandlers({
 
 type SessionMobileFooterProps = {
   sessionId: string | null;
+  taskId: string | null;
+  sessionKind: "managed" | "passthrough" | null;
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
   showPromptHistory: boolean;
@@ -545,6 +583,8 @@ type SessionMobileFooterProps = {
 
 function SessionMobileFooter({
   sessionId,
+  taskId,
+  sessionKind,
   activePanel,
   onPanelChange,
   showPromptHistory,
@@ -576,6 +616,9 @@ function SessionMobileFooter({
         connectionIssueSeverity={connectionIssueSeverity}
         taskCanvases={taskCanvases}
         onOpenCanvas={onOpenCanvas}
+        taskId={taskId}
+        sessionId={sessionId}
+        sessionKind={sessionKind}
       />
     </>
   );
@@ -621,6 +664,20 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  const workflowFocusRequest = useAppStore((state) => {
+    const request = state.workflowSessionFocus.request;
+    return request && request.taskId === activeTaskId && request.sessionId === effectiveSessionId
+      ? request
+      : null;
+  });
+  const acknowledgeWorkflowSessionFocus = useAppStore(
+    (state) => state.acknowledgeWorkflowSessionFocus,
+  );
+  useEffect(() => {
+    if (!workflowFocusRequest) return;
+    handlePanelChangeAndClearSheet("chat");
+    acknowledgeWorkflowSessionFocus(workflowFocusRequest.requestId);
+  }, [acknowledgeWorkflowSessionFocus, handlePanelChangeAndClearSheet, workflowFocusRequest]);
   const [mobileScrollTarget, setMobileScrollTarget] = useState<PendingMessageScrollTarget | null>(
     null,
   );
@@ -637,18 +694,22 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     [handlePanelChangeAndClearSheet],
   );
   const handleNavigateToPrompt = useCallback(
-    (messageId: string) => {
-      if (!effectiveSessionId) return;
+    (messageId: string): PluginOpenMessageResult => {
+      const normalizedMessageId = messageId.trim();
+      if (isPassthroughMode || !effectiveSessionId || normalizedMessageId === "") {
+        return { status: "unavailable" };
+      }
       const token = ++mobileScrollTokenRef.current;
       setMobileScrollTarget({
         sessionId: effectiveSessionId,
-        messageId,
+        messageId: normalizedMessageId,
         token,
         hostPanelId: "mobile-chat",
       });
       handlePanelChangeAndClearSheet("chat");
+      return { status: "accepted" };
     },
-    [effectiveSessionId, handlePanelChangeAndClearSheet],
+    [effectiveSessionId, handlePanelChangeAndClearSheet, isPassthroughMode],
   );
   const handleMobileScrollTargetConsumed = useCallback(() => {
     setMobileScrollTarget(null);
@@ -666,6 +727,10 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
       setMobileScrollTarget(null);
     }
   }, [currentMobilePanel, effectiveMobilePanel]);
+  let sessionKind: PluginSessionKind = null;
+  if (effectiveSessionId) {
+    sessionKind = isPassthroughMode ? "passthrough" : "managed";
+  }
   return (
     <div className="relative h-full min-h-0 bg-background" data-testid="mobile-task-layout">
       <MobileTopBarSticky
@@ -700,6 +765,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
       />
       <StatusAwareSessionMobileFooter
         sessionId={effectiveSessionId ?? null}
+        taskId={activeTaskId ?? null}
+        sessionKind={sessionKind}
         activePanel={effectiveMobilePanel}
         onPanelChange={handleMobilePanelChange}
         planBadge={hasUnseenPlanUpdate}

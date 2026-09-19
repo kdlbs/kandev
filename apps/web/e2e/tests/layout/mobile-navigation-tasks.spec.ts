@@ -99,3 +99,20 @@ for (const status of [503, 403]) {
     await expect(menu.getByText("Workspace-scoped task", { exact: true })).toBeVisible();
   });
 }
+
+// @covers AC-UI-MOBILE-MENU-004.1
+test("embedded Tasks retains the current archived task outside archived views", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const task = await apiClient.seedTask(seedData.workspaceId, "Current archived navigation task", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  await apiClient.archiveTask(task.task_id);
+  await testPage.goto(`/t/${task.task_id}`);
+  await testPage.getByTestId("app-nav-trigger").tap();
+  const menu = testPage.getByTestId("app-nav-sheet");
+  await expect(menu.getByText("Current archived navigation task", { exact: true })).toBeVisible();
+});

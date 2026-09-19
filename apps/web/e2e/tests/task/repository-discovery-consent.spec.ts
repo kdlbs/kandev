@@ -2,6 +2,10 @@ import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { KanbanPage } from "../../pages/kanban-page";
+import {
+  DISCOVERY_FAILURE_ROOT,
+  installRepositoryDiscoveryFailureRoute,
+} from "./repository-discovery-failure-helpers";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -37,8 +41,45 @@ test.describe("Desktop repository discovery consent", () => {
     ]);
     expect(chooseBox).not.toBeNull();
     expect(refreshBox).not.toBeNull();
-    expect(refreshBox!.height).toBeCloseTo(chooseBox!.height, 1);
+    expect(Math.abs(refreshBox!.height - chooseBox!.height)).toBeLessThanOrEqual(1);
     expect(refreshBox!.height).toBeLessThanOrEqual(32);
+  });
+
+  test("keeps failed-root diagnostics out of the server selector", async ({
+    testPage,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await installRepositoryDiscoveryFailureRoute(testPage);
+    await backend.restart({ KANDEV_DESKTOP_RUNTIME: "false" });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("repo-chip-trigger").first().click();
+
+    await expect(testPage.getByTestId("discovery-root-controls")).toHaveCount(0);
+    await expect(testPage.getByTestId("discovery-failure")).toHaveCount(0);
+    await expect(testPage.getByText(DISCOVERY_FAILURE_ROOT, { exact: true })).toHaveCount(0);
+    const availableRepository = testPage.getByRole("option", { name: /healthy-project/ });
+    await expect(availableRepository).toBeEnabled();
+    await availableRepository.click();
+    await expect(dialog.getByTestId("repo-chip-trigger").first()).toContainText("healthy-project");
+
+    await dialog.getByTestId("repo-chip-trigger").first().click();
+    const refreshResponse = testPage.waitForResponse(
+      (response) =>
+        /\/api\/v1\/workspaces\/[^/]+\/repositories$/.test(new URL(response.url()).pathname) &&
+        response.request().method() === "GET" &&
+        response.ok(),
+    );
+    await testPage.getByTestId("repo-refresh-button").click();
+    await refreshResponse;
+    await expect(testPage.getByTestId("discovery-failure")).toHaveCount(0);
+    await expect(testPage.getByRole("option", { name: /healthy-project/ })).toBeVisible();
   });
 
   test("uses the native picker and keeps the discovery root recoverable", async ({

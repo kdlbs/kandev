@@ -12,13 +12,35 @@
     "tldr": "Webhook delivery now retries transient failures with bounded backoff. Permanent failures stop immediately, which protects downstream services from repeated invalid requests."
   },
   "why": {
+    "audience": "Operators who depend on webhook delivery during brief endpoint outages.",
     "problem": "The delivery worker treats every send failure the same. A short network interruption loses a webhook, while repeated retries of a rejected payload waste worker capacity.",
+    "outcome": "Transient failures receive up to three attempts. Permanent failures stop immediately.",
     "what": [
       "Classify transient and permanent send failures.",
       "Retry transient failures with three attempts and exponential backoff.",
       "Record a terminal failure after the retry budget is exhausted.",
       "Add tests for recovery, permanent failure, and exhausted retries."
     ]
+  },
+  "impact": {
+    "breaking": {
+      "status": "changed",
+      "items": [{
+        "audience": "Endpoint owners who return permanent error responses for temporary failures",
+        "before": "The worker retries rejected payloads.",
+        "after": "The worker stops immediately for permanent errors.",
+        "action": "Return 429 or a 5xx response for transient failures.",
+        "file": "src/webhooks/webhook-sender.ts"
+      }]
+    },
+    "ux": { "status": "none", "items": [] },
+    "plugins": { "status": "none", "items": [] },
+    "mcp": { "status": "none", "items": [] },
+    "database": {
+      "status": "unknown",
+      "items": [],
+      "note": "This illustrative excerpt does not include persistence code or migrations. Database changes are not verified."
+    }
   },
   "architecture": {
     "caption": "The worker checks the retry policy before each send. Exhausted jobs move to the dead-letter queue.",
@@ -78,7 +100,7 @@
     { "from": "n3", "to": "n1", "label": "returns outcome" }
   ],
   "data": {
-    "caption": "Each delivery record stores retry state so a resumed worker can continue from the last attempt.",
+    "caption": "The delivery job carries retry state in memory. This excerpt does not establish database persistence.",
     "fields": [
       { "field": "attempts", "type": "integer", "note": "number of sends already made" },
       { "field": "status", "type": "enum", "note": "pending, delivered, or failed" },

@@ -31,7 +31,9 @@ repeat those inside the embedded body. Preserve the standalone title picker.
 `MobileTaskNavigationProvider` lives in the app shell above responsive page
 headers. It owns the lazy, workspace-keyed sidebar/controller after first use;
 `AppNavSheet` registers a body outlet and origin-specific selection/navigation
-callbacks. Only the body is portalled into the menu; action dialogs stay mounted
+callbacks. The outlet also forwards archived-task and port-forwarding context
+from the task page to the retained sidebar; React portals do not inherit target
+context. Only the body is portalled into the menu; action dialogs stay mounted
 when the outlet closes or the header unmounts on rotation.
 `AppNavSheet` supplies this Tasks body after primary/local
 navigation and before workspace actions. Start expanded; preserve disclosure
@@ -93,6 +95,10 @@ the manifest destinations and hoisted dialog controls between some of them.
 | REQ-UI-MOBILE-MENU-001 | Shared shell and page controls; Mobile composition |
 | REQ-UI-MOBILE-MENU-002 | Task title and navigation handoff |
 | REQ-UI-MOBILE-MENU-003 | Pinned shortcuts and recovery |
+| REQ-UI-MOBILE-MENU-004 | Embedded Tasks |
+| REQ-UI-MOBILE-MENU-005 | Listing-title options |
+| REQ-UI-MOBILE-MENU-006 | Menu hierarchy revision |
+| REQ-UI-MOBILE-MENU-007 | Action-first composition |
 
 ## Shared shell and page controls
 

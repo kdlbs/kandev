@@ -159,7 +159,7 @@ export function MobileIntegrationsSection({
       {collapsible ? (
         <Button
           variant="ghost"
-          className="h-11 w-full justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
+          className="cursor-pointer h-11 w-full justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
           aria-expanded={expanded}
           aria-controls={bodyId}
           onClick={() => setExpanded(!expanded)}
@@ -185,7 +185,7 @@ export function MobileIntegrationsSection({
             <Button
               asChild
               variant="outline"
-              className="h-11 w-full justify-start gap-3 px-3 text-sm"
+              className="cursor-pointer h-11 w-full justify-start gap-3 px-3 text-sm"
             >
               <Link
                 href={

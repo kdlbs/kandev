@@ -34,7 +34,7 @@ chrome.
 The same top bar also renders `GitActionsDropdown` on every phone panel. Its
 commit, change-request, pull, push, rebase, merge, and contribution-recovery
 commands duplicate capabilities already owned by `MobileChangesPanel`. The
-task drawer opened by `mobile-session-menu` already exposes task actions,
+shared app menu and title-triggered task picker expose task-row actions,
 including **Move to**, so replacing the Git ellipsis with another task menu
 would create a second path to the same commands.
 
@@ -42,10 +42,10 @@ would create a second path to the same commands.
 
 - `apps/web/components/task/mobile/session-mobile-top-bar.tsx` keeps task title,
   repository/branch summary, applicable status/plugin controls, approval, and
-  the task-drawer trigger. It stops mounting layout and Git action surfaces.
-  The retained task-drawer trigger becomes a 44-by-44 CSS-pixel touch target.
+  the shared app-navigation trigger and title-triggered task picker. It does not
+  mount layout or Git action surfaces. Phone triggers retain 44px touch targets.
 - `apps/web/components/task/mobile/session-task-switcher-sheet.tsx` remains the
-  only phone top-chrome path to the task list and its row-level actions.
+  shared task-list and row-action owner for embedded Tasks and the title picker.
 - `apps/web/components/task/mobile/mobile-changes-panel.tsx` continues to
   compose the shared `ChangesPanelHeader` and `ChangesPanelBody`. Those shared
   components retain commit, push, change-request, pull, rebase, merge, and
@@ -68,13 +68,14 @@ not retain action ownership.
 
 ### Task action
 
-1. User taps retained hamburger control.
-2. `SessionTaskSwitcherSheet` opens its existing inset bottom drawer.
+1. User taps the hamburger to open shared app navigation and its embedded Tasks
+   section, or taps the task title to open the separate inset task picker.
+2. The existing task list presents saved views, filters, and task rows.
 3. User opens active task row's visible action menu.
 4. Existing `TaskMoveContextMenuItems` moves the task to another permitted
    workflow step.
 
-No new top-bar overflow, picker, state, or mutation path is introduced.
+Both entries reuse the same task-row actions and mutation path.
 
 ### Git action
 

@@ -10,6 +10,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Drawer } from "@kandev/ui/drawer";
+import {
+  TaskArchivedProvider,
+  useArchivedTaskState,
+} from "@/components/task/task-archived-context";
+import {
+  PortForwardingVisibilityContextProvider,
+  type PortForwardingVisibility,
+} from "@/components/task/port-forwarding-visibility-provider";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskSheetSelectionController } from "@/components/task/mobile/session-task-switcher-sheet-selection";
 
@@ -24,6 +32,8 @@ type Outlet = {
   close: () => void;
   navigate: (taskId: string) => void;
   selection?: TaskSheetSelectionController | null;
+  archivedState?: ReturnType<typeof useArchivedTaskState>;
+  portForwarding?: PortForwardingVisibility;
 };
 const Context = createContext<(outlet: Outlet | null) => void>(() => {});
 export const useMobileTaskNavigationOutlet = () => useContext(Context);
@@ -47,28 +57,36 @@ export function MobileTaskNavigationProvider({ children }: { children: ReactNode
       {children}
       {requested && workspaceId && (
         <Suspense fallback={null}>
-          <TaskSidebar
-            key={workspaceId}
-            workspaceId={workspaceId}
-            workflowId={workflowId}
-            open={!!outlet}
-            onOpenChange={(open) => {
-              if (!open) configuration.current?.close();
-            }}
-            navigate={configuration.current?.navigate}
-            selection={configuration.current?.selection ?? undefined}
-            presentation="drawer"
-            renderInline={(body) =>
-              outlet
-                ? createPortal(
-                    <Drawer open modal={false}>
-                      {body}
-                    </Drawer>,
-                    outlet.element,
-                  )
-                : null
-            }
-          />
+          <TaskArchivedProvider
+            value={configuration.current?.archivedState ?? { isArchived: false }}
+          >
+            <PortForwardingVisibilityContextProvider
+              value={configuration.current?.portForwarding ?? null}
+            >
+              <TaskSidebar
+                key={workspaceId}
+                workspaceId={workspaceId}
+                workflowId={workflowId}
+                open={!!outlet}
+                onOpenChange={(open) => {
+                  if (!open) configuration.current?.close();
+                }}
+                navigate={configuration.current?.navigate}
+                selection={configuration.current?.selection ?? undefined}
+                presentation="drawer"
+                renderInline={(body) =>
+                  outlet
+                    ? createPortal(
+                        <Drawer open modal={false}>
+                          {body}
+                        </Drawer>,
+                        outlet.element,
+                      )
+                    : null
+                }
+              />
+            </PortForwardingVisibilityContextProvider>
+          </TaskArchivedProvider>
         </Suspense>
       )}
     </Context.Provider>

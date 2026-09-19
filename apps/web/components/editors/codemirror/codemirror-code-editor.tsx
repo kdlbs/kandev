@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
@@ -54,6 +56,7 @@ type FileEditorContentProps = {
   taskId?: string | null;
   repositoryId?: string | null;
   worktreePath?: string;
+  isSymlink?: boolean;
   repo?: string;
   enableComments?: boolean;
   previewKind?: FilePreviewKind;
@@ -270,10 +273,39 @@ function CodeMirrorPreviewButton({
   );
 }
 
+function CodeMirrorFileLabel({
+  path,
+  worktreePath,
+  isSymlink,
+  isDirty,
+  diffStats,
+}: {
+  path: string;
+  worktreePath?: string;
+  isSymlink?: boolean;
+  isDirty: boolean;
+  diffStats: { additions: number; deletions: number } | null;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <ScrollOnOverflow className="min-w-0 font-mono">
+        {toRelativePath(path, worktreePath)}
+      </ScrollOnOverflow>
+      <SymlinkIndicator isSymlink={isSymlink} showLabel />
+      {isDirty && diffStats && (
+        <span className="shrink-0 text-xs text-yellow-500">
+          {formatDiffStats(diffStats.additions, diffStats.deletions)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** Toolbar for the CodeMirror code editor. */
 function CodeMirrorToolbar({
   path,
   worktreePath,
+  isSymlink,
   isDirty,
   isSaving,
   diffStats,
@@ -297,6 +329,7 @@ function CodeMirrorToolbar({
 }: {
   path: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   isDirty: boolean;
   isSaving: boolean;
   diffStats: { additions: number; deletions: number } | null;
@@ -322,16 +355,13 @@ function CodeMirrorToolbar({
   return (
     <PanelHeaderBarSplit
       left={
-        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <ScrollOnOverflow className="min-w-0 font-mono">
-            {toRelativePath(path, worktreePath)}
-          </ScrollOnOverflow>
-          {isDirty && diffStats && (
-            <span className="shrink-0 text-xs text-yellow-500">
-              {formatDiffStats(diffStats.additions, diffStats.deletions)}
-            </span>
-          )}
-        </div>
+        <CodeMirrorFileLabel
+          path={path}
+          worktreePath={worktreePath}
+          isSymlink={isSymlink}
+          isDirty={isDirty}
+          diffStats={diffStats}
+        />
       }
       right={
         <div className="flex items-center gap-1">
@@ -423,6 +453,7 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const state = useCodeMirrorEditorState({
     path,
+    repo,
     content,
     originalContent,
     isDirty,
@@ -471,6 +502,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
     taskId,
     repositoryId,
     worktreePath,
+    isSymlink,
     repo,
     enableComments = false,
     previewKind,
@@ -490,6 +522,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
       <CodeMirrorToolbar
         path={path}
         worktreePath={worktreePath}
+        isSymlink={isSymlink}
         isDirty={isDirty}
         isSaving={isSaving}
         diffStats={state.diffStats}

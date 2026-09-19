@@ -68,9 +68,11 @@ type repoInfo struct {
 	RepositoryID               string
 	RepositoryPath             string
 	BaseBranch                 string
+	IntegrationRef             string
 	CheckoutBranch             string
 	PRNumber                   int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
 	RemoteContribution         *models.RemoteContribution
+	CheckoutOptions            *models.RepositoryCheckoutOptions
 	ContributionDestination    *models.ContributionDestination
 	ComparisonTarget           *models.ComparisonTarget
 	Position                   int
@@ -166,10 +168,16 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 func (e *Executor) resolveTaskRepoInfoForSession(
 	ctx context.Context, sessionID string, tr *models.TaskRepository,
 ) (*repoInfo, error) {
+	options, err := models.GetRepositoryCheckoutOptions(tr.Metadata)
+	if err != nil {
+		return nil, err
+	}
 	info := &repoInfo{
+		CheckoutOptions:  options,
 		TaskRepositoryID: tr.ID,
 		RepositoryID:     tr.RepositoryID,
 		BaseBranch:       tr.BaseBranch,
+		IntegrationRef:   tr.BranchPolicyPullRequestTarget,
 		CheckoutBranch:   tr.CheckoutBranch,
 		PRNumber:         prNumberFromMetadata(tr.Metadata),
 		Position:         tr.Position,
@@ -213,7 +221,10 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	}
 	e.resolvePRBaseForLaunch(ctx, tr, repo, info)
 
-	remoteRefState, err := e.ensureRepoLocalPathForSessionAndState(ctx, tr.TaskID, sessionID, repo)
+	// Task checkout modes select a separate cache without rewriting the repository record.
+	repoCopy := *repo
+	repo = &repoCopy
+	remoteRefState, err := e.ensureTaskCheckoutPath(ctx, tr.TaskID, sessionID, repo, options)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +250,9 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
 	}
+	if info.IntegrationRef == "" {
+		info.IntegrationRef = info.BaseBranch
+	}
 	if info.PullBeforeWorktree {
 		refreshRequired, refreshErr := e.shouldRefreshRepositoryForSession(ctx, repo)
 		if refreshErr != nil {
@@ -250,12 +264,12 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		prNumber, checkoutBranch := info.PRNumber, info.CheckoutBranch
 		info.RefreshRepository = func(refreshCtx context.Context) error {
 			return e.refreshManagedRepositoryForSession(
-				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch,
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
 			)
 		}
 		info.RefreshRepositoryWithState = func(refreshCtx context.Context) (repoclone.RemoteRefState, error) {
 			return e.refreshManagedRepositoryForSessionWithState(
-				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch,
+				refreshCtx, tr.TaskID, sessionID, repo, prNumber, checkoutBranch, options,
 			)
 		}
 	}
@@ -340,16 +354,16 @@ func isPluginManagedRepository(repo *models.Repository) bool {
 }
 
 func (e *Executor) refreshManagedRepositoryForSession(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string,
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string, options ...*models.RepositoryCheckoutOptions,
 ) error {
 	_, err := e.refreshManagedRepositoryForSessionWithState(
-		ctx, taskID, sessionID, repo, prNumber, checkoutBranch,
+		ctx, taskID, sessionID, repo, prNumber, checkoutBranch, options...,
 	)
 	return err
 }
 
 func (e *Executor) refreshManagedRepositoryForSessionWithState(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string,
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, prNumber int, checkoutBranch string, options ...*models.RepositoryCheckoutOptions,
 ) (repoclone.RemoteRefState, error) {
 	if e.repoCloner == nil || repo.LocalPath == "" {
 		return repoclone.RemoteRefStateUnknown, errors.New("managed repository refresh is unavailable")
@@ -379,6 +393,9 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 		)
 	}
 	request := repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL)
+	if len(options) > 0 {
+		request.CheckoutOptions = options[0]
+	}
 	if isGitHubRepository(repo) {
 		request.PRNumber = prNumber
 		request.CheckoutBranch = checkoutBranch
@@ -748,6 +765,14 @@ type ResumeOptions struct {
 	// or a pinned follow-up dispatch. It does not change the global terminal
 	// session predicate or permit implicit resume paths.
 	AllowCompletedSessionResume bool
+	// Origin carries the session ceiling's explicit automatic/manual launch
+	// classification ("automatic" or "manual") from the caller into
+	// ResumeTaskSessionWithOptions's admission gate. A plain string rather
+	// than the orchestrator package's own type, since this package must not
+	// import orchestrator. Left empty, the gate classifies the resume as
+	// automatic and logs the omission — it is never silently treated as a
+	// manual override.
+	Origin string
 }
 
 type cancellableResumeContextKey struct{}
@@ -808,6 +833,9 @@ func (e *Executor) ResumeSessionWithOptions(
 	startAgent bool,
 	options ResumeOptions,
 ) (*TaskExecution, error) {
+	if session != nil {
+		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
+	}
 	return e.resumeSession(ctx, session, startAgent, options)
 }
 
@@ -1073,6 +1101,14 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	resumeErr error,
 	credentialSnapshot *resumeCredentialSnapshotBackup,
 ) {
+	// This rollback always leaves STARTING (successfully, or a no-op if the
+	// session had already left it), so the ceiling reservation is released
+	// unconditionally (AC-51a). Safe even when onSessionStateTransition
+	// already routes the write through the orchestrator's own funnel, since
+	// releasing a session that holds no reservation is a defined no-op.
+	if e.onCeilingReservationRelease != nil {
+		defer e.onCeilingReservationRelease(sessionID)
+	}
 	e.restoreResumeCredentialSnapshotIfStarting(ctx, sessionID, credentialSnapshot)
 	if e.onSessionStateTransition != nil {
 		current, err := e.repo.GetTaskSession(ctx, sessionID)

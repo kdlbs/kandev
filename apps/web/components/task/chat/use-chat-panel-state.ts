@@ -18,7 +18,7 @@ import { useSessionModel } from "@/hooks/domains/session/use-session-model";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import { useContextFilesStore, type ContextFile } from "@/lib/state/context-files-store";
 import { useCommentsStore, isPlanComment, type Comment } from "@/lib/state/slices/comments";
-import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
+import { usePendingReviewCommentsByFile } from "@/hooks/domains/comments/use-review-comments";
 import {
   usePendingPlanComments,
   usePendingPRFeedback,
@@ -32,7 +32,7 @@ import {
   usePlanLayoutHandlers,
 } from "./use-plan-mode-helpers";
 import type { ContextItem } from "@/lib/types/context";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   AgentMessageComment,
   PlanComment,
@@ -57,7 +57,7 @@ const autoAppliedPlanSessions = new Set<string>();
 
 export type CommentsState = {
   planComments: PlanComment[];
-  pendingCommentsByFile: Record<string, DiffComment[]>;
+  pendingCommentsByFile: Record<string, ReviewComment[]>;
   pendingPRFeedback: PRFeedbackComment[];
   walkthroughComments: WalkthroughComment[];
   messageComments: AgentMessageComment[];
@@ -290,7 +290,7 @@ export function useCommentsState(
     if (resolvedSessionId) hydrateComments(resolvedSessionId);
   }, [resolvedSessionId, hydrateComments]);
   const planComments = usePendingPlanComments(taskId);
-  const pendingCommentsByFile = usePendingDiffCommentsByFile(resolvedSessionId);
+  const pendingCommentsByFile = usePendingReviewCommentsByFile(resolvedSessionId);
   const pendingPRFeedback = usePendingPRFeedback(resolvedSessionId);
   const walkthroughComments = usePendingWalkthroughComments(resolvedSessionId);
   const messageComments = usePendingAgentMessageComments(resolvedSessionId);
@@ -360,7 +360,7 @@ type ChatContextItemsOptions = {
   comments: CommentsState;
   taskId: string | null;
   onOpenFile?: (path: string, repo?: string) => void;
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
 };
 
 function useChatContextItems(opts: ChatContextItemsOptions) {
@@ -465,6 +465,11 @@ function useSessionData(
     () => clarificationTurnIdForSession(session?.state, turns),
     [session?.state, turns],
   );
+  const currentTurnCompleted = useMemo(() => {
+    if (currentTurnId === null) return true;
+    if (currentTurnId === undefined || !turns) return undefined;
+    return turns.find((turn) => turn.id === currentTurnId)?.completed_at != null;
+  }, [currentTurnId, turns]);
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
     initialPromptPreview: session?.metadata?.initial_prompt_preview,
@@ -472,6 +477,7 @@ function useSessionData(
     hasOlderMessages,
     lastAgentError,
     currentTurnId,
+    currentTurnCompleted,
     pendingAction: session?.pending_action,
   });
   const { sessionModel, activeModel } = useSessionModel(
@@ -543,7 +549,7 @@ export type UseChatPanelStateOptions = {
   /** Disable Dockview and plan-layout mutations for embedded multi-panel hosts. */
   disableWorkbenchEffects?: boolean;
   onOpenFile?: (path: string, repo?: string) => void;
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
 };
 
 export function useChatPanelState({

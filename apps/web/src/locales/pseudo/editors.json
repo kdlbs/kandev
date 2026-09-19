@@ -89,5 +89,10 @@
   "toggleWordWrap": "Ţōĝĝĺē ŵōŕď ŵŕàƥ",
   "underlineCmdU": "Ũńďēŕĺĩńē (Ćḿď+Ũ)",
   "failedToOpenEditor": "Ƒàĩĺēď ţō ōƥēń ēďĩţōŕ",
-  "downloadFile": "Ďōŵńĺōàď ƒĩĺē"
+  "downloadFile": "Ďōŵńĺōàď ƒĩĺē",
+  "symlink": "Śŷḿĺĩńķ",
+  "failedToOpenFolder": "Ƒàĩĺēď ţō ōƥēń ƒōĺďēŕ",
+  "openFolderOnHost": "Ōƥēń ƒōĺďēŕ ōń ţĥē ḿàćĥĩńē ŕũńńĩńĝ Ķàńďēv",
+  "chooseFolder": "Ćĥōōśē à ƒōĺďēŕ",
+  "openingFolder": "Ōƥēńĩńĝ ƒōĺďēŕ…"
 }

@@ -93,5 +93,8 @@
   "severityBlocker": "Bloqueador",
   "severityMajor": "Grave",
   "severityMinor": "Menor",
-  "severityNit": "Detalhe"
+  "severityNit": "Detalhe",
+  "commentOnFile": "Comentar ficheiro",
+  "fileComment": "Comentário ao ficheiro",
+  "fileComments": "Comentários ao ficheiro"
 }

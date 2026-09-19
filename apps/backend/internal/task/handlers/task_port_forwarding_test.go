@@ -32,7 +32,7 @@ func (r *portForwardingHandlerRepo) GetTask(_ context.Context, _ string) (*model
 	return r.task, nil
 }
 
-func (r *portForwardingHandlerRepo) UpdateTask(_ context.Context, task *models.Task) error {
+func (r *portForwardingHandlerRepo) UpdateTaskPreservingDeferredLaunch(_ context.Context, task *models.Task) error {
 	r.updatedTask = task
 	r.updateCalls++
 	return nil

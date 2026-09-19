@@ -51,7 +51,8 @@ export function useComposerProps(args: ComposerPropsArgs) {
     hideAgentControls,
     hidePlanMode,
   } = args;
-  const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
+  const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
+    panelState;
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
   const hasContextComments =
@@ -73,6 +74,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     mcpAttachmentHistory: panelState.mcpAttachmentHistory,
     onPlanModeChange: panelState.handlePlanModeChange,
     isAgentBusy,
+    isWorking,
     supportsSteering,
     isStarting: panelState.isStarting,
     canQueueWhileStarting,

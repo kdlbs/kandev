@@ -54,6 +54,52 @@ func TestUserVisibleStoreRejectsInternalCreate(t *testing.T) {
 	}
 }
 
+func TestUserVisibleStoreHidesAutomationWebhookSecretsFromCredentials(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	internal := &SecretWithValue{
+		Secret: Secret{ID: "automation-webhook:binding-1", Name: "webhook signing secret"},
+		Value:  "webhook-secret",
+	}
+	visible := &SecretWithValue{Secret: Secret{ID: "user-secret", Name: "user token"}, Value: "user-value"}
+	for _, secret := range []*SecretWithValue{internal, visible} {
+		if err := store.Create(ctx, secret); err != nil {
+			t.Fatalf("create %s: %v", secret.ID, err)
+		}
+	}
+
+	wrapped := NewUserVisibleStore(store)
+	items, err := wrapped.List(ctx)
+	if err != nil {
+		t.Fatalf("list visible secrets: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != visible.ID {
+		t.Fatalf("visible secrets = %+v, want only %q", items, visible.ID)
+	}
+
+	for _, operation := range []func() error{
+		func() error { _, err := wrapped.Reveal(ctx, internal.ID); return err },
+		func() error { return wrapped.Update(ctx, internal.ID, &UpdateSecretRequest{}) },
+		func() error { return wrapped.Delete(ctx, internal.ID) },
+	} {
+		if err := operation(); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("internal operation error = %v, want not found", err)
+		}
+	}
+
+	provider := NewSecretStoreProvider(wrapped)
+	available, err := provider.ListAvailable(ctx)
+	if err != nil {
+		t.Fatalf("list credential choices: %v", err)
+	}
+	if len(available) != 1 || available[0] != visible.ID {
+		t.Fatalf("available credentials = %v, want only %q", available, visible.ID)
+	}
+	if _, err := provider.GetCredential(ctx, internal.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("internal credential selection error = %v, want not found", err)
+	}
+}
+
 func TestIsInternalIDRecognizesKubernetesRuntimeSecrets(t *testing.T) {
 	t.Parallel()
 
@@ -62,6 +108,9 @@ func TestIsInternalIDRecognizesKubernetesRuntimeSecrets(t *testing.T) {
 	}
 	if IsInternalID("legacy-random-runtime-secret-id") {
 		t.Fatal("legacy random secret ID must remain user-visible")
+	}
+	if !IsInternalID("  AUTOMATION-WEBHOOK:binding-1 ") {
+		t.Fatal("automation webhook secret ID must be internal")
 	}
 }
 

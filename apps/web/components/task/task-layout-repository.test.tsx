@@ -30,6 +30,19 @@ vi.mock("./mobile", () => ({
   SessionTabletLayout: () => <div data-testid="tablet-layout" />,
 }));
 
+vi.mock("./mobile/responsive-task-picker", () => ({
+  ResponsiveTaskPicker: function Picker() {
+    const [draft, setDraft] = useState("");
+    return (
+      <input
+        aria-label="Picker draft"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+    );
+  },
+}));
+
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: true, usesDesktopWorkbench: false }),
 }));
@@ -47,10 +60,28 @@ describe("TaskLayout repository label", () => {
     const view = render(<TaskLayout workspaceId="ws-1" workflowId="wf-1" />, {
       wrapper: StateProvider,
     });
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep this draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Layout draft" }), {
+      target: { value: "Keep this draft" },
+    });
     view.rerender(<TaskLayout workspaceId={null} workflowId={null} />);
     view.rerender(<TaskLayout workspaceId="ws-1" workflowId="wf-1" />);
-    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("Keep this draft");
+    expect((screen.getByRole("textbox", { name: "Layout draft" }) as HTMLInputElement).value).toBe(
+      "Keep this draft",
+    );
+  });
+
+  it("retains picker drafts through missing workspace metadata and resets for a different workspace", () => {
+    const view = render(<TaskLayout workspaceId="ws-1" workflowId="wf-1" />, {
+      wrapper: StateProvider,
+    });
+    const draft = () => screen.getByRole("textbox", { name: "Picker draft" }) as HTMLInputElement;
+    fireEvent.change(draft(), { target: { value: "Keep picker draft" } });
+    view.rerender(<TaskLayout workspaceId={null} workflowId={null} />);
+    expect(draft().value).toBe("Keep picker draft");
+    view.rerender(<TaskLayout workspaceId="ws-1" workflowId="wf-1" />);
+    expect(draft().value).toBe("Keep picker draft");
+    view.rerender(<TaskLayout workspaceId="ws-2" workflowId="wf-2" />);
+    expect(draft().value).toBe("");
   });
 
   it("hands the repository label to the phone layout", () => {

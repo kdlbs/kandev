@@ -84,4 +84,3 @@ tests/task/mobile-workspace-switch-sidebar-isolation.spec.ts
 tests/terminal/mobile-quick-terminal.spec.ts
 tests/workflow/mobile-workflow-step-move-overrides.spec.ts
 tests/workflow/mobile-workflow-step-progress.spec.ts
-tests/integrations/mobile-integrations-nav.spec.ts

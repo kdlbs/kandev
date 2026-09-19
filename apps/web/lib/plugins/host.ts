@@ -9,11 +9,11 @@
  * registration, or throwing `initialize`) is logged and swallowed — it never
  * breaks boot or blocks other plugins.
  *
- * `registeredPlugins` is never cleared on disable — only on a fresh import
- * (see `resolveRegistration`). The browser's ES module cache means a repeat
- * `import(bundleUrl)` after disable would resolve without re-running the
- * bundle's top-level `registerKandevPlugin` call, so re-enabling in the same
- * tab must reuse the cached registration instead of relying on re-import.
+ * `registeredPlugins` is retained by bundle identity across disable/re-enable
+ * cycles, but a changed bundle URL always gets a fresh module registration.
+ * The global callback is accepted only while the matching bundle import has an
+ * open registration stage, preventing late or foreign bundles from poisoning
+ * the cache.
  */
 import { getBackendConfig } from "@/lib/config";
 import { pluginModalManager } from "./modal-manager";
@@ -73,8 +73,22 @@ type PluginGlobalWindow = Window & {
   registerKandevPlugin?: (id: string, plugin: KandevPlugin) => void;
 };
 
-/** Bundles registered via `window.registerKandevPlugin`, keyed by pluginId. */
-const registeredPlugins = new Map<string, KandevPlugin>();
+type RegistrationCacheEntry = {
+  bundleUrl: string;
+  plugin: KandevPlugin;
+};
+
+const registeredPlugins = new Map<string, RegistrationCacheEntry>();
+
+type RegistrationStage = {
+  pluginId: string;
+  bundleUrl: string;
+  plugin?: KandevPlugin;
+  open: boolean;
+};
+
+let registrationStage: RegistrationStage | undefined;
+let registrationQueue = Promise.resolve();
 
 /**
  * Latest load "generation" claimed per pluginId. `loadPlugin` claims a fresh
@@ -97,6 +111,9 @@ type ActivePluginRuntime = {
 /** Currently initialized (or initializing) runtime per plugin id. */
 const activePluginRuntimes = new Map<string, ActivePluginRuntime>();
 
+/** Generation currently published to consumers; staged replacements do not change it. */
+const publishedGenerations = new Map<string, number>();
+
 /** Claims and returns a new, strictly-increasing load generation for `id`. */
 function claimLoadGeneration(id: string): number {
   const next = (loadGenerations.get(id) ?? 0) + 1;
@@ -109,36 +126,64 @@ function isCurrentLoad(id: string, generation: number): boolean {
   return loadGenerations.get(id) === generation;
 }
 
-/**
- * Wraps a scoped `PluginRegistry` so every register* call is dropped once this
- * load has been superseded by a newer one (`isCurrent()` is false). Guards the
- * window where a plugin registers *after* an `await` inside `initialize()`: a
- * stale async initializer must not append onto the successor's registrations.
- *
- * Wraps every method reflectively rather than naming each one, so any register*
- * added to the `PluginRegistry` contract (e.g. `registerKeybinding`) is fenced
- * automatically instead of being silently dropped from the forwarded object.
- */
-function generationFencedRegistry(
+function stagedGenerationRegistry(
   registry: PluginRegistry,
   isCurrent: () => boolean,
-): PluginRegistry {
-  const fenced: Record<string, unknown> = {};
+): { registry: PluginRegistry; commit: () => void } {
+  const pending: Array<() => void> = [];
+  const staged: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(registry)) {
-    fenced[key] =
+    staged[key] =
       typeof value === "function"
         ? (...args: unknown[]) => {
-            if (isCurrent()) (value as (...callArgs: unknown[]) => unknown)(...args);
+            if (isCurrent()) {
+              pending.push(() => (value as (...callArgs: unknown[]) => unknown)(...args));
+            }
           }
         : value;
   }
-  return fenced as unknown as PluginRegistry;
+  return {
+    registry: staged as unknown as PluginRegistry,
+    commit: () => pending.forEach((registration) => registration()),
+  };
+}
+
+function isCurrentPublished(id: string, generation: number): boolean {
+  return publishedGenerations.get(id) === generation;
+}
+
+function failPluginGeneration(
+  pluginId: string,
+  generation: number,
+  preservePublished: boolean,
+  restorePublishedMetadata?: () => void,
+) {
+  pluginRegistry.runAtomicMutation(() => {
+    if (preservePublished) {
+      restorePublishedMetadata?.();
+      pluginRegistry.markPluginReady(pluginId, generation);
+    } else {
+      pluginRegistry.unregisterPlugin(pluginId);
+      restorePublishedMetadata?.();
+      pluginRegistry.markPluginFailed(pluginId, generation);
+    }
+  });
+}
+
+function setPluginDeclarations(plugin: ActivePlugin): void {
+  if (plugin.repositoryProviderIds) {
+    pluginRegistry.setDeclaredRepositoryProviderIds(plugin.id, plugin.repositoryProviderIds);
+  } else {
+    pluginRegistry.clearDeclaredRepositoryProviderIds(plugin.id);
+  }
 }
 
 /** Defines `window.registerKandevPlugin` before any bundle loads. Idempotent. */
 export function installPluginGlobal(win: Window = window): void {
   (win as PluginGlobalWindow).registerKandevPlugin = (id, plugin) => {
-    registeredPlugins.set(id, plugin);
+    const stage = registrationStage;
+    if (!stage || !stage.open || stage.pluginId !== id || stage.plugin) return;
+    stage.plugin = plugin;
   };
 }
 
@@ -165,6 +210,7 @@ export async function loadPlugins(
   }
 }
 
+// eslint-disable-next-line max-lines-per-function -- Plugin loading keeps the guarded lifecycle in one transaction.
 async function loadPlugin(
   plugin: ActivePlugin,
   hostFactory: PluginHostFactory,
@@ -172,73 +218,63 @@ async function loadPlugin(
   initTimeoutMs: number,
 ): Promise<void> {
   const { apiBaseUrl } = getBackendConfig();
-  // Claim a generation before the (awaited) import so entry order — not
-  // import-resolve order — decides which load owns the registry.
   const generation = claimLoadGeneration(plugin.id);
-  // A replacement generation owns the id immediately. Abort and destroy the
-  // prior runtime before loading new code so its requests/listeners cannot run
-  // concurrently with the successor.
-  deactivatePluginRuntime(plugin.id);
+  const previousRuntime = activePluginRuntimes.get(plugin.id);
+  const previousPluginName = pluginRegistry.getPluginName(plugin.id);
+  const previousProviderIds = pluginRegistry.getDeclaredRepositoryProviderIds(plugin.id);
+  const restorePublishedMetadata = () => {
+    pluginRegistry.restorePluginName(plugin.id, previousPluginName);
+    if (previousProviderIds) {
+      pluginRegistry.setDeclaredRepositoryProviderIds(plugin.id, previousProviderIds);
+    } else {
+      pluginRegistry.clearDeclaredRepositoryProviderIds(plugin.id);
+    }
+  };
   pluginRegistry.markPluginLoading(plugin.id, generation);
   let generationOpen = true;
+  let resources: PluginLoadResources | undefined;
+  let registeredPlugin: KandevPlugin | undefined;
   const isActiveGeneration = () => generationOpen && isCurrentLoad(plugin.id, generation);
   try {
-    injectStyles(plugin.id, plugin.styleUrls, apiBaseUrl);
-    const registered = await resolveRegistration(plugin, importer, apiBaseUrl);
-    if (!registered) {
+    injectStyles(plugin.id, plugin.styleUrls, apiBaseUrl, generation);
+    registeredPlugin = await resolveRegistration(
+      plugin,
+      importer,
+      apiBaseUrl,
+      previousRuntime?.plugin,
+    );
+    if (!registeredPlugin) {
       console.error(`[plugins] "${plugin.id}" bundle did not call registerKandevPlugin`);
       generationOpen = false;
       if (isCurrentLoad(plugin.id, generation)) {
-        pluginRegistry.markPluginFailed(plugin.id, generation);
+        failPluginGeneration(
+          plugin.id,
+          generation,
+          Boolean(previousRuntime),
+          restorePublishedMetadata,
+        );
         revokeFailedLoad(plugin.id, generation);
       }
       return;
     }
-    // A newer load for this plugin started while we awaited the import — it now
-    // owns the registry. Bail before mutating anything so this stale load can't
-    // revoke the successor's registrations or initialize an older bundle over
-    // them (the boot-vs-update race Codex flagged).
     if (!isCurrentLoad(plugin.id, generation)) {
       generationOpen = false;
+      removeStyles(plugin.id, generation);
       return;
     }
-    const resources = new PluginLoadResources(plugin.id);
-    activePluginRuntimes.set(plugin.id, { generation, plugin: registered, resources });
+    resources = new PluginLoadResources(plugin.id);
     const host = generationFencedHost(
       hostFactory(plugin.id),
-      () => isCurrentLoad(plugin.id, generation),
+      () => isActiveGeneration() || isCurrentPublished(plugin.id, generation),
       resources,
     );
-    // Idempotent (re)load. The nav/route/slot registry is append-only, so
-    // running a plugin's initialize() a second time while its previous
-    // registrations are still live leaves duplicates — e.g. a plugin's
-    // chat-input-actions icon rendered twice. The disable/update paths already
-    // call unloadPlugin() first, but boot does not, and it can re-enter for a
-    // plugin that is already registered: a boot race (bootPlugins' fire-and-
-    // forget loadPlugins still in flight when an install/update reload runs), a
-    // dev HMR re-boot (fresh bootedStores guard against the persistent registry
-    // singleton), or a fresh store instance. Because resolveRegistration reuses
-    // the cached bundle registration, that re-entry re-runs initialize() and
-    // re-registers on top of the old entries. Revoke this plugin's prior
-    // registrations here so a reload always converges to exactly one set,
-    // whatever the caller did — a no-op on a genuine first load.
-    pluginRegistry.unregisterPlugin(plugin.id);
-    // Newer boot payloads carry manifest-owned provider IDs. Set them after
-    // revoking prior state and before plugin initialize(), so a re-enable
-    // cannot retain stale declarations and registration is checked eagerly.
-    // Omit this call for older payloads to preserve their existing registry API.
-    if (plugin.repositoryProviderIds) {
-      pluginRegistry.setDeclaredRepositoryProviderIds(plugin.id, plugin.repositoryProviderIds);
+    const scopedRegistry = pluginRegistry.forPlugin(plugin.id, plugin.name);
+    if (isCurrentLoad(plugin.id, generation)) {
+      pluginRegistry.runAtomicMutation(() => setPluginDeclarations(plugin));
     }
-    // Fence the scoped registry on this generation so that if an even-newer
-    // load supersedes us while initialize() is awaiting, a plugin that
-    // registers post-await can't append onto the successor.
-    const registry = generationFencedRegistry(
-      pluginRegistry.forPlugin(plugin.id, plugin.name),
-      isActiveGeneration,
-    );
+    const staged = stagedGenerationRegistry(scopedRegistry, isActiveGeneration);
     const result = await raceTimeout(
-      Promise.resolve(registered.initialize(registry, host)),
+      Promise.resolve(registeredPlugin.initialize(staged.registry, host)),
       initTimeoutMs,
       () => {
         console.warn(
@@ -247,85 +283,160 @@ async function loadPlugin(
       },
     );
     generationOpen = false;
-    if (isCurrentLoad(plugin.id, generation)) {
-      if (result.timedOut) {
-        pluginRegistry.markPluginFailed(plugin.id, generation);
-        revokeFailedLoad(plugin.id, generation);
-      } else {
-        pluginRegistry.markPluginReady(plugin.id, generation);
-      }
+    if (!isCurrentLoad(plugin.id, generation)) {
+      revokeFailedLoad(plugin.id, generation, resources, registeredPlugin);
+      return;
+    }
+    if (result.timedOut) {
+      failPluginGeneration(
+        plugin.id,
+        generation,
+        Boolean(previousRuntime),
+        restorePublishedMetadata,
+      );
+      revokeFailedLoad(plugin.id, generation, resources, registeredPlugin);
+      return;
+    }
+    publishPluginGeneration(plugin, generation, staged, registeredPlugin, resources);
+    if (previousRuntime) {
+      retireRuntime(plugin.id, previousRuntime);
+      removeStyles(plugin.id, previousRuntime.generation);
     }
   } catch (error) {
     generationOpen = false;
     if (isCurrentLoad(plugin.id, generation)) {
-      pluginRegistry.markPluginFailed(plugin.id, generation);
+      failPluginGeneration(
+        plugin.id,
+        generation,
+        Boolean(previousRuntime),
+        restorePublishedMetadata,
+      );
     }
     console.error(`[plugins] failed to load plugin "${plugin.id}"`, error);
-    revokeFailedLoad(plugin.id, generation);
+    revokeFailedLoad(plugin.id, generation, resources, registeredPlugin);
   }
 }
 
 /**
- * Removes a failed generation without disturbing a newer concurrent load.
- * Leaves the plugin's registry entries (nav items, routes, etc.) in place: a
- * registration made before `initialize()` threw or timed out must survive —
- * only the runtime (resources, styles, modals) is torn down. `loadPlugin`
- * already marked the plugin `"failed"` before calling this.
+ * Publishes one plugin generation under the registry's atomic mutation: the
+ * previous registration set is revoked and the staged registrations commit as
+ * one unit, so a partial failure rolls the whole generation back.
  */
-function revokeFailedLoad(pluginId: string, generation: number): void {
-  if (!isCurrentLoad(pluginId, generation)) return;
-  deactivatePluginRuntime(pluginId, generation, { unregister: false });
-  // Fence delayed registrations from an initializer that timed out.
-  claimLoadGeneration(pluginId);
-}
-
-/**
- * Revokes one active runtime without changing its published lifecycle state.
- * Pass `unregister: false` to keep the plugin's existing registry entries —
- * used by the failed-load path (see `revokeFailedLoad`) so a nav item
- * registered before `initialize()` failed is retained, per the
- * partial-initialization-failure retention contract (spec.md's AC).
- */
-function deactivatePluginRuntime(
-  pluginId: string,
-  expectedGeneration?: number,
-  options?: { unregister?: boolean },
+function publishPluginGeneration(
+  plugin: ActivePlugin,
+  generation: number,
+  staged: { commit: () => void },
+  registeredPlugin: KandevPlugin,
+  resources: PluginLoadResources,
 ): void {
-  if (expectedGeneration !== undefined && !isCurrentLoad(pluginId, expectedGeneration)) return;
+  pluginRegistry.runAtomicMutation(() => {
+    pluginRegistry.unregisterPlugin(plugin.id);
+    pluginRegistry.restorePluginName(plugin.id, plugin.name);
+    setPluginDeclarations(plugin);
+    staged.commit();
+    activePluginRuntimes.set(plugin.id, {
+      generation,
+      plugin: registeredPlugin,
+      resources,
+    });
+    publishedGenerations.set(plugin.id, generation);
+    pluginRegistry.markPluginReady(plugin.id, generation);
+  });
+}
+
+/** Removes a failed generation without touching the published runtime. */
+function revokeFailedLoad(
+  pluginId: string,
+  generation: number,
+  resources?: PluginLoadResources,
+  plugin?: KandevPlugin,
+): void {
   const runtime = activePluginRuntimes.get(pluginId);
-  if (runtime && expectedGeneration !== undefined && runtime.generation !== expectedGeneration) {
-    return;
-  }
-  if (runtime) {
+  if (runtime?.generation === generation) {
     activePluginRuntimes.delete(pluginId);
-    runtime.resources.revoke();
+    retireRuntime(pluginId, runtime);
+  } else if (resources) {
+    resources.revoke();
     try {
-      runtime.plugin.destroy?.();
+      plugin?.destroy?.();
     } catch (error) {
       console.error(`[plugins] error destroying plugin "${pluginId}"`, error);
     }
+    pluginModalManager.closeAllForPlugin(pluginId);
   }
-  if (options?.unregister ?? true) {
-    pluginRegistry.unregisterPlugin(pluginId);
+  removeStyles(pluginId, generation);
+}
+
+function retireRuntime(pluginId: string, runtime: ActivePluginRuntime): void {
+  runtime.resources.revoke();
+  try {
+    runtime.plugin.destroy?.();
+  } catch (error) {
+    console.error(`[plugins] error destroying plugin "${pluginId}"`, error);
   }
+  pluginModalManager.closeAllForPlugin(pluginId);
+}
+
+/** Revokes one published runtime and its contributions. */
+function deactivatePluginRuntime(pluginId: string): void {
+  const runtime = activePluginRuntimes.get(pluginId);
+  if (runtime) {
+    activePluginRuntimes.delete(pluginId);
+    publishedGenerations.delete(pluginId);
+    retireRuntime(pluginId, runtime);
+  }
+  pluginRegistry.unregisterPlugin(pluginId);
   pluginModalManager.closeAllForPlugin(pluginId);
   removeStyles(pluginId);
 }
 
 /**
- * Returns the plugin's registration, importing the bundle only when it
- * isn't already cached from a prior load in this tab (see module doc for
- * why re-enable must not blindly re-import).
+ * Returns the plugin's registration, importing the bundle only when the
+ * resolved bundle URL is not already cached in this tab.
  */
 async function resolveRegistration(
   plugin: ActivePlugin,
   importer: BundleImporter,
   apiBaseUrl: string,
+  previousRuntimePlugin?: KandevPlugin,
 ): Promise<KandevPlugin | undefined> {
-  const cached = registeredPlugins.get(plugin.id);
+  const bundleUrl = resolvePluginUrl(plugin.bundleUrl, apiBaseUrl);
+  const cachedRegistration = () => {
+    const cached = registeredPlugins.get(plugin.id);
+    if (cached?.bundleUrl !== bundleUrl) return undefined;
+    return cached.plugin === previousRuntimePlugin ? { ...cached.plugin } : cached.plugin;
+  };
+  const cached = cachedRegistration();
   if (cached) return cached;
-  await importer(resolvePluginUrl(plugin.bundleUrl, apiBaseUrl));
-  return registeredPlugins.get(plugin.id);
+
+  const previousRegistration = registrationQueue;
+  let releaseRegistration!: () => void;
+  const registrationTurn = new Promise<void>((resolve) => {
+    releaseRegistration = resolve;
+  });
+  const queuedRegistration = previousRegistration.then(() => registrationTurn);
+  registrationQueue = queuedRegistration;
+  try {
+    await previousRegistration;
+    const queuedCached = cachedRegistration();
+    if (queuedCached) return queuedCached;
+
+    const stage: RegistrationStage = { pluginId: plugin.id, bundleUrl, open: true };
+    registrationStage = stage;
+    try {
+      await importer(bundleUrl);
+      if (stage.plugin) {
+        registeredPlugins.set(plugin.id, { bundleUrl, plugin: stage.plugin });
+      }
+      return stage.plugin;
+    } finally {
+      stage.open = false;
+      if (registrationStage === stage) registrationStage = undefined;
+    }
+  } finally {
+    releaseRegistration();
+    if (registrationQueue === queuedRegistration) registrationQueue = Promise.resolve();
+  }
 }
 
 /**
@@ -339,20 +450,30 @@ function resolvePluginUrl(url: string, apiBaseUrl: string): string {
   return `${apiBaseUrl}${url}`;
 }
 
-function injectStyles(pluginId: string, styleUrls: string[] | undefined, apiBaseUrl: string): void {
+function injectStyles(
+  pluginId: string,
+  styleUrls: string[] | undefined,
+  apiBaseUrl: string,
+  generation: number,
+): void {
   if (!styleUrls) return;
   for (const href of styleUrls) {
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = resolvePluginUrl(href, apiBaseUrl);
     link.dataset.pluginId = pluginId;
+    link.dataset.pluginGeneration = String(generation);
     document.head.appendChild(link);
   }
 }
 
-/** Removes every `<link>` this plugin injected via `injectStyles`. */
-function removeStyles(pluginId: string): void {
-  document.querySelectorAll(`link[data-plugin-id="${pluginId}"]`).forEach((link) => link.remove());
+/** Removes one generation's styles, or every style during explicit unload. */
+function removeStyles(pluginId: string, generation?: number): void {
+  const selector =
+    generation === undefined
+      ? `link[data-plugin-id="${pluginId}"]`
+      : `link[data-plugin-id="${pluginId}"][data-plugin-generation="${generation}"]`;
+  document.querySelectorAll(selector).forEach((link) => link.remove());
 }
 
 /**

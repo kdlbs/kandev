@@ -6,7 +6,7 @@ import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-r
 import { useRepository } from "@/hooks/domains/workspace/use-repository";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useAppStore } from "@/components/state-provider";
-import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
+import { useTaskFolderAction } from "@/hooks/use-task-folder-action";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useFileBrowserSearch, useFileBrowserTree } from "./file-browser-hooks";
 import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
@@ -45,7 +45,7 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
   const workspaceRestoration = useWorkspaceRestoration(session?.task_id, sessionId, environmentId);
   const repository = useRepository(session?.repository_id ?? null);
   const gitStatus = useSessionGitStatus(sessionId);
-  const { open: openFolder } = useOpenSessionFolder(sessionId);
+  const folderAction = useTaskFolderAction(sessionId);
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
   const search = useFileBrowserSearch(sessionId);
   const resetKey = useFileBrowserResetKey(sessionId, environmentId);
@@ -65,7 +65,7 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
   return {
     isSessionFailed,
     sessionError,
-    openFolder,
+    folderAction,
     copied,
     copyPath,
     search,

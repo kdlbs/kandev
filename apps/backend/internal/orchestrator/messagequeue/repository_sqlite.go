@@ -33,8 +33,9 @@ type sqliteRepository struct {
 	// OUTSIDE any transaction because a failed statement on PostgreSQL aborts
 	// the whole transaction — the guard must never issue its UPDATE against a
 	// missing table inside a tx.
-	tasksTablePresent        bool
-	taskSessionsTablePresent bool
+	tasksTablePresent          bool
+	taskSessionsTablePresent   bool
+	taskStepTransitionsPresent bool
 }
 
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
@@ -72,6 +73,10 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 		return nil, fmt.Errorf("messagequeue: resolve task_sessions table presence: %w", err)
 	}
 	r.taskSessionsTablePresent = present
+	r.taskStepTransitionsPresent, err = r.sharedTablePresent("task_step_transitions")
+	if err != nil {
+		return nil, fmt.Errorf("messagequeue: resolve task step transitions table presence: %w", err)
+	}
 	if present {
 		// Older isolated queue fixtures can provide a task_sessions table
 		// without the incarnation column. They still use the legacy queue API,
@@ -222,6 +227,62 @@ func (r *sqliteRepository) guardActiveTaskTx(ctx context.Context, tx *sqlx.Tx, t
 	}
 	if affected == 0 {
 		return ErrTaskInactive
+	}
+	return nil
+}
+
+// validateWorkflowEntryTx checks the launch-time entry after the task row has
+// been locked by guardActiveTaskTx. Workflow moves take the same task-row lock
+// before writing their transition ledger row, so this check and queue insert
+// form one admission boundary rather than a read-then-write race.
+func (r *sqliteRepository) validateWorkflowEntryTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	entry *WorkflowEntryIdentity,
+) error {
+	if entry == nil {
+		return nil
+	}
+	if !r.tasksTablePresent || !r.taskStepTransitionsPresent || entry.TransitionID <= 0 {
+		return ErrWorkflowEntryMismatch
+	}
+	query := `SELECT COALESCE(workflow_id, ''), COALESCE(workflow_step_id, '')
+		FROM tasks WHERE id = ? AND archived_at IS NULL`
+	if r.db.DriverName() == "pgx" {
+		query += ` FOR UPDATE`
+	}
+	var workflowID, workflowStepID string
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), taskID).Scan(&workflowID, &workflowStepID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrTaskInactive
+		}
+		return fmt.Errorf("read workflow entry for queue admission: %w", err)
+	}
+	if workflowID != entry.WorkflowID || workflowStepID != entry.WorkflowStepID {
+		return ErrWorkflowEntryMismatch
+	}
+	var transitionID int64
+	if err := tx.GetContext(ctx, &transitionID, r.db.Rebind(`
+		SELECT id FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), taskID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrWorkflowEntryMismatch
+		}
+		return fmt.Errorf("read workflow transition for queue admission: %w", err)
+	}
+	if transitionID != entry.TransitionID {
+		return ErrWorkflowEntryMismatch
+	}
+	generation, err := getLifecycleGenerationTx(ctx, tx, r.db, taskID)
+	if err != nil {
+		return err
+	}
+	if generation != entry.LifecycleGeneration {
+		return ErrLifecycleCancelled
 	}
 	return nil
 }
@@ -583,21 +644,21 @@ func decodeEntryOptions(encoded string) (*workflowmove.EntryOptions, error) {
 
 // Insert appends a new entry at the tail of the session's FIFO queue.
 func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPerSession int) error {
-	return r.insert(ctx, nil, msg, nil, maxPerSession, nil)
+	return r.insert(ctx, nil, msg, nil, maxPerSession, nil, nil)
 }
 
 func (r *sqliteRepository) InsertForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, maxPerSession int) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
 	}
-	return r.insert(ctx, &identity, msg, nil, maxPerSession, nil)
+	return r.insert(ctx, &identity, msg, nil, maxPerSession, nil, nil)
 }
 
 func (r *sqliteRepository) InsertForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage, claim QueueAttachmentClaim, maxPerSession int) error {
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
 	}
-	return r.insert(ctx, &identity, msg, &claim, maxPerSession, nil)
+	return r.insert(ctx, &identity, msg, &claim, maxPerSession, nil, nil)
 }
 
 func (r *sqliteRepository) InsertForSessionWithPolicy(
@@ -611,7 +672,22 @@ func (r *sqliteRepository) InsertForSessionWithPolicy(
 	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
 		return ErrSessionIdentityMismatch
 	}
-	return r.insert(ctx, &identity, msg, claim, maxPerSession, &policy)
+	return r.insert(ctx, &identity, msg, claim, maxPerSession, &policy, nil)
+}
+
+func (r *sqliteRepository) InsertForSessionWithWorkflowEntry(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entry WorkflowEntryIdentity,
+	msg *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	maxPerSession int,
+	policy *AutoMergePolicy,
+) error {
+	if msg == nil || msg.SessionID != identity.SessionID || msg.TaskID != identity.TaskID {
+		return ErrSessionIdentityMismatch
+	}
+	return r.insert(ctx, &identity, msg, claim, maxPerSession, policy, &entry)
 }
 
 func (r *sqliteRepository) insert(
@@ -621,6 +697,7 @@ func (r *sqliteRepository) insert(
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
 	policy *AutoMergePolicy,
+	workflowEntry *WorkflowEntryIdentity,
 ) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -628,6 +705,9 @@ func (r *sqliteRepository) insert(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.guardActiveTaskTx(ctx, tx, msg.TaskID); err != nil {
+		return err
+	}
+	if err := r.validateWorkflowEntryTx(ctx, tx, msg.TaskID, workflowEntry); err != nil {
 		return err
 	}
 	if err := r.lockSessionTx(ctx, tx, msg.SessionID); err != nil {
@@ -4677,21 +4757,21 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAbove(ctx context.Context, cand
 	if err := r.ensureEditLeaseSchema(ctx); err != nil {
 		return nil, false, err
 	}
-	return r.autoMergeCandidateIntoAbove(ctx, nil, candidate, nil, nil)
+	return r.autoMergeCandidateIntoAbove(ctx, nil, candidate, nil, nil, nil)
 }
 
 func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSession(ctx context.Context, identity QueueSessionIdentity, candidate *QueuedMessage) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
 	}
-	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, nil, nil)
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, nil, nil, nil)
 }
 
 func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithClaim(ctx context.Context, identity QueueSessionIdentity, candidate *QueuedMessage, claim QueueAttachmentClaim) (*QueuedMessage, bool, error) {
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
 	}
-	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, &claim, nil)
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, &claim, nil, nil)
 }
 
 func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
@@ -4704,7 +4784,21 @@ func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithPolicy(
 	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
 		return nil, false, ErrSessionIdentityMismatch
 	}
-	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, claim, &policy)
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, claim, &policy, nil)
+}
+
+func (r *sqliteRepository) AutoMergeCandidateIntoAboveForSessionWithWorkflowEntry(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entry WorkflowEntryIdentity,
+	candidate *QueuedMessage,
+	claim *QueueAttachmentClaim,
+	policy *AutoMergePolicy,
+) (*QueuedMessage, bool, error) {
+	if candidate == nil || candidate.SessionID != identity.SessionID || candidate.TaskID != identity.TaskID {
+		return nil, false, ErrSessionIdentityMismatch
+	}
+	return r.autoMergeCandidateIntoAbove(ctx, &identity, candidate, claim, policy, &entry)
 }
 
 //nolint:cyclop,funlen // the transaction's guards intentionally surround the one durable fold.
@@ -4714,6 +4808,7 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 	candidate *QueuedMessage,
 	claim *QueueAttachmentClaim,
 	policy *AutoMergePolicy,
+	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	unlock := r.withSessionLock(candidate.SessionID)
 	defer unlock()
@@ -4729,6 +4824,9 @@ func (r *sqliteRepository) autoMergeCandidateIntoAbove(
 	// the fold, and the fold must not accept a message the purge will then
 	// silently delete. Task row first, then the session lock.
 	if err := r.guardActiveTaskTx(ctx, tx, candidate.TaskID); err != nil {
+		return nil, false, err
+	}
+	if err := r.validateWorkflowEntryTx(ctx, tx, candidate.TaskID, workflowEntry); err != nil {
 		return nil, false, err
 	}
 	if err := r.lockSessionTx(ctx, tx, candidate.SessionID); err != nil {

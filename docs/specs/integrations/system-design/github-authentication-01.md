@@ -133,8 +133,11 @@ automation under different GitHub Apps without operating separate Kandev deploym
 - Managed Git helper execution does not depend on the post-startup `PATH`: Git resolves an
   absolute Kandev-owned `agentctl` executable published before the first managed Git operation.
   Local and Worktree preparation binds the helper to the standalone launcher's absolute executable
-  before checkout or setup scripts run. Remote preparation binds it to the installed executor
-  binary before cloning, and a running `agentctl` publishes its own executable for child processes.
+  before Kandev-owned checkout operations run. Per-repository setup scripts retain resolved profile
+  and repository environment, user-owned indexed Git configuration, and Kandev's managed build
+  cache, but Kandev removes broker capabilities and generated Git and `gh` helper routing before
+  those scripts start. Remote preparation binds the helper to the installed executor binary before
+  cloning, and a running `agentctl` publishes its own executable for child processes.
   Non-interactive Unix login shells that replace their inherited `PATH` restore the managed
   CLI-shim directory after profile initialization for broker-enabled tasks, while preserving
   pre-existing Bash environment hooks, including hook paths containing `$VAR` or `${VAR}`

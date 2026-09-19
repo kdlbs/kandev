@@ -27,7 +27,7 @@ export function MobileAutomationsSection({
       <div className="flex items-center gap-2">
         <Button
           variant="ghost"
-          className="h-11 min-w-11 flex-1 justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
+          className="cursor-pointer h-11 min-w-11 flex-1 justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
           aria-expanded={expanded}
           aria-controls="mobile-automations-body"
           onClick={() => setExpanded(!expanded)}
@@ -39,7 +39,11 @@ export function MobileAutomationsSection({
             <IconChevronRight className="size-3.5 text-muted-foreground" />
           )}
         </Button>
-        <Button asChild variant="ghost" className="size-11 shrink-0 text-muted-foreground">
+        <Button
+          asChild
+          variant="ghost"
+          className="cursor-pointer size-11 shrink-0 text-muted-foreground"
+        >
           <Link
             href={AUTOMATIONS_HREF}
             onClick={onNavigate}
@@ -86,7 +90,7 @@ function MobileAutomationRows({
           </p>
           <Button
             variant="outline"
-            className="h-11"
+            className="cursor-pointer h-11"
             onClick={() => {
               list.refresh();
               activity.refresh();
@@ -102,7 +106,7 @@ function MobileAutomationRows({
           <Button
             asChild
             variant="outline"
-            className="min-h-11 h-auto justify-start gap-3 px-3 py-2"
+            className="cursor-pointer min-h-11 h-auto justify-start gap-3 px-3 py-2"
             key={automation.id}
           >
             <Link href={`${AUTOMATIONS_HREF}/${automation.id}`} onClick={onNavigate}>
@@ -113,7 +117,7 @@ function MobileAutomationRows({
             </Link>
           </Button>
         ))}
-      <Button asChild variant="outline" className="h-11 justify-start px-3">
+      <Button asChild variant="outline" className="cursor-pointer h-11 justify-start px-3">
         <Link href={workspaceSettingsHref(workspaceId, "automations")} onClick={onNavigate}>
           {t("automations:setUpAnAutomation")}
         </Link>

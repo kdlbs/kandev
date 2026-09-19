@@ -228,7 +228,7 @@ func TestEnsureSessionRunning_IdleSessionTriggersResume(t *testing.T) {
 		t.Fatalf("reload: %v", err)
 	}
 
-	if err := svc.ensureSessionRunning(ctx, "session1", session); err != nil {
+	if err := svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual); err != nil {
 		t.Fatalf("ensureSessionRunning failed for IDLE session: %v", err)
 	}
 	select {
@@ -311,7 +311,7 @@ func TestEnsureSessionRunning_WaitsForPromptReadyAfterResume(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.ensureSessionRunning(ctx, "session1", session)
+		done <- svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	}()
 
 	select {
@@ -425,7 +425,7 @@ func TestEnsureSessionRunning_SurvivesCallerContextCancellationDuringResume(t *t
 
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.ensureSessionRunning(ctx, "session1", session)
+		done <- svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	}()
 
 	// Simulate the caller's request context expiring mid-resume (e.g. a
@@ -484,7 +484,7 @@ func TestEnsureSessionRunning_FailedStateWriteSurvivesCancelledCallerCtx(t *test
 	}
 	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-idle-1")
 
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	if err == nil {
 		t.Fatal("expected ensureSessionRunning to return the simulated resume failure")
 	}
@@ -552,7 +552,7 @@ func TestEnsureSessionRunning_WaitsForPromptReadyWhenExecutionExists(t *testing.
 
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.ensureSessionRunning(ctx, "session1", session)
+		done <- svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	}()
 
 	select {
@@ -605,7 +605,7 @@ func TestEnsureSessionRunning_CancelledContextDoesNotReapExecution(t *testing.T)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	agentMgr.mu.Lock()
 	stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
 	agentMgr.mu.Unlock()

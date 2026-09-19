@@ -334,6 +334,15 @@ details. A browser can connect to a desktop backend and use the HTTP folder
 picker; the browser's picker capability does not change the backend's
 discovery policy.
 
+If discovery cannot read a root, repository selectors keep repositories from
+successful roots available and retain their normal **Refresh repositories**
+action. Failed-root paths stay in structured backend logs and are not shown in
+selectors. A denied descendant does not require root reconnection. If a saved
+Desktop root itself fails, use **Reconnect** or **Remove**. Kandev does not
+create a missing clone directory during recovery.
+You can also enter an absolute repository path in **Add Local Repository** and
+select **Validate**; this explicit check is independent of discovery roots.
+
 ### Debug configuration
 
 | YAML key             | Environment variable         | Default | Current behavior                                                                            |
@@ -508,7 +517,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.multiTenancy` | `KANDEV_FEATURES_MULTI_TENANCY` | off | Experimental organizations above authenticated users. Requires `features.auth`; startup is refused otherwise. |
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
 | `features.canvases` | `KANDEV_FEATURES_CANVASES` | off | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk. |
-| `features.needsYouInbox` | `KANDEV_FEATURES_NEEDS_YOU_INBOX` | off | Inbox for clarification questions across tasks in the active workspace. |
+| `features.needsYouInbox` | `KANDEV_FEATURES_NEEDS_YOU_INBOX` | off | Inbox for clarification questions and failed tasks in the active workspace. The Failed tab shows a bounded list with its own count. |
 | `features.officeSessionIdentity` | `KANDEV_FEATURES_OFFICE_SESSION_IDENTITY` | on | Office participant sessions: each participant agent gets its own session per task. The live `(task_id, agent_profile_id)` pair is guarded in-transaction, not by a table-level index. Pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. |
 | `features.agentSurvival` | `KANDEV_FEATURES_AGENT_SURVIVAL` | off | Experimental. Lets the `agentctl` control server and its running agents outlive a backend restart or upgrade, for the `local_pc` and worktree executors only. The restarted backend takes the surviving server over and reconnects to the sessions still running on it. **Unavailable on Windows**, where surviving the backend means giving up the Job Object that guarantees agent processes are cleaned up. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |

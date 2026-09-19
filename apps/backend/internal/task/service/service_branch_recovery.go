@@ -26,10 +26,14 @@ type BranchStatusProber interface {
 	BranchRecoveryStatus(ctx context.Context, repoPath, branch string) string
 }
 
+type ExactBranchStatusProber interface {
+	RecoverBranchStatus(ctx context.Context, wt *worktree.Worktree) string
+}
+
 // RecoverTaskBranches inspects the task's historical worktree records
-// (archive keeps the rows and deletes only the local branch + directory)
-// and, per repository, probes whether the branch still exists locally or
-// on origin. When it does and the task_repositories row has no
+// (archive keeps the rows and may safely compact an integrated local branch)
+// and, per repository, restores an exact compacted head or probes whether the
+// branch still exists locally or on origin. When it does and the task_repositories row has no
 // checkout_branch yet, the branch is written back as checkout_branch so a
 // brand-new session checks the old work back out instead of minting a
 // fresh branch. Best-effort: failures are logged and reported as
@@ -55,6 +59,9 @@ func (s *Service) RecoverTaskBranches(ctx context.Context, taskID string) []Bran
 	restored := false
 	for _, wt := range latest {
 		status := prober.BranchRecoveryStatus(ctx, wt.RepositoryPath, wt.Branch)
+		if exact, ok := s.worktreeCleanup.(ExactBranchStatusProber); ok {
+			status = exact.RecoverBranchStatus(ctx, wt)
+		}
 		if status != worktree.BranchStatusMissing {
 			restored = s.restoreCheckoutBranch(ctx, reposByID[wt.RepositoryID], wt.Branch) || restored
 		}

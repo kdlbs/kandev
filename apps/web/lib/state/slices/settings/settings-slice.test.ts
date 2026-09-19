@@ -365,3 +365,16 @@ describe("setAvailableAgents capability propagation", () => {
     expect(store.getState().agentProfiles.items[0]?.capability_status).toBe("probing");
   });
 });
+
+describe("folder opener discovery", () => {
+  it("defaults unavailable and preserves capability through editor preference updates", () => {
+    const store = makeStore();
+    expect(store.getState().editors.folderOpeningAvailable).not.toBe(true);
+    store.getState().setEditors([], true);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(true);
+    store.getState().setEditors([]);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(true);
+    store.getState().setEditors([], false);
+    expect(store.getState().editors.folderOpeningAvailable).toBe(false);
+  });
+});

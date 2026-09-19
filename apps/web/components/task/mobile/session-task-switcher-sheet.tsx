@@ -89,6 +89,7 @@ export type MobileTaskListProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onBeforeMoveOptionsOpen?: () => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
@@ -307,6 +308,19 @@ type TaskSwitcherSurfaceContentProps = {
   linking: ReturnType<typeof useMobileTaskLinking>;
 };
 
+function mobileMoveActions(
+  presentation: "sheet" | "drawer",
+  moveOptions: ReturnType<typeof useMobileTaskMoveOptions>,
+  onOpenChange: (open: boolean) => void,
+) {
+  if (presentation !== "drawer") return {};
+  return {
+    onMoveToStep: moveOptions.handleMove,
+    onRequestMoveOptions: moveOptions.handleRequest,
+    onBeforeMoveOptionsOpen: () => onOpenChange(false),
+  };
+}
+
 // eslint-disable-next-line max-lines-per-function -- this surface keeps the existing mobile scroll owner intact
 function TaskSwitcherSurfaceContent({
   open,
@@ -329,6 +343,7 @@ function TaskSwitcherSurfaceContent({
   const { taskLoadError, retryTaskLoad } = useTaskReadStatus(data);
   const moveOptions = useMobileTaskMoveOptions({
     open,
+    activeTaskId: data.activeTaskId,
     stepsByWorkflowId: data.stepsByWorkflowId,
   });
   if (moveOptions.moveOptionsStep && moveOptions.request) {
@@ -396,12 +411,7 @@ function TaskSwitcherSurfaceContent({
               activeTaskId={data.activeTaskId}
               selectedTaskId={data.selectedTaskId}
               onSelectTask={actions.handleSelectTask}
-              onRequestMoveOptions={
-                presentation === "drawer" ? moveOptions.handleRequest : undefined
-              }
-              onBeforeMoveOptionsOpen={
-                presentation === "drawer" ? () => onOpenChange(false) : undefined
-              }
+              {...mobileMoveActions(presentation, moveOptions, onOpenChange)}
               {...taskListActions}
               onCreateSubtask={onCreateSubtask}
               onNestTask={actions.handleNestTask}

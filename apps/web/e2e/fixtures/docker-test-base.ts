@@ -164,6 +164,7 @@ export const dockerTest = backendFixture.extend<
       lsp_auto_start_languages: [],
       lsp_auto_install_languages: [],
       lsp_server_configs: {},
+      kanban_priority_filter_tokens: [],
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

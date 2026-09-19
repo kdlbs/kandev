@@ -19,7 +19,7 @@ The shared phone navigation should expose the task-sidebar views available from 
 
 #### Acceptance criteria
 
-- **AC-UI-MOBILE-TASK-VIEWS-001.1:** Shared phone navigation in a Kanban workspace shall expose Task views. Selecting it shall close navigation and open the existing mobile task-view surface with its saved views and editor. Task dialogs opened from that surface shall retain their drafts across phone orientation changes.
+- **AC-UI-MOBILE-TASK-VIEWS-001.1:** Shared phone navigation in a Kanban workspace shall embed a collapsible Tasks sidebar with saved views, filters, editor, task selection, and row actions. The task title shall open the separate task picker; no separate Task views action shall appear. Task dialogs opened from that surface shall retain their drafts across phone orientation changes.
 - **AC-UI-MOBILE-TASK-VIEWS-001.2:** Choosing a task shall navigate to that task and preserve browser Back to the originating page. Dismissal shall return focus to a visible navigation opener. GitHub queries, Threads views, and sidebar task views shall remain separate collections.
 
 ## Out of scope
@@ -37,8 +37,7 @@ changes the hamburger to app navigation and the task-title button to the existin
 task picker. Its [design](../system-design/unified-mobile-navigation.md)
 owns that entry-point change; existing task actions, saved-view controller
 lifetime, history, and desktop/tablet guarantees here remain compatibility
-requirements. Historical hamburger descriptions above describe the preceding composition;
-the unified navigation design defines the current entry points.
+requirements. The unified navigation design defines the current entry points.
 
 The September 2026 revision embeds the collapsible Tasks sidebar directly in
 the shared phone menu, replacing the Task views action and dedicated pinned

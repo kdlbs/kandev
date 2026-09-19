@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	"github.com/kandev/kandev/internal/worktree"
@@ -924,8 +925,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	// Explicit agent-requested moves (move_task_kandev) take precedence over pending clarifications.
+	// Agent.ready is the authoritative turn boundary. Detach the request before
+	// publishing WAITING_FOR_INPUT so a client that immediately reloads sees the
+	// deferred-answer metadata in its first snapshot.
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
+		s.detachClarificationWaiters(ctx, data.SessionID)
 		s.logger.Info("deferring on_turn_complete while clarification is pending",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))
@@ -1149,6 +1153,107 @@ func queuedMessagePromptContent(queuedMsg *messagequeue.QueuedMessage) string {
 	return appendStepHandoffToPrompt(content, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
 }
 
+func (s *Service) queuedMessageHasDispatchInput(ctx context.Context, queuedMsg *messagequeue.QueuedMessage) (bool, error) {
+	if queuedMsg == nil {
+		return false, nil
+	}
+	if present, ok := queuedMsg.Metadata[metaKeyWorkflowDispatchInputPresent].(bool); ok {
+		return present, nil
+	}
+	if strings.TrimSpace(queuedMessagePromptContent(queuedMsg)) != "" ||
+		len(queuedMsg.Attachments) > 0 || queuedMsg.PlanMode {
+		return true, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) || errors.Is(err, context.Canceled) {
+			return false, nil
+		}
+		return false, err
+	}
+	if session == nil {
+		return false, nil
+	}
+	configMode, _ := session.Metadata["config_mode"].(bool)
+	return configMode, nil
+}
+
+func workflowQueuedConfigModeOverride(queuedMsg *messagequeue.QueuedMessage) *bool {
+	if queuedMsg == nil {
+		return nil
+	}
+	configMode, ok := queuedMsg.Metadata[metaKeyWorkflowConfigMode].(bool)
+	if !ok {
+		return nil
+	}
+	return &configMode
+}
+
+// prepareQueuedCIAutoFixOutcomeProtocol selects the protocol name from the
+// current session execution. It rewrites only the server-owned protocol block;
+// task prompt text and historical transcript content remain untouched.
+func (s *Service) prepareQueuedCIAutoFixOutcomeProtocol(
+	ctx context.Context, queuedMsg *messagequeue.QueuedMessage,
+) error {
+	if queuedMsg == nil || !isCIAutoFixMetadata(queuedMsg.Metadata) {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID)
+	if err != nil {
+		return err
+	}
+	currentTool, ok := ciAutomationOutcomeToolForSession(session)
+	if !ok {
+		return errCIAutoFixMCPToolCatalogUnavailable
+	}
+	storedTool, _ := queuedMsg.Metadata[ciAutomationOutcomeToolMetadata].(string)
+	if storedTool == "" {
+		switch {
+		case strings.Contains(queuedMsg.Content, ciAutomationLegacyOutcomeTool):
+			storedTool = ciAutomationLegacyOutcomeTool
+		case strings.Contains(queuedMsg.Content, ciAutomationNeutralOutcomeTool):
+			storedTool = ciAutomationNeutralOutcomeTool
+		default:
+			return nil
+		}
+	}
+	if storedTool == currentTool {
+		return nil
+	}
+	updated, changed := replaceCIAutoFixOutcomeProtocol(queuedMsg.Content, storedTool, currentTool)
+	if !changed {
+		return fmt.Errorf("CI auto-fix outcome protocol is not recognized for queued delivery")
+	}
+	queuedMsg.Content = updated
+	queuedMsg.Metadata[ciAutomationOutcomeToolMetadata] = currentTool
+	return nil
+}
+
+func replaceCIAutoFixOutcomeProtocol(content, fromTool, toTool string) (string, bool) {
+	if strings.TrimSpace(fromTool) == "" || strings.TrimSpace(toTool) == "" || fromTool == toTool {
+		return content, fromTool == toTool
+	}
+	toProtocol := fmt.Sprintf(ciAutomationOutcomeProtocolTemplate, toTool)
+	fromProtocols := []string{fmt.Sprintf(ciAutomationOutcomeProtocolTemplate, fromTool)}
+	if fromTool == ciAutomationLegacyOutcomeTool {
+		fromProtocols = append(fromProtocols, ciAutomationLegacyOutcomeProtocol)
+	}
+	for _, fromProtocol := range fromProtocols {
+		for _, wrapped := range []bool{true, false} {
+			fromBlock := fromProtocol
+			toBlock := toProtocol
+			if wrapped {
+				fromBlock = sysprompt.Wrap(fromProtocol)
+				toBlock = sysprompt.Wrap(toProtocol)
+			}
+			if strings.Contains(content, fromBlock) {
+				return strings.Replace(content, fromBlock, toBlock, 1), true
+			}
+		}
+	}
+	return content, false
+}
+
 func (s *Service) recordQueuedUserMessage(
 	ctx context.Context,
 	queuedMsg *messagequeue.QueuedMessage,
@@ -1258,6 +1363,9 @@ func (s *Service) finishQueuedPassthroughExecution(
 	reservation *queuedDispatchReservation,
 	state *queuedPassthroughExecutionState,
 ) {
+	if state.dispatchErr != nil {
+		s.reconcileQueuedCIAutoFixDispatchFailure(ctx, queuedMsg)
+	}
 	s.finishQueuedMessageExecution(
 		ctx, identity.SessionID, identity.SessionID, queuedMsg, reservation,
 		isLifecycleAutomationMessage(queuedMsg),
@@ -1318,6 +1426,9 @@ func (s *Service) deliverQueuedPassthroughPrompt(
 	queuedMsg *messagequeue.QueuedMessage,
 	state *queuedPassthroughExecutionState,
 ) {
+	if state.dispatchErr = s.prepareQueuedCIAutoFixOutcomeProtocol(ctx, queuedMsg); state.dispatchErr != nil {
+		return
+	}
 	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	if state.dispatchErr = s.recordQueuedUserMessage(ctx, queuedMsg, attachments); state.dispatchErr != nil {
@@ -1434,6 +1545,14 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 
 	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
+	if err := s.prepareQueuedCIAutoFixOutcomeProtocol(promptCtx, queuedMsg); err != nil {
+		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
+		s.finishQueuedMessageExecution(
+			promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
+			lifecyclePrompt, false, false, err,
+		)
+		return
+	}
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	userMessageRecorded := false
 	deliveryAttempted := false
@@ -1467,6 +1586,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
+		launchOriginAutomatic,
 		promptTaskOptions{
 			claimEntryID:         claimEntryID,
 			lifecyclePrompt:      lifecyclePrompt,
@@ -1474,6 +1594,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			afterDispatch:        afterDispatch,
 			beforeDispatch:       beforeDispatch,
 			disableDispatchRetry: queuedMsg.IsDurablePlanComment(),
+			configModeOverride:   workflowQueuedConfigModeOverride(queuedMsg),
 			onAccepted: func(turnID string) {
 				s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
 			},
@@ -1720,13 +1841,14 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
+	_, seam3Refusal := isSeam3Refusal(err)
 	passthroughAttachmentRecovery := !lifecyclePrompt &&
 		len(queuedMsg.Attachments) > 0 &&
 		s.agentManager != nil &&
 		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
 	if passthroughAttachmentRecovery || lifecyclePrompt || queuedMsg.IsDurablePlanComment() || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
-		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
+		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
 		errors.Is(err, ErrSessionRuntimeUnavailable) {
 		if userMessageRecorded {
@@ -2723,6 +2845,13 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 		zap.String("session_id", data.SessionID),
 		zap.String("error", data.ErrorMessage))
 
+	// Capture the turn this failure terminates before completing it, and mark it
+	// so its completion reports had_output=true (its recovery/error entry is the
+	// turn's outcome). The captured ID also lets the recovery message attach to
+	// this same turn instead of lazily opening a second empty turn — otherwise
+	// both turns would emit a spurious empty-turn notice.
+	failedTurnID := s.markTurnErrorTerminated(ctx, data.SessionID)
+
 	// Complete the current turn.
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
@@ -2735,7 +2864,9 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// Office sessions. Only the current metadata record owns recovery controls;
 	// the persisted message remains as history after it is retired.
 	if s.messageCreator != nil {
-		s.createRecoveryStatusMessage(ctx, data)
+		// The failure is logged inside persistRecoveryStatusMessage; recovery
+		// continues so the session still transitions and surfaces its error.
+		_ = s.createRecoveryStatusMessage(ctx, data, failedTurnID)
 	}
 
 	// Set session state. Office-owned tasks
@@ -3081,7 +3212,33 @@ func providerRemediationURL(data watcher.AgentEventData) string {
 // createRecoveryStatusMessage builds and persists the ActionMessage shown in
 // the session transcript after a recoverable agent failure. Its stable message
 // identity keeps retries and bootstrap failures idempotent.
-func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) error {
+// markTurnErrorTerminated flags the session's active turn as ending in a
+// recoverable agent failure and returns its ID. The marker makes the turn's
+// completion report had_output=true (its recovery/error entry is the turn's
+// outcome), and the returned ID lets the recovery status message attach to that
+// same turn rather than lazily opening a second empty turn. Returns "" when no
+// turn is active — for example a bootstrap failure before any turn started — so
+// callers fall back to the existing lazy turn resolution.
+func (s *Service) markTurnErrorTerminated(ctx context.Context, sessionID string) string {
+	if s.turnService == nil {
+		return ""
+	}
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
+	if err != nil || turnID == "" {
+		return ""
+	}
+	if err := s.turnService.PatchTurnMetadata(ctx, sessionID, turnID, map[string]interface{}{
+		models.TurnMetaKeyErrorTerminated: true,
+	}); err != nil {
+		s.logger.Warn("failed to mark turn error-terminated",
+			zap.String("session_id", sessionID),
+			zap.String("turn_id", turnID),
+			zap.Error(err))
+	}
+	return turnID
+}
+
+func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData, turnID string) error {
 	if s.messageCreator == nil {
 		return fmt.Errorf("recovery status message creator is unavailable")
 	}
@@ -3124,14 +3281,6 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	managedRuntimeNpmFailure := data.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution)
 	if managedRuntimeNpmFailure {
 		meta["failure_kind"] = string(routingerr.CodeManagedRuntimeNpmResolution)
-		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
-			meta["error_output"] = details
-		}
-	}
-	if data.Phase == models.LaunchErrorPhaseBootstrap {
-		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
-			meta["error_output"] = details
-		}
 	}
 	// The validated remediation URL is carried independently of quota
 	// classification so the generic recoverable card can still show the link.
@@ -3139,6 +3288,11 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		meta["remediation_url"] = remediationURL
 	}
 	applyProviderQuotaMetadata(meta, data)
+	// Quota classification sets error_output from its own provider diagnostic;
+	// every other class (bootstrap, managed-runtime-npm, and generic post-start
+	// recoverable failures) surfaces its sanitized failure detail in the same
+	// collapsed disclosure.
+	applyRecoverableFailureDetail(meta, data)
 
 	// Include cached auth methods so the frontend can show login options.
 	if authErr {
@@ -3163,7 +3317,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
 	}
 
-	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta)
+	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta, turnID)
 }
 
 func (s *Service) persistRecoveryStatusMessage(
@@ -3171,7 +3325,14 @@ func (s *Service) persistRecoveryStatusMessage(
 	data watcher.AgentEventData,
 	statusMsg string,
 	meta map[string]interface{},
+	turnID string,
 ) error {
+	// A captured failed-turn ID keeps the recovery entry on the turn that
+	// failed; when none was captured (e.g. a bootstrap failure with no active
+	// turn) fall back to the lazy active-turn resolution.
+	if turnID == "" {
+		turnID = s.getActiveTurnID(data.SessionID)
+	}
 	messageID := uuid.NewSHA1(
 		uuid.NameSpaceOID,
 		[]byte("session-recovery:"+data.SessionID+":"+agentFailureStamp(data)),
@@ -3183,7 +3344,7 @@ func (s *Service) persistRecoveryStatusMessage(
 		statusMsg,
 		data.SessionID,
 		string(v1.MessageTypeStatus),
-		s.getActiveTurnID(data.SessionID),
+		turnID,
 		meta,
 		false,
 	); err != nil {
@@ -3225,6 +3386,19 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		meta["error_output"] = details
 	}
 	return true
+}
+
+// applyRecoverableFailureDetail populates the collapsed technical-details
+// disclosure (error_output) from the sanitized failure detail. It never
+// overrides a more specific classification (quota) that already set the field,
+// and omits the disclosure when sanitization yields nothing.
+func applyRecoverableFailureDetail(meta map[string]interface{}, data watcher.AgentEventData) {
+	if _, ok := meta["error_output"]; ok {
+		return
+	}
+	if details := routingerr.Sanitize(data.FailureDetails); details != "" {
+		meta["error_output"] = details
+	}
 }
 
 // isOfficeSession resolves Office ownership through the session's task.
@@ -3340,6 +3514,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			}
 			return true
 		}
+		s.preserveWorkflowStartPromptAfterFailure(ctx, taskID, sessionID, agentExecutionID)
 	}
 	if failureData.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution) {
 		s.logger.Info("managed npm runtime startup failure is recoverable",
