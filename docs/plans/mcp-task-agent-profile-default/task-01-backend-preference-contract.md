@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/mcp-task-agent-profile-default/spec.md"
+spec: "../../specs/tasks/requirements/mcp-task-agent-profile-default.md"
 ---
 
 # Task 01: Backend Preference Contract

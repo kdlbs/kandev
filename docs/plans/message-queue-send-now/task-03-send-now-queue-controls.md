@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-replacement-turn-dispatch"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-send-now.md"
+spec: "../../specs/ui/requirements/message-queue-send-now.md"
 ---
 
 # Task 03: Add Send Now queue controls

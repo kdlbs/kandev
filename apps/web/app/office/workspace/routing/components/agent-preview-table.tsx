@@ -5,6 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import type { AgentRoutePreview } from "@/lib/state/slices/office/types";
 import { providerLabel } from "./provider-order-editor";
+import { TIER_SOURCE_LABEL_KEYS } from "../../../lib/label-keys";
 import { useTranslation } from "react-i18next";
 
 type Props = {
@@ -67,7 +68,7 @@ function PreviewRow({ a }: { a: AgentRoutePreview }) {
             {a.effective_tier}
           </Badge>
           <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
-            {a.tier_source}
+            {t(TIER_SOURCE_LABEL_KEYS[a.tier_source])}
           </span>
         </div>
       </TableCell>

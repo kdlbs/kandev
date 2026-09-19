@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/message-metadata-overflow.md
+spec: docs/specs/ui/requirements/message-metadata-overflow.md
 created: 2026-08-14
 status: done
 ---

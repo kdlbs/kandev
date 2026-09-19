@@ -5,7 +5,7 @@ status: pending
 wave: 10
 depends_on: ["09-routed-chat-presentation", "11-core-routing-observability"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 13: Routed session E2E

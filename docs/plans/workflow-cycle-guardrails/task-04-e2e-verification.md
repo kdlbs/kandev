@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-diagnostic-ui"]
 plan: "plan.md"
-spec: "../../specs/workflow-cycle-guardrails/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cycle-guardrails.md"
 ---
 
 # Task 04: Workflow cycle guardrail E2E verification

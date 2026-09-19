@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 func TestCapabilitiesMarshalProjectCapabilityKeys(t *testing.T) {
@@ -123,8 +125,41 @@ func TestActionsCreateSubtaskDeniesWithoutCapability(t *testing.T) {
 	}
 }
 
-func TestActionsCreateSubtaskPreservesCallerIdentity(t *testing.T) {
+func TestActionsCreateSubtaskRefusesWildcardBoundRunDefaultParent(t *testing.T) {
+	// An omitted ParentTaskID defaults to runCtx.TaskID. A run whose payload
+	// injected task_id="*" stays task-bound with TaskID == WildcardTaskScope
+	// (context_builder.go#build), so the default here resolves to the
+	// sentinel itself and must be refused rather than treated as an
+	// ordinary bound parent task.
 	creator := &recordingTaskCreator{taskID: "created-task"}
+	actions := NewActions(ActionDependencies{Tasks: creator})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		TaskID:      WildcardTaskScope,
+		Capabilities: Capabilities{
+			CanCreateSubtasks: true,
+		},
+	}
+
+	_, err := actions.CreateSubtask(context.Background(), runCtx, CreateSubtaskInput{
+		Title: "child",
+	})
+	if !errors.Is(err, ErrTaskOutOfScope) {
+		t.Fatalf("error = %v, want ErrTaskOutOfScope — a wildcard-bound run must not create a subtask under the sentinel", err)
+	}
+	if len(creator.calls) != 0 {
+		t.Fatal("task creator should not be called when the resolved parent is the wildcard sentinel")
+	}
+}
+
+func TestActionsCreateSubtaskPreservesCallerIdentity(t *testing.T) {
+	creator := &recordingTaskCreator{
+		taskID: "created-task",
+		taskScopes: map[string]taskScope{
+			"task-parent": {WorkspaceID: "ws-1"},
+		},
+	}
 	actions := NewActions(ActionDependencies{Tasks: creator})
 	runCtx := RunContext{
 		AgentID:     "agent-1",
@@ -370,6 +405,15 @@ func TestActionsCreateTaskDeniesCrossWorkspaceRelationsBeforePersistence(t *test
 			tasks: map[string]taskScope{"parent-2": {WorkspaceID: "ws-2"}},
 		},
 		{
+			// parent-2 is absent from tasks (unlike the "parent" case above), so the
+			// test double's GetTaskWorkspaceID returns ("", nil) exactly like the real
+			// repository does for a missing row. This must still deny as a workspace
+			// mismatch, not surface GetTaskProjectID's "task not found" error as a 500 -
+			// locking in that the workspace check runs, and denies, before the project
+			// check is ever reached for a nonexistent parent.
+			name: "missing parent", input: CreateTaskInput{Title: "task", ParentTaskID: "parent-2"},
+		},
+		{
 			name: "assignee", input: CreateTaskInput{Title: "task", AssigneeAgentID: "agent-2"},
 			agents: map[string]*models.AgentInstance{"agent-2": {ID: "agent-2", WorkspaceID: "ws-2"}},
 		},
@@ -597,6 +641,30 @@ func TestActionsUpdateTaskStatusDeniesUnscopedTask(t *testing.T) {
 	}
 	if len(updater.calls) != 0 {
 		t.Fatal("status updater should not be called for an unscoped task")
+	}
+}
+
+func TestActionsUpdateTaskStatusDeniesCrossWorkspaceWildcard(t *testing.T) {
+	updater := &recordingStatusUpdater{}
+	creator := &recordingTaskCreator{taskScopes: map[string]taskScope{
+		"task-other": {WorkspaceID: "workspace-other"},
+	}}
+	actions := NewActions(ActionDependencies{Tasks: creator, TaskStatus: updater})
+	runCtx := RunContext{
+		WorkspaceID: "workspace-run",
+		TaskID:      "task-current",
+		Capabilities: Capabilities{
+			CanUpdateTaskStatus: true,
+			AllowedTaskIDs:      []string{WildcardTaskScope},
+		},
+	}
+
+	err := actions.UpdateTaskStatus(context.Background(), runCtx, "task-other", "done", "")
+	if !errors.Is(err, ErrWorkspaceOutOfScope) {
+		t.Fatalf("error = %v, want workspace denial", err)
+	}
+	if len(updater.calls) != 0 {
+		t.Fatal("status updater should not be called for a cross-workspace task")
 	}
 }
 
@@ -1043,12 +1111,13 @@ func (w *recordingCommentWriter) CreateComment(_ context.Context, comment *model
 }
 
 type recordingTaskCreator struct {
-	calls            []createTaskCall
-	taskID           string
-	taskScopes       map[string]taskScope
-	workspaceLookups []string
-	projectLookups   []string
-	projectLookupErr error
+	calls              []createTaskCall
+	taskID             string
+	taskScopes         map[string]taskScope
+	workspaceLookups   []string
+	projectLookups     []string
+	projectLookupErr   error
+	workspaceLookupErr error
 }
 
 type taskScope struct {
@@ -1088,6 +1157,9 @@ type createTaskCall struct {
 
 func (c *recordingTaskCreator) GetTaskWorkspaceID(_ context.Context, taskID string) (string, error) {
 	c.workspaceLookups = append(c.workspaceLookups, taskID)
+	if c.workspaceLookupErr != nil {
+		return "", c.workspaceLookupErr
+	}
 	return c.taskScopes[taskID].WorkspaceID, nil
 }
 
@@ -1096,7 +1168,11 @@ func (c *recordingTaskCreator) GetTaskProjectID(_ context.Context, taskID string
 	if c.projectLookupErr != nil {
 		return "", c.projectLookupErr
 	}
-	return c.taskScopes[taskID].ProjectID, nil
+	scope, ok := c.taskScopes[taskID]
+	if !ok {
+		return "", fmt.Errorf("task not found: %s", taskID)
+	}
+	return scope.ProjectID, nil
 }
 
 func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
@@ -1203,14 +1279,14 @@ type spawnRunCall struct {
 func (r *recordingRunSpawner) QueueRun(
 	_ context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-) error {
+) (runsservice.QueueOutcome, error) {
 	r.calls = append(r.calls, spawnRunCall{
 		AgentID:        agentInstanceID,
 		Reason:         reason,
 		Payload:        payload,
 		IdempotencyKey: idempotencyKey,
 	})
-	return nil
+	return runsservice.QueueOutcomeQueued, nil
 }
 
 type recordingAgentModifier struct {

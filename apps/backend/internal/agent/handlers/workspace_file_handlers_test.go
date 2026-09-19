@@ -12,7 +12,11 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestWorkspaceFileHandlersValidateRequestsBeforeLookup(t *testing.T) {
@@ -117,7 +121,80 @@ func TestWorkspaceFileHandlersMapDependencyFailures(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFileHandlersMissingContentIsNotFoundAndDebug(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	log, err := commonlogger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	h := workspaceHandlerServerWithLogger(t, log, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"file not found: stat /workspace/gone.go: no such file or directory"}`))
+	})
+	msg, err := ws.NewRequest("id", ws.ActionWorkspaceFileContentGet, map[string]any{
+		"session_id": "s",
+		"path":       "gone.go",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := h.wsGetFileContent(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("wsGetFileContent returned error: %v", err)
+	}
+	assertWorkspaceContentSearchErrorCode(t, response, ws.ErrorCodeNotFound)
+
+	entries := logs.All()
+	if len(entries) != 1 {
+		t.Fatalf("observed %d log entries, want 1: %v", len(entries), entries)
+	}
+	if entries[0].Level != zap.DebugLevel {
+		t.Fatalf("log level = %s, want debug", entries[0].Level)
+	}
+	if entries[0].Message != "file not found (expected for deleted or stale files)" {
+		t.Fatalf("log message = %q, want expected missing-file message", entries[0].Message)
+	}
+}
+
+func TestWorkspaceFileHandlersNonMissingContentFailureRemainsError(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	log, err := commonlogger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	h := workspaceHandlerServerWithLogger(t, log, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"file not found: permission denied"}`))
+	})
+	msg, err := ws.NewRequest("id", ws.ActionWorkspaceFileContentGet, map[string]any{
+		"session_id": "s",
+		"path":       "private.go",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := h.wsGetFileContent(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("wsGetFileContent returned error: %v", err)
+	}
+	assertWorkspaceContentSearchErrorCode(t, response, ws.ErrorCodeInternalError)
+
+	entries := logs.All()
+	if len(entries) != 1 {
+		t.Fatalf("observed %d log entries, want 1: %v", len(entries), entries)
+	}
+	if entries[0].Level != zap.ErrorLevel {
+		t.Fatalf("log level = %s, want error", entries[0].Level)
+	}
+}
+
 func workspaceHandlerServer(t *testing.T, handler http.HandlerFunc) *WorkspaceFileHandlers {
+	return workspaceHandlerServerWithLogger(t, newTestLogger(), handler)
+}
+
+func workspaceHandlerServerWithLogger(t *testing.T, log *commonlogger.Logger, handler http.HandlerFunc) *WorkspaceFileHandlers {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -127,7 +204,7 @@ func workspaceHandlerServer(t *testing.T, handler http.HandlerFunc) *WorkspaceFi
 	execution := &lifecycle.AgentExecution{SessionID: "s"}
 	execution.SetAgentCtlClientForTesting(client)
 	lookup := &mockExecutionLookup{executions: map[string]*lifecycle.AgentExecution{"s": execution}}
-	return NewWorkspaceFileHandlers(lookup, newTestLogger())
+	return NewWorkspaceFileHandlers(lookup, log)
 }
 
 func expectWorkspaceQuery(key, want string) func(*testing.T, *http.Request) {

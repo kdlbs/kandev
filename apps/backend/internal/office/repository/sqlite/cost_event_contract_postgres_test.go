@@ -11,7 +11,7 @@ import (
 
 // TestPostgresCostEventContractMigration is the PostgreSQL twin of
 // TestCostEventContractMigration_LegacyRowsGetNullColumns
-// (docs/specs/office/costs.md, ADR 0027): a pre-migration office_cost_events
+// (docs/specs/office/requirements/costs.md, ADR 0027): a pre-migration office_cost_events
 // table gets the cache-split / provenance / turn-attribution columns added
 // nullable, a legacy row is left NULL (never 0), the partial unique index
 // exists, and the migration replays cleanly on a second boot. Skips unless

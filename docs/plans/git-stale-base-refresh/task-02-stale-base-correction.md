@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-git-operator-is-ancestor"]
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 02: Correct stale commits-panel base to the integration merge-base
@@ -17,7 +17,7 @@ in the stacked-PR / merged-parent case.
 
 ## Context / Inputs
 
-- Spec: `docs/specs/platform/workspace-git-status.md` → "Base-commit staleness and refresh",
+- Spec: `docs/specs/platform/requirements/workspace-git-status.md` → "Base-commit staleness and refresh",
   Failure modes rows, and Scenarios 1–4.
 - Confirmed root cause (see `plan.md`): stored target = merged/deleted stacked parent →
   `computeMergeBase` falls back to stale local ref (`ed630b8446`, 31 commits) instead of

@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["08-pr-lifecycle-agent-prompts"]
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 10: Frontend lifecycle feedback

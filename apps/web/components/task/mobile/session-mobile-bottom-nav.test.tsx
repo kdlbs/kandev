@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 
 const PLUGIN_A = "plugin-a";
@@ -109,6 +110,7 @@ describe("SessionMobileBottomNav plugin panels", () => {
     render(
       <SessionMobileBottomNav
         activePanel="chat"
+        taskId="task-1"
         onPanelChange={onPanelChange}
         showStatus={false}
         onOpenStatus={vi.fn()}
@@ -141,6 +143,7 @@ describe("SessionMobileBottomNav plugin panels", () => {
     render(
       <SessionMobileBottomNav
         activePanel="plugin:plugin-a:notes"
+        taskId="task-1"
         onPanelChange={vi.fn()}
         showStatus={false}
         onOpenStatus={vi.fn()}
@@ -148,6 +151,32 @@ describe("SessionMobileBottomNav plugin panels", () => {
     );
 
     expect(screen.getByRole("button", { name: "Panels" }).className).toContain("text-primary");
+  });
+
+  it("does not evaluate task-panel visibility without a task", () => {
+    function Notes() {
+      return null;
+    }
+    const visible = vi.fn(() => true);
+    pluginRegistry.forPlugin(PLUGIN_A).registerTaskPanel({
+      id: "notes",
+      title: "Notes",
+      Component: Notes,
+      mobileEnabled: true,
+      visible,
+    });
+
+    render(
+      <SessionMobileBottomNav
+        activePanel="chat"
+        onPanelChange={vi.fn()}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+      />,
+    );
+
+    expect(visible).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Panels" })).toBeNull();
   });
 
   it("keeps the grouped Panels action active for Prompt history", () => {
@@ -183,5 +212,39 @@ describe("SessionMobileBottomNav panel picker", () => {
     fireEvent.click(screen.getByTestId("mobile-prompt-history-option"));
 
     expect(onPanelChange).toHaveBeenCalledWith("prompt-history");
+  });
+
+  it("offers applicable task canvases in the native picker", () => {
+    const onOpenCanvas = vi.fn();
+    const taskCanvas: Canvas = {
+      id: "canvas-1",
+      plugin_instance_id: "instance-1",
+      plugin_id: "plugin-1",
+      workspace_id: "workspace-1",
+      task_id: "task-1",
+      scope_kind: "task",
+      title: "Release board",
+      status: "active",
+      active_release_id: "release-1",
+      active_release_status: "valid",
+    };
+
+    render(
+      <SessionMobileBottomNav
+        activePanel="chat"
+        onPanelChange={vi.fn()}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+        taskCanvases={[taskCanvas]}
+        onOpenCanvas={onOpenCanvas}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Panels" }));
+    const option = screen.getByTestId("mobile-canvas-option-canvas-1");
+    expect(option.className).toContain("min-h-11");
+    fireEvent.click(option);
+
+    expect(onOpenCanvas).toHaveBeenCalledWith("canvas-1");
   });
 });

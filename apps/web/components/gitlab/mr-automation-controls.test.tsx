@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
-import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
+import type {
+  TaskMR,
+  TaskMRAutomationOptions,
+  TaskMRAutomationOptionsForMR,
+} from "@/lib/types/gitlab";
 
 const hookMocks = vi.hoisted(() => ({
   error: null as string | null,
@@ -44,6 +48,25 @@ const CLOSED_LABEL = "MR closed without merging";
 const REVIEW_REQUESTED_LABEL = "Your review is requested";
 const FOLLOW_UP_TRIGGER = "mr-review-follow-up-trigger";
 
+function makeMROptions(
+  overrides: Partial<TaskMRAutomationOptionsForMR> = {},
+): TaskMRAutomationOptionsForMR {
+  return {
+    task_id: "task-1",
+    repository_id: "",
+    project_path: "group/project",
+    mr_iid: 7,
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
+}
+
 function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
   return {
     task_id: "task-1",
@@ -58,6 +81,37 @@ function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAu
     review_reviewer_username: "",
     updated_at: "2026-06-18T10:00:00Z",
     mr_states: [],
+    mr_options: [makeMROptions()],
+    ...overrides,
+  };
+}
+
+function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
+  return {
+    id: "assoc-1",
+    task_id: "task-1",
+    host: "https://gitlab.com",
+    project_path: "group/project",
+    mr_iid: 7,
+    mr_url: "https://gitlab.com/group/project/-/merge_requests/7",
+    mr_title: "Test MR",
+    head_branch: "feature",
+    base_branch: "main",
+    author_username: "alice",
+    state: "open",
+    approval_state: "",
+    pipeline_state: "",
+    merge_status: "",
+    draft: false,
+    approval_count: 0,
+    required_approvals: 0,
+    pipeline_jobs_total: 0,
+    pipeline_jobs_pass: 0,
+    reviewer_count: 0,
+    unapproved_reviewers: 0,
+    unresolved_discussions: 0,
+    created_at: "",
+    updated_at: "",
     ...overrides,
   };
 }
@@ -66,7 +120,7 @@ function renderControls() {
   return render(
     <TooltipProvider>
       <ToastProvider>
-        <MRAutomationControls taskId="task-1" />
+        <MRAutomationControls taskId="task-1" mr={makeMR()} />
       </ToastProvider>
     </TooltipProvider>,
   );
@@ -112,7 +166,7 @@ describe("MRAutomationControls", () => {
   });
 
   it("auto-expands when a switch is already on", () => {
-    hookMocks.options = makeOptions({ prompt_on_merged: true });
+    hookMocks.options = makeOptions({ mr_options: [makeMROptions({ prompt_on_merged: true })] });
     renderControls();
     expect(screen.getByTestId(FOLLOW_UP_TRIGGER).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByLabelText(MERGED_LABEL)).not.toBeNull();
@@ -134,13 +188,13 @@ describe("MRAutomationControls", () => {
     fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
 
     expect(screen.getByLabelText(REVIEW_REQUESTED_LABEL).getAttribute("aria-describedby")).toBe(
-      "task-mr-review-requested-prompt-task-1-description",
+      "task-mr-review-requested-prompt-task-1-assoc-1-description",
     );
     expect(screen.getByLabelText(MERGED_LABEL).getAttribute("aria-describedby")).toBe(
-      "task-mr-terminal-help-task-1",
+      "task-mr-terminal-help-task-1-assoc-1",
     );
     expect(screen.getByLabelText(CLOSED_LABEL).getAttribute("aria-describedby")).toBe(
-      "task-mr-terminal-help-task-1",
+      "task-mr-terminal-help-task-1-assoc-1",
     );
     expect(
       screen.getByText(
@@ -160,9 +214,23 @@ describe("MRAutomationControls", () => {
     fireEvent.click(screen.getByLabelText(MERGED_LABEL));
     fireEvent.click(screen.getByLabelText(CLOSED_LABEL));
 
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_review_requested: true });
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_merged: true });
-    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_closed: true });
+    const mrIdentity = { repository_id: "", project_path: "group/project", mr_iid: 7 };
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({
+      ...mrIdentity,
+      prompt_on_review_requested: true,
+    });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ ...mrIdentity, prompt_on_merged: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ ...mrIdentity, prompt_on_closed: true });
+  });
+});
+
+describe("MRAutomationControls error and loading states", () => {
+  beforeEach(() => {
+    resetHookMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("surfaces an error from the hook", () => {

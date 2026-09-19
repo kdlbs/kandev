@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { createServer, type Server } from "node:http";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -20,6 +20,8 @@ type HTTPGitFixture = {
 };
 
 export type HTTPGitFixtureOptions = {
+  /** Override the Docker bridge address for direct host-side fixture tests. */
+  bridgeGateway?: string;
   onListening?: (server: Server, port: number) => void;
   writeBackendGitConfig?: (file: string, content: string) => void;
   closeServer?: (server: Server) => Promise<void>;
@@ -39,6 +41,11 @@ export async function startHTTPGitFixture(
   const checkout = path.join(root, `${name}-checkout`);
   fs.mkdirSync(checkout, { recursive: true });
   execFileSync("git", ["init", "--bare", "-b", "main", remoteDir]);
+  // The fixture is served as static (dumb) HTTP. Keep its advertised refs in
+  // sync when E2E tests push additional commits before launching a task.
+  const postUpdateHook = path.join(remoteDir, "hooks", "post-update");
+  fs.writeFileSync(postUpdateHook, "#!/bin/sh\nexec git update-server-info\n");
+  fs.chmodSync(postUpdateHook, 0o755);
   execFileSync("git", ["init", "-b", "main"], { cwd: checkout });
   fs.writeFileSync(path.join(checkout, "remote-source.txt"), `${name} fixture\n`);
   execFileSync("git", ["add", "."], { cwd: checkout });
@@ -55,7 +62,7 @@ export async function startHTTPGitFixture(
   const port = await listen(server);
   try {
     options.onListening?.(server, port);
-    const fixtureOrigin = `http://${dockerBridgeGateway()}:${port}/`;
+    const fixtureOrigin = `http://${options.bridgeGateway ?? dockerBridgeGateway()}:${port}/`;
     const remoteURL = `https://gitlab.com/fixture/${name}.git`;
     execFileSync("git", ["remote", "set-url", "origin", remoteURL], { cwd: checkout });
     const backendGitConfigPath = path.join(root, "fixture", `${name}.gitconfig`);
@@ -92,15 +99,18 @@ export async function startHTTPGitFixture(
 }
 
 function createStaticGitServer(root: string): Server {
-  return createServer((request, response) => {
+  return createServer(async (request, response) => {
     const pathname = decodeURIComponent(new URL(request.url ?? "/", "http://fixture").pathname);
     const relative = pathname.replace(/^\/+/, "");
+    if (await serveSmartGitRequest(root, relative, request, response)) return;
+
     const file = path.resolve(root, relative);
     if (file !== root && !file.startsWith(`${root}${path.sep}`)) {
       response.writeHead(400).end();
       return;
     }
     try {
+      refreshGitAdvertisement(root, relative);
       const stat = fs.statSync(file);
       if (!stat.isFile()) throw new Error("not a file");
       response.writeHead(200, { "content-length": stat.size });
@@ -109,6 +119,102 @@ function createStaticGitServer(root: string): Server {
       response.writeHead(404).end();
     }
   });
+}
+
+/**
+ * Serve Git's smart upload-pack protocol as well as static files. Docker's
+ * historical prepare script uses a shallow clone, which needs upload-pack's
+ * capability negotiation and cannot use dumb HTTP's info/refs transport.
+ */
+async function serveSmartGitRequest(
+  root: string,
+  relative: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<boolean> {
+  const requestURL = new URL(request.url ?? "/", "http://fixture");
+  const repo = smartGitRepository(root, relative);
+  if (!repo) return false;
+
+  if (
+    request.method === "GET" &&
+    relative.endsWith("/info/refs") &&
+    requestURL.searchParams.get("service") === "git-upload-pack"
+  ) {
+    response.writeHead(200, {
+      "content-type": "application/x-git-upload-pack-advertisement",
+      "cache-control": "no-cache",
+    });
+    response.write("001e# service=git-upload-pack\n0000");
+    await pipeGitUploadPack(response, repo, ["--stateless-rpc", "--advertise-refs"]);
+    return true;
+  }
+
+  if (request.method === "POST" && relative.endsWith("/git-upload-pack")) {
+    response.writeHead(200, {
+      "content-type": "application/x-git-upload-pack-result",
+      "cache-control": "no-cache",
+    });
+    await pipeGitUploadPack(response, repo, ["--stateless-rpc"], request);
+    return true;
+  }
+  return false;
+}
+
+function smartGitRepository(root: string, relative: string): string | undefined {
+  let suffix = "";
+  if (relative.endsWith("/info/refs")) suffix = "/info/refs";
+  if (relative.endsWith("/git-upload-pack")) suffix = "/git-upload-pack";
+  if (!relative.startsWith("fixture/") || suffix === "") return undefined;
+
+  const repo = path.resolve(root, relative.slice(0, -suffix.length));
+  if (repo === root || !repo.startsWith(`${root}${path.sep}`) || !repo.endsWith(".git")) {
+    return undefined;
+  }
+  try {
+    if (!fs.statSync(repo).isDirectory()) return undefined;
+  } catch {
+    return undefined;
+  }
+  return repo;
+}
+
+function pipeGitUploadPack(
+  response: ServerResponse,
+  repo: string,
+  args: string[],
+  request?: IncomingMessage,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const git = spawn("git", ["upload-pack", ...args, repo]);
+    git.once("error", reject);
+    git.stderr.on("data", () => undefined);
+    git.stdout.pipe(response, { end: false });
+    if (request) request.pipe(git.stdin);
+    else git.stdin.end();
+    git.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`git upload-pack exited with ${code}`));
+        return;
+      }
+      response.end();
+      resolve();
+    });
+  });
+}
+
+/**
+ * A static HTTP Git server is a dumb transport, so clients discover refs from
+ * `info/refs`. Refresh that advertisement immediately before it is read: the
+ * test workers push source commits after fixture startup and Git's hook is not
+ * a sufficient synchronization point across all transport implementations.
+ */
+function refreshGitAdvertisement(root: string, relative: string): void {
+  if (!relative.startsWith("fixture/") || !relative.endsWith(".git/info/refs")) return;
+
+  const repo = path.resolve(root, relative.slice(0, -"/info/refs".length));
+  if (repo !== root && !repo.startsWith(`${root}${path.sep}`)) return;
+  execFileSync("git", ["--git-dir", repo, "update-server-info"]);
 }
 
 function dockerBridgeGateway(): string {

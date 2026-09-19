@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-enforce-registered-schemas", "02-create-task-prompt-compatibility"]
 plan: "plan.md"
-spec: "../../specs/integrations/mcp-tool-argument-validation.md"
+spec: "../../specs/integrations/requirements/mcp-tool-argument-validation.md"
 ---
 
 # Task 03: Document fail-closed MCP arguments

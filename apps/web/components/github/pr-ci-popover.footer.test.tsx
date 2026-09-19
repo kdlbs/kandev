@@ -41,6 +41,7 @@ const UPDATING_LABEL = "Updating…";
 function makePR(): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "app",

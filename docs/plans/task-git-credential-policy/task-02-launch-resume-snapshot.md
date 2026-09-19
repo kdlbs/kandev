@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["00-indexed-git-config-composition", "01-policy-persistence"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 02: Resolve Launch And Resume Credentials With A Session Snapshot

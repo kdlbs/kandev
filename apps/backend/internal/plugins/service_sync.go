@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
@@ -22,7 +23,7 @@ const tarballSuffix = ".tar.gz"
 // Sync scans the plugins directory for filesystem-level changes an operator
 // made outside the install/enable/disable/uninstall API — directory
 // sideloads and dropped tarballs — and reconciles the registry with what
-// actually exists on disk, per docs/specs/plugins/spec.md ("Filesystem
+// actually exists on disk, per docs/specs/plugins/requirements/plugins.md ("Filesystem
 // sideloading & sync"):
 //
 //  1. Dir sideloads: an extracted <id>/<version>/manifest.yaml with no
@@ -198,16 +199,18 @@ func (s *Service) registerSideload(id, version string) error {
 	}
 
 	rec := &store.Record{
-		Manifest:    *m,
-		Status:      StatusDisabled,
-		InstallPath: versionDir,
-		Signed:      false,
-		InstalledAt: time.Now().UTC(),
+		Manifest:       *m,
+		Status:         StatusDisabled,
+		InstallationID: uuid.NewString(),
+		InstallPath:    versionDir,
+		Signed:         false,
+		InstalledAt:    time.Now().UTC(),
 	}
 	if err := s.store.Save(rec); err != nil {
 		return fmt.Errorf("persist sideloaded record: %w", err)
 	}
 	s.registry.Add(rec)
+	s.warnWebhookAccessIssues(rec.Manifest)
 	return nil
 }
 

@@ -144,6 +144,12 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.ClassifierRule)
 }
 
+// ShouldShortRetry reports whether a classified failure is worth retrying
+// against the same provider before falling back or escalating.
+func (e *Error) ShouldShortRetry() bool {
+	return e != nil && e.Class == ClassTransient && e.AutoRetryable && e.FallbackAllowed
+}
+
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
 	Phase         Phase
@@ -163,8 +169,11 @@ const exitCodeBinaryMissing = 127
 const statusOverloaded = 529
 
 // Classify normalizes a failure into a routing-aware Error. See package doc.
+// Classify always returns a non-nil *Error, even for an unmatched or empty
+// input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
-	excerpt := Sanitize(in.Stderr + "\n" + in.Stdout)
+	rawText := in.Stderr + "\n" + in.Stdout
+	excerpt := Sanitize(rawText)
 	if e := classifyInjection(in, excerpt); e != nil {
 		return e
 	}
@@ -186,24 +195,24 @@ func Classify(in Input) *Error {
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchRuntimeEnvironmentRules(excerpt); ok {
+	if e, ok := matchRuntimeEnvironmentRulesForProvider(in.ProviderID, excerpt, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		if e.Code == CodeNpxCacheCorrupted {
 			// Preserve the legacy path for the path-aware remediation guard;
 			// the path is validated again before deletion.
-			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchLegacyRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
+	if e, ok := matchLegacyRuntimeEnvironmentRulesForProvider(in.ProviderID, rawText, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		if e.Code == CodeNpxCacheCorrupted {
-			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
@@ -268,6 +277,11 @@ func httpStatusToCode(status int) Code {
 		return CodeSubscriptionRequired
 	case http.StatusTooManyRequests:
 		return CodeRateLimited
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusGatewayTimeout:
+		// A gateway may expose an upstream 5xx directly instead of translating
+		// it to 503. These are provider-side availability failures, not a task
+		// or agent-runtime failure, so the shared transient policy may recover.
+		return CodeProviderUnavailable
 	case http.StatusServiceUnavailable:
 		return CodeProviderUnavailable
 	case statusOverloaded:

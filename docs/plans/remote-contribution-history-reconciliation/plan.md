@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/remote-contribution-tasks.md
+spec: docs/specs/tasks/system-design/remote-contribution-tasks.md
 created: 2026-08-13
 status: complete
 ---

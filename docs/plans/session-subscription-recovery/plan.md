@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/session-subscription-recovery/spec.md
+spec: docs/specs/platform/requirements/session-subscription-recovery.md
 created: 2026-08-05
 status: implemented
 issue: https://github.com/kdlbs/kandev/issues/2287
@@ -136,3 +136,8 @@ contract, so they are intentionally one sequential task.
 
 - The race-specific reload fallback can be removed; the general bounded
   `waitForLoad` reload remains for unrelated startup/SSR hydration failures.
+
+## Follow-up package
+
+The [delayed-entry package](../session-entry-recovery/plan.md) extends recovery after a registration timeout.
+The completed ordering work and its recorded results remain unchanged.

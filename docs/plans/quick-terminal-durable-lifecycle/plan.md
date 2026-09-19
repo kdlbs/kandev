@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/quick-terminal/spec.md
+spec: docs/specs/ui/requirements/quick-terminal.md
 created: 2026-08-06
 status: draft
 ---

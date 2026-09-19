@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/sidebar-task-edit.md"
+spec: "../../specs/tasks/requirements/sidebar-task-edit.md"
 ---
 
 # Task 01: Add shared sidebar edit flow

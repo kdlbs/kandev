@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/autopilot-mode.md
+spec: docs/specs/tasks/requirements/autopilot-mode.md
 created: 2026-08-08
 status: implemented
 ---

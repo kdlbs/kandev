@@ -81,17 +81,18 @@ describe("navigation coverage guardrails", () => {
     ).toEqual([]);
   });
 
-  it("keeps Home and Tasks in the mobile menu's primary section", () => {
+  it("keeps the listing destinations in the mobile menu's primary section", () => {
     // Settings, Office and plugin pages have neither kanban's brand link nor
-    // its View toggle — their nav sheet's Home and Tasks rows come from here.
-    // Kanban's drawer opts out at its call site via omitSections={["primary"]}.
+    // its View toggle — their nav sheet's Home, Tasks and Threads rows come
+    // from here. Kanban's drawer opts out at its call site via
+    // omitSections={["primary"]}.
     const primary = resolveDestinations({
       surface: "mobileMenu",
       section: "primary",
       ctx: NO_WORKSPACE_CONTEXT,
     });
 
-    expect(ids(primary)).toEqual(["home", "tasks"]);
+    expect(ids(primary)).toEqual(["home", "tasks", "threads"]);
   });
 
   // Shape guard for whatever comes back into MOBILE_MENU_EXEMPTIONS: the list is

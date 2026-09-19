@@ -32,6 +32,65 @@ func rawClear() **json.RawMessage {
 	return ptr((*json.RawMessage)(nil))
 }
 
+func TestApplySidebarTaskColorAutomationReplacesRulesAndValidates(t *testing.T) {
+	current := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "old",
+			Enabled:   true,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "TODO"},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "red"},
+		}},
+	}
+	replacement := models.SidebarTaskColorAutomation{
+		Enabled: true,
+		Rules: []models.SidebarTaskColorRule{{
+			ID:        "new",
+			Enabled:   false,
+			Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionRepository, Value: nil},
+			Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "cyan"},
+		}},
+	}
+	settings := &models.UserSettings{SidebarTaskColorAutomation: current}
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{
+		SidebarTaskColorAutomation: &replacement,
+	}); err != nil {
+		t.Fatalf("apply automatic colors: %v", err)
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, replacement) {
+		t.Fatalf("automatic colors = %#v, want %#v", settings.SidebarTaskColorAutomation, replacement)
+	}
+
+	invalid := models.SidebarTaskColorAutomation{
+		Enabled: replacement.Enabled,
+		Rules:   append([]models.SidebarTaskColorRule(nil), replacement.Rules...),
+	}
+	invalid.Rules[0].Enabled = true
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{
+		SidebarTaskColorAutomation: &invalid,
+	}); err == nil {
+		t.Fatal("expected incomplete enabled rule to be rejected")
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, replacement) {
+		t.Fatalf("rejected automatic colors changed settings to %#v", settings.SidebarTaskColorAutomation)
+	}
+}
+
+func TestApplySidebarTaskColorAutomationOmissionPreservesRules(t *testing.T) {
+	want := models.SidebarTaskColorAutomation{Enabled: true, Rules: []models.SidebarTaskColorRule{{
+		ID:        "keep",
+		Condition: models.SidebarTaskColorCondition{Dimension: models.SidebarTaskColorDimensionTaskState, Value: "TODO"},
+		Output:    models.SidebarTaskColorOutput{Kind: models.SidebarTaskColorOutputFixed, Color: "blue"},
+	}}}
+	settings := &models.UserSettings{SidebarTaskColorAutomation: want}
+	if err := applySidebarTaskColorAutomation(settings, &UpdateUserSettingsRequest{}); err != nil {
+		t.Fatalf("apply omitted automatic colors: %v", err)
+	}
+	if !reflect.DeepEqual(settings.SidebarTaskColorAutomation, want) {
+		t.Fatalf("automatic colors = %#v, want %#v", settings.SidebarTaskColorAutomation, want)
+	}
+}
+
 // TestApplyBasicSettingsTasksListShowDetails verifies applyBasicSettings preserves TasksListShowDetails when omitted and applies explicit values.
 func TestApplyBasicSettingsTasksListShowDetails(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
@@ -74,6 +133,61 @@ func TestApplyBasicSettingsSystemMetricsDisplayPreservesOmittedFields(t *testing
 	}
 	if !settings.SystemMetricsDisplay.Simplified {
 		t.Fatal("simplified = false, want existing value preserved when omitted")
+	}
+}
+
+func TestApplyBasicSettingsQuickChatTabOrderValidation(t *testing.T) {
+	tooManyWorkspaces := make(map[string][]string, 201)
+	for index := 0; index < 201; index++ {
+		tooManyWorkspaces[fmt.Sprintf("workspace-%d", index)] = []string{"conversation:one"}
+	}
+	tooManyReferences := make([]string, 201)
+	for index := range tooManyReferences {
+		tooManyReferences[index] = fmt.Sprintf("conversation:%d", index)
+	}
+	tooManyBytes := map[string][]string{
+		"workspace-1": {strings.Repeat("x", maxUserPreferenceBlobBytes)},
+	}
+
+	tests := []struct {
+		name    string
+		order   map[string][]string
+		wantErr string
+	}{
+		{
+			name:    "rejects too many workspaces",
+			order:   tooManyWorkspaces,
+			wantErr: "quick_chat_tab_order_by_workspace: max 200 workspaces allowed",
+		},
+		{
+			name: "rejects too many references in one workspace",
+			order: map[string][]string{
+				"workspace-1": tooManyReferences,
+			},
+			wantErr: "quick_chat_tab_order_by_workspace[workspace-1]: max 200 tab references allowed",
+		},
+		{
+			name:    "rejects an oversized serialized order",
+			order:   tooManyBytes,
+			wantErr: "quick_chat_tab_order_by_workspace: max 65536 bytes allowed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{
+				QuickChatTabOrderByWorkspace: map[string][]string{"existing": {"conversation:keep"}},
+			}
+			err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+				QuickChatTabOrderByWorkspace: ptr(tt.order),
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want error containing %q", err, tt.wantErr)
+			}
+			if !reflect.DeepEqual(settings.QuickChatTabOrderByWorkspace, map[string][]string{"existing": {"conversation:keep"}}) {
+				t.Fatalf("rejected update changed settings to %#v", settings.QuickChatTabOrderByWorkspace)
+			}
+		})
 	}
 }
 
@@ -562,6 +676,256 @@ func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
 	})
 }
 
+// TestApplyBasicSettings_KanbanSort verifies the board sort enum is set, defaulted, and rejects
+// an invalid value with a validation error (AC-004.9, kanban_sort reading: whole-request reject).
+func TestApplyBasicSettings_KanbanSort(t *testing.T) {
+	t.Run("sets a valid sort", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{KanbanSort: ptr("priority_desc")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.KanbanSort != "priority_desc" {
+			t.Fatalf("KanbanSort = %q, want priority_desc", settings.KanbanSort)
+		}
+	})
+
+	t.Run("empty value defaults", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		req := &UpdateUserSettingsRequest{KanbanSort: ptr("  ")}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.KanbanSort != models.KanbanSortDefault {
+			t.Fatalf("KanbanSort = %q, want %q", settings.KanbanSort, models.KanbanSortDefault)
+		}
+	})
+
+	t.Run("nil is a no-op", func(t *testing.T) {
+		settings := &models.UserSettings{KanbanSort: "priority_desc"}
+		req := &UpdateUserSettingsRequest{}
+		if err := applyBasicSettings(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.KanbanSort != "priority_desc" {
+			t.Fatalf("KanbanSort = %q, want unchanged priority_desc", settings.KanbanSort)
+		}
+	})
+
+	t.Run("rejects an invalid value and leaves settings unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{KanbanSort: "created_desc"}
+		req := &UpdateUserSettingsRequest{
+			KanbanSort:                 ptr("bogus"),
+			KanbanPriorityFilterTokens: ptr([]string{"critical"}),
+		}
+		if err := applyBasicSettings(settings, req); err == nil {
+			t.Fatal("expected invalid kanban_sort error")
+		}
+		if settings.KanbanSort != "created_desc" {
+			t.Fatalf("KanbanSort = %q, want unchanged created_desc on rejection", settings.KanbanSort)
+		}
+	})
+}
+
+// TestNormalizeKanbanPriorityFilterTokens verifies the R5-F1 disposition: an out-of-vocabulary
+// member is dropped (not a whole-request rejection), duplicates are removed, and the remainder
+// is ordered by priority rank.
+func TestNormalizeKanbanPriorityFilterTokens(t *testing.T) {
+	cases := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{name: "nil is empty", input: nil, want: []string{}},
+		{name: "empty stays empty", input: []string{}, want: []string{}},
+		{
+			name:  "already-ranked input is unchanged",
+			input: []string{"critical", "high", "medium", "low"},
+			want:  []string{"critical", "high", "medium", "low"},
+		},
+		{
+			name:  "out-of-order input is stored in rank order",
+			input: []string{"low", "critical"},
+			want:  []string{"critical", "low"},
+		},
+		{
+			name:  "duplicates are removed",
+			input: []string{"high", "high", "critical"},
+			want:  []string{"critical", "high"},
+		},
+		{
+			name:  "an invalid member is dropped, keeping the valid remainder",
+			input: []string{"critical", "urgent", "low"},
+			want:  []string{"critical", "low"},
+		},
+		{
+			name:  "a selection that is all invalid resolves to empty",
+			input: []string{"urgent", "none"},
+			want:  []string{},
+		},
+		{
+			name:  "surrounding whitespace is trimmed before validation",
+			input: []string{" critical ", "high"},
+			want:  []string{"critical", "high"},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeKanbanPriorityFilterTokens(tt.input)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("normalizeKanbanPriorityFilterTokens(%v) = %#v, want %#v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestApplyWorkspaceAndTaskListPreferencesInvalidPriorityFilterMemberCommitsSiblingField is the
+// R5-F1 regression test: an invalid priority-filter member must not block an unrelated field
+// (repository_ids) riding in the same request, because normalizeKanbanPriorityFilterTokens never
+// returns an error — only applyKanbanSort (a true enum) rejects the whole request.
+func TestApplyWorkspaceAndTaskListPreferencesInvalidPriorityFilterMemberCommitsSiblingField(t *testing.T) {
+	settings := &models.UserSettings{RepositoryIDs: []string{"repo-old"}}
+	req := &UpdateUserSettingsRequest{
+		RepositoryIDs:              ptr([]string{"repo-new"}),
+		KanbanPriorityFilterTokens: ptr([]string{"critical", "urgent"}),
+	}
+	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(settings.RepositoryIDs, []string{"repo-new"}) {
+		t.Fatalf("RepositoryIDs = %#v, want [repo-new] committed alongside the dropped invalid token", settings.RepositoryIDs)
+	}
+	if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"critical"}) {
+		t.Fatalf("KanbanPriorityFilterTokens = %#v, want [critical]", settings.KanbanPriorityFilterTokens)
+	}
+}
+
+// TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensCount verifies the request is
+// rejected before normalization allocates on an attacker-controlled length, mirroring the count
+// caps already applied to the sibling kanban_hidden_step_ids and
+// workflow_ids_with_auto_hide_empty_steps fields.
+func TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensCount(t *testing.T) {
+	makeTokens := func(n int) []string {
+		tokens := make([]string, n)
+		for i := range tokens {
+			tokens[i] = "critical"
+		}
+		return tokens
+	}
+
+	tests := []struct {
+		name    string
+		value   []string
+		wantErr string
+	}{
+		{name: "exactly max is accepted", value: makeTokens(maxKanbanPriorityFilterTokens)},
+		{
+			name:    "exceeding max is rejected",
+			value:   makeTokens(maxKanbanPriorityFilterTokens + 1),
+			wantErr: fmt.Sprintf("kanban_priority_filter_tokens: max %d tokens allowed", maxKanbanPriorityFilterTokens),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{KanbanPriorityFilterTokens: []string{"low"}}
+			req := &UpdateUserSettingsRequest{KanbanPriorityFilterTokens: ptr(tt.value)}
+			err := applyWorkspaceAndTaskListPreferences(settings, req)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+				if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"low"}) {
+					t.Fatalf("expected settings unchanged on error, got %v", settings.KanbanPriorityFilterTokens)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensSize verifies an
+// individually oversized token is rejected before normalization trims and looks it up, so the
+// count cap alone cannot be satisfied by a handful of attacker-controlled multi-megabyte
+// strings — mirroring maxKanbanHiddenStepIDsTotalBytes on the sibling field.
+func TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   []string
+		wantErr string
+	}{
+		{name: "at the byte cap is accepted", value: []string{strings.Repeat("a", maxKanbanPriorityFilterTokensTotalBytes)}},
+		{
+			name:  "exceeding the byte cap is rejected",
+			value: []string{strings.Repeat("a", maxKanbanPriorityFilterTokensTotalBytes+1)},
+			wantErr: fmt.Sprintf(
+				"kanban_priority_filter_tokens: max %d bytes allowed",
+				maxKanbanPriorityFilterTokensTotalBytes,
+			),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{KanbanPriorityFilterTokens: []string{"low"}}
+			req := &UpdateUserSettingsRequest{KanbanPriorityFilterTokens: ptr(tt.value)}
+			err := applyWorkspaceAndTaskListPreferences(settings, req)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+				if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"low"}) {
+					t.Fatalf("expected settings unchanged on error, got %v", settings.KanbanPriorityFilterTokens)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensNilPreservesEmptyClears
+// verifies AC-004.8's request-boundary cases at the apply-step level (not just DTO decode): an
+// absent field pointer (nil, which a request-boundary null also decodes to, per
+// TestKanbanSortAndPriorityFilterTokensRequestDecode) preserves the stored selection, while an
+// explicit empty list clears it.
+func TestApplyWorkspaceAndTaskListPreferencesKanbanPriorityFilterTokensNilPreservesEmptyClears(t *testing.T) {
+	t.Run("nil field pointer preserves the stored selection", func(t *testing.T) {
+		settings := &models.UserSettings{KanbanPriorityFilterTokens: []string{"critical", "high"}}
+		req := &UpdateUserSettingsRequest{}
+		if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !reflect.DeepEqual(settings.KanbanPriorityFilterTokens, []string{"critical", "high"}) {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want unchanged [critical high]", settings.KanbanPriorityFilterTokens)
+		}
+	})
+
+	t.Run("explicit empty list clears the stored selection", func(t *testing.T) {
+		settings := &models.UserSettings{KanbanPriorityFilterTokens: []string{"critical", "high"}}
+		req := &UpdateUserSettingsRequest{KanbanPriorityFilterTokens: ptr([]string{})}
+		if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(settings.KanbanPriorityFilterTokens) != 0 {
+			t.Fatalf("KanbanPriorityFilterTokens = %#v, want cleared to empty", settings.KanbanPriorityFilterTokens)
+		}
+	})
+}
+
 // TestApplyBasicSettings_TerminalFontFamily verifies the terminal font family is preserved, set, trimmed, and cleared.
 func TestApplyBasicSettings_TerminalFontFamily(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
@@ -676,7 +1040,7 @@ func TestApplyStartupPage(t *testing.T) {
 		}
 	})
 
-	for _, value := range []string{models.StartupPageTaskOverview, models.StartupPageLastTask} {
+	for _, value := range []string{models.StartupPageTaskOverview, models.StartupPageLastTask, "threads"} {
 		t.Run("applies "+value, func(t *testing.T) {
 			settings := &models.UserSettings{StartupPage: models.StartupPageTaskOverview}
 			if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{StartupPage: ptr(value)}); err != nil {
@@ -1055,6 +1419,75 @@ func TestApplyWorkspaceAndTaskListPreferencesKanbanHiddenStepIDs(t *testing.T) {
 
 			if !reflect.DeepEqual(settings.KanbanHiddenStepIDs, *tt.req.KanbanHiddenStepIDs) {
 				t.Fatalf("expected %v, got %v", *tt.req.KanbanHiddenStepIDs, settings.KanbanHiddenStepIDs)
+			}
+		})
+	}
+}
+
+func TestApplyWorkspaceAndTaskListPreferencesAutoHideWorkflowIDs(t *testing.T) {
+	makeWorkflowIDs := func(n int) []string {
+		ids := make([]string, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("wf-%d", i)
+		}
+		return ids
+	}
+	duplicateWorkflowIDs := make([]string, maxWorkflowIDsWithAutoHideEmptySteps+1)
+	for i := range duplicateWorkflowIDs {
+		duplicateWorkflowIDs[i] = "wf-duplicate"
+	}
+
+	tests := []struct {
+		name    string
+		value   []string
+		want    []string
+		wantErr string
+	}{
+		{name: "empty list clears the preference", value: []string{}, want: []string{}},
+		{
+			name:  "normalizes duplicate workflow ids",
+			value: []string{"wf-b", "wf-a", "wf-b"},
+			want:  []string{"wf-a", "wf-b"},
+		},
+		{
+			name:  "applies the count limit after deduplication",
+			value: duplicateWorkflowIDs,
+			want:  []string{"wf-duplicate"},
+		},
+		{
+			name:    "rejects too many workflow ids",
+			value:   makeWorkflowIDs(maxWorkflowIDsWithAutoHideEmptySteps + 1),
+			wantErr: fmt.Sprintf("workflow_ids_with_auto_hide_empty_steps: max %d workflow ids allowed", maxWorkflowIDsWithAutoHideEmptySteps),
+		},
+		{
+			name:    "rejects an oversized preference",
+			value:   []string{strings.Repeat("x", maxUserPreferenceBlobBytes+1)},
+			wantErr: fmt.Sprintf("workflow_ids_with_auto_hide_empty_steps: max %d bytes allowed", maxUserPreferenceBlobBytes),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &models.UserSettings{
+				WorkflowIDsWithAutoHideEmptySteps: []string{"wf-existing"},
+			}
+			err := applyWorkspaceAndTaskListPreferences(settings, &UpdateUserSettingsRequest{
+				WorkflowIDsWithAutoHideEmptySteps: &tt.value,
+			})
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want error containing %q", err, tt.wantErr)
+				}
+				if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, []string{"wf-existing"}) {
+					t.Fatalf("rejected update changed settings to %#v", settings.WorkflowIDsWithAutoHideEmptySteps)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(settings.WorkflowIDsWithAutoHideEmptySteps, tt.want) {
+				t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", settings.WorkflowIDsWithAutoHideEmptySteps, tt.want)
 			}
 		})
 	}

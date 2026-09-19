@@ -67,12 +67,44 @@
   display: none !important;
 }
 
+/* Give the tab strip back native horizontal scrolling.
+ *
+ * Dockview hides the strip's overflow and drives scrolling entirely from its
+ * own `wheel` handler, which reads `deltaY` only: a two-finger horizontal
+ * swipe on a touchpad produces `deltaX` and moved nothing. Handing the axis
+ * back to the browser makes the gesture work. Dockview's overlay scrollbar
+ * stays the visible affordance and follows along (it syncs from the element's
+ * `scroll` event), so the native bar is hidden rather than squeezed into the
+ * 40px strip. */
+.dockview-theme-kandev .dv-scrollable > .dv-tabs-container {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dockview-theme-kandev .dv-scrollable > .dv-tabs-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* Tabs shrink before the strip clips them.
+ *
+ * Dockview pins `.dv-tab` at `flex-shrink: 0`, so a group narrower than its tab
+ * row kept every tab at full width and the strip clipped the row from the
+ * right. The close button sits at a tab's right edge, so it was the first thing
+ * to disappear and a tab could become impossible to close without widening the
+ * group again. Shrinking down to a floor truncates the label instead and keeps
+ * the close button in view; past the floor Dockview's own overflow dropdown
+ * takes over.
+ *
+ * The floor is 4rem because that leaves a few characters of label beside the
+ * close button, and because it sits just under the natural width of the
+ * shortest panel titles ("Plan", "Files") so the common case is not widened. */
 .dockview-theme-kandev .dv-tab {
   padding: 0;
   margin: 0 1px;
   font-size: 12px;
   font-weight: 500;
-  min-width: auto;
+  flex-shrink: 1;
+  min-width: 4rem;
   border-radius: 5px;
   border-bottom: none !important;
   outline: none;
@@ -107,7 +139,26 @@
   line-height: 1;
 }
 
+/* Every wrapper a tab component puts between `.dv-tab` and `.dv-default-tab`
+ * (context-menu trigger, terminal ordinal row, session badge row, plugin icon
+ * row) is a flex container, and a flex item's default `min-width: auto` would
+ * stop the shrink above before it ever reaches the label. */
+.dockview-theme-kandev .dv-tab *:has(.dv-default-tab),
+.dockview-theme-kandev .dv-default-tab {
+  min-width: 0;
+}
+
+.dockview-theme-kandev .dv-default-tab .dv-default-tab-content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* `flex-shrink: 0` — the close control is the one part of a tab that must
+ * never be shrunk away. */
 .dockview-theme-kandev .dv-default-tab .dv-default-tab-action {
+  flex-shrink: 0;
   opacity: 0;
   transition:
     opacity 0.15s ease,
@@ -144,6 +195,7 @@
 /* Session tabs own their delete control so the X can transition to an
  * in-place spinner while the delete request is in flight. */
 .dockview-theme-kandev .session-tab-close-action {
+  flex-shrink: 0;
   opacity: 0;
   transition:
     opacity 0.15s ease,

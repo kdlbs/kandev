@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-dev-paths", "02-db-backup", "03-web-child", "04-dev-command"]
 plan: "plan.md"
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Task 05: `runDev` orchestration

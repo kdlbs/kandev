@@ -31,6 +31,7 @@ type recordingEventBus struct {
 type recordedEvent struct {
 	subject string
 	event   *bus.Event
+	ctx     context.Context
 }
 
 // taskServiceStateRepository exercises runtime task-state reconciliation
@@ -156,6 +157,23 @@ func (r failSessionStateUpdateRepo) UpdateTaskSessionState(
 	return r.err
 }
 
+// UpdateTaskSessionStateIfCurrent must also fail: repoStore now declares this
+// method, so the embedded repoStore field promotes it and
+// persistStrictTaskSessionState's conditionalTaskSessionStateUpdater
+// assertion succeeds, routing state transitions through this narrow CAS
+// instead of the plain UpdateTaskSessionState this double otherwise
+// overrides. Without this override, the transition would silently succeed
+// against the embedded real repo instead of surfacing the injected failure.
+func (r failSessionStateUpdateRepo) UpdateTaskSessionStateIfCurrent(
+	context.Context,
+	string,
+	models.TaskSessionState,
+	models.TaskSessionState,
+	string,
+) (bool, time.Time, error) {
+	return false, time.Time{}, r.err
+}
+
 type failSetBaselineRepo struct {
 	repoStore
 }
@@ -254,6 +272,25 @@ func (m *serviceBackedMessageCreator) CreateSessionMessage(
 	return err
 }
 
+func (m *serviceBackedMessageCreator) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, messageType, turnID string,
+	metadata map[string]interface{},
+	requestsInput bool,
+) error {
+	_, err := m.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+		RequestsInput: requestsInput,
+	})
+	return err
+}
+
 func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 	ctx context.Context,
 	taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string,
@@ -271,6 +308,15 @@ func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 		taskID,
 		turnID,
 		msgType,
+	)
+}
+
+func (m *serviceBackedMessageCreator) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, agentSessionID, content, turnID string,
+) error {
+	return m.svc.UpsertAgentPlanMessage(
+		ctx, taskID, sourceToolCallID, agentSessionID, content, turnID,
 	)
 }
 
@@ -324,8 +370,8 @@ func (r failSetSessionMetadataRepo) SetSessionMetadataKey(
 	return errors.New("set session metadata failed")
 }
 
-func (b *recordingEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
-	b.events = append(b.events, recordedEvent{subject: subject, event: event})
+func (b *recordingEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	b.events = append(b.events, recordedEvent{subject: subject, event: event, ctx: ctx})
 	return nil
 }
 func (b *recordingEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {
@@ -339,6 +385,28 @@ func (b *recordingEventBus) Request(context.Context, string, *bus.Event, time.Du
 }
 func (b *recordingEventBus) Close()            {}
 func (b *recordingEventBus) IsConnected() bool { return true }
+
+// @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.1
+func TestHandleAgentPlanEventUsesCorrelatedMessageUpdate(t *testing.T) {
+	messages := &mockMessageCreator{}
+	service := &Service{messageCreator: messages, logger: testLogger()}
+	service.activeTurns.Store("session-plan", "turn-plan")
+
+	service.handleAgentPlanEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task-plan",
+		SessionID: "session-plan",
+		Data: &lifecycle.AgentStreamEventData{
+			ToolCallID:  "call-plan",
+			PlanContent: "# Plan\n\n1. Read",
+		},
+	})
+
+	require.Zero(t, messages.sessionMessageAttempts)
+	require.Zero(t, messages.toolUpdateWrites)
+	require.Equal(t, 1, messages.agentPlanUpserts)
+	require.Equal(t, "call-plan", messages.lastAgentPlanToolCallID)
+	require.Equal(t, "# Plan\n\n1. Read", messages.lastAgentPlanContent)
+}
 
 func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	ctx := context.Background()
@@ -1785,6 +1853,58 @@ func TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID(t *testing.T
 		"republishing the same completion must reuse the same usage_event_id so the DB unique index catches the duplicate")
 }
 
+// TestPublishPromptUsage_RepublishedCompletionWithoutPromptGenerationMintsDistinctUsageEventIDs
+// is the integration-level counterpart to TestUsageEventIDFor's unit-level
+// promptGeneration==0 assertion, and the random-identifier-class counterpart
+// to TestPublishPromptUsage_RepublishedCompletionReusesUsageEventID's
+// deterministic-class coverage (docs/specs/task-cost-ledger/spec.md AC-22).
+// A generation-less transport's "same" redelivered completion frame mints a
+// fresh random usage_event_id on every publish, so the two publishes carry
+// DIFFERENT ids: office/costs already documents that those rows are
+// intentionally not deduplicated, and this proves that end to end rather
+// than just at usageEventIDFor's own return value.
+func TestPublishPromptUsage_RepublishedCompletionWithoutPromptGenerationMintsDistinctUsageEventIDs(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	_, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+	svc.markExecutionCompleted("s1", "exec-1")
+	svc.completeTurnForSession(ctx, "s1")
+
+	frame := func() *lifecycle.AgentStreamEventPayload {
+		return &lifecycle.AgentStreamEventPayload{
+			TaskID:      "t1",
+			SessionID:   "s1",
+			ExecutionID: "exec-1",
+			Data: &lifecycle.AgentStreamEventData{
+				Type:             agentEventComplete,
+				PromptGeneration: 0,
+				Usage:            &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
+			},
+		}
+	}
+
+	// Simulates the same buffered stream frame being delivered twice on a
+	// generation-less transport - same session and execution, but no
+	// prompt-generation tracking either time.
+	svc.handleAgentStreamEvent(ctx, frame())
+	svc.handleAgentStreamEvent(ctx, frame())
+
+	published := findAllPromptUsageEvents(t, eb, "s1")
+	require.Len(t, published, 2, "expected both republished frames to publish a prompt-usage event")
+	require.NotEmpty(t, published[0].UsageEventID)
+	require.NotEmpty(t, published[1].UsageEventID)
+	require.NotEqual(t, published[0].UsageEventID, published[1].UsageEventID,
+		"a generation-less transport must mint a fresh id per publish, so this redelivery is recorded as a new row and its rollup applied - not deduplicated")
+}
+
 func TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2523,6 +2643,30 @@ func TestSetSessionRunning_PublishesTaskStateBeforeRunningSession(t *testing.T) 
 	require.Equal(t, events.TaskSessionStateChanged, eventBus.events[1].subject)
 }
 
+func TestSetSessionRunning_PreservesWaitingForLiveClarification(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	))
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.setSessionRunningForExecution(ctx, "t1", "s1", "exec-1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.Empty(t, taskRepo.stateWrites,
+		"a stream event must not move the task while its clarification remains live")
+}
+
 func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2749,9 +2893,8 @@ func TestAutoStartFailureDoesNotMarkTaskWithActiveSession(t *testing.T) {
 	require.False(t, marked, "a late failure must not mark a task with active work")
 }
 
-// Nothing else ever retires a stored agent failure, so without this clear every
-// path that re-derives task status from session metadata resurrects it and the
-// error icon never goes away.
+// A recovered failure remains available for transcript history, while this
+// transition retires it from the live session-error projection.
 func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 	ctx := context.Background()
 
@@ -2776,11 +2919,12 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 	newService := func(repo *sqliterepo.Repository) (*Service, *recordingEventBus) {
 		eb := &recordingEventBus{}
 		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.taskLaunchRecoveryRepo = repo
 		svc.eventBus = eb
 		return svc, eb
 	}
 
-	t.Run("clears the record and publishes it inactive", func(t *testing.T) {
+	t.Run("retires the record and publishes it inactive", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedError(t, repo)
@@ -2792,13 +2936,15 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 
 		stored, err := repo.GetTaskSession(ctx, "s1")
 		require.NoError(t, err)
-		_, ok := models.LoadLastAgentError(stored.Metadata)
-		require.False(t, ok, "a recovered failure must not keep driving the error icon")
+		storedError, ok := models.LoadLastAgentError(stored.Metadata)
+		require.True(t, ok, "a recovered failure remains available as history")
+		require.True(t, storedError.IsDismissed(), "a recovered failure must not remain active")
 
 		// The session-state publish that follows reads session_metadata straight
 		// off this object, so a stale copy would re-arm the icon immediately.
-		_, ok = models.LoadLastAgentError(session.Metadata)
-		require.False(t, ok, "the in-memory copy must be cleared too")
+		memoryError, ok := models.LoadLastAgentError(session.Metadata)
+		require.True(t, ok)
+		require.True(t, memoryError.IsDismissed(), "the in-memory copy must be retired too")
 
 		published := errorEvents(eb)
 		require.Len(t, published, 1, "clients need one event to drop the icon")
@@ -2806,6 +2952,7 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, false, data["active"])
 		require.Equal(t, "s1", data["session_id"])
+		require.Equal(t, models.ErrorScopeSession, data["scope"])
 	})
 
 	t.Run("stays silent when the session has no stored error", func(t *testing.T) {
@@ -2820,6 +2967,206 @@ func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
 		require.Empty(t, errorEvents(eb),
 			"every later completion must stay silent so turns do not churn the row")
 	})
+
+	t.Run("does not retire a successor failure from a stale snapshot", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetSessionMetadataKey(
+			ctx, "s1", models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{
+				Message:    "old failure",
+				OccurredAt: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC),
+				StampValue: "old-stamp",
+			},
+		))
+		svc, eb := newService(repo)
+
+		snapshot, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.NoError(t, repo.SetSessionMetadataKey(
+			ctx, "s1", models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{
+				Message:    "successor failure",
+				OccurredAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC),
+				StampValue: "successor-stamp",
+			},
+		))
+
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", snapshot))
+
+		stored, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		storedError, ok := models.LoadLastAgentError(stored.Metadata)
+		require.True(t, ok)
+		require.Equal(t, "successor-stamp", storedError.Stamp())
+		require.False(t, storedError.IsDismissed())
+		snapshotError, ok := models.LoadLastAgentError(snapshot.Metadata)
+		require.True(t, ok)
+		require.Equal(t, "old-stamp", snapshotError.Stamp())
+		require.False(t, snapshotError.IsDismissed())
+		require.Empty(t, errorEvents(eb), "a stale retirement must not hide the successor")
+	})
+}
+
+func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "bootstrap-history-task", "bootstrap-history-session", "step1")
+	session, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, "bootstrap-history-session", "bootstrap-history-task", "exec-1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.taskLaunchRecoveryRepo = repo
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+	startupFailure := &lifecycle.BootstrapFailure{
+		Operation: models.AgentErrorCauseOperationResume,
+		Code:      models.AgentErrorCauseCodePermissionDenied,
+		Detail:    "The saved session could not be loaded.",
+		Cause:     errors.New("provider timeout with private token=secret"),
+	}
+	// The ordinary non-auth startup path returns false so the executor owns the
+	// terminal admission. The transition below is that accepted boundary.
+	require.False(t, svc.handleAgentStartFailed(
+		ctx,
+		"bootstrap-history-task",
+		"bootstrap-history-session",
+		"exec-1",
+		startupFailure,
+		false,
+	))
+	failure := models.LastAgentError{
+		Message:          "The agent could not start.",
+		OccurredAt:       time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC),
+		Scope:            models.ErrorScopeSession,
+		AgentExecutionID: "exec-1",
+		ExecutionID:      "exec-1",
+		Phase:            models.LaunchErrorPhaseBootstrap,
+		AttemptID:        "attempt-1",
+		Code:             models.LaunchErrorCategoryGenericLaunchFailure,
+		Details:          "operation=agent_bootstrap; cause=the provider did not respond",
+		StampValue:       "bootstrap-failure-1",
+	}
+
+	changed, state, err := svc.transitionBootstrapFailure(
+		ctx,
+		"bootstrap-history-task",
+		"bootstrap-history-session",
+		"exec-1",
+		models.TaskSessionStateStarting,
+		"",
+		failure,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, models.TaskSessionStateFailed, state)
+
+	messages, err := repo.ListMessages(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "accepted bootstrap failure must create one transcript entry")
+	require.Equal(t, models.MessageTypeStatus, messages[0].Type)
+	require.Equal(t, "bootstrap-failure-1", messages[0].Metadata["error_stamp"])
+	require.Equal(t, true, messages[0].Metadata["recovery_actions"])
+	require.Equal(t, failure.Details, messages[0].Metadata["error_output"])
+	require.Equal(t, "Agent startup failed: The agent could not start.", messages[0].Content)
+
+	reloaded, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	resolvedAt := svc.markRecoveryResolved(ctx, reloaded.ID, reloaded)
+	require.NotNil(t, resolvedAt)
+
+	afterRecovery, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	retainedError, ok := models.LoadLastAgentError(afterRecovery.Metadata)
+	require.True(t, ok)
+	require.True(t, retainedError.IsDismissed())
+	retainedMessages, err := repo.ListMessages(ctx, "bootstrap-history-session")
+	require.NoError(t, err)
+	require.Len(t, retainedMessages, 1, "recovery retirement must retain the chronological entry")
+}
+
+type failOnceBootstrapMessageCreator struct {
+	*serviceBackedMessageCreator
+	err error
+}
+
+func (m *failOnceBootstrapMessageCreator) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput bool,
+) error {
+	if m.err != nil {
+		err := m.err
+		m.err = nil
+		return err
+	}
+	return m.serviceBackedMessageCreator.CreateSessionMessageIdempotent(
+		ctx,
+		messageID,
+		taskID,
+		content,
+		sessionID,
+		messageType,
+		turnID,
+		metadata,
+		requestsInput,
+	)
+}
+
+func TestTransitionBootstrapFailureReturnsRepairableHistoryError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "bootstrap-repair-task", "bootstrap-repair-session", "step1")
+	session, err := repo.GetTaskSession(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, "bootstrap-repair-session", "bootstrap-repair-task", "exec-repair")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	creator := &failOnceBootstrapMessageCreator{
+		serviceBackedMessageCreator: newServiceBackedMessageCreator(repo),
+		err:                         errors.New("transcript temporarily unavailable"),
+	}
+	svc.messageCreator = creator
+	failure := models.LastAgentError{
+		Message:          "The agent could not start.",
+		OccurredAt:       time.Date(2026, 9, 14, 11, 0, 0, 0, time.UTC),
+		Scope:            models.ErrorScopeSession,
+		AgentExecutionID: "exec-repair",
+		ExecutionID:      "exec-repair",
+		Phase:            models.LaunchErrorPhaseBootstrap,
+		AttemptID:        "exec-repair",
+		Code:             models.LaunchErrorCategoryGenericLaunchFailure,
+		Details:          "operation=agent_bootstrap; cause=provider unavailable",
+		StampValue:       "bootstrap-repair-failure",
+	}
+
+	changed, state, err := svc.transitionBootstrapFailure(
+		ctx,
+		"bootstrap-repair-task",
+		"bootstrap-repair-session",
+		"exec-repair",
+		models.TaskSessionStateStarting,
+		"",
+		failure,
+	)
+	require.Error(t, err)
+	require.True(t, changed, "the state admission succeeded even though history needed repair")
+	require.Equal(t, models.TaskSessionStateFailed, state)
+	messages, err := repo.ListMessages(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	require.Empty(t, messages)
+
+	require.NoError(t, svc.persistBootstrapFailureMessage(
+		ctx, "bootstrap-repair-task", "bootstrap-repair-session", "exec-repair", failure,
+	))
+	messages, err = repo.ListMessages(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "the bounded repair must restore the accepted failure entry")
+	require.Equal(t, "bootstrap-repair-failure", messages[0].Metadata["error_stamp"])
 }
 
 func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
@@ -3415,6 +3762,100 @@ func TestPersistSessionRuntimeConfigUpdatesProviderState(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "mock-fast", cfg.Model)
 	require.Equal(t, map[string]string{"model": "mock-fast", "effort": "medium"}, cfg.ConfigOptions)
+}
+
+func TestHandleSessionModelsEventDefersUnsettledStartupState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyRuntimeConfig, models.SessionRuntimeConfig{
+		Model: "gpt-5.6-sol",
+		ConfigOptions: map[string]string{
+			"model":            "gpt-5.6-sol",
+			"reasoning_effort": "high",
+		},
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPConfigBaseline, map[string]string{
+		"model":            "gpt-5.6-sol",
+		"reasoning_effort": "medium",
+	}))
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyACPModelState, lifecycle.SessionModelsSnapshot{
+		CurrentModelID: "gpt-5.6-sol",
+		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+		ConfigOptions: []streams.ConfigOption{{
+			ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol",
+		}},
+		ConfigOptionsSettled: true,
+	}))
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.AgentProfileSnapshot = map[string]interface{}{"model": "gpt-5.6-sol"}
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eb}
+	unsettled := func(model string) {
+		svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:    "t1",
+			SessionID: "s1",
+			AgentID:   "a1",
+			Data: &lifecycle.AgentStreamEventData{
+				CurrentModelID: model,
+				SessionModels:  []streams.SessionModelInfo{{ModelID: model, Name: model}},
+				OriginalConfigCandidate: []streams.ConfigOption{{
+					Type: "select", ID: "reasoning_effort", CurrentValue: "high",
+				}},
+				ConfigOptions: []streams.ConfigOption{
+					{ID: "model", Category: "model", CurrentValue: model},
+					{ID: "reasoning_effort", CurrentValue: "low"},
+				},
+				Data: map[string]any{"original_config_settled": true},
+			},
+		})
+	}
+
+	unsettled("gpt-5.6-luna")
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	runtimeConfig, ok := models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", runtimeConfig.Model)
+	require.Equal(t, "gpt-5.6-sol", updated.AgentProfileSnapshot["model"])
+	modelState, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", modelState.CurrentModelID)
+	require.Empty(t, eb.events)
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AgentID:   "a1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			SessionModels:  []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+			ConfigOptions: []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol"},
+				{ID: "reasoning_effort", CurrentValue: "high"},
+			},
+			Data: map[string]any{
+				"config_options_settled":  true,
+				"original_config_settled": true,
+			},
+		},
+	})
+	require.Len(t, eb.events, 1)
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateRunning, ""))
+	unsettled("gpt-5.6-luna")
+	require.Len(t, eb.events, 2)
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	runtimeConfig, ok = models.LoadSessionRuntimeConfig(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-luna", runtimeConfig.Model)
 }
 
 func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t *testing.T) {

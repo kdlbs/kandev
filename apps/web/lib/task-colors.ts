@@ -1,4 +1,4 @@
-import { getLocalStorage, setLocalStorage } from "./local-storage";
+import { getLocalStorage, removeLocalStorage } from "./local-storage";
 
 export const TASK_COLORS = ["red", "orange", "yellow", "green", "blue", "purple", "pink"] as const;
 
@@ -32,56 +32,50 @@ export const TASK_COLOR_LABEL_KEYS: Record<TaskColor, string> = {
 };
 
 export const TASK_COLORS_STORAGE_KEY = "kandev.taskColors";
-export const TASK_COLORS_CHANGED_EVENT = "kandev:task-colors-changed";
+export const MAX_TASK_COLOR_TASK_ID_BYTES = 128;
+export const MAX_TASK_COLOR_MAP_ENTRIES = 10_000;
 
 function isTaskColor(value: unknown): value is TaskColor {
   return typeof value === "string" && (TASK_COLORS as readonly string[]).includes(value);
 }
 
-let cachedMap: Record<string, TaskColor> | null = null;
-
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key === null || e.key === TASK_COLORS_STORAGE_KEY) cachedMap = null;
-  });
-}
-
-function readAll(): Record<string, TaskColor> {
-  if (cachedMap) return cachedMap;
-  const raw = getLocalStorage<Record<string, string>>(TASK_COLORS_STORAGE_KEY, {});
-  const out: Record<string, TaskColor> = {};
-  if (raw && typeof raw === "object") {
-    for (const [taskId, color] of Object.entries(raw)) {
-      if (isTaskColor(color)) out[taskId] = color;
+/** Parses the backend manual-color map and drops malformed entries. */
+export function parseSidebarTaskColors(value: unknown): Record<string, TaskColor | null> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Record<string, TaskColor | null> = {};
+  let entryCount = 0;
+  for (const [taskId, color] of Object.entries(value)) {
+    if (entryCount >= MAX_TASK_COLOR_MAP_ENTRIES) break;
+    if (!isValidTaskColorTaskId(taskId)) continue;
+    if (color === null || isTaskColor(color)) {
+      result[taskId] = color;
+      entryCount += 1;
     }
   }
-  cachedMap = out;
-  return out;
+  return result;
 }
 
-function writeAll(map: Record<string, TaskColor>): void {
-  cachedMap = map;
-  setLocalStorage(TASK_COLORS_STORAGE_KEY, map);
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(TASK_COLORS_CHANGED_EVENT));
+function isValidTaskColorTaskId(taskId: string): boolean {
+  if (!taskId) return false;
+  try {
+    const encoded = encodeURIComponent(taskId).replace(/%[0-9a-f]{2}/gi, "_");
+    return encoded.length <= MAX_TASK_COLOR_TASK_ID_BYTES;
+  } catch {
+    return false;
   }
 }
 
-export function getTaskColor(taskId: string): TaskColor | null {
-  if (!taskId) return null;
-  return readAll()[taskId] ?? null;
+/** Reads legacy browser colors as migration input only. */
+export function readLegacyTaskColors(): Record<string, TaskColor> {
+  const parsed = parseSidebarTaskColors(getLocalStorage(TASK_COLORS_STORAGE_KEY, {}));
+  const result: Record<string, TaskColor> = {};
+  for (const [taskId, color] of Object.entries(parsed)) {
+    if (color !== null) result[taskId] = color;
+  }
+  return result;
 }
 
-export function setTaskColor(taskId: string, color: TaskColor | null): void {
-  if (!taskId) return;
-  const all = readAll();
-  if (color === null) {
-    if (!(taskId in all)) return;
-    const next = { ...all };
-    delete next[taskId];
-    writeAll(next);
-  } else {
-    if (all[taskId] === color) return;
-    writeAll({ ...all, [taskId]: color });
-  }
+/** Removes the legacy browser key after a complete migration. */
+export function clearLegacyTaskColors(): void {
+  removeLocalStorage(TASK_COLORS_STORAGE_KEY);
 }

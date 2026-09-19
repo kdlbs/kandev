@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/integrations/enable-disable-toggle.md
+spec: docs/specs/integrations/requirements/enable-disable-toggle.md
 created: 2026-08-06
 status: complete
 ---

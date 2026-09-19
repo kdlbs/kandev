@@ -1,5 +1,11 @@
 import { generateUUID } from "@/lib/utils";
-import { workflowId as toWorkflowId, type Workflow, type WorkflowStep } from "@/lib/types/http";
+import {
+  normalizeWorkflowProfileSessionStartPolicy,
+  normalizeWorkflowProfileSessionEndPolicy,
+  workflowId as toWorkflowId,
+  type Workflow,
+  type WorkflowStep,
+} from "@/lib/types/http";
 
 const COPY_SUFFIX_PATTERN = /^(.*) \(copy(?: (\d+))?\)$/;
 
@@ -73,9 +79,20 @@ function cloneWorkflowStep(
     show_in_command_panel: source.show_in_command_panel,
     auto_archive_after_hours: source.auto_archive_after_hours,
     agent_profile_id: source.agent_profile_id,
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      source.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      source.profile_session_end_policy,
+    ),
+    complete_task_on_enter: source.complete_task_on_enter,
     auto_advance_requires_signal: source.auto_advance_requires_signal,
     cancel_triggers_turn_complete: source.cancel_triggers_turn_complete,
     wip_limit: source.wip_limit,
+    session_target:
+      source.session_target?.kind === "step"
+        ? { kind: "step", step_id: remapStepId(source.session_target.step_id)! }
+        : (source.session_target ?? null),
     pull_from_step_id: remapStepId(source.pull_from_step_id),
     stage_type: source.stage_type,
     created_at: "",

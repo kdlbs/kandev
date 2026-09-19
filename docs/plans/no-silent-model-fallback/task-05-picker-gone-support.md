@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: []
 plan: docs/plans/no-silent-model-fallback/plan.md
-spec: docs/specs/no-silent-model-fallback/spec.md
+spec: docs/specs/agents/requirements/no-silent-model-fallback.md
 ---
 
 # Task 5 — Model pickers: grey out gone models

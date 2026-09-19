@@ -1,4 +1,5 @@
 import type { SidebarView } from "./sidebar-view-types";
+import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
 
 export const DEFAULT_VIEW_ID = "view-all-tasks";
 export const MAX_SIDEBAR_VIEWS = 50;
@@ -11,6 +12,7 @@ export function createDefaultSidebarView(id: string, name: string): SidebarView 
     sort: { key: "state", direction: "asc" },
     group: "repository",
     collapsedGroups: [],
+    taskRow: cloneSidebarTaskRowPresentation(undefined),
   };
 }
 

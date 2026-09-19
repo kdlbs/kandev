@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/webkit-task-dialog-rendering.md
+spec: docs/specs/ui/requirements/webkit-task-dialog-rendering.md
 created: 2026-08-01
 status: complete
 ---

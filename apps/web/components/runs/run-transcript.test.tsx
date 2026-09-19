@@ -16,10 +16,12 @@ vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { RunTranscript } from "./run-transcript";
+import { focusRunTranscriptTurn, RunTranscript } from "./run-transcript";
 
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
+const OLD_TURN_ID = "turn-old";
+const CURRENT_TURN_ID = "turn-current";
 
 function transcript() {
   return (
@@ -74,6 +76,25 @@ describe("RunTranscript session hydration", () => {
     rerender(transcript());
 
     expect(mockFetchTaskSession).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("RunTranscript turn selection", () => {
+  it("focuses the selected turn without removing surrounding transcript rows", () => {
+    const root = document.createElement("div");
+    const previous = document.createElement("div");
+    previous.dataset.turnId = OLD_TURN_ID;
+    const selected = document.createElement("div");
+    selected.dataset.turnId = CURRENT_TURN_ID;
+    selected.scrollIntoView = vi.fn();
+    root.append(previous, selected);
+    document.body.append(root);
+
+    expect(focusRunTranscriptTurn(root, CURRENT_TURN_ID)).toBe(true);
+    expect(root.querySelectorAll("[data-turn-id]")).toHaveLength(2);
+    expect(document.activeElement).toBe(selected);
+    expect(selected.scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "center" });
+    root.remove();
   });
 });
 

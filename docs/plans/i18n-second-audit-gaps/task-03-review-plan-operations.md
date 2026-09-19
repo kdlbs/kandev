@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-azure-shortcut-metadata"]
 plan: "plan.md"
-spec: "../../specs/i18n-second-audit-gaps/spec.md"
+spec: "../../specs/platform/requirements/i18n-second-audit-gaps.md"
 ---
 
 # Task 03: Review And Plan Operations

@@ -16,6 +16,17 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
    (`~/.kandev/plugins/<id>/<version>/ui/...`, per manifest `ui.bundle`). There is no
    reverse proxy and no live upstream request: the plugin subprocess does not need to
    be running to serve the UI bundle, since installation already extracted the file.
+   Before importing a bundle, the Host calls authenticated
+   `GET /api/plugins/{id}/conversation/binding`. Success returns
+   `{bindingToken,generation,expiresAt}` with `expiresAt` RFC3339 UTC; every
+   response, including errors, sends `Cache-Control: no-store`. Errors use
+   `{ "error": { "code": "...", "message": "...", "retryable": false|true } }`:
+   `401/unauthenticated/false`, `404/not_found/false`, and
+   `409/generation_superseded/true`. On `401` or `404`, the current load is
+   skipped without disabling persisted state; on `409`, binding is retried with
+   bounded backoff and import waits for success. Expiry rebinds or aborts. The
+   grant remains in a Host-only closure and is never passed to bundle code/public
+   API values.
 2. On SPA boot, the **plugin host** (`apps/web/lib/plugins/host.ts`) iterates
    `bootPayload.plugins`, injects any `styleUrls` as `<link>`, and dynamically
    `import(/* @vite-ignore */ bundleUrl)` each bundle as a native ES module. Before a
@@ -33,21 +44,19 @@ repositoryProviderIds?: string[] }`. `repositoryProviderIds` is JSON
      destroy?(): void,
    })
    ```
+   The loader serializes stages per plugin and creates a private Host-only `(pluginId,generation,stageId,stageToken)` registration context before import. The public `window.registerKandevPlugin(id,plugin)` signature is unchanged; the Host routes each call to the currently open stage context for that plugin ID through an internal import-context handshake (closure-held stage token, never a public argument). Only the open stage's first registration is accepted. Registration after context closure (timeout, failure, or settled stage), a duplicate registration within the same stage, and a call presenting a foreign or retired stage token are rejected without mutating active state; the next stage does not import until the prior import settles.
+   Generation lifecycle is `pending -> active -> retired` with one commit linearization point. `pending` owns staged style links keyed by `(pluginId,generation)`, staged registry contributions, staged runtime handles/subscriptions, and the staged binding grant. `active` is the single committed generation serving panels. `retired` is revoked and reclaimed. Failed or timed-out staging removes only pending style links, contributions, handles, and grants. Commit atomically swaps active registry contributions and styles, then retires the old generation: revoke its grant and binding token, call its `destroy?.()`, remove its `(pluginId,generation)` styles and registrations, and close its panels. Prior contributions stay visible until replacement succeeds.
 4. After the module resolves, the host calls `initialize(registry, host)`. A
-   reload/update may unregister the previous generation before starting the next
-   one; the host keeps that transition unresolved until the current generation's
-   initialization finishes. Slow or failed reloads do not by themselves revoke
-   open or saved task panels. On explicit plugin disable/uninstall the host calls
-   `destroy?.()`, removes the plugin's registrations, and closes its panels.
-   Each initialization attempt is transactional for plugin-owned runtime state:
-   failure or timeout aborts plugin-owned work and fences callbacks from the
-   expired generation. The same generation owns host-created subscriptions,
-   modal and task-link handles, toasts, and review surfaces; the loader closes or
-   unsubscribes them before calling `destroy` exactly once. Requests and callbacks
-   from an expired generation cannot mutate the replacement generation. Failure or
-   timeout does **not** unregister `registry` contributions (nav items, routes,
-   etc.) already made before the failure — those persist, and only the plugin's
-   lifecycle status becomes failed, until the plugin's *next* load revokes them.
+   reload/update stages binding, import, and initialization for the successor;
+   the previous active generation remains usable until the successor commits.
+   Failed or timed-out staging fences only the pending generation and leaves
+   open/saved panels on the previous generation. On explicit disable/uninstall
+   the host calls `destroy?.()`, revokes the active grant, removes registrations,
+   and closes panels. Each initialization attempt is transactional for
+   plugin-owned runtime state; its callbacks, subscriptions, and handles are
+   fenced on failure, while successful replacement revokes the old generation.
+   Failure does not unregister prior registry contributions until replacement
+   succeeds.
 
 ## Global entry point
 
@@ -60,6 +69,11 @@ The independently consumable frontend type contract is the runtime-free
 these types instead of re-declaring this document or importing `apps/web` internals.
 The host has a compile-time assignability test, and the real Bitbucket package is a
 required exact-head compatibility consumer.
+`HostReact` includes `Fragment`, `createElement`, `useState`, `useEffect`,
+`useMemo`, `useCallback`, and `useLayoutEffect` with structural React-compatible
+signatures. `host.ui.PromptMentionText` is a curated host component with
+`{ text: string; interactive?: boolean }` props and owns alias loading plus
+fine/coarse-pointer disclosure.
 
 ## `host: PluginHostApi`
 
@@ -164,7 +178,11 @@ interface PluginHostApi {
   // Publishes one integration registration's live enabled state for one
   // workspace. The value is memory-only; persist it with host.storage and
   // republish it for every workspace after plugin load.
-  setIntegrationEnabled(integrationId: string, workspaceId: string, enabled: boolean): void;
+  setIntegrationEnabled(
+    integrationId: string,
+    workspaceId: string,
+    enabled: boolean,
+  ): void;
   // Authenticated, per-user key/value storage backed by
   // /api/plugins/{id}/user-state/... — see the "host.storage" section below.
   // Requires the plugin manifest to declare capabilities.user_state: true.
@@ -349,7 +367,7 @@ provider-neutral code-host dashboard set: `ChangeRequestList`,
 `ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
 `IntegrationSaveQueryDialog`, `IntegrationRepositoryFilter`, `IntegrationCursorPagination`,
 `IntegrationStartTaskMenu`, `IntegrationIcon`, `IntegrationChangeRequestStatus`, and
-`TaskRowIndicator`, plus native integration settings surfaces:
+`TaskRowIndicator`, `PromptMentionText`, plus native integration settings
 `IntegrationAuthStatusBanner`, `IntegrationEnabledControl`, `SettingsSection`,
 `SettingsCard`, and `WorkspaceScopedSection`. The authoritative list is
 `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
@@ -412,6 +430,57 @@ Radix/portal/context-based would split React context across instances and
 break refs/`asChild`. Pure-React libs (e.g. `@tabler/icons-react`) bundle
 fine.
 
+### First-use repository inspection action
+
+A manifest-owned repository provider that supports native task creation from a
+new URL declares this workspace-scoped action:
+
+```yaml
+actions:
+  - key: "repositories.inspect"
+    scope: "workspace"
+    max_body_bytes: 16384
+```
+
+The host invokes the active manifest owner from the backend. The plugin receives
+the verified workspace context and this bounded body. Browser descriptor fields
+are not forwarded:
+
+```json
+{ "url": "https://code.example.com/owner/repository" }
+```
+
+Return the preferred nested response:
+
+```json
+{
+  "repository": {
+    "provider_id": "example-provider",
+    "provider_host": "https://code.example.com",
+    "provider_scope": "https://code.example.com/context-a",
+    "provider_repository_id": "owner/repository",
+    "owner_or_project": "owner",
+    "name": "repository",
+    "clone_url": "https://code.example.com/owner/repository.git",
+    "default_branch": "main"
+  }
+}
+```
+
+The host accepts the descriptor at the top level for compatibility and accepts
+`{"matched":false}` for a URL the provider does not own. A successful response
+must use the requested provider ID and include a provider host, provider scope,
+repository ID, owner or project, name, credential-free HTTPS clone URL, and
+default branch. The clone origin must match the HTTPS provider origin. Provider
+scope is limited to 512 bytes and identity fields cannot contain NUL bytes. Any
+scope or repository ID hint from the task request must match the response.
+
+The host enforces the manifest body limit, a 15-second timeout, and a 1 MiB
+response limit. It validates the response before it writes a repository or task.
+Malformed output is invalid, `matched:false` is not found, and provider or
+transport failures are unavailable. Error responses do not include plugin body
+content or upstream credentials.
+
 ### Persisted repository branch action
 
 A manifest-owned repository provider that participates in Kandev's native task branch
@@ -423,6 +492,10 @@ actions:
     scope: "workspace"
     max_body_bytes: 16384
 ```
+
+Browser-invoked actions may additionally declare `access: "admin"`. Omitting
+`access` preserves the default `authenticated` policy. The host rejects a
+non-administrator before it forwards any request body to an admin action.
 
 This action is invoked by the host backend, not the browser callback. Kandev resolves the
 active plugin that owns the repository's persisted provider ID and supplies a verified
@@ -525,9 +598,17 @@ cleared when the plugin unloads. Persist the source of truth with
 `host.storage`, then republish it after load:
 
 ```ts
-function publishAll(host: PluginHostApi, integrationId: string, enabledByWorkspace: Map<string, boolean>) {
+function publishAll(
+  host: PluginHostApi,
+  integrationId: string,
+  enabledByWorkspace: Map<string, boolean>,
+) {
   for (const workspaceId of host.context.getWorkspaceIds()) {
-    host.setIntegrationEnabled(integrationId, workspaceId, enabledByWorkspace.get(workspaceId) === true);
+    host.setIntegrationEnabled(
+      integrationId,
+      workspaceId,
+      enabledByWorkspace.get(workspaceId) === true,
+    );
   }
 }
 
@@ -614,6 +695,211 @@ that already filters to this plugin's own events, applies your `scope`/
 tab's own writes (so an editor never clobbers its own caret/selection from its
 own write).
 
+### host.conversation - live paginated session history
+
+The Host-only conversation contract is source-backed. The
+[source reconciliation plan](../conversation-storage-replacement/plan.md) and
+its system design define storage and transport behavior; this section defines
+the browser-visible API and the private v2 wire shape.
+
+This browser-only facade requires the manifest capability
+capabilities.api_read: ["messages"] and min_kandev_version: "0.91.1" or higher.
+It is the only supported browser way to read prompt history. It does not expose
+Zustand state, first-party /api/v1 URLs, raw content, arbitrary metadata, cursors,
+revision tokens, or WebSocket payloads. The Host binds every request and
+notification to the current plugin generation and task-panel session context.
+
+    type PluginConversationErrorCode =
+      | "unauthenticated"
+      | "not_found"
+      | "invalid_query"
+      | "upstream_failure";
+
+    interface PluginConversationError {
+      code: PluginConversationErrorCode;
+      message: string;
+      retryable: boolean;
+    }
+
+    type PluginConversationAuthor = "user" | "agent";
+    type PluginConversationSort = "asc" | "desc";
+
+    interface PluginConversationMessage {
+      id: string;
+      taskId: string | null;
+      sessionId: string;
+      turnId?: string;
+      authorType: PluginConversationAuthor;
+      type: string;
+      content: string;
+      createdAt: string;
+      updatedAt: string;
+      promptIndex?: number;
+      senderTaskId?: string;
+    }
+
+    interface PluginConversationTurn {
+      id: string;
+      taskId: string | null;
+      sessionId: string;
+      startedAt: string;
+      completedAt?: string;
+      updatedAt: string;
+    }
+
+    interface PluginSessionMessagesQuery {
+      sessionId: string | null;
+      taskId?: string | null;
+      authorTypes?: readonly PluginConversationAuthor[];
+      sort?: PluginConversationSort;
+      pageSize?: number;
+    }
+
+    interface PluginSessionMessagesState {
+      messages: readonly PluginConversationMessage[];
+      loading: boolean;
+      hydrated: boolean;
+      loadingMore: boolean;
+      error: PluginConversationError | null;
+      hasMore: boolean;
+      removed: boolean;
+      loadMore(): Promise<number>;
+      retry(): void;
+    }
+
+    interface PluginSessionTurnsState {
+      turns: readonly PluginConversationTurn[];
+      loading: boolean;
+      hydrated: boolean;
+      error: PluginConversationError | null;
+      removed: boolean;
+      retry(): void;
+    }
+
+    interface PluginConversationApi {
+      useSessionMessages(query: PluginSessionMessagesQuery): PluginSessionMessagesState;
+      useSessionTurns(sessionId: string | null, taskId?: string | null): PluginSessionTurnsState;
+      useMessageFavorite(sessionId: string | null, messageId: string): boolean;
+    }
+
+Within a task-panel render, host.conversation resolves the Host-injected panel
+scope; props.conversation.history is the equivalent explicit handle. Outside a
+panel scope, nullable session reads return empty state. taskId is tri-state:
+undefined inherits the active panel task, null selects every task in the session,
+and an explicit string must equal the panel task. A mismatch fails before
+network activity. Cache identity, cursor fingerprints, and live filtering retain
+that tri-state distinction.
+
+Messages and turns are read from current source rows in bounded deterministic
+keyset pages. The Host maps safe DTOs, strips system content and arbitrary
+metadata, and keeps source cursors private. It owns page invalidation, retries,
+deduplication, recovery, and lifecycle abort. The public state retains projected
+rows when session.removed arrives, sets removed to true, and stops pagination and
+retry without issuing more network requests. Each mounted panel has an
+independent scope, cache, Host-minted identity, and abort controller.
+
+The Host reconciles source notifications by epoch and decimal revision. A
+matching complete receipt applies its operations by entity ID. A reset marker,
+malformed payload, wrong scope, epoch change, revision gap, or failed operation
+starts a fresh source read. Notifications received before their matching
+snapshot commits remain buffered. A source read and its revision are checked
+together, then the buffered changes are applied. There is no durable payload
+journal, ACK protocol, poison queue, replay promise, content hash, or caller
+selectable as-of read.
+
+#### Host-only v2 conversation wire contract
+
+The private subscribe actions are session.conversation.subscribe and
+session.conversation.unsubscribe. A request uses this shape:
+
+    type ConversationSubscribeRequest = {
+      protocol_version: 2;
+      scope_id: string;
+      session_id: string;
+      consumer_kind: "core" | "plugin";
+      plugin_id?: string;
+      generation?: number;
+      binding_token?: string;
+      task_id?: string | null;
+      authors?: string[];
+      sort?: "asc" | "desc";
+    };
+
+Plugin requests include plugin_id, generation, and binding_token. Core requests
+use consumer_kind: "core". The server validates the session through the normal
+user/workspace boundary and rejects stale legacy session.subscribe payloads with
+ordered fields. Unsubscribe uses the same scope and binding identity.
+
+    type ConversationSubscribeSuccess = {
+      success: true;
+      protocol_version: 2;
+      scope_id: string;
+      session_id: string;
+      epoch: string;
+      revision: string;
+    };
+
+    type ConversationSubscribeFailure = {
+      success: false;
+      error: {
+        code: "invalid_request" | "invalid_binding" | "generation_superseded"
+          | "session_not_found" | "unauthorized" | "upstream_failure";
+        message: string;
+        retryable: boolean;
+      };
+    };
+
+    type ConversationChangeOperation = {
+      kind: "upsert" | "remove";
+      entity: "message" | "turn";
+      id: string;
+      message?: object;
+      turn?: object;
+    };
+
+    type ConversationChangedPayload = {
+      protocol_version: 2;
+      scope_id: string;
+      session_id: string;
+      epoch: string;
+      base_revision: string;
+      revision: string;
+      reset?: boolean;
+      operations: ConversationChangeOperation[];
+    };
+
+The server publishes a changed payload only after the source transaction
+commits. Complete mutation receipts carry the represented operations and the
+base and committed revision. Incomplete receipts and uninstrumented writes
+carry reset: true, so the client performs source reconciliation. An operation
+may be filtered out for a task or author subscription while the revision still
+advances; an empty operations array with matching revisions is a valid
+coverage-only notification.
+
+Revision values are decimal strings because JavaScript numbers cannot safely
+represent every database revision. The process epoch changes after restart or
+restore. The Host accepts only a newer contiguous revision in the current epoch,
+buffers changes until snapshots commit, and recovers on a gap or epoch change.
+A terminal session.removed notification is delivered through the normal
+notification channel and closes every matching source scope.
+
+HTTP pages are:
+GET /api/plugins/{id}/conversation/v2/task-sessions/{sessionId}/messages
+GET /api/plugins/{id}/conversation/v2/task-sessions/{sessionId}/turns
+GET /api/plugins/{id}/conversation/v2/task-sessions/{sessionId}/revision
+GET /api/plugins/{id}/conversation/binding
+
+Source pages return the public records plus private epoch, revision, cursor, and
+hasMore fields. expected_revision is an optional decimal guard. Binding and all
+error responses use Cache-Control: no-store. Stable public errors are
+401/unauthenticated, 404/not_found, 400/invalid_query, and authorized
+5xx/upstream_failure. Binding failures may use a Host-only retryable
+generation_superseded response; it never reaches plugin code.
+
+The continuation-renew endpoint from the predecessor transport is not part of
+the source contract. Load-more and retry use a current source read and preserve
+the public state until that read succeeds. No browser code imports a persistence
+store or writes conversation history.
 ## `registry: PluginRegistry`
 
 ```ts
@@ -631,7 +917,11 @@ own write).
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
 // silently dropped.
 type PluginIcon = string | React.ComponentType<{ className?: string }>;
-export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
+export type PluginNavSection =
+  | "main"
+  | "settings"
+  | "integrations"
+  | "sidebar-footer";
 
 interface NavItem {
   id: string;
@@ -684,7 +974,9 @@ interface PluginRegistry {
   registerNavItem(item: NavItem): void;
 
   // Route under /settings/plugins/{id}/... rendered inside settings shell.
-  // The settings shell already provides its own topbar chrome — no options here.
+  // The exact /settings/plugins/{id} route retains the host-owned personal
+  // shortcut card beside the plugin component; nested routes are fully
+  // plugin-owned. The settings shell already provides its own topbar chrome.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
 
   // Native Settings > Integrations contribution. The host adds index/navigation
@@ -695,7 +987,8 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "chat-input-actions", "task-create-input-actions",
+  // "settings-nav", "chat-input-actions", "chat-submit-decoration",
+  // "task-create-input-actions",
   // "new-session-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
   // "plugin-settings", "task-card-indicators", "task-card-tags",
@@ -719,6 +1012,26 @@ interface PluginRegistry {
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
   // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
+  // "chat-submit-decoration" renders *over* the chat composer's send button
+  // rather than beside it — for adornments that belong on the send affordance
+  // itself (a progress ring, a state dot), which a sibling slot cannot draw.
+  // The host owns the geometry: the layer is absolutely positioned to the send
+  // button's 28px circular box, so a decoration sizes itself against `inset-0`
+  // without measuring the DOM and stays on the button's rim; a negative inset
+  // can be clipped by the collapsed desktop toolbar. The plugin component is
+  // rendered inside the layer, not beside the button. The layer is
+  // `pointer-events-none` so a decoration can never swallow a click meant for
+  // send. For hover or focus disclosure, keep the decoration inert and observe
+  // the host button from an effect, removing listeners on unmount. Use
+  // `pointer-events-auto` only as a last resort for a separate hit target that
+  // does not obstruct send; prefer "chat-input-actions" when the plugin needs
+  // its own action. The slot forwards
+  // `ChatSubmitDecorationSlotProps`: `{ taskId, taskTitle, activeSessionId,
+  // sessionIds, presentation, isSending, isAgentBusy, disabled,
+  // planModeEnabled }`, so a decoration can react to the button's live state.
+  // The slot renders only while the send button does: when the agent is
+  // mid-turn with an empty composer the button is replaced by Cancel, and the
+  // decoration goes with it.
   // "chat-top-bar" renders status in the session top bar (beside the
   // document/editor/debug controls) and forwards
   // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
@@ -727,10 +1040,10 @@ interface PluginRegistry {
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
   // presentation }`, where presentation is "desktop" or "mobile". On a phone,
-  // contributions join the horizontally scrollable middle action strip between
-  // the fixed Kandev link and menu button. Documented host ui.Button icon
-  // contributions are normalized to a 32px box with a 16px SVG icon on phones;
-  // desktop contribution sizing is unchanged. It is the app-wide,
+  // listing contributions live inside the topbar menu with 44px touch targets
+  // and 16px SVG icons. Slots own their controls and disclosure state; the host
+  // does not dismiss the menu on arbitrary plugin interactions. Desktop
+  // contribution sizing is unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
   // ids.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
@@ -771,8 +1084,10 @@ interface PluginRegistry {
   // ctrl/cmd/mod/alt modifier, and the dispatcher re-checks the *resolved*
   // combo, so a user override that drops the modifier silently falls back to
   // skipping editables rather than swallowing ordinary keystrokes. Combos are
-  // user-overridable in Settings > Keyboard Shortcuts, namespaced
-  // `plugin:{pluginId}:{id}`. Binding an id the manifest didn't declare still
+  // user-overridable on the installed plugin detail page (Settings > Plugins >
+  // <plugin>), namespaced `plugin:{pluginId}:{id}`. Overrides are personal to
+  // the signed-in user; plugin configuration and lifecycle controls remain
+  // administrator-only. Binding an id the manifest didn't declare still
   // stores the handler (a console warning is logged) since the dispatcher's
   // effective-shortcut resolution keys off the manifest list.
   //
@@ -786,8 +1101,8 @@ interface PluginRegistry {
   registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 
   // Requires manifest ownership of provider.id. One active plugin owns one provider;
-  // unload revokes it and aborts in-flight provider work. inspectURL returns a complete
-  // credential-free HTTPS descriptor—host does not parse plugin provider URLs.
+  // unload revokes it and aborts in-flight provider work. inspectURL returns browser
+  // picker data only. Native first-use task creation also requires repositories.inspect.
   registerRepositoryProvider(provider: RepositoryProviderRegistration): void;
 
   // Native task-menu contribution. placement "link" renders in Link menus on desktop
@@ -803,14 +1118,15 @@ interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
 
   // Contributes an item to the kanban card's Edit submenu (group "edit") or
-  // a flat, top-level card menu item between "Move to"/"Send to workflow"
-  // and "Link" (group "primary"). See "Kanban card contributions" below.
+  // a flat, top-level card menu item after "Move to"/"Send to workflow"
+  // and before "Archive"/"Delete" (group "primary"). See "Kanban card contributions" below.
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
 
   // Contributes a client-side filter section to the kanban board's display
   // dropdown, alongside the built-in Workflow/Repository sections. See
   // "Task filters" below.
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 interface IntegrationSettingsRegistration {
@@ -857,6 +1173,7 @@ interface RepositoryProviderRegistration {
     repository: RepositoryInspection;
     signal: AbortSignal;
   }): Promise<RepositoryProviderBranch[]>;
+  // Browser picker callback. Its result is not authoritative for a native task write.
   inspectURL(context: {
     workspaceId: string;
     url: string;
@@ -1057,20 +1374,33 @@ interface PluginComposerSlotProps {
   disabledReason?: string;
   composer: PluginComposerCapability;
 }
+type PluginOpenMessageResult = { status: "accepted" | "unavailable" };
+interface PluginTaskPanelConversationCapability {
+  openMessage(messageId: string): PluginOpenMessageResult;
+  /** Host-created API bound to this panel's context and generation. */
+  history: PluginConversationApi;
+}
 
-interface PluginTaskPanelProps {
-  panelId: string; // this registration's panel id, so one Component can back multiple panels
+interface PluginTaskPanelContext {
   taskId: string;
   sessionId: string | null;
+  sessionKind: PluginSessionKind;
   presentation: PluginPresentation;
+}
+
+interface PluginTaskPanelProps extends PluginTaskPanelContext {
+  panelId: string; // this registration's panel id, so one Component can back multiple panels
+  conversation: PluginTaskPanelConversationCapability;
 }
 
 interface TaskPanelRegistration {
   id: string; // plugin-local panel id (unique within the plugin, not globally)
   title: string; // add-panel-menu row label and dockview tab title
+  titleKey?: string;
   icon?: PluginIcon;
   Component: React.ComponentType<PluginTaskPanelProps>; // wrapped in a PluginErrorBoundary
   mobileEnabled?: boolean; // include in the phone's grouped Panels picker. Default: false.
+  visible?(context: PluginTaskPanelContext): boolean;
 }
 
 interface PluginTaskMenuContext {
@@ -1086,8 +1416,8 @@ interface TaskMenuActionRegistration {
   label: string;
   icon?: React.ReactNode;
   // "edit" nests the item in the card's Edit submenu; "primary" renders it
-  // as a flat, top-level item between the "Move to"/"Send to workflow"
-  // submenus and the "Link" submenu.
+  // as a flat, top-level item after the "Move to"/"Send to workflow"
+  // submenus and before the "Archive"/"Delete" items.
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean; // default: always visible
   run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
@@ -1202,10 +1532,11 @@ console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
 Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit`. It appears on cards and on the shared
-desktop/mobile task-row menu. Group `"edit"` remains card-only. Visibility
-filtering, registration order, and `run()`/error handling are identical; the
-two groups are independent lists (an action only ever belongs to one).
+item instead of nesting it under `Edit`. It appears after the movement items
+and before the Archive/Delete items on cards and on the shared desktop/mobile
+task-row menu. Group `"edit"` remains card-only. Visibility filtering,
+registration order, and `run()`/error handling are identical; the two groups
+are independent lists (an action only ever belongs to one).
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status
@@ -1242,6 +1573,19 @@ combine with AND (a task must match every section with an active selection),
 mirroring how Workflow/Repository combine with the search query today. If
 `matches()` throws, the task is treated as non-matching and the error is
 logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
+
+### Task-list facets
+
+`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice to `/tasks` Sort and
+Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
+color? }[]`; `subscribe` invalidates the loaded page. Return each value at most once for a task,
+and keep one label and color for a value across all tasks. Facet sorting uses the first value label
+after a case-insensitive alphabetical comparison. Facets are page-local: no facet selection is
+persisted or sent to the backend. The host catches callback errors and revokes registrations and
+active subscriptions when the owning plugin unloads. A task with multiple values appears in each
+matching group; a task without a value appears in the host's `Ungrouped` section. Parent/child
+indentation is preserved only within a group both tasks match, so a matching child without its
+parent is rendered at that group's root.
 
 ## Registry internals (host side)
 

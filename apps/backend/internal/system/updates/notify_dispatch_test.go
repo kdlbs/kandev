@@ -262,7 +262,7 @@ func TestService_PollBeforeLocalSubscription_ReplaysCachedUpdateExactlyOnce(t *t
 	t.Cleanup(func() { _ = closeRepo() })
 
 	hub := gateways.NewHub(nil, logger.Default())
-	notifier := notificationservice.NewService(repo, nil, hub, logger.Default())
+	notifier := notificationservice.NewService(repo, nil, hub, logger.Default(), nil)
 	svc := NewService(pool, "v1.0.0", nil, logger.Default())
 	svc.SetNotifier(notifier)
 	fetches := 0

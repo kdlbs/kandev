@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/session-delete-resource-cleanup/spec.md"
+spec: "../../specs/tasks/requirements/session-delete-resource-cleanup.md"
 ---
 
 # Task 01: Repair Cutover Physical Identity Precedence
@@ -35,7 +35,7 @@ cd apps/backend && go test ./internal/task/repository/sqlite -count=1
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_normalize.go`
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_targets.go`
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_migration_test.go`
-- `docs/specs/session-delete-resource-cleanup/spec.md`
+- `docs/specs/tasks/requirements/session-delete-resource-cleanup.md`
 - `docs/plans/task-owned-worktree-cutover-identity-precedence/plan.md`
 - `docs/plans/task-owned-worktree-cutover-identity-precedence/task-01-repair-identity-precedence.md`
 

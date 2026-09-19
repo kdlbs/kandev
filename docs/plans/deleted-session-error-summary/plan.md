@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/bounded-task-status-delivery.md
+spec: docs/specs/platform/requirements/bounded-task-status-delivery.md
 created: 2026-08-15
 status: done
 ---

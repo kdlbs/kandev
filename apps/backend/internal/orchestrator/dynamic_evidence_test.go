@@ -3,32 +3,97 @@ package orchestrator
 import (
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 )
 
+// Contract coverage: a recognized provider failure still cannot override the
+// dynamic route's pre-result and effect-safety gate.
 func TestDynamicPreResultRequiresExplicitKnownEvidence(t *testing.T) {
-	if dynamicPreResultSafe(watcher.AgentEventData{DynamicRouteAttempt: true}) {
-		t.Fatal("unknown dynamic attempt was treated as pre-result safe")
-	}
-	if !dynamicPreResultSafe(watcher.AgentEventData{
+	usageLimitFailure := watcher.AgentEventData{
+		AgentID:             "codex-acp",
+		ErrorMessage:        `{"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"usageLimitExceeded","message":"You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 1st, 2026 3:14 PM."}}`,
 		DynamicRouteAttempt: true,
 		EvidenceKnown:       true,
-	}) {
-		t.Fatal("known no-output/no-effect attempt was not pre-result safe")
 	}
-	if dynamicPreResultSafe(watcher.AgentEventData{
-		DynamicRouteAttempt: true,
-		EvidenceKnown:       true,
-		OutputObserved:      true,
-	}) {
-		t.Fatal("output-producing attempt was treated as pre-result safe")
+	if !dynamicPreResultSafe(usageLimitFailure) {
+		t.Fatal("pre-result usage-limit failure was not safe to route")
 	}
-	if dynamicPreResultSafe(watcher.AgentEventData{
-		DynamicRouteAttempt: true,
-		EvidenceKnown:       true,
-		EffectObserved:      true,
-	}) {
-		t.Fatal("effect-producing attempt was treated as pre-result safe")
+
+	unsafeCases := []struct {
+		name string
+		data watcher.AgentEventData
+	}{
+		{name: "unknown evidence", data: watcher.AgentEventData{DynamicRouteAttempt: true}},
+		{name: "assistant output", data: func() watcher.AgentEventData {
+			data := usageLimitFailure
+			data.OutputObserved = true
+			return data
+		}()},
+		{name: "tool effect", data: func() watcher.AgentEventData {
+			data := usageLimitFailure
+			data.EffectObserved = true
+			return data
+		}()},
+	}
+	for _, test := range unsafeCases {
+		t.Run(test.name, func(t *testing.T) {
+			if dynamicPreResultSafe(test.data) {
+				t.Fatalf("case %q was incorrectly treated as pre-result safe", test.name)
+			}
+		})
+	}
+}
+
+func TestDynamicAttemptEvidenceTreatsMatchingACPProviderDiagnosticAsPreResult(t *testing.T) {
+	var service Service
+	const message = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
+	service.beginPromptAttempt("session-1", "execution-1", 1, true)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, message)
+
+	got := service.withDynamicAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 1,
+		ErrorMessage:     message,
+	})
+	if got.OutputObserved {
+		t.Fatal("matching ACP provider diagnostic was treated as generated output")
+	}
+	if !dynamicPreResultSafe(got) {
+		t.Fatal("matching ACP provider diagnostic was not safe to route")
+	}
+
+	// A different failure must not erase the output fence.
+	service.beginPromptAttempt("session-2", "execution-2", 1, true)
+	service.observeProviderDiagnostic("session-2", "execution-2", 1, message)
+	other := service.withDynamicAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-2",
+		AgentExecutionID: "execution-2",
+		PromptGeneration: 1,
+		ErrorMessage:     "API Error: 500 Internal server error",
+	})
+	if !other.OutputObserved {
+		t.Fatal("mismatched provider failure erased the output fence")
+	}
+	if gotCode := matchingProviderFailureCode(got); gotCode != routingerr.CodeProviderOverloaded {
+		t.Fatalf("matching provider failure code = %q, want %q", gotCode, routingerr.CodeProviderOverloaded)
+	}
+}
+
+func TestDynamicAttemptEvidenceRequiresLocalIdentityFence(t *testing.T) {
+	var service Service
+	got := service.withDynamicAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 7,
+		EvidenceKnown:    true,
+	})
+	if got.EvidenceKnown {
+		t.Fatal("lifecycle evidence without a local attempt record was accepted")
+	}
+	if dynamicPreResultSafe(got) {
+		t.Fatal("lifecycle evidence without a local attempt record was treated as pre-result safe")
 	}
 }
 

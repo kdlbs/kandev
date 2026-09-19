@@ -10,6 +10,19 @@ import { updatePanelAfterSave } from "./use-file-save-delete";
 import type { FileInfo } from "@/lib/state/store";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
+function buildChangeFacetSignature(facet: FileInfo["staged_change"]): string {
+  if (!facet) return "";
+  return [
+    facet.status,
+    facet.is_symlink ?? "",
+    facet.additions ?? 0,
+    facet.deletions ?? 0,
+    facet.old_path ?? "",
+    facet.diff ?? "",
+    facet.diff_skip_reason ?? "",
+  ].join("\0");
+}
+
 /**
  * Builds a stable signature string from a file's git status entry. The hook
  * compares signatures across renders to decide whether the editor's content
@@ -19,11 +32,14 @@ export function buildGitFileSignature(file: FileInfo | undefined): string {
   if (!file) return "__clean__";
   return [
     file.status ?? "",
+    file.is_symlink ?? "",
     file.staged ? "1" : "0",
     String(file.additions ?? 0),
     String(file.deletions ?? 0),
     file.old_path ?? "",
     file.diff ?? "",
+    buildChangeFacetSignature(file.staged_change),
+    buildChangeFacetSignature(file.unstaged_change),
   ].join("|");
 }
 
@@ -68,6 +84,7 @@ export async function syncOpenFileFromWorkspace({
     if (latest.isDirty) {
       if (response.content === latest.content) {
         updateFileState(fileKey, {
+          resolvedPath: response.resolved_path,
           originalContent: response.content,
           originalHash: remoteHash,
           isDirty: false,
@@ -78,8 +95,14 @@ export async function syncOpenFileFromWorkspace({
         updatePanelAfterSave(path, latest.name, latest.repo);
         return;
       }
-      if (latest.hasRemoteUpdate && latest.remoteContent === response.content) return;
+      if (
+        latest.hasRemoteUpdate &&
+        latest.remoteContent === response.content &&
+        latest.resolvedPath === response.resolved_path
+      )
+        return;
       updateFileState(fileKey, {
+        resolvedPath: response.resolved_path,
         hasRemoteUpdate: true,
         remoteContent: response.content,
         remoteOriginalHash: remoteHash,
@@ -90,12 +113,14 @@ export async function syncOpenFileFromWorkspace({
     if (
       latest.content === response.content &&
       latest.originalHash === remoteHash &&
+      latest.resolvedPath === response.resolved_path &&
       !latest.hasRemoteUpdate
     ) {
       return;
     }
 
     updateFileState(fileKey, {
+      resolvedPath: response.resolved_path,
       content: response.content,
       originalContent: response.content,
       originalHash: remoteHash,

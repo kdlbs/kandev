@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -48,6 +50,20 @@ type fakeTaskDataSource struct {
 	// can prove a workspace with more tasks than a single page issues
 	// multiple calls instead of returning a truncated first page.
 	listTasksByWorkspaceCalls int
+
+	// dependencyViews, keyed by task ID, is returned by both
+	// BuildDependencyViews and BuildDependencyViewsBounded. A nil map
+	// yields an empty map (every task unblocked), matching the zero value a
+	// test that never sets it should observe. dependencyViewsErr, when set,
+	// is returned only by the bounded variant, simulating a fan-out refusal.
+	dependencyViews             map[string]taskservice.DependencyView
+	dependencyViewsErr          error
+	dependencyViewsCalls        int
+	dependencyViewsBoundedCalls int
+	// dependencyViewsTasks records the task IDs passed to the most recent
+	// BuildDependencyViews/Bounded call, so tests can prove attachment
+	// derives over the right (e.g. post-filter) slice.
+	dependencyViewsTasks []string
 }
 
 func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error) {
@@ -113,6 +129,35 @@ func (f *fakeTaskDataSource) GetExecutor(_ context.Context, id string) (*taskmod
 	return f.executors[id], nil
 }
 
+func (f *fakeTaskDataSource) recordDependencyViewsTasks(tasks []*taskmodels.Task) {
+	ids := make([]string, len(tasks))
+	for i, t := range tasks {
+		ids[i] = t.ID
+	}
+	f.dependencyViewsTasks = ids
+}
+
+func (f *fakeTaskDataSource) BuildDependencyViews(_ context.Context, tasks []*taskmodels.Task) map[string]taskservice.DependencyView {
+	f.dependencyViewsCalls++
+	f.recordDependencyViewsTasks(tasks)
+	if f.dependencyViews == nil {
+		return map[string]taskservice.DependencyView{}
+	}
+	return f.dependencyViews
+}
+
+func (f *fakeTaskDataSource) BuildDependencyViewsBounded(_ context.Context, tasks []*taskmodels.Task) (map[string]taskservice.DependencyView, error) {
+	f.dependencyViewsBoundedCalls++
+	f.recordDependencyViewsTasks(tasks)
+	if f.dependencyViewsErr != nil {
+		return nil, f.dependencyViewsErr
+	}
+	if f.dependencyViews == nil {
+		return map[string]taskservice.DependencyView{}, nil
+	}
+	return f.dependencyViews, nil
+}
+
 type fakeWorkflowLister struct {
 	workflows map[string][]*taskmodels.Workflow
 }
@@ -130,11 +175,25 @@ func (f *fakeWorkflowStepLister) ListStepsByWorkflow(_ context.Context, workflow
 }
 
 type fakeAgentProfileDataSource struct {
-	resp *agentsettingsdto.ListAgentsResponse
+	resp         *agentsettingsdto.ListAgentsResponse
+	profilesByID map[string]*AgentProfile
+	profileErr   error
+	profileCalls int
 }
 
 func (f *fakeAgentProfileDataSource) ListAgents(context.Context) (*agentsettingsdto.ListAgentsResponse, error) {
 	return f.resp, nil
+}
+
+func (f *fakeAgentProfileDataSource) GetProfileByID(_ context.Context, id string) (*AgentProfile, error) {
+	f.profileCalls++
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	if profile, ok := f.profilesByID[id]; ok {
+		return profile, nil
+	}
+	return nil, ErrAgentProfileNotFound
 }
 
 type fakeSessionCodeStatsSource struct {
@@ -186,6 +245,10 @@ type fakeTaskWriter struct {
 	updateErr   error
 	deletedIDs  []string
 	deleteErr   error
+	lastMove    TaskMoveInput
+	moveCalls   int
+	moveResult  *TaskMoveResult
+	moveErr     error
 }
 
 func (f *fakeTaskWriter) CreateTask(_ context.Context, in TaskCreateInput) (*taskmodels.Task, error) {
@@ -210,6 +273,22 @@ func (f *fakeTaskWriter) UpdateTask(_ context.Context, in TaskUpdateInput) (*tas
 		return f.updated, nil
 	}
 	return &taskmodels.Task{ID: in.ID, Title: "updated"}, nil
+}
+
+func (f *fakeTaskWriter) MoveTask(_ context.Context, in TaskMoveInput) (*TaskMoveResult, error) {
+	f.moveCalls++
+	f.lastMove = in
+	if f.moveErr != nil {
+		return nil, f.moveErr
+	}
+	if f.moveResult != nil {
+		return f.moveResult, nil
+	}
+	return &TaskMoveResult{
+		Task:         &taskmodels.Task{ID: in.TaskID, WorkflowStepID: in.WorkflowStepID},
+		Transitioned: true,
+		FromStepID:   "step-from",
+	}, nil
 }
 
 func (f *fakeTaskWriter) DeleteTask(_ context.Context, id string) error {
@@ -263,18 +342,21 @@ func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string, launch Tas
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
 type testDataHost struct {
-	host       *pluginHost
-	tasks      *fakeTaskDataSource
-	workflows  *fakeWorkflowLister
-	steps      *fakeWorkflowStepLister
-	profiles   *fakeAgentProfileDataSource
-	codeStats  *fakeSessionCodeStatsSource
-	messages   *fakeMessageDataSource
-	utilAgents *fakeUtilityAgentSource
-	utilRun    *fakeUtilityRunner
-	taskWriter *fakeTaskWriter
-	messenger  *fakeMessenger
-	starter    *fakeTaskStarter
+	host           *pluginHost
+	tasks          *fakeTaskDataSource
+	workflows      *fakeWorkflowLister
+	steps          *fakeWorkflowStepLister
+	profiles       *fakeAgentProfileDataSource
+	codeStats      *fakeSessionCodeStatsSource
+	messages       *fakeMessageDataSource
+	defaultProfile *fakeDefaultUtilityProfileSource
+	utilRun        *fakeUtilityRunner
+	taskWriter     *fakeTaskWriter
+	messenger      *fakeMessenger
+	starter        *fakeTaskStarter
+
+	interactions *fakeInteractionDataSource
+	responder    *fakeInteractionResponder
 }
 
 // newTestDataHost builds a fully-wired pluginHost (every Host data API
@@ -282,17 +364,20 @@ type testDataHost struct {
 // resource) so each test only needs to vary caps.
 func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 	d := &testDataHost{
-		tasks:      &fakeTaskDataSource{},
-		workflows:  &fakeWorkflowLister{},
-		steps:      &fakeWorkflowStepLister{},
-		profiles:   &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
-		codeStats:  &fakeSessionCodeStatsSource{},
-		messages:   &fakeMessageDataSource{},
-		utilAgents: &fakeUtilityAgentSource{},
-		utilRun:    &fakeUtilityRunner{text: "ok"},
-		taskWriter: &fakeTaskWriter{},
-		messenger:  &fakeMessenger{},
-		starter:    &fakeTaskStarter{},
+		tasks:          &fakeTaskDataSource{},
+		workflows:      &fakeWorkflowLister{},
+		steps:          &fakeWorkflowStepLister{},
+		profiles:       &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
+		codeStats:      &fakeSessionCodeStatsSource{},
+		messages:       &fakeMessageDataSource{},
+		defaultProfile: &fakeDefaultUtilityProfileSource{},
+		utilRun:        &fakeUtilityRunner{text: "ok"},
+		taskWriter:     &fakeTaskWriter{},
+		messenger:      &fakeMessenger{},
+		starter:        &fakeTaskStarter{},
+
+		interactions: &fakeInteractionDataSource{},
+		responder:    &fakeInteractionResponder{},
 	}
 	d.host = &pluginHost{
 		pluginID:         "p1",
@@ -303,14 +388,16 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
+		interactionData:  d.interactions,
 		taskWriter:       d.taskWriter,
-		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
-		utilityDeps: func() (utilityAgentSource, utilityRunner) {
-			return d.utilAgents, d.utilRun
+		configs:          &fakeConfigReader{configs: map[string]any{"utility_agent": "utility-agent-42"}},
+		utilityDeps: func() (utilityDefaultProfileSource, agentProfileSource, utilityRunner) {
+			return d.defaultProfile, d.profiles, d.utilRun
 		},
 		writeDeps: func() (taskMessenger, taskStarter) {
 			return d.messenger, d.starter
 		},
+		interactionDeps: func() interactionResponder { return d.responder },
 	}
 	return d
 }
@@ -505,7 +592,18 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 		"ws-1": {{ID: "wf-1", WorkspaceID: "ws-1", Name: "Default"}},
 	}
 	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
-		"wf-1": {{ID: "step-1", WorkflowID: "wf-1", Name: "Todo", Position: 0, StageType: wfmodels.StageType("work")}},
+		"wf-1": {
+			{ID: "step-1", WorkflowID: "wf-1", Name: "Todo", Position: 0, StageType: wfmodels.StageType("work")},
+			{
+				ID: "step-2", WorkflowID: "wf-1", Name: "Work", Position: 1, StageType: wfmodels.StageType("custom"),
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterAutoStartAgent},
+						{Type: wfmodels.OnEnterRunCodeReview, Config: map[string]interface{}{"agent_profile_id": "profile-1"}},
+					},
+				},
+			},
+		},
 	}
 
 	workflows, _, err := d.host.Workflows().List(context.Background(), "ws-1", pluginsdk.Page{})
@@ -520,8 +618,15 @@ func TestPluginHost_Workflows_SucceedsWithCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSteps() unexpected error: %v", err)
 	}
-	if len(steps) != 1 || steps[0].StageType != "work" {
-		t.Fatalf("ListSteps() = %+v, want one step with StageType=work", steps)
+	if len(steps) != 2 || steps[0].StageType != "work" {
+		t.Fatalf("ListSteps() = %+v, want two steps, first with StageType=work", steps)
+	}
+	if steps[0].OnEnterActionTypes != nil {
+		t.Fatalf("steps[0].OnEnterActionTypes = %+v, want nil for a step with no on_enter actions", steps[0].OnEnterActionTypes)
+	}
+	wantTypes := []string{"auto_start_agent", "run_code_review"}
+	if !reflect.DeepEqual(steps[1].OnEnterActionTypes, wantTypes) {
+		t.Fatalf("steps[1].OnEnterActionTypes = %+v, want %+v", steps[1].OnEnterActionTypes, wantTypes)
 	}
 }
 
@@ -901,22 +1006,24 @@ func TestSortSessionsNewestFirst_TiesBrokenByID(t *testing.T) {
 func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	task := &taskmodels.Task{
-		ID:          "task-1",
-		WorkspaceID: "ws-1",
-		WorkflowID:  "wf-1",
-		Title:       "Fix bug",
-		Description: "details",
-		State:       v1.TaskStateInProgress,
-		Priority:    "high",
-		Origin:      "agent_created",
-		CreatedAt:   created,
-		UpdatedAt:   created,
-		ParentID:    "parent-1",
-		Identifier:  "KAN-1",
-		IsEphemeral: false,
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f",
+		Title:          "Fix bug",
+		Description:    "details",
+		State:          v1.TaskStateInProgress,
+		Priority:       "high",
+		Origin:         "agent_created",
+		CreatedAt:      created,
+		UpdatedAt:      created,
+		ParentID:       "parent-1",
+		Identifier:     "KAN-1",
+		IsEphemeral:    false,
 		Repositories: []*taskmodels.TaskRepository{
 			{ID: "tr-1", RepositoryID: "repo-1", BaseBranch: "main", Position: 0, CheckoutBranch: "feature/fix"},
 		},
+		Labels:   `["bug","customer"]`,
 		Metadata: map[string]any{"k": "v"},
 	}
 
@@ -924,6 +1031,9 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 
 	if dto.ID != "task-1" || dto.State != "IN_PROGRESS" || dto.CreatedBy != "agent_created" {
 		t.Fatalf("taskModelToDTO() = %+v, unexpected core fields", dto)
+	}
+	if dto.Priority != "high" {
+		t.Errorf("Priority = %q, want high", dto.Priority)
 	}
 	if dto.CreatedAt != created.Format(time.RFC3339) {
 		t.Errorf("CreatedAt = %q, want RFC3339 %q", dto.CreatedAt, created.Format(time.RFC3339))
@@ -936,6 +1046,20 @@ func TestTaskModelToDTO_MapsFields(t *testing.T) {
 	}
 	if dto.Metadata["k"] != "v" {
 		t.Errorf("Metadata = %+v, want k=v", dto.Metadata)
+	}
+	if dto.WorkflowStepID != "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f" {
+		t.Errorf("WorkflowStepID = %q, want %q", dto.WorkflowStepID, "step-7f3a9c2b-0001-4f42-a5d1-9c0e8b7d6a5f")
+	}
+	if got, want := dto.Labels, []string{"bug", "customer"}; !reflect.DeepEqual(got, want) { //nolint:staticcheck // verifies deprecated API v1 compatibility
+		t.Errorf("Labels = %v, want %v", got, want)
+	}
+}
+
+func TestTaskModelToDTO_MalformedLabelsFallbackToEmpty(t *testing.T) {
+	dto := taskModelToDTO(&taskmodels.Task{ID: "task-1", Labels: `not-json`})
+	labels := dto.Labels //nolint:staticcheck // verifies deprecated API v1 compatibility
+	if len(labels) != 0 {
+		t.Errorf("Labels = %#v, want empty fallback for malformed stored JSON", labels)
 	}
 }
 

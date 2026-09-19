@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-mcp-profile-resolution", "03-responsive-task-actions-setting"]
 plan: "plan.md"
-spec: "../../specs/tasks/mcp-task-agent-profile-default/spec.md"
+spec: "../../specs/tasks/requirements/mcp-task-agent-profile-default.md"
 ---
 
 # Task 05: Public Documentation

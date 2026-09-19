@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 01: Filter Open Review Menu Entries
@@ -66,8 +66,8 @@ focused E2E command as evidence.
 - `apps/web/e2e/tests/settings/layout-profiles.spec.ts`
 - `apps/web/e2e/tests/pr/pr-multi-popover.spec.ts`
 - `docs/public/sessions-and-review.md`
-- `docs/specs/ui/task-layout-profiles.md`
-- `docs/specs/ui/add-panel-pr-submenu.md`
+- `docs/specs/ui/requirements/task-layout-profiles.md`
+- `docs/specs/ui/requirements/add-panel-pr-submenu.md`
 - `docs/plans/dockview-review-add-menu/plan.md`
 - `docs/plans/dockview-review-add-menu/task-01-filter-open-review-menu-entries.md`
 
@@ -82,9 +82,9 @@ one RED-GREEN cycle and overlapping files.
 
 ## Inputs
 
-- `docs/specs/ui/task-layout-profiles.md`, especially review placement and the
+- `docs/specs/ui/requirements/task-layout-profiles.md`, especially review placement and the
   missing-only add-menu scenario.
-- `docs/specs/ui/add-panel-pr-submenu.md`, especially filtered PR count and
+- `docs/specs/ui/requirements/add-panel-pr-submenu.md`, especially filtered PR count and
   inline/submenu scenarios.
 - `apps/web/components/task/dockview-add-panel-items.tsx` for all three review
   menu paths.

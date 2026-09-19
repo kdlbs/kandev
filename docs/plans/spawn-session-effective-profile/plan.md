@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/spawn-session-effective-profile/spec.md
+spec: docs/specs/agents/requirements/spawn-session-effective-profile.md
 created: 2026-08-12
 status: complete
 ---

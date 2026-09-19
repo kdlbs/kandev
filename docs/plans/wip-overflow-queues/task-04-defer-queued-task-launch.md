@@ -6,7 +6,7 @@ wave: 4
 depends_on:
   - "03-reconcile-queued-promotion"
 plan: "plan.md"
-spec: "../../specs/tasks/wip-limit-pull-system.md"
+spec: "../../specs/tasks/system-design/wip-limit-pull-system.md"
 ---
 
 # Task 04: Defer Queued Task Launch

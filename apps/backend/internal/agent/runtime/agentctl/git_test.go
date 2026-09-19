@@ -4,12 +4,59 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // gitOperationOK is the canonical success body every /api/v1/git/* POST returns.
 const gitOperationOK = `{"success":true,"operation":"pull","output":"Already up to date."}`
+
+func TestGitPushPreflightHonorsOperationBudget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timer := time.NewTimer(25 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"operation":"push-preflight"}`))
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newHTTPOnlyClient(server.URL)
+	client.httpClient.Timeout = 10 * time.Millisecond
+	result, err := client.GitPushPreflight(context.Background(), "", PushOptions{})
+	if err != nil || result == nil || !result.Success {
+		t.Fatalf("GitPushPreflight() = result %#v, error %v; want delayed response to succeed", result, err)
+	}
+	if got := client.httpClient.Timeout; got != 10*time.Millisecond {
+		t.Fatalf("ordinary client timeout = %s, want unchanged 10ms", got)
+	}
+}
+
+func TestGitPushSendsPushOptions(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, gitOperationOK))
+	_, err := newHTTPOnlyClient(srv.URL).GitPush(context.Background(), "svc", PushOptions{
+		Remote: "backup", ExpectedBranch: "feature/work",
+	})
+	if err != nil {
+		t.Fatalf("GitPush() error = %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	for key, want := range map[string]any{
+		"repo": "svc", "remote": "backup", "expected_branch": "feature/work",
+	} {
+		if gotValue := body[key]; gotValue != want {
+			t.Errorf("body[%q] = %#v, want %#v", key, gotValue, want)
+		}
+	}
+}
 
 // TestGitOperations_PostExpectedPathAndPayload pins the endpoint and JSON body
 // of every thin wrapper over gitOperation. A wrapper that posts to the wrong
@@ -36,7 +83,7 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 		{
 			name: "push force with upstream",
 			call: func(c *Client) (*GitOperationResult, error) {
-				return c.GitPush(context.Background(), true, true, "svc")
+				return c.GitPush(context.Background(), "svc", PushOptions{Force: true, SetUpstream: true})
 			},
 			wantPath: "/api/v1/git/push",
 			wantBody: map[string]any{"force": true, "set_upstream": true, "repo": "svc"},
@@ -44,16 +91,43 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 		{
 			name: "push plain",
 			call: func(c *Client) (*GitOperationResult, error) {
-				return c.GitPush(context.Background(), false, false, "")
+				return c.GitPush(context.Background(), "", PushOptions{})
 			},
 			wantPath: "/api/v1/git/push",
 			wantBody: map[string]any{"force": false, "set_upstream": false},
 		},
 		{
-			name:     "push preflight",
-			call:     func(c *Client) (*GitOperationResult, error) { return c.GitPushPreflight(context.Background(), "svc") },
+			name: "push preflight",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPushPreflight(context.Background(), "svc", PushOptions{})
+			},
 			wantPath: "/api/v1/git/push-preflight",
 			wantBody: map[string]any{"repo": "svc"},
+		},
+		{
+			name: "push with explicit target and expected branch",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPush(context.Background(), "svc", PushOptions{
+					Remote: "backup", ExpectedBranch: "feature/work",
+				})
+			},
+			wantPath: "/api/v1/git/push",
+			wantBody: map[string]any{
+				"force": false, "set_upstream": false, "repo": "svc",
+				"remote": "backup", "expected_branch": "feature/work",
+			},
+		},
+		{
+			name: "push preflight with explicit target and expected branch",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPushPreflight(context.Background(), "svc", PushOptions{
+					Remote: "backup", ExpectedBranch: "feature/work",
+				})
+			},
+			wantPath: "/api/v1/git/push-preflight",
+			wantBody: map[string]any{
+				"repo": "svc", "remote": "backup", "expected_branch": "feature/work",
+			},
 		},
 		{
 			name: "replace remote contribution",
@@ -331,7 +405,7 @@ func TestGitOperation_HonoursContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := newHTTPOnlyClient(srv.URL).GitPush(ctx, false, false, "")
+	_, err := newHTTPOnlyClient(srv.URL).GitPush(ctx, "", PushOptions{})
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("error = %v, want context canceled", err)
 	}
@@ -341,7 +415,8 @@ func TestGitCreatePR_PostsFullPayloadAndDecodesResult(t *testing.T) {
 	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{
 		"success":true,"branch_pushed":true,
 		"pr_url":"https://github.com/kdlbs/kandev/pull/1",
-		"provider":"github","output":"created"
+		"provider":"github","output":"created",
+		"error_code":"empty_remote_branch_publish_failed"
 	}`))
 
 	result, err := newHTTPOnlyClient(srv.URL).GitCreatePR(
@@ -382,6 +457,9 @@ func TestGitCreatePR_PostsFullPayloadAndDecodesResult(t *testing.T) {
 	}
 	if result.Provider != "github" || result.Output != "created" {
 		t.Errorf("provider/output = %q / %q, want github / created", result.Provider, result.Output)
+	}
+	if result.ErrorCode != "empty_remote_branch_publish_failed" {
+		t.Errorf("error code = %q, want empty_remote_branch_publish_failed", result.ErrorCode)
 	}
 }
 

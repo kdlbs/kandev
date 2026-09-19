@@ -10,7 +10,7 @@ import (
 
 func TestOpenCodeACPUsesManagedRuntime(t *testing.T) {
 	a := NewOpenCodeACP()
-	want := []string{"npx", "--yes", "--prefer-offline", "opencode-ai", "acp", "--print-logs", "--log-level", "ERROR"}
+	want := a.ManagedNPMRuntime().CachedACPCommand().Args()
 
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
@@ -122,6 +122,9 @@ func TestOpenCodeACPRemoteAuth(t *testing.T) {
 	}
 	if m.TargetRelDir != ".local/share/opencode" {
 		t.Errorf("TargetRelDir = %q, want %q", m.TargetRelDir, ".local/share/opencode")
+	}
+	if m.FileConflictPolicy != RemoteAuthFileConflictPolicyMergeJSONObject {
+		t.Errorf("FileConflictPolicy = %q, want %q", m.FileConflictPolicy, RemoteAuthFileConflictPolicyMergeJSONObject)
 	}
 	want := []string{".local/share/opencode/auth.json"}
 	for _, os := range []string{"darwin", "linux"} {

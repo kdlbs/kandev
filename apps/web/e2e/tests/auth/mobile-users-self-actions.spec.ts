@@ -2,6 +2,7 @@ import { devices, expect } from "@playwright/test";
 import path from "node:path";
 import { backendFixture as test } from "../../fixtures/backend";
 import { login, setupAdmin } from "../../helpers/auth";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { responseUserId } from "./users-auth-helpers";
 
 /**
@@ -119,12 +120,60 @@ test.describe.serial("users self-actions guard (mobile)", () => {
     expect(secondRes.status(), await secondRes.text()).toBe(201);
     const secondAdminId = responseUserId(await secondRes.json());
 
+    const secondUsersRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
     await page.reload();
+    await secondUsersRefresh;
     const secondAdminRow = page.locator(`[data-user-id="${secondAdminId}"]`);
+    await expect(ownRow).toBeVisible({ timeout: 15_000 });
     await expect(ownRow.getByTestId("users-table-toggle-role")).toBeEnabled();
     await expect(ownRow.getByTestId("users-table-toggle-status")).toBeEnabled();
     await expect(secondAdminRow.getByTestId("users-table-toggle-role")).toBeEnabled();
     await expect(secondAdminRow.getByTestId("users-table-toggle-status")).toBeEnabled();
+
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+
+    // A named sheet leaves the original card and its controls mounted.
+    const rolePatch = waitForHttp(page, "PATCH", new RegExp(`/api/v1/users/${memberId}$`));
+    const roleRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
+    const roleTrigger = memberRow.getByTestId("users-table-toggle-role");
+    await roleTrigger.tap();
+    const roleConfirmation = page.getByRole("dialog");
+    await expect(roleConfirmation).toBeVisible();
+    await expect(memberRow.getByTestId("users-table-email")).toBeVisible();
+    await expect(memberRow.getByTestId("users-table-role")).toContainText("member");
+    await expect(roleConfirmation).toContainText(`Change ${MEMBER.email} to admin?`);
+    await roleConfirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(roleTrigger).toBeFocused();
+    await expect(memberRow.getByTestId("users-table-role")).toContainText("member");
+    await roleTrigger.tap();
+    const roleConfirmButton = roleConfirmation.getByTestId("users-table-confirm");
+    await expect(roleConfirmButton).toBeVisible();
+    const roleConfirmBox = await roleConfirmButton.boundingBox();
+    expect(roleConfirmBox).not.toBeNull();
+    expect(roleConfirmBox!.height).toBeGreaterThanOrEqual(44);
+    await roleConfirmButton.tap();
+    await rolePatch;
+    await roleRefresh;
+    await expect(memberRow.getByTestId("users-table-role")).toContainText("admin");
+
+    const statusPatch = waitForHttp(page, "PATCH", new RegExp(`/api/v1/users/${disabledAdminId}$`));
+    const statusRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
+    await disabledAdminRow.getByTestId("users-table-toggle-status").tap();
+    const statusConfirmation = page.getByRole("dialog");
+    await expect(statusConfirmation).toBeVisible();
+    await expect(statusConfirmation).toContainText(`Re-enable ${DISABLED_ADMIN.email}?`);
+    const statusConfirmButton = statusConfirmation.getByTestId("users-table-confirm");
+    const statusConfirmBox = await statusConfirmButton.boundingBox();
+    expect(statusConfirmBox).not.toBeNull();
+    expect(statusConfirmBox!.height).toBeGreaterThanOrEqual(44);
+    await statusConfirmButton.tap();
+    await statusPatch;
+    await statusRefresh;
+    await expect(disabledAdminRow.getByTestId("users-table-status")).toContainText("active");
 
     await ctx.close();
   });

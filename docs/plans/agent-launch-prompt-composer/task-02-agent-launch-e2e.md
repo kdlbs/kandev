@@ -5,10 +5,14 @@ status: done
 wave: 2
 depends_on: ["01-reuse-shared-composer"]
 plan: "plan.md"
-spec: "../../specs/ui/agent-launch-prompt-composer.md"
+spec: "../../specs/ui/requirements/agent-launch-prompt-composer.md"
 ---
 
 # Task 02: Cover agent launch flows
+
+The [Blank handoff context package](../handoff-blank-context/plan.md) adds explicit
+handoff-context coverage. The completed saved-prompt scenarios and results below
+remain historical evidence; they do not verify the new context default.
 
 ## Acceptance
 

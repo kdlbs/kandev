@@ -8,7 +8,7 @@ depends_on:
   - "06-container-isolation"
   - "07-retry-observability"
 plan: "plan.md"
-spec: "../../specs/e2e-duration-aware-sharding/spec.md"
+spec: "../../specs/platform/requirements/e2e-duration-aware-sharding.md"
 ---
 
 # Task 09: Document rollout and operating checks
@@ -41,7 +41,7 @@ workflow.
 
 - `apps/web/e2e/README.md`
 - `.github/workflows/e2e-tests.yml`
-- `docs/specs/e2e-duration-aware-sharding/spec.md` (status or contract sync)
+- `docs/specs/platform/requirements/e2e-duration-aware-sharding.md` (status or contract sync)
 - `docs/decisions/2026-08-10-duration-aware-e2e-sharding.md` (consequence or
   implementation-status sync if needed)
 

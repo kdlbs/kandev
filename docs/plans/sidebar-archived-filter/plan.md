@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-archived-filter.md
+spec: docs/specs/ui/requirements/sidebar-archived-filter.md
 created: 2026-08-04
 status: implemented
 ---

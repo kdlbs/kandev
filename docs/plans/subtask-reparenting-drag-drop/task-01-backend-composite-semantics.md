@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-reparenting-drag-drop.md"
+spec: "../../specs/tasks/requirements/subtask-reparenting-drag-drop.md"
 ---
 
 # Task 01: Backend composite re-parent semantics

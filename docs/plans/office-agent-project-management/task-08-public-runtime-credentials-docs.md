@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["06-office-launch-context-guard", "07-cli-context-diagnostic"]
 plan: "plan.md"
-spec: "../../specs/office/agents.md"
+spec: "../../specs/office/requirements/agents.md"
 ---
 
 # Task 08: Document Office runtime credentials
@@ -34,7 +34,7 @@ node scripts/validate-public-docs.mjs
 ## Inputs
 
 - Completed Tasks 06 and 07.
-- `docs/specs/office/agents.md`, section **Environment variables**.
+- `docs/specs/office/requirements/agents.md`, section **Environment variables**.
 - Follow `.agents/skills/docs-maintainer/SKILL.md`.
 
 ## Output Contract

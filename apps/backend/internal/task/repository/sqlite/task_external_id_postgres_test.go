@@ -46,7 +46,7 @@ func TestPostgresTaskPriorityMigrationConvertsLegacyInteger(t *testing.T) {
 
 // TestPostgresExternalIDConcurrentInsertYieldsExactlyOneWinner is the
 // PostgreSQL twin of the SQLite concurrency coverage
-// (docs/specs/tasks/external-id-idempotency/spec.md, "Uniqueness and
+// (docs/specs/tasks/system-design/external-id-idempotency.md, "Uniqueness and
 // concurrency"): the SQLite path passing is not evidence for Postgres, since
 // the two drivers classify unique-violation errors completely differently
 // (typed pgconn.PgError vs. SQLite driver string-matching). Skips unless

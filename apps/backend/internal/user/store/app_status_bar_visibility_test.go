@@ -38,3 +38,32 @@ func TestScanUserSettingsAppStatusBarVisibilityDefaultsAndRoundTrips(t *testing.
 		})
 	}
 }
+func TestScanUserSettingsResolveSessionHostnamesDefaultsAndRoundTrips(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "missing defaults to disabled", raw: `{}`, want: false},
+		{name: "explicit true is preserved", raw: `{"resolve_session_hostnames":true}`, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			encoded, err := marshalUserSettingsPayload(settings)
+			if err != nil {
+				t.Fatalf("marshal settings payload: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(encoded, &payload); err != nil {
+				t.Fatalf("decode normalized settings: %v", err)
+			}
+			if got, ok := payload["resolve_session_hostnames"].(bool); !ok || got != tt.want {
+				t.Fatalf("resolve_session_hostnames = %#v, want %t", payload["resolve_session_hostnames"], tt.want)
+			}
+		})
+	}
+}

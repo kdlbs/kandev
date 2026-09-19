@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-events-and-persistence"]
 plan: "plan.md"
-spec: "../../specs/platform/notifications.md"
+spec: "../../specs/platform/requirements/notifications.md"
 ---
 
 # Task 02: Expose Semantic Notification Settings and Delivery

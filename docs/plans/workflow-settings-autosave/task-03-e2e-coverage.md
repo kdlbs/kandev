@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-autosave-state", "02-responsive-layout"]
 plan: "plan.md"
-spec: "../../specs/workflow-settings-autosave/spec.md"
+spec: "../../specs/tasks/requirements/workflow-settings-autosave.md"
 ---
 
 # Task 03: Workflow Autosave E2E Coverage

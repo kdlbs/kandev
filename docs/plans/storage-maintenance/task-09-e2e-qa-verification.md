@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["08-storage-settings-ui"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 09: E2E, QA, and final verification

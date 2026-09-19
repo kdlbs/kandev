@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-shared-sidebar-edit-flow"]
 plan: "plan.md"
-spec: "../../specs/tasks/sidebar-task-edit.md"
+spec: "../../specs/tasks/requirements/sidebar-task-edit.md"
 ---
 
 # Task 02: Prove sidebar edit parity
@@ -44,7 +44,7 @@ Sequential after Task 01. These tests consume Task 01's menu item, dialog wiring
 
 ## Inputs
 
-- Every scenario in `docs/specs/tasks/sidebar-task-edit.md`.
+- Every scenario in `docs/specs/tasks/requirements/sidebar-task-edit.md`.
 - Plan `E2E Tests` and `Mobile design contract` sections.
 - Existing patterns: `SessionPage.sidebar`, the visible **Task actions** button, managed `prCapture` evidence, API seeding/polling, and the current mobile menu geometry assertions.
 

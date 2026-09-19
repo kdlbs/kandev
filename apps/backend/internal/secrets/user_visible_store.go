@@ -8,12 +8,19 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-const internalGitHubSecretPrefix = "github:"
+const (
+	internalGitHubSecretPrefix            = "github:"
+	internalRuntimeSecretPrefix           = "kandev-runtime:"
+	internalAutomationWebhookSecretPrefix = "automation-webhook:"
+)
 
 // IsInternalID reports whether a secret is owned by backend infrastructure
 // and must never be listed, revealed, or selected as an agent credential.
 func IsInternalID(id string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(id)), internalGitHubSecretPrefix)
+	normalized := strings.ToLower(strings.TrimSpace(id))
+	return strings.HasPrefix(normalized, internalGitHubSecretPrefix) ||
+		strings.HasPrefix(normalized, internalRuntimeSecretPrefix) ||
+		strings.HasPrefix(normalized, internalAutomationWebhookSecretPrefix)
 }
 
 // UserVisibleStore restricts a SecretStore to user-managed credentials. The
@@ -95,6 +102,15 @@ func (s *UserVisibleStore) Delete(ctx context.Context, id string) error {
 		return internalSecretNotFound(id)
 	}
 	if _, err := s.Get(ctx, id); err != nil {
+		return err
+	}
+	return s.store.Delete(ctx, id)
+}
+
+// DeleteForWorkspace removes a visible Global or same-workspace secret after
+// the service has authorized access to the requested workspace.
+func (s *UserVisibleStore) DeleteForWorkspace(ctx context.Context, id, workspaceID string) error {
+	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
 		return err
 	}
 	return s.store.Delete(ctx, id)

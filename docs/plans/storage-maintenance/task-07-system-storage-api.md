@@ -11,7 +11,7 @@ depends_on:
     "06-docker-storage",
   ]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 07: System storage API and composition

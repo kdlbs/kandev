@@ -6,7 +6,7 @@ wave: 2
 depends_on:
   - "01-selector-loading-state"
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-provider-options.md"
+spec: "../../specs/agents/requirements/dynamic-provider-options.md"
 ---
 
 # Task 02: Prove Selector Loading State

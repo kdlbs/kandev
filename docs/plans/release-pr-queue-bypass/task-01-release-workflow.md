@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/release-pr-queue-bypass/spec.md"
+spec: "../../specs/release/requirements/release-pr-queue-bypass.md"
 ---
 
 # Task 01: Repair the Stable release merge
@@ -37,7 +37,7 @@ Sequential. The workflow and its contract test form one TDD unit.
 
 ## Inputs
 
-- `docs/specs/release-pr-queue-bypass/spec.md`
+- `docs/specs/release/requirements/release-pr-queue-bypass.md`
 - `docs/decisions/2026-08-17-release-pr-ruleset-bypass.md`
 - The `Create release PR + squash-merge` step in `.github/workflows/release.yml`.
 - The protected `release` environment on the `prepare` job.

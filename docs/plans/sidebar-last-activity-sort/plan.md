@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/sidebar-last-activity-sort.md
+spec: docs/specs/ui/requirements/sidebar-last-activity-sort.md
 created: 2026-08-17
 status: completed
 ---

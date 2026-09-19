@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/session-delete-resource-cleanup/spec.md"
+spec: "../../specs/tasks/requirements/session-delete-resource-cleanup.md"
 ---
 
 # Task 01: Classify Orphaned Session Worktrees
@@ -40,7 +40,7 @@ that expected reason.
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_normalize.go`
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_orphan_migration_test.go`
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_postgres_test.go`
-- `docs/specs/session-delete-resource-cleanup/spec.md`
+- `docs/specs/tasks/requirements/session-delete-resource-cleanup.md`
 - `docs/plans/task-owned-worktree-cutover-orphaned-sessions/plan.md`
 - `docs/plans/task-owned-worktree-cutover-orphaned-sessions/task-01-classify-orphaned-session-worktrees.md`
 

@@ -5,7 +5,7 @@ status: done
 wave: 0
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 00: Verification cache safeguard
@@ -30,7 +30,7 @@ rtk rg -n 'outside the repository|/\.verify-cache/' .agents/skills/verify/SKILL.
 
 - `.gitignore`
 - `.agents/skills/verify/SKILL.md`
-- `docs/specs/platform/workspace-git-status.md`
+- `docs/specs/platform/requirements/workspace-git-status.md`
 - `docs/plans/workspace-git-status-scalability/plan.md`
 
 ## Dependencies

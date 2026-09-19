@@ -101,7 +101,7 @@ function AgentField({
   onChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
-  const options = useAgentProfileOptions(profiles);
+  const options = useAgentProfileOptions(profiles, "quick_chat");
   return (
     <section className="space-y-2" aria-labelledby="quick-chat-agent-label">
       <div>

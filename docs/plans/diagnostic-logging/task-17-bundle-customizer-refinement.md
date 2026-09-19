@@ -8,7 +8,7 @@ depends_on:
   - "14-bundle-customizer-ui"
   - "15-custom-bundle-e2e"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 17: Bundle customizer refinement
@@ -57,8 +57,8 @@ pnpm e2e:run --no-build --project mobile-chrome e2e/tests/system/mobile-logs-bun
 - `apps/web/e2e/tests/system/mobile-logs-bundle.spec.ts`
 - `apps/web/src/locales/en/settings.json`
 - `apps/web/src/locales/pseudo/settings.json`
-- `docs/specs/platform/diagnostic-logging.md`
-- `docs/specs/system-page/spec.md`
+- `docs/specs/platform/requirements/diagnostic-logging.md`
+- `docs/specs/system-page/requirements/system-page.md`
 - `docs/public/operations.md`
 - `docs/decisions/2026-07-30-file-backed-diagnostic-bundles.md`
 

@@ -5,7 +5,7 @@ status: superseded
 wave: 3
 depends_on: ["01-link-foundation", "02-toolbar-wiring"]
 plan: "plan.md"
-spec: "../../specs/ui/external-vcs-file-links.md"
+spec: "../../specs/ui/requirements/external-vcs-file-links.md"
 ---
 
 # Task 04: Repository remote URL HTTP contract

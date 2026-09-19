@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["11-responsive-launch-error-surface"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 09: Localized recovery E2E

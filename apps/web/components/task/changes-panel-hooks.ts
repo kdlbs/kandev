@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { t } from "@/lib/i18n";
 import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
+import { getLocalizedGitOperationError } from "@/hooks/use-git-operations";
 import type { useToast } from "@/components/toast-provider";
 import type { SessionGit, PerRepoOperationResult } from "@/hooks/domains/session/use-session-git";
 
@@ -30,6 +31,7 @@ type GitOperationResultLike = {
   success: boolean;
   output: string;
   error?: string;
+  error_code?: string;
   per_repo?: PerRepoOperationResult[];
 };
 type GitOperationFn = (op: () => Promise<GitOperationResultLike>, name: string) => Promise<void>;
@@ -50,7 +52,7 @@ export function describePerRepo(
     .map((r) =>
       t("common:gitOperationRepoFailure", {
         repo: r.repository_name,
-        error: r.error || t("common:unknownError"),
+        error: getLocalizedGitOperationError(r.error_code, r.error) || t("common:unknownError"),
       }),
     )
     .join("; ");
@@ -116,7 +118,8 @@ export function useChangesGitHandlers(
         const description = result.success
           ? result.output.slice(0, 200) ||
             t("common:gitOperationCompleted", { operation: operationName })
-          : result.error || t("common:anErrorOccurred");
+          : getLocalizedGitOperationError(result.error_code, result.error) ||
+            t("common:anErrorOccurred");
         toast({ title, description, variant });
       } catch (e) {
         toast({
@@ -202,21 +205,32 @@ function useChangesDiscardAmendHandlers(
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
   const [filesToDiscard, setFilesToDiscard] = useState<string[] | null>(null);
+  const discardAnchorRef = useRef<HTMLElement | null>(null);
   // Multi-repo: remember the clicked file's repo so the discard op routes to
   // the right git repo. Path alone is ambiguous when two repos share a name.
   const [repoToDiscard, setRepoToDiscard] = useState<string | undefined>(undefined);
 
-  const handleDiscardClick = useCallback((filePath: string, repo?: string) => {
-    setFileToDiscard(filePath);
-    setRepoToDiscard(repo);
-    setFilesToDiscard(null);
-    setShowDiscardDialog(true);
-  }, []);
-  const handleBulkDiscardClick = useCallback((paths: string[]) => {
+  const handleDiscardClick = useCallback(
+    (filePath: string, repo?: string, anchor?: HTMLElement) => {
+      discardAnchorRef.current = anchor ?? null;
+      setFileToDiscard(filePath);
+      setRepoToDiscard(repo);
+      setFilesToDiscard(null);
+      setShowDiscardDialog(true);
+    },
+    [],
+  );
+  const handleBulkDiscardClick = useCallback((paths: string[], anchor?: HTMLElement) => {
+    discardAnchorRef.current = anchor ?? null;
     setFilesToDiscard(paths);
     setFileToDiscard(null);
     setRepoToDiscard(undefined);
     setShowDiscardDialog(true);
+  }, []);
+  const handleDiscardOpenChange = useCallback((open: boolean) => {
+    setShowDiscardDialog(open);
+    // Keep the anchor through the popover's close autofocus. A later discard
+    // replaces it, while confirmation clears it after the mutation settles.
   }, []);
   const handleDiscardConfirm = useCallback(async () => {
     const paths = filesToDiscard ?? (fileToDiscard ? [fileToDiscard] : null);
@@ -237,6 +251,7 @@ function useChangesDiscardAmendHandlers(
       });
     } finally {
       setShowDiscardDialog(false);
+      discardAnchorRef.current = null;
       setFileToDiscard(null);
       setFilesToDiscard(null);
       setRepoToDiscard(undefined);
@@ -271,6 +286,8 @@ function useChangesDiscardAmendHandlers(
   return {
     showDiscardDialog,
     setShowDiscardDialog,
+    discardAnchorRef,
+    handleDiscardOpenChange,
     fileToDiscard,
     filesToDiscard,
     handleDiscardClick,

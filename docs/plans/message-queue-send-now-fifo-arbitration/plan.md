@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/message-queue-send-now.md
+spec: docs/specs/ui/requirements/message-queue-send-now.md
 created: 2026-08-05
 status: implemented
 ---

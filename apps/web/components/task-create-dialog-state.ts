@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type { LocalRepository } from "@/lib/types/http";
+import type { LocalRepository, TaskPriority } from "@/lib/types/http";
 import type {
   TaskFormInputsHandle,
   TaskRemoteRepoRow,
 } from "@/components/task-create-dialog-types";
+import { resetTaskForm, type FormResetters } from "@/components/task-create-dialog-form-reset";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
@@ -17,7 +18,6 @@ import type {
   StepType,
   TaskCreateDialogInitialValues,
   DialogFormState,
-  TaskRepoRow,
 } from "@/components/task-create-dialog-types";
 import {
   useRemoteReposSeedEffect,
@@ -27,6 +27,7 @@ import {
 import { useDialogComputed } from "@/components/task-create-dialog-computed";
 import { createDebugLogger } from "@/lib/debug/log";
 import { clampTaskTitleInput, truncateRemoteTaskTitle } from "@/lib/task-title";
+import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 
 const stateDebug = createDebugLogger("task-create:state");
 
@@ -36,30 +37,6 @@ export type {
 } from "@/components/task-create-dialog-types";
 export { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 export { useLockedFieldSync } from "@/components/task-create-dialog-locked-fields";
-
-type FormResetters = {
-  setTaskName: (v: string) => void;
-  setHasTitle: (v: boolean) => void;
-  setHasDescription: (v: boolean) => void;
-  setHasPendingAttachmentUploads: (v: boolean) => void;
-  setRepositories: (v: TaskRepoRow[]) => void;
-  setRemoteRepos: (v: TaskRemoteRepoRow[]) => void;
-  setAgentProfileId: (v: string) => void;
-  setExecutorId: (v: string) => void;
-  setExecutorProfileId: (v: string) => void;
-  setSelectedWorkflowId: (v: string | null) => void;
-  setFetchedSteps: (v: StepType[] | null) => void;
-  setDiscoveredRepositories: (v: LocalRepository[]) => void;
-  setDiscoverReposLoaded: (v: boolean) => void;
-  setUseRemote: (v: boolean) => void;
-  setNoRepository: (v: boolean) => void;
-  setWorkspacePath: (v: string) => void;
-  setAutopilot: (v: boolean) => void;
-  setGitHubUrlError: (v: string | null) => void;
-  setFreshBranchEnabled: (v: boolean) => void;
-  setCurrentLocalBranch: (v: string) => void;
-  setBlockedBy: (v: string[]) => void;
-};
 
 type FormResetEffectsArgs = {
   open: boolean;
@@ -86,15 +63,12 @@ function useFormResetEffects({
   prevOpenRef,
   lockedWorkflow,
 }: FormResetEffectsArgs) {
-  // Restore draft or initialValues when dialog opens
   useEffect(() => {
-    // Only run on rising edge (dialog opening)
     const wasOpen = prevOpenRef.current;
     (prevOpenRef as React.MutableRefObject<boolean>).current = open;
 
     if (!open || wasOpen) return;
 
-    // Increment cycle to force TaskFormInputs remount
     setOpenCycle((c) => c + 1);
 
     const defaults = resolveFormDefaults(initialValues, workspaceId);
@@ -143,7 +117,6 @@ function resolveFormDefaults(
   initialValues: TaskCreateDialogInitialValues | undefined,
   workspaceId: string | null,
 ) {
-  // In edit mode (has content), use initialValues; in create mode, try draft
   const draft =
     !hasUserContent(initialValues) && workspaceId ? getTaskCreateDraft(workspaceId) : null;
   const initTitle = initialValues?.title ?? "";
@@ -170,40 +143,6 @@ function resolveDefaultsSource(
   return "empty";
 }
 
-/** Resets task form fields to specified values */
-function resetTaskForm(
-  resetters: FormResetters,
-  name: string,
-  description: string,
-  workflowId: string | null,
-  initialValues?: TaskCreateDialogInitialValues,
-) {
-  resetters.setTaskName(name);
-  resetters.setHasTitle(name.trim().length > 0);
-  resetters.setHasDescription(description.trim().length > 0);
-  resetters.setHasPendingAttachmentUploads(false);
-  // Seed the unified repos list from initialValues. A repo + branch pre-fill
-  // becomes a single row; nothing seeds an empty list (the auto-select
-  // effect later picks the user's last-used repo or the first workspace one).
-  if (initialValues?.repositoryId) {
-    resetters.setRepositories([
-      {
-        key: "row-0",
-        repositoryId: initialValues.repositoryId,
-        branch: initialValues.branch ?? "",
-      },
-    ]);
-  } else {
-    resetters.setRepositories([]);
-  }
-  resetters.setAgentProfileId("");
-  resetters.setExecutorId("");
-  resetters.setExecutorProfileId("");
-  resetters.setSelectedWorkflowId(workflowId);
-  resetters.setFetchedSteps(null);
-  resetters.setAutopilot(false);
-}
-
 function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
   return values.find((value) => value !== undefined);
 }
@@ -225,11 +164,7 @@ function seededRemoteRepositories(iv?: TaskCreateDialogInitialValues): TaskRemot
     inspection ?? {};
   const remoteUrl = definedOr("", initial.remoteUrl, initial.githubUrl, repository.cloneUrl);
   if (!remoteUrl) return [];
-  // Seed remoteRepos with a single paste row when the dialog opens with a
-  // pre-filled URL (Quick-task launcher path). When `checkoutBranch` is set
-  // (PR launch flow), seed the row's branch with it so the chip pill shows
-  // the PR head immediately. Otherwise start empty — the seed effect creates
-  // an empty row on mode toggle.
+  // Seed a pre-filled URL and preserve its PR head when one is provided.
   const seededBranch = definedOr(
     "",
     initial.checkoutBranch,
@@ -258,7 +193,6 @@ function seededRemoteRepositories(iv?: TaskCreateDialogInitialValues): TaskRemot
   ];
 }
 
-/** Resets repository discovery state. */
 function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInitialValues) {
   const remoteRepositories = seededRemoteRepositories(iv);
   resetters.setDiscoveredRepositories([]);
@@ -268,10 +202,6 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubUrlError(null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
-  // Source-mode toggle resets — without these, opening the dialog in "None"
-  // mode and reopening for a different task would land in None mode again.
-  resetters.setNoRepository(false);
-  resetters.setWorkspacePath("");
   // The dialog stays mounted between opens, so without this the previous
   // create's predecessor selection reappears on the next one.
   resetters.setBlockedBy([]);
@@ -392,8 +322,10 @@ function useFormStateValues(workflowId: string | null) {
   // optional workspacePath points the agent at an existing host folder; empty
   // means kandev creates a scratch workspace.
   const [noRepository, setNoRepository] = useState(false);
+  const [preferLocalExecutor, setPreferLocalExecutor] = useState(false);
   const [workspacePath, setWorkspacePath] = useState("");
   const [autopilot, setAutopilot] = useState(false);
+  const [priority, setPriority] = useState<TaskPriority>("medium");
   return {
     taskName,
     setTaskName,
@@ -427,10 +359,14 @@ function useFormStateValues(workflowId: string | null) {
     prevOpenRef,
     noRepository,
     setNoRepository,
+    preferLocalExecutor,
+    setPreferLocalExecutor,
     workspacePath,
     setWorkspacePath,
     autopilot,
     setAutopilot,
+    priority,
+    setPriority,
   };
 }
 
@@ -487,6 +423,7 @@ export function useDialogFormState(
       setHasDescription: form.setHasDescription,
       setHasPendingAttachmentUploads: form.setHasPendingAttachmentUploads,
       setRepositories: repos.setRepositories,
+      setRepositoriesDirty: repos.setRepositoriesDirty,
       setRemoteRepos: remoteRepos.setRemoteRepos,
       setAgentProfileId: form.setAgentProfileId,
       setExecutorId: form.setExecutorId,
@@ -500,8 +437,10 @@ export function useDialogFormState(
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
       setNoRepository: form.setNoRepository,
+      setPreferLocalExecutor: form.setPreferLocalExecutor,
       setWorkspacePath: form.setWorkspacePath,
       setAutopilot: form.setAutopilot,
+      setPriority: form.setPriority,
     },
   });
 
@@ -528,6 +467,11 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
+  const { seededExecutorProfileId, setExecutorProfileIdFromSeed } = useSeededExecutorProfileId(
+    open,
+    form.setExecutorProfileId,
+  );
+
   return {
     ...form,
     ...discovery,
@@ -540,7 +484,46 @@ export function useDialogFormState(
     branchesByUrl,
     prInfoByUrl,
     clearDraft,
+    seededExecutorProfileId,
+    setExecutorProfileIdFromSeed,
   };
+}
+
+/**
+ * Tracks the executorProfileId value written through
+ * setExecutorProfileIdFromSeed each open cycle, whether it arrives via the
+ * create-mode autopick or the edit-mode stored-profile seed effect. Resets
+ * on each open rising edge. This is "what the dialog put there", independent
+ * of any later or earlier user selection: only a write through the
+ * returned setExecutorProfileIdFromSeed counts, never the plain
+ * setExecutorProfileId a user's own picker uses.
+ *
+ * The reset is keyed on `open`'s own rising edge via an effect, not on
+ * comparing openCycle during render: openCycle bumps via its own effect on
+ * the same rising edge, and a seed write triggered by that same edge can
+ * land in the same subsequent render as the bump. A render-phase comparison
+ * can't distinguish "openCycle just changed because the dialog opened" from
+ * "openCycle changed and this cycle's seed already arrived", so it would
+ * wipe a same-transition seed the instant it was written.
+ */
+function useSeededExecutorProfileId(open: boolean, setExecutorProfileId: (v: string) => void) {
+  const seededRef = useRef<string | null>(null);
+  const prevOpenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = prevOpenRef.current;
+    prevOpenRef.current = open;
+    if (open && !wasOpen) {
+      seededRef.current = null;
+    }
+  }, [open]);
+  const setExecutorProfileIdFromSeed = useCallback(
+    (value: string) => {
+      seededRef.current = value;
+      setExecutorProfileId(value);
+    },
+    [setExecutorProfileId],
+  );
+  return { seededExecutorProfileId: seededRef.current, setExecutorProfileIdFromSeed };
 }
 
 /**
@@ -652,6 +635,7 @@ type TaskCreateDialogDataArgs = {
   defaultStepId: string | null;
   fs: DialogFormState;
   lockedWorkflow?: boolean;
+  agentProfileRecentUseContext?: AgentProfileRecentUseContext;
 };
 
 export function useTaskCreateDialogData({
@@ -661,6 +645,7 @@ export function useTaskCreateDialogData({
   defaultStepId,
   fs,
   lockedWorkflow = false,
+  agentProfileRecentUseContext = "task_create",
 }: TaskCreateDialogDataArgs) {
   const workflows = useAppStore((state) => state.workflows.items);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -702,6 +687,7 @@ export function useTaskCreateDialogData({
     lastUsedWorkflowIdsByWorkspace:
       taskCreateUserSettings.userSettings.taskCreateLastUsed.workflowIdsByWorkspace ?? {},
     userSettingsLoaded: taskCreateUserSettings.loaded,
+    agentProfileRecentUseContext,
   });
   return {
     workflows,

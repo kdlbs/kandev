@@ -135,6 +135,7 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 		{name: "missing setting defaults to task overview", raw: `{"chat_submit_key":"cmd_enter"}`, want: "task_overview"},
 		{name: "unknown setting defaults to task overview", raw: `{"startup_page":"future_value"}`, want: "task_overview"},
 		{name: "last task is preserved", raw: `{"startup_page":"last_task"}`, want: "last_task"},
+		{name: "threads is preserved", raw: `{"startup_page":"threads"}`, want: "threads"},
 	}
 
 	for _, tt := range tests {
@@ -167,6 +168,7 @@ func TestScanUserSettingsSidebarDefaults(t *testing.T) {
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
 		CollapsedGroups: []string{},
+		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}
 
 	tests := []struct {
@@ -223,6 +225,42 @@ func TestScanUserSettingsPreservesExplicitEmptySidebarSettings(t *testing.T) {
 				t.Fatalf("active sidebar view = %q, want an explicit empty ID", settings.SidebarActiveViewID)
 			}
 		})
+	}
+}
+
+func TestSidebarTaskColorAutomationStorageRoundTripAndMalformedFallback(t *testing.T) {
+	raw := `{"sidebar_task_color_automation":{"enabled":true,"rules":[{"id":"blocked","enabled":true,"condition":{"dimension":"task_state","value":"BLOCKED","label":"Blocked"},"output":{"kind":"fixed","color":"red"}}]}}`
+	settings, err := scanUserSettings(settingsScanner{raw: raw}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan automatic colors: %v", err)
+	}
+	if !settings.SidebarTaskColorAutomation.Enabled || len(settings.SidebarTaskColorAutomation.Rules) != 1 {
+		t.Fatalf("automatic colors = %#v, want enabled rule", settings.SidebarTaskColorAutomation)
+	}
+	encoded, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatalf("marshal automatic colors: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode normalized settings: %v", err)
+	}
+	if got := payload["sidebar_task_color_automation"].(map[string]any)["enabled"]; got != true {
+		t.Fatalf("stored automatic colors enabled = %#v, want true", got)
+	}
+
+	for _, malformed := range []string{
+		`{"sidebar_task_color_automation":null}`,
+		`{"sidebar_task_color_automation":{"enabled":true,"rules":"bad"}}`,
+		`{"sidebar_task_color_automation":{"enabled":true,"rules":[{"id":"bad","enabled":true,"condition":{"dimension":"task_state","value":null},"output":{"kind":"fixed","color":"red"}}]}}`,
+	} {
+		settings, err := scanUserSettings(settingsScanner{raw: malformed}, DefaultUserID)
+		if err != nil {
+			t.Fatalf("scan malformed automatic colors %q: %v", malformed, err)
+		}
+		if settings.SidebarTaskColorAutomation.Enabled || len(settings.SidebarTaskColorAutomation.Rules) != 0 {
+			t.Fatalf("malformed automatic colors = %#v, want disabled empty default", settings.SidebarTaskColorAutomation)
+		}
 	}
 }
 
@@ -885,6 +923,56 @@ func TestSQLiteRepositoryKanbanHiddenStepIDsDefaultAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepositoryWorkflowIDsWithAutoHideEmptyStepsDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if settings.WorkflowIDsWithAutoHideEmptySteps == nil || len(settings.WorkflowIDsWithAutoHideEmptySteps) != 0 {
+		t.Fatalf("default WorkflowIDsWithAutoHideEmptySteps = %#v, want non-nil empty", settings.WorkflowIDsWithAutoHideEmptySteps)
+	}
+	settings.WorkflowIDsWithAutoHideEmptySteps = []string{"wf-a", "wf-b"}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if !reflect.DeepEqual(got.WorkflowIDsWithAutoHideEmptySteps, settings.WorkflowIDsWithAutoHideEmptySteps) {
+		t.Fatalf("WorkflowIDsWithAutoHideEmptySteps = %#v, want %#v", got.WorkflowIDsWithAutoHideEmptySteps, settings.WorkflowIDsWithAutoHideEmptySteps)
+	}
+}
+
+func TestDecodeWorkflowIDsWithAutoHideEmptyStepsFallsBackToEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "missing", raw: nil},
+		{name: "null", raw: json.RawMessage(`null`)},
+		{name: "non-array", raw: json.RawMessage(`{"workflow":"wf-a"}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeStringIDs(tt.raw)
+			if got == nil || len(got) != 0 {
+				t.Fatalf("decodeStringIDs(%s) = %#v, want non-nil empty", tt.raw, got)
+			}
+		})
+	}
+}
+
 // TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty verifies corrupt kanban_hidden_step_ids values fall back to empty while sibling fields still load.
 func TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty(t *testing.T) {
 	tests := []struct {
@@ -930,6 +1018,121 @@ func TestScanUserSettingsKanbanHiddenStepIDsCorruptFallsBackToEmpty(t *testing.T
 				t.Fatalf("WorkspaceID = %q, want %q (sibling fields must still load)", settings.WorkspaceID, "ws-1")
 			}
 		})
+	}
+}
+
+// TestSQLiteRepositoryKanbanSortAndPriorityFilterTokensDefaultAndRoundTrip verifies both new
+// fields default correctly and round-trip through the SQLite repository.
+func TestSQLiteRepositoryKanbanSortAndPriorityFilterTokensDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if settings.KanbanSort != models.KanbanSortDefault {
+		t.Fatalf("default KanbanSort = %q, want %q", settings.KanbanSort, models.KanbanSortDefault)
+	}
+	if settings.KanbanPriorityFilterTokens == nil || len(settings.KanbanPriorityFilterTokens) != 0 {
+		t.Fatalf("default KanbanPriorityFilterTokens = %#v, want non-nil empty", settings.KanbanPriorityFilterTokens)
+	}
+
+	settings.KanbanSort = models.KanbanSortPriorityDesc
+	settings.KanbanPriorityFilterTokens = []string{"critical", "high"}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if got.KanbanSort != models.KanbanSortPriorityDesc {
+		t.Fatalf("KanbanSort = %q, want %q", got.KanbanSort, models.KanbanSortPriorityDesc)
+	}
+	if !reflect.DeepEqual(got.KanbanPriorityFilterTokens, settings.KanbanPriorityFilterTokens) {
+		t.Fatalf("KanbanPriorityFilterTokens = %#v, want %#v", got.KanbanPriorityFilterTokens, settings.KanbanPriorityFilterTokens)
+	}
+}
+
+// TestDecodeKanbanPriorityFilterTokensFallsBackToEmpty verifies a stored value that is not a
+// list at all resolves to the empty selection (AC-004.4) instead of erroring.
+func TestDecodeKanbanPriorityFilterTokensFallsBackToEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{name: "missing", raw: nil},
+		{name: "null", raw: json.RawMessage(`null`)},
+		{name: "bare string", raw: json.RawMessage(`"critical"`)},
+		{name: "object", raw: json.RawMessage(`{"token":"critical"}`)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decodeKanbanPriorityFilterTokens(tt.raw)
+			if got == nil || len(got) != 0 {
+				t.Fatalf("decodeKanbanPriorityFilterTokens(%s) = %#v, want non-nil empty", tt.raw, got)
+			}
+		})
+	}
+}
+
+// TestDecodeKanbanPriorityFilterTokensDropsInvalidMembers verifies an out-of-vocabulary member in
+// an otherwise-valid list is dropped, keeping the remaining valid tokens, per AC-004.4's read-side
+// rule for legacy rows this capability's write-side validation (AC-004.9) did not produce.
+func TestDecodeKanbanPriorityFilterTokensDropsInvalidMembers(t *testing.T) {
+	got := decodeKanbanPriorityFilterTokens(json.RawMessage(`["critical","urgent","low"]`))
+	want := []string{"critical", "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decodeKanbanPriorityFilterTokens = %#v, want %#v", got, want)
+	}
+}
+
+// TestDecodeKanbanPriorityFilterTokensDropsNonStringMembers verifies a member that isn't even a
+// string (a row written directly, bypassing this capability's write-side validation) is dropped
+// like any other invalid member, keeping the remaining valid tokens rather than discarding the
+// whole list because one element failed to type-assert as a string.
+func TestDecodeKanbanPriorityFilterTokensDropsNonStringMembers(t *testing.T) {
+	got := decodeKanbanPriorityFilterTokens(json.RawMessage(`["critical",42,"low",{"x":1},null,true]`))
+	want := []string{"critical", "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decodeKanbanPriorityFilterTokens = %#v, want %#v", got, want)
+	}
+}
+
+// TestDecodeKanbanPriorityFilterTokensTrimsWhitespace verifies a legacy row with surrounding
+// whitespace around an otherwise-valid token is returned trimmed, not just validated as if
+// trimmed: the board compares tokens for exact equality, so an untrimmed member would validate
+// but then silently fail every downstream match.
+func TestDecodeKanbanPriorityFilterTokensTrimsWhitespace(t *testing.T) {
+	got := decodeKanbanPriorityFilterTokens(json.RawMessage(`[" critical","low "]`))
+	want := []string{"critical", "low"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("decodeKanbanPriorityFilterTokens = %#v, want %#v", got, want)
+	}
+}
+
+// TestScanUserSettingsKanbanSortCorruptFallsBackToDefault verifies a corrupt kanban_sort value
+// falls back to the default while sibling fields still load.
+func TestScanUserSettingsKanbanSortCorruptFallsBackToDefault(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{
+		raw: `{"kanban_sort":"garbage","workspace_id":"ws-1"}`,
+	}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings with corrupt kanban_sort: %v", err)
+	}
+	if settings.KanbanSort != models.KanbanSortDefault {
+		t.Fatalf("KanbanSort = %q, want %q", settings.KanbanSort, models.KanbanSortDefault)
+	}
+	if settings.WorkspaceID != "ws-1" {
+		t.Fatalf("WorkspaceID = %q, want %q (sibling fields must still load)", settings.WorkspaceID, "ws-1")
 	}
 }
 
@@ -1223,6 +1426,20 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 		t.Fatalf("get defaults: %v", err)
 	}
 	settings.SidebarActiveViewID = "view-1"
+	settings.SidebarViews = []models.SidebarView{{
+		ID:              "view-1",
+		Name:            "Custom",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "updatedAt", Direction: "desc"},
+		Group:           "workflow",
+		CollapsedGroups: []string{},
+		TaskRow: &models.SidebarTaskRowPresentation{
+			DetailsEnabled: false,
+			DetailOrder:    []string{"repository", "relative_time", "pull_request_number"},
+			VisibleDetails: []string{"repository"},
+			Trailing:       "none",
+		},
+	}}
 	settings.SidebarTaskPrefs = models.SidebarTaskPrefs{
 		PinnedTaskIDs:          []string{"task-1"},
 		OrderedTaskIDs:         []string{"task-2", "task-1"},
@@ -1254,6 +1471,9 @@ func TestSQLiteRepositorySidebarViewStateRoundTrip(t *testing.T) {
 	}
 	if got.SidebarActiveViewID != "view-1" {
 		t.Fatalf("expected active view to round-trip, got %q", got.SidebarActiveViewID)
+	}
+	if got.SidebarViews[0].TaskRow == nil || got.SidebarViews[0].TaskRow.Trailing != "none" {
+		t.Fatalf("expected sidebar view task row to round-trip, got %+v", got.SidebarViews)
 	}
 	if got.SidebarDraft == nil || got.SidebarDraft.Group != "workflow" {
 		t.Fatalf("expected sidebar draft to round-trip, got %+v", got.SidebarDraft)

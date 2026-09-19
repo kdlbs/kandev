@@ -3,6 +3,7 @@ import type {
   OfficeTaskStatus,
   ProjectStatus,
   Tier,
+  TierSource,
 } from "@/lib/state/slices/office/types";
 
 /**
@@ -59,6 +60,18 @@ export const TIER_NAME_KEYS: Record<Tier, string> = {
 };
 
 /**
+ * Names the precedence level that supplied an agent's effective tier: a
+ * matching wake-reason policy, a per-agent override, the agent's role entry,
+ * or the workspace default. Wire values are never shown raw (AC-16, AC-16a).
+ */
+export const TIER_SOURCE_LABEL_KEYS: Record<TierSource, string> = {
+  wake_reason: "office:tierSourceWakeReason",
+  override: "office:tierSourceOverride",
+  role: "office:tierSourceRole",
+  workspace: "office:tierSourceWorkspace",
+};
+
+/**
  * Routine concurrency policies. The row and the expanded detail used to render
  * the wire value with `policy.replace(/_/g, " ")`, which showed the identifier
  * as pseudo-English and could never be localized.
@@ -76,7 +89,9 @@ export const CONCURRENCY_POLICY_LABEL_KEYS: Record<string, string> = {
  * identifier.
  */
 export const BUDGET_PERIOD_LABEL_KEYS: Record<string, string> = {
+  daily: "office:budgetPeriodDaily",
   monthly: "office:budgetPeriodMonthly",
+  yearly: "office:budgetPeriodYearly",
   total: "office:budgetPeriodTotal",
 };
 

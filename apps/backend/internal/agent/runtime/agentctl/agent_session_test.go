@@ -122,6 +122,62 @@ func TestResetSession_FailureModes(t *testing.T) {
 	})
 }
 
+func TestResetSession_ContextCancellationRemovesPendingRequestBeforeLateResponse(t *testing.T) {
+	received := make(chan ws.Message)
+	releaseResponse := make(chan struct{})
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		received <- msg
+		<-releaseResponse
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"success": true, "session_id": "late-session",
+		})
+		return resp
+	})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseResponse) }) }
+	t.Cleanup(func() {
+		release()
+		c.Close()
+		ts.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := c.ResetSession(ctx, "/workspace", nil)
+		result <- err
+	}()
+
+	select {
+	case msg := <-received:
+		if msg.Action != "agent.session.reset" {
+			t.Fatalf("request action = %q, want agent.session.reset", msg.Action)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reset request")
+	}
+
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+			t.Fatalf("ResetSession error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ResetSession did not stop waiting after context cancellation")
+	}
+
+	c.pendingMu.Lock()
+	pendingRequests := len(c.pendingRequests)
+	pendingConnections := len(c.pendingRequestConns)
+	c.pendingMu.Unlock()
+	if pendingRequests != 0 || pendingConnections != 0 {
+		t.Fatalf("pending reset request state = %d requests, %d connections, want both zero", pendingRequests, pendingConnections)
+	}
+
+	release()
+}
+
 // SetMode / SetModel / SetConfigOption / Authenticate share one shape: send a
 // typed payload, treat an error frame as a failure, ignore the response body.
 func TestAgentSessionSetters_SendExpectedActionAndPayload(t *testing.T) {
@@ -411,9 +467,8 @@ type errUnauthorizedStub struct{}
 
 func (errUnauthorizedStub) Error() string { return "not authorized" }
 
-// A nil response with no error means the handler intentionally answered
-// nothing (e.g. a notification); nothing should go on the wire.
-func TestDispatchMCPRequest_WritesNothingForANilResponse(t *testing.T) {
+// @covers AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.4
+func TestDispatchMCPRequest_WritesAnErrorFrameForANilResponse(t *testing.T) {
 	handler := &stubMCPHandler{}
 
 	var written [][]byte
@@ -423,8 +478,15 @@ func TestDispatchMCPRequest_WritesNothingForANilResponse(t *testing.T) {
 		handler,
 		func(data []byte) error { written = append(written, data); return nil })
 
-	if len(written) != 0 {
-		t.Errorf("wrote %d frames, want none for a nil handler response", len(written))
+	if len(written) != 1 {
+		t.Fatalf("wrote %d frames, want 1 error frame", len(written))
+	}
+	var sent ws.Message
+	if err := json.Unmarshal(written[0], &sent); err != nil {
+		t.Fatalf("decode written frame: %v", err)
+	}
+	if sent.Type != ws.MessageTypeError || sent.ID != "req-3" {
+		t.Errorf("written frame = %+v, want a correlated error", sent)
 	}
 }
 

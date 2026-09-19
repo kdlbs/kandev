@@ -4,7 +4,7 @@
 // cookie scope — so multiple kandev instances on one host (same IP,
 // different ports) share one cookie jar. Suffixing cookie names with the
 // request's port lets each instance read and write only its own cookies
-// (see docs/specs/fix-multi-instance-cookie-isolation/spec.md).
+// (see docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md).
 package httpcookie
 
 import (

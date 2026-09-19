@@ -1,9 +1,8 @@
 package persistence
 
 import (
-	"errors"
+	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 // Provide creates the database connection pool used by repositories.
@@ -25,6 +25,15 @@ import (
 // compared against the stored kandev_version to decide whether to take a
 // pre-migration backup.  Pass "" in tests that do not care about snapshots.
 func Provide(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
+	return ProvideContext(context.Background(), cfg, log, version)
+}
+
+// ProvideContext opens persistence for a cancellable backend initialization.
+func ProvideContext(ctx context.Context, cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	startup.SetPhase(ctx, startup.OpeningDatabase)
 	driver := cfg.Database.Driver
 	if driver == "" {
 		driver = "sqlite"
@@ -32,7 +41,7 @@ func Provide(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, 
 
 	switch driver {
 	case "sqlite":
-		return provideSQLite(cfg, log, version)
+		return provideSQLite(ctx, cfg, log, version)
 	case "postgres":
 		return providePostgres(cfg, log)
 	default:
@@ -40,14 +49,12 @@ func Provide(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, 
 	}
 }
 
-func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
-	dbPath := cfg.Database.Path
-	if dbPath == "" {
-		dbPath = filepath.Join(cfg.ResolvedDataDir(), "kandev.db")
-		if err := migrateLegacyDBPath(cfg, dbPath, log); err != nil {
-			return nil, nil, fmt.Errorf("migrate legacy DB: %w", err)
-		}
+func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, version string) (*db.Pool, func() error, error) {
+	selection, err := selectSQLiteDatabase(cfg, log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("select sqlite database: %w", err)
 	}
+	dbPath := selection.path
 
 	// Writer: single connection, owns WAL/journal_mode setup.
 	writerConn, err := db.OpenSQLite(dbPath)
@@ -91,16 +98,17 @@ func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.
 	}
 
 	if shouldBackup(storedVersion, version, userTables) {
+		startup.SetPhase(ctx, startup.BackingUpDatabase)
+		started := time.Now()
 		backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
 		if err := os.MkdirAll(backupDir, 0o755); err != nil {
 			_ = pool.Close()
 			return nil, nil, fmt.Errorf("create backup dir: %w", err)
 		}
-		path := snapshotPath(backupDir, storedVersion)
-		size, err := snapshotSQLite(writer, path)
+		path, size, err := createPreMigrationBackup(ctx, writer, backupDir, storedVersion)
 		if err != nil {
 			_ = pool.Close()
-			return nil, nil, fmt.Errorf("pre-migration backup failed: %w", err)
+			return nil, nil, err
 		}
 		if log != nil {
 			log.Info("pre-migration backup taken",
@@ -108,6 +116,7 @@ func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.
 				zap.String("to_version", version),
 				zap.String("path", path),
 				zap.Int64("size_bytes", size),
+				zap.Duration("duration", time.Since(started)),
 			)
 		}
 		_ = pruneBackups(backupDir, 2)
@@ -132,48 +141,35 @@ func provideSQLite(cfg *config.Config, log *logger.Logger, version string) (*db.
 	return pool, cleanup, nil
 }
 
-// migrateLegacyDBPath moves a pre-KANDEV_HOME_DIR SQLite DB from
-// <HomeDir>/kandev.db into the new derived location at <HomeDir>/data/kandev.db
-// on first boot after an upgrade, so `docker pull && docker restart` doesn't
-// silently start against an empty DB.
-//
-// Runs only when:
-//   - KANDEV_DATABASE_PATH is not explicitly set (caller checks this).
-//   - The new derived path does not exist yet.
-//   - A legacy file exists at <HomeDir>/kandev.db.
-//   - The legacy path differs from the new path (skip when HomeDir == DataDir).
-//
-// Only the main .db file is moved - SQLite recreates -wal/-shm on open, and a
-// cleanly-shut-down DB (the expected state on container restart) has empty WAL.
-func migrateLegacyDBPath(cfg *config.Config, newPath string, log *logger.Logger) error {
-	if _, err := os.Stat(newPath); !errors.Is(err, fs.ErrNotExist) {
-		return nil // new path exists (or stat failed) - nothing to migrate
+func createPreMigrationBackup(ctx context.Context, writer *sqlx.DB, backupDir, storedVersion string) (string, int64, error) {
+	path := snapshotPath(backupDir, storedVersion)
+	stagingDir, err := os.MkdirTemp(backupDir, ".kandev-backup-*")
+	if err != nil {
+		return "", 0, fmt.Errorf("create private backup staging directory: %w", err)
 	}
-	legacyPath := filepath.Join(cfg.ResolvedHomeDir(), "kandev.db")
-	if legacyPath == newPath {
-		return nil
+	defer func() { _ = os.RemoveAll(stagingDir) }()
+
+	stagedPath := filepath.Join(stagingDir, filepath.Base(path))
+	size, err := snapshotSQLiteContext(ctx, writer, stagedPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("pre-migration backup failed: %w", err)
 	}
-	if _, err := os.Stat(legacyPath); err != nil {
-		return nil // no legacy file to migrate
+	if err := ctx.Err(); err != nil {
+		return "", 0, fmt.Errorf("startup canceled after pre-migration backup: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
-		return fmt.Errorf("create data dir %s: %w", filepath.Dir(newPath), err)
+	if err := os.Chmod(stagedPath, 0o600); err != nil {
+		return "", 0, fmt.Errorf("protect staged pre-migration backup: %w", err)
 	}
-	if err := os.Rename(legacyPath, newPath); err != nil {
-		return fmt.Errorf("move %s -> %s: %w", legacyPath, newPath, err)
+	if _, err := inspectSQLiteCandidate(stagedPath); err != nil {
+		return "", 0, fmt.Errorf("validate staged pre-migration backup: %w", err)
 	}
-	// Also move -wal / -shm if present. These are transient (SQLite recreates
-	// them on open) but moving them avoids orphaned files on the volume.
-	for _, suffix := range []string{"-wal", "-shm"} {
-		_ = os.Rename(legacyPath+suffix, newPath+suffix)
+	if err := ctx.Err(); err != nil {
+		return "", 0, fmt.Errorf("startup canceled before installing pre-migration backup: %w", err)
 	}
-	if log != nil {
-		log.Info("Migrated SQLite database from pre-KANDEV_HOME_DIR location",
-			zap.String("legacy_path", legacyPath),
-			zap.String("new_path", newPath),
-		)
+	if err := installStagedSQLite(stagedPath, path); err != nil {
+		return "", 0, fmt.Errorf("install pre-migration backup: %w", err)
 	}
-	return nil
+	return path, size, nil
 }
 
 func providePostgres(cfg *config.Config, log *logger.Logger) (*db.Pool, func() error, error) {

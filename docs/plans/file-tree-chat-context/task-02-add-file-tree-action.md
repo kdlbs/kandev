@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-model-directory-context"]
 plan: "plan.md"
-spec: "../../specs/ui/file-tree-chat-context.md"
+spec: "../../specs/ui/requirements/file-tree-chat-context.md"
 ---
 
 # Task 02: Add File-Tree Context Action

@@ -113,6 +113,23 @@ func WriteMetaKeyIfAbsent(db *sqlx.DB, key, value string) (bool, error) {
 	return affected > 0, nil
 }
 
+// DeleteKeys removes the given keys from kandev_meta, if present. Used by
+// the factory reset path to clear activation instants before dropping user
+// tables (docs/specs/task-delivery-ledger/spec.md, "Reset parity").
+func DeleteKeys(db *sqlx.DB, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	query, args, err := sqlx.In(`DELETE FROM kandev_meta WHERE key IN (?)`, keys)
+	if err != nil {
+		return fmt.Errorf("build delete meta keys query: %w", err)
+	}
+	if _, err := db.Exec(db.Rebind(query), args...); err != nil {
+		return fmt.Errorf("delete meta keys: %w", err)
+	}
+	return nil
+}
+
 // WriteVersion records currentVersion as the binary version that last
 // successfully completed boot against this DB. Call this only after every
 // repository initSchema has succeeded.

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-frontend-link-menu"]
 plan: "plan.md"
-spec: "../../specs/gitlab-integration/spec.md"
+spec: "../../specs/integrations/requirements/gitlab-integration.md"
 ---
 
 # Task 02: GitLab Contextual Linking E2E

@@ -170,7 +170,9 @@ test.describe("File editor auto-update on file change", () => {
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
     await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
-    const editFile = testPage.getByRole("button", { name: "Edit", exact: true });
+    const editFile = testPage
+      .getByTestId("review-file-actions")
+      .getByRole("button", { name: "Edit", exact: true });
     await expect(editFile).toBeVisible();
     await editFile.click();
 
@@ -226,7 +228,9 @@ test.describe("File editor auto-update on file change", () => {
     // Open the editor from the already-loaded diff. A late git-status update is
     // allowed to focus Changes, so routing through the Files tab would race that
     // intentional focus transition instead of testing editor refresh behavior.
-    const editFile = testPage.getByRole("button", { name: "Edit", exact: true });
+    const editFile = testPage
+      .getByTestId("review-file-actions")
+      .getByRole("button", { name: "Edit", exact: true });
     await expect(editFile).toBeVisible();
     await editFile.click();
     const editorTab = testPage.locator(".dv-default-tab[type='file-editor']", {

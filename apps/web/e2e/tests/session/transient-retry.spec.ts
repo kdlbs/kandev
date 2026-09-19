@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { seedIdleSession } from "../../helpers/session";
+import { listTransientRetryNotices } from "../../helpers/transient-retry";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("transient provider error (529 Overloaded) retry", () => {
@@ -12,9 +13,18 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
 
     // /overloaded:9 keeps failing so the retry loop stays visible until cancel.
     await session.sendMessage("/overloaded:9");
+    const sessionId = await session.activeChat().getAttribute("data-session-id");
+    if (!sessionId) throw new Error("active chat did not expose a session id");
+
+    await expect
+      .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
+        timeout: 30_000,
+      })
+      .toBe(1);
 
     // The calm yellow "retrying" card + Cancel button must appear...
     await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
+    await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
 
     // ...and the red recovery banner must NOT be shown yet (retries in flight).
@@ -29,13 +39,27 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Cancel Test");
 
     await session.sendMessage("/overloaded:9");
+    const sessionId = await session.activeChat().getAttribute("data-session-id");
+    if (!sessionId) throw new Error("active chat did not expose a session id");
     await expect(session.recoveryCancelRetryButton()).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
+        timeout: 30_000,
+      })
+      .toBe(1);
 
     await session.recoveryCancelRetryButton().click();
+
+    await expect
+      .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
+        timeout: 30_000,
+      })
+      .toBe(0);
 
     // Cancelling falls through to the red Resume / Start-fresh recovery banner.
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     await expect(session.recoveryFreshButton()).toBeVisible();
+    await expect(session.transientRetryCard()).toBeHidden();
   });
 
   test("retries are paced — the attempt counter advances across the backoff", async ({
@@ -50,9 +74,53 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     // progress from attempt 1 of 5 to attempt 2 of 5 — proving the retry loop is live
     // and paced rather than an instant, silent resume.
     await session.sendMessage("/overloaded:9");
+    const sessionId = await session.activeChat().getAttribute("data-session-id");
+    if (!sessionId) throw new Error("active chat did not expose a session id");
+
+    await expect
+      .poll(
+        async () => {
+          const notices = await listTransientRetryNotices(apiClient, sessionId);
+          return notices.length === 1 && notices[0].attempt === 1;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
 
     await expect(session.chat.getByText(/attempt 1 of 5/i)).toBeVisible({ timeout: 30_000 });
-    await expect(session.chat.getByText(/attempt 2 of 5/i)).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          const notices = await listTransientRetryNotices(apiClient, sessionId);
+          return notices.length === 1 && notices[0].attempt >= 2;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+
+    const advanced = await listTransientRetryNotices(apiClient, sessionId);
+    expect(advanced).toHaveLength(1);
+    const firstNoticeId = advanced[0].id;
+    await expect(session.transientRetryCard()).toHaveCount(1);
+    await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect
+      .poll(
+        async () => {
+          const notices = await listTransientRetryNotices(apiClient, sessionId);
+          return notices.length === 1 && notices[0].attempt >= 2;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+
+    const afterReload = await listTransientRetryNotices(apiClient, sessionId);
+    expect(afterReload).toHaveLength(1);
+    expect(afterReload[0].id).toBe(firstNoticeId);
+    await expect(session.transientRetryCard()).toHaveCount(1);
+    await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
   });
 
   test("a 529 on the very first turn retries (launch prompt is cached)", async ({

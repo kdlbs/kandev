@@ -21,6 +21,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { WorkflowCard } from "@/components/settings/workflow-card";
 import { WorkflowSectionActions } from "@/components/settings/workflow-section-actions";
 import { WorkflowSyncSection } from "@/components/settings/workflow-sync-section";
@@ -30,7 +31,6 @@ import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-setti
 import {
   deleteWorkflowAction,
   exportAllWorkflowsAction,
-  importWorkflowsAction,
   reorderWorkflowsAction,
 } from "@/app/actions/workspaces";
 import {
@@ -42,6 +42,7 @@ import {
 } from "@/lib/types/http";
 import { WorkflowDialogs } from "@/app/settings/workspace/workspace-workflows-dialogs";
 import { useWorkflowCreation } from "@/app/settings/workspace/use-workflow-creation";
+import { useWorkflowImport } from "@/app/settings/workspace/use-workflow-import";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 
 type WorkspaceWorkflowsClientProps = {
@@ -80,10 +81,6 @@ function useWorkflowImportExport(
 ) {
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [exportYaml, setExportYaml] = useState("");
-  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
-  const [importYaml, setImportYaml] = useState("");
-  const [importLoading, setImportLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportAll = async () => {
     if (!workspace) return;
@@ -104,57 +101,11 @@ function useWorkflowImportExport(
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setImportYaml(event.target?.result as string);
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  };
-
-  const handleImport = async () => {
-    if (!workspace || !importYaml.trim()) return;
-    setImportLoading(true);
-    try {
-      const result = await importWorkflowsAction(workspace.id, importYaml.trim());
-      const created = result.created ?? [];
-      const skipped = result.skipped ?? [];
-      const parts: string[] = [];
-      if (created.length > 0)
-        parts.push(translate("workflows:importCreated", { names: created.join(", ") }));
-      if (skipped.length > 0)
-        parts.push(translate("workflows:importSkipped", { names: skipped.join(", ") }));
-      toast({ title: translate("workflows:importCompleteTitle"), description: parts.join(". ") });
-      setIsImportDialogOpen(false);
-      setImportYaml("");
-      if (created.length > 0) router.refresh();
-    } catch (error) {
-      toast({
-        title: translate("workflows:failedToImportWorkflows"),
-        description: error instanceof Error ? error.message : translate("workflows:invalidYaml"),
-        variant: "error",
-      });
-    } finally {
-      setImportLoading(false);
-    }
-  };
-
   return {
     isExportDialogOpen,
     setIsExportDialogOpen,
     exportYaml,
-    isImportDialogOpen,
-    setIsImportDialogOpen,
-    importYaml,
-    setImportYaml,
-    importLoading,
-    fileInputRef,
     handleExportAll,
-    handleFileUpload,
-    handleImport,
   };
 }
 
@@ -190,7 +141,12 @@ function useWorkflowActions({
 
   const handleUpdateWorkflow = (
     workflowId: string,
-    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
+    updates: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+    },
   ) => {
     setWorkflowItems((prev) =>
       prev.map((wf) =>
@@ -292,7 +248,12 @@ type WorkflowListProps = {
   isImproveWorkspace?: boolean;
   onUpdate: (
     id: string,
-    u: { name?: string; description?: string; agent_profile_id?: string },
+    u: {
+      name?: string;
+      description?: string;
+      prompt?: string;
+      agent_profile_id?: string;
+    },
   ) => void;
   onDelete: (id: string) => void;
   onDuplicate: (workflow: Workflow, steps: WorkflowStep[]) => void;
@@ -312,10 +273,16 @@ function SortableWorkflowItem({
   readOnly?: boolean;
   children: React.ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: workflow.id,
-    disabled: readOnly,
-  });
+  const { t } = useTranslation();
+  const {
+    attributes,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: workflow.id, disabled: readOnly });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -331,14 +298,26 @@ function SortableWorkflowItem({
       data-testid={`workflow-order-item-${workflow.id}`}
     >
       {!readOnly && (
-        <div
-          className="absolute left-0 top-6 -ml-6 flex items-center cursor-grab active:cursor-grabbing z-10 sm:-ml-8"
-          data-testid={`workflow-drag-handle-${workflow.id}`}
-          {...attributes}
-          {...listeners}
-        >
-          <IconGripVertical className="h-5 w-5 text-muted-foreground" />
-        </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                ref={setActivatorNodeRef}
+                type="button"
+                className="absolute right-3 top-4 z-10 flex h-8 w-8 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,transform] hover:bg-muted hover:text-foreground active:scale-95 active:cursor-grabbing [@media(pointer:coarse)]:top-3 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+                data-testid={`workflow-drag-handle-${workflow.id}`}
+                {...attributes}
+                {...listeners}
+                aria-label={t("workflows:reorderWorkflow", { name: workflow.name })}
+              >
+                <IconGripVertical className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {t("workflows:reorderWorkflow", { name: workflow.name })}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )}
       {children}
     </div>
@@ -382,7 +361,7 @@ function WorkflowList({
         strategy={verticalListSortingStrategy}
       >
         <div
-          className="grid min-w-0 gap-3 pl-6 sm:pl-8"
+          className="grid min-w-0 gap-3"
           data-settings-dirty={orderDirtyIds.size > 0}
           data-settings-dirty-level="container"
           data-testid="workflow-order-list"
@@ -573,6 +552,7 @@ function useWorkspaceWorkflowsPage(
   const workflowIdMappingsRef = useRef(new Map<string, string>());
 
   const importExport = useWorkflowImportExport(workspace, workflowItems, router, toast);
+  const importState = useWorkflowImport({ workspace, router, toast });
   const actions = useWorkflowActions({
     workspace,
     workflowItems,
@@ -609,6 +589,7 @@ function useWorkspaceWorkflowsPage(
     workflowOrderDirtyIds,
     isWorkflowDirty,
     ...importExport,
+    ...importState,
     ...actions,
     handleWorkflowSaved,
     handleReorderWorkflows,

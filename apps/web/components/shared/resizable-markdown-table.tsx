@@ -1,20 +1,29 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { canResizeColumnBoundary, MIN_MARKDOWN_COLUMN_WIDTH } from "@/lib/markdown/table-resize";
 import { useMarkdownTableResize } from "./use-markdown-table-resize";
 
-export function ResizableMarkdownTable({ children }: { children?: ReactNode }) {
+type ResizableMarkdownTableProps = {
+  children?: ReactNode;
+  renderWrapper?: (props: {
+    children: ReactNode;
+    className: string;
+    elementRef: Ref<HTMLDivElement>;
+  }) => ReactNode;
+};
+
+export function ResizableMarkdownTable({ children, renderWrapper }: ResizableMarkdownTableProps) {
   const { t } = useTranslation();
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const resizeEnabled = isFinePointer && !isMobile;
   const resize = useMarkdownTableResize(resizeEnabled);
   const displayedWidths = resize.columnWidths ?? resize.geometry?.columnWidths;
 
-  return (
-    <div ref={resize.wrapperRef} className="markdown-table-scroll overflow-x-auto">
+  const tableContent = (
+    <>
       <table
         ref={resize.tableRef}
         style={
@@ -74,6 +83,20 @@ export function ResizableMarkdownTable({ children }: { children?: ReactNode }) {
             />
           );
         })}
+    </>
+  );
+
+  if (renderWrapper) {
+    return renderWrapper({
+      children: tableContent,
+      className: "markdown-table-scroll overflow-x-auto",
+      elementRef: resize.wrapperRef,
+    });
+  }
+
+  return (
+    <div ref={resize.wrapperRef} className="markdown-table-scroll overflow-x-auto">
+      {tableContent}
     </div>
   );
 }

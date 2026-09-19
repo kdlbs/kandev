@@ -10,12 +10,12 @@ import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Pill } from "@/components/task-create-dialog-pill";
 import {
-  Pill,
   branchToOption,
-  computeBranchPlaceholder,
   sortBranches,
-} from "@/components/task-create-dialog-pill";
+  computeBranchPlaceholder,
+} from "@/components/branch-picker-options";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import type {
   RemoteRepository,
@@ -136,8 +136,7 @@ function RemoteResolutionError({ error, onRetry }: { error: Error; onRetry: () =
       <Button
         type="button"
         variant="outline"
-        size="sm"
-        className="h-11 sm:h-9 cursor-pointer"
+        className="cursor-pointer"
         aria-label={t("task:retryRemoteRepositoryResolution")}
         onClick={onRetry}
       >

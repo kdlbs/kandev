@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-persist-model-warning"]
 plan: "plan.md"
-spec: "../../specs/no-silent-model-fallback/spec.md"
+spec: "../../specs/agents/requirements/no-silent-model-fallback.md"
 ---
 
 # Task 03: Remove host model launch gates

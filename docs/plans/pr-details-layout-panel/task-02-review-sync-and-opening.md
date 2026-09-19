@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-reusable-panel-and-settings-cleanup"]
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 02: Review synchronization and opening behavior

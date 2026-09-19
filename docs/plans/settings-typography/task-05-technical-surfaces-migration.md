@@ -5,7 +5,7 @@ status: in-progress
 wave: 2
 depends_on: ["01-typography-primitives-and-shells"]
 plan: "plan.md"
-spec: "../../specs/settings-typography/spec.md"
+spec: "../../specs/ui/requirements/settings-typography.md"
 ---
 
 # Task 05: Technical surfaces migration
@@ -55,7 +55,7 @@ disjoint.
 
 ## Inputs
 
-- Spec: `docs/specs/settings-typography/spec.md`, technical-value and mobile
+- Spec: `docs/specs/ui/requirements/settings-typography.md`, technical-value and mobile
   scenarios.
 - Plan: `plan.md`, Technical surfaces section.
 - Audit: `docs/audits/settings-typography/003-normalize-card-and-section-headings.md`,

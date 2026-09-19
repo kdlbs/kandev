@@ -44,6 +44,7 @@ export function AppNavSheet({ pageNav, omitDestinations }: AppNavSheetProps) {
           <AppNavTrigger />
         </SheetTrigger>
         <SheetContent
+          onCloseAutoFocus={controls.onMenuCloseAutoFocus}
           side="left"
           className="flex w-80 max-w-[85vw] flex-col overflow-hidden p-0"
           data-testid="app-nav-sheet"

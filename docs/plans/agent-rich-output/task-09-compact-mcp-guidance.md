@@ -5,7 +5,7 @@ status: complete
 wave: 9
 depends_on: ["08-real-agent-acp-delivery"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 09: Compact MCP guidance

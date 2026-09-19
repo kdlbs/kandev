@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/tasks.md"
+spec: "../../specs/office/requirements/tasks.md"
 ---
 
 # Task 01: Correct Branch Messaging
@@ -48,7 +48,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/office/tasks.md`, section B and Handoff scenarios.
+- `docs/specs/office/requirements/tasks.md`, section B and Handoff scenarios.
 - `docs/plans/subtask-new-workspace-branch-label/plan.md`, Frontend and Tests.
 - Existing `WorkspaceSection`, `WorktreeBadge`, and `SubtaskFormBody` rendering
   in `new-subtask-form-parts.tsx`.

@@ -5,7 +5,7 @@ status: pending
 wave: 6
 depends_on: ["05-responsive-mcp-status-surface"]
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 07: Prove responsive status flows

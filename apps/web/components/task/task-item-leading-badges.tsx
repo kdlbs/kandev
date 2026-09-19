@@ -6,25 +6,32 @@ import { useTranslation } from "react-i18next";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 import { TaskAutopilotIcon } from "@/components/task/task-autopilot-icon";
+import type { TaskPriority } from "@/lib/types/http";
 import { TaskContributionIcons } from "./task-contribution-icons";
+import { TaskPriorityIndicator } from "./task-priority-indicator";
 
 export function TaskItemLeadingBadges({
   autopilot,
+  priority,
   isPinned,
   taskId,
   prInfo,
+  showChangeRequestStatus = true,
   issueInfo,
   agentErrorMessage,
 }: {
   autopilot?: boolean;
+  priority?: TaskPriority;
   isPinned?: boolean;
   taskId?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
+  showChangeRequestStatus?: boolean;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
 }) {
   return (
     <>
+      <TaskPriorityIndicator priority={priority} testId="sidebar-task-priority-indicator" />
       {autopilot && <TaskAutopilotIcon />}
       {isPinned && (
         <IconPinFilled
@@ -32,8 +39,10 @@ export function TaskItemLeadingBadges({
           className="h-3 w-3 shrink-0 text-muted-foreground/60"
         />
       )}
-      <TaskContributionIcons taskId={taskId} prInfo={prInfo} />
-      {taskId ? <RegisteredChangeRequestTaskIcon taskId={taskId} /> : null}
+      {showChangeRequestStatus && <TaskContributionIcons taskId={taskId} prInfo={prInfo} />}
+      {showChangeRequestStatus && taskId ? (
+        <RegisteredChangeRequestTaskIcon taskId={taskId} />
+      ) : null}
       {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
       {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
     </>

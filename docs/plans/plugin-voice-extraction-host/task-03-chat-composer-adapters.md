@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-publish-composer-contract"]
 plan: "plan.md"
-spec: "../../specs/plugins/voice-extraction-host.md"
+spec: "../../specs/plugins/requirements/voice-extraction-host.md"
 ---
 
 # Task 03: Adapt Chat And Quick Chat Composers

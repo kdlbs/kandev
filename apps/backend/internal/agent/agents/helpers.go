@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -61,6 +62,44 @@ func mergeAgentctlAutoApprove(settings map[string]PermissionSetting) map[string]
 	return merged
 }
 
+func permissionCLIFlagArgs(settings map[string]PermissionSetting, values map[string]bool) [][]string {
+	if settings == nil || values == nil {
+		return nil
+	}
+	var args [][]string
+	for settingName, setting := range settings {
+		if !setting.Supported || setting.ApplyMethod != PermissionApplyMethodCLIFlag || setting.CLIFlag == "" {
+			continue
+		}
+		if value, exists := values[settingName]; !exists || !value {
+			continue
+		}
+		flagArgs := strings.Fields(setting.CLIFlag)
+		if setting.CLIFlagValue != "" {
+			flagArgs = append(flagArgs, setting.CLIFlagValue)
+		}
+		args = append(args, flagArgs)
+	}
+	return args
+}
+
+func withoutPermissionCLIFlagDuplicates(tokens []string, settings map[string]PermissionSetting, values map[string]bool) []string {
+	remaining := slices.Clone(tokens)
+	for _, permissionArgs := range permissionCLIFlagArgs(settings, values) {
+		if len(permissionArgs) == 0 {
+			continue
+		}
+		for i := 0; i+len(permissionArgs) <= len(remaining); i++ {
+			if !slices.Equal(remaining[i:i+len(permissionArgs)], permissionArgs) {
+				continue
+			}
+			remaining = append(remaining[:i], remaining[i+len(permissionArgs):]...)
+			break
+		}
+	}
+	return remaining
+}
+
 // CmdBuilder constructs CLI command slices using a fluent API.
 type CmdBuilder struct {
 	args []string
@@ -119,22 +158,8 @@ func (b *CmdBuilder) Permissions(flag string, tools []string, opts CommandOption
 
 // Settings appends CLI flags for enabled permission settings.
 func (b *CmdBuilder) Settings(settings map[string]PermissionSetting, values map[string]bool) *CmdBuilder {
-	if settings == nil || values == nil {
-		return b
-	}
-	for settingName, setting := range settings {
-		if !setting.Supported || setting.ApplyMethod != PermissionApplyMethodCLIFlag || setting.CLIFlag == "" {
-			continue
-		}
-		value, exists := values[settingName]
-		if !exists || !value {
-			continue
-		}
-		if setting.CLIFlagValue != "" {
-			b.args = append(b.args, setting.CLIFlag, setting.CLIFlagValue)
-		} else {
-			b.args = append(b.args, strings.Fields(setting.CLIFlag)...)
-		}
+	for _, args := range permissionCLIFlagArgs(settings, values) {
+		b.args = append(b.args, args...)
 	}
 	return b
 }

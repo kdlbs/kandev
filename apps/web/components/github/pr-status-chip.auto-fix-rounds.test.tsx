@@ -64,6 +64,7 @@ function renderWithStore(initialState: Partial<AppState>, ui: ReactNode) {
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
     id: "pr-id",
+    workspace_id: "workspace-1",
     task_id: "task-1",
     owner: "acme",
     repo: "demo",
@@ -142,7 +143,9 @@ function makeCIPrState(roundCount: number, exhausted = false) {
     auto_fix_exhausted_at: exhausted ? "2026-06-18T11:00:00Z" : null,
     last_merge_signature: "",
     last_merge_attempt_at: null,
+    last_merge_result: "" as const,
     last_error: exhausted ? "CI auto-fix paused after 10 rounds for this PR" : null,
+    last_error_kind: "",
     created_at: "2026-06-18T10:00:00Z",
     updated_at: "2026-06-18T10:00:00Z",
   };
@@ -229,6 +232,15 @@ describe("PRStatusChip auto-fix round display", () => {
     expect(explanation.textContent).toContain(
       "pauses auto-fix for this PR so it cannot loop forever",
     );
+    expect(explanation.textContent).toContain(
+      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
+    );
+    expect(explanation.textContent).toContain(
+      "After an action-taken outcome, Kandev waits for provider progress before retrying",
+    );
+    expect(explanation.textContent).toContain(
+      "A non-actionable or blocked outcome acknowledges unchanged feedback and does not retry it",
+    );
   });
 
   it("opens the auto-fix round explanation from the mobile drawer help icon", async () => {
@@ -247,6 +259,9 @@ describe("PRStatusChip auto-fix round display", () => {
     expect(explanation.textContent).toContain("Auto-fix has used 2 of 10 rounds");
     expect(explanation.textContent).toContain(
       "Kandev waits for all PR checks to finish before starting a new CI auto-fix turn",
+    );
+    expect(explanation.textContent).toContain(
+      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
     );
   });
 });

@@ -49,7 +49,7 @@ export function StatusSurfaceMetrics({
     return (
       <section
         data-testid="app-status-metrics"
-        className="space-y-2 py-0.5"
+        className="w-full min-w-0 space-y-2 py-0.5"
         aria-label={t("system:systemMetrics")}
       >
         <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -136,6 +136,7 @@ function BarSourceMetrics({
         source={source}
         updatedAt={updatedAt}
         limit={metricLimit}
+        layout="inline"
         simplified={simplified}
         iconSize={iconSize}
       />
@@ -155,19 +156,19 @@ function DrawerSourceMetrics({
   iconSize: string;
 }) {
   return (
-    <div className="flex min-h-11 w-full min-w-0 items-center gap-2 px-0 text-sm">
+    <div className="flex min-h-11 w-full min-w-0 flex-col items-stretch gap-1 px-0 text-sm">
       {!simplified ? (
-        <SourceBadge source={source} updatedAt={updatedAt} showLabel iconSize={iconSize} />
+        <div className="flex min-h-11 w-full min-w-0 items-center">
+          <SourceBadge source={source} updatedAt={updatedAt} showLabel iconSize={iconSize} />
+        </div>
       ) : null}
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-3 overflow-hidden">
-        <MetricValues
-          source={source}
-          updatedAt={updatedAt}
-          limit={4}
-          simplified={simplified}
-          iconSize={iconSize}
-        />
-      </div>
+      <MetricValues
+        source={source}
+        updatedAt={updatedAt}
+        layout="grid"
+        simplified={simplified}
+        iconSize={iconSize}
+      />
     </div>
   );
 }
@@ -213,43 +214,53 @@ function MetricValues({
   source,
   updatedAt,
   limit,
+  layout,
   simplified,
   iconSize,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
-  limit: number;
+  limit?: number;
+  layout: "inline" | "grid";
   simplified: boolean;
   iconSize: string;
 }) {
-  const metrics = source.metrics.slice(0, limit);
+  const metrics = limit === undefined ? source.metrics : source.metrics.slice(0, limit);
   if (metrics.length === 0) return <span className="text-muted-foreground">-</span>;
-  return (
-    <span className="flex min-w-0 items-center gap-3 overflow-hidden">
-      {metrics.map((metric) => (
-        <MetricValue
-          key={metric.id}
-          metric={metric}
-          source={source}
-          updatedAt={updatedAt}
-          simplified={simplified}
-          iconSize={iconSize}
-        />
-      ))}
-    </span>
-  );
+  const values = metrics.map((metric) => (
+    <MetricValue
+      key={metric.id}
+      metric={metric}
+      source={source}
+      updatedAt={updatedAt}
+      layout={layout}
+      simplified={simplified}
+      iconSize={iconSize}
+    />
+  ));
+  if (layout === "grid") {
+    return (
+      // Keep detailed cells compact enough for two columns in the Pixel 5 drawer.
+      <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-x-3 gap-y-1">
+        {values}
+      </div>
+    );
+  }
+  return <span className="flex min-w-0 items-center gap-3 overflow-hidden">{values}</span>;
 }
 
 function MetricValue({
   metric,
   source,
   updatedAt,
+  layout,
   simplified,
   iconSize,
 }: {
   metric: SystemMetricSample;
   source: SystemMetricsSource;
   updatedAt?: string;
+  layout: "inline" | "grid";
   simplified: boolean;
   iconSize: string;
 }) {
@@ -260,7 +271,7 @@ function MetricValue({
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className={`inline-flex shrink-0 items-center gap-1.5 tabular-nums ${metricColor(metric)}`}
+          className={`${layout === "grid" ? "flex min-h-11 min-w-0 w-full" : "inline-flex shrink-0"} items-center gap-1.5 tabular-nums ${metricColor(metric)}`}
           aria-label={`${metricLabel(t, metric.id)} ${formatMetric(metric)}`}
         >
           {metricIcon(metric.id, iconSize)}

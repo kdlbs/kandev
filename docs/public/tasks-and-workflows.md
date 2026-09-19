@@ -13,6 +13,25 @@ A task is the work to deliver. A workflow is the sequence of steps it follows. U
 2. Create a task with a clear outcome, a compatible agent, and an executor.
 3. Start the agent, review its changes, and move the task through the human gate.
 
+![Task journey from workspace scope to task definition, agent session, human review, and a completed workflow position.](../screenshots/tasks-and-workflows.svg)
+
+[Open full-size SVG diagram][tasks-and-workflows-diagram]
+
+[tasks-and-workflows-diagram]: ../../docs/screenshots/tasks-and-workflows.svg
+
+The task carries the outcome through the workflow. The repository and session provide the working context, while review remains an explicit human gate.
+
+## Keep your view when creating tasks
+
+In **Settings > Task Behavior**, turn off **Auto-focus new tasks**
+and select **Save changes** to create tasks without leaving your current view.
+The setting is on by default and is saved with your user preferences across
+reloads. It works on desktop and mobile.
+
+Tasks and agents still start as requested. You can open the new task manually
+from the task list. This setting controls opening newly created tasks; it does
+not change the separate preference for preventing agent auto-start on open.
+
 ## Understand the model
 
 | Concept         | What it controls                                                                                                       |
@@ -26,6 +45,58 @@ A task is the work to deliver. A workflow is the sequence of steps it follows. U
 | Plan            | The task's single editable Markdown plan, with version history. Consecutive writes can be coalesced into one revision. |
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
+
+During a move and while the destination agent is preparing or starting, the destination marker shows a spinner in the existing marker space. Open the existing step disclosure to see the lifecycle status and agent profile. On touch devices, these details appear in the existing **Move to** Drawer. A destination without auto-start settles after the move and remains available for a later agent start.
+
+Before an allowed move, the step disclosure can show a compact preview of the
+recipient and effective model. It identifies whether the move reuses the
+current session, reuses another named session, creates a new session, or leaves
+the task idle without a recipient when the destination has no launch turn. The
+second line shows the current model or an expected model change and counts
+additional settings changes. Use the info button for the session, profile, model,
+context reset, source-session disposition, and prompt dispatch information.
+In the condensed topbar workflow, each eligible step has a **Move here** button
+beside its name. A single line below summarizes the session and model. Expand
+the row's chevron for full transition details and one-time move options. Moving
+does not require expanding the row. The current step has a highlighted background.
+On touch devices, the same controls appear in the bottom drawer.
+The full stepper and the next-step button above chat retain the centered preview
+footer in their options popover or touch drawer.
+Changing the options refreshes that preview.
+The preview is advisory. **Move here** checks routing, permissions, WIP, and
+current session state again when the move runs. A preview can therefore change
+while a turn is running or while another session becomes available.
+
+## Move a task with one-time entry options
+
+The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
+
+For a keyboard move, open the task and press `Cmd/Ctrl+K`, search for **Move to**, and
+press Enter. Choose the destination step, type any instructions, and press
+`Cmd/Ctrl+Enter` to move. In a step destination list, press `Cmd/Ctrl+Enter`
+to move immediately with defaults, or `Enter` to open options. This also works
+when choosing a step in another workflow. The same submit shortcut works in the existing move-options
+forms. Plain Enter in Instructions inserts a newline. Failed moves retain your
+instructions so you can correct and retry them.
+
+Available options are **Reset context**, **Instructions**, and **Skip step prompt**. The normalized one-time `entry_options` object carries `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. By default, instructions are appended after the destination step prompt. Skip step prompt suppresses the destination step's configured prompt (and its task-description fallback) for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. Reset context is additive, so it cannot disable a reset already required by the destination step. On touch devices the same controls open in a bottom Drawer.
+
+Moves keep the existing reachability, authorization, WIP, archive, workspace, and active-session rules. Reset runs when either the destination or override requests it, and instructions are appended once. An entry override that carries instructions requires an active target session or a destination step that auto-starts an agent. Pull-request draft versus ready-for-review behavior is not part of these move options; configure that in the PR step's normal automation.
+
+When the source agent is running, the move is deferred until its turn ends. The complete normalized options survive WIP admission, promotion, and backend restart, then apply once at destination entry. A plain move remains valid without a target session or auto-start, but agent-facing options are rejected when there is no recipient.
+
+## Task actions from the command palette
+
+While a task is open, `Cmd/Ctrl+K` offers the task actions available from its sidebar
+menu, including Pin/Unpin, Color, Priority, Edit, Rename, Create subtask, Nest under,
+Link, Move to, Send to workflow, Archive, and Delete. Detach and plugin actions
+appear when applicable. These commands target the open task, even when the search
+also shows other tasks. Duplicate remains disabled.
+
+Use arrow keys and Enter to choose an action or nested option. Back or Escape
+returns to the previous choices. Archive and Delete retain their confirmations.
+On phones, task overflow retains touch access; an attached keyboard can open the
+palette, whose choices also support touch.
 
 ## Prepare a workspace
 
@@ -60,24 +131,38 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    task titles** is enabled, the New Task dialog hides this field, requires a nonempty prompt, and uses
    the prompt's first six words as a provisional title while the first eligible agent session chooses
    the final title. The empty-description Plan Mode exception applies only when this setting is disabled.
-2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
+2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow. The step name after the workflow selector identifies the destination used by the applicable immediate launch action. Select the arrow button between the workflow and step name for an explanation of the action-sensitive destination. With an empty description, **Start Plan Mode** uses the first positional step. After you enter a description, **Start task** and **Start task in plan mode** use the first positional step with **Auto-start agent**, then the configured **Start step**, then the first positional step.
 3. Select a source:
 
    | Source     | Use it for                                        | Important behavior                                                                                                                                                                                                                                                                                                                                                                                                   |
    | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | **Repo**   | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task.                                                                                                                                                                                                  |
+   | **Repo**   | A configured, discovered, or new local repository | Select a named branch policy or a raw base branch for each repository row. A policy creates a fresh branch from its saved base and uses its branch template. Each editable local row offers **Refresh repositories** and **Create new repository**. Creation initializes `main` with one empty initial commit in a parent folder you choose. Add more rows for a multi-repository task.                              |
    | **Remote** | A remote repository                               | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL. A pasted URL stays editable until you press Enter; then select the branch. Anonymous, credential-free reads include public GitHub repository branches, pull requests, and issues, plus public `gitlab.com` branch discovery. Private resources and authenticated browse/write features require valid provider credentials. |
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable.                                                                                                                                                                                                                                            |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
-5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. When agent-generated task titles are enabled, every task and subtask action requires a nonempty prompt; the empty-description Plan Mode exception is disabled. A nonempty description exposes the standard split actions.
+5. Enter the initial description. If the applicable launch step has a prompt template, use the eye button after **Enhance prompt with AI** to inspect the launch prompt with your description inserted. The preview leaves task IDs and saved-prompt references unresolved until the task exists. Toggle the button again to return to the unchanged description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode** and uses the first positional workflow step; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. When agent-generated task titles are enabled, every task and subtask action requires a nonempty prompt; the empty-description Plan Mode exception is disabled. A nonempty description exposes the standard split actions and updates the displayed destination to the first positional step with **Auto-start agent**, or falls back to **Start step** and then the first positional step.
 6. Choose the applicable action:
    - **Start Plan Mode** is the primary empty-description action and creates the task through the plan-mode path.
-   - **Start task** requires a nonempty description, creates the task, and starts its agent.
-   - **Start task in plan mode** requires a nonempty description and starts the agent with plan mode enabled. This path starts in the first positional workflow step, even if another step is marked **Start step**.
-   - **Create without starting agent** requires a nonempty description. A structured ACP profile prepares the session/workspace without starting an agent turn. Passthrough/TUI is an exception: the backend launches it immediately so its native PTY exists.
+   - **Start task** requires a nonempty description, creates the task, and starts its agent. This path starts in the first positional step whose entry actions include **Auto-start agent**, falling back to **Start step** when the workflow automates no step.
+   - **Start task in plan mode** requires a nonempty description and starts the agent with plan mode enabled. Like **Start task**, this path starts in the first positional step whose entry actions include **Auto-start agent**, then falls back to **Start step**.
+   - **Create without starting agent** requires a nonempty description and starts in **Start step**. A structured ACP profile prepares the session/workspace without starting an agent turn. Passthrough/TUI is an exception: the backend launches it immediately so its native PTY exists.
 
    On mobile, the two non-primary actions are separate buttons labeled **Plan mode** and **Create only**; they have the same plan-mode and create-without-agent behavior.
+
+### Branch policies
+
+Manage named branch policies in **Settings → Workspaces → _workspace_ → Repositories**. A policy
+stores a base branch, a branch-name template, and a pull-request target for one repository. The
+task picker shows policies before raw branches. A selected policy starts a fresh branch. A raw branch
+continues to open the existing branch. Each policy row has an information icon for its saved values.
+The base branch is the starting point. The pull-request target is the merge destination.
+
+When you create a task, Kandev saves the selected policy values on the task repository. Later edits
+or deletion of the policy do not change the task. Kandev's pull-request dialog uses the saved target
+by default. You can change it before creation. Kandev also adds the saved target to the agent's task
+context. The instruction tells the agent to pass the target explicitly to its provider CLI.
+Policies are not offered in **Quick Chat**, **Remote**, **Add Sources**, or **Add Branch** flows.
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 
@@ -88,7 +173,17 @@ candidate. Kandev does not switch candidates after an ambiguous started turn.
 If the route has no eligible candidate, wait for the current turn to settle and
 use the session's **Retry current agent** or **Try next agent** recovery action.
 
-Creating a repository is available only in an unlocked, single-repository **New Task** form. Kandev rejects an existing target path, creates no initial files or commit, registers the repository in the workspace, and switches the task to a direct **Local** executor profile. If no direct Local profile is available, repository creation stays disabled. Add more repository rows only after selecting existing repositories; empty multi-repository worktrees are not supported.
+Every editable local repository row in **New Task** offers **Refresh repositories** and **Create new repository**, including populated lists and empty search results. Refresh updates the available repositories without changing your selections. It stays visible but disabled during the request.
+
+Kandev rejects an existing target path and creates one empty initial commit with no project files. It registers the repository in the workspace and selects it in the originating row. For a single-row task, Kandev selects a direct **Local** profile. If no direct Local profile exists, single-row creation stays disabled. For multiple rows, creation preserves the selected executor and the other rows. It does not require a direct Local profile.
+
+### Work with an empty remote repository
+
+An existing local checkout or a repository selected from **Remote** can point to a remote with no refs. Kandev creates a local empty baseline so a normal **Worktree** task can start. The baseline contains no README, license, `.gitignore`, or other project files.
+
+Task launch, resume, and worktree recovery do not write to the remote. When the work is ready, use the existing **Changes** action to **Push** or **Create pull request**. Kandev publishes the selected base branch first, then the task branch, with the task runtime's Git credentials. Read or clone access alone is not enough to publish.
+
+If another person or tool initializes the remote before the first publication, Kandev stops without overwriting that history. Reconcile the remote and local task branch, then retry. When an existing contribution session resumes after the remote source branch advances, Kandev recognizes that history-only preflight result and lets the session continue without pulling, rebasing, resetting, or pushing. Inspect and reconcile the branch before publishing. Other contribution access or destination failures still stop the launch. If the base branch was published but the task branch failed, the task branch remains local and **Push** can be retried. On phones, use the same actions from the touch-sized **Changes** menu.
 
 > **Local changes:** creating a fresh local branch can discard dirty files only after explicit consent. Save or commit important work before approving it.
 
@@ -138,7 +233,7 @@ For a compact reminder while you read later replies, enable **Show anchored
 prompt bar** in the same settings section. On desktop, it pins a shortened
 copy of your latest prompt below the session tabs once you've scrolled past
 it further down the transcript. It stays hidden while you're browsing earlier
-  history above your prompt, even though the prompt itself is out of view.
+history above your prompt, even though the prompt itself is out of view.
 use **Scroll to last prompt** to jump back to it instead. Expand the bar for
 longer prompts, or use its scroll action to return to the full prompt; the
 expanded view is capped at 40% of the transcript panel's height so it stays
@@ -150,7 +245,7 @@ progress.
 
 ### Multiple repositories
 
-A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.
+A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.
 
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
@@ -167,16 +262,21 @@ A **repository set** is a named, reusable group of a workspace's repositories: d
 once, then fill the repository picker with all of its repositories in a single action every time that
 combination of repositories is the one you need.
 
-A set holds repositories only. Branches stay a per-task decision, so applying a set leaves each row's
-branch to the picker's normal defaulting, and you review and adjust branches exactly as when adding
-rows by hand.
+A set stores the repositories and order, plus an optional saved base branch for each member. When a
+member has no saved base, applying the set uses the task form's normal defaulting. A saved base is
+copied into the new task row, while the task branch or local checkout remains a separate choice.
 
 Define a set in either place:
 
 - **Settings → Workspaces → _workspace_ → Repositories**, in the **Repository sets** section: create,
-  rename, edit which repositories belong, reorder them, and delete.
+  rename, add or remove repositories, set each member's base branch, reorder them, reset saved bases,
+  and delete.
 - **New Task → Sets → Save as set**, which captures the repositories currently selected in the form
   without disturbing the task you are creating.
+
+Each set contains a repository only once. If the form contains several rows for one repository,
+**Save as set** keeps the first row and its base choice. The dialog reports additional rows separately
+from rows that are not workspace repositories. The task draft keeps all its rows.
 
 Apply one from the **Sets** control beside **add repository** in **New Task** and **New subtask**.
 Applying a set adds one row per repository, in the set's order. It is additive and repeatable:
@@ -190,21 +290,30 @@ Applying a set adds one row per repository, in the set's order. It is additive a
 Applying a set only fills the form. Nothing is saved until you create the task, so the repositories
 the task ends up with are whatever the form holds when you submit.
 
+Each set member's base selector includes **Task default**, with the repository's current default branch
+shown as context when available. Open a selector to load its branch list. If a saved branch no longer
+exists, the form keeps that value visible as unavailable and blocks task creation until you select an
+available branch or **Task default**. For local execution, the saved base is used separately from the
+repository's current checkout branch.
+
 Sets are also available over the API for scripted setup:
 
 ```text
 GET    /api/v1/workspaces/:id/repository-sets
-POST   /api/v1/workspaces/:id/repository-sets   {"name","description","repository_ids"}
+POST   /api/v1/workspaces/:id/repository-sets   {"name","description","repositories"}
 GET    /api/v1/repository-sets/:id
-PATCH  /api/v1/repository-sets/:id              any of name, description, repository_ids
+PATCH  /api/v1/repository-sets/:id              any of name, description, repositories
 DELETE /api/v1/repository-sets/:id
 ```
 
-`repository_ids` is ordered and is the order a set fills the picker. A supplied `repository_ids`
-replaces the whole membership list, which is also how you reorder one; omit the field to leave
-membership untouched. The same five operations exist as `repository_set.list|create|get|update|delete`
-WebSocket actions, and `repository_set.created|updated|deleted` notifications keep every open client
-current. See [WebSocket API](websocket-api.md).
+`repositories` is an ordered list of objects. Each object has a `repository_id` and an optional
+`base_branch`; an empty or omitted base uses task defaulting. A supplied list replaces the whole
+membership list, which is also how you reorder one. Omit the field to leave membership untouched.
+Existing clients may send ordered `repository_ids`; those members have no saved bases. Do not send both
+member fields in one request. The same five operations exist as
+`repository_set.list|create|get|update|delete` WebSocket actions, and
+`repository_set.created|updated|deleted` notifications keep every open client current. See
+[WebSocket API](websocket-api.md).
 
 Sets are workspace-scoped and shared: everyone who can see the workspace sees and can apply its sets.
 A set name is unique within its workspace, compared case-insensitively. Deleting a set removes the
@@ -237,14 +346,16 @@ carry over. The intentional restart is not shown as a previous agent error.
 
 The host rebind stops open task terminals, dev servers, the task editor server, and other
 agentctl-managed workspace processes, so save unsaved work and restart those processes afterward.
-Local Docker, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
+Local Docker, Kubernetes, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
 without restarting the agent or changing its CWD.
 
-Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
+Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, Kubernetes, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
 
 ### Attachments and local-change consent
 
 The task prompt supports image, audio, and resource attachments. Kandev accepts at most 10 files per submission, with a 100 MiB raw limit per file and a 100 MiB raw aggregate limit. Files are uploaded over authenticated HTTP before the task or message is submitted, so the task-create JSON and WebSocket frames carry attachment descriptors rather than base64 file contents. An upload that is still in progress or has failed must finish or be retried before the prompt can be sent. Removing a staged attachment discards its private upload; unclaimed uploads expire automatically after 24 hours. This prompt-attachment limit does not change the separate 10 MB task-document upload contract.
+
+During workspace preparation, the initial message shows your uploaded screenshots and file labels. You can open image previews before the agent starts. The preview survives a page reload and remains visible if preparation fails. It does not indicate successful delivery to the agent.
 
 Creating a fresh local branch is available only with the local executor. If the checkout is dirty, Kandev lists the affected paths and requires explicit consent before discarding those local changes. If another path becomes dirty after the warning, creation fails with a conflict and asks for consent again. Save or commit work before approving this operation.
 
@@ -263,6 +374,8 @@ A task created with **Create without starting agent** opens in a prepared workbe
 />
 
 If the selected profile is unhealthy or incompatible with the executor, fix that configuration before launch. Starting an agent is separate from moving the task through its workflow; entry actions and turn-complete transitions can move or restart work afterward.
+
+When you send a message from Chat before selecting **Start agent**, Kandev keeps the task description in the first user prompt and places your instruction after it. The combined prompt is stored and remains after reload. Later messages contain only their own text.
 
 By default, a running session keeps the coarse **Generating** state and queues
 another message even if Kandev detects background work. Operators can opt into
@@ -363,12 +476,46 @@ deletion is not success.
 
 ## Find and organize tasks
 
-On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
+On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
+**Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
+different layouts. Threads shows agent conversations side by side. Kandev
+remembers the last selected view in that browser on the current device. Phones
+offer **Kanban**, **Threads**, and **List** in the topbar menu, with a native
+Threads deck showing one conversation at a time. A saved desktop Pipeline
+preference is kept but shown as Kanban on the phone.
 
-Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
+Kanban and List share a compact phone header showing the workspace and current
+mode. Tap that context or the menu button to change views, workspaces, or display
+options, or return **Home**. In Threads, tap the view name to choose a saved
+Threads view. Phone **Search tasks** lives in the menu: selecting it reveals
+and focuses the search field below the header. Selecting it again hides the
+field and clears the query.
+
+Under **Settings → Preferences → Appearance → Startup Page**, choose a destination, then select **Save changes**:
+
+- **Task overview** (the default): open the last listing view used on this device, including Threads.
+- **Last visited task**: resume the most recently opened task in the current workspace on this device when Kandev starts or you open the bare home address. If no matching task exists, open the remembered listing instead. Home navigation does not resume the task.
+- **Threads**: always open Threads on startup and Home navigation in the selected workspace, even after using a different listing view. This saved choice follows your user across devices; changing a listing view does not change it.
+
+Office workspaces keep their Office Home while Office is enabled. With Office disabled, Home keeps the workspace and uses the task-listing startup choice.
+
+Explicit view selections (including Kanban, Pipeline, and List), task, session, workflow, overview, and focused Threads links keep their destination on reload instead of applying the saved Threads default. A task's **Task overview** or Back action still opens the overview family using the remembered listing; it does not apply the fixed Threads default.
+
+By default, on desktop, hover over the collapsed sidebar for half a second to reveal its full navigation without moving the page. It closes when the pointer and focus leave the sidebar and its menus. Select **Expand sidebar** to keep it open. On phones, use the existing navigation menu by tapping its button.
+
+In **Settings → Preferences → Appearance → Sidebar**, turn **Show sidebar on hover** on or off and set **Hover delay (ms)** from 0 to 5000 (default 500). Zero reveals immediately. Choose **Save changes** to apply the settings across your browsers. Turning hover off retains the delay and leaves explicit expansion available. You can edit these preferences on a phone, but hover activation requires a mouse or trackpad.
+
+The **TASKS** list in the left sidebar has two time-based sort choices. These choices are separate from the sort choices in the task **List** view.
+
+| Sort choice       | Meaning                                                                                                                 |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Updated**       | The last task summary refresh. Background events, such as pull-request status changes, can change this time.            |
+| **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. |
+
+Choose **Last activity** when you want to review tasks by the least recent user or agent interaction.
 
 - Search matches tasks without changing their state.
-- The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**. In Kanban/Pipeline, each workflow lane has a **Columns** menu to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. On phones, open the menu drawer to change columns for the focused workflow.
+- The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, open the existing menu drawer to expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **State**, **Workflow**, **Repository**, or **None**.
 - **List** can sort by updated time, created time, or title in either direction.
@@ -376,6 +523,8 @@ Under **Settings → General → Appearance → Startup Page**, choose **Task ov
 - List page sizes are 10, 25, or 50; the default is 25.
 - Parent tasks and direct subtasks are indented as a tree.
 - A subtask's action menu can detach it into a top-level task. Detaching preserves its workflow position and descendants; an inherited workspace remains shared with the former parent.
+
+On desktop and tablet, drag a card up or down within its column to reorder it relative to the other cards in that step. You can also focus a card and press **Space** or **Enter** to pick it up, **Arrow Up**/**Arrow Down** to move it, **Space**/**Enter** again to drop it, or **Escape** to cancel. The new order is saved immediately and shown to other viewers of the same board.
 
 On phones, Kanban focuses one workflow and one step at a time. The board navigator always names both; open it to choose either level, or use the previous/next controls and horizontal swipe to move between steps. Choosing a workflow makes it the active workflow for board actions and task creation. Tap a card to open that task directly. Its **More options** menu opens as a touch-sized bottom surface; **Move to** changes the task's workflow or step. **Edit** can still rename a task after work starts, while its original prompt remains locked.
 
@@ -394,25 +543,70 @@ You can add, reorder, edit, and delete steps. Deleting a step that still contain
 
 New steps allow manual moves by default. **Show in command panel** also defaults on. WIP is unlimited and auto-archive is off until configured.
 
-| Setting                   | Effect                                                                                                                                                                                           |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Start step**            | Makes this the normal starting step. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step.                                         |
-| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context. The fixed profile override and original-session options are mutually exclusive. |
-| **Override original session options** | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked. |
-| **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
-| **Plan mode**             | Enables plan mode when the task enters the step.                                                                                                                                                 |
-| **Reset agent context**   | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the profile switch already creates a fresh session.                                 |
-| **Allow manual move**     | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary.                                                                                          |
-| **Show in command panel** | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting.    |
-| **Auto-archive**          | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1.                                                                                  |
-| **WIP limit**             | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step succeed and queue there. |
-| **Pull from**             | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
+| Setting                                | Effect                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Start step**                         | Where a task is created when no agent starts with it. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step. This setting places tasks; it never starts agents, which is **Auto-start agent** below.                                         |
+| **Agent profile and session handling** | The combined selector can choose a profile, the task's initial conversation, or a conversation from an earlier direct-profile step. Its lifecycle settings control how this step starts and ends. The fixed profile override and original-session options are mutually exclusive.                         |
+| **Override original session options**  | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked.                                                                                                       |
+| **Auto-start agent**                   | Starts an agent whenever a task enters the step.                                                                                                                                                                                                                                                          |
+| **Plan mode**                          | Enables plan mode when the task enters the step.                                                                                                                                                                                                                                                          |
+| **Reset agent context**                | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the destination step's session start setting controls whether that switch reuses or creates a conversation.                                                                                  |
+| **Allow manual move**                  | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary.                                                                                                                                                                                                   |
+| **Show in command panel**              | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting.                                                                                                             |
+| **Auto-archive**                       | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1.                                                                                                                                                                                           |
+| **WIP limit**                          | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step succeed and queue there.                                                                                                             |
+| **Pull from**                          | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
+
+For a profile change, configure two independent settings in the combined selector:
+
+- **When this step starts: Reuse an available session** continues the newest eligible nonterminal conversation for this profile. If none is available, Kandev starts a new session.
+- **When this step starts: Start a new session** always starts a fresh conversation for this step.
+- **When this step ends: Complete the session** closes the source session. The workflow cannot reuse it later.
+- **When this step ends: Park the session** stops the source runtime but keeps the conversation available for reuse or manual follow-up.
+
+The combined selector can target a specific conversation when a step changes
+the agent profile:
+
+- **Initial agent session** returns to the conversation that the task used at
+  launch. If that conversation is unavailable, Kandev starts a new conversation
+  with the target step's profile.
+- **Earlier workflow step** returns to the latest successful session recorded
+  for that earlier direct-profile step. The source step must be earlier and
+  must select a profile directly. Inherited profiles and indirect targets are
+  not valid sources.
+- **Agent profile** keeps the default profile-based routing. Kandev can select
+  any eligible conversation for that profile.
+
+For an explicit target, Kandev does not select an unrelated tab only because it
+uses the same profile. **Start a new session** always creates a new conversation,
+even when the target profile already has another session. A completed or
+missing source conversation uses a new conversation with the target profile.
+
+If a source step is moved, removed, or changed to an indirect profile, the
+workflow editor keeps the invalid target visible. Save changes stays disabled
+until you choose another target, clear the target, or undo the source edit.
+Synced workflows require the same repair in the source file before the next
+sync.
+
+New or unset steps use **Reuse an available session** and **Park the session** by
+default. An explicitly saved **Complete the session** choice remains unchanged.
+A parked session is not an active process. You can answer it later, or
+Kandev can reuse it when a later destination step selects the matching profile
+and start behavior. If Kandev cannot prepare the destination session or record
+the parked switch, it keeps the current session recoverable and reports the
+error. The destination step controls start behavior; the source step controls
+end behavior.
 
 When **Reset agent context** creates a fresh ACP session, Kandev preserves the
 selected ACP model, permission mode, and provider options. It restores these
 settings before the next automatic prompt. If the provider rejects a setting,
-the restoration fails and Kandev does not send the destination step's automatic
-prompt.
+the reset fails, or the provider does not answer the reset request, Kandev
+leaves the session waiting for input. It does not send the destination step's
+automatic prompt. The conversation keeps a visible previous-agent-error notice
+with the reset cause. To recover, delete the affected conversation from its
+session actions, then create a new session for the task. The task workspace and
+files remain available to the new session. See [Sessions and review](sessions-and-review.md)
+for the session actions and mobile session picker.
 
 The WIP check also applies when a task is created. It runs for an explicit
 `workflow_step_id` and for the workflow's resolved start step, and the
@@ -428,6 +622,39 @@ destination queue. If the configured
 feeder is also full, creation returns a conflict. Ephemeral tasks are not
 counted.
 
+A queued task detail shows a **Workflow WIP limit** banner. It names the
+destination workflow and step, reports task counts, and links to that
+workflow's WIP settings when the destination identity is available. The
+banner can appear before the task has a session. A feeder's name or limit is
+never shown as the destination.
+
+A task can also show **Queued** after workflow entry selects a session but the
+global session capacity blocks automatic launch. This is a separate queue:
+WIP queueing waits before destination entry, while global capacity queueing
+keeps the selected session and retries it automatically. The task detail and
+task navigator identify this cause as **Global session limit**, state that it
+applies to all workspaces, and link to Settings > Task Behavior > Session
+capacity. They show the destination, the latest capacity observation, queue
+time, and retry state. They do not show a queue position or estimated start
+time. Capacity counts older than 40 seconds, or counts unavailable because the
+client is disconnected, are labelled stale while the destination remains
+visible. Opening a task or a parked predecessor does not start it. Use the
+explicit **Start** or **Resume** action, or send a message, to override the
+automatic ceiling for that conversation.
+
+The instance session capacity is disabled by default. An administrator can
+enable it in Settings > Task Behavior > Session capacity, enter a positive
+maximum, and save the change. The saved value applies to later automatic
+starts without a restart and persists across restarts. Disabling it retains
+the maximum for later use. Manual starts can exceed the limit. Workflow WIP
+limits remain separate and are checked before session capacity.
+
+`KANDEV_MAX_CONCURRENT_SESSIONS` is an optional startup override. A valid
+non-negative value takes precedence over the saved setting, and `0` disables
+the ceiling. When the override is present, Settings shows the effective value
+and prevents edits. Change the environment and restart Kandev to remove the
+override.
+
 Integration watchers use the same admission rule. For example, a GitHub review
 watch targeting a `Review` step with a limit of two admits at most two newly
 observed pull requests at a time. Pull requests that lose the capacity race
@@ -440,18 +667,20 @@ Pull configuration rejects self-references, cycles, and cross-workflow feeders. 
 
 ### Configure events and transitions
 
-| Event                         | Available transition                                                                                                                                                                       |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **On Turn Start**             | Do nothing, move next, move previous, or move to a selected step when the user sends a message.                                                                                            |
-| **On Turn Complete**          | **Do nothing (wait for user)**, move next, move previous, or move to a selected step after the agent turn.                                                                                 |
+| Event                         | Available transition                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **On Turn Start**             | Do nothing, move next, move previous, or move to a selected step when the user sends a message.                                                                                                                                                                                                                                                                                                                                                  |
+| **On Turn Complete**          | **Do nothing (wait for user)**, move next, move previous, or move to a selected step after the agent turn.                                                                                                                                                                                                                                                                                                                                       |
 | **Cancelled turn completion** | When enabled, an explicit user cancellation also runs this step's normal `on_turn_complete` actions after the cancelled turn settles. It bypasses the `auto_advance_requires_signal` / `step_complete_kandev` gate for that cancellation, but a pending clarification still blocks the transition. It does not apply to silent clarification cancellation, peer interruptions, parent/task stops, provider errors, crashes, or runtime teardown. |
-| **When Child Tasks Complete** | Do nothing, move next, move previous, or move to a selected step after every active direct child reaches `COMPLETED`, `FAILED`, or `CANCELLED`, provided the parent has an active session. |
+| **When Child Tasks Complete** | Do nothing, move next, move previous, or move to a selected step after every active direct child reaches `COMPLETED`, `FAILED`, or `CANCELLED`, provided the parent has an active session.                                                                                                                                                                                                                                                       |
 
 The child-completion event ignores archived and ephemeral children, does not inspect grandchildren, and does nothing when the parent has no children. It also requires a parent session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT`; a parent with no session, or only an `IDLE`, `COMPLETED`, `FAILED`, or `CANCELLED` session, does not transition.
 
 Generic comment, blocker-resolution, approval, heartbeat, budget, and error triggers, plus participant quorum, belong to the in-progress Office workflow surface. They are not configurable regular-Kanban step events.
 
 When **On Turn Complete** moves a task, **Wait for agent completion signal** is available. With it enabled, a bare turn end leaves the task waiting; the agent must call `step_complete_kandev`. The call requires a summary and can include a handoff or blockers. It is idempotent within the step, runs asynchronously, and a user message sent before the transition is applied cancels that pending signal. Without the option, turn end counts as completion.
+
+If the task changes steps before the agent sends the signal, Kandev rejects the call and names both the turn's launch step and the current step. Retrying in that same turn cannot recover. End the turn and have the user resume the session, then satisfy the current step and call `step_complete_kandev` from the fresh turn. An operator can also use the normal manual workflow move after checking the work and destination. Waiting, reconnecting, or retrying the stale turn does not change its eligibility.
 
 **Run completion actions when a turn is cancelled** is available beneath a configured turn-complete transition. It applies only when a user explicitly presses **Cancel** on the active turn. The normal completion pipeline still applies, including `on_exit`, the configured transition, and the destination step's `on_enter` actions; an `auto_start_agent` action there can start another turn immediately. An eligible explicit cancellation bypasses the `auto_advance_requires_signal` / `step_complete_kandev` gate, but a pending clarification still blocks the transition. The setting does not turn other interruption or failure paths into completion events. When the setting is off, an explicit cancel leaves the task in its current step and ready for input.
 
@@ -514,7 +743,7 @@ For a Review or Approval step:
 
 ### Avoid automation loops
 
-An entry action can auto-start an agent, and turn completion can move the task into another step that auto-starts again. Trace the entire cycle before enabling it. WIP limits stop over-capacity moves but are not compute budgets. Keep a **Do nothing** transition wherever a person must decide whether work continues.
+An entry action can auto-start an agent, and turn completion can move the task into another step that auto-starts again. Trace the entire cycle before enabling it. WIP limits queue over-capacity moves but are not compute budgets. Keep a **Do nothing** transition wherever a person must decide whether work continues.
 
 For examples and portability, see [Workflow tips](workflow-tips.md), [Workflow import and export](workflow-import-export.md), and [Workflow sync](workflow-sync.md).
 
@@ -536,10 +765,69 @@ Regular tasks have one shared Markdown plan, not a collection of named documents
 2. Write the plan or let an agent write it through task MCP.
 3. Edit it directly. The panel autosaves after 1.5 seconds.
 4. Use plan history to preview a revision, compare it with the previous or current revision, or restore it. Restore creates a new revision; it does not erase history or coalesce with the preceding revision.
-5. Select plan text to leave a comment. **Run** sends the selected feedback to the agent in plan mode.
+5. Select plan text to add pending feedback. Plan comments belong to the task plan, so the same comments appear above every session composer. A normal **Send** includes the visible comments in the message to the selected session. **Run** sends only that comment, in plan mode, to the task's current primary session. An accepted Send or Run removes the delivered comments from the plan and every composer.
 6. Choose **Implement** for the current session or **Implement in fresh agent**. Kandev saves the current draft first and marks the plan as sent for implementation; the implement control is then disabled for that plan.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
+Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
+text. A plan supports up to 100 pending comments and 1 MiB of combined feedback
+and selected text. The complete message, including formatted comments, must
+also fit within 1 MiB. If a limit is exceeded, shorten the feedback, selection,
+or message and retry; rejected changes and deliveries do not remove pending
+comments.
+
+Temporary connection issues are retried automatically in the background. If
+saved feedback still needs attention, an inline notice offers **Retry**. Your
+message stays in the composer while that feedback is being restored; recovery
+never sends it for you. If no saved feedback needs recovery, you can keep
+sending messages normally. **Run** remains available when the selected comment
+and primary session are eligible, even if other feedback is still being
+restored. A recovered comment must finish its own browser-draft cleanup before
+it can be run.
+
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+### Protect agent plan writes
+
+Every agent plan read returns an opaque `version`. The version changes after a
+title or content write. Comment and implementation-marker changes do not change
+the version.
+
+Use `expected_version` for a whole-document replacement. Kandev rejects the
+write when the stored version differs. The rejection happens before Kandev
+changes the title, content, history, or events.
+
+Kandev also rejects a replacement that looks like accidental truncation. Use
+`edit_task_plan_kandev` for a local text change. Set `allow_truncation` only
+when the reduction is intentional and the current version matches. Kandev
+keeps the previous snapshot in plan history.
+
+Use `update_task_plan_kandev` with `mode="append"` to add a section without
+reading the plan first. The server adds one blank line before the new section.
+Append is not idempotent, so a repeated call adds the section again.
+
+If an agent loses a write response, read the plan before retrying. Use the
+returned version as the next `expected_version`. Do not repeat a whole-document
+replacement with an old version.
+
+## Arrange task panels
+
+On desktop and tablet, use the right-panel button in the task header to hide or
+restore the rightmost workbench pane. In the Default layout, this pane contains
+**Files**, **Changes**, and **Terminal**. In Plan Mode it contains **Plan**; in
+Preview Mode it contains **Browser**; and in VS Code mode it contains the editor.
+Custom layouts follow their current rightmost split. The button stays beside
+**Layouts**, and the conversation keeps the released width while the pane is
+hidden. Kandev restores the same pane, tabs, and internal split arrangement in
+the current task environment on the current device.
+
+If the workbench has one region, the button is disabled because there is no
+separate right pane to hide. Kandev does not create a default sidebar in this
+state. Selecting a preset, applying a custom layout, or resetting the layout
+clears the previous hidden-pane target.
+
+On phones, use the bottom navigation to open **Chat**, **Files**, or
+**Terminal** as a full-screen surface. Phone navigation keeps its existing
+layout and does not change the wider task-panel choice.
 
 Revision history is not an immutable record of every autosave. Consecutive writes from the same author name and author kind coalesce into the latest revision for five minutes by default. Operators can set `KANDEV_PLAN_COALESCE_WINDOW_MS`; `0` disables coalescing, while an invalid or negative value falls back to five minutes.
 
@@ -548,33 +836,46 @@ Revision history is not an immutable record of every autosave. Consecutive write
 > [!EXPERIMENTAL]
 > Office is feature-flagged, disabled in the production profile by default, and still in progress. Its named documents, labels, and blocker controls are not stable regular-Kanban features.
 
-| Capability                            | Regular Kanban | Office                                              |
-| ------------------------------------- | -------------- | --------------------------------------------------- |
-| One versioned task plan               | Available      | Available in Office-specific surfaces where enabled |
-| Multiple named task documents         | Not exposed    | In-progress Office capability                       |
-| Task label editor and label filters   | Not exposed    | In-progress Office capability                       |
-| Blocked-by / blocking property editor | Set at task creation or over MCP; read-only afterwards | In-progress Office capability |
+| Capability                            | Regular Kanban                                         | Office                                              |
+| ------------------------------------- | ------------------------------------------------------ | --------------------------------------------------- |
+| One versioned task plan               | Available                                              | Available in Office-specific surfaces where enabled |
+| Multiple named task documents         | Not exposed                                            | In-progress Office capability                       |
+| Task label editor and label filters   | Not exposed                                            | In-progress Office capability                       |
+| Blocked-by / blocking property editor | Set at task creation or over MCP; read-only afterwards | In-progress Office capability                       |
 
 Regular Kanban reads and enforces blocker relationships (see [Task dependencies](#task-dependencies)) but has no blocker filter and no in-place editor: dependencies are declared when the task is created or over MCP. Office additionally exposes named documents, labels, and its own blocker property editor. Do not treat those Office surfaces as a stable public contract yet.
 
 ## Archive, unarchive, and delete
 
+On a phone, archive uses a focused confirmation step in the open Tasks sheet,
+or a compact bottom sheet from a page. [Phone confirmation controls](mobile-remote-access.md#confirm-an-action-on-a-phone)
+explain how to review the action and return to your list without losing your place.
+
+After you confirm archive, the task stays in the active sidebar and phone task picker in a dimmed, busy state with a spinner while the request is pending. It disappears after a successful archive. If the request fails, the task returns to its normal state. Saved views that include archived tasks still show confirmed archives.
+
 Archive records the task as archived and removes it from active views immediately. Runtime stopping and physical cleanup then run in the background with a 60-second timeout. Cleanup is best-effort: a stop or deletion failure is logged and does not undo the archive, and Kandev preserves a runtime or environment when a nonterminal session cannot be stopped. Shared inherited environments and borrowed worktrees are also preserved while another active task still uses them.
 
-| Executor      | Archive cleanup                                                                                                                                                                                 |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                       |
-| Git worktree  | Attempts to remove the Kandev-owned worktree and its local task branch. It does not delete the remote branch, and shared or borrowed worktrees can remain until their last active user is gone. |
-| Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                         |
-| Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                       |
-| Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                         |
-| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.            |
+| Executor      | Archive cleanup                                                                                                                                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |
+| Git worktree  | Attempts to remove the Kandev-owned worktree directory. It removes a managed local branch only when its exact head is already integrated; unpublished, external, ambiguous, shared, or borrowed work remains. Remote branches are untouched. |
+| Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                                               |
+| Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
+| Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
+| Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                                               |
+| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.                                  |
 
 The archive confirmation is enabled by default at **Settings → General → Task Actions → Archive Confirmation** under **Confirm before archiving tasks**. If a parent has children, **Also archive _N_ subtasks** is unchecked by default; without it, the children remain active. Task MCP archive/delete operations affect only the selected task and do not offer the cascade checkbox. MCP delete also does not reparent direct children the way the UI's non-cascade delete does; use the UI rather than task MCP to delete a parent that still has children.
 
-To restore a task, open **List**, enable **Show archived**, and choose unarchive. If the parent was archived with its children, the cascade-owned children are restored with it. For worktree tasks, Kandev probes the newest historical worktree branch for each repository. If that branch still exists locally or on `origin`, Kandev restores it as the checkout branch so the next session can pick it up. Recovery is best-effort and does not rewrite ambiguous multi-row attachments for the same repository. If the branch is missing, the unarchive toast warns that the next session starts fresh from the base branch; work that existed only on the deleted local branch is unrecoverable. Removed worktree directories, containers, and sandboxes are materialized again on a later launch rather than resumed in place.
+To restore a task, open **List**, enable **Show archived**, and choose **Unarchive**. You can also choose **Unarchive** in the open task view on desktop or a phone. If unarchive fails, the task stays archived and recovery stays disabled. If the parent was archived with its children, the cascade-owned children are restored with it.
 
-Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous, best-effort rules as archive.
+While a task is archived, Kandev shows its history but does not start its agent or restore its workspace. After a successful unarchive, the open task checks its existing session once and follows the normal start preference. It can resume the same session or restore its worktree while keeping the session and environment identity. If **Prevent auto-start on open** is enabled, select **Start agent** to begin recovery.
+
+If session startup or resume fails, Kandev keeps the failure as a chronological entry in that session's chat. The current unresolved entry provides the valid recovery actions. After recovery and later agent output, the entry remains in the chat with its details, while older entries have no stale controls. History loading and new messages keep the normal chat scroll position.
+
+If task or workspace preparation fails, Kandev shows one task error strip below the task header and above the session and Plan tabs. The strip stays visible when you switch sessions or tabs. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer. Kandev clears the strip after task recovery succeeds. If you archive the task during recovery, Kandev stops that recovery path and does not start a fallback restore. For worktree tasks, archive keeps the environment identity and either retains the local branch or records its exact integrated head before safe compaction. The next session recreates the worktree directory and restores a missing managed branch from that exact head before trying `origin`. Recovery is best-effort and does not rewrite ambiguous multi-row attachments for the same repository. If neither exact local recovery nor a remote branch is available, the next session starts from the base branch. Removed worktree directories, containers, and sandboxes are materialized again on a later launch rather than resumed in place.
+
+Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 
 When a task still has a `RUNNING` agent, the confirmation dialog adds a
 still-working warning: proceeding discards work that is in progress. Delete
@@ -586,7 +887,7 @@ settled task in the still-working state.
 
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.
-- **Task starts in the wrong step:** normal creation uses **Start step** with first-step fallback; **Start task in plan mode** deliberately uses the first positional step.
+- **Task starts in the wrong step:** the destination depends on whether an agent starts immediately. **Create without starting agent** uses **Start step** with first-step fallback. **Start task** and **Start task in plan mode** use the first **Auto-start agent** step, then fall back to **Start step**. An explicit `workflow_step_id` from the creator outranks these defaults.
 - **A task moves unexpectedly:** inspect **On Turn Start**, **On Turn Complete**, child completion, entry actions, and the destination step's entry actions.
 - **A task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.
 - **Move rejected:** check the target WIP limit and whether the task is already counted there.
@@ -595,8 +896,8 @@ settled task in the still-working state.
 - **Completion signal appears ignored:** it is asynchronous; also check whether a user message canceled it or whether the task already left the step.
 - **Remote source cannot clone or fetch:** verify provider credentials and access to every repository and base branch.
 - **Attachment is rejected below the picker limit:** encoded size is subject to the backend's stricter 10 MB item/batch checks.
-- **Resources remain after archive or delete:** physical cleanup is asynchronous and best-effort. Check for an active task sharing the environment, a failed runtime stop, and server cleanup logs before removing anything manually.
-- **An unarchived worktree starts fresh:** the prior branch no longer existed locally or on `origin`; any work that was never pushed or otherwise saved cannot be recovered by Kandev.
+- **Resources remain after archive or delete:** physical cleanup is asynchronous and retryable. Check for an active task sharing the environment, a failed runtime stop, and server cleanup logs before removing anything manually. Restarting Kandev lets queued cleanup work resume; do not manually remove a shared environment while another active task uses it.
+- **An unarchived worktree starts fresh:** an external action or an older Kandev version removed the branch, and no matching branch exists on `origin`.
 - **A synchronized workflow is read-only:** edit the workflow file in its GitHub source and let sync apply the change.
 
 Related: [Coordinate work](coordination.md), [Sessions and review](sessions-and-review.md), [Agents and profiles](agents-and-profiles.md), and [Automation and MCP](automation-and-mcp.md).

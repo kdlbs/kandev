@@ -14,7 +14,7 @@ The core plugin `Service`: in-memory registry loaded from the FS store, lifecycl
 state machine, and a `Provide(...)` constructor following the repo provider pattern.
 
 ## Inputs
-- Spec `docs/specs/plugins/spec.md` → "State machine" (registered→active→
+- Spec `docs/specs/plugins/requirements/plugins.md` → "State machine" (registered→active→
   disabled→uninstalled, error branch), "Permissions", registration flow.
 - Depends on: `internal/plugins/manifest` (task-01), `internal/plugins/store`
   (task-02), `internal/plugins/state` (task-03).

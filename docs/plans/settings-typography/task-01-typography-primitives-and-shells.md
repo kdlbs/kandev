@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/settings-typography/spec.md"
+spec: "../../specs/ui/requirements/settings-typography.md"
 ---
 
 # Task 01: Typography primitives and shells
@@ -58,7 +58,7 @@ shell markup.
 
 ## Inputs
 
-- Spec: `docs/specs/settings-typography/spec.md`, especially What items 1–4 and
+- Spec: `docs/specs/ui/requirements/settings-typography.md`, especially What items 1–4 and
   the scenarios for page/card hierarchy and Terminal Editors.
 - Plan: `plan.md`, Shared role primitives and Mobile design contract sections.
 - Audit: `docs/audits/settings-typography/001-define-settings-typography-contract.md`,

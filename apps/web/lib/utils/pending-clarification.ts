@@ -8,13 +8,30 @@ import { isInputCapableSessionState } from "./task-pending-input";
 
 export type PendingClarificationScope = {
   /**
-   * Undefined means turn history is not loaded, so pendingAction gates the fallback.
-   * Null means history is loaded but has no durable turns, so all messages are hidden.
-   * A string scopes detection to that exact turn. An empty object disables detection.
+   * Undefined means turn history is not loaded, so pendingAction gates the
+   * fallback. Null means history is loaded but has no durable turns, so all
+   * messages are hidden except a pending request explicitly detached after
+   * agent disconnection. A string scopes detection to that exact turn. An
+   * empty object disables detection.
    */
   currentTurnId?: string | null;
+  /** True when currentTurnId identifies a completed turn. */
+  currentTurnCompleted?: boolean;
+  /**
+   * Allows detached clarification requests to remain answerable after their
+   * turn is no longer the newest durable turn.
+   */
   pendingAction?: TaskPendingAction | null;
+  allowDetached?: boolean;
 };
+
+function hasDetachedPendingClarification(messages: readonly Message[]): boolean {
+  return messages.some((message) => {
+    if (!isPendingClarificationMessage(message)) return false;
+    const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+    return metadata?.agent_disconnected === true;
+  });
+}
 
 export function isPendingClarificationMessage(message: Message): boolean {
   if (message.type !== "clarification_request") return false;
@@ -30,29 +47,58 @@ function durableTurnTimestampKey(value: string): string {
   return `${match[1]}.${(match[2] ?? "").padEnd(9, "0")}Z`;
 }
 
+// A turn counts as lifecycle-only for exactly these four encodings, mirroring
+// the backend's turnMetadataFlagPredicate (D12): boolean true, number 1,
+// string "true", string "1". Everything else - an absent key, null,
+// undefined, false, 0, "", "false", "0", "yes", an object, an array - is
+// conversational. Deliberately a value-set membership check, not a
+// truthiness test (misreads "false"/"0"/"yes"/{}/[] as lifecycle) or a
+// String() coercion (misreads ["1"]).
+const LIFECYCLE_ONLY_VALUES: ReadonlySet<unknown> = new Set([true, 1, "true", "1"]);
+
+function isLifecycleOnlyTurn(turn: Turn): boolean {
+  return LIFECYCLE_ONLY_VALUES.has(turn.metadata?.lifecycle_only);
+}
+
+// completed_at is optional on the wire, so an open turn arrives as an absent
+// key or explicit null; == null treats both alike.
+function isOpenTurn(turn: Turn): boolean {
+  return turn.completed_at == null;
+}
+
+// isNewerTurn mirrors D1's total order: an open turn always outranks a
+// completed one regardless of timestamps, then started_at, created_at, id -
+// all descending.
+function isNewerTurn(candidate: Turn, current: Turn): boolean {
+  const candidateOpen = isOpenTurn(candidate);
+  if (candidateOpen !== isOpenTurn(current)) return candidateOpen;
+  const candidateKey = [
+    durableTurnTimestampKey(candidate.started_at),
+    durableTurnTimestampKey(candidate.created_at),
+    // Mirrors the backend's final deterministic tie-break. Turn IDs do not
+    // encode creation time; exact timestamp ties have no finer ordering.
+    candidate.id,
+  ];
+  const currentKey = [
+    durableTurnTimestampKey(current.started_at),
+    durableTurnTimestampKey(current.created_at),
+    current.id,
+  ];
+  for (let part = 0; part < candidateKey.length; part++) {
+    if (candidateKey[part] === currentKey[part]) continue;
+    return candidateKey[part] > currentKey[part];
+  }
+  return false;
+}
+
 export function newestDurableTurnId(turns?: readonly Turn[]): string | null | undefined {
   if (turns === undefined) return undefined;
-  if (turns.length === 0) return null;
-  let newest = turns[0];
-  for (let index = 1; index < turns.length; index++) {
-    const candidate = turns[index];
-    const newestKey = [
-      durableTurnTimestampKey(newest.started_at),
-      durableTurnTimestampKey(newest.created_at),
-      newest.id,
-    ];
-    const candidateKey = [
-      durableTurnTimestampKey(candidate.started_at),
-      durableTurnTimestampKey(candidate.created_at),
-      // Mirrors the backend's final deterministic tie-break. Turn IDs do not
-      // encode creation time; exact timestamp ties have no finer ordering.
-      candidate.id,
-    ];
-    for (let part = 0; part < candidateKey.length; part++) {
-      if (candidateKey[part] === newestKey[part]) continue;
-      if (candidateKey[part] > newestKey[part]) newest = candidate;
-      break;
-    }
+  const eligible = turns.filter((candidate) => !isLifecycleOnlyTurn(candidate));
+  if (eligible.length === 0) return null;
+  let newest = eligible[0];
+  for (let index = 1; index < eligible.length; index++) {
+    const candidate = eligible[index];
+    if (isNewerTurn(candidate, newest)) newest = candidate;
   }
   return newest.id;
 }
@@ -70,8 +116,19 @@ function clarificationMessagesInScope(
   scope?: PendingClarificationScope,
 ): readonly Message[] {
   if (!scope) return messages;
-  if (scope.pendingAction !== undefined && scope.pendingAction !== "clarification") return [];
-  if (scope.currentTurnId === null) return [];
+  const allowDetached =
+    (scope.allowDetached === true || scope.pendingAction === null) &&
+    scope.currentTurnCompleted !== true &&
+    hasDetachedPendingClarification(messages);
+  if (
+    scope.pendingAction !== undefined &&
+    scope.pendingAction !== "clarification" &&
+    !allowDetached
+  ) {
+    return [];
+  }
+  if (scope.currentTurnId === null && !allowDetached) return [];
+  if (allowDetached) return messages;
   if (scope.currentTurnId === undefined) {
     return scope.pendingAction === "clarification" ? messages : [];
   }
@@ -102,11 +159,13 @@ export function findPendingClarification(
   if (!messages?.length) return null;
   const scoped = clarificationMessagesInScope(messages, scope);
   // Sidebar callers do not have durable turn history. Use persisted message
-  // order instead of WebSocket arrival order so a delayed predecessor event
-  // cannot hide the current request or re-arm an older one.
   const latestTurnId = newestMessageTurnId(scoped);
-  for (let i = scoped.length - 1; i >= 0; i--) {
-    if (latestTurnId && scoped[i].turn_id !== latestTurnId) continue;
+  for (let i = scoped.length - 1; i >= 0; i -= 1) {
+    const metadata = scoped[i].metadata as ClarificationRequestMetadata | undefined;
+    const isDetached = metadata?.agent_disconnected === true;
+    const detachedAllowed =
+      (scope?.allowDetached === true || scope?.pendingAction === null) && isDetached;
+    if (latestTurnId && scoped[i].turn_id !== latestTurnId && !detachedAllowed) continue;
     if (scoped[i].type !== "clarification_request") continue;
     if (isPendingClarificationMessage(scoped[i])) return scoped[i];
   }
@@ -129,7 +188,7 @@ export function findPendingClarificationGroup(
 ): Message[] {
   if (!messages) return [];
   const scoped = clarificationMessagesInScope(messages, scope);
-  const last = findPendingClarification(scoped);
+  const last = findPendingClarification(scoped, scope);
   if (!last) return [];
   const meta = last.metadata as ClarificationRequestMetadata | undefined;
   const pendingID = meta?.pending_id;

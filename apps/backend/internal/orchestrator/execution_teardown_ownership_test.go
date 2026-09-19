@@ -54,6 +54,49 @@ func TestRegisterExecutionStopOwner_SuppressesOrphanCleanupAndRecordsForceEscala
 	require.Equal(t, executionTeardownIntentForce, claim.intent)
 }
 
+// @covers AC-TASKS-RUNTIME-CLEANUP-001.1
+func TestRegisterExecutionStopOwner_ContendedGuardDoesNotBlock(t *testing.T) {
+	svc := newCoordinatorStopTestService(
+		setupTestRepo(t),
+		newMockTaskRepo(),
+		&mockAgentManager{},
+	)
+	const (
+		sessionID   = "session-contended"
+		executionID = "execution-contended"
+	)
+	guard, release := svc.acquireCancelInFlightGuard(sessionID)
+	guardLocked := false
+	t.Cleanup(func() {
+		if guardLocked {
+			guard.Unlock()
+		}
+		release()
+	})
+	guard.Lock()
+	guardLocked = true
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		svc.RegisterExecutionStopOwner(sessionID, executionID, false)
+		close(done)
+	}()
+	<-started
+
+	select {
+	case <-done:
+		_, claimed := svc.executionTeardownClaims.Load(terminalExecutionKey(sessionID, executionID))
+		require.False(t, claimed)
+	case <-time.After(time.Second):
+		guard.Unlock()
+		guardLocked = false
+		<-done
+		t.Fatal("advisory stop-owner registration blocked on the session guard")
+	}
+}
+
 func TestHandleAgentStopped_OwnedPredecessorDoesNotCancelStartingReplacement(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

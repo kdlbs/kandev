@@ -7,7 +7,7 @@ depends_on:
   - "07-diagnostic-bundle-backend"
   - "08-browser-logs-and-bundle-ui"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 10: Agent diagnostic materialization

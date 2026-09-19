@@ -1,6 +1,6 @@
 # task-05: Backend GitHub carry-over on Improve Kandev workspace creation
 
-Spec: `docs/specs/improve-kandev/spec.md` — "Workspace creation semantics"
+Spec: `docs/specs/workspaces/requirements/improve-kandev.md` — "Workspace creation semantics"
 Plan: `docs/plans/improve-kandev-workspace/plan.md` — Phase 2, Wave 5.
 Depends on: task-04.
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { PluginKey } from "@tiptap/pm/state";
+import { exitSuggestion } from "@tiptap/suggestion";
 import type {
   SuggestionOptions,
   SuggestionProps,
@@ -43,6 +44,7 @@ const EMPTY_SLASH_STATE: MenuState<SlashCommand> = {
 
 export type MentionSuggestionCallbacks = {
   getItems: (query: string) => Promise<MentionItem[]>;
+  onSelect: (item: MentionItem) => void;
 };
 
 export const MentionSuggestionPluginKey = new PluginKey("mentionSuggestion");
@@ -95,6 +97,7 @@ export function createMentionSuggestion(
             clientRect: props.clientRect ?? null,
             command: (item: MentionItem) => {
               props.command(mentionItemToAttrs(item));
+              callbacks.onSelect(item);
             },
           });
         },
@@ -107,6 +110,7 @@ export function createMentionSuggestion(
             clientRect: props.clientRect ?? null,
             command: (item: MentionItem) => {
               props.command(mentionItemToAttrs(item));
+              callbacks.onSelect(item);
             },
           });
         },
@@ -119,6 +123,7 @@ export function createMentionSuggestion(
             // keypress.
             kd.event.stopPropagation();
             setMenuState(EMPTY_MENTION_STATE);
+            exitSuggestion(kd.view, MentionSuggestionPluginKey);
             return true;
           }
           return onKeyDown(kd.event);

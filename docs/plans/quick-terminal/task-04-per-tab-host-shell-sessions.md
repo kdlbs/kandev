@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-fix-quick-terminal-startup-race"]
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 04: Add per-tab host-shell sessions

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/office/models"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // CommentWriter is the comment mutation dependency used by runtime actions.
@@ -165,13 +166,21 @@ func (a *Actions) validateTaskRelations(ctx context.Context, workspaceID string,
 		}
 	}
 	if input.ParentTaskID != "" {
+		// The workspace check must run, and deny, before the project check.
+		// GetTaskWorkspaceID returns ("", nil) for a missing row, so a nonexistent
+		// parent ID mismatches here and never reaches GetTaskProjectID, which errors
+		// ("task not found") for the same missing row. Running them in the other
+		// order would leak task existence to the caller as a 500-vs-403 oracle.
 		parentWorkspaceID, err := a.deps.Tasks.GetTaskWorkspaceID(ctx, input.ParentTaskID)
-		if err != nil || parentWorkspaceID != workspaceID {
+		if err != nil {
+			return fmt.Errorf("get parent task workspace: %w", err)
+		}
+		if parentWorkspaceID != workspaceID {
 			return ErrWorkspaceOutOfScope
 		}
 		parentProjectID, err := a.deps.Tasks.GetTaskProjectID(ctx, input.ParentTaskID)
 		if err != nil {
-			return ErrWorkspaceOutOfScope
+			return fmt.Errorf("get parent task project: %w", err)
 		}
 		if input.ProjectID != "" && input.ProjectID != parentProjectID {
 			return ErrWorkspaceOutOfScope
@@ -246,7 +255,7 @@ type ApprovalRequester interface {
 
 // RunSpawner is the run queue dependency used by runtime actions.
 type RunSpawner interface {
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
 }
 
 // AgentModifier is the agent update dependency used by runtime actions.
@@ -368,13 +377,67 @@ func NewActions(deps ActionDependencies) *Actions {
 	return &Actions{deps: deps}
 }
 
+func (a *Actions) authorizeTaskWorkspace(ctx context.Context, runCtx RunContext, taskID string) error {
+	if strings.TrimSpace(runCtx.WorkspaceID) == "" {
+		return nil
+	}
+	if a.deps.Tasks == nil {
+		return fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
+	}
+	workspaceID, err := a.deps.Tasks.GetTaskWorkspaceID(ctx, taskID)
+	if err != nil || workspaceID != runCtx.WorkspaceID {
+		return ErrWorkspaceOutOfScope
+	}
+	return nil
+}
+
+// canAnnotateTask is the annotation scope predicate: a task-bound run may
+// annotate only its own (already-trimmed) task; a taskless run may annotate
+// any task that resolves to its own workspace claim. The two checks never
+// interact — a task-bound run never consults a workspace lookup, and a
+// taskless run never falls back to its (absent) task id. A cross-workspace
+// target and a nonexistent one refuse with the same sentinel so annotation
+// cannot be used as an existence oracle; a failed lookup is returned as-is
+// so an outage is not read as a refusal. The wildcard sentinel is never a
+// real task id, so it is refused outright before either branch — otherwise
+// a run whose own TaskID is the sentinel would self-match against it.
+func (a *Actions) canAnnotateTask(ctx context.Context, runCtx RunContext, taskID string) error {
+	if taskID == WildcardTaskScope {
+		return ErrTaskOutOfScope
+	}
+	if strings.TrimSpace(runCtx.TaskID) != "" {
+		if taskID != runCtx.TaskID {
+			return ErrTaskOutOfScope
+		}
+		return nil
+	}
+	if strings.TrimSpace(runCtx.WorkspaceID) == "" {
+		return ErrWorkspaceOutOfScope
+	}
+	if a.deps.Tasks == nil {
+		return fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
+	}
+	workspaceID, err := a.deps.Tasks.GetTaskWorkspaceID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if workspaceID == "" || workspaceID != runCtx.WorkspaceID {
+		return ErrTaskOutOfScope
+	}
+	return nil
+}
+
 // PostComment records an agent-authored task comment when the run is scoped for it.
 func (a *Actions) PostComment(ctx context.Context, runCtx RunContext, taskID, body string) error {
 	if !runCtx.Capabilities.Allows(CapabilityPostComment) {
 		return ErrCapabilityDenied
 	}
-	if !runCtx.CanMutateTask(taskID) {
-		return ErrTaskOutOfScope
+	if strings.TrimSpace(body) == "" {
+		return ErrCommentBodyRequired
+	}
+	taskID = strings.TrimSpace(taskID)
+	if err := a.canAnnotateTask(ctx, runCtx, taskID); err != nil {
+		return err
 	}
 	if a.deps.Comments == nil {
 		return fmt.Errorf("%w: comments", ErrRuntimeDependencyMissing)
@@ -386,7 +449,7 @@ func (a *Actions) PostComment(ctx context.Context, runCtx RunContext, taskID, bo
 		AuthorID:   runCtx.AgentID,
 		Body:       body,
 		Source:     "agent",
-		CreatedAt:  time.Now(),
+		CreatedAt:  time.Now().UTC(),
 	}
 	return a.deps.Comments.CreateComment(ctx, comment)
 }
@@ -414,6 +477,9 @@ func (a *Actions) UpdateTaskStatus(
 	}
 	if !runCtx.CanMutateTask(taskID) {
 		return ErrTaskOutOfScope
+	}
+	if err := a.authorizeTaskWorkspace(ctx, runCtx, taskID); err != nil {
+		return err
 	}
 	if a.deps.TaskStatus == nil {
 		return fmt.Errorf("%w: task status", ErrRuntimeDependencyMissing)
@@ -451,6 +517,9 @@ func (a *Actions) CreateSubtask(
 	}
 	if !runCtx.CanMutateTask(parentTaskID) {
 		return "", ErrTaskOutOfScope
+	}
+	if err := a.authorizeTaskWorkspace(ctx, runCtx, parentTaskID); err != nil {
+		return "", err
 	}
 	if a.deps.Tasks == nil {
 		return "", fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
@@ -557,7 +626,22 @@ type SpawnAgentRunInput struct {
 	IdempotencyKey string                 `json:"idempotency_key"`
 }
 
+// maxSpawnAgentRunReasonLength bounds SpawnAgentRunInput.Reason. Reason is
+// agent-supplied and reaches office_run_dedup_total /
+// office_run_dedup_keyless_total as an expvar.Map label; those maps never
+// evict, so an unbounded Reason would let a caller grow them without limit.
+const maxSpawnAgentRunReasonLength = 100
+
 // SpawnAgentRun queues a run for an agent in the same workspace.
+//
+// A non-empty agent-supplied key is prefixed with the calling run's id
+// (agent:<callerRunID>:<key>) so a retry of the same run reuses the run id
+// and still dedupes, while a later run gets a different prefix and is not
+// suppressed. With no caller run id the request enqueues keyless
+// (cause=unresolved) rather than risk colliding across runs. An empty key is
+// NOT prefixed: the agent expressed no dedup intent (cause=by_design), and
+// prefixing it would collapse every no-dedup-intent call inside one run onto
+// a single key, suppressing every call after the first.
 func (a *Actions) SpawnAgentRun(
 	ctx context.Context,
 	runCtx RunContext,
@@ -568,6 +652,9 @@ func (a *Actions) SpawnAgentRun(
 	}
 	if a.deps.Runs == nil || a.deps.AgentModifier == nil {
 		return fmt.Errorf("%w: runs", ErrRuntimeDependencyMissing)
+	}
+	if len(input.Reason) > maxSpawnAgentRunReasonLength {
+		return ErrReasonTooLong
 	}
 	target, err := a.deps.AgentModifier.GetAgentInstance(ctx, input.AgentID)
 	if err != nil {
@@ -584,7 +671,17 @@ func (a *Actions) SpawnAgentRun(
 	if err != nil {
 		return err
 	}
-	return a.deps.Runs.QueueRun(ctx, target.ID, input.Reason, string(payload), input.IdempotencyKey)
+	key := ""
+	switch {
+	case input.IdempotencyKey == "":
+		runsservice.ReportKeylessEnqueue(input.Reason, runsservice.KeylessCauseByDesign, "")
+	case runCtx.RunID != "":
+		key = fmt.Sprintf("agent:%s:%s", runCtx.RunID, input.IdempotencyKey)
+	default:
+		runsservice.ReportKeylessEnqueue(input.Reason, runsservice.KeylessCauseUnresolved, "no_caller_run")
+	}
+	_, err = a.deps.Runs.QueueRun(ctx, target.ID, input.Reason, string(payload), key)
+	return err
 }
 
 // ModifyAgentInput contains agent fields an authorized runtime may update.

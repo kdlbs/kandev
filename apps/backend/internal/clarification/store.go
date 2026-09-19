@@ -31,6 +31,27 @@ type Store struct {
 	// coordinate multi-waiter scenarios deterministically; always nil in
 	// production.
 	onWaitEntered func(pendingID string)
+
+	// onRespondEntered, if non-nil, is invoked inside Respond after the
+	// initial pending lookup and before pending.mu is acquired. Tests use it
+	// to force a specific interleaving against a concurrent CancelRequest or
+	// CancelSession; always nil in production.
+	onRespondEntered func(pendingID string)
+
+	// onCancelSessionEntered, if non-nil, is invoked inside CancelSession for
+	// each matching entry, after it has been removed from s.pending and
+	// before that entry's pending.mu is acquired. Tests use it to force a
+	// specific interleaving against a concurrent Respond; always nil in
+	// production.
+	onCancelSessionEntered func(pendingID string)
+
+	// onCancelRequestEntered, if non-nil, is invoked inside CancelRequest
+	// after the initial pending lookup and before pending.mu is acquired.
+	// Tests use it to force a specific interleaving against a concurrent
+	// CancelRequest/CancelSession on the same entry; always nil in
+	// production.
+	onCancelRequestEntered func(pendingID string)
+
 	// onRespondLoaded coordinates cancellation-after-lookup tests. It is always
 	// nil in production.
 	onRespondLoaded func(pendingID string)
@@ -244,10 +265,14 @@ func (s *Store) respond(
 ) error {
 	s.mu.RLock()
 	pending, ok := s.pending[pendingID]
-	hook := s.onRespondLoaded
+	hook := s.onRespondEntered
+	loadedHook := s.onRespondLoaded
 	s.mu.RUnlock()
 	if hook != nil {
 		hook(pendingID)
+	}
+	if loadedHook != nil {
+		loadedHook(pendingID)
 	}
 
 	if !ok {
@@ -263,6 +288,24 @@ func (s *Store) respond(
 	if pending.resolved {
 		pending.mu.Unlock()
 		return fmt.Errorf("%w: %s", ErrAlreadyResponded, pendingID)
+	}
+
+	// A concurrent cancel may have already closed CancelCh (and possibly
+	// already unblocked WaitForResponse) while this entry was still
+	// unresolved. pending.mu makes this check race-free: CancelRequest
+	// only closes CancelCh while holding the same lock, so if it got there
+	// first, that close is already visible here. There is no live waiter
+	// left to deliver to, so this must not report success. Report the same
+	// ErrNotFound a fresh lookup would have hit had CancelRequest won a
+	// touch earlier: the caller's dichotomy (ErrNotFound falls back to
+	// detached delivery; anything else is a hard failure) is correct here
+	// too, since the durable claim already succeeded and there is simply no
+	// live in-memory waiter left to hand it to.
+	select {
+	case <-pending.CancelCh:
+		pending.mu.Unlock()
+		return fmt.Errorf("%w: %s", ErrNotFound, pendingID)
+	default:
 	}
 
 	resp.PendingID = pendingID
@@ -331,18 +374,56 @@ func clarificationDeliveryConfirmationResult(pending *PendingClarification) erro
 }
 
 // CancelRequest cancels a single pending clarification by id, unblocking any
-// WaitForResponse caller that is currently parked on it. Returns true if the
-// entry existed (and was removed), false otherwise. Used by callers that need
-// to surface a creation-side failure immediately rather than wait for the
-// 2-hour MCP timeout.
+// WaitForResponse caller that is currently parked on it. Returns true only if
+// the entry existed and was still unresolved, so the cancel actually took
+// effect; returns false if the entry was never found, or a concurrent
+// Respond has already recorded a resolution and there is nothing left to
+// cancel. Used by callers that need to surface a creation-side failure
+// immediately rather than wait for the 2-hour MCP timeout, and by
+// httpCancelRequest to distinguish a real cancel from cancelling an entry
+// that already has an answer in flight.
+//
+// A losing resolution claim (see clarification.Resolver) calls this on every
+// cancel outcome, independently of whichever concurrent request reaches the
+// entry first. CancelCh is only closed while an entry is still unresolved:
+// once Respond has recorded a resolution, closing CancelCh would serve no
+// purpose (there is no wedge left to break) and would race Respond's own
+// close of done, letting WaitForResponse's select nondeterministically
+// report a spurious cancellation for an answer that was actually delivered.
+// Gating on pending.resolved under the same pending.mu Respond uses is what
+// makes the two mutually exclusive.
+//
+// Gating additionally on pending.cancelled (set here, under the same lock,
+// before the close) makes CancelRequest idempotent against a concurrent
+// second close of the same entry -- two overlapping /:id/cancel requests, or
+// a request racing CancelSession -- which would otherwise both observe
+// resolved=false and both call close(pending.CancelCh), panicking with
+// "close of closed channel" and taking down the backend process.
 func (s *Store) CancelRequest(pendingID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
 	pending, ok := s.pending[pendingID]
+	hook := s.onCancelRequestEntered
+	s.mu.RUnlock()
+
+	if hook != nil {
+		hook(pendingID)
+	}
+
 	if !ok {
 		return false
 	}
-	return s.cancelPendingLocked(pendingID, pending)
+
+	pending.mu.Lock()
+	if pending.resolved || pending.cancelled {
+		pending.mu.Unlock()
+		return false
+	}
+	pending.cancelled = true
+	close(pending.CancelCh)
+	pending.mu.Unlock()
+
+	s.deletePendingIfCurrent(pendingID, pending)
+	return true
 }
 
 // ListPending returns a snapshot of all pending clarification requests.
@@ -360,16 +441,35 @@ func (s *Store) ListPending() []*Request {
 
 // CancelSession cancels all pending clarification requests for a given session.
 // It closes the CancelCh to unblock any WaitForResponse callers and removes entries.
-// Returns the list of cancelled pending IDs.
+// Returns the list of cancelled pending IDs. Same race protection as
+// CancelRequest: CancelCh is only closed for an entry that is still
+// unresolved and not already cancelled, checked and set under that entry's
+// own pending.mu -- guarding against a concurrent CancelRequest (or a second
+// CancelSession call) closing the same channel twice and panicking.
 func (s *Store) CancelSession(sessionID string) []string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	var toCancel []*PendingClarification
 	var cancelled []string
 	for id, pending := range s.pending {
-		if pending.Request.SessionID == sessionID && s.cancelPendingLocked(id, pending) {
+		if pending.Request.SessionID == sessionID {
+			toCancel = append(toCancel, pending)
+			delete(s.pending, id)
 			cancelled = append(cancelled, id)
 		}
+	}
+	hook := s.onCancelSessionEntered
+	s.mu.Unlock()
+
+	for i, pending := range toCancel {
+		if hook != nil {
+			hook(cancelled[i])
+		}
+		pending.mu.Lock()
+		if !pending.resolved && !pending.cancelled {
+			pending.cancelled = true
+			close(pending.CancelCh)
+		}
+		pending.mu.Unlock()
 	}
 	return cancelled
 }

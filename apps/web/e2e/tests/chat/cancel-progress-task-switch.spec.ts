@@ -3,7 +3,7 @@ import { waitForSessionDone, seedIdleSession } from "../../helpers/session";
 import { waitForActiveSessionCancellationPending } from "../../helpers/session-store";
 
 test.describe("Cancel progress across task switches", () => {
-  test("keeps backend-owned cancel progress across task switches and reloads", async ({
+  test("keeps backend-owned cancel progress across task switches", async ({
     testPage,
     apiClient,
     seedData,
@@ -30,14 +30,16 @@ test.describe("Cancel progress across task switches", () => {
     );
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
-    await session.sendMessage("/slow 8s");
+    // Reload hydration is covered independently by mobile-cancel-progress-reload.spec.ts.
+    // Keep this regression focused on the two component remounts caused by task navigation.
+    await session.sendMessage("/slow 30s");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(activeCancel).toBeVisible({ timeout: 15_000 });
     await activeCancel.click();
     await waitForActiveSessionCancellationPending(testPage, true);
     await expect(activeCancel).toBeDisabled();
-    await expect(activeCancel.getByRole("status", { name: "Loading" })).toBeVisible();
+    await expect(activeCancel.getByRole("status", { name: "Cancelling..." })).toBeVisible();
 
     await expect(session.sidebar.getByText("Cancel progress B", { exact: true })).toBeVisible({
       timeout: 15_000,
@@ -54,17 +56,10 @@ test.describe("Cancel progress across task switches", () => {
     const remountedCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(remountedCancel).toBeVisible({ timeout: 15_000 });
     await expect(remountedCancel).toBeDisabled();
-    await expect(remountedCancel.getByRole("status", { name: "Loading" })).toBeVisible();
-
-    await testPage.reload();
-    await session.waitForLoad();
-    const reloadedCancel = session.activeChat().getByTestId("cancel-agent-button");
-    await expect(reloadedCancel).toBeVisible({ timeout: 15_000 });
-    await expect(reloadedCancel).toBeDisabled();
-    await expect(reloadedCancel.getByRole("status", { name: "Loading" })).toBeVisible();
+    await expect(remountedCancel.getByRole("status", { name: "Cancelling..." })).toBeVisible();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await waitForActiveSessionCancellationPending(testPage, false);
-    await expect(reloadedCancel).not.toBeVisible({ timeout: 15_000 });
+    await expect(remountedCancel).not.toBeVisible({ timeout: 15_000 });
   });
 });

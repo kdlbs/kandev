@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/profile-duplicate.md"
+spec: "../../specs/agents/requirements/profile-duplicate.md"
 ---
 
 # Task 01: Backend profile duplicate endpoint

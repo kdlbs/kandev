@@ -7,8 +7,8 @@ This audit covers the first-party settings routes, shared settings components, t
 
 The goal is a role-based typography system. Settings should not use one font size for every piece of content, but the same semantic role must render with the same family, size, weight, and line height across pages. Technical values such as commands, paths, identifiers, tokens, and logs are intentional exceptions and are tracked separately.
 
-The audit rollout notes are tracked in [plan.md](./plan.md). The formal design
-package is [the spec](../../specs/settings-typography/spec.md), [the canonical
+The audit rollout notes are tracked in [plan.md](plan.md). The formal design
+package is [the spec](../../specs/ui/requirements/settings-typography.md), [the canonical
 implementation plan](../../plans/settings-typography/plan.md), and its linked
 task files.
 

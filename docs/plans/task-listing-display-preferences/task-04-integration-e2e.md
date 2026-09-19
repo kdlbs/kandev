@@ -7,7 +7,7 @@ depends_on:
   - "01-device-view-and-workflow-fix"
   - "03-rich-list-row-ui"
 plan: "plan.md"
-spec: "../../specs/ui/task-listing-display-preferences.md"
+spec: "../../specs/ui/requirements/task-listing-display-preferences.md"
 role: test-engineer
 model_tier: balanced
 ---

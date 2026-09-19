@@ -89,6 +89,14 @@ func (c *NoopClient) ListCheckRuns(context.Context, string, string, string) ([]C
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListWorkflowRuns(context.Context, string, string, string) ([]WorkflowRun, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListWorkflowRunJobs(context.Context, string, string, int64, int) ([]WorkflowJob, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) GetPRFeedback(context.Context, string, string, int) (*PRFeedback, error) {
 	return nil, ErrNoClient
 }
@@ -125,7 +133,7 @@ func (c *NoopClient) RequestReviewers(context.Context, string, string, int, []st
 	return ErrNoClient
 }
 
-func (c *NoopClient) MergePR(context.Context, string, string, int, string) (MergeOutcome, error) {
+func (c *NoopClient) MergePR(context.Context, string, string, int, MergePRRequest) (MergeOutcome, error) {
 	return "", ErrNoClient
 }
 

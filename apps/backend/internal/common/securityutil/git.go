@@ -51,6 +51,56 @@ func IsValidBaseBranchRef(ref string) bool {
 	return IsValidBranchName(rest)
 }
 
+// gitSymbolicRefs are git's well-known symbolic refs: pure alnum/underscore
+// with no leading dash and no "~"/"^", so validBranchNameRegex (and
+// therefore IsValidBaseBranchRef) admits them even though none is ever a
+// real branch name. A caller that persists one of these as a repository's
+// default branch and later feeds it to a local rev-parse fallback (worktree
+// FallbackBaseBranch, or internal/delivery's ancestry check) gets whatever
+// commit that pseudo-ref currently resolves to in that checkout — silently
+// the wrong commit, not a resolution failure.
+var gitSymbolicRefs = map[string]struct{}{
+	"HEAD":       {},
+	"ORIG_HEAD":  {},
+	"FETCH_HEAD": {},
+	"MERGE_HEAD": {},
+}
+
+// IsGitSymbolicRef reports whether ref is one of git's reserved pseudo-refs
+// above.
+func IsGitSymbolicRef(ref string) bool {
+	_, ok := gitSymbolicRefs[ref]
+	return ok
+}
+
+// IsValidDefaultBranchName validates a value bound for
+// repositories.default_branch: the IsValidBaseBranchRef allowlist (branch
+// syntax, no trailing/double slash) plus a reject on git's symbolic
+// pseudo-refs, which that allowlist alone admits. Every ingestion site for
+// this field (repository create, update, and the FindOrCreateRepository
+// backfill) must use this rather than IsValidBranchName or
+// IsValidBaseBranchRef directly, since a default branch — unlike an
+// ordinary base-branch override — is read back through a local-fallback
+// rev-parse with no upstream ref to disambiguate it from a pseudo-ref.
+func IsValidDefaultBranchName(branch string) bool {
+	return IsValidBaseBranchRef(branch) && !IsGitSymbolicRef(branch)
+}
+
+// IsValidExpectedBranchName validates a caller-supplied expected branch: the
+// IsValidBranchName allowlist plus git check-ref-format's rejection of a
+// trailing "/" and consecutive "//", plus a reject on git's symbolic
+// pseudo-refs. It deliberately does not route through IsValidBaseBranchRef,
+// which strips an "origin/" prefix and so validates a different string than
+// the caller supplied. An expected branch is used verbatim, both in the
+// comparison against HEAD and in the push refspec, so the value that is
+// checked must be the value that is used.
+func IsValidExpectedBranchName(branch string) bool {
+	if strings.HasSuffix(branch, "/") || strings.Contains(branch, "//") {
+		return false
+	}
+	return IsValidBranchName(branch) && !IsGitSymbolicRef(branch)
+}
+
 // IsKnownSafeGitFlag returns true if the argument is a known safe git flag used by this codebase.
 // This prevents argument injection where user input could introduce malicious flags.
 // Only flags actually used by the Kandev codebase are whitelisted.
@@ -76,7 +126,9 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--format", "--format=", "--stat", "--shortstat", "--numstat", "-p", "-A",
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
 		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
-		"--dry-run", "--get-all", "--first-parent", "--is-ancestor",
+		"--dry-run", "--no-verify", "--get-all", "--first-parent", "--is-ancestor",
+		"--git-path", "--count", "--merges",
+		"--refs",
 		"--src-prefix=", "--dst-prefix=",
 	}
 	for _, safe := range safeFlags {

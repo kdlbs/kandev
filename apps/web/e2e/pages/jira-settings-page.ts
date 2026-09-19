@@ -53,7 +53,11 @@ export class JiraSettingsPage {
 
   /** Open the Auth-method dropdown and pick by visible label. */
   async selectAuth(
-    label: "API token (recommended)" | "Browser session cookie" | "Personal Access Token",
+    label:
+      | "API token (recommended)"
+      | "Browser session cookie"
+      | "Personal Access Token"
+      | "OAuth 2.0",
   ) {
     await this.authSelect.click();
     await this.page.getByRole("option", { name: label, exact: true }).click();

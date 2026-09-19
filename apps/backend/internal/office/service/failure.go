@@ -3,14 +3,18 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 // Inbox item kinds for office-agent-error-handling.
@@ -21,26 +25,118 @@ const (
 	RunReasonManualResumeAfterFailure = "manual_resume_after_failure"
 )
 
+// officeLegacyTransientMaxRetries bounds how many times a classified-transient
+// post-start failure on the legacy (HandleAgentFailure) path is retried
+// before it counts toward auto-pause like any other failure. Shared with
+// the pre-launch retry tier's run.RetryCount rather than a dedicated
+// column: a run that already burned pre-launch retries gets no transient
+// retry here, which under-retries in a rare case but can never lengthen
+// the pre-launch budget.
+const officeLegacyTransientMaxRetries = 2
+
+// officeLegacyTransientBackoff mirrors the first two steps of the routing
+// tier's short-retry backoff (routing_lifecycle.go's officeShortRetryBackoff).
+var officeLegacyTransientBackoff = []time.Duration{
+	5 * time.Second,
+	10 * time.Second,
+}
+
+// AgentFailureEvidence is the lifecycle snapshot for the invocation that
+// produced an agent failure. The legacy retry path requires this evidence to
+// prove that the failure belongs to this run and invocation, and happened
+// before output or effects.
+type AgentFailureEvidence struct {
+	RunID                       string
+	SessionID                   string
+	AgentExecutionID            string
+	PromptGeneration            uint64
+	EvidenceKnown               bool
+	OutputObserved              bool
+	EffectObserved              bool
+	ProviderDiagnosticCandidate bool
+	ProviderDiagnosticText      string
+}
+
 // HandleAgentFailure is the v1 office failure path: every agent error
-// is treated as terminal. The run is marked failed with the verbatim
-// error message, the consecutive-failure counter is incremented, and
-// when it crosses the effective threshold the agent is auto-paused.
+// is treated as terminal, except a classified-transient post-start
+// failure that still has retry budget, which is requeued instead (see
+// tryLegacyTransientRetry). A terminal failure marks the run failed with
+// the verbatim error message, increments the consecutive-failure
+// counter, and auto-pauses the agent once it crosses the effective
+// threshold. It also stamps office_agent_runtime.last_run_finished_at
+// the same as the completed/stopped paths, so cooldown_sec paces the
+// agent's next heartbeat-driven fire regardless of why the previous run
+// ended.
 //
-// No retry is scheduled — the user resolves via Resume session in the
-// chat or Mark fixed in the inbox.
+// Beyond the transient retry above, no other retry is scheduled — the
+// user resolves via Resume session in the chat or Mark fixed in the
+// inbox.
+//
+// tryLegacyTransientRetry runs before MarkRunFailed, not after: every
+// policy cancel (task-tree cancel, workspace pause, participant
+// eviction) guards its write to status IN ('queued','claimed'), and
+// MarkRunFailed always used its own 'claimed' guard, so marking the run
+// 'failed' first and requeuing second would leave a claimed -> failed
+// -> queued window neither guard covers — a cancel landing in that
+// window matches nothing, and the unconditional requeue write would
+// resurrect the run anyway. Classifying and attempting the guarded
+// requeue first means a retry-eligible run never visits 'failed' at
+// all: it goes claimed -> queued directly, or (if a concurrent writer
+// already moved it off 'claimed') the requeue itself no-ops and
+// MarkRunFailed's identical guard below catches it the same way it
+// always has.
+//
+// Returns wrote=false when MarkRunFailed's guarded write was a no-op —
+// the run reached a terminal state through another writer (e.g. a
+// concurrent cancel) between the caller's read and this call — so
+// callers know not to treat a cancelled/already-terminal run as a
+// genuine agent failure. wrote=false also covers a scheduled transient
+// retry: the run was requeued, not terminalized, so callers must not
+// escalate or publish for it either.
 func (s *Service) HandleAgentFailure(
 	ctx context.Context,
 	run *models.Run,
 	errorMessage string,
-) error {
-	if err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage); err != nil {
-		return fmt.Errorf("mark run failed: %w", err)
+	agentID string,
+	providerError *streams.ProviderError,
+	evidence ...AgentFailureEvidence,
+) (bool, error) {
+	var failureEvidence AgentFailureEvidence
+	if len(evidence) > 0 {
+		failureEvidence = evidence[0]
+	}
+	if s.tryLegacyTransientRetry(ctx, run, errorMessage, agentID, providerError, failureEvidence) {
+		return false, nil
+	}
+
+	wrote, err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage)
+	if err != nil {
+		return false, fmt.Errorf("mark run failed: %w", err)
+	}
+	if !wrote {
+		// Nothing to classify, release, or escalate: the row's real
+		// terminal state was written by someone else. Still make sure
+		// the agent isn't left stuck "working" from the launch.
+		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+		return false, nil
 	}
 	// MarkRunFailed bypasses transitionRunTerminal (this is the office v1
-	// failure path, not FailRun), so the checkout release that lives there
-	// has to be duplicated here — otherwise every agent-error terminal
-	// transition leaks the task checkout the same way FinishRun used to.
+	// failure path, not FailRun), so the checkout release and terminal-shape
+	// count that live there have to be duplicated here — otherwise every
+	// agent-error terminal transition leaks the task checkout the same way
+	// FinishRun used to, and every genuine post-launch crash goes uncounted
+	// in office_loop_terminal_total. MarkRunFailed writes status='failed'
+	// with outcome left untouched (NULL for a launched run), matching FailRun.
+	s.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	s.releaseTaskCheckoutForRun(ctx, run)
+	// Leave "working" before the auto-pause decision below, not after: the
+	// reset is a working → idle CAS, so running it first lets a subsequent
+	// auto-pause overwrite idle with paused, while running it last would
+	// find the agent already paused and silently do nothing. Ordering it
+	// here keeps the agent out of a stuck "working" even if the failure
+	// bookkeeping that follows errors out.
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	s.stampRunFinished(ctx, run)
 
 	count, err := s.repo.IncrementAgentConsecutiveFailures(ctx, run.AgentProfileID)
 	if err != nil {
@@ -65,7 +161,161 @@ func (s *Service) HandleAgentFailure(
 		}
 	}
 
-	return nil
+	return true, nil
+}
+
+// tryLegacyTransientRetry requeues run for another attempt instead of
+// letting HandleAgentFailure treat it as terminal, when the failure
+// classifies as transient (ClassTransient, AutoRetryable, FallbackAllowed)
+// and the run still has legacy-transient retry budget. Called before
+// MarkRunFailed runs at all, so a successful retry never marks the row
+// 'failed' — the requeue write is itself
+// guarded to status = 'claimed', mirroring MarkRunFailed's own guard,
+// so the caller must not also run the terminal-shape/counter/auto-pause
+// accounting below — that is exactly what returning true signals. A
+// false return means either the failure is not retry-eligible, or the
+// guarded requeue lost a race against a concurrent writer (a cancel,
+// pause, or eviction that moved the run off 'claimed' first) — either
+// way the caller falls through to MarkRunFailed, whose identical guard
+// resolves the second case the same way it always has.
+//
+// providerError.Message is preferred over the bare errorMessage when
+// present: a raw agent stderr string ("Overloaded", a bare 429) usually
+// classifies unclassified, while the structured provider error carries
+// the signal the classifier needs.
+//
+// Provider rules are keyed by agent ID (agentID, e.g. "claude-acp"), not
+// providerError.ProviderID — some adapters put a model-provider id there
+// instead, which has no rules of its own. The provider id is substituted
+// only when the agent id itself has no rules and the provider id does,
+// mirroring classifyKanbanFailure's resolution
+// (internal/orchestrator/event_handlers_transient.go). Without this, a
+// provider rate limit — the canonical transient failure this retry exists
+// to cover — falls through the provider-specific rules unmatched and
+// classifies as an unretryable agent_runtime_error instead.
+func (s *Service) tryLegacyTransientRetry(
+	ctx context.Context, run *models.Run, errorMessage string, agentID string,
+	providerError *streams.ProviderError, evidence AgentFailureEvidence,
+) bool {
+	if !legacyTransientRetryEvidenceSafe(run, evidence) {
+		return false
+	}
+	delay, ok := legacyTransientRetryDelay(run)
+	if !ok {
+		return false
+	}
+	classified, ok := classifyLegacyTransientFailure(errorMessage, agentID, providerError, evidence)
+	if !ok {
+		return false
+	}
+
+	retryAt := time.Now().UTC().Add(delay)
+	newRetryCount := run.RetryCount + 1
+
+	wrote, err := s.repo.ScheduleRetryIfClaimed(ctx, run.ID, retryAt, newRetryCount)
+	if err != nil {
+		s.logger.Error("failed to schedule legacy transient retry",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return false
+	}
+	if !wrote {
+		// A concurrent writer (cancel, pause, or eviction) already moved
+		// the run off 'claimed': it is no longer ours to resurrect.
+		// MarkRunFailed's identical guard, called next by the caller,
+		// will see the same thing and no-op the same way.
+		return false
+	}
+	// Release ownership only after the requeue is confirmed durable — the
+	// same ordering as the terminal path below. Releasing first would leave
+	// the run 'claimed' with no checkout or working owner if this write (or
+	// the caller's fallthrough MarkRunFailed) then failed.
+	s.releaseTaskCheckoutForRun(ctx, run)
+	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+	s.logger.Info("retrying transient post-start failure before it counts toward auto-pause",
+		zap.String("run_id", run.ID),
+		zap.String("code", string(classified.Code)),
+		zap.Int("retry_count", newRetryCount),
+		zap.Duration("delay", delay))
+	return true
+}
+
+func legacyTransientRetryDelay(run *models.Run) (time.Duration, bool) {
+	if run == nil || run.RetryCount >= officeLegacyTransientMaxRetries {
+		return 0, false
+	}
+	if stale, _ := isRetryStale(run); stale {
+		return 0, false
+	}
+	delay := officeLegacyTransientBackoff[run.RetryCount]
+	// A requeued run is re-evaluated by evaluateRunStaleness the next time
+	// it is claimed, which cancels any run with retry_count > 0 once
+	// run.RequestedAt is older than staleRunThreshold. Test the age it will
+	// have on arrival so the backoff cannot move it into that cancellation
+	// window after this handler schedules the retry.
+	if !run.RequestedAt.IsZero() && time.Since(run.RequestedAt)+delay > staleRunThreshold {
+		return 0, false
+	}
+	return delay, true
+}
+
+func classifyLegacyTransientFailure(
+	errorMessage, agentID string,
+	providerError *streams.ProviderError,
+	evidence AgentFailureEvidence,
+) (*routingerr.Error, bool) {
+	message := errorMessage
+	providerID := agentID
+	if providerError != nil {
+		if providerError.Message != "" {
+			message = providerError.Message
+		}
+		if id := providerError.ProviderID; id != "" &&
+			!routingerr.HasProviderRules(providerID) && routingerr.HasProviderRules(id) {
+			providerID = id
+		}
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: providerID,
+		Stderr:     message,
+	})
+	if !classified.ShouldShortRetry() {
+		return nil, false
+	}
+	if !evidence.ProviderDiagnosticCandidate {
+		return classified, true
+	}
+	diagnostic := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     evidence.ProviderDiagnosticText,
+	})
+	diagnosticText := normalizeFailureText(evidence.ProviderDiagnosticText)
+	if diagnostic.Confidence != routingerr.ConfHigh || !diagnostic.ShouldShortRetry() ||
+		diagnostic.Code != classified.Code || diagnosticText == "" ||
+		!strings.Contains(normalizeFailureText(message), diagnosticText) {
+		return nil, false
+	}
+	return classified, true
+}
+
+func legacyTransientRetryEvidenceSafe(run *models.Run, evidence AgentFailureEvidence) bool {
+	if run == nil || evidence.RunID == "" || evidence.RunID != run.ID || evidence.SessionID == "" ||
+		evidence.AgentExecutionID == "" || evidence.PromptGeneration == 0 ||
+		!evidence.EvidenceKnown || evidence.OutputObserved || evidence.EffectObserved {
+		return false
+	}
+	if run.SessionID != "" && evidence.SessionID != "" && run.SessionID != evidence.SessionID {
+		return false
+	}
+	if evidence.ProviderDiagnosticCandidate && normalizeFailureText(evidence.ProviderDiagnosticText) == "" {
+		return false
+	}
+	return true
+}
+
+func normalizeFailureText(value string) string {
+	return streams.SanitizeProviderMessage(value)
 }
 
 // RecordAgentSuccess resets the consecutive-failure counter for the
@@ -82,28 +332,36 @@ func (s *Service) RecordAgentSuccess(ctx context.Context, agentID string) {
 	}
 }
 
-// MarkAgentRunFailedFixed dismisses the per-task inbox entry, clears
-// the FAILED state on the (task, agent) session, and re-queues a
-// run for that pair. Used by the inbox "Mark fixed" action.
+// MarkAgentRunFailedFixed clears the FAILED state on the (task, agent)
+// session, re-queues a run for that pair, and then dismisses the inbox entry.
+// Used by the inbox "Mark fixed" action.
 func (s *Service) MarkAgentRunFailedFixed(
 	ctx context.Context, userID, runID string,
 ) error {
-	if err := s.repo.DismissInboxItem(ctx, userID, InboxKindAgentRunFailed, runID); err != nil {
-		return fmt.Errorf("dismiss: %w", err)
-	}
 	run, err := s.repo.GetRun(ctx, runID)
 	if err != nil {
 		// Run vanished (e.g. cancelled by reactivity) — dismissal
 		// alone is the best we can do. No retry needed.
+		if dismissErr := s.repo.DismissInboxItem(
+			ctx, userID, InboxKindAgentRunFailed, runID,
+		); dismissErr != nil {
+			return fmt.Errorf("dismiss: %w", dismissErr)
+		}
 		s.logger.Info("mark fixed: run not found, dismissed only",
 			zap.String("run_id", runID))
 		return nil
 	}
 	taskID := taskIDFromRunPayload(run.Payload)
 	if taskID == "" {
-		return nil
+		return s.repo.DismissInboxItem(ctx, userID, InboxKindAgentRunFailed, runID)
 	}
-	return s.requeueRunForTask(ctx, run.AgentProfileID, taskID)
+	if err := s.requeueRunForTask(ctx, run.AgentProfileID, taskID, runID); err != nil {
+		return fmt.Errorf("requeue run: %w", err)
+	}
+	if err := s.repo.DismissInboxItem(ctx, userID, InboxKindAgentRunFailed, runID); err != nil {
+		return fmt.Errorf("dismiss: %w", err)
+	}
+	return nil
 }
 
 // MarkAgentPausedFixed unpauses an auto-paused agent, clears the
@@ -113,57 +371,205 @@ func (s *Service) MarkAgentRunFailedFixed(
 func (s *Service) MarkAgentPausedFixed(
 	ctx context.Context, userID, agentID string,
 ) error {
-	if err := s.repo.DismissInboxItem(ctx, userID, InboxKindAgentPausedAfterFails, agentID); err != nil {
-		return fmt.Errorf("dismiss: %w", err)
-	}
-
 	agent, err := s.repo.GetAgentInstance(ctx, agentID)
 	if err != nil {
 		return fmt.Errorf("get agent: %w", err)
 	}
-	if !strings.HasPrefix(agent.PauseReason, autoPauseReasonPrefix) {
-		// Already cleared by something else; nothing to do.
-		return nil
-	}
-
-	if err := s.repo.UpdateAgentStatusFields(ctx, agentID, string(agent.Status), ""); err != nil {
-		return fmt.Errorf("clear pause reason: %w", err)
-	}
-	if err := s.repo.ResetAgentConsecutiveFailures(ctx, agentID); err != nil {
-		s.logger.Warn("reset counter on unpause failed",
-			zap.String("agent", agentID), zap.Error(err))
-	}
-
-	// Re-queue runs for the tasks affected by the pause AND
-	// auto-dismiss the prior per-task failure entries so unpausing
-	// doesn't resurface them in the inbox. The pause entry is the
-	// single source of truth for this batch of failures; once the
-	// user marks it fixed, the per-task entries are no longer
-	// actionable on their own.
-	runIDs, err := s.repo.ListFailedRunsForAgent(ctx, agentID)
+	autoPaused := strings.HasPrefix(agent.PauseReason, autoPauseReasonPrefix)
+	recoveries, err := s.loadPauseRecoveries(ctx, agent, autoPaused)
 	if err != nil {
-		return fmt.Errorf("list failed runs: %w", err)
+		return err
 	}
-	seenTasks := map[string]bool{}
-	for _, wID := range runIDs {
-		// Auto-dismiss every prior failed run row so it doesn't
-		// re-emerge in the inbox when the agent unpauses.
-		_ = s.repo.DismissInboxItem(ctx, autoDismissUserID, InboxKindAgentRunFailed, wID)
-		w, err := s.repo.GetRun(ctx, wID)
+	if !autoPaused && len(recoveries) == 0 {
+		// Both the pause marker and its durable recovery work are gone.
+		return s.repo.DismissInboxItem(ctx, userID, InboxKindAgentPausedAfterFails, agentID)
+	}
+
+	if autoPaused {
+		if err := s.clearAutoPause(ctx, agent); err != nil {
+			return err
+		}
+		if err := s.repo.ResetAgentConsecutiveFailures(ctx, agentID); err != nil {
+			s.logger.Warn("reset counter on unpause failed",
+				zap.String("agent", agentID), zap.Error(err))
+		}
+	}
+	// Dismissed only once the auto-pause this call observed is actually
+	// cleared (or there was none to clear): a refused clearAutoPause
+	// returns above, leaving the inbox entry for a still-active pause
+	// visible and this call retryable instead of silently swallowed.
+	if err := s.repo.DismissInboxItem(
+		ctx, userID, InboxKindAgentPausedAfterFails, agentID,
+	); err != nil {
+		return fmt.Errorf("dismiss: %w", err)
+	}
+	return s.recoverPausedTasks(ctx, agentID, recoveries)
+}
+
+func (s *Service) loadPauseRecoveries(
+	ctx context.Context, agent *models.AgentInstance, autoPaused bool,
+) ([]officesqlite.AgentPauseRecovery, error) {
+	recoveries, err := s.repo.ListAgentPauseRecoveries(ctx, agent.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list pause recoveries: %w", err)
+	}
+	if len(recoveries) == 0 && autoPaused {
+		// Populate the snapshot for auto-paused agents created before this
+		// table was introduced, then use the same safe recovery path.
+		if err := s.repo.ReplaceAgentPauseRecoveries(
+			ctx, agent.ID, agent.ConsecutiveFailures,
+		); err != nil {
+			return nil, fmt.Errorf("capture pause recoveries: %w", err)
+		}
+		recoveries, err = s.repo.ListAgentPauseRecoveries(ctx, agent.ID)
 		if err != nil {
-			continue
-		}
-		taskID := taskIDFromRunPayload(w.Payload)
-		if taskID == "" || seenTasks[taskID] {
-			continue
-		}
-		seenTasks[taskID] = true
-		if err := s.requeueRunForTask(ctx, agentID, taskID); err != nil {
-			s.logger.Warn("requeue on unpause failed",
-				zap.String("agent", agentID), zap.String("task_id", taskID),
-				zap.Error(err))
+			return nil, fmt.Errorf("reload pause recoveries: %w", err)
 		}
 	}
+	return recoveries, nil
+}
+
+func (s *Service) clearAutoPause(
+	ctx context.Context, agent *models.AgentInstance,
+) error {
+	originalReason := agent.PauseReason
+	for attempt := 0; attempt < 2; attempt++ {
+		changed, err := s.clearAutoPauseAttempt(ctx, agent)
+		if err != nil {
+			return err
+		}
+		if changed {
+			return nil
+		}
+
+		current, err := s.repo.GetAgentInstance(ctx, agent.ID)
+		if err != nil {
+			return fmt.Errorf("reload agent status: %w", err)
+		}
+		if !strings.HasPrefix(current.PauseReason, autoPauseReasonPrefix) {
+			return nil
+		}
+		// Still paused but with a reason this call never observed means a
+		// newer auto-pause landed between our read and the CAS above.
+		// Retrying against it would clear that newer pause and let the
+		// caller reset the counter and recover tasks from this call's
+		// stale snapshot instead. Abort so the newer pause stays intact
+		// and reachable by a fresh "Mark fixed".
+		if current.Status == models.AgentStatusPaused && current.PauseReason != originalReason {
+			return fmt.Errorf("clear pause reason: a newer auto-pause is in progress")
+		}
+		agent = current
+	}
+	return fmt.Errorf("clear pause reason: agent status changed")
+}
+
+func (s *Service) clearAutoPauseAttempt(
+	ctx context.Context, agent *models.AgentInstance,
+) (bool, error) {
+	if agent.Status == models.AgentStatusPaused {
+		return s.unpauseAgentIfCurrent(ctx, agent)
+	}
+	return s.clearPauseReasonIfCurrent(ctx, agent)
+}
+
+func (s *Service) unpauseAgentIfCurrent(
+	ctx context.Context, agent *models.AgentInstance,
+) (bool, error) {
+	changed, err := s.repo.UnpauseAgentIfCurrent(
+		ctx, agent.ID, agent.PauseReason, string(models.AgentStatusIdle),
+	)
+	if err != nil {
+		return false, fmt.Errorf("unpause agent: %w", err)
+	}
+	if changed {
+		s.publishAgentStatusChanged(
+			ctx, agent.ID, agent.WorkspaceID, string(models.AgentStatusIdle),
+		)
+	}
+	return changed, nil
+}
+
+func (s *Service) clearPauseReasonIfCurrent(
+	ctx context.Context, agent *models.AgentInstance,
+) (bool, error) {
+	changed, err := s.repo.ClearAgentPauseReasonIfCurrent(
+		ctx, agent.ID, string(agent.Status),
+	)
+	if err != nil {
+		return false, fmt.Errorf("clear pause reason: %w", err)
+	}
+	if changed {
+		s.publishAgentStatusChanged(
+			ctx, agent.ID, agent.WorkspaceID, string(agent.Status),
+		)
+	}
+	return changed, nil
+}
+
+func (s *Service) recoverPausedTasks(
+	ctx context.Context, agentID string,
+	recoveries []officesqlite.AgentPauseRecovery,
+) error {
+	var recoveryErrs []error
+	for _, recovery := range recoveries {
+		if err := s.recoverPausedTask(ctx, agentID, recovery); err != nil {
+			recoveryErrs = append(recoveryErrs,
+				fmt.Errorf("recover task %s: %w", recovery.TaskID, err))
+		}
+	}
+	return errors.Join(recoveryErrs...)
+}
+
+func (s *Service) recoverPausedTask(
+	ctx context.Context, agentID string,
+	recovery officesqlite.AgentPauseRecovery,
+) error {
+	fields, err := s.repo.GetTaskExecutionFields(ctx, recovery.TaskID)
+	if errors.Is(err, officesqlite.ErrTaskNotFound) {
+		return s.discardPauseRecovery(ctx, recovery)
+	}
+	if err != nil {
+		return fmt.Errorf("load task: %w", err)
+	}
+	if fields.AssigneeAgentProfileID != agentID {
+		return s.discardPauseRecovery(ctx, recovery)
+	}
+
+	latest, err := s.repo.GetLatestRunForAgentTask(ctx, agentID, recovery.TaskID)
+	if err != nil {
+		return fmt.Errorf("load latest run: %w", err)
+	}
+	if latest == nil || latest.ID != recovery.FailedRunID ||
+		latest.Status != models.RunStatusFailed {
+		return s.discardPauseRecovery(ctx, recovery)
+	}
+	if err := s.requeueRunForTask(
+		ctx, agentID, recovery.TaskID, recovery.FailedRunID,
+	); err != nil {
+		return fmt.Errorf("requeue task: %w", err)
+	}
+	if err := s.repo.DeleteAgentPauseRecovery(
+		ctx, agentID, recovery.TaskID,
+	); err != nil {
+		return fmt.Errorf("delete recovery: %w", err)
+	}
+	_ = s.repo.DismissInboxItem(
+		ctx, autoDismissUserID, InboxKindAgentRunFailed, recovery.FailedRunID,
+	)
+	return nil
+}
+
+func (s *Service) discardPauseRecovery(
+	ctx context.Context, recovery officesqlite.AgentPauseRecovery,
+) error {
+	if err := s.repo.DeleteAgentPauseRecovery(
+		ctx, recovery.AgentID, recovery.TaskID,
+	); err != nil {
+		return fmt.Errorf("delete recovery: %w", err)
+	}
+	_ = s.repo.DismissInboxItem(
+		ctx, autoDismissUserID, InboxKindAgentRunFailed, recovery.FailedRunID,
+	)
 	return nil
 }
 
@@ -299,6 +705,9 @@ func (s *Service) autoPauseAgent(
 	}
 	reason := fmt.Sprintf("%s %d consecutive failures. Last error: %s",
 		autoPauseReasonPrefix, count, truncateForReason(errorMessage))
+	if err := s.repo.ReplaceAgentPauseRecoveries(ctx, agentID, count); err != nil {
+		return fmt.Errorf("capture pause recoveries: %w", err)
+	}
 	if err := s.repo.UpdateAgentStatusFields(
 		ctx, agentID, string(models.AgentStatusPaused), reason,
 	); err != nil {
@@ -311,11 +720,20 @@ func (s *Service) autoPauseAgent(
 	return nil
 }
 
+// requeueRunForTask is a manual resume: the failed run's own id is the
+// occurrence identity (falling back to the task id if it is somehow empty),
+// so a duplicate "Mark fixed" click dedupes instead of double-queuing.
 func (s *Service) requeueRunForTask(
-	ctx context.Context, agentID, taskID string,
+	ctx context.Context, agentID, taskID, failedRunID string,
 ) error {
 	payload := mustJSONString(map[string]string{"task_id": taskID})
-	return s.QueueRun(ctx, agentID, RunReasonManualResumeAfterFailure, payload, "")
+	identity := failedRunID
+	if identity == "" {
+		identity = taskID
+	}
+	key := fmt.Sprintf("%s:%s:%s", RunReasonManualResumeAfterFailure, agentID, identity)
+	_, err := s.QueueRun(ctx, agentID, RunReasonManualResumeAfterFailure, payload, key)
+	return err
 }
 
 func (s *Service) publishRunFailed(

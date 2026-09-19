@@ -6,7 +6,7 @@ Kandev's backend reads configuration from three sources, in this order of preced
 2. A YAML config file (`config.yaml`).
 3. Environment variables (`KANDEV_*`).
 
-Both the file and env vars are optional; the backend boots with sensible defaults out of the box. See [`docker.md`](./docker.md) and [`k8s.md`](./k8s.md) for deployment-specific tables; this page is the full reference.
+Both the file and env vars are optional; the backend boots with sensible defaults out of the box. See [`docker.md`](docker.md) and [`k8s.md`](k8s.md) for deployment-specific tables; this page is the full reference.
 
 ## Config file
 

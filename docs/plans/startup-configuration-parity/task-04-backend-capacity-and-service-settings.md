@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-backend-security-and-lifecycle-settings"]
 plan: "plan.md"
-spec: "../../specs/platform/startup-configuration-parity.md"
+spec: "../../specs/platform/requirements/startup-configuration-parity.md"
 ---
 
 # Task 04: Backend capacity and service settings

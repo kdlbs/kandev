@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/command-panel-sidebar-task-reveal.md"
+spec: "../../specs/ui/requirements/command-panel-sidebar-task-reveal.md"
 ---
 
 # Task 01: Reveal command-selected sidebar task
@@ -54,7 +54,7 @@ guard form one TDD vertical slice.
 
 ## Inputs
 
-- Behavioral contract: `docs/specs/ui/command-panel-sidebar-task-reveal.md`.
+- Behavioral contract: `docs/specs/ui/requirements/command-panel-sidebar-task-reveal.md`.
 - Root-cause trace and frontend design: `plan.md`.
 - Retryable navigation precedent: `apps/web/lib/review/navigation.ts` and its unit test.
 - Existing overflowing-sidebar fixture: `apps/web/e2e/tests/task/sidebar-scroll-preservation.spec.ts`.

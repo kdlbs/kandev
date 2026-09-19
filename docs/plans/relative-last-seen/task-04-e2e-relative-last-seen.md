@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-security-page-relative-last-seen"]
 plan: "plan.md"
-spec: "../../specs/relative-last-seen/spec.md"
+spec: "../../specs/ui/requirements/relative-last-seen.md"
 ---
 
 # Task 04: E2E coverage for relative last seen (desktop + mobile + cross-tab)

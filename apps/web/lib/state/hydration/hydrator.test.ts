@@ -9,6 +9,12 @@ import type { AppState } from "@/lib/state/store";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
 const TERMINAL_TAB_ID = "terminal-1";
+const DEFAULT_TASK_ROW = {
+  detailsEnabled: true,
+  detailOrder: ["relative_time", "repository", "pull_request_number"],
+  visibleDetails: ["relative_time", "repository", "pull_request_number"],
+  trailing: "git_changes",
+};
 
 /** Builds an AppState draft carrying only the default UI slice for hydrateUI tests. */
 function makeDraft(): AppState {
@@ -132,7 +138,53 @@ describe("hydrateUI — typed quick chat sessions", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- This covers the full hydration-to-launcher sequence in one fixture.
 describe("hydrateUI — quick chat lifecycle", () => {
+  it("restores the remembered tab before a passive hydrated active session", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      draft.quickChat.sessions = [{ sessionId: "chat-first", workspaceId: "ws-1", kind: "chat" }];
+      draft.quickChat.activeSessionId = "chat-first";
+      draft.quickChat.rememberedSelectionByWorkspace = {
+        "ws-1": { chat: "chat-remembered" },
+      };
+      draft.quickChat.rememberedSelectionOrder = ["ws-1"];
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [
+            { sessionId: "chat-first", workspaceId: "ws-1", kind: "chat" },
+            { sessionId: "chat-remembered", workspaceId: "ws-1", kind: "chat" },
+          ],
+        },
+      });
+    });
+
+    expect(result.quickChat.activeSessionId).toBe("chat-remembered");
+  });
+
+  it("resolves an empty boot snapshot for the active workspace", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.workspaces.activeId = "ws-1";
+      draft.quickChat.pendingOpen = {
+        workspaceId: "ws-1",
+        kind: "chat",
+        selectionRevision: 0,
+      };
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: true,
+          activeSessionId: null,
+          sessions: [],
+        },
+      });
+    });
+
+    expect(result.quickChat.selectionReadyByWorkspace).toMatchObject({ "ws-1": true });
+    expect(result.quickChat.pendingOpen).toBeNull();
+    expect(result.quickChat.activeSessionId).toBe("quick-chat-setup:ws-1:chat");
+  });
+
   it("restores server-owned terminal tabs during a fresh hydration", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       hydrateUI(draft, {
@@ -373,6 +425,46 @@ describe("mergeInitialState — sidebar views from boot settings", () => {
   });
 });
 
+describe("hydrateState — settings agent profiles", () => {
+  it("normalizes fallback fields from nested boot hydration", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        settingsAgents: {
+          items: [
+            {
+              profiles: [
+                {
+                  id: "explicit-profile",
+                  fallback_model: "provider/model",
+                  auto_fallback: false,
+                },
+                {
+                  id: "automatic-profile",
+                  fallback_model: "",
+                  auto_fallback: true,
+                },
+              ],
+            },
+          ],
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.settingsAgents.items[0]?.profiles).toMatchObject([
+      {
+        id: "explicit-profile",
+        fallbackModel: "provider/model",
+        autoFallback: false,
+      },
+      {
+        id: "automatic-profile",
+        fallbackModel: "",
+        autoFallback: true,
+      },
+    ]);
+  });
+});
+
 describe("hydrateState — user settings revisions", () => {
   it("applies a newer boot snapshot after an earlier websocket update", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
@@ -416,6 +508,85 @@ describe("hydrateState — user settings revisions", () => {
   });
 });
 
+describe("hydrateState — agent profile revisions", () => {
+  it("keeps a newer websocket profile snapshot over route bootstrap", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.agentProfiles = {
+        version: 1,
+        items: [
+          {
+            id: "live-profile",
+            label: "Live profile",
+            agent_id: "agent-1",
+            agent_name: "Agent",
+            cli_passthrough: false,
+            inference_capable: true,
+          },
+        ],
+      };
+      draft.settingsAgents.items = [
+        {
+          id: "agent-1",
+          name: "Agent",
+          profiles: [],
+        } as never,
+      ];
+      hydrateState(draft, {
+        settingsAgents: { items: [] },
+        agentProfiles: {
+          version: 0,
+          items: [],
+        },
+        settingsData: { agentsLoaded: true },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.agentProfiles).toMatchObject({
+      version: 1,
+      items: [{ id: "live-profile" }],
+    });
+    expect(result.settingsAgents.items).toHaveLength(1);
+    expect(result.settingsData.agentsLoaded).toBe(false);
+  });
+
+  it("applies a fresh snapshot captured at the current generation", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.agentProfiles = {
+        version: 1,
+        items: [
+          {
+            id: "stale-profile",
+            label: "Stale profile",
+            agent_id: "agent-1",
+            agent_name: "Agent",
+            cli_passthrough: false,
+            inference_capable: true,
+          },
+        ],
+      };
+      draft.settingsAgents.items = [
+        {
+          id: "agent-1",
+          name: "Agent",
+          profiles: [{ id: "stale-profile" }],
+        } as never,
+      ];
+      hydrateState(draft, {
+        settingsAgents: { items: [] },
+        agentProfiles: {
+          version: 1,
+          items: [],
+        },
+        settingsData: { agentsLoaded: true },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.agentProfiles).toEqual({ version: 1, items: [] });
+    expect(result.settingsAgents.items).toEqual([]);
+    expect(result.settingsData.agentsLoaded).toBe(true);
+  });
+});
+
 describe("hydrateState — sidebar views from user settings", () => {
   it("hydrates active view and draft from backend user settings", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
@@ -449,6 +620,7 @@ describe("hydrateState — sidebar views from user settings", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      taskRow: DEFAULT_TASK_ROW,
     });
   });
 
@@ -642,6 +814,41 @@ describe("hydrateState — session runtime model state", () => {
     expect(systemResult.system).toEqual(defaultState.system);
   });
 });
+
+describe("hydrateState — route MCP status freshness", () => {
+  it("keeps newer live MCP state when force-merging an older route snapshot", () => {
+    const routeHistory: MCPAttachmentHistory = {
+      version: 1,
+      current: {
+        attachment_attempt_id: "attempt-route",
+        started_at: "2026-06-10T00:00:00.000Z",
+        servers: [{ name: "route", status: "connected" }],
+      },
+    };
+    const liveHistory: MCPAttachmentHistory = {
+      version: 1,
+      current: {
+        attachment_attempt_id: "attempt-live",
+        started_at: "2026-06-11T00:00:00.000Z",
+        updated_at: "2026-06-11T00:01:00.000Z",
+        servers: [{ name: "live", status: "active" }],
+      },
+    };
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionMcpStatus.bySessionId["session-1"] = liveHistory;
+      hydrateState(
+        draft,
+        {
+          sessionMcpStatus: { bySessionId: { "session-1": routeHistory } },
+        } as unknown as Partial<AppState>,
+        { activeSessionId: "session-1", forceMergeSessionId: "session-1" },
+      );
+    });
+
+    expect(result.sessionMcpStatus.bySessionId["session-1"]).toEqual(liveHistory);
+  });
+});
+
 it.each([true, false])(
   "turn hydration marks a session only when it is force-merged",
   (forceMerge) => {

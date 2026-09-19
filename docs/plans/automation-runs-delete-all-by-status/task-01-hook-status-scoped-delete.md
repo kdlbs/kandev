@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/automation-runs-delete-all-by-status/spec.md"
+spec: "../../specs/office/requirements/automation-runs-delete-all-by-status.md"
 ---
 
 # Task 01: Hook status-scoped delete-all

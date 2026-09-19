@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  activateChangesPanel,
   applyChangesPanelAutoFocusState,
   markInactiveChangesIncreases,
   migrateEnvironmentKeys,
@@ -7,6 +8,8 @@ import {
   shouldClearPendingChangesFocus,
 } from "./changes-panel-focus";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 const hashDiffMock = vi.hoisted(() => vi.fn((diff: string) => `hash:${diff}`));
 
@@ -20,6 +23,52 @@ const UPDATED_FINGERPRINT = "repo:path:updated";
 
 beforeEach(() => {
   hashDiffMock.mockClear();
+  useDockviewStore.setState({
+    activeLayoutProfile: { kind: "built-in", id: "default" },
+  });
+});
+
+function activationApi(groupId: string, panelIds: string[]) {
+  const setActive = vi.fn();
+  const changesPanel = {
+    id: "changes",
+    group: { id: groupId, panels: panelIds.map((id) => ({ id })) },
+    api: { setActive },
+  };
+  const api = {
+    getPanel: vi.fn().mockReturnValue(changesPanel),
+  } as unknown as Parameters<typeof activateChangesPanel>[0];
+  return { api, setActive };
+}
+
+// @covers AC-UI-TASK-LAYOUT-PROFILES-001.11
+describe("activateChangesPanel", () => {
+  it("activates Changes in the Default Files and Changes group", () => {
+    const { api, setActive } = activationApi(RIGHT_TOP_GROUP, ["files", "changes"]);
+
+    expect(activateChangesPanel(api)).toBe("activated");
+    expect(setActive).toHaveBeenCalledOnce();
+  });
+
+  it("does not activate Changes in a copied Default custom profile", () => {
+    useDockviewStore.setState({
+      activeLayoutProfile: { kind: "custom", id: "layout-copied-default" },
+    });
+    const { api, setActive } = activationApi(RIGHT_TOP_GROUP, ["files", "changes"]);
+
+    expect(activateChangesPanel(api)).toBe("blocked-layout");
+    expect(setActive).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a non-Default group", "group-center", ["files", "changes"]],
+    ["a Default group with an extra VS Code tab", RIGHT_TOP_GROUP, ["files", "changes", "vscode"]],
+  ])("does not activate Changes in %s", (_name, groupId, panelIds) => {
+    const { api, setActive } = activationApi(groupId, panelIds);
+
+    expect(activateChangesPanel(api)).toBe("blocked-layout");
+    expect(setActive).not.toHaveBeenCalled();
+  });
 });
 
 function gitStatus(files: string[], timestamp = TEST_TIMESTAMP, diff = ""): GitStatusEntry {
@@ -581,6 +630,7 @@ describe("shouldClearPendingChangesFocus", () => {
     expect(shouldClearPendingChangesFocus("activated")).toBe(true);
     expect(shouldClearPendingChangesFocus("no-panel")).toBe(true);
     expect(shouldClearPendingChangesFocus("blocked-agent-group")).toBe(false);
+    expect(shouldClearPendingChangesFocus("blocked-layout")).toBe(false);
     expect(shouldClearPendingChangesFocus("no-api")).toBe(false);
   });
 });

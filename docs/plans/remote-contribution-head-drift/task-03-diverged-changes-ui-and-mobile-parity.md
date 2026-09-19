@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-checkout-relation-and-action-semantics"]
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 03: Separate Diverged Histories Across Responsive UI

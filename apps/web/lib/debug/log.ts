@@ -197,7 +197,14 @@
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select
- *     [messages:*]            message fetch / process / lazyload
+ *     [messages:*]            message fetch / process / lazyload / pagination
+ *     [messages:pagination]   older-page trigger, visible boundary, and scroll geometry
+ *     [messages:read-tracking]
+ *                             unread visit capture and per-session mark-read
+ *                             request dispatch/apply/discard/failure
+ *     [messages:scroll-placement]
+ *                             initial placement owner/geometry and later
+ *                             work/message-driven bottom writes
  *     [session:env-mapping]   session → environment ID mapping
  *
  * Tip: in Chrome devtools the console filter input takes substrings and regex.

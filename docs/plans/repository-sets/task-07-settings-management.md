@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-boot-and-web-data-layer"]
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 07: Manage Sets In Workspace Settings

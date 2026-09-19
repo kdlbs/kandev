@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/github"
@@ -10,15 +11,54 @@ import (
 	"github.com/kandev/kandev/internal/office/configloader"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
 	officeengineadapters "github.com/kandev/kandev/internal/office/engine_adapters"
+	officemodels "github.com/kandev/kandev/internal/office/models"
 	officeonboarding "github.com/kandev/kandev/internal/office/onboarding"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+type officeCommentWindowReader interface {
+	ListTaskCommentsWindow(ctx context.Context, taskID string, limit int) ([]*officemodels.TaskComment, int, error)
+}
+
+// officeCommentReaderAdapter keeps Office persistence models at the backend
+// composition boundary. The task service receives its own neutral records.
+type officeCommentReaderAdapter struct {
+	reader officeCommentWindowReader
+}
+
+func (a *officeCommentReaderAdapter) ListTaskCommentsWindow(
+	ctx context.Context, taskID string, limit int,
+) ([]taskservice.CommentRecord, int, error) {
+	rows, total, err := a.reader.ListTaskCommentsWindow(ctx, taskID, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	records := make([]taskservice.CommentRecord, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		records = append(records, taskservice.CommentRecord{
+			ID:         row.ID,
+			TaskID:     row.TaskID,
+			AuthorType: row.AuthorType,
+			AuthorID:   row.AuthorID,
+			Source:     row.Source,
+			Body:       row.Body,
+			CreatedAt:  row.CreatedAt,
+		})
+	}
+	return records, total, nil
+}
+
+var _ taskservice.CommentReader = (*officeCommentReaderAdapter)(nil)
 
 // taskWorkspaceCreatorAdapter adapts the task service to the office
 // WorkspaceCreator interface for dual workspace creation.
@@ -148,12 +188,27 @@ func (a *taskCreatorAdapter) createOfficeTask(
 }
 
 // CreateOfficeTaskInWorkflow creates an office task pinned to a specific
-// workflow id, bypassing the workspace's default office_workflow_id. Used
-// for the standing coordination task that lives on the dedicated
-// Coordination workflow.
+// workflow id, bypassing the workspace's default office_workflow_id. Its
+// only production caller (as of WO-36) is the routines dispatcher, which
+// pins a materialized heavy-routine run to the dedicated Routine workflow.
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string,
 ) (string, error) {
+	metadata := map[string]interface{}{
+		// The Routine workflow's start step carries on_enter:
+		// auto_start_agent, but a materialized run lands directly on that
+		// step rather than transitioning into it, so nothing would
+		// otherwise evaluate on_enter for it. This opts the task into
+		// handleTaskCreated's create-time on_enter evaluation.
+		models.MetaKeyAutoStartOnCreate: true,
+	}
+	if assigneeAgentID != "" {
+		// The Routine workflow's start step pins no agent (routine.yml), so
+		// the kanban auto-start path's fallback read of
+		// task.Metadata[MetaKeyAgentProfileID] is what lets a materialized
+		// heavy-routine task actually launch with the routine's assignee.
+		metadata[models.MetaKeyAgentProfileID] = assigneeAgentID
+	}
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
 		WorkflowID:             workflowID,
@@ -161,6 +216,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		Description:            description,
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
+		Metadata:               metadata,
 		Origin:                 models.TaskOriginOnboarding,
 	})
 	if err != nil {
@@ -205,15 +261,31 @@ func (a *routineWakeupAdapter) CreateWakeupRequest(
 		Reason:         req.Reason,
 		Payload:        req.Payload,
 		RequestedAt:    req.RequestedAt,
+		CausationID:    req.CausationID,
 	}
 	if req.IdempotencyKey != "" {
 		row.IdempotencyKey = sql.NullString{String: req.IdempotencyKey, Valid: true}
 	}
-	return a.repo.CreateWakeupRequest(ctx, row)
+	if err := a.repo.CreateWakeupRequest(ctx, row); err != nil {
+		if errors.Is(err, officesqlite.ErrWakeupIdempotencyConflict) {
+			runsservice.ReportDurableDedup(runsservice.QueueSourceWakeup, req.Reason, req.IdempotencyKey, req.AgentProfileID)
+			// Wraps both sentinels so a caller can check either: routines
+			// callers key off ErrWakeupAlreadyRequested to treat this as
+			// success by another route, while errors.Is against the
+			// sqlite-layer ErrWakeupIdempotencyConflict still matches.
+			return fmt.Errorf("%w: %w", officeroutines.ErrWakeupAlreadyRequested, err)
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *routineWakeupAdapter) Dispatch(ctx context.Context, requestID string) error {
 	return a.dispatcher.Dispatch(ctx, requestID)
+}
+
+func (a *routineWakeupAdapter) FailWakeupRequest(ctx context.Context, requestID, reason string) error {
+	return a.repo.MarkWakeupRequestFailed(ctx, requestID, reason)
 }
 
 // configSyncerAdapter bridges config.ConfigService to the onboarding.ConfigSyncer

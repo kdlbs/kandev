@@ -24,8 +24,8 @@ import (
 const freshMultiStatusPath = "/api/v1/git/status/multi?fresh=true"
 
 func TestGitStatusMultiFreshCoalescesOverlappingHTTPRequests(t *testing.T) {
-	server, repoNames := newMultiRepoStatusServer(t)
 	gate := newGitStatusCommandGate(t)
+	server, repoNames := newMultiRepoStatusServerWithAgentEnv(t, append([]string(nil), os.Environ()...))
 	router := server.Router()
 
 	firstResult := make(chan gitStatusHTTPResult, 1)

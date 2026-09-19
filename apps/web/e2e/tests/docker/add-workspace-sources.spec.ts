@@ -233,7 +233,7 @@ test.describe("Docker executor — attach workspace sources", () => {
             ...sourcePayload(fixture.remoteURL).sources,
             {
               kind: "repository",
-              remote_url: `${fixture.remoteURL}-missing`,
+              remote_url: fixture.remoteURL.replace(/\.git$/, "-missing.git"),
               provider: "gitlab",
               base_branch: "main",
             },

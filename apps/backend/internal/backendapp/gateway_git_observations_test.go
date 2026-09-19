@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
 func TestTaskGitObservationConvertsSnapshotFields(t *testing.T) {
@@ -49,6 +51,18 @@ func TestTaskGitObservationConvertsSnapshotFields(t *testing.T) {
 	}
 }
 
+func TestTaskGitObservationUsesStableRootKeyWithoutRepositoryMetadata(t *testing.T) {
+	observation, ok := taskGitObservation(nil, &models.GitSnapshot{
+		TaskEnvironmentID: "environment-root",
+	})
+	if !ok {
+		t.Fatal("taskGitObservation returned ok=false")
+	}
+	if observation.Repository != statussummary.RootRepositoryKey {
+		t.Fatalf("root repository key = %q, want %q", observation.Repository, statussummary.RootRepositoryKey)
+	}
+}
+
 func TestNonNegativeMetadataIntParsesAndNormalizesValues(t *testing.T) {
 	metadata := map[string]interface{}{
 		"number":   json.Number("7"),
@@ -87,8 +101,17 @@ func TestLoadTaskGitObservationsSkipsSessionsWithoutSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	const environmentID = "environment-git-observation"
+	if err := harness.taskRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: task.ID, WorkspacePath: "/workspace/git-observation",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
 	for _, sessionID := range []string{"session-with-snapshot", "session-without-snapshot"} {
-		if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: task.ID}); err != nil {
+		if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: task.ID, TaskEnvironmentID: environmentID,
+		}); err != nil {
 			t.Fatalf("create session %s: %v", sessionID, err)
 		}
 	}
@@ -108,5 +131,60 @@ func TestLoadTaskGitObservationsSkipsSessionsWithoutSnapshots(t *testing.T) {
 	}
 	if len(observations) != 1 || observations[0].Repository != "org/repo" {
 		t.Fatalf("observations = %+v, want one org/repo observation", observations)
+	}
+}
+
+func TestLoadTaskGitObservationsUsesNewestSnapshotOncePerSharedEnvironment(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	const (
+		taskID        = "task-shared-git-observation"
+		environmentID = "environment-shared-git-observation"
+	)
+	if err := harness.taskRepo.CreateTask(ctx, &models.Task{ID: taskID, Title: taskID}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := harness.taskRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environmentID, TaskID: taskID, WorkspacePath: "/workspace/shared-git-observation",
+		Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	oldAt := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	newAt := oldAt.Add(time.Minute)
+	for _, session := range []*models.TaskSession{
+		{ID: "session-shared-old", TaskID: taskID, TaskEnvironmentID: environmentID, StartedAt: oldAt, UpdatedAt: oldAt},
+		{ID: "session-shared-new", TaskID: taskID, TaskEnvironmentID: environmentID, StartedAt: newAt, UpdatedAt: newAt},
+	} {
+		if err := harness.taskRepo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("create session %s: %v", session.ID, err)
+		}
+	}
+	for _, snapshot := range []*models.GitSnapshot{
+		{
+			ID: "snapshot-shared-old", SessionID: "session-shared-old", TaskEnvironmentID: environmentID,
+			Files: map[string]interface{}{"old.go": true}, CreatedAt: oldAt,
+			Metadata: map[string]interface{}{"repository_name": "org/repo", "branch_additions": 1},
+		},
+		{
+			ID: "snapshot-shared-new", SessionID: "session-shared-new", TaskEnvironmentID: environmentID,
+			Files: map[string]interface{}{"new.go": true}, CreatedAt: newAt,
+			Metadata: map[string]interface{}{"repository_name": "org/repo", "branch_additions": 9},
+		},
+	} {
+		if err := harness.taskRepo.CreateGitSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("create snapshot %s: %v", snapshot.ID, err)
+		}
+	}
+
+	observations, err := loadTaskGitObservations(ctx, harness.taskRepo, taskID)
+	if err != nil {
+		t.Fatalf("load observations: %v", err)
+	}
+	if len(observations) != 1 {
+		t.Fatalf("observations = %+v, want one shared-environment observation", observations)
+	}
+	if observations[0].Repository != "org/repo" || observations[0].Summary.Additions != 9 {
+		t.Fatalf("observation = %+v, want newest snapshot from shared environment", observations[0])
 	}
 }

@@ -40,6 +40,8 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			name,
 			description,
 			owner_id,
+			org_id,
+			unit_id,
 			default_executor_id,
 			default_environment_id,
 			default_agent_profile_id,
@@ -50,8 +52,8 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			created_at,
 			updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.CreatedAt, workspace.UpdatedAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
@@ -65,13 +67,15 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	var defaultConfigAgentProfileID sql.NullString
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
+		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
 		FROM workspaces WHERE id = ?
 	`), id).Scan(
 		&workspace.ID,
 		&workspace.Name,
 		&workspace.Description,
 		&workspace.OwnerID,
+		&workspace.OrgID,
+		&workspace.UnitID,
 		&defaultExecutorID,
 		&defaultEnvironmentID,
 		&defaultAgentProfileID,
@@ -109,13 +113,14 @@ func (r *Repository) UpdateWorkspace(ctx context.Context, workspace *models.Work
 		UPDATE workspaces
 		SET name = ?,
 			description = ?,
+			unit_id = ?,
 			default_executor_id = ?,
 			default_environment_id = ?,
 			default_agent_profile_id = ?,
 			default_config_agent_profile_id = ?,
 			updated_at = ?
 		WHERE id = ?
-	`), workspace.Name, workspace.Description, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID)
+	`), workspace.Name, workspace.Description, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID)
 	if err != nil {
 		return err
 	}
@@ -212,6 +217,16 @@ func (r *Repository) deleteWorkspaceCascade(
 	if err != nil {
 		return nil, nil, err
 	}
+	// Lock every workflow_steps row this workspace owns BEFORE any task row:
+	// ReorderStepTasks and lockTaskStepForWrite's callers (Archive/Delete/
+	// Unarchive) both lock a step before the task rows inside it, so this
+	// cascade must acquire the same two resources in the same order or a
+	// concurrent reorder of one of these steps can deadlock against it on
+	// Postgres (each transaction waiting on the resource the other already
+	// holds). Sorted id order mirrors the task-row locking below.
+	if err := r.lockWorkspaceStepRowsInTx(ctx, tx, id); err != nil {
+		return nil, nil, err
+	}
 	// Establish the global lock order task-row -> queue-session before
 	// purging the queues: lifecycle admission takes the task row first and
 	// then the session lock, so taking session locks first here would invert
@@ -231,6 +246,11 @@ func (r *Repository) deleteWorkspaceCascade(
 	}
 	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
 		return nil, nil, err
+	}
+	if cleanup != nil {
+		if err := cleanup(ctx, tx); err != nil {
+			return nil, nil, fmt.Errorf("workspace secret cleanup: %w", err)
+		}
 	}
 
 	rows, err := r.deleteWorkspaceCascadeRow(ctx, tx, id, expectedName)
@@ -266,11 +286,6 @@ func (r *Repository) deleteWorkspaceCascade(
 	`), id); err != nil {
 		return nil, nil, err
 	}
-	if cleanup != nil {
-		if err := cleanup(ctx, tx); err != nil {
-			return nil, nil, fmt.Errorf("workspace secret cleanup: %w", err)
-		}
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
@@ -288,8 +303,11 @@ func (r *Repository) purgeWorkspaceTaskQueuesInTx(ctx context.Context, tx *sqlx.
 		if err != nil {
 			return fmt.Errorf("task queue sessions for cascade task %s: %w", task.ID, err)
 		}
-		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions); err != nil {
+		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions, true); err != nil {
 			return fmt.Errorf("purge task queue for workspace cascade task %s: %w", task.ID, err)
+		}
+		if err := r.purgeQueueSessionPoliciesInTx(ctx, tx, sessions); err != nil {
+			return fmt.Errorf("purge queue session policies for workspace cascade task %s: %w", task.ID, err)
 		}
 	}
 	return nil
@@ -395,6 +413,42 @@ func (r *Repository) listWorkspaceCascadeDeleteWorkflows(
 	return scanWorkflowRows(rows)
 }
 
+// lockWorkspaceStepRowsInTx locks (Postgres FOR UPDATE; no-op on SQLite,
+// whose single writer connection already serializes) every workflow_steps
+// row belonging to workspaceID's workflows, in sorted id order. Called before
+// any task-row lock in the delete cascade so it acquires steps and tasks in
+// the same order ReorderStepTasks and lockTaskStepForWrite's callers do.
+func (r *Repository) lockWorkspaceStepRowsInTx(ctx context.Context, tx *sqlx.Tx, workspaceID string) error {
+	rows, err := tx.QueryContext(ctx, r.db.Rebind(`
+		SELECT id FROM workflow_steps
+		WHERE workflow_id IN (SELECT id FROM workflows WHERE workspace_id = ?)
+		ORDER BY id
+	`), workspaceID)
+	if err != nil {
+		return fmt.Errorf("list workspace step rows to lock: %w", err)
+	}
+	var stepIDs []string
+	for rows.Next() {
+		var stepID string
+		if err := rows.Scan(&stepID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan workspace step row to lock: %w", err)
+		}
+		stepIDs = append(stepIDs, stepID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("list workspace step rows to lock: %w", err)
+	}
+	_ = rows.Close()
+	for _, stepID := range stepIDs {
+		if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID); err != nil {
+			return fmt.Errorf("lock workspace cascade step row %s: %w", stepID, err)
+		}
+	}
+	return nil
+}
+
 // ListWorkspaces returns all workspaces
 // ClaimUnownedWorkspaces assigns every pre-auth workspace (empty owner_id) to
 // ownerID. Called by the auth setup wizard when promoting the instance's
@@ -408,7 +462,7 @@ func (r *Repository) ClaimUnownedWorkspaces(ctx context.Context, ownerID string)
 
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
+		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
 		FROM workspaces ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -428,6 +482,8 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 			&workspace.Name,
 			&workspace.Description,
 			&workspace.OwnerID,
+			&workspace.OrgID,
+			&workspace.UnitID,
 			&defaultExecutorID,
 			&defaultEnvironmentID,
 			&defaultAgentProfileID,

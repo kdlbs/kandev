@@ -246,7 +246,7 @@ Review the warning from the OS-package phase. Install a compiler toolchain, `pkg
 Use the backend port from the latest startup banner, not the preferred port or the Vite port. Confirm locally inside the VM:
 
 ```bash
-curl --fail http://127.0.0.1:38429/health
+curl --fail http://127.0.0.1:38429/ready
 ```
 
 Substitute the logged port. Then check the provider's port visibility, proxy path/WebSocket support, firewall, and process logs. Do not solve the problem by making an unauthenticated development port public.

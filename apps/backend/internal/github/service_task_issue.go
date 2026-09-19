@@ -21,9 +21,10 @@ const (
 	githubIssuePathMarker = "/issues/"
 )
 
-// TaskIssueStore is the task-facing dependency needed to link GitHub issues.
-// The backendapp adapter routes metadata writes through task.Service so the
-// normal task.updated event is published.
+// TaskIssueStore is the task-facing dependency used by GitHub task links.
+// It supplies task repositories for PR association validation and task
+// metadata for issue links. The backendapp adapter routes metadata writes
+// through task.Service so the normal task.updated event is published.
 type TaskIssueStore interface {
 	GetTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*taskmodels.TaskRepository, error)

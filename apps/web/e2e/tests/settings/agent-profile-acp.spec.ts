@@ -52,6 +52,44 @@ test.describe("Agent profile — ACP-first", () => {
     await expect(testPage.getByTestId("profile-mode-field")).toBeVisible({ timeout: 10_000 });
   });
 
+  test("profile model picker opens from the field start edge", async ({ testPage, apiClient }) => {
+    test.setTimeout(60_000);
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    const profile = agent.profiles[0];
+
+    await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+
+    const profileSettingsPanel = testPage.locator(
+      '[data-settings-target^="setting-agent-profile-"][data-settings-target$="-profile-settings"]',
+    );
+    const selector = profileSettingsPanel.getByRole("button", {
+      name: "Profile start model settings",
+    });
+    await expect(selector).toBeVisible({ timeout: 15_000 });
+    await selector.click();
+
+    const popoverContent = testPage.locator('[data-slot="popover-content"]:visible');
+    await expect(popoverContent).toBeVisible();
+    await popoverContent.evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
+
+    const [selectorBox, popoverBox] = await Promise.all([
+      selector.boundingBox(),
+      popoverContent.boundingBox(),
+    ]);
+
+    expect(selectorBox).not.toBeNull();
+    expect(popoverBox).not.toBeNull();
+    // Radix may nudge the content by a few pixels to satisfy collision padding;
+    // the regression is the old end alignment, which placed it ~50px inward.
+    expect(Math.abs(popoverBox!.x - selectorBox!.x)).toBeLessThanOrEqual(12);
+  });
+
   test("profile name edits persist across reload", async ({ testPage, apiClient }) => {
     test.setTimeout(60_000);
 

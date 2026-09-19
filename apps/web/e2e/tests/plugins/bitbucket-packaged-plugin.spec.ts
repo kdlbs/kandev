@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 
 const PLUGIN_ID = "kandev-plugin-bitbucket";
@@ -176,16 +177,6 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
     .toBe(true);
 }
 
-async function waitForFiniteAnimations(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const animations = document.getAnimations().filter((animation) => {
-      const iterations = animation.effect?.getComputedTiming().iterations;
-      return typeof iterations === "number" && Number.isFinite(iterations);
-    });
-    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
-  });
-}
-
 async function expectContainedInViewport(page: Page, selector: string): Promise<void> {
   const element = page.locator(selector);
   await expect
@@ -318,7 +309,7 @@ test.describe("Bitbucket packaged plugin", () => {
       expect((await filterButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       await filterButton.click();
       await expect(testPage.getByRole("heading", { name: "Bitbucket filters" })).toBeVisible();
-      await waitForFiniteAnimations(testPage);
+      await waitForFiniteAnimations(testPage.locator("body"));
       await expectContainedInViewport(testPage, ".bb-filter-sheet");
     } else {
       const configureButton = workbench.getByRole("button", { name: "Configure Bitbucket" });

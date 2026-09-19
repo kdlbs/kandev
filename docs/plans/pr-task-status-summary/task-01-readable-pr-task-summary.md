@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/pr-task-status-summary.md"
+spec: "../../specs/ui/requirements/pr-task-status-summary.md"
 ---
 
 # Task 01: Build Readable PR Task Summary
@@ -61,7 +61,7 @@ cd apps && pnpm --filter @kandev/web run i18n:ratchet
 - `apps/web/src/locales/pseudo/github.json`
 - `apps/web/e2e/tests/pr/pr-status-badge.spec.ts`
 - `apps/web/e2e/tests/task/mobile-task-status-summary.spec.ts`
-- `docs/specs/ui/pr-task-status-summary.md`
+- `docs/specs/ui/requirements/pr-task-status-summary.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/pr-task-status-summary/plan.md`
 - `docs/plans/pr-task-status-summary/task-01-readable-pr-task-summary.md`
@@ -78,7 +78,7 @@ one small vertical slice and overlap on the same component contract.
 
 ## Inputs
 
-- `docs/specs/ui/pr-task-status-summary.md`, especially status-preservation, multi-PR, fallback,
+- `docs/specs/ui/requirements/pr-task-status-summary.md`, especially status-preservation, multi-PR, fallback,
   and mobile scenarios.
 - `docs/plans/pr-task-status-summary/plan.md`.
 - Existing derivation and trigger attributes in `apps/web/components/github/pr-task-icon.tsx`.

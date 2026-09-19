@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-frontend-auto-load"]
 plan: "plan.md"
-spec: "../../specs/ui/prompt-history-panel.md"
+spec: "../../specs/ui/requirements/prompt-history-panel.md"
 ---
 
 # Task 04: E2E coverage and harness author_type

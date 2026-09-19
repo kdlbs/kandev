@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-executor-model-decision"]
 plan: "plan.md"
-spec: "../../specs/no-silent-model-fallback/spec.md"
+spec: "../../specs/agents/requirements/no-silent-model-fallback.md"
 ---
 
 # Task 02: Persist model-selection warnings

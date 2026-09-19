@@ -21,6 +21,7 @@ import { RepositoryBranchTemplateHelp } from "@/components/settings/repository-b
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
 import { CopyFilesField } from "@/components/settings/repository-copy-files-help";
 import { RepositoryCustomScripts } from "@/components/settings/repository-custom-scripts";
+import { RepositoryBranchPolicies } from "@/components/settings/repository-branch-policies";
 import {
   RepositorySecretBindings,
   validateRepositorySecretBindings,
@@ -220,6 +221,7 @@ function RepositoryScriptFields({
 
 type RepositoryEditViewProps = {
   repository: RepositoryWithScripts;
+  workspaceId: string;
   savedRepository?: RepositoryWithScripts;
   isDirty: boolean;
   areScriptsDirty: boolean;
@@ -234,6 +236,7 @@ type RepositoryEditViewProps = {
 
 function RepositoryEditView({
   repository,
+  workspaceId,
   savedRepository,
   isDirty,
   areScriptsDirty,
@@ -282,6 +285,8 @@ function RepositoryEditView({
             }
             pullBeforeWorktree={repository.pull_before_worktree ?? true}
           />
+
+          <RepositoryBranchPolicies repository={repository} workspaceId={workspaceId} />
 
           <RepositoryScriptFields
             repositoryId={repository.id}
@@ -341,6 +346,7 @@ function repositorySecretInvalidReason(
 
 type RepositoryCardProps = {
   repository: RepositoryWithScripts;
+  workspaceId: string;
   savedRepository?: RepositoryWithScripts;
   isRepositoryDirty: boolean;
   areScriptsDirty: boolean;
@@ -421,6 +427,7 @@ function useRepositoryDelete(
 
 export function RepositoryCard({
   repository,
+  workspaceId,
   savedRepository,
   isRepositoryDirty,
   areScriptsDirty,
@@ -488,6 +495,7 @@ export function RepositoryCard({
         renderEdit={({ close }) => (
           <RepositoryEditView
             repository={repository}
+            workspaceId={workspaceId}
             savedRepository={savedRepository}
             isDirty={isDirty}
             areScriptsDirty={areScriptsDirty}

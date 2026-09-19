@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-enabled-hooks"]
 plan: "plan.md"
-spec: "../../specs/integrations/enable-disable-toggle.md"
+spec: "../../specs/integrations/requirements/enable-disable-toggle.md"
 ---
 
 # Task 03: Per-row enable/disable slider on the integrations index page

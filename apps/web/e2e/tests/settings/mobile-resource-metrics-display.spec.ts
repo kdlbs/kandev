@@ -9,20 +9,39 @@ import {
   metricsUnavailableWasRendered,
   observeMetricsUnavailable,
 } from "./metrics-loading-observer";
+import type { SystemMetricId, SystemMetricsGlobalSettings } from "@/lib/types/system";
 
 type SystemMetricsDisplay = {
   show_in_topbar: boolean;
   simplified?: boolean;
 };
 
+const ALL_HOST_METRICS = [
+  "cpu_percent",
+  "memory_percent",
+  "disk_percent",
+  "cpu_temp",
+  "io_load",
+] satisfies SystemMetricId[];
+
 test.describe("Mobile resource metrics display", () => {
   let baseline: SystemMetricsDisplay;
   let statusBarBaseline: AppStatusBarSettingsBaseline;
+  let globalMetricsBaseline: SystemMetricsGlobalSettings;
 
   test.beforeEach(async ({ apiClient }) => {
     const settings = await apiClient.getUserSettings();
     baseline = settings.settings.system_metrics_display as SystemMetricsDisplay;
     statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    const globalMetricsResponse = await apiClient.rawRequest(
+      "GET",
+      "/api/v1/system/metrics/settings",
+    );
+    expect(globalMetricsResponse.ok).toBe(true);
+    const globalMetrics = (await globalMetricsResponse.json()) as {
+      settings: SystemMetricsGlobalSettings;
+    };
+    globalMetricsBaseline = globalMetrics.settings;
     await setAppStatusBarEnabled(apiClient, true);
   });
 
@@ -30,7 +49,71 @@ test.describe("Mobile resource metrics display", () => {
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       system_metrics_display: baseline,
     });
+    const globalMetricsRestore = await apiClient.rawRequest(
+      "PATCH",
+      "/api/v1/system/metrics/settings",
+      globalMetricsBaseline,
+    );
+    expect(globalMetricsRestore.ok).toBe(true);
     await restoreAppStatusBarSettings(apiClient, statusBarBaseline);
+  });
+
+  test("stacks all enabled metrics inside the Status drawer", async ({ testPage, apiClient }) => {
+    const globalMetricsUpdate = await apiClient.rawRequest(
+      "PATCH",
+      "/api/v1/system/metrics/settings",
+      { ...globalMetricsBaseline, metrics: ALL_HOST_METRICS },
+    );
+    expect(globalMetricsUpdate.ok).toBe(true);
+    const displayUpdate = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      system_metrics_display: { show_in_topbar: true, simplified: false },
+    });
+    expect(displayUpdate.ok).toBe(true);
+
+    await testPage.goto("/");
+    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("mobile-home-status-button").click();
+
+    const drawer = testPage.getByTestId("app-status-drawer");
+    const metrics = drawer.getByTestId("app-status-metrics");
+    await expect(metrics.getByLabel(/^CPU (?!temperature)/)).toBeVisible();
+    const geometry = await metrics.evaluate((element) => {
+      const indicators = Array.from(
+        element.querySelectorAll<HTMLElement>('span[aria-label]:not([aria-label="Host metrics"])'),
+      );
+      const values = indicators[0]?.parentElement;
+      const valuesRect = values?.getBoundingClientRect();
+      const indicatorRects = indicators.map((indicator) => indicator.getBoundingClientRect());
+      const rowTops: number[] = [];
+      for (const rect of indicatorRects) {
+        if (!rowTops.some((top) => Math.abs(top - rect.top) <= 1)) rowTops.push(rect.top);
+      }
+      const firstRowTop = rowTops[0];
+      return {
+        count: indicators.length,
+        firstRowCount: indicatorRects.filter(
+          (rect) => firstRowTop !== undefined && Math.abs(rect.top - firstRowTop) <= 1,
+        ).length,
+        rowCount: rowTops.length,
+        valuesClientWidth: values?.clientWidth ?? 0,
+        valuesScrollWidth: values?.scrollWidth ?? 0,
+        contained:
+          valuesRect !== undefined &&
+          indicatorRects.every(
+            (rect) => rect.left >= valuesRect.left - 1 && rect.right <= valuesRect.right + 1,
+          ),
+      };
+    });
+
+    expect(geometry.rowCount).toBe(3);
+    expect(geometry.firstRowCount).toBe(2);
+    expect(geometry.count).toBe(5);
+    expect(geometry.contained).toBe(true);
+    expect(geometry.valuesScrollWidth).toBeLessThanOrEqual(geometry.valuesClientWidth + 1);
+    expect(await drawer.locator("[class*='overflow-y-auto']").count()).toBe(1);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
   });
 
   test("renders simplified metrics in the Status drawer", async ({ testPage }) => {

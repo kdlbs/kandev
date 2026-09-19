@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-backend-preference-contract"]
 plan: "plan.md"
-spec: "../../specs/ui/port-forwarding-discovery.md"
+spec: "../../specs/ui/requirements/port-forwarding-discovery.md"
 ---
 
 # Task 02: Frontend preference state

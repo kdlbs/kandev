@@ -430,7 +430,7 @@ func TestPATClient_ListIssuesPaged_ScopeAssignedToMe(t *testing.T) {
 	defer stop()
 
 	c := NewPATClient(host, "tok")
-	if _, err := c.ListIssuesPaged(context.Background(), "scope=assigned_to_me", "", 1, 25); err != nil {
+	if _, err := c.ListIssuesPaged(context.Background(), "scope=assigned_to_me", "", "Next", 1, 25); err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if receivedPath != "/issues" {
@@ -441,6 +441,9 @@ func TestPATClient_ListIssuesPaged_ScopeAssignedToMe(t *testing.T) {
 	}
 	if got := receivedQuery.Get("state"); got != "opened" {
 		t.Errorf("state = %q, want opened", got)
+	}
+	if got := receivedQuery.Get("milestone"); got != "Next" {
+		t.Errorf("milestone = %q, want Next — must reach the server", got)
 	}
 }
 
@@ -467,7 +470,7 @@ func TestPATClient_ListIssuesPaged_HonoursTotalHeader(t *testing.T) {
 	defer stop()
 
 	c := NewPATClient(host, "tok")
-	page, err := c.ListIssuesPaged(context.Background(), "", "", 2, 20)
+	page, err := c.ListIssuesPaged(context.Background(), "", "", "", 2, 20)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

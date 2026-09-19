@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 10: Inherit the service temp environment

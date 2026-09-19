@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-frontend-numbering"]
 plan: "plan.md"
-spec: "../../specs/ui/prompt-history-panel.md"
+spec: "../../specs/ui/requirements/prompt-history-panel.md"
 ---
 
 # Task 03: Frontend auto-load sentinel

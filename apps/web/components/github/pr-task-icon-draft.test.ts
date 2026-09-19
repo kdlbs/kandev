@@ -6,6 +6,7 @@ import { derivePRTaskStatusSummary } from "./pr-task-status-summary";
 function draftPR(): TaskPR {
   return {
     id: "id",
+    workspace_id: "workspace-1",
     task_id: "task",
     owner: "o",
     repo: "r",
@@ -38,6 +39,20 @@ function draftPR(): TaskPR {
 describe("draft PR task status", () => {
   it("stays muted even when checks pass", () => {
     expect(getPRStatusColor(draftPR())).toBe("text-muted-foreground");
+  });
+
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.20
+  it("stays muted when checks fail", () => {
+    expect(getPRStatusColor({ ...draftPR(), checks_state: "failure" })).toBe(
+      "text-muted-foreground",
+    );
+  });
+
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.20
+  it("stays muted when changes are requested", () => {
+    expect(getPRStatusColor({ ...draftPR(), review_state: "changes_requested" })).toBe(
+      "text-muted-foreground",
+    );
   });
 
   it("identifies the draft without claiming it is ready to merge", () => {

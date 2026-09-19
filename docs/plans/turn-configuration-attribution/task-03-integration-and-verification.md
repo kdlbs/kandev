@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-turn-snapshot", "02-frontend-turn-attribution"]
 plan: "plan.md"
-spec: "../../specs/ui/acp-model-configuration-summary.md"
+spec: "../../specs/ui/requirements/acp-model-configuration-summary.md"
 ---
 
 # Task 03: Verify Durable Cross-turn Attribution
@@ -32,7 +32,7 @@ Run from the repository root.
 ## Files
 
 - Backend and frontend files from tasks 01 and 02
-- `docs/specs/ui/acp-model-configuration-summary.md`
+- `docs/specs/ui/requirements/acp-model-configuration-summary.md`
 - `docs/decisions/2026-07-18-turn-configuration-snapshots.md`
 
 ## Inputs

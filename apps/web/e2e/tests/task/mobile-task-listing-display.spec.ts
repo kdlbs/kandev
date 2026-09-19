@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 const VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
 const TASK_TITLE = "Mobile rich task";
@@ -79,9 +80,15 @@ test.describe("Mobile task listing display preferences", () => {
     await testPage.goto("/");
     await taskListLoaded;
     await expect(testPage).toHaveURL(/\/tasks/);
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByRole("button", { name: "Open menu" }).tap();
     const tasksMenu = testPage.getByRole("dialog", { name: "Menu" });
+    await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
     await tasksMenu.getByText("Show task details", { exact: true }).click();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
+        message: "task detail preference was not persisted",
+      })
+      .toBe(true);
     await testPage.keyboard.press("Escape");
     await expect(tasksMenu).toHaveCount(0);
 

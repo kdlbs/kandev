@@ -13,10 +13,34 @@ import (
 )
 
 // createTestDB sets up a SQLite database with all required schemas for analytics queries.
-func createTestDB(t *testing.T) *sqlx.DB {
+func createTestDB(t testing.TB) *sqlx.DB {
 	t.Helper()
 	tmpDir := t.TempDir()
-	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
+	return createTestDBAt(t, filepath.Join(tmpDir, "test.db"))
+}
+
+// createTestDBPair returns the production-shaped writer and read-only reader
+// pools used by availability tests. The writer owns schema setup and the
+// reader has the same four-connection limit as a running instance.
+func createTestDBPair(t testing.TB) (*sqlx.DB, *sqlx.DB) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	writer := createTestDBAt(t, dbPath)
+	rawReader, err := db.OpenSQLiteReader(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite reader: %v", err)
+	}
+	reader := sqlx.NewDb(rawReader, "sqlite3")
+	reader.SetMaxOpenConns(4)
+	reader.SetMaxIdleConns(4)
+	t.Cleanup(func() { _ = reader.Close() })
+	return writer, reader
+}
+
+func createTestDBAt(t testing.TB, dbPath string) *sqlx.DB {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(dbPath)
 	if err != nil {
 		t.Fatalf("failed to open sqlite db: %v", err)
 	}
@@ -124,7 +148,7 @@ func createTestDB(t *testing.T) *sqlx.DB {
 	);
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
-		session_id TEXT NOT NULL,
+		session_id TEXT,
 		snapshot_type TEXT NOT NULL DEFAULT '',
 		files TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL

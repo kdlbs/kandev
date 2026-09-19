@@ -347,7 +347,8 @@ printf 'prepared\\n' > "$workspace/custom-prepare-marker"
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-    await apiClient.queueMessage(task.id, task.session_id, "Inspect the follow-up file.", [
+    const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
+    await apiClient.queueMessage(queueIdentity, "Inspect the follow-up file.", [
       {
         type: "resource",
         data: Buffer.from(content, "utf8").toString("base64"),
@@ -394,8 +395,10 @@ printf 'prepared\\n' > "$workspace/custom-prepare-marker"
   test("stopping the session cleans up the session runtime dir but leaves the task dir", async ({
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(180_000);
+    await backend.ensureReady();
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "H7 stop cleanup",

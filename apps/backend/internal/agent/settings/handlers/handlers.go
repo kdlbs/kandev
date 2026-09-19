@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -53,33 +55,40 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadca
 
 func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
+	// Agents, agent profiles and the runtimes behind them are org configuration:
+	// org.config.manage is the scope that names exactly this surface. Reads stay
+	// open to any identity; every mutation is gated. h.interlock is a
+	// concurrent-edit guard, not an authorization check, so it does not stand in
+	// for this.
+	cfg := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents", h.httpListAgents)
-	api.POST("/agents", h.interlock, h.httpCreateAgent)
-	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
+	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)
+	api.POST("/agents/tui", cfg, h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/tui/mcp-strategies", h.httpListMCPStrategies)
-	api.PATCH("/agents/tui/:id/mcp", h.interlock, h.httpUpdateCustomTUIAgentMCP)
+	api.PATCH("/agents/tui/:id/mcp", cfg, h.interlock, h.httpUpdateCustomTUIAgentMCP)
 	api.GET("/agents/:id", h.httpGetAgent)
-	api.PATCH("/agents/:id", h.interlock, h.httpUpdateAgent)
-	api.DELETE("/agents/:id", h.interlock, h.httpDeleteAgent)
-	api.POST("/agents/:id/profiles", h.interlock, h.httpCreateProfile)
+	api.PATCH("/agents/:id", cfg, h.interlock, h.httpUpdateAgent)
+	api.DELETE("/agents/:id", cfg, h.interlock, h.httpDeleteAgent)
+	api.POST("/agents/:id/profiles", cfg, h.interlock, h.httpCreateProfile)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-models/:agentName/resolve", h.httpResolveAgentModelConfig)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
-	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
+	api.POST("/agent-install/:agentName", cfg, h.interlock, h.httpInstallAgent)
+	api.GET("/agent-update/status", h.httpListAgentUpdateStatuses)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
-	api.POST("/agent-update/:agentName", h.interlock, h.httpUpdateAgentRuntime)
+	api.POST("/agent-update/:agentName", cfg, h.interlock, h.httpUpdateAgentRuntime)
 	api.GET("/agent-update/jobs", h.httpListAgentUpdateJobs)
 	api.GET("/agent-update/jobs/:id", h.httpGetAgentUpdateJob)
-	api.PATCH("/agent-profiles/:id", h.interlock, h.httpUpdateProfile)
-	api.DELETE("/agent-profiles/:id", h.interlock, h.httpDeleteProfile)
-	api.POST("/agent-profiles/:id/duplicate", h.interlock, h.httpDuplicateProfile)
+	api.PATCH("/agent-profiles/:id", cfg, h.interlock, h.httpUpdateProfile)
+	api.DELETE("/agent-profiles/:id", cfg, h.interlock, h.httpDeleteProfile)
+	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
-	api.POST("/agent-profiles/:id/mcp-config", h.interlock, h.httpUpdateProfileMcpConfig)
+	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -131,11 +140,18 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		return
 	}
 	request.TargetVersion = strings.TrimSpace(request.TargetVersion)
-	if request.TargetVersion == "" {
+	if request.UseDefault && request.TargetVersion != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	if !request.UseDefault && request.TargetVersion == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
 		return
 	}
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
+		if request.UseDefault {
+			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
+		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
 }
@@ -145,11 +161,27 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	preview, err := h.controller.PreviewAgentUpdate(
-		c.Request.Context(),
-		name,
-		strings.TrimSpace(c.Query("target_version")),
-	)
+	targetVersion := strings.TrimSpace(c.Query("target_version"))
+	useDefault := false
+	if raw := strings.TrimSpace(c.Query("use_default")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "use_default must be a boolean"})
+			return
+		}
+		useDefault = parsed
+	}
+	if useDefault && targetVersion != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	var preview *dto.AgentUpdatePreviewDTO
+	var err error
+	if useDefault {
+		preview, err = h.controller.PreviewAgentUpdateUseDefault(c.Request.Context(), name)
+	} else {
+		preview, err = h.controller.PreviewAgentUpdate(c.Request.Context(), name, targetVersion)
+	}
 	if err == nil {
 		c.JSON(http.StatusOK, preview)
 		return
@@ -160,6 +192,44 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 	}
 	h.logger.Error("failed to preview agent runtime update", zap.String("agent", name), zap.Error(err))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to preview agent update"})
+}
+
+func (h *Handlers) httpListAgentUpdateStatuses(c *gin.Context) {
+	resp, err := h.controller.ListAgentUpdateStatuses(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list agent runtime update statuses", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list agent update statuses"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) broadcastProfileMCPConfigUpdated(profileID, workspaceID string) {
+	if h.hub == nil || profileID == "" {
+		return
+	}
+	var scopedWorkspaceID any
+	if workspaceID != "" {
+		scopedWorkspaceID = workspaceID
+	}
+	notification, err := ws.NewNotification(ws.ActionAgentProfileMCPConfigUpdated, gin.H{
+		"profile_id":   profileID,
+		"workspace_id": scopedWorkspaceID,
+	})
+	if err != nil {
+		return
+	}
+	if workspaceID != "" {
+		workspaceHub, ok := h.hub.(interface {
+			BroadcastToWorkspaceOrDrop(string, *ws.Message)
+		})
+		if ok {
+			workspaceHub.BroadcastToWorkspaceOrDrop(workspaceID, notification)
+		}
+		return
+	}
+	//ws:global profile MCP updates without workspace ownership are global.
+	h.hub.Broadcast(notification)
 }
 
 func requireAgentName(c *gin.Context) (string, bool) {
@@ -335,14 +405,15 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name          string                 `json:"name"`
-	Model         string                 `json:"model"`
-	FallbackModel string                 `json:"fallback_model,omitempty"`
-	AutoFallback  bool                   `json:"auto_fallback"`
-	Mode          string                 `json:"mode,omitempty"`
-	CLIFlags      []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars       []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CommandPrefix string                 `json:"command_prefix,omitempty"`
+	Name              string                 `json:"name"`
+	Model             string                 `json:"model"`
+	FallbackModel     string                 `json:"fallback_model,omitempty"`
+	AutoFallback      bool                   `json:"auto_fallback"`
+	RequireExactModel bool                   `json:"require_exact_model"`
+	Mode              string                 `json:"mode,omitempty"`
+	CLIFlags          []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars           []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix     string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -362,14 +433,15 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:          profile.Name,
-			Model:         profile.Model,
-			FallbackModel: profile.FallbackModel,
-			AutoFallback:  profile.AutoFallback,
-			Mode:          profile.Mode,
-			CLIFlags:      profile.CLIFlags,
-			EnvVars:       profile.EnvVars,
-			CommandPrefix: profile.CommandPrefix,
+			Name:              profile.Name,
+			Model:             profile.Model,
+			FallbackModel:     profile.FallbackModel,
+			AutoFallback:      profile.AutoFallback,
+			RequireExactModel: profile.RequireExactModel,
+			Mode:              profile.Mode,
+			CLIFlags:          profile.CLIFlags,
+			EnvVars:           profile.EnvVars,
+			CommandPrefix:     profile.CommandPrefix,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -378,7 +450,9 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		Profiles:    profiles,
 	})
 	if err != nil {
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -522,23 +596,10 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+	h.broadcastProfileMCPConfigUpdated(profileID, resp.WorkspaceID)
 }
 
-type createProfileRequest struct {
-	Name           string                      `json:"name"`
-	Model          string                      `json:"model"`
-	FallbackModel  string                      `json:"fallback_model,omitempty"`
-	AutoFallback   bool                        `json:"auto_fallback"`
-	Mode           string                      `json:"mode,omitempty"`
-	ConfigOptions  map[string]string           `json:"config_options,omitempty"`
-	AllowIndexing  bool                        `json:"allow_indexing"`
-	AutoApprove    bool                        `json:"auto_approve"`
-	CLIPassthrough bool                        `json:"cli_passthrough"`
-	CLIFlags       []dto.CLIFlagDTO            `json:"cli_flags,omitempty"`
-	EnvVars        []dto.ProfileEnvVarDTO      `json:"env_vars,omitempty"`
-	CommandPrefix  string                      `json:"command_prefix,omitempty"`
-	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
-}
+type createProfileRequest = dto.ProfileCreateRequest
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	var body createProfileRequest
@@ -546,26 +607,12 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if strings.TrimSpace(body.Name) == "" {
+	body.AgentID = c.Param("id")
+	if err := body.Validate(); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 		return
 	}
-	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequest{
-		AgentID:        c.Param("id"),
-		Name:           body.Name,
-		Model:          body.Model,
-		FallbackModel:  body.FallbackModel,
-		AutoFallback:   body.AutoFallback,
-		Mode:           body.Mode,
-		ConfigOptions:  body.ConfigOptions,
-		AllowIndexing:  body.AllowIndexing,
-		AutoApprove:    body.AutoApprove,
-		CLIPassthrough: body.CLIPassthrough,
-		CLIFlags:       body.CLIFlags,
-		EnvVars:        body.EnvVars,
-		CommandPrefix:  body.CommandPrefix,
-		Dynamic:        body.Dynamic,
-	})
+	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequestFromDTO(body))
 	if err != nil {
 		if errors.Is(err, controller.ErrDynamicAgentRoutingDisabled) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -578,7 +625,9 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -586,26 +635,11 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create profile"})
 		return
 	}
-	h.broadcastProfileEvent(ws.ActionAgentProfileCreated, resp)
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileCreated, resp)
 	c.JSON(http.StatusOK, resp)
 }
 
-type updateProfileRequest struct {
-	Name           *string                     `json:"name,omitempty"`
-	Model          *string                     `json:"model,omitempty"`
-	FallbackModel  *string                     `json:"fallback_model,omitempty"`
-	AutoFallback   *bool                       `json:"auto_fallback,omitempty"`
-	Mode           *string                     `json:"mode,omitempty"`
-	ConfigOptions  *map[string]string          `json:"config_options,omitempty"`
-	AllowIndexing  *bool                       `json:"allow_indexing,omitempty"`
-	AutoApprove    *bool                       `json:"auto_approve,omitempty"`
-	CLIPassthrough *bool                       `json:"cli_passthrough,omitempty"`
-	Enabled        *bool                       `json:"enabled,omitempty"`
-	CLIFlags       *[]dto.CLIFlagDTO           `json:"cli_flags,omitempty"`
-	EnvVars        *[]dto.ProfileEnvVarDTO     `json:"env_vars,omitempty"`
-	CommandPrefix  *string                     `json:"command_prefix,omitempty"`
-	Dynamic        *dto.DynamicAgentProfileDTO `json:"dynamic,omitempty"`
-}
+type updateProfileRequest = dto.ProfileUpdateRequest
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 	var body updateProfileRequest
@@ -613,34 +647,25 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
+	body.ID = c.Param("id")
+	body.Force = c.Query("force") == queryTrue
+	if err := body.Validate(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
+		return
+	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
 		return
 	}
-	resp, err := h.controller.UpdateProfile(c.Request.Context(), controller.UpdateProfileRequest{
-		ID:             c.Param("id"),
-		Name:           body.Name,
-		Model:          body.Model,
-		FallbackModel:  body.FallbackModel,
-		AutoFallback:   body.AutoFallback,
-		Mode:           body.Mode,
-		ConfigOptions:  body.ConfigOptions,
-		AllowIndexing:  body.AllowIndexing,
-		AutoApprove:    body.AutoApprove,
-		CLIPassthrough: body.CLIPassthrough,
-		Enabled:        body.Enabled,
-		CLIFlags:       body.CLIFlags,
-		EnvVars:        body.EnvVars,
-		CommandPrefix:  body.CommandPrefix,
-		Dynamic:        body.Dynamic,
-		Force:          c.Query("force") == queryTrue,
-	})
+	resp, err := h.controller.UpdateProfile(c.Request.Context(), controller.UpdateProfileRequestFromDTO(body))
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
 		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -669,7 +694,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update profile"})
 		return
 	}
-	h.broadcastProfileEvent(ws.ActionAgentProfileUpdated, resp)
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileUpdated, resp)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -699,7 +724,7 @@ func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to duplicate profile"})
 		return
 	}
-	h.broadcastProfileEvent(ws.ActionAgentProfileCreated, resp)
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileCreated, resp)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -711,12 +736,24 @@ func (h *Handlers) httpDuplicateProfile(c *gin.Context) {
 // filterGlobalProfiles, and the WS path must not contradict that. When the
 // hub does not support workspace routing (test fakes), the office event is
 // dropped fail-closed.
-func (h *Handlers) broadcastProfileEvent(action string, profile *dto.AgentProfileDTO) {
+func (h *Handlers) broadcastProfileEvent(ctx context.Context, action string, profile *dto.AgentProfileDTO) {
 	if h.hub == nil {
 		return
 	}
+	// Profile events can arrive before settings-agent hydration. Include the
+	// capability needed by sessionless pickers so they need not guess.
+	inferenceCapable := false
+	if action != ws.ActionAgentProfileDeleted {
+		agent, err := h.controller.GetAgent(ctx, profile.AgentID)
+		if err != nil {
+			h.logger.Warn("failed to load agent capability for profile event", zap.Error(err))
+		} else {
+			inferenceCapable = agent.InferenceCapable
+		}
+	}
 	notification, _ := ws.NewNotification(action, gin.H{
-		"profile": profile,
+		"profile":           profile,
+		"inference_capable": inferenceCapable,
 	})
 	if profile.WorkspaceID != "" {
 		if workspaceHub, ok := h.hub.(interface {
@@ -754,7 +791,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete profile"})
 		return
 	}
-	h.broadcastProfileEvent(ws.ActionAgentProfileDeleted, profile)
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileDeleted, profile)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 

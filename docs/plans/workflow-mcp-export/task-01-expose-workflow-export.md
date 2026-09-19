@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/external-mcp.md"
+spec: "../../specs/integrations/requirements/external-mcp.md"
 ---
 
 # Task 01: Expose Workflow Export Through MCP
@@ -47,7 +47,7 @@ Sequential. This task owns the MCP action, handler, registration, prompt contrac
 
 ## Inputs
 
-- `docs/specs/integrations/external-mcp.md`, workflow export sections and scenarios.
+- `docs/specs/integrations/requirements/external-mcp.md`, workflow export sections and scenarios.
 - `docs/plans/workflow-mcp-export/plan.md`, Backend and Tests sections.
 - The `import_workflow_kandev` action, handler, server bridge, and tests as the nearest pattern.
 - `workflow.Service.ExportWorkflow` as the only workflow export assembly path.

@@ -5,7 +5,8 @@ import { AttachAddon } from "@xterm/addon-attach";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { getTerminalTheme } from "@/lib/theme/terminal-theme";
+import { getTerminalTheme, TERMINAL_MINIMUM_CONTRAST_RATIO } from "@/lib/theme/terminal-theme";
+import type { ResolvedTheme } from "@/components/theme/app-theme";
 import { startReconnectLoop, teardownWebSocket } from "./ws-reconnect";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -32,6 +33,7 @@ export type TerminalInitOptions = {
   webglAddonRef: React.MutableRefObject<WebglAddon | null>;
   fitAndResize: (force?: boolean) => void;
   onReady: () => void;
+  resolvedTheme: ResolvedTheme;
 };
 
 type TerminalKeyHandlerOptions = {
@@ -135,11 +137,11 @@ function initTerminalInstance(
     fontFamily?: string;
     fontSize?: number;
     disableWebgl?: boolean;
+    resolvedTheme: ResolvedTheme;
   } & TerminalKeyHandlerOptions,
 ) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
   refs.isInitializedRef.current = true;
-  log("Creating terminal");
   const terminal = new Terminal({
     allowProposedApi: true,
     cursorBlink: true,
@@ -151,7 +153,8 @@ function initTerminalInstance(
     // i18n-exempt: CSS font-family stack, not copy.
     fontFamily: options.fontFamily || 'Menlo, Monaco, "Courier New", monospace',
     macOptionIsMeta: true,
-    theme: getTerminalTheme(termContainer),
+    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+    theme: getTerminalTheme(termContainer, options.resolvedTheme),
   });
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
@@ -224,11 +227,14 @@ export function useTerminalInit({
   fontFamily,
   fontSize,
   disableWebgl,
+  resolvedTheme,
   onToggleBottomTerminal,
   sendInput,
   keyboardShortcutsRef,
   onFindInPanelRef,
 }: TerminalInitHookOptions) {
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
   const refs = {
     xtermRef,
     fitAddonRef,
@@ -238,10 +244,8 @@ export function useTerminalInit({
     webglAddonRef,
   };
   useEffect(() => {
-    log("Terminal init effect");
     const container = terminalRef.current;
     if (!container) {
-      log("No container ref");
       return;
     }
     if (isInitializedRef.current) {
@@ -259,6 +263,7 @@ export function useTerminalInit({
           fontFamily,
           fontSize,
           disableWebgl,
+          resolvedTheme: resolvedThemeRef.current,
           onToggleBottomTerminal,
           sendInput,
           keyboardShortcutsRef,
@@ -305,6 +310,7 @@ export function useTerminalInit({
         xterm.current.dispose();
         xterm.current = null;
       }
+      clearBufferReader(container);
       fitAddon.current = null;
       isInitializedRef.current = false;
       lastDimensionsRef.current = { cols: 0, rows: 0 };

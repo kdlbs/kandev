@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/search-filter-scroll-reset.md
+spec: docs/specs/ui/requirements/search-filter-scroll-reset.md
 created: 2026-08-06
 status: completed
 ---

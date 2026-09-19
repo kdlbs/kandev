@@ -2,10 +2,13 @@ package github
 
 import "strings"
 
-// isConnectivityError returns true when err looks like a transient network
+// IsConnectivityError returns true when err looks like a transient network
 // failure from `gh api` (offline, DNS, unreachable). These are noisy to log at
-// ERROR since the poller retries every few minutes.
-func isConnectivityError(err error) bool {
+// ERROR since the poller retries every few minutes; config sync's fetch-error
+// classifier also uses this to distinguish an unreachable provider from a
+// residue error on the gh-CLI transport, which reports connectivity failures
+// as a bare exec error rather than the *url.Error the PAT clients produce.
+func IsConnectivityError(err error) bool {
 	if err == nil {
 		return false
 	}

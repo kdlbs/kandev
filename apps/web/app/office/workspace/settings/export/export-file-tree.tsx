@@ -16,6 +16,7 @@ import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import type { FileTreeNode } from "./export-types";
 import { getDescendantFilePaths } from "./export-utils";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 interface ExportFileTreeProps {
   tree: FileTreeNode[];
@@ -82,7 +83,7 @@ export function ExportFileTree({
             placeholder={t("office:searchFiles")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-8 text-sm"
+            className={controlSizingClassName("standard", "pl-8 text-sm")}
           />
         </div>
       </div>

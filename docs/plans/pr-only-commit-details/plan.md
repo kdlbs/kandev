@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/pr-only-commit-details/spec.md
+spec: docs/specs/ui/requirements/pr-only-commit-details.md
 created: 2026-08-04
 status: implemented
 ---

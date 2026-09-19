@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/prompt-attachments.md"
+spec: "../../specs/tasks/requirements/prompt-attachments.md"
 ---
 
 # Task 01: Render queued attachment IDs
@@ -48,7 +48,7 @@ contract.
 
 ## Inputs
 
-- `docs/specs/tasks/prompt-attachments.md`, queued preview scenario
+- `docs/specs/tasks/requirements/prompt-attachments.md`, queued preview scenario
 - `docs/plans/queued-message-attachment-preview/plan.md`
 - Existing source resolution in
   `apps/web/components/task/chat/messages/chat-message.tsx`

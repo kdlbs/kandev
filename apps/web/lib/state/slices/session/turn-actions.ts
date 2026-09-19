@@ -2,49 +2,13 @@ import type { StateCreator } from "zustand";
 import type { Draft } from "immer";
 import type { SessionSlice } from "./types";
 import type { Turn, TaskSession } from "@/lib/types/http";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 
 type ImmerSet = Parameters<
   StateCreator<SessionSlice, [["zustand/immer", never]], [], SessionSlice>
 >[0];
 
 type TurnReconciliationDraft = Pick<Draft<SessionSlice>, "turns" | "taskSessions">;
-
-// Strict wire format: full RFC3339 with explicit offset/UTC marker. JS
-// Date.parse is permissive (e.g. "0" parses as 2000-01-01, partial dates as
-// midnight, timezone-less values in the local zone), so shape validation must
-// come first or malformed rows would win freshness comparisons.
-const RFC3339_PATTERN =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-](\d{2}):(\d{2}))$/;
-
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
-/** Whether the year is a leap year (proleptic Gregorian calendar). */
-function isLeapYear(year: number): boolean {
-  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-}
-
-/** Whether the day exists in the month (leap-year aware). */
-function validDayForMonth(year: number, month: number, day: number): boolean {
-  if (day < 1) return false;
-  const maxDay = month === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1];
-  return day <= maxDay;
-}
-
-/**
- * Returns the UTC-offset delta in SECONDS for a matched zone, or null when
- * the offset components are out of range.
- */
-function parseOffsetSeconds(
-  zone: string,
-  offsetHourText: string | undefined,
-  offsetMinuteText: string | undefined,
-): number | null {
-  if (zone === "Z") return 0;
-  const hour = Number(offsetHourText);
-  const minute = Number(offsetMinuteText);
-  if (hour > 23 || minute > 59) return null;
-  return (zone.startsWith("-") ? -1 : 1) * (hour * 60 + minute) * 60;
-}
 
 /**
  * Whether `incoming` is not newer than `existing`. A malformed incoming
@@ -204,6 +168,19 @@ export function mergeTurnRows(target: Draft<Turn[]>, incoming: Turn[]): void {
   }
 }
 
+/** Replaces a complete turn snapshot while preserving newer rows by id. */
+export function replaceTurnRows(target: Draft<Turn[]>, incoming: Turn[]): void {
+  const existingById = new Map(target.map((turn) => [turn.id, turn]));
+  const nextRows = incoming.map((turn) => {
+    const existing = existingById.get(turn.id);
+    if (!existing) return turn;
+    if (!shouldApplyTurnUpdate(existing as Turn, turn)) return existing as Turn;
+    return { ...turn, completed_at: existing.completed_at ?? turn.completed_at };
+  });
+  target.length = 0;
+  target.push(...nextRows);
+}
+
 /** Applies active-turn reconciliation to a draft owned by a hydration path. */
 export function reconcileActiveTurnAfterHydrationDraft(
   draft: TurnReconciliationDraft,
@@ -224,30 +201,7 @@ export function reconcileActiveTurnAfterHydrationDraft(
  * would collapse legitimate sub-100ns differences and misorder rows.
  */
 export function parseTurnTimestamp(value: string | undefined): bigint | null {
-  if (!value) return null;
-  const match = RFC3339_PATTERN.exec(value);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  if (month < 1 || month > 12) return null;
-  if (!validDayForMonth(year, month, Number(match[3]))) return null;
-  if (Number(match[4]) > 23 || Number(match[5]) > 59 || Number(match[6]) > 59) {
-    return null;
-  }
-  const offsetSeconds = parseOffsetSeconds(match[8], match[9], match[10]);
-  if (offsetSeconds === null) return null;
-  // RFC3339Nano caps the fraction at 9 digits; longer fractions would
-  // overflow into the seconds component (padEnd does not cap).
-  if (match[7] !== undefined && match[7].length > 9) return null;
-  // setUTCFullYear handles years 0-99 correctly (Date.UTC maps them to
-  // 1900+year); the components are validated above, so no normalization can
-  // occur here.
-  const utc = new Date(0);
-  utc.setUTCFullYear(year, month - 1, Number(match[3]));
-  utc.setUTCHours(Number(match[4]), Number(match[5]), Number(match[6]), 0);
-  const wholeSeconds = BigInt(Math.floor(utc.getTime() / 1000)) - BigInt(offsetSeconds);
-  const fractionNs = BigInt((match[7] ?? "").padEnd(9, "0"));
-  return wholeSeconds * BigInt(1_000_000_000) + fractionNs;
+  return parseStrictRfc3339Timestamp(value);
 }
 
 /**
@@ -275,11 +229,17 @@ export function shouldApplyTurnUpdate(existing: Turn, incoming: Turn): boolean {
 
 /** Store action: merges a complete REST turn snapshot and reconciles its marker atomically. */
 function mergeTurnsSnapshotAction(set: ImmerSet) {
-  return (sessionId: string, turns: Turn[], hydrationEpoch: number) =>
+  return (
+    sessionId: string,
+    turns: Turn[],
+    hydrationEpoch: number,
+    options?: { replace?: boolean },
+  ) =>
     set((draft) => {
       if (!draft.taskSessions.items[sessionId]) return;
       const target = (draft.turns.bySession[sessionId] ??= []);
-      mergeTurnRows(target, turns);
+      if (options?.replace) replaceTurnRows(target, turns);
+      else mergeTurnRows(target, turns);
       applyActiveTurnReconciliation(draft, sessionId, hydrationEpoch);
       draft.turns.loadedBySession[sessionId] = true;
     });

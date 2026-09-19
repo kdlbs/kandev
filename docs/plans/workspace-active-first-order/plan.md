@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/workspace-active-first-order.md
+spec: docs/specs/ui/requirements/workspace-active-first-order.md
 created: 2026-08-14
 status: complete
 ---

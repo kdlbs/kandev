@@ -98,6 +98,7 @@ function applyPendingActionProjection(store: StoreApi<AppState>, payload: Messag
       payload.session_id,
       payload.pending_action ?? null,
       payload.pending_action_revision,
+      payload.task_id,
     );
 }
 
@@ -137,11 +138,13 @@ export function createMessageUpdateScheduler(
     }
     const updates = [...pending.values()];
     pending.clear();
+    const messages: Message[] = [];
     for (const payload of updates) {
       if (!payload.session_id || !payload.message_id) continue;
       if (isOlderThanCurrentSnapshot(store, payload)) continue;
-      store.getState().updateMessage(settleMessageForCompletedTurn(store, toMessage(payload)));
+      messages.push(settleMessageForCompletedTurn(store, toMessage(payload)));
     }
+    if (messages.length > 0) store.getState().updateMessages(messages);
   };
 
   const enqueue = (payload: MessagePayload) => {

@@ -13,6 +13,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
+import { useChatMotion } from "@/hooks/use-chat-motion";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { selectCommandCount } from "@/lib/state/slices/session/selectors";
@@ -21,7 +22,6 @@ import { formatRelativeTime } from "@/lib/utils";
 import { MarkdownComment } from "./markdown-comment";
 import { AgentTurnPanel } from "./components/agent-turn-panel";
 import { RunErrorEntry } from "./components/run-error-entry";
-import { TaskChatLaunchError } from "./components/task-chat-launch-error";
 import { UserCommentRunBadge } from "./components/user-comment-run-badge";
 import { buildCommentTurnContext, type CommentTurnContext } from "./turn-context";
 import { groupSessionsForTimeline, groupSortKey, type SessionGroup } from "./session-groups";
@@ -505,6 +505,7 @@ function useChatAutoScroll(
  * the user when they scroll away.
  */
 function useCommentHashScroll(comments: TaskComment[]): void {
+  const motionEnabled = useChatMotion();
   const targetIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -518,9 +519,9 @@ function useCommentHashScroll(comments: TaskComment[]): void {
     if (!targetId) return;
     const el = document.getElementById(targetId);
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.scrollIntoView({ behavior: motionEnabled ? "smooth" : "auto", block: "center" });
     targetIdRef.current = null;
-  }, [comments]);
+  }, [comments, motionEnabled]);
 }
 
 function ChatEntries({
@@ -590,7 +591,6 @@ export function TaskChat({
   onCommentsChanged,
   taskTitle,
   taskDescription,
-  statusSummary,
   repositories,
 }: TaskChatProps) {
   const { t } = useTranslation();
@@ -648,13 +648,6 @@ export function TaskChat({
           {t("task:showOlderSessions", { count: olderGroups.length })}
         </button>
       )}
-      <TaskChatLaunchError
-        taskId={taskId}
-        workspaceId={workspaceId}
-        statusSummary={statusSummary}
-        runErrors={runErrors}
-        repositories={repositories}
-      />
       {isEmpty ? (
         <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
       ) : (

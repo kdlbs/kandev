@@ -14,6 +14,12 @@ func New(backend Backend) Runtime {
 	return &facade{backend: backend}
 }
 
+// IsNotFound reports whether err identifies runtime execution state that no
+// longer exists, including the lifecycle sentinel behind the runtime facade.
+func IsNotFound(err error) bool {
+	return errors.Is(err, ErrNotFound) || errors.Is(err, lifecycle.ErrExecutionNotFound)
+}
+
 // facade is the default Runtime implementation: a thin adapter over
 // the lifecycle Manager (or any Backend).
 type facade struct {
@@ -29,12 +35,56 @@ type facade struct {
 // multi-repo specs, attachments) reach the runtime in Phase 1 without
 // canonicalising them onto LaunchSpec yet.
 func (f *facade) Launch(ctx context.Context, spec LaunchSpec) (ExecutionRef, error) {
+	if spec.Owner.Kind == ExecutionOwnerRun {
+		if spec.OwnerAdmission == nil {
+			return ExecutionRef{}, fmt.Errorf("execution owner %q has no admission provider", spec.Owner.Kind)
+		}
+		if err := spec.OwnerAdmission.AdmitExecution(ctx, spec.Owner); err != nil {
+			return ExecutionRef{}, err
+		}
+	}
 	req := launchRequestFromSpec(spec)
 	exec, err := f.backend.Launch(ctx, req)
 	if err != nil {
 		return ExecutionRef{}, err
 	}
 	return executionRefFromAgentExecution(exec), nil
+}
+
+// Start launches and starts an execution. The lifecycle manager owns initial
+// prompt delivery because it already coordinates ACP session initialization;
+// the facade only provides the atomic launch/start envelope and rolls back a
+// registered execution when startup fails.
+func (f *facade) Start(ctx context.Context, spec LaunchSpec) (ExecutionRef, error) {
+	ref, err := f.Launch(ctx, spec)
+	if err != nil {
+		return ExecutionRef{}, err
+	}
+	if err := f.StartExecution(ctx, ref.ID); err != nil {
+		cleanupErr := f.Stop(context.WithoutCancel(ctx), ref.ID, "runtime_start_failed")
+		return ExecutionRef{}, errors.Join(err, cleanupErr)
+	}
+	return ref, nil
+}
+
+// StartExecution starts a registered execution after rechecking its durable
+// owner admission. The lifecycle manager repeats the same check immediately
+// before process creation, so a pause or reassignment cannot be crossed by a
+// late process start.
+func (f *facade) StartExecution(ctx context.Context, executionID string) error {
+	if executionID == "" {
+		return fmt.Errorf("runtime: executionID is required")
+	}
+	execution, ok := f.backend.GetExecution(executionID)
+	if !ok || execution == nil {
+		return ErrNotFound
+	}
+	if execution.Owner.Kind == ExecutionOwnerRun && execution.OwnerAdmission != nil {
+		if err := execution.OwnerAdmission.AdmitExecution(ctx, execution.Owner); err != nil {
+			return err
+		}
+	}
+	return f.backend.StartAgentProcess(ctx, executionID)
 }
 
 // Resume sends a follow-up prompt to an existing execution. Attachments
@@ -125,6 +175,10 @@ func launchRequestFromSpec(spec LaunchSpec) *lifecycle.LaunchRequest {
 	if spec.McpMode != "" {
 		req.McpMode = spec.McpMode
 	}
+	if spec.Owner.Kind != "" {
+		req.Owner = spec.Owner
+		req.OwnerAdmission = spec.OwnerAdmission
+	}
 	if len(spec.Metadata) > 0 {
 		if req.Metadata == nil {
 			req.Metadata = map[string]interface{}{}
@@ -168,6 +222,7 @@ func executionFromAgentExecution(exec *lifecycle.AgentExecution) *Execution {
 		ExitCode:       exec.ExitCode,
 		ErrorMessage:   exec.ErrorMessage,
 		ACPSessionID:   exec.ACPSessionID,
+		Owner:          exec.OwnerSnapshot(),
 		Metadata:       exec.MetadataSnapshot(),
 	}
 	return out

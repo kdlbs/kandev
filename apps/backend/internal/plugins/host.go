@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/state"
@@ -49,10 +50,9 @@ type pluginHost struct {
 	// GetConfig to know which fields are secret (and therefore stored as
 	// vault references to resolve back to cleartext).
 	configSchema map[string]any
-
-	state   *state.Store
-	secrets SecretVault
-	bus     bus.EventBus
+	state        *state.Store
+	secrets      SecretVault
+	bus          bus.EventBus
 
 	// configs reads the plugin's operator-editable config for the ungated
 	// GetConfig RPC. Satisfied by store.Store; nil in tests that build a
@@ -67,6 +67,11 @@ type pluginHost struct {
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
+	interactionData  interactionDataSource
+	taskPRs          taskPRSource
+	// taskPRsDep resolves the source at read time so a host created before
+	// SetTaskPRSource still observes the late wiring.
+	taskPRsDep func() taskPRSource
 
 	// taskWriter backs the CreateTask/UpdateTask write RPCs (ADR 0043
 	// phase 2, capability api_write:tasks). Wired via SetDataSources like the
@@ -81,22 +86,47 @@ type pluginHost struct {
 	// utilityDeps. nil on a bare test host. See host_write.go.
 	writeDeps func() (taskMessenger, taskStarter)
 
-	// utilityDeps returns the live utility-agent dependencies (ADR 0048) at
-	// call time rather than a spawn-time snapshot. hostUtilityMgr is
-	// constructed late in boot — after StartActivePlugins has already spawned
-	// boot-active plugins — so snapshotting here would strand those hosts with
-	// nil deps and make InvokeUtilityAgent return Unimplemented for their whole
-	// lifetime. Reading live (under Service.mu) lets the later SetUtilityAgent
-	// wiring take effect without a plugin restart. nil on a bare test host.
+	// interactionDeps returns the live interaction responder behind the
+	// api_write:interactions RPCs (ADR 0052). Read live, not snapshotted at
+	// hostForPlugin time, for the same reason as writeDeps: the orchestrator
+	// and the clarification handler are both constructed after boot-active
+	// plugins spawn, so a snapshot would strand those hosts with a nil
+	// responder for their whole lifetime. nil on a bare test host.
+	// See host_interactions.go.
+	interactionDeps func() interactionResponder
+
+	// utilityDeps returns the live utility invocation dependencies at call time
+	// rather than a spawn-time snapshot. The runner is constructed late in boot,
+	// after boot-active plugins can spawn, so reading live lets later wiring take
+	// effect without a plugin restart. nil on a bare test host.
 	// See host_utility.go.
-	utilityDeps func() (utilityAgentSource, utilityRunner)
+	utilityDeps func() (utilityDefaultProfileSource, agentProfileSource, utilityRunner)
+
+	// agentConversations provides the managed workspace agent conversation
+	// operations — EnsureAgentConversation / DispatchAgentConversation /
+	// DeleteAgentConversation. Wired by backendapp via SetAgentConversations
+	// and read through agentConversationsDeps (live, not snapshotted at
+	// hostForPlugin time, for the same late-wiring reason as writeDeps).
+	agentConversations func() AgentConversationService
+
+	// log receives the dependency-derivation-failure diagnostic emitted by
+	// attachDependencies (see host_data_dependencies.go). nil on a bare test
+	// host; attachDependencies skips logging rather than panicking.
+	log *logger.Logger
+
+	// instanceID identifies the canvas plugin instance a request is scoped
+	// to, set by Service.webAppHost. Empty on a gRPC plugin's host, which has
+	// no instance identity distinct from pluginID: every managed plugin uses
+	// one implicit global instance, so attachDependencies logs pluginID as
+	// the instance in that case.
+	instanceID string
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)
 
 // permissionDenied builds the gRPC error RemotePlugin/Host RPCs return for
 // an undeclared capability, matching the wire-level message from
-// docs/specs/plugins/spec.md ("Permissions"): "capability '<name>' not
+// docs/specs/plugins/requirements/plugins.md ("Permissions"): "capability '<name>' not
 // declared".
 func permissionDenied(capability string) error {
 	return status.Errorf(codes.PermissionDenied, "capability '%s' not declared", capability)
@@ -114,6 +144,13 @@ func taskNotFound(id string) error {
 // plugin passes a malformed filter value (e.g. a non-RFC3339 time bound).
 func invalidArgument(msg string) error {
 	return status.Error(codes.InvalidArgument, msg)
+}
+
+// resourceExhausted builds the gRPC error a Host data reader returns when a
+// batch read would exceed a hard response-size bound (e.g. the dependency
+// projection's fan-out cap) rather than silently truncate it.
+func resourceExhausted(msg string) error {
+	return status.Error(codes.ResourceExhausted, msg)
 }
 
 func (h *pluginHost) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
@@ -303,6 +340,15 @@ func (h *pluginHost) EmitEvent(ctx context.Context, name string, payload map[str
 	subject := "plugin." + h.pluginID + "." + name
 	event := bus.NewEvent(subject, "plugin:"+h.pluginID, payload)
 	return h.bus.Publish(ctx, subject, event)
+}
+
+// AgentConversations returns the agent conversation manager. It always
+// returns a usable manager — an undeclared capability or missing wiring is
+// denied per call with a typed error (see pluginHostAgentConversationManager.
+// resolve), because the gRPC server adapter calls methods on it directly and
+// a nil interface would panic the host server.
+func (h *pluginHost) AgentConversations() pluginsdk.AgentConversationManager {
+	return &pluginHostAgentConversationManager{host: h}
 }
 
 // unmarshalStateValue decodes a plugin_state row's JSON value into a

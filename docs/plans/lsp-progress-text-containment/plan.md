@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/lsp-file-intelligence/spec.md
+spec: docs/specs/platform/requirements/lsp-file-intelligence.md
 created: 2026-08-04
 status: completed
 ---

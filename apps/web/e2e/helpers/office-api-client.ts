@@ -19,6 +19,16 @@ export class OfficeApiClient {
     return res.json() as Promise<T>;
   }
 
+  /** Like {@link request}, but returns the raw Response instead of throwing on non-2xx —
+   * for endpoints a test exercises across success and rejection status codes (409, 503). */
+  async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office${path}`, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
   // --- Onboarding ---
 
   async getOnboardingState(): Promise<Record<string, unknown>> {
@@ -93,11 +103,17 @@ export class OfficeApiClient {
     await this.request("DELETE", `/agents/${id}`);
   }
 
-  async updateAgentStatus(id: string, status: string): Promise<Record<string, unknown>> {
+  async updateAgentStatus(
+    id: string,
+    status: string,
+    pauseReason?: string,
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { status };
+    if (pauseReason !== undefined) body.pause_reason = pauseReason;
     const res = await this.request<{ agent: Record<string, unknown> }>(
       "PATCH",
       `/agents/${id}/status`,
-      { status },
+      body,
     );
     return res.agent ?? (res as unknown as Record<string, unknown>);
   }
@@ -169,6 +185,34 @@ export class OfficeApiClient {
 
   async searchTasks(wsId: string, query: string): Promise<Record<string, unknown>> {
     return this.request("GET", `/workspaces/${wsId}/tasks/search?q=${encodeURIComponent(query)}`);
+  }
+
+  /**
+   * Reassign (or clear, with "") the task's project. Publishes
+   * `office.task.updated` with `fields: ["project_id"]`, which is what the
+   * costs page's live refetch gate keys off.
+   */
+  async updateTaskProjectId(id: string, projectId: string): Promise<Record<string, unknown>> {
+    return this.request("PATCH", `/tasks/${id}`, { project_id: projectId });
+  }
+
+  /**
+   * Create a project in the workspace. Onboarding does not seed a default
+   * project (see e2e/tests/office/project-repository-picker.spec.ts), so
+   * tests that need a real project_id to reassign a task to must create
+   * one first.
+   */
+  async createProject(wsId: string, name: string): Promise<Record<string, unknown>> {
+    const res = await this.request<{ project?: Record<string, unknown> }>(
+      "POST",
+      `/workspaces/${wsId}/projects`,
+      { name },
+    );
+    return res.project ?? (res as unknown as Record<string, unknown>);
+  }
+
+  async listProjects(wsId: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/workspaces/${wsId}/projects`);
   }
 
   // --- Labels ---
@@ -275,6 +319,7 @@ export class OfficeApiClient {
           execution_profile_ids?: { frontier?: string; balanced?: string; economy?: string };
         }
       >;
+      role_tiers?: Record<string, "frontier" | "balanced" | "economy">;
     };
     known_providers: string[];
     execution_profiles: Array<{
@@ -306,6 +351,7 @@ export class OfficeApiClient {
           execution_profile_ids?: { frontier?: string; balanced?: string; economy?: string };
         }
       >;
+      role_tiers?: Record<string, "frontier" | "balanced" | "economy">;
     },
   ): Promise<Record<string, unknown>> {
     return this.request("PUT", `/workspaces/${wsId}/routing`, cfg);
@@ -459,6 +505,58 @@ export class OfficeApiClient {
     return this.request("POST", `/workspaces/${wsId}/config/sync/import-fs`, undefined);
   }
 
+  // --- Config Sync (provider) ---
+  // Covers internal/office/configsync's HTTP surface: a per-workspace
+  // GitHub/GitLab source config, forced sync, and removal. Distinct from the
+  // filesystem <-> DB diff surface above.
+
+  // getConfigSyncConfig returns null on a 204 (no config yet for this
+  // workspace) rather than calling res.json() on an empty body.
+  async getConfigSyncConfig(wsId: string): Promise<Record<string, unknown> | null> {
+    const res = await fetch(`${this.baseUrl}/api/v1/office/workspaces/${wsId}/config-sync/config`);
+    if (res.status === 204) return null;
+    if (!res.ok) {
+      throw new Error(
+        `Office API GET config-sync/config failed (${res.status}): ${await res.text()}`,
+      );
+    }
+    return res.json();
+  }
+
+  async setConfigSyncConfig(
+    wsId: string,
+    payload: {
+      provider: "github" | "gitlab";
+      repo_owner?: string;
+      repo_name?: string;
+      project_path?: string;
+      branch?: string;
+      path?: string;
+      interval_seconds?: number;
+      poll_enabled?: boolean;
+    },
+  ): Promise<Record<string, unknown>> {
+    return this.request("POST", `/workspaces/${wsId}/config-sync/config`, payload);
+  }
+
+  async deleteConfigSyncConfig(wsId: string): Promise<void> {
+    await this.request("DELETE", `/workspaces/${wsId}/config-sync/config`);
+  }
+
+  async forceConfigSync(wsId: string): Promise<{
+    config: Record<string, unknown>;
+    result?: {
+      created: string[] | null;
+      updated: string[] | null;
+      deleted: string[] | null;
+      warnings: string[] | null;
+      unchanged: boolean;
+    };
+    error?: string;
+  }> {
+    return this.request("POST", `/workspaces/${wsId}/config-sync/sync`, undefined);
+  }
+
   // --- Routines ---
 
   async listRoutines(wsId: string): Promise<Record<string, unknown>> {
@@ -467,7 +565,16 @@ export class OfficeApiClient {
 
   async createRoutine(
     wsId: string,
-    data: { name: string; description?: string },
+    data: {
+      name: string;
+      description?: string;
+      catch_up_policy?: string;
+      assignee_agent_profile_id?: string;
+      concurrency_policy?: string;
+      catch_up_max?: number;
+      task_template?: string;
+      variables?: string;
+    },
   ): Promise<Record<string, unknown>> {
     const res = await this.request<{ routine: Record<string, unknown> }>(
       "POST",
@@ -475,6 +582,48 @@ export class OfficeApiClient {
       data,
     );
     return res.routine ?? (res as unknown as Record<string, unknown>);
+  }
+
+  async getRoutine(id: string): Promise<Record<string, unknown>> {
+    const res = await this.request<{ routine: Record<string, unknown> }>("GET", `/routines/${id}`);
+    return res.routine ?? (res as unknown as Record<string, unknown>);
+  }
+
+  async listRoutineRuns(routineId: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/routines/${routineId}/runs`);
+  }
+
+  /** Manual fire (AC-OFFICE-KILL-SWITCH-002.4). Raw: a paused workspace answers 409. */
+  async runRoutine(routineId: string): Promise<Response> {
+    return this.rawRequest("POST", `/routines/${routineId}/run`);
+  }
+
+  async listRoutineTriggers(routineId: string): Promise<Record<string, unknown>[]> {
+    const res = await this.request<{ triggers: Record<string, unknown>[] | null }>(
+      "GET",
+      `/routines/${routineId}/triggers`,
+    );
+    return res.triggers ?? [];
+  }
+
+  // --- Workspace pause (kill switch) ---
+
+  async getWorkspacePause(wsId: string): Promise<{
+    workspace_id: string;
+    paused: boolean;
+    pause: Record<string, unknown> | null;
+  }> {
+    return this.request("GET", `/workspaces/${wsId}/pause`);
+  }
+
+  /** Raw: exercised at both 200 (success) and 400 (invalid reason). */
+  async pauseWorkspace(wsId: string, reason: string): Promise<Response> {
+    return this.rawRequest("POST", `/workspaces/${wsId}/pause`, { reason });
+  }
+
+  /** Raw: exercised at 200 both paused and not-paused. */
+  async resumeWorkspace(wsId: string, reason?: string): Promise<Response> {
+    return this.rawRequest("POST", `/workspaces/${wsId}/resume`, reason ? { reason } : undefined);
   }
 
   // --- Costs ---

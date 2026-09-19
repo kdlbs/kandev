@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-filter-open-review-menu-entries"]
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 02: Place Reviews in Invoking Group

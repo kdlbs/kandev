@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: [task-05-picker-gone-support, task-06-profile-editor, task-07-profile-picker-gating]
 plan: docs/plans/no-silent-model-fallback/plan.md
-spec: docs/specs/no-silent-model-fallback/spec.md
+spec: docs/specs/agents/requirements/no-silent-model-fallback.md
 ---
 
 # Task 8 — Playwright E2E for gone-model flows

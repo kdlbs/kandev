@@ -186,10 +186,14 @@ endif
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-ui e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
 
 ## Default target
 all: build
+
+## Check SQL source for unsafe cross-dialect constructs.
+sqlguard:
+	$(GO) run ./cmd/sqlguard ./internal
 
 ## Build the preview CLI for deploying PR preview environments to Sprites
 build-preview:
@@ -307,11 +311,16 @@ build-mock-agent-linux:
 FIXTURE_PACKAGE_DIR := cmd/plugin-fixture/fixture-package
 FIXTURE_STAGE_DIR := .build/fixture-stage
 FIXTURE_PACKAGE_OUT := .build/kandev-plugin-e2e-1.0.0.tar.gz
+FIXTURE_IDENTITY_OUT := .build/e2e-plugin-identity.json
 HOST_GOOS := $(shell $(GO) env GOOS)
 HOST_GOARCH := $(shell $(GO) env GOARCH)
 
+.PHONY: e2e-plugin-ui
+e2e-plugin-ui:
+	cd ../web && pnpm run build:e2e-plugin -- --outDir ../../apps/backend/$(FIXTURE_PACKAGE_DIR)/ui
+
 .PHONY: e2e-plugin-package
-e2e-plugin-package:
+e2e-plugin-package: e2e-plugin-ui
 	@echo "Packaging plugin-fixture for e2e ($(HOST_GOOS)-$(HOST_GOARCH))..."
 	@$(RMDIR) $(FIXTURE_STAGE_DIR)
 	@$(call MKDIR,$(FIXTURE_STAGE_DIR)/server)
@@ -319,6 +328,12 @@ e2e-plugin-package:
 	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
 	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
 	$(GO) run ./cmd/plugin-pack -dir $(FIXTURE_STAGE_DIR) -out $(FIXTURE_PACKAGE_OUT) -platform-only
+	cd ../web && node scripts/write-e2e-plugin-identity.mjs \
+		e2e/fixtures/plugins/prompt-history-plugin/bundle.js \
+		../backend/cmd/plugin-fixture/fixture-package/ui/bundle.js \
+		../backend/cmd/plugin-fixture/fixture-package/manifest.yaml \
+		../backend/$(FIXTURE_PACKAGE_OUT) \
+		../backend/$(FIXTURE_IDENTITY_OUT)
 	@$(RMDIR) $(FIXTURE_STAGE_DIR)
 	@echo "Wrote $(FIXTURE_PACKAGE_OUT)"
 
@@ -351,12 +366,16 @@ test:
 ## Run only the Windows-sensitive packages — mirrors the test-windows job in
 ## .github/workflows/backend-tests.yml. The broader suite uses Unix-only
 ## shell commands in test fixtures and would need GOOS guards to be portable;
-## this narrow scope is the regression coverage for the conpty/job-object
-## bug class. Tests that genuinely cannot run on Windows skip themselves via
-## runtime.GOOS guards in source.
+## this narrow scope is the regression coverage for Windows-specific behavior.
+## Tests that genuinely cannot run on Windows skip themselves via runtime.GOOS
+## guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+	@echo "Running Windows managed runtime cache tests..."
+	# Scoped to the Windows-tagged test only: untagged tests in this package use os.Symlink
+	# which requires Developer Mode on Windows. Add new //go:build windows tests here.
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
 	@echo "Running Windows port-collision tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
@@ -370,7 +389,6 @@ check-make-shells:
 	$(CHECK_SHELLS)
 
 ## Run E2E tests (real agents, costs money — manual only)
-## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND
 ## Enable debug: KANDEV_DEBUG_AGENT_MESSAGES=true KANDEV_DEBUG_LOG_DIR=/tmp/e2e-debug
 test-e2e:
 	@echo "Running E2E adapter tests..."

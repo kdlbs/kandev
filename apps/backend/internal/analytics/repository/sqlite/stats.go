@@ -65,13 +65,28 @@ func rangeStartArg(start *time.Time) any {
 	return start.UTC()
 }
 
+func rangeStartPredicate(driver, column string) string {
+	return fmt.Sprintf("(%s IS NULL OR %s >= ?)", dialect.NullableTimestamp(driver, "?"), column)
+}
+
 // GetTaskStats retrieves aggregated statistics for tasks in a workspace.
 func (r *Repository) GetTaskStats(
 	ctx context.Context,
 	workspaceID string,
 	start *time.Time,
 	limit int,
-) ([]*models.TaskStats, error) {
+) (results []*models.TaskStats, err error) {
+	parentCtx := ctx
+	operationCtx, release, err := r.beginAnalyticsOperation(parentCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = normalizeAnalyticsOperationError(parentCtx, operationCtx, err)
+		release()
+	}()
+	ctx = operationCtx
+
 	startArg := rangeStartArg(start)
 	if limit <= 0 {
 		limit = 200
@@ -79,55 +94,69 @@ func (r *Repository) GetTaskStats(
 
 	drv := r.ro.DriverName()
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
-
-	query := fmt.Sprintf(`
-		SELECT
-			t.id, t.title, t.workspace_id, t.workflow_id, t.state,
-			COALESCE(session_stats.session_count, 0) as session_count,
-			COALESCE(session_stats.turn_count, 0) as turn_count,
-			COALESCE(session_stats.message_count, 0) as message_count,
-			COALESCE(session_stats.user_message_count, 0) as user_message_count,
-			COALESCE(session_stats.tool_call_count, 0) as tool_call_count,
-			COALESCE(turn_stats.active_duration_ms, 0) as total_duration_ms,
-			COALESCE(turn_stats.active_duration_ms, 0) as active_duration_ms,
-			COALESCE(turn_stats.elapsed_span_ms, 0) as elapsed_span_ms,
-			t.created_at, session_stats.last_completed_at
-		FROM tasks t
-		LEFT JOIN (
-			SELECT s.task_id,
-				COUNT(DISTINCT s.id) as session_count,
-				COUNT(DISTINCT turn.id) as turn_count,
-				COUNT(DISTINCT msg.id) as message_count,
-				COUNT(DISTINCT CASE WHEN msg.author_type = 'user' THEN msg.id END) as user_message_count,
-				COUNT(DISTINCT CASE WHEN msg.type LIKE 'tool_%%' THEN msg.id END) as tool_call_count,
-				MAX(s.completed_at) as last_completed_at
-			FROM task_sessions s
-			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
-			WHERE (? IS NULL OR s.started_at >= ?)
-			GROUP BY s.task_id
-		) session_stats ON session_stats.task_id = t.id
-		LEFT JOIN (
-			SELECT s.task_id,
-				SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END) as active_duration_ms,
-				%s as elapsed_span_ms
-			FROM task_sessions s
-			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-			WHERE (? IS NULL OR s.started_at >= ?)
-			GROUP BY s.task_id
-		) turn_stats ON turn_stats.task_id = t.id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
-		ORDER BY t.updated_at DESC
-		LIMIT ?
-	`, dur, dialect.DurationMs(
+	elapsedDur := dialect.DurationMs(
 		drv,
 		"MAX(CASE WHEN turn.completed_at IS NOT NULL THEN turn.completed_at END)",
 		"MIN(CASE WHEN turn.completed_at IS NOT NULL THEN turn.started_at END)",
-	))
+	)
+
+	query := fmt.Sprintf(`
+		WITH eligible_tasks AS (
+			SELECT t.id, t.title, t.workspace_id, t.workflow_id, t.state,
+				t.created_at, t.updated_at
+			FROM tasks t
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "t.created_at")+`
+			ORDER BY t.updated_at DESC
+			LIMIT ?
+		), scoped_sessions AS (
+			SELECT s.id, s.task_id, s.completed_at
+			FROM task_sessions s
+			JOIN eligible_tasks t ON t.id = s.task_id
+			WHERE `+rangeStartPredicate(drv, "s.started_at")+`
+		), session_stats AS (
+			SELECT task_id,
+				COUNT(*) AS session_count,
+				MAX(completed_at) AS last_completed_at
+			FROM scoped_sessions
+			GROUP BY task_id
+		), turn_stats AS (
+			SELECT s.task_id,
+				COUNT(turn.id) AS turn_count,
+				COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) AS active_duration_ms,
+				%s AS elapsed_span_ms
+			FROM scoped_sessions s
+			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
+			GROUP BY s.task_id
+		), message_stats AS (
+			SELECT s.task_id,
+				COUNT(msg.id) AS message_count,
+				COUNT(CASE WHEN msg.author_type = 'user' THEN msg.id END) AS user_message_count,
+				COUNT(CASE WHEN msg.type LIKE 'tool_%%' THEN msg.id END) AS tool_call_count
+			FROM scoped_sessions s
+			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
+			GROUP BY s.task_id
+		)
+		SELECT
+			t.id, t.title, t.workspace_id, t.workflow_id, t.state,
+			COALESCE(s.session_count, 0) AS session_count,
+			COALESCE(turns.turn_count, 0) AS turn_count,
+			COALESCE(messages.message_count, 0) AS message_count,
+			COALESCE(messages.user_message_count, 0) AS user_message_count,
+			COALESCE(messages.tool_call_count, 0) AS tool_call_count,
+			COALESCE(turns.active_duration_ms, 0) AS total_duration_ms,
+			COALESCE(turns.active_duration_ms, 0) AS active_duration_ms,
+			COALESCE(turns.elapsed_span_ms, 0) AS elapsed_span_ms,
+			t.created_at, s.last_completed_at
+		FROM eligible_tasks t
+		LEFT JOIN session_stats s ON s.task_id = t.id
+		LEFT JOIN turn_stats turns ON turns.task_id = t.id
+		LEFT JOIN message_stats messages ON messages.task_id = t.id
+		ORDER BY t.updated_at DESC
+	`, dur, elapsedDur)
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
-		startArg, startArg, startArg, startArg,
 		workspaceID, startArg, startArg, limit,
+		startArg, startArg,
 	)
 	if err != nil {
 		return nil, err
@@ -190,7 +219,24 @@ const (
 // table at most once per request; clean_turn additionally issues one
 // index-only message-count subquery per qualifying turn (kept correlated to
 // stay portable between the SQLite and Postgres dialects).
-func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GlobalStats, error) {
+
+//nolint:funlen // Keep the portable aggregate CTEs together with their scan contract.
+func (r *Repository) GetGlobalStats(
+	ctx context.Context,
+	workspaceID string,
+	start *time.Time,
+) (result *models.GlobalStats, err error) {
+	parentCtx := ctx
+	operationCtx, release, err := r.beginAnalyticsOperation(parentCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = normalizeAnalyticsOperationError(parentCtx, operationCtx, err)
+		release()
+	}()
+	ctx = operationCtx
+
 	startArg := rangeStartArg(start)
 
 	drv := r.ro.DriverName()
@@ -207,13 +253,13 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 				SUM(CASE WHEN t.state = 'IN_PROGRESS' AND t.archived_at IS NULL THEN 1 ELSE 0 END) AS in_progress_tasks
 			FROM tasks t
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "t.created_at")+`
 		),
 		session_agg AS (
 			SELECT COUNT(*) AS total_sessions
 			FROM task_sessions s
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 		),
 		turn_agg AS (
 			SELECT
@@ -222,7 +268,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			FROM task_session_turns turn
 			JOIN task_sessions s ON s.id = turn.task_session_id
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 		),
 		clean_turn_agg AS (
 			SELECT
@@ -235,7 +281,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 				FROM task_session_turns turn
 				JOIN task_sessions s ON s.id = turn.task_session_id
 				JOIN tasks t ON t.id = s.task_id
-				WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+				WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 				  AND turn.completed_at IS NOT NULL
 			) clean
 			WHERE dur_ms >= %d AND dur_ms < %d AND msg_count >= %d
@@ -248,7 +294,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			FROM task_session_messages msg
 			JOIN task_sessions s ON s.id = msg.task_session_id
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 		)
 		SELECT
 			task_agg.total_tasks, task_agg.completed_tasks, task_agg.in_progress_tasks,
@@ -265,7 +311,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 	var completedTasks, inProgressTasks sql.NullInt64
 	var userMessages, toolCalls sql.NullInt64
 	var avgTurnDurationMs, avgMessagesPerTurn sql.NullFloat64
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query),
+	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(query),
 		workspaceID, startArg, startArg, // task_agg
 		workspaceID, startArg, startArg, // session_agg
 		workspaceID, startArg, startArg, // turn_agg
@@ -299,42 +345,69 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 }
 
 // GetDailyActivity retrieves daily activity statistics for the last N days
-func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, days int) ([]*models.DailyActivity, error) {
+func (r *Repository) GetDailyActivity(
+	ctx context.Context,
+	workspaceID string,
+	days int,
+) (items []*models.DailyActivity, err error) {
+	parentCtx := ctx
+	operationCtx, release, err := r.beginAnalyticsOperation(parentCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = normalizeAnalyticsOperationError(parentCtx, operationCtx, err)
+		release()
+	}()
+	ctx = operationCtx
+
 	drv := r.ro.DriverName()
 	dateStart := dialect.DateNowMinusDays(drv, "?")
 	datePlus := dialect.DatePlusOneDay(drv, "date")
 	curDate := dialect.CurrentDate(drv)
 	dateOfTurn := dialect.DateOf(drv, "turn.started_at")
 	dateOfMsg := dialect.DateOf(drv, "msg.created_at")
+	dateText := dialect.DateText(drv, "d.date")
 
 	query := fmt.Sprintf(`
 		WITH RECURSIVE dates(date) AS (
 			SELECT %s
 			UNION ALL
 			SELECT %s FROM dates WHERE date < %s
-		)
-		SELECT
-			d.date,
-			COALESCE(activity.turn_count, 0) as turn_count,
-			COALESCE(activity.message_count, 0) as message_count,
-			COALESCE(activity.task_count, 0) as task_count
-		FROM dates d
-		LEFT JOIN (
-			SELECT
-				%s as activity_date,
-				COUNT(DISTINCT turn.id) as turn_count,
-				COUNT(DISTINCT msg.id) as message_count,
-				COUNT(DISTINCT t.id) as task_count
+		), turn_scope AS (
+			SELECT turn.id, turn.task_session_id, t.id AS task_id,
+				%s AS activity_date
 			FROM task_session_turns turn
 			JOIN task_sessions s ON s.id = turn.task_session_id
 			JOIN tasks t ON t.id = s.task_id
-			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
-				AND %s = %s
+			JOIN dates d ON d.date = %s
 			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
-			GROUP BY %s
-		) activity ON activity.activity_date = d.date
+		), turn_activity AS (
+			SELECT activity_date,
+				COUNT(*) AS turn_count,
+				COUNT(DISTINCT task_id) AS task_count
+			FROM turn_scope
+			GROUP BY activity_date
+		), message_days AS (
+			SELECT DISTINCT task_session_id, activity_date
+			FROM turn_scope
+		), message_activity AS (
+			SELECT md.activity_date, COUNT(msg.id) AS message_count
+			FROM message_days md
+			JOIN task_session_messages msg ON msg.task_session_id = md.task_session_id
+			WHERE %s = md.activity_date
+			GROUP BY md.activity_date
+		)
+		SELECT
+			%s AS date,
+			COALESCE(turn_activity.turn_count, 0) AS turn_count,
+			COALESCE(message_activity.message_count, 0) AS message_count,
+			COALESCE(turn_activity.task_count, 0) AS task_count
+		FROM dates d
+		LEFT JOIN turn_activity ON turn_activity.activity_date = d.date
+		LEFT JOIN message_activity ON message_activity.activity_date = d.date
 		ORDER BY d.date ASC
-	`, dateStart, datePlus, curDate, dateOfTurn, dateOfMsg, dateOfTurn, dateOfTurn)
+	`, dateStart, datePlus, curDate, dateOfTurn, dateOfTurn, dateOfMsg, dateText)
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID)
 	if err != nil {
@@ -355,12 +428,28 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 }
 
 // GetCompletedTaskActivity retrieves completed task counts for the last N days
-func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID string, days int) ([]*models.CompletedTaskActivity, error) {
+func (r *Repository) GetCompletedTaskActivity(
+	ctx context.Context,
+	workspaceID string,
+	days int,
+) (items []*models.CompletedTaskActivity, err error) {
+	parentCtx := ctx
+	operationCtx, release, err := r.beginAnalyticsOperation(parentCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = normalizeAnalyticsOperationError(parentCtx, operationCtx, err)
+		release()
+	}()
+	ctx = operationCtx
+
 	drv := r.ro.DriverName()
 	dateStart := dialect.DateNowMinusDays(drv, "?")
 	datePlus := dialect.DatePlusOneDay(drv, "date")
 	curDate := dialect.CurrentDate(drv)
 	dateOfCompleted := dialect.DateOf(drv, "COALESCE(ts.completed_at, t.archived_at)")
+	dateText := dialect.DateText(drv, "d.date")
 
 	query := fmt.Sprintf(`
 		WITH RECURSIVE dates(date) AS (
@@ -368,7 +457,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 			UNION ALL
 			SELECT %s FROM dates WHERE date < %s
 		)
-		SELECT d.date, COALESCE(activity.completed_tasks, 0) as completed_tasks
+		SELECT %s AS date, COALESCE(activity.completed_tasks, 0) as completed_tasks
 		FROM dates d
 		LEFT JOIN (
 			SELECT %s as activity_date, COUNT(DISTINCT t.id) as completed_tasks
@@ -385,7 +474,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 			GROUP BY %s
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC
-	`, dateStart, datePlus, curDate, dateOfCompleted, dateOfCompleted)
+	`, dateStart, datePlus, curDate, dateText, dateOfCompleted, dateOfCompleted)
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID)
 	if err != nil {
@@ -406,14 +495,30 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 }
 
 // GetRepositoryStats retrieves aggregated statistics for repositories in a workspace
-func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string, start *time.Time) ([]*models.RepositoryStats, error) {
+func (r *Repository) GetRepositoryStats(
+	ctx context.Context,
+	workspaceID string,
+	start *time.Time,
+) (items []*models.RepositoryStats, err error) {
+	parentCtx := ctx
+	operationCtx, release, err := r.beginAnalyticsOperation(parentCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = normalizeAnalyticsOperationError(parentCtx, operationCtx, err)
+		release()
+	}()
+	ctx = operationCtx
+
 	startArg := rangeStartArg(start)
 
 	query := buildRepositoryStatsQuery(r.ro.DriverName())
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
-		startArg, startArg, startArg, startArg,
-		startArg, startArg, startArg, startArg,
 		workspaceID,
+		startArg, startArg,
+		startArg, startArg,
+		startArg, startArg,
 	)
 	if err != nil {
 		return nil, err
@@ -445,71 +550,86 @@ func (r *Repository) GetRepositoryStats(ctx context.Context, workspaceID string,
 func buildRepositoryStatsQuery(drv string) string {
 	dur := dialect.DurationMs(drv, "turn.completed_at", "turn.started_at")
 	return fmt.Sprintf(`
+		WITH eligible_repositories AS (
+			SELECT id, name
+			FROM repositories
+			WHERE workspace_id = ? AND deleted_at IS NULL
+		), task_repository_scope AS (
+			SELECT DISTINCT er.id AS repository_id,
+				t.id AS task_id, t.state, t.workflow_step_id, t.archived_at, t.created_at
+			FROM eligible_repositories er
+			JOIN task_repositories tr ON tr.repository_id = er.id
+			JOIN tasks t ON t.id = tr.task_id
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		), task_stats AS (
+			SELECT scope.repository_id,
+				COUNT(*) AS total_tasks,
+				COUNT(CASE WHEN scope.archived_at IS NOT NULL
+					OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
+					THEN scope.task_id END) AS completed_tasks,
+				COUNT(CASE WHEN scope.state = 'IN_PROGRESS' AND scope.archived_at IS NULL THEN scope.task_id END) AS in_progress_tasks
+			FROM task_repository_scope scope
+			LEFT JOIN workflow_steps ws ON ws.id = scope.workflow_step_id
+			WHERE `+rangeStartPredicate(drv, "scope.created_at")+`
+			GROUP BY scope.repository_id
+		), session_scope AS (
+			SELECT DISTINCT scope.repository_id, s.id AS session_id
+			FROM task_repository_scope scope
+			JOIN task_sessions s ON s.task_id = scope.task_id
+			WHERE `+rangeStartPredicate(drv, "s.started_at")+`
+		), session_stats AS (
+			SELECT repository_id, COUNT(*) AS session_count
+			FROM session_scope
+			GROUP BY repository_id
+		), turn_stats AS (
+			SELECT ss.repository_id,
+				COUNT(turn.id) AS turn_count,
+				COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) AS total_duration_ms
+			FROM session_scope ss
+			LEFT JOIN task_session_turns turn ON turn.task_session_id = ss.session_id
+			GROUP BY ss.repository_id
+		), message_stats AS (
+			SELECT ss.repository_id,
+				COUNT(msg.id) AS message_count,
+				COUNT(CASE WHEN msg.author_type = 'user' THEN msg.id END) AS user_message_count,
+				COUNT(CASE WHEN msg.type LIKE 'tool_%%' THEN msg.id END) AS tool_call_count
+			FROM session_scope ss
+			LEFT JOIN task_session_messages msg ON msg.task_session_id = ss.session_id
+			GROUP BY ss.repository_id
+		), git_stats AS (
+			SELECT er.id AS repository_id,
+				COUNT(DISTINCT c.id) AS total_commits,
+				COALESCE(SUM(c.files_changed), 0) AS total_files_changed,
+				COALESCE(SUM(c.insertions), 0) AS total_insertions,
+				COALESCE(SUM(c.deletions), 0) AS total_deletions
+			FROM eligible_repositories er
+			JOIN task_sessions s ON s.repository_id = er.id
+			JOIN task_session_commits c ON c.session_id = s.id
+			JOIN tasks t ON t.id = s.task_id
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND s.repository_id != '' AND `+rangeStartPredicate(drv, "c.committed_at")+`
+			GROUP BY er.id
+		)
 		SELECT
 			r.id, r.name,
-			COALESCE(task_stats.total_tasks, 0) as total_tasks,
-			COALESCE(task_stats.completed_tasks, 0) as completed_tasks,
-			COALESCE(task_stats.in_progress_tasks, 0) as in_progress_tasks,
-			COALESCE(session_stats.session_count, 0) as session_count,
-			COALESCE(session_stats.turn_count, 0) as turn_count,
-			COALESCE(session_stats.message_count, 0) as message_count,
-			COALESCE(session_stats.user_message_count, 0) as user_message_count,
-			COALESCE(session_stats.tool_call_count, 0) as tool_call_count,
-			COALESCE(duration_stats.total_duration_ms, 0) as total_duration_ms,
-			COALESCE(git_stats.total_commits, 0) as total_commits,
-			COALESCE(git_stats.total_files_changed, 0) as total_files_changed,
-			COALESCE(git_stats.total_insertions, 0) as total_insertions,
-			COALESCE(git_stats.total_deletions, 0) as total_deletions
-		FROM repositories r
-		LEFT JOIN (
-			SELECT tr.repository_id,
-				COUNT(DISTINCT t.id) as total_tasks,
-				COUNT(DISTINCT CASE WHEN ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id) THEN t.id END) as completed_tasks,
-				COUNT(DISTINCT CASE WHEN t.state = 'IN_PROGRESS' THEN t.id END) as in_progress_tasks
-			FROM task_repositories tr
-			JOIN tasks t ON t.id = tr.task_id
-			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
-			GROUP BY tr.repository_id
-		) task_stats ON task_stats.repository_id = r.id
-		LEFT JOIN (
-			SELECT tr.repository_id,
-				COUNT(DISTINCT s.id) as session_count,
-				COUNT(DISTINCT turn.id) as turn_count,
-				COUNT(DISTINCT msg.id) as message_count,
-				COUNT(DISTINCT CASE WHEN msg.author_type = 'user' THEN msg.id END) as user_message_count,
-				COUNT(DISTINCT CASE WHEN msg.type LIKE 'tool_%%' THEN msg.id END) as tool_call_count
-			FROM task_repositories tr
-			JOIN tasks t ON t.id = tr.task_id
-			JOIN task_sessions s ON s.task_id = tr.task_id
-			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
-			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
-			GROUP BY tr.repository_id
-		) session_stats ON session_stats.repository_id = r.id
-		LEFT JOIN (
-			SELECT tr.repository_id,
-				COALESCE(SUM(CASE WHEN turn.completed_at IS NOT NULL THEN %s ELSE 0 END), 0) as total_duration_ms
-			FROM task_repositories tr
-			JOIN tasks t ON t.id = tr.task_id
-			JOIN task_sessions s ON s.task_id = tr.task_id
-			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
-			GROUP BY tr.repository_id
-		) duration_stats ON duration_stats.repository_id = r.id
-		LEFT JOIN (
-			SELECT s.repository_id,
-				COUNT(DISTINCT c.id) as total_commits,
-				COALESCE(SUM(c.files_changed), 0) as total_files_changed,
-				COALESCE(SUM(c.insertions), 0) as total_insertions,
-				COALESCE(SUM(c.deletions), 0) as total_deletions
-			FROM task_session_commits c
-			JOIN task_sessions s ON s.id = c.session_id
-			JOIN tasks t ON t.id = s.task_id
-			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND s.repository_id != '' AND (? IS NULL OR c.committed_at >= ?)
-			GROUP BY s.repository_id
-		) git_stats ON git_stats.repository_id = r.id
-		WHERE r.workspace_id = ? AND r.deleted_at IS NULL
+			COALESCE(task_stats.total_tasks, 0) AS total_tasks,
+			COALESCE(task_stats.completed_tasks, 0) AS completed_tasks,
+			COALESCE(task_stats.in_progress_tasks, 0) AS in_progress_tasks,
+			COALESCE(session_stats.session_count, 0) AS session_count,
+			COALESCE(turn_stats.turn_count, 0) AS turn_count,
+			COALESCE(message_stats.message_count, 0) AS message_count,
+			COALESCE(message_stats.user_message_count, 0) AS user_message_count,
+			COALESCE(message_stats.tool_call_count, 0) AS tool_call_count,
+			COALESCE(turn_stats.total_duration_ms, 0) AS total_duration_ms,
+			COALESCE(git_stats.total_commits, 0) AS total_commits,
+			COALESCE(git_stats.total_files_changed, 0) AS total_files_changed,
+			COALESCE(git_stats.total_insertions, 0) AS total_insertions,
+			COALESCE(git_stats.total_deletions, 0) AS total_deletions
+		FROM eligible_repositories r
+		LEFT JOIN task_stats ON task_stats.repository_id = r.id
+		LEFT JOIN session_stats ON session_stats.repository_id = r.id
+		LEFT JOIN turn_stats ON turn_stats.repository_id = r.id
+		LEFT JOIN message_stats ON message_stats.repository_id = r.id
+		LEFT JOIN git_stats ON git_stats.repository_id = r.id
 		ORDER BY total_duration_ms DESC, total_tasks DESC, r.name ASC
 	`, dur)
 }
@@ -525,7 +645,23 @@ func buildRepositoryStatsQuery(drv string) string {
 // Sessions whose snapshot records no model are skipped rather than collected
 // under a blank label, mirroring how sessions with no agent profile were
 // already left out.
-func (r *Repository) GetModelUsage(ctx context.Context, workspaceID string, limit int, start *time.Time) ([]*models.ModelUsage, error) {
+func (r *Repository) GetModelUsage(
+	ctx context.Context,
+	workspaceID string,
+	limit int,
+	start *time.Time,
+) (items []*models.ModelUsage, err error) {
+	parentCtx := ctx
+	operationCtx, release, err := r.beginAnalyticsOperation(parentCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = normalizeAnalyticsOperationError(parentCtx, operationCtx, err)
+		release()
+	}()
+	ctx = operationCtx
+
 	startArg := rangeStartArg(start)
 
 	drv := r.ro.DriverName()
@@ -541,7 +677,7 @@ func (r *Repository) GetModelUsage(ctx context.Context, workspaceID string, limi
 				COALESCE(%s, %s, %s, '') as model
 			FROM task_sessions s
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND `+rangeStartPredicate(drv, "s.started_at")+`
 		)
 		SELECT
 			scoped.model,
@@ -580,7 +716,22 @@ func (r *Repository) GetModelUsage(ctx context.Context, workspaceID string, limi
 }
 
 // GetGitStats retrieves aggregated git statistics for a workspace
-func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start *time.Time) (*models.GitStats, error) {
+func (r *Repository) GetGitStats(
+	ctx context.Context,
+	workspaceID string,
+	start *time.Time,
+) (result *models.GitStats, err error) {
+	parentCtx := ctx
+	operationCtx, release, err := r.beginAnalyticsOperation(parentCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = normalizeAnalyticsOperationError(parentCtx, operationCtx, err)
+		release()
+	}()
+	ctx = operationCtx
+
 	startArg := rangeStartArg(start)
 
 	query := `
@@ -592,11 +743,11 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 		FROM task_session_commits c
 		JOIN task_sessions s ON s.id = c.session_id
 		JOIN tasks t ON t.id = s.task_id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0` + andNotAutomationOriginT + ` AND (? IS NULL OR c.committed_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0` + andNotAutomationOriginT + ` AND ` + rangeStartPredicate(r.ro.DriverName(), "c.committed_at") + `
 	`
 
 	var stats models.GitStats
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), workspaceID, startArg, startArg).Scan(
+	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(query), workspaceID, startArg, startArg).Scan(
 		&stats.TotalCommits, &stats.TotalFilesChanged,
 		&stats.TotalInsertions, &stats.TotalDeletions,
 	)
@@ -653,7 +804,18 @@ const commitCaptureActivatedAtMetaKey = "commit_capture_activated_at"
 func (r *Repository) ListSessionCodeStats(
 	ctx context.Context,
 	filter models.SessionCodeStatsFilter,
-) ([]*models.SessionCodeStats, error) {
+) (results []*models.SessionCodeStats, err error) {
+	parentCtx := ctx
+	operationCtx, release, err := r.beginAnalyticsOperation(parentCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = normalizeAnalyticsOperationError(parentCtx, operationCtx, err)
+		release()
+	}()
+	ctx = operationCtx
+
 	driver := r.ro.DriverName()
 	where, args := buildSessionCodeStatsFilter(filter)
 	// Exclude office config-mode tasks' sessions (internal bookkeeping, not
@@ -791,10 +953,11 @@ func peakPendingSnapshotSubquery(drv string) string {
 				MAX(snap.deletions) AS peak_deletions
 			FROM (
 				SELECT g.id AS snapshot_id, g.session_id,
-					SUM(COALESCE((f.jvalue->>'additions')::numeric, 0)) AS additions,
-					SUM(COALESCE((f.jvalue->>'deletions')::numeric, 0)) AS deletions
+				SUM(COALESCE((f.jvalue->>'additions')::numeric, 0)) AS additions,
+				SUM(COALESCE((f.jvalue->>'deletions')::numeric, 0)) AS deletions
 				FROM task_session_git_snapshots g,
 					jsonb_each(g.files::jsonb) AS f(jkey, jvalue)
+				WHERE g.session_id IS NOT NULL
 				GROUP BY g.id, g.session_id
 			) snap
 			GROUP BY snap.session_id`
@@ -808,6 +971,7 @@ func peakPendingSnapshotSubquery(drv string) string {
 				SUM(COALESCE(json_extract(f.value, '$.additions'), 0)) AS additions,
 				SUM(COALESCE(json_extract(f.value, '$.deletions'), 0)) AS deletions
 			FROM task_session_git_snapshots g, json_each(g.files) f
+			WHERE g.session_id IS NOT NULL
 			GROUP BY g.id, g.session_id
 		) snap
 		GROUP BY snap.session_id`

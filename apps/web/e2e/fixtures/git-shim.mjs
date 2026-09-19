@@ -12,7 +12,8 @@
 //   - Skip leading Git global options when finding the subcommand.
 //   - If KANDEV_E2E_GIT_DELAY_FILE holds a positive ms value and the subcommand
 //     is `fetch`/`pull`, sleep that long before running real git (simulates slow
-//     network git so prepare-panel streaming stays observable).
+//     network git so prepare-panel streaming stays observable). A JSON object
+//     with `startedFile` and `releaseFile` provides a deterministic test gate.
 //   - If the subcommand is `push` and KANDEV_E2E_GITLAB_PUSH_FILE matches the
 //     repo's origin remote, record the push args and exit 0 without pushing.
 //   - Otherwise exec the real git binary with the original args, restoring the
@@ -73,9 +74,19 @@ function runRealGit(args, extraEnv) {
 function maybeDelay(subcommand) {
   if (subcommand !== "fetch" && subcommand !== "pull") return;
   const raw = readFileSafe(process.env.KANDEV_E2E_GIT_DELAY_FILE);
-  if (!/^[0-9]+$/.test(raw)) return;
-  const delayMs = Number(raw);
-  if (delayMs > 0) sleepMs(delayMs);
+  if (/^[0-9]+$/.test(raw)) {
+    const delayMs = Number(raw);
+    if (delayMs > 0) sleepMs(delayMs);
+    return;
+  }
+  try {
+    const gate = JSON.parse(raw);
+    if (typeof gate.startedFile !== "string" || typeof gate.releaseFile !== "string") return;
+    fs.writeFileSync(gate.startedFile, "started");
+    while (!fs.existsSync(gate.releaseFile)) sleepMs(50);
+  } catch {
+    // Invalid or absent delay configuration means transparent passthrough.
+  }
 }
 
 /**

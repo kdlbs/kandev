@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/executor-settings-card-spacing.md"
+spec: "../../specs/ui/requirements/executor-settings-card-spacing.md"
 ---
 
 # Task 01: Restore executor card spacing
@@ -49,7 +49,7 @@ The managed E2E runner rebuilds the production web assets before each change-awa
 - `apps/web/e2e/tests/settings/executor-profile-spacing.spec.ts`
 - `apps/web/e2e/tests/settings/executor-profile-spacing-helpers.ts`
 - `apps/web/e2e/tests/settings/mobile-executor-profile-spacing.spec.ts`
-- `docs/specs/ui/executor-settings-card-spacing.md`
+- `docs/specs/ui/requirements/executor-settings-card-spacing.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/executor-settings-card-spacing/plan.md`
 - `docs/plans/executor-settings-card-spacing/task-01-restore-card-spacing.md`
@@ -64,7 +64,7 @@ Sequential. The regression specs and the two production class changes share the 
 
 ## Inputs
 
-- Repair contract and scenarios in `docs/specs/ui/executor-settings-card-spacing.md`.
+- Repair contract and scenarios in `docs/specs/ui/requirements/executor-settings-card-spacing.md`.
 - Root cause and file-level approach in `docs/plans/executor-settings-card-spacing/plan.md`.
 - Existing settings mobile shell in `apps/web/components/settings/settings-layout-client.tsx` and mobile settings E2E conventions in `apps/web/e2e/tests/settings/mobile-settings-sidebar.spec.ts`.
 - Existing worker fixture field `seedData.worktreeExecutorProfileId` and `ApiClient.createExecutorProfile` for the create-form setup.

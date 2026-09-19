@@ -31,7 +31,7 @@ async function openStorageSettings(page: Page): Promise<void> {
   // document request once if the first load is interrupted under CI load.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.goto("/settings/system/data-storage", {
+      await page.goto("/settings/system/storage", {
         waitUntil: "commit",
         timeout: 20_000,
       });

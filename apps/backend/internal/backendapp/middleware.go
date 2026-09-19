@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -12,7 +13,8 @@ import (
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if origin := c.Request.Header.Get("Origin"); origin != "" {
-			if !httpmw.AllowedOrigin(origin, c.Request.Host) {
+			opaqueRuntime := origin == "null" && strings.HasPrefix(c.Request.URL.Path, "/api/v1/plugins/web-apps/runtime/")
+			if !opaqueRuntime && !httpmw.AllowedOrigin(origin, c.Request.Host) {
 				// Disallowed cross-origin browser request: reject every method
 				// (including GET/HEAD) with 403. Letting one reach the handler
 				// yields nothing legitimate — a response the browser could read
@@ -32,12 +34,16 @@ func corsMiddleware() gin.HandlerFunc {
 
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Vary", "Origin")
-			c.Header("Access-Control-Allow-Credentials", "true")
+			if opaqueRuntime {
+				c.Header("Access-Control-Allow-Credentials", "false")
+			} else {
+				c.Header("Access-Control-Allow-Credentials", "true")
+			}
 		} else {
 			c.Header("Access-Control-Allow-Origin", "*")
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, X-Kandev-Interim-Settings-Interlock, Upgrade, Connection, Sec-WebSocket-Key, Sec-WebSocket-Version, Sec-WebSocket-Protocol")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, If-Match, Last-Event-ID, X-Kandev-Interim-Settings-Interlock, Upgrade, Connection, Sec-WebSocket-Key, Sec-WebSocket-Version, Sec-WebSocket-Protocol")
 		c.Header("Access-Control-Expose-Headers", "WWW-Authenticate")
 
 		if c.Request.Method == "OPTIONS" {

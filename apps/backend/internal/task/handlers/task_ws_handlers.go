@@ -5,11 +5,14 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -133,6 +136,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			BranchPolicyID: r.BranchPolicyID,
 			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
@@ -140,6 +144,8 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			GitHubURL:      r.GitHubURL,
 			RemoteURL:      r.RemoteURL,
 			Provider:       r.Provider,
+			ProviderHost:   r.ProviderHost,
+			ProviderScope:  r.ProviderScope,
 			ProviderRepoID: r.ProviderRepoID,
 			ProviderOwner:  r.ProviderOwner,
 			ProviderName:   r.ProviderName,
@@ -173,28 +179,33 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	result, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID:    req.WorkspaceID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Title:          title,
-		Description:    description,
-		Autopilot:      req.Autopilot,
-		Priority:       req.Priority,
-		State:          req.State,
-		Repositories:   convertToServiceRepos(repos),
-		Position:       req.Position,
-		Metadata:       req.Metadata,
-		DeferredLaunch: deferredLaunch,
-		PlanMode:       req.PlanMode,
-		ParentID:       req.ParentID,
+		WorkspaceID:                 req.WorkspaceID,
+		WorkflowID:                  req.WorkflowID,
+		WorkflowStepID:              req.WorkflowStepID,
+		Title:                       title,
+		Description:                 description,
+		Autopilot:                   req.Autopilot,
+		Priority:                    req.Priority,
+		State:                       req.State,
+		Repositories:                convertToServiceRepos(repos),
+		Position:                    req.Position,
+		Metadata:                    req.Metadata,
+		DeferredLaunch:              deferredLaunch,
+		RecordAgentProfileRecentUse: true,
+		PlanMode:                    req.PlanMode,
+		StartAgent:                  req.StartAgent,
+		ParentID:                    req.ParentID,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
+		if code, ok := repositorySelectionWSCode(err); ok {
+			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
+		}
 		if errors.Is(err, service.ErrWIPLimitExceeded) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
 		}
 		if isTaskCreateValidationError(err) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), taskErrorDetails(err))
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
@@ -214,6 +225,10 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		response.TaskSessionID = launchResp.SessionID
 		response.AgentExecutionID = launchResp.AgentExecutionID
+		response.AgentProfileID = launchResp.AgentProfileID
+		if launchResp.Success {
+			h.recordSuccessfulTaskCreateProfileAsync(ctx, launchResp.AgentProfileID)
+		}
 	}
 	h.recordTaskCreateLastUsed(ctx, httpCreateTaskRequest{
 		WorkspaceID:       req.WorkspaceID,
@@ -267,7 +282,12 @@ func (h *TaskHandlers) wsGetTask(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, []*models.Task{task})
+	if err != nil {
+		h.logger.Error("failed to build task DTO", zap.Error(err))
+		return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dtos[0])
 }
 
 type wsUpdateTaskRequest struct {
@@ -281,6 +301,8 @@ type wsUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. "" unassigns.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -300,6 +322,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				RepositoryID:   r.RepositoryID,
 				BaseBranch:     r.BaseBranch,
 				CheckoutBranch: r.CheckoutBranch,
+				BranchPolicyID: r.BranchPolicyID,
 				PRNumber:       r.PRNumber,
 				LocalPath:      r.LocalPath,
 				Name:           r.Name,
@@ -307,6 +330,8 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				GitHubURL:      r.GitHubURL,
 				RemoteURL:      r.RemoteURL,
 				Provider:       r.Provider,
+				ProviderHost:   r.ProviderHost,
+				ProviderScope:  r.ProviderScope,
 				ProviderRepoID: r.ProviderRepoID,
 				ProviderOwner:  r.ProviderOwner,
 				ProviderName:   r.ProviderName,
@@ -327,17 +352,21 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	task, err := h.service.UpdateTask(ctx, req.ID, &service.UpdateTaskRequest{
-		Title:        title,
-		Description:  description,
-		Priority:     req.Priority,
-		State:        req.State,
-		Repositories: convertUpdateRepositories(req.Repositories != nil, repos),
-		Position:     req.Position,
-		Metadata:     req.Metadata,
-		ParentID:     req.ParentID,
+		Title:          title,
+		Description:    description,
+		Priority:       req.Priority,
+		State:          req.State,
+		Repositories:   convertUpdateRepositories(req.Repositories != nil, repos),
+		Position:       req.Position,
+		Metadata:       req.Metadata,
+		ParentID:       req.ParentID,
+		AssigneeUserID: req.AssigneeUserID,
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
+		if code, ok := repositorySelectionWSCode(err); ok {
+			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
+		}
 		if isValidationError(err) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
@@ -349,6 +378,24 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete task",
 		func(ctx context.Context, id string) (any, error) {
+			// Route through HandoffService when wired so WS deletion has the
+			// same child reparenting, membership release, and cleanup
+			// orchestration as the HTTP path.
+			if h.handoffSvc != nil {
+				if _, err := h.handoffSvc.DeleteTaskTree(ctx, id, false); err != nil {
+					if !isCascadePostCommitError(err) {
+						return nil, err
+					}
+					h.logger.Warn("task deleted but post-commit housekeeping failed",
+						zap.String("task_id", id), zap.Error(err))
+					return map[string]interface{}{
+						responseKeySuccess:  false,
+						responseKeyPending:  true,
+						dependencyKeyTaskID: id,
+					}, nil
+				}
+				return dto.SuccessResponse{Success: true}, nil
+			}
 			if err := h.service.DeleteTask(ctx, id); err != nil {
 				return nil, err
 			}
@@ -365,12 +412,38 @@ func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 			// unarchivable. cascade=false matches the WS payload, which has
 			// no cascade flag.
 			if h.handoffSvc != nil {
-				if _, err := h.handoffSvc.ArchiveTaskTree(ctx, id, false); err != nil {
-					return nil, err
+				out, err := h.handoffSvc.ArchiveTaskTree(ctx, id, false)
+				if err != nil {
+					if !isCascadePostCommitError(err) {
+						return nil, err
+					}
+					h.logger.Warn("task archived but post-commit housekeeping failed",
+						zap.String("task_id", id), zap.Error(err))
+					return map[string]interface{}{
+						responseKeySuccess:  false,
+						responseKeyPending:  true,
+						dependencyKeyTaskID: id,
+					}, nil
 				}
-				return dto.SuccessResponse{Success: true}, nil
+				response := map[string]interface{}{responseKeySuccess: true}
+				if out != nil && len(out.ArchivedTaskIDs) == 0 && len(out.SkippedTaskIDs) > 0 {
+					response["already_archived"] = true
+				}
+				return response, nil
 			}
 			if err := h.service.ArchiveTask(ctx, id); err != nil {
+				if errors.Is(err, service.ErrTaskAlreadyArchived) {
+					return map[string]interface{}{responseKeySuccess: true, "already_archived": true}, nil
+				}
+				if isCascadePostCommitError(err) {
+					h.logger.Warn("task archived but post-commit task projection failed",
+						zap.String("task_id", id), zap.Error(err))
+					return map[string]interface{}{
+						responseKeySuccess:  false,
+						responseKeyPending:  true,
+						dependencyKeyTaskID: id,
+					}, nil
+				}
 				return nil, err
 			}
 			return dto.SuccessResponse{Success: true}, nil
@@ -378,10 +451,11 @@ func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 type wsMoveTaskRequest struct {
-	ID             string `json:"id"`
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
-	Position       int    `json:"position"`
+	ID             string                     `json:"id"`
+	WorkflowID     string                     `json:"workflow_id"`
+	WorkflowStepID string                     `json:"workflow_step_id"`
+	Position       int                        `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
 func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -405,15 +479,24 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		req.WorkflowID,
 		req.WorkflowStepID,
 		req.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
+		service.MoveTaskOptions{
+			AllowActivePrimarySession: true,
+			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
+			EntryOptions:              req.EntryOptions,
+		},
 	)
 	if err != nil {
+		if code, msgText, ok := moveEntryOptionsWSError(err); ok {
+			return ws.NewError(msg.ID, msg.Action, code, msgText, nil)
+		}
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
 	}
 
 	response := dto.MoveTaskResponse{
-		Task: dto.FromTask(result.Task),
+		Task:         dto.FromTask(result.Task),
+		MoveID:       result.MoveID,
+		EntryOptions: result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
@@ -488,4 +571,65 @@ func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+type wsUpdateTaskRunnerRequest struct {
+	ID                string `json:"id"`
+	ExecutorProfileID string `json:"executor_profile_id"`
+}
+
+// wsUpdateTaskRunner implements the task.runner action. The response DTO is
+// built through buildTaskDTOsWithSessionInfo, not the bare dto.FromTask, so
+// it carries the recomputed runner_editable/runner_ineligible_reason
+// alongside every other enriched field.
+func (h *TaskHandlers) wsUpdateTaskRunner(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsUpdateTaskRunnerRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	task, err := h.service.SwitchTaskRunner(ctx, req.ID, req.ExecutorProfileID)
+	if err != nil {
+		return runnerSwitchWSError(msg, err, h.logger)
+	}
+
+	dtos, err := buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, []*models.Task{task})
+	if err != nil {
+		h.logger.Error("failed to build task DTO after runner switch", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to load updated task", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dtos[0])
+}
+
+// runnerSwitchWSError maps SwitchTaskRunner's outcome vocabulary onto WS
+// error codes, attaching the machine-readable reason under
+// errorDetailKeyErrorCode so a client can present per-outcome copy without
+// parsing the human-readable message. evaluation_unavailable can wrap an
+// opaque internal error (a DB failure, a transaction abort), so its message
+// is a fixed generic string with the real error logged server-side instead
+// — the same sanitization wsUpdateTaskRepository applies to its own opaque
+// internal errors.
+func runnerSwitchWSError(msg *ws.Message, err error, log *logger.Logger) (*ws.Message, error) {
+	switch {
+	case errors.Is(err, service.ErrRunnerSwitchMalformed):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	case errors.Is(err, repoerrors.ErrTaskNotFound):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+	case errors.Is(err, service.ErrForbidden):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, err.Error(), nil)
+	case errors.Is(err, service.ErrExecutorProfileInvalid):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	case errors.Is(err, repoerrors.ErrRunnerCompatibilityConflict):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(),
+			map[string]interface{}{errorDetailKeyErrorCode: models.RunnerConflictTargetCannotMaterializeRepository})
+	case errors.Is(err, repoerrors.ErrRunnerEvaluationUnavailable):
+		log.Warn("runner switch evaluation unavailable", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "Unable to evaluate the runner switch right now, try again", nil)
+	}
+	var mutabilityErr *repoerrors.ErrRunnerMutabilityConflict
+	if errors.As(err, &mutabilityErr) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(),
+			map[string]interface{}{errorDetailKeyErrorCode: mutabilityErr.Reason})
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to switch task runner", nil)
 }

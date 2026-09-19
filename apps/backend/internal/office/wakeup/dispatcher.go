@@ -12,7 +12,9 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/pause"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // Concurrency policy values stored on office_routines.concurrency_policy.
@@ -62,10 +64,11 @@ type RoutineLookup interface {
 //   - coalesce_if_active: behave as step 2 (default).
 //   - always_enqueue: skip step 2, always create a fresh run.
 type Dispatcher struct {
-	repo     *officesqlite.Repository
-	agents   AgentReader
-	routines RoutineLookup
-	log      *logger.Logger
+	repo      *officesqlite.Repository
+	agents    AgentReader
+	routines  RoutineLookup
+	log       *logger.Logger
+	pauseGate shared.PauseGate
 }
 
 // NewDispatcher builds a Dispatcher. log MUST be non-nil; the agents
@@ -93,6 +96,13 @@ func NewDispatcher(
 // already holds — so the cycle is broken by setting this post-build).
 func (d *Dispatcher) SetRoutineLookup(routines RoutineLookup) {
 	d.routines = routines
+}
+
+// SetPauseGate wires the workspace-pause read used to block the
+// taskless-run creation path (createFreshRun). Optional — when nil the
+// gate is not enforced.
+func (d *Dispatcher) SetPauseGate(g shared.PauseGate) {
+	d.pauseGate = g
 }
 
 // Dispatch processes one wakeup-request by id. The flow is:
@@ -141,14 +151,66 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 	case PolicySkipIfActive:
 		return d.repo.MarkWakeupRequestSkipped(ctx, req.ID, "policy:skip_if_active")
 	case PolicyCoalesceIfActive:
-		return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
+		return d.coalesceIntoInflightRun(ctx, req, inflight)
 	}
 	// Unknown policies fall back to coalesce — the safest "do something"
 	// behaviour. Surface a warning so misconfigured rows are visible.
 	d.log.Warn("unknown wakeup concurrency policy; coalescing",
 		zap.String("policy", policy),
 		zap.String("agent_id", req.AgentProfileID))
+	return d.coalesceIntoInflightRun(ctx, req, inflight)
+}
+
+// coalesceIntoInflightRun merges req into inflight, promoting the run's
+// reason first when the merge would otherwise let a periodic
+// classification survive on top of an event/user-triggered request —
+// see docs/specs/office/scheduler.md ("Event-triggered wakeups always
+// proceed"). Promotion is monotonic (periodic → event only): a
+// periodic request coalescing into an already event-classified run
+// never demotes it back to periodic.
+//
+// The inflight run's Status field reflects a read taken before this
+// call, not the row's current state: the scheduler can claim it
+// concurrently. processRun evaluates checkIdleSkip against the
+// *models.Run it captured at claim time and never re-reads Reason, so
+// promoting a row the scheduler already claimed would race a decision
+// already in flight and could still let the event trigger be silently
+// idle-skipped. PromoteRunAndCoalesceWakeupIfQueued makes the run
+// status update, request transition, count increment, and payload merge
+// one transaction. Its conditional UPDATE only lands while the row is
+// still 'queued'. When it does not land (claimed out from under us),
+// route the event to its own fresh run instead of trusting the stale
+// in-memory status.
+func (d *Dispatcher) coalesceIntoInflightRun(
+	ctx context.Context, req *officesqlite.WakeupRequest, inflight *models.Run,
+) error {
+	reason := effectiveReason(req)
+	if reason != "" &&
+		shared.IsPeriodicTasklessWake(inflight.Reason) &&
+		!shared.IsPeriodicTasklessWake(reason) {
+		promoted, err := d.repo.PromoteRunAndCoalesceWakeupIfQueued(
+			ctx, req.ID, inflight.ID, reason,
+		)
+		if err != nil {
+			return fmt.Errorf("promote run and coalesce wakeup into %s: %w", inflight.ID, err)
+		}
+		if !promoted {
+			return d.createFreshRun(ctx, req)
+		}
+		return nil
+	}
 	return d.repo.MarkWakeupRequestCoalesced(ctx, req.ID, inflight.ID)
+}
+
+// effectiveReason returns the reason a run derived from req should carry:
+// req.Reason when set, else req.Source — mirroring createFreshRun's
+// fallback so a request is classified the same way whether it lands on
+// a fresh run or merges into an in-flight one.
+func effectiveReason(req *officesqlite.WakeupRequest) string {
+	if req.Reason != "" {
+		return req.Reason
+	}
+	return req.Source
 }
 
 // resolvePolicy returns the concurrency policy for a wakeup-request.
@@ -223,10 +285,11 @@ func normaliseRoutinePolicy(p string) string {
 func (d *Dispatcher) createFreshRun(
 	ctx context.Context, req *officesqlite.WakeupRequest,
 ) error {
-	reason := req.Reason
-	if reason == "" {
-		reason = req.Source
+	if err := d.checkPauseGate(ctx, req); err != nil {
+		return err
 	}
+
+	reason := effectiveReason(req)
 	payload := req.Payload
 	if payload == "" {
 		payload = "{}"
@@ -240,6 +303,10 @@ func (d *Dispatcher) createFreshRun(
 		CoalescedCount:  1,
 		ContextSnapshot: payload,
 		RequestedAt:     time.Now().UTC(),
+		// AC-OFFICE-LOOP-LIVENESS-002.3: copied from the requesting
+		// wake, including on the lost-CAS fresh-run path — that run
+		// still carries the requesting wake's id, not a new one.
+		CausationID: req.CausationID,
 	}
 	if err := d.repo.CreateRun(ctx, run); err != nil {
 		return fmt.Errorf("create run for wakeup %s: %w", req.ID, err)
@@ -261,4 +328,57 @@ func (d *Dispatcher) createFreshRun(
 		zap.String("source", req.Source),
 		zap.String("reason", reason))
 	return nil
+}
+
+// wakeupPauseSkipReason is the skip reason MarkWakeupRequestSkipped
+// writes when the pause gate blocks createFreshRun — matching the
+// literal the other gate sites use for cross-site debugging
+// consistency (routine skip_reason, halt-sweep cancel reason).
+const wakeupPauseSkipReason = "workspace_paused"
+
+// checkPauseGate is createFreshRun's sole gate insertion point (this is
+// the only source= that reaches CreateRun directly — skip_if_active and
+// coalesce_if_active resolve to either this path or a merge into an
+// existing run, never a bare write of their own). Resolves the
+// request's workspace via the agent it targets: GetAgentInstance's
+// ErrAgentNotFound is deliberately NOT treated as a gate error — F41
+// established this is the one wakeup-dispatch site that observes the
+// wrapped sentinel (it bypasses GetAgentFromConfig), and an agent that
+// no longer exists must not block on a workspace the dispatcher cannot
+// even resolve; launch behaviour for that case is unchanged (proceeds
+// ungated, exactly as before this gate existed). Any other lookup
+// error, or a PauseState error, fails closed. A confirmed pause marks
+// the request skipped so it does not stay perpetually "queued"; a
+// gate-read error deliberately does not — nothing has been written yet,
+// so the request is simply left queued for the next dispatch attempt.
+func (d *Dispatcher) checkPauseGate(ctx context.Context, req *officesqlite.WakeupRequest) error {
+	if d.pauseGate == nil {
+		return nil
+	}
+	agent, err := d.agents.GetAgentInstance(ctx, req.AgentProfileID)
+	if err != nil {
+		if errors.Is(err, officesqlite.ErrAgentNotFound) {
+			return nil
+		}
+		pause.RecordGateError("wakeup_dispatch")
+		d.log.Warn("wakeup dispatch: pause gate agent lookup failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	active, err := d.pauseGate.PauseState(ctx, agent.WorkspaceID)
+	if err != nil {
+		pause.RecordGateError("wakeup_dispatch")
+		d.log.Warn("wakeup dispatch: pause gate read failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	if active == nil {
+		return nil
+	}
+	pause.RecordBlocked("wakeup_dispatch")
+	if err := d.repo.MarkWakeupRequestSkipped(ctx, req.ID, wakeupPauseSkipReason); err != nil {
+		d.log.Warn("wakeup dispatch: mark skipped (paused) failed",
+			zap.String("wakeup_id", req.ID), zap.Error(err))
+	}
+	return shared.ErrWorkspacePaused
 }

@@ -23,7 +23,7 @@ export type ConditionalTodoPanelAction = "add" | "remove" | "none";
  * Details conditional panel, there is no per-instance identity to reconcile
  * and no closed-for-session suppression: the `showTodoListPanel` preference
  * is the single authoritative on/off switch (see
- * docs/specs/ui/agent-todo-list-panel.md — "true, unconditional visibility
+ * docs/specs/ui/requirements/agent-todo-list-panel.md — "true, unconditional visibility
  * gate"). The "only pin when not empty" sub-option (`onlyPinWhenNotEmpty`)
  * gates only the automatic add: while it is on, an absent panel is not added
  * until the active session's todo list is non-empty (`todoListNotEmpty`).

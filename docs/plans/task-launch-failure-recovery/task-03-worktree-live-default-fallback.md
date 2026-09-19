@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-gitref-default-hardening"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 03: Worktree fallback resolves live remote default

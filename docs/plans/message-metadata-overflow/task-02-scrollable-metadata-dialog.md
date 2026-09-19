@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["01-seed-turn-metadata-and-prove-overflow"]
 plan: "plan.md"
-spec: "../../specs/ui/message-metadata-overflow.md"
+spec: "../../specs/ui/requirements/message-metadata-overflow.md"
 ---
 
 # Task 02: Make the Metadata Dialog Entries Area Scroll
@@ -77,7 +77,7 @@ git diff --check
 
 ## Inputs
 
-- `docs/specs/ui/message-metadata-overflow.md`
+- `docs/specs/ui/requirements/message-metadata-overflow.md`
 - `apps/web/components/github/github-app-policy-dialog.tsx` (established
   scrollable-dialog pattern: `flex ... flex-col`, `shrink-0` header,
   `min-h-0 flex-1` scroll body)

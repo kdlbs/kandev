@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-instant-create-state"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-view-creation.md"
+spec: "../../specs/ui/requirements/sidebar-view-creation.md"
 ---
 
 # Task 02: Sidebar New-View UI

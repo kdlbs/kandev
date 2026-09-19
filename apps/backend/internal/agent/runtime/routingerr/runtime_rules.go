@@ -1,6 +1,9 @@
 package routingerr
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // runtimeEnvironmentRules match failures caused by the local execution
 // environment (npm/npx cache state, missing binaries' install steps,
@@ -9,8 +12,10 @@ import "regexp"
 // fallback, so a specific environment fingerprint wins over the
 // low-confidence "phase.prestart.unknown" verdict.
 //
-// Each entry pairs a regex matcher with a builder that can extract
-// signal-specific metadata (e.g. RemediationPath) from the raw text.
+// Each entry pairs a matcher with a builder that can extract signal-specific
+// metadata (e.g. RemediationPath) from the raw text. Most matchers are regular
+// expressions; rules that share an adapter's byte-level contract can provide a
+// custom matcher instead.
 var runtimeEnvironmentRules = []runtimeRule{
 	{
 		// npm 9 and npm 10 use different casing for the error prefix. Require
@@ -75,6 +80,40 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 	{
+		// ACP adapters preserve these upstream gateway 5xx envelopes as text
+		// instead of structured HTTP metadata. Require the ACP "API Error"
+		// prefix and an exact status/reason pair so ordinary model output or a
+		// local process error cannot authorize dynamic recovery.
+		id:      gatewayServerFailureRuleID,
+		pattern: gatewayServerFailureRe,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeProviderUnavailable,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
+		// Cursor emits this control prefix as an assistant message chunk for
+		// transient provider failures. Keep the fingerprint anchored to the
+		// control frame and bounded so user-authored prose cannot turn into an
+		// automatic retry. The custom matcher shares the adapter's byte and
+		// Unicode-whitespace contract.
+		id:         cursorRetriableStreamResetRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorRetriableStreamReset,
+		rawMatch:   matchCursorRetriableStreamReset,
+		build: func(text string) *Error {
+			if IsCursorRetriableCancellation(text) {
+				return nil
+			}
+			return &Error{
+				Code:       CodeAgentTransportLost,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
 		// The ACP transport pipe died mid-turn: the upstream provider service
 		// dropped the connection before a response arrived. This is
 		// provider-agnostic wire-level transport death, not a model or
@@ -115,14 +154,56 @@ const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
 
 const overloadedRuleID = "anthropic.overloaded.529.v1"
 
+const gatewayServerFailureRuleID = "acp.gateway_server_failure.v1"
+
+const cursorRetriableStreamResetRuleID = "cursor.retriable_stream_reset.v1"
+
 const transportLostRuleID = "acp.transport_lost.v1"
 
 // transportLostRe matches the narrow ACP wire-level transport-death
 // signatures: the peer disconnecting before a response, or the underlying
 // connection closing outright. Deliberately narrow (only these two
 // substrings) so it never matches context-cancellation or shutdown-teardown
-// error strings, which must keep falling through to manual recovery.
+// error strings, which must keep falling through to manual recovery. It does
+// not fire when the signature never leaves a terminal ACP prompt error's
+// `RequestError.Data`, because the generic prompt-error projection classifies
+// on `Message` alone; it still fires whenever the projected `Message` itself
+// carries the signature.
 var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection closed`)
+
+const (
+	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
+	cursorRetriableStreamResetMaxTail = 256
+	cursorRetriableProviderID         = "cursor-acp"
+)
+
+// matchCursorRetriableStreamReset matches Cursor's complete bounded control
+// diagnostic using the same trim, prefix, byte-limit, and cancellation-veto
+// rules as the ACP adapter. The byte limit prevents the classifier from
+// accepting a diagnostic that the adapter would reject after multibyte text is
+// measured.
+func matchCursorRetriableStreamReset(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) < len(cursorRetriableStreamResetPrefix) ||
+		!strings.EqualFold(trimmed[:len(cursorRetriableStreamResetPrefix)], cursorRetriableStreamResetPrefix) {
+		return false
+	}
+	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
+	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || IsCursorRetriableCancellation(suffix) {
+		return false
+	}
+	return true
+}
+
+// IsCursorRetriableCancellation reports whether Cursor's RetriableError
+// suffix carries cancellation or deadline evidence that must not be retried.
+// The adapter uses this same predicate before it suppresses diagnostic output.
+func IsCursorRetriableCancellation(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "context canceled") ||
+		strings.Contains(lower, "context deadline exceeded") ||
+		strings.Contains(lower, "cancel escalated")
+}
 
 // overloadedRe matches the transient 529 Overloaded signature: either the
 // numeric code adjacent to "overloaded" on a single line (in either order), or
@@ -131,15 +212,33 @@ var transportLostRe = regexp.MustCompile(`(?i)peer disconnected|connection close
 // can't bridge into a false positive.
 var overloadedRe = regexp.MustCompile(`(?i)\b529\b[^\n]*overloaded|overloaded[^\n]*\b529\b|\boverloaded_error\b`)
 
-// IsTransientProviderError reports whether a provider error is eligible for a
-// short same-provider retry. It is intentionally backed by Classify so new
-// provider-neutral fingerprints (capacity and network failures) become
-// available to callers outside the adapter without another allow-list.
+// gatewayServerFailureRe accepts only status/reason pairs emitted by the ACP
+// API-error wrapper. The bounded, one-line expression intentionally excludes
+// bare 5xx numbers and generic "internal error" prose.
+var gatewayServerFailureRe = regexp.MustCompile(`(?i)\bAPI\s+Error:\s*(?:500\s+Internal(?:\s+Server)?\s+Error|502\s+Bad\s+Gateway|504\s+Gateway\s+Timeout)\b`)
+
+// IsTransientProviderError reports whether a provider-neutral error is eligible
+// for a short same-provider retry. Provider-specific callers must use
+// IsTransientProviderErrorForProvider so a signature cannot cross adapters.
 func IsTransientProviderError(message string) bool {
+	return isTransientProviderError(Classify(Input{Phase: PhasePromptSend, Stderr: message}))
+}
+
+// IsTransientProviderErrorForProvider reports whether a provider error is
+// eligible for a short same-provider retry while preserving provider-specific
+// catalogue scope.
+func IsTransientProviderErrorForProvider(providerID, message string) bool {
 	if message == "" {
 		return false
 	}
-	e := Classify(Input{Phase: PhasePromptSend, Stderr: message})
+	return isTransientProviderError(Classify(Input{
+		Phase:      PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
+	}))
+}
+
+func isTransientProviderError(e *Error) bool {
 	if e == nil || !e.AutoRetryable || e.UserAction {
 		return false
 	}
@@ -168,7 +267,10 @@ func IsResumeCorrupted(message string) bool {
 
 type runtimeRule struct {
 	id            string
+	providerID    string
 	pattern       *regexp.Regexp
+	match         func(text string) bool
+	rawMatch      func(text string) bool
 	build         func(text string) *Error
 	sanitizedOnly bool
 }
@@ -191,14 +293,22 @@ func extractNpxCachePath(text string) string {
 }
 
 func matchRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, false)
+	return matchRuntimeRules(text, text, "", false)
 }
 
 func matchLegacyRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, true)
+	return matchRuntimeRules(text, text, "", true)
 }
 
-func matchRuntimeRules(text string, legacyOnly bool) (*Error, bool) {
+func matchRuntimeEnvironmentRulesForProvider(providerID, text, rawText string) (*Error, bool) {
+	return matchRuntimeRules(text, rawText, providerID, false)
+}
+
+func matchLegacyRuntimeEnvironmentRulesForProvider(providerID, text, rawText string) (*Error, bool) {
+	return matchRuntimeRules(text, rawText, providerID, true)
+}
+
+func matchRuntimeRules(text, rawText, providerID string, legacyOnly bool) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
@@ -206,7 +316,19 @@ func matchRuntimeRules(text string, legacyOnly bool) (*Error, bool) {
 		if legacyOnly && r.sanitizedOnly {
 			continue
 		}
-		if !r.pattern.MatchString(text) {
+		if r.providerID != "" && r.providerID != providerID {
+			continue
+		}
+		if r.rawMatch != nil && !r.rawMatch(rawText) {
+			continue
+		}
+		var matched bool
+		if r.match != nil {
+			matched = r.match(text)
+		} else {
+			matched = r.pattern != nil && r.pattern.MatchString(text)
+		}
+		if !matched {
 			continue
 		}
 		if e := r.build(text); e != nil {

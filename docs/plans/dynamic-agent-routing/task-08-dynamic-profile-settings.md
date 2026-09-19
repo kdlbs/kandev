@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["03-dynamic-profile-management"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 08: Dynamic profile settings

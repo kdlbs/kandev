@@ -7,7 +7,7 @@ depends_on:
   - "09-backend-lifecycle-reliability"
   - "10-frontend-lifecycle-feedback"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 12: Lifecycle public documentation

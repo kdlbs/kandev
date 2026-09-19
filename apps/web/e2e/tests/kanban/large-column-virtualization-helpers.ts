@@ -38,12 +38,34 @@ export async function mountedTaskCardIds(column: Locator): Promise<string[]> {
 }
 
 export async function expectBoundedMountedCards(column: Locator): Promise<void> {
-  await expect.poll(() => taskCards(column).count()).toBeLessThan(MAX_MOUNTED_TASK_CARDS);
+  await expect
+    .poll(() => taskCards(column).count(), {
+      timeout: 30_000,
+      message: "Waiting for virtualized column card count to settle",
+    })
+    .toBeLessThan(MAX_MOUNTED_TASK_CARDS);
 }
 
 export async function scrollColumnToBottom(scrollOwner: Locator): Promise<void> {
-  await scrollOwner.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    element.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
+  let stableBottomSamples = 0;
+  await expect
+    .poll(
+      async () => {
+        const atBottom = await scrollOwner.evaluate((element) => {
+          const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+          if (maxScrollTop === 0) return false;
+          element.scrollTop = maxScrollTop;
+          element.dispatchEvent(new Event("scroll", { bubbles: true }));
+          return element.scrollTop >= maxScrollTop - 1;
+        });
+        stableBottomSamples = atBottom ? stableBottomSamples + 1 : 0;
+        return stableBottomSamples >= 2;
+      },
+      {
+        timeout: 30_000,
+        intervals: [50, 100, 250],
+        message: "virtualized column did not settle at the bottom",
+      },
+    )
+    .toBe(true);
 }

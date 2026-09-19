@@ -15,6 +15,8 @@ import { applyProfileDuplicated } from "@/hooks/domains/settings/use-profile-dup
 import { errorMessage } from "@/components/settings/agent-profile-page-state";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
+import { getBackendReloadSnapshot } from "@/lib/platform/backend-reload-coordinator";
+import { isHandledApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
 /**
@@ -71,6 +73,7 @@ export function useProfileDuplicateAction({
       // it reports canLeave=false and we abort before posting.
       const saved = await saveAll();
       if (!saved.canLeave) {
+        if (getBackendReloadSnapshot().reloadRequired) return;
         // Surface whichever contributor is blocking the save (MCP error or
         // an invalid profile draft); when the coordinator gives no reason
         // (another save in flight, or newer changes appeared during the
@@ -106,6 +109,7 @@ export function useProfileDuplicateAction({
         router.push(`/settings/agents/${encodeURIComponent(agent.name)}/profiles/${created.id}`),
       );
     } catch (error) {
+      if (isHandledApiError(error)) return;
       toast({
         title: translate("agents:failedToDuplicateProfile"),
         description: errorMessage(error),

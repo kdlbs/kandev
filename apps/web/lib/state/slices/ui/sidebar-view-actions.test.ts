@@ -17,11 +17,24 @@ type UIStore = UseBoundStore<StoreApi<UISlice>>;
 
 const CREATE_FAILED = "create failed";
 const RENAME_FAILED = "rename failed";
+const DRAFT_WRITE_FAILED = "draft write failed";
+
+type SettingsResponse = Awaited<ReturnType<typeof updateUserSettings>>;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
 
 function makeStore(): UIStore {
   return create<UISlice>()(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    immer((...args) => ({ ...(createUISlice as any)(...args) })),
+    immer((...args) => ({ ...(createUISlice as any)(...args), workspaces: { activeId: "ws" } })),
   );
 }
 
@@ -43,11 +56,13 @@ function seedSidebar(
 ): void {
   store.setState((state) => ({
     ...state,
-    sidebarViews: {
-      ...state.sidebarViews,
-      views,
-      activeViewId: views[0].id,
-      draft,
+    sidebarViewsByWorkspace: {
+      ws: {
+        ...state.sidebarViews,
+        views,
+        activeViewId: views[0].id,
+        draft,
+      },
     },
   }));
 }
@@ -77,7 +92,7 @@ describe("createSidebarView semantics", () => {
     ]);
 
     const createdId = store.getState().createSidebarView();
-    const sidebar = store.getState().sidebarViews;
+    const sidebar = store.getState().sidebarViewsByWorkspace.ws;
     const created = sidebar.views.at(-1);
 
     expect(created).toEqual({
@@ -87,6 +102,12 @@ describe("createSidebarView semantics", () => {
       sort: { key: "state", direction: "asc" },
       group: "repository",
       collapsedGroups: [],
+      taskRow: {
+        detailsEnabled: true,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: ["relative_time", "repository", "pull_request_number"],
+        trailing: "git_changes",
+      },
     });
     expect(sidebar.activeViewId).toBe(createdId);
     expect(sidebar.draft).toBeNull();
@@ -94,14 +115,17 @@ describe("createSidebarView semantics", () => {
     expect(created?.sort).not.toBe(DEFAULT_VIEW.sort);
     expect(created?.collapsedGroups).not.toBe(DEFAULT_VIEW.collapsedGroups);
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_views: [
-        expect.objectContaining({ id: "custom", name: "Custom" }),
-        expect.objectContaining({ id: "new-1", name: "New view" }),
-        expect.objectContaining({ id: "new-3", name: "New view 3" }),
-        expect.objectContaining({ id: createdId, name: "New view 2", group: "repository" }),
-      ],
-      sidebar_active_view_id: createdId,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: "ws",
+        views: [
+          expect.objectContaining({ id: "custom", name: "Custom" }),
+          expect.objectContaining({ id: "new-1", name: "New view" }),
+          expect.objectContaining({ id: "new-3", name: "New view 3" }),
+          expect.objectContaining({ id: createdId, name: "New view 2", group: "repository" }),
+        ],
+        active_view_id: createdId,
+        draft: null,
+      },
     });
   });
 
@@ -116,8 +140,8 @@ describe("createSidebarView semantics", () => {
     seedSidebar(store, [makeView("all", "All tasks")], draft);
 
     expect(store.getState().createSidebarView()).toBeNull();
-    expect(store.getState().sidebarViews.draft).toEqual(draft);
-    expect(store.getState().sidebarViews.views).toHaveLength(1);
+    expect(store.getState().sidebarViewsByWorkspace.ws.draft).toEqual(draft);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views).toHaveLength(1);
     expect(updateUserSettings).not.toHaveBeenCalled();
   });
 
@@ -129,8 +153,8 @@ describe("createSidebarView semantics", () => {
     seedSidebar(store, views);
 
     expect(store.getState().createSidebarView()).toBeNull();
-    expect(store.getState().sidebarViews.views).toHaveLength(50);
-    expect(store.getState().sidebarViews.activeViewId).toBe(views[0].id);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views).toHaveLength(50);
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(views[0].id);
     expect(updateUserSettings).not.toHaveBeenCalled();
   });
 });
@@ -148,9 +172,11 @@ describe("createSidebarView queued rollback", () => {
     expect(createdId).not.toBeNull();
     store.getState().renameSidebarView(createdId!, "Renamed view");
 
-    await waitFor(() => expect(store.getState().sidebarViews.syncError).toBe(RENAME_FAILED));
-    expect(store.getState().sidebarViews.views).toEqual([original]);
-    expect(store.getState().sidebarViews.activeViewId).toBe(original.id);
+    await waitFor(() =>
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(RENAME_FAILED),
+    );
+    expect(store.getState().sidebarViewsByWorkspace.ws.views).toEqual([original]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(original.id);
   });
 
   it("keeps the automatic view when create syncs but its immediate rename fails", async () => {
@@ -165,12 +191,14 @@ describe("createSidebarView queued rollback", () => {
     expect(createdId).not.toBeNull();
     store.getState().renameSidebarView(createdId!, "Renamed view");
 
-    await waitFor(() => expect(store.getState().sidebarViews.syncError).toBe(RENAME_FAILED));
-    expect(store.getState().sidebarViews.views).toEqual([
+    await waitFor(() =>
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(RENAME_FAILED),
+    );
+    expect(store.getState().sidebarViewsByWorkspace.ws.views).toEqual([
       original,
       expect.objectContaining({ id: createdId, name: "New view" }),
     ]);
-    expect(store.getState().sidebarViews.activeViewId).toBe(createdId);
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(createdId);
   });
 
   it("restores a valid active view when two queued creates fail", async () => {
@@ -186,10 +214,10 @@ describe("createSidebarView queued rollback", () => {
     store.getState().setSidebarActiveView(firstCreatedId!);
 
     await waitFor(() =>
-      expect(store.getState().sidebarViews.syncError).toBe("second create failed"),
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe("second create failed"),
     );
-    expect(store.getState().sidebarViews.views).toEqual([original]);
-    expect(store.getState().sidebarViews.activeViewId).toBe(original.id);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views).toEqual([original]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(original.id);
   });
 });
 
@@ -201,11 +229,13 @@ describe("createSidebarView failure isolation", () => {
     vi.mocked(updateUserSettings).mockRejectedValueOnce(new ApiError(CREATE_FAILED, 500, {}));
 
     store.getState().createSidebarView();
-    expect(store.getState().sidebarViews.views).toHaveLength(2);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views).toHaveLength(2);
 
-    await waitFor(() => expect(store.getState().sidebarViews.syncError).toBe(CREATE_FAILED));
-    expect(store.getState().sidebarViews.views).toEqual([original]);
-    expect(store.getState().sidebarViews.activeViewId).toBe(original.id);
+    await waitFor(() =>
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(CREATE_FAILED),
+    );
+    expect(store.getState().sidebarViewsByWorkspace.ws.views).toEqual([original]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(original.id);
   });
 
   it("clears a draft based on a created view that fails to sync", async () => {
@@ -218,10 +248,12 @@ describe("createSidebarView failure isolation", () => {
     expect(createdId).not.toBeNull();
     store.getState().updateSidebarDraft({ group: "state" });
 
-    await waitFor(() => expect(store.getState().sidebarViews.syncError).toBe(CREATE_FAILED));
-    expect(store.getState().sidebarViews.views).toEqual([original]);
-    expect(store.getState().sidebarViews.activeViewId).toBe(original.id);
-    expect(store.getState().sidebarViews.draft).toBeNull();
+    await waitFor(() =>
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(CREATE_FAILED),
+    );
+    expect(store.getState().sidebarViewsByWorkspace.ws.views).toEqual([original]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(original.id);
+    expect(store.getState().sidebarViewsByWorkspace.ws.draft).toBeNull();
   });
 
   it("rolls back independently when another store mutates at the same time", async () => {
@@ -237,9 +269,91 @@ describe("createSidebarView failure isolation", () => {
     successfulStore.getState().createSidebarView();
 
     await waitFor(() =>
-      expect(failedStore.getState().sidebarViews.syncError).toBe("isolated failure"),
+      expect(failedStore.getState().sidebarViewsByWorkspace.ws.syncError).toBe("isolated failure"),
     );
-    expect(failedStore.getState().sidebarViews.views).toHaveLength(1);
-    expect(successfulStore.getState().sidebarViews.views).toHaveLength(2);
+    expect(failedStore.getState().sidebarViewsByWorkspace.ws.views).toHaveLength(1);
+    expect(successfulStore.getState().sidebarViewsByWorkspace.ws.views).toHaveLength(2);
+  });
+});
+
+describe("sidebar draft write failure isolation", () => {
+  it("restores the confirmed draft after a task-row write fails", async () => {
+    const store = makeStore();
+    seedSidebar(store, [makeView("all", "All tasks")]);
+    vi.mocked(updateUserSettings).mockRejectedValueOnce(new ApiError(DRAFT_WRITE_FAILED, 500, {}));
+
+    store.getState().updateSidebarDraft({
+      taskRow: {
+        detailsEnabled: false,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: [],
+        trailing: "none",
+      },
+    });
+
+    expect(store.getState().sidebarViewsByWorkspace.ws.draft).not.toBeNull();
+    await waitFor(() =>
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(DRAFT_WRITE_FAILED),
+    );
+    expect(store.getState().sidebarViewsByWorkspace.ws.draft).toBeNull();
+  });
+});
+
+describe("sidebar write ordering", () => {
+  it("keeps a queued successful save after an earlier draft failure", async () => {
+    const store = makeStore();
+    seedSidebar(store, [makeView("all", "All tasks")]);
+    const draftResponse = deferred<SettingsResponse>();
+    const saveResponse = deferred<SettingsResponse>();
+    vi.mocked(updateUserSettings)
+      .mockImplementationOnce(() => draftResponse.promise)
+      .mockImplementationOnce(() => saveResponse.promise);
+
+    store.getState().updateSidebarDraft({
+      taskRow: {
+        detailsEnabled: false,
+        detailOrder: ["relative_time", "repository", "pull_request_number"],
+        visibleDetails: [],
+        trailing: "none",
+      },
+    });
+    store.getState().saveSidebarDraftOverwrite();
+
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
+    draftResponse.reject(new ApiError(DRAFT_WRITE_FAILED, 500, {}));
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
+
+    saveResponse.resolve({ settings: {} } as SettingsResponse);
+    await waitFor(() => {
+      expect(store.getState().sidebarViewsByWorkspace.ws.draft).toBeNull();
+      expect(store.getState().sidebarViewsByWorkspace.ws.views[0]?.taskRow?.detailsEnabled).toBe(
+        false,
+      );
+    });
+  });
+
+  it("does not resurrect a failed create when its queued draft also fails", async () => {
+    const store = makeStore();
+    const original = makeView("all", "All tasks");
+    seedSidebar(store, [original]);
+    const createResponse = deferred<SettingsResponse>();
+    const draftResponse = deferred<SettingsResponse>();
+    vi.mocked(updateUserSettings)
+      .mockImplementationOnce(() => createResponse.promise)
+      .mockImplementationOnce(() => draftResponse.promise);
+
+    const createdId = store.getState().createSidebarView();
+    expect(createdId).not.toBeNull();
+    store.getState().updateSidebarDraft({ group: "state" });
+
+    createResponse.reject(new ApiError(CREATE_FAILED, 500, {}));
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledTimes(2));
+    draftResponse.reject(new ApiError(DRAFT_WRITE_FAILED, 500, {}));
+
+    await waitFor(() => {
+      expect(store.getState().sidebarViewsByWorkspace.ws.views).toEqual([original]);
+      expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(original.id);
+      expect(store.getState().sidebarViewsByWorkspace.ws.draft).toBeNull();
+    });
   });
 });

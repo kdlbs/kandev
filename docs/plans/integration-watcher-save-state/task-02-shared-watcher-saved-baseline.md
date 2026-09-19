@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-github-review-watch-response"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-manual-save.md"
+spec: "../../specs/ui/requirements/settings-manual-save.md"
 ---
 
 # Task 02: Reconcile shared watcher saved state
@@ -41,7 +41,7 @@ Sequential.
 
 ## Inputs
 
-- `docs/specs/ui/settings-manual-save.md`
+- `docs/specs/ui/requirements/settings-manual-save.md`
 - `docs/plans/integration-watcher-save-state/plan.md`
 - `docs/decisions/0046-settings-route-save-coordinator.md`
 

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-foreground-recovery"]
 plan: "plan.md"
-spec: "../../specs/ui/task-surface-refresh.md"
+spec: "../../specs/ui/requirements/task-surface-refresh.md"
 ---
 
 # Task 02: Listing pull refresh and mobile create

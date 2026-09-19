@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -36,6 +39,11 @@ const (
 // newMCPPlanTestHandlers builds Handlers with only the plan service wired —
 // the plan actions touch nothing else.
 func newMCPPlanTestHandlers(t *testing.T) *Handlers {
+	h, _ := newMCPPlanTestHandlersWithRepo(t)
+	return h
+}
+
+func newMCPPlanTestHandlersWithRepo(t *testing.T) (*Handlers, *sqliterepo.Repository) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -91,7 +99,7 @@ func newMCPPlanTestHandlers(t *testing.T) *Handlers {
 		}
 	}
 
-	return &Handlers{planService: service.NewPlanService(repo, eventBus, log), logger: log}
+	return &Handlers{planService: service.NewPlanService(repo, eventBus, log), logger: log}, repo
 }
 
 func mcpPlanMsg(t *testing.T, action string, payload string) *ws.Message {
@@ -180,7 +188,19 @@ func TestMCPPlanActionsRequireContent(t *testing.T) {
 	t.Run("update", func(t *testing.T) {
 		out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
 			`{"task_id":"`+mcpPlanTaskID+`"}`))
-		assertMCPPlanError(t, out, err, ws.ErrorCodeValidation, "content is required")
+		if err != nil {
+			t.Fatalf("handleUpdateTaskPlan returned error: %v", err)
+		}
+		if out.Type != ws.MessageTypeError {
+			t.Fatalf("message type = %q, want %q", out.Type, ws.MessageTypeError)
+		}
+		var payload ws.ErrorPayload
+		if jsonErr := json.Unmarshal(out.Payload, &payload); jsonErr != nil {
+			t.Fatalf("unmarshal error payload: %v", jsonErr)
+		}
+		if payload.Code != ws.ErrorCodeValidation || payload.Details["reason"] != "plan_content_required" || payload.Details["write_applied"] != false {
+			t.Fatalf("error payload = %#v, want content-required validation with no write", payload)
+		}
 	})
 }
 
@@ -202,6 +222,125 @@ func TestMCPPlanActionsReportMissingPlan(t *testing.T) {
 	})
 }
 
+func TestMCPPlanCreateReportsMissingTask(t *testing.T) {
+	h := newMCPPlanTestHandlers(t)
+	out, err := h.handleCreateTaskPlan(context.Background(), mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan,
+		`{"task_id":"task-plan-mcp-missing","content":"body"}`))
+	assertMCPPlanError(t, out, err, ws.ErrorCodeNotFound, "Task not found")
+	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
+		t.Fatalf("error payload leaks storage details: %s", out.Payload)
+	}
+}
+
+// TestMCPPlanActionsRejectOversizedContent pins REQ-TASKS-PLAN-CONTENT-SIZE-LIMIT-002:
+// a write over the byte ceiling returns a validation error response, not a
+// success payload with a truncation warning, and the message states the
+// ceiling and the submitted size without instructing a retry.
+func TestMCPPlanActionsRejectOversizedContent(t *testing.T) {
+	h := newMCPPlanTestHandlers(t)
+	ctx := context.Background()
+	oversized := strings.Repeat("a", service.MaxPlanContentBytes+1)
+	payload, err := json.Marshal(map[string]string{
+		"task_id": mcpPlanTaskID,
+		"content": oversized,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+
+	t.Run("create", func(t *testing.T) {
+		out, handleErr := h.handleCreateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPCreateTaskPlan, string(payload)))
+		if handleErr != nil {
+			t.Fatalf("handler returned error: %v", handleErr)
+		}
+		if out.Type != ws.MessageTypeError {
+			t.Fatalf("message type = %q, want %q (payload %s)", out.Type, ws.MessageTypeError, out.Payload)
+		}
+		var errPayload ws.ErrorPayload
+		if jsonErr := json.Unmarshal(out.Payload, &errPayload); jsonErr != nil {
+			t.Fatalf("unmarshal error payload: %v", jsonErr)
+		}
+		if errPayload.Code != ws.ErrorCodeValidation {
+			t.Errorf("code = %q, want %q", errPayload.Code, ws.ErrorCodeValidation)
+		}
+		if !strings.Contains(errPayload.Message, "262144") {
+			t.Errorf("message %q does not state the byte ceiling", errPayload.Message)
+		}
+		if !strings.Contains(errPayload.Message, fmt.Sprintf("%d", service.MaxPlanContentBytes+1)) {
+			t.Errorf("message %q does not state the submitted size", errPayload.Message)
+		}
+		if strings.Contains(strings.ToLower(errPayload.Message), "retry") {
+			t.Errorf("message %q must not instruct a retry", errPayload.Message)
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		if _, seedErr := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+			TaskID: mcpPlanTaskID, Content: "small", CreatedBy: "agent",
+		}); seedErr != nil {
+			t.Fatalf("seed CreatePlan: %v", seedErr)
+		}
+		out, handleErr := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan, string(payload)))
+		if handleErr != nil {
+			t.Fatalf("handler returned error: %v", handleErr)
+		}
+		if out.Type != ws.MessageTypeError {
+			t.Fatalf("message type = %q, want %q (payload %s)", out.Type, ws.MessageTypeError, out.Payload)
+		}
+		var errPayload ws.ErrorPayload
+		if jsonErr := json.Unmarshal(out.Payload, &errPayload); jsonErr != nil {
+			t.Fatalf("unmarshal error payload: %v", jsonErr)
+		}
+		if errPayload.Code != ws.ErrorCodeValidation {
+			t.Errorf("code = %q, want %q", errPayload.Code, ws.ErrorCodeValidation)
+		}
+
+		plan, getErr := h.planService.GetPlan(ctx, mcpPlanTaskID)
+		if getErr != nil {
+			t.Fatalf("GetPlan: %v", getErr)
+		}
+		if plan.Content != "small" {
+			t.Fatalf("plan content changed after a rejected write: %q", plan.Content)
+		}
+	})
+}
+
+func TestMCPPlanUpdateReportsMissingTask(t *testing.T) {
+	h, repo := newMCPPlanTestHandlersWithRepo(t)
+	ctx := context.Background()
+	created, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+		TaskID: mcpPlanTaskID, Content: "initial", CreatedBy: "agent",
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	h.planService = service.NewPlanService(&missingTaskOnPlanWriteRepo{Repository: repo}, nil, h.logger)
+
+	out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
+		mustMarshalPlanPayload(t, map[string]any{
+			"task_id": mcpPlanTaskID, "content": "updated", "expected_version": created.Plan.WriteVersion,
+		})))
+	assertMCPPlanError(t, out, err, ws.ErrorCodeNotFound, "Task not found")
+	if strings.Contains(strings.ToLower(string(out.Payload)), "constraint") {
+		t.Fatalf("error payload leaks storage details: %s", out.Payload)
+	}
+}
+
+type missingTaskOnPlanWriteRepo struct {
+	*sqliterepo.Repository
+}
+
+func (r *missingTaskOnPlanWriteRepo) WritePlanRevision(
+	context.Context,
+	*models.TaskPlan,
+	*models.TaskPlanRevision,
+	*string,
+	bool,
+	bool,
+) error {
+	return repository.ErrTaskNotFound
+}
+
 // TestMCPPlanActionsSucceed pins the success payloads across a full CRUD round
 // trip. Two replies deliberately differ from the browser surface and must not
 // be "unified" away: get returns {} rather than null for a task with no plan,
@@ -209,6 +348,7 @@ func TestMCPPlanActionsReportMissingPlan(t *testing.T) {
 func TestMCPPlanActionsSucceed(t *testing.T) {
 	h := newMCPPlanTestHandlers(t)
 	ctx := context.Background()
+	var version string
 
 	t.Run("get with no plan returns an empty object", func(t *testing.T) {
 		out, err := h.handleGetTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPGetTaskPlan,
@@ -237,6 +377,10 @@ func TestMCPPlanActionsSucceed(t *testing.T) {
 		if plan["created_by"] != "agent" {
 			t.Errorf("created_by = %v, want agent", plan["created_by"])
 		}
+		version, _ = plan["version"].(string)
+		if version == "" {
+			t.Fatal("create response omitted version")
+		}
 	})
 
 	t.Run("get", func(t *testing.T) {
@@ -252,7 +396,9 @@ func TestMCPPlanActionsSucceed(t *testing.T) {
 
 	t.Run("update", func(t *testing.T) {
 		out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
-			`{"task_id":"`+mcpPlanTaskID+`","content":"step two"}`))
+			mustMarshalPlanPayload(t, map[string]any{
+				"task_id": mcpPlanTaskID, "content": "step two", "expected_version": version,
+			})))
 		if err != nil {
 			t.Fatalf("handleUpdateTaskPlan: %v", err)
 		}

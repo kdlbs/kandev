@@ -29,6 +29,10 @@ let mockState: MockState;
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: MockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => ({
+    getState: () => mockState,
+    setState: vi.fn(),
+  }),
 }));
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
@@ -66,6 +70,7 @@ function makeUnloadedSettings(): UserSettingsState {
     preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
+    autoFocusNewTasks: true,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -77,9 +82,15 @@ function makeUnloadedSettings(): UserSettingsState {
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],
     sidebarViews: [],
+    sidebarViewsByWorkspace: {},
     sidebarActiveViewId: null,
     sidebarDraft: null,
+    threadViews: [],
+    threadActiveViewId: null,
+    threadViewDraft: null,
     sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
+    sidebarTaskColorAutomation: { enabled: false, rules: [] },
+    sidebarTaskColors: {},
     taskCreateLastUsed: {
       repositoryId: null,
       branch: null,
@@ -94,6 +105,7 @@ function makeUnloadedSettings(): UserSettingsState {
     gitlabSavedPresets: undefined,
     azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
+    defaultUtilityAgentProfileId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
     terminalFontFamily: null,
@@ -101,13 +113,20 @@ function makeUnloadedSettings(): UserSettingsState {
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
     appStatusBarEnabled: false,
+    resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
+    quickChatTabOrderByWorkspace: {},
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
     lspStatusLocation: "toolbar",
     hiddenWorkflowStepIds: {},
+    workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort: "created_desc",
+    kanbanPriorityFilterTokens: [],
     loaded: false,
   };
 }

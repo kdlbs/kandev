@@ -5,7 +5,7 @@ status: completed
 wave: 3i
 depends_on: ["12h-native-create-unlink-indicators-saved-queries"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 12i: Reuse the Native Pull-Request Summary from Registered Task Indicators

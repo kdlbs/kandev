@@ -37,7 +37,13 @@ func seedPriorUserMessages(t *testing.T, repo interface {
 // eventData extracts the structured data payload from a published bus event.
 func eventData(t *testing.T, bus *MockEventBus) map[string]interface{} {
 	t.Helper()
-	return singlePublishedEventData(t, bus)
+	for _, eventType := range []string{events.MessageAdded, events.MessageUpdated} {
+		if countEvents(bus.GetPublishedEvents(), eventType) == 1 {
+			return singlePublishedEventDataOfType(t, bus, eventType)
+		}
+	}
+	t.Fatalf("expected one message event, got %v", eventTypes(bus.GetPublishedEvents()))
+	return nil
 }
 
 // TestCreateMessageReturnsAndPublishesPromptIndex: after N-1 prior user

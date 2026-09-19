@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/plugins/agent-tools.md
+spec: docs/specs/plugins/requirements/agent-tools.md
 created: 2026-08-11
 status: in_progress
 ---

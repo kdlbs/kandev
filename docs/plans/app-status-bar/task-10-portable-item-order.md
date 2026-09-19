@@ -5,14 +5,14 @@ status: done
 wave: 6
 depends_on: []
 plan: docs/plans/app-status-bar/plan.md
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 ---
 
 # Portable status item order
 
 ## Inputs
 
-[Spec: data, API, and persistence](../../specs/ui/app-status-bar.md#data-api-and-persistence),
+[Spec: data, API, and persistence](../../specs/ui/requirements/app-status-bar.md#data-api-and-persistence),
 [ADR 0041](../../decisions/0041-backend-owned-portable-user-settings.md), and
 [portable-order ADR](../../decisions/2026-07-21-portable-status-bar-order.md).
 

@@ -7,14 +7,26 @@ import { Button } from "@kandev/ui/button";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type { ApiRequestOptions } from "@/lib/api/client";
-import { createSecret, updateSecret, deleteSecret } from "@/lib/api/domains/secrets-api";
+import {
+  createSecret,
+  updateSecret,
+  deleteSecret,
+  listSecretReferences,
+} from "@/lib/api/domains/secrets-api";
 import { useRequest } from "@/lib/http/use-request";
-import type { SecretListItem, SecretScope, UpdateSecretRequest } from "@/lib/types/http-secrets";
+import type {
+  SecretListItem,
+  SecretReference,
+  SecretScope,
+  UpdateSecretRequest,
+} from "@/lib/types/http-secrets";
 import { SecretForm, defaultFormState, type SecretFormState } from "./secret-form";
 import { SecretListItemRow } from "./secrets-list-item-row";
-import { DeleteSecretDialog } from "./secrets-delete-dialog";
+import { secretDeleteErrorMessage, secretReferencesFromError } from "./secret-delete-error";
+import { SecretDeleteConflictDialog } from "./secrets-delete-dialog";
 import { CopyMoveSecretDialog, type CopyMoveMode } from "./copy-move-secret-dialog";
 
 /* ------------------------------------------------------------------ */
@@ -37,6 +49,7 @@ function useSecretsState(
   const [showCreate, setShowCreate] = useState(false);
   const [formState, setFormState] = useState<SecretFormState>(defaultFormState);
   const [deleteTarget, setDeleteTarget] = useState<SecretListItem | null>(null);
+  const [deleteReferences, setDeleteReferences] = useState<SecretReference[] | null>(null);
   const [transferTarget, setTransferTarget] = useState<SecretListItem | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
 
@@ -56,6 +69,8 @@ function useSecretsState(
     setFormState,
     deleteTarget,
     setDeleteTarget,
+    deleteReferences,
+    setDeleteReferences,
     transferTarget,
     setTransferTarget,
     transferOpen,
@@ -134,6 +149,60 @@ function useSecretRequests(
   return { createRequest, updateRequest, deleteRequest };
 }
 
+/** Owns reference preflight, cancellation ordering, and the final guarded deletion. */
+function useSecretDeleteActions(
+  state: ReturnType<typeof useSecretsState>,
+  requestOptions: ApiRequestOptions,
+  deleteRequest: ReturnType<typeof useSecretRequests>["deleteRequest"],
+) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const requestGeneration = useRef(0);
+  const { deleteTarget, deleteReferences, setDeleteTarget, setDeleteReferences } = state;
+  const closeDelete = () => {
+    requestGeneration.current += 1;
+    setDeleteTarget(null);
+    setDeleteReferences(null);
+  };
+  const openDelete = async (secret: SecretListItem) => {
+    const generation = requestGeneration.current + 1;
+    requestGeneration.current = generation;
+    setDeleteTarget(secret);
+    setDeleteReferences(null);
+    try {
+      const references = await listSecretReferences(secret.id, requestOptions);
+      if (requestGeneration.current !== generation) return;
+      setDeleteReferences(references);
+    } catch {
+      if (requestGeneration.current !== generation) return;
+      setDeleteTarget(null);
+      setDeleteReferences(null);
+      toast({ description: t("settings:secretReferencesLoadFailed"), variant: "error" });
+    }
+  };
+  const confirmDelete = () => {
+    if (!deleteTarget || deleteReferences === null || deleteReferences.length > 0) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    setDeleteReferences(null);
+    return deleteRequest.run(target.id).catch((error: unknown) => {
+      const references = secretReferencesFromError(error);
+      if (references !== null) {
+        setDeleteTarget(target);
+        setDeleteReferences(references);
+        return;
+      }
+      toast({ description: secretDeleteErrorMessage(error, t), variant: "error" });
+    });
+  };
+  return {
+    referencesLoading: deleteTarget !== null && deleteReferences === null,
+    openDelete: (secret: SecretListItem) => void openDelete(secret),
+    closeDelete,
+    confirmDelete,
+  };
+}
+
 /** Composes request runners and UI actions (create, edit, delete, transfer) from the secrets state. */
 function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
   const { rememberTransferTrigger, restoreTransferTrigger } = useTransferFocusRestore();
@@ -145,8 +214,6 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
     setEditingId,
     setShowCreate,
     setFormState,
-    setDeleteTarget,
-    deleteTarget,
     formState,
     scope,
     workspaceId,
@@ -180,7 +247,12 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
       editingId,
     },
   );
-  const isBusy = createRequest.isLoading || updateRequest.isLoading || deleteRequest.isLoading;
+  const deletion = useSecretDeleteActions(state, requestOptions, deleteRequest);
+  const isBusy =
+    createRequest.isLoading ||
+    updateRequest.isLoading ||
+    deleteRequest.isLoading ||
+    deletion.referencesLoading;
 
   return {
     resetForm,
@@ -207,13 +279,9 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
       setShowCreate(true);
       setFormState(defaultFormState);
     },
-    openDelete: (secret: SecretListItem) => setDeleteTarget(secret),
-    closeDelete: () => setDeleteTarget(null),
-    confirmDelete: () => {
-      if (!deleteTarget) return;
-      deleteRequest.run(deleteTarget.id).catch(() => undefined);
-      setDeleteTarget(null);
-    },
+    openDelete: deletion.openDelete,
+    closeDelete: deletion.closeDelete,
+    confirmDelete: deletion.confirmDelete,
     openTransfer: (secret: SecretListItem) => {
       // Remember the focused Copy/Move button; close restores it because
       // Radix targets a stale node when the list re-renders mid-close.
@@ -280,6 +348,8 @@ export type SecretsSettingsState = {
   setFormState: (state: SecretFormState | ((prev: SecretFormState) => SecretFormState)) => void;
   deleteTarget: SecretListItem | null;
   setDeleteTarget: (target: SecretListItem | null) => void;
+  deleteReferences: SecretReference[] | null;
+  setDeleteReferences: (references: SecretReference[] | null) => void;
   transferTarget: SecretListItem | null;
   setTransferTarget: (target: SecretListItem | null) => void;
   transferOpen: boolean;
@@ -296,7 +366,7 @@ export type SecretsSettingsActions = {
   startCreate: () => void;
   openDelete: (secret: SecretListItem) => void;
   closeDelete: () => void;
-  confirmDelete: () => void;
+  confirmDelete: () => void | Promise<void>;
   openTransfer: (secret: SecretListItem) => void;
   closeTransfer: () => void;
   items: SecretListItem[];
@@ -419,21 +489,23 @@ function SecretsSettingsBody({
               workspaceId={workspaceId}
               onEdit={actions.startEditing}
               onDelete={actions.openDelete}
+              onDeleteCancel={actions.closeDelete}
+              onDeleteConfirm={actions.confirmDelete}
               onCopyMove={actions.openTransfer}
               isBusy={isBusy}
               showCreate={showCreate}
               isEditing={editingId === secret.id}
+              isDeleteConfirming={
+                deleteTarget?.id === secret.id && (state.deleteReferences?.length ?? 0) === 0
+              }
+              isDeleteLoading={deleteTarget?.id === secret.id && state.deleteReferences === null}
+              isDeleteBlocked={
+                deleteTarget?.id === secret.id && Boolean(state.deleteReferences?.length)
+              }
             />
           ))}
         </div>
       </div>
-
-      <DeleteSecretDialog
-        target={deleteTarget}
-        onClose={actions.closeDelete}
-        onConfirm={actions.confirmDelete}
-        isBusy={isBusy}
-      />
     </>
   );
 }
@@ -487,6 +559,11 @@ function SecretsSettingsContent({
         actions={actions}
         edit={edit}
         onFormChange={onFormChange}
+      />
+      <SecretDeleteConflictDialog
+        secret={state.deleteReferences?.length ? state.deleteTarget : null}
+        references={state.deleteReferences ?? []}
+        onClose={actions.closeDelete}
       />
     </SettingsPageTemplate>
   );

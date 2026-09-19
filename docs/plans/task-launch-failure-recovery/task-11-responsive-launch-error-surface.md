@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["06-recovery-actions-ws", "08-frontend-failure-surface-and-recovery"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 11: Responsive launch-error surface

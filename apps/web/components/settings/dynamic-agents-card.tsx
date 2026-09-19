@@ -10,6 +10,7 @@ import { DisabledBadge } from "@/components/settings/record-badges";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { DYNAMIC_AGENT_NAME } from "@/lib/settings/agent-display-order";
 import type { Agent, AgentProfile } from "@/lib/types/http";
+import { settingsActionClassName } from "./settings-control";
 
 const dynamicProfileRoute = (profileId: string): string =>
   `/settings/agents/${encodeURIComponent(DYNAMIC_AGENT_NAME)}/profiles/${encodeURIComponent(profileId)}`;
@@ -63,8 +64,7 @@ export function DynamicAgentsCard({ agent }: DynamicAgentsCardProps) {
           </p>
         </div>
         <Button
-          size="sm"
-          className="min-h-11 cursor-pointer sm:min-h-7"
+          className={settingsActionClassName("cursor-pointer")}
           asChild
           data-testid="new-dynamic-profile"
         >

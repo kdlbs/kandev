@@ -53,6 +53,8 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		project_id TEXT DEFAULT '',
 		state TEXT NOT NULL DEFAULT 'TODO',
 		title TEXT DEFAULT '',
+		assignee_user_id TEXT NOT NULL DEFAULT '',
+		assignment_generation INTEGER NOT NULL DEFAULT 0,
 		description TEXT DEFAULT '',
 		identifier TEXT DEFAULT '',
 		workflow_id TEXT DEFAULT '',
@@ -82,7 +84,8 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
-		agent_profile_id TEXT NOT NULL DEFAULT ''
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		stage_type TEXT NOT NULL DEFAULT 'custom'
 	)`); err != nil {
 		t.Fatalf("create workflow_steps: %v", err)
 	}
@@ -93,16 +96,23 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		role TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT NOT NULL DEFAULT '',
 		decision_required INTEGER NOT NULL DEFAULT 0,
-		position INTEGER NOT NULL DEFAULT 0
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 	)`); err != nil {
 		t.Fatalf("create workflow_step_participants: %v", err)
 	}
 	// Stub of task_sessions, mirroring the columns GetSessionAgentProfileID
-	// (RunnerProjection's fallback source, see prompt_usage_cost.go) reads.
+	// (RunnerProjection's fallback source, see prompt_usage_cost.go) reads,
+	// plus the AC-10 rollup columns so tests can assert the Office
+	// subscriber never writes them (AC-21).
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
 		agent_profile_id TEXT,
+		tokens_in INTEGER NOT NULL DEFAULT 0,
+		tokens_cached_in INTEGER NOT NULL DEFAULT 0,
+		tokens_out INTEGER NOT NULL DEFAULT 0,
+		cost_subcents INTEGER NOT NULL DEFAULT 0,
 		started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`); err != nil {
@@ -172,6 +182,9 @@ func applyServiceOverrides(opts *service.ServiceOptions, o service.ServiceOption
 	if o.TaskCanceller != nil {
 		opts.TaskCanceller = o.TaskCanceller
 	}
+	if o.RunExecutionStopper != nil {
+		opts.RunExecutionStopper = o.RunExecutionStopper
+	}
 	if o.TaskWorkspace != nil {
 		opts.TaskWorkspace = o.TaskWorkspace
 	}
@@ -199,15 +212,29 @@ func applyServiceOverrides(opts *service.ServiceOptions, o service.ServiceOption
 	if o.EventBus != nil {
 		opts.EventBus = o.EventBus
 	}
+	if o.TaskPRs != nil {
+		opts.TaskPRs = o.TaskPRs
+	}
 }
 
 // insertTestCostEvent inserts a cost event directly into the DB for
 // budget rollup tests. costSubcents is hundredths of a cent.
+//
+// occurred_at/created_at are bound as time.Time values, not pre-formatted
+// strings: the production CreateCostEvent path binds event.OccurredAt the
+// same way, and the pre-launch spend-window queries
+// (internal/office/repository/sqlite/spendwindow.go) compare occurred_at
+// against a time.Time bound the same way too. A hand-formatted
+// time.RFC3339 string ("...T...Z") sorts inconsistently against the
+// driver's own time.Time formatting ("... ...+00:00") once a query compares
+// two timestamps seconds apart rather than months apart, which silently
+// zeroed out spend in AC-OFFICE-BUDGET-006 admission tests until this was
+// made to match.
 func insertTestCostEvent(t *testing.T, svc interface {
 	ExecSQL(t *testing.T, q string, args ...interface{})
 }, agentID, taskID string, costSubcents int64) {
 	t.Helper()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
 	svc.ExecSQL(t,
 		`INSERT INTO office_cost_events (id, agent_profile_id, task_id, cost_subcents, occurred_at, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,

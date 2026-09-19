@@ -5,14 +5,46 @@ description: "Set up Kandev, find the owning subsystem, run focused checks, upda
 
 # Contributing to Kandev
 
-Kandev combines a Go server and native launcher, a Vite/React web client, a TypeScript development supervisor and npm shim, a Tauri desktop shell, and task-environment helpers. Begin at the subsystem that owns the behavior; do not recreate its rules in a neighboring layer.
+Kandev ships the web client inside a native Go application binary. The source
+tree also contains the Vite/React web client, a TypeScript development
+supervisor and npm shim, a Tauri desktop shell, and task-environment helpers.
+Begin at the subsystem that owns the behavior. Do not recreate its rules in a
+neighboring layer.
 
 ## Quick path
 
 1. Run `make bootstrap` once in a fresh checkout.
 2. Use `make dev` for normal full-stack work.
 3. Find the owning backend, web, CLI, desktop, or runtime boundary before editing.
-4. Run focused checks, update public docs, and leave a small reviewable diff.
+4. Open an issue before a large architectural change and discuss its direction
+   with maintainers before opening a PR.
+5. Keep one logical change in a small PR. Split unrelated work.
+6. Run focused checks, update public docs, and leave a small reviewable diff.
+
+## Contribution language
+
+Use English for issues, PRs, documentation, specifications, plans, code
+comments, and review discussion. Product localization values can use their
+target language. Keep the surrounding explanation in English.
+
+## Discuss large architectural changes first
+
+Open an issue before you implement or submit a large architectural change. This
+includes a new subsystem, a public API or protocol change, a persistence or
+data-model change, a new execution boundary, an authentication or
+permission-model change, or a cross-cutting change across subsystems.
+
+Describe the problem, proposed direction, affected boundaries, alternatives,
+and migration or compatibility risks in the issue. Wait until maintainers have
+discussed the direction before opening the PR. Link the issue from the PR.
+An agent must stop and report missing discussion instead of opening the PR.
+
+## Keep PRs small
+
+Prefer one logical change and the smallest practical diff. Split unrelated
+cleanup, refactoring, documentation, and feature work into separate PRs.
+Smaller PRs reduce the risk surface, make review easier, and reduce maintainer
+burden.
 
 ## Set up the repository
 
@@ -48,7 +80,11 @@ KANDEV_HOME_DIR="$PWD/.kandev-dev" KANDEV_DEBUG_DEV_MODE=true make dev-backend
 
 One backend owns a Kandev home at a time. Raw backend commands use the normal home by default, so a second backend with that home stops before it changes shared state. For an intentional second backend, use a separate `KANDEV_HOME_DIR`, database, and port.
 
-Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev and writes `<resolved-home>/logs/backend-logs.log`.
+Use `make build` for a production build. It builds the web application, copies
+its assets into the Go embed tree, and builds the native `kandev` binary. Use
+`make start` for a production-shaped local start. It installs dependencies,
+builds and synchronizes the embedded web application, then launches Kandev and
+writes `<resolved-home>/logs/backend-logs.log`.
 
 ## Find the owner
 
@@ -99,6 +135,9 @@ The complete source and Landing build contract is in the [public docs contributi
 ## Review checklist
 
 - The change has one clear user impact and owning subsystem.
+- Large architectural changes have a linked issue with maintainer discussion
+  before the PR opens.
+- The PR contains one logical change and the smallest practical diff.
 - Wire changes update Go DTOs, TypeScript types/clients, compatibility behavior, and protocol docs together.
 - Persistence changes include fresh-schema and upgrade-path tests.
 - Credentials, external text, shell arguments, URLs, paths, and logs respect their trust boundary.

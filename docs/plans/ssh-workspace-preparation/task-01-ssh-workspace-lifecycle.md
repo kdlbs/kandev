@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ssh-executor/spec.md"
+spec: "../../specs/executors/requirements/ssh-executor.md"
 ---
 
 # Task 01: SSH Workspace Lifecycle

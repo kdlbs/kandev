@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { bulkMoveSelectedTasks } from "@/lib/api";
 import { useToast } from "@/components/toast-provider";
+import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
 
 export function useTaskWorkflowMove() {
   const { toast } = useToast();
@@ -37,9 +38,10 @@ export function useTaskWorkflowMove() {
           variant: "success",
         });
       } catch (error) {
+        const fallback = t("task:taskMoveErrorGeneric");
         toast({
           title: t("task:failedToMoveTask"),
-          description: error instanceof Error ? error.message : t("task:failedToMoveTask"),
+          description: getTaskMoveErrorMessage(error, fallback, t),
           variant: "error",
         });
         throw error;

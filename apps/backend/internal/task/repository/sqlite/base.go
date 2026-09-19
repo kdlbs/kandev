@@ -16,14 +16,24 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db               *sqlx.DB // writer
-	ro               *sqlx.DB // reader (read-only pool)
-	ownsDB           bool
-	log              *logger.Logger
-	migrate          *db.MigrateLogger
-	queuePurgeMu     sync.RWMutex
-	queuePurger      func(context.Context, string)
-	queuePurgeNotify func(context.Context, string)
+	db                      *sqlx.DB // writer
+	ro                      *sqlx.DB // reader (read-only pool)
+	ownsDB                  bool
+	log                     *logger.Logger
+	migrate                 *db.MigrateLogger
+	queuePurgeMu            sync.RWMutex
+	queuePurger             func(context.Context, string)
+	queuePurgePrepare       func(context.Context, string)
+	queuePurgeNotify        func(context.Context, string)
+	queueSessionPurgeNotify func(context.Context, string, string)
+	// stepArrivalLocks holds one *sync.Mutex per workflow step, serializing
+	// this process's own arrival-position writes (assignArrivalPosition)
+	// against each other for the same step. lockWorkflowStepForWrite alone
+	// only serializes within a single transaction; a caller assigning
+	// positions to several tasks across several sequential transactions (a
+	// bulk move) needs this held across the whole sequence — see
+	// LockStepArrivalsForBatch.
+	stepArrivalLocks sync.Map
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
@@ -31,6 +41,112 @@ type Repository struct {
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
 	failCutoverAfter string
+	// failGitSnapshotCutoverAfter is a test-only failpoint for the Git snapshot
+	// ownership cutover. It is separate from the worktree failpoint because the
+	// two migrations can be exercised independently in the same repository.
+	failGitSnapshotCutoverAfter string
+	// failConversationJournalCleanupAfter is a test-only failpoint for the
+	// atomic removal of the retired conversation journal. It lets migration
+	// tests prove that a failed cleanup leaves the source tables and legacy
+	// tables unchanged for a retry.
+	failConversationJournalCleanupAfter string
+	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
+	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
+	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns
+	// failUsageEventErr before opening a transaction, without touching the
+	// database, and decrements the counter. A genuine SQLITE_BUSY/serialization
+	// race cannot be triggered deterministically against this package's
+	// single-connection test repositories, so this stands in for one. Use this
+	// (not the mid-transaction seam below) when a scenario needs the injected
+	// failure to happen before any real driver-level activity - e.g. before a
+	// same-attempt foreign-key violation the test also wants to observe.
+	failUsageEventAttempts int
+	failUsageEventErr      error
+	// failUsageEventRollupAttempts/failUsageEventRollupErr are a test-only
+	// failpoint inside insertUsageEventAndRollup's transaction, checked after
+	// the ledger row insert succeeds but before the task_sessions rollup
+	// increment: while failUsageEventRollupAttempts > 0, the function returns
+	// failUsageEventRollupErr and decrements the counter, so the deferred
+	// tx.Rollback() unwinds a real, already-attempted INSERT. Unlike
+	// failUsageEventAttempts (which fires before BeginTxx and so cannot tell
+	// an atomic single-transaction implementation from a hypothetical
+	// two-transaction one, since neither has touched the database yet), this
+	// seam proves AC-11's atomicity: an implementation that committed the
+	// insert in its own transaction before attempting the rollup would leave a
+	// row behind here, while the real single-transaction implementation rolls
+	// it back with everything else.
+	// failParticipantSeatReconcileAttempts is a test-only failpoint for the
+	// participant-seat reconciler's AC-OFFICE-REVIEW-SEATS-005.9 bounded
+	// retry loop: while > 0, tryHealParticipantSeatRow reports a synthetic
+	// concurrent-modification retry without touching the database, and
+	// decrements the counter. A genuine SQLite write race is not
+	// reproducible deterministically against this package's
+	// single-connection test repositories (SetMaxOpenConns(1) serializes
+	// all writes), so this stands in for one.
+	failParticipantSeatReconcileAttempts int
+	// failAgentErrorReconcileAttempts is a test-only failpoint for the
+	// on_agent_error reconciler's bounded retry loop (WO-05-2): while > 0,
+	// tryHealAgentErrorRow reports a synthetic concurrent-modification retry
+	// without touching the database, and decrements the counter. Same
+	// rationale as failParticipantSeatReconcileAttempts above.
+	failAgentErrorReconcileAttempts int
+	failUsageEventRollupAttempts    int
+	failUsageEventRollupErr         error
+	// usageEventPreRollupHook is a test-only synchronization seam, called (if
+	// set) inside insertUsageEventAndRollup's transaction at the same point as
+	// the failUsageEventRollup* failpoint - after the ledger row insert
+	// succeeds, before the task_sessions rollup increment. Unlike the
+	// failpoints, it does not alter control flow; it exists so a Postgres test
+	// can pause a real production transaction at this exact boundary and open
+	// a second, genuinely concurrent connection to construct a real lock
+	// conflict there (a real SQLITE_BUSY/serialization race cannot be
+	// provoked deterministically against SQLite's single test connection, but
+	// Postgres supports true concurrent connections, so this proves AC-32's
+	// retry classification against a real driver-reported 40001/40P01 rather
+	// than only the injected failpoint errors). Nil in production and in
+	// every test but the one that sets it.
+	usageEventPreRollupHook func()
+	// reorderPreWriteHook is a test-only synchronization seam, called (if
+	// set) inside ReorderStepTasks after stepID's current membership has
+	// been read and resolved against the caller's ordered id list, but
+	// before the renumbering write loop begins. Like usageEventPreRollupHook
+	// above, it does not alter control flow; it exists so a Postgres test
+	// can pause a real production reorder transaction at this exact
+	// boundary - after it has locked stepID and observed a task's
+	// still-current membership, but before it writes - to construct a real
+	// interleaving against a concurrent writer that changes that task's step
+	// membership in between. Nil in production and in every test but the
+	// one that sets it.
+	reorderPreWriteHook func()
+	// taskStepLockBeforeAcquireHook is a test-only synchronization seam,
+	// called (if set) inside lockTaskStepForWrite's retry loop after it has
+	// read a task's candidate step but before it locks that step - the exact
+	// gap a concurrent move of the same task can land in. It exists so a
+	// Postgres test can pause there and commit a real concurrent move,
+	// proving the confirm-and-retry loop settles on the task's post-move
+	// step rather than the stale one it read. Nil in production and in
+	// every test but the one that sets it.
+	taskStepLockBeforeAcquireHook func(candidateStepID string)
+	// taskRowReconfirmHook is a test-only synchronization seam, called (if
+	// set) inside lockTaskRowIfStepless right before it re-locks a task's
+	// own row to confirm the task still has no step - the exact gap a
+	// concurrent reattachment of that task can land in, between
+	// lockTaskStepForWrite releasing a stale step's lock (or finding none on
+	// its first read) and re-verifying there is truly nothing left to
+	// protect. It exists so a Postgres test can pause there and commit a
+	// real concurrent reattachment, proving the retry locks the task's new
+	// step instead of returning as if there were none. Nil in production
+	// and in every test but the one that sets it.
+	taskRowReconfirmHook func()
+	// agentPlanUpsertAfterRead is a test-only synchronization seam used to
+	// pause a plan upsert while its identity lock and transaction are held.
+	agentPlanUpsertAfterRead func()
+	// stepEntryDispatcher fires a step's session-independent on_enter
+	// sequence after a registered step-transition writer commits. Nil-safe
+	// (see dispatchStepEntry in step_entry_dispatch.go): unset in every
+	// test that doesn't exercise it, and in production until
+	// SetStepEntryDispatcher is called during boot wiring.
+	stepEntryDispatcher StepEntryDispatcher
 }
 
 func (r *Repository) nowUTC() time.Time {
@@ -40,6 +156,13 @@ func (r *Repository) nowUTC() time.Time {
 	return time.Now().UTC()
 }
 
+func (r *Repository) migrationContext() context.Context {
+	if r.migrate == nil {
+		return context.Background()
+	}
+	return r.migrate.Context()
+}
+
 // SetTaskQueuePurger registers the orchestrator-owned queue cleanup for
 // in-memory queues. SQLite queues are also purged in the task mutation
 // transaction; this callback keeps the explicitly ephemeral queue equivalent.
@@ -47,6 +170,14 @@ func (r *Repository) SetTaskQueuePurger(purger func(context.Context, string)) {
 	r.queuePurgeMu.Lock()
 	defer r.queuePurgeMu.Unlock()
 	r.queuePurger = purger
+}
+
+// SetTaskQueuePurgePreparer registers a bounded in-process cancellation hook
+// invoked before a task lifecycle transaction purges queue rows.
+func (r *Repository) SetTaskQueuePurgePreparer(prepare func(context.Context, string)) {
+	r.queuePurgeMu.Lock()
+	defer r.queuePurgeMu.Unlock()
+	r.queuePurgePrepare = prepare
 }
 
 // SetTaskQueuePurgeNotifier registers a post-commit observer for every path
@@ -59,6 +190,15 @@ func (r *Repository) SetTaskQueuePurgeNotifier(notifier func(context.Context, st
 	r.queuePurgeMu.Lock()
 	defer r.queuePurgeMu.Unlock()
 	r.queuePurgeNotify = notifier
+}
+
+func (r *Repository) notifyTaskQueuePurging(ctx context.Context, taskID string) {
+	r.queuePurgeMu.RLock()
+	prepare := r.queuePurgePrepare
+	r.queuePurgeMu.RUnlock()
+	if prepare != nil {
+		prepare(ctx, taskID)
+	}
 }
 
 func (r *Repository) notifyTaskQueuePurged(ctx context.Context, taskID string) {
@@ -74,20 +214,56 @@ func (r *Repository) notifyTaskQueuePurged(ctx context.Context, taskID string) {
 	}
 }
 
+// SetTaskSessionQueuePurgeNotifier registers a post-commit observer for queue
+// rows removed by DeleteTaskSession.
+func (r *Repository) SetTaskSessionQueuePurgeNotifier(notifier func(context.Context, string, string)) {
+	r.queuePurgeMu.Lock()
+	defer r.queuePurgeMu.Unlock()
+	r.queueSessionPurgeNotify = notifier
+}
+
+func (r *Repository) notifyTaskSessionQueuePurged(ctx context.Context, taskID, sessionID string) {
+	r.queuePurgeMu.RLock()
+	notifier := r.queueSessionPurgeNotify
+	r.queuePurgeMu.RUnlock()
+	if notifier != nil {
+		notifier(ctx, taskID, sessionID)
+	}
+}
+
 // NewWithDB creates a new SQLite repository with an existing database connection (shared ownership).
 func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
-	return newRepository(writer, reader, log, false)
+	return NewWithDBContext(context.Background(), writer, reader, log)
+}
+
+// NewWithDBContext creates a repository with an existing database connection
+// while observing cancellation at schema-step boundaries and in
+// context-aware migration statements. A statement that has already entered
+// the database driver can finish before that driver reports cancellation; the
+// caller retains pool ownership until this constructor returns.
+func NewWithDBContext(ctx context.Context, writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
+	return newRepositoryContext(ctx, writer, reader, log, false)
 }
 
 func newRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*Repository, error) {
+	return newRepositoryContext(context.Background(), writer, reader, log, ownsDB)
+}
+
+func newRepositoryContext(ctx context.Context, writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*Repository, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	repo := &Repository{
 		db:      writer,
 		ro:      reader,
 		ownsDB:  ownsDB,
 		log:     log,
-		migrate: db.NewMigrateLogger(writer, log),
+		migrate: db.NewRequiredMigrateLoggerContext(writer, log, ctx),
 	}
-	if err := repo.initSchema(); err != nil {
+	if err := repo.initSchemaContext(ctx); err != nil {
 		if ownsDB {
 			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)

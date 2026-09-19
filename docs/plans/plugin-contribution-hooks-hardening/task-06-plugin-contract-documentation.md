@@ -8,7 +8,7 @@ depends_on:
   - "03-responsive-task-menu-context"
   - "04-bounded-mobile-plugin-panels"
 plan: "plan.md"
-spec: "../../specs/plugins/spec.md"
+spec: "../../specs/plugins/requirements/plugins.md"
 ---
 
 # Task 06: Plugin contract documentation
@@ -26,7 +26,7 @@ spec: "../../specs/plugins/spec.md"
 ## Verification
 
 ```bash
-rg -n "registerTaskPanel|registerTaskMenuAction|host.storage|Panels" docs/public/plugins-authoring.md docs/plans/plugins/PLUGIN-API.md docs/specs/plugins/spec.md docs/decisions/2026-08-0*-plugin-*.md
+rg -n "registerTaskPanel|registerTaskMenuAction|host.storage|Panels" docs/public/plugins-authoring.md docs/plans/plugins/PLUGIN-API.md docs/specs/plugins/requirements/plugins.md docs/decisions/2026-08-0*-plugin-*.md
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 ```
@@ -35,7 +35,7 @@ node scripts/validate-public-docs.mjs
 
 - `docs/plans/plugins/PLUGIN-API.md`
 - `docs/public/plugins-authoring.md`
-- `docs/specs/plugins/spec.md` only for implementation-discovered wording corrections
+- `docs/specs/plugins/requirements/plugins.md` only for implementation-discovered wording corrections
 - `docs/decisions/2026-08-01-plugin-task-panel-contributions.md`
 - `docs/decisions/2026-08-04-plugin-contribution-lifecycle-authority.md`
 - `apps/web/lib/plugins/types.ts` comments only if the public contract mirror needs

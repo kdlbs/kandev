@@ -19,6 +19,7 @@ import type { CheckRun, TaskPR } from "@/lib/types/github";
 import { PRCIAutomationControls } from "./pr-ci-automation-controls";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityRow } from "./pr-mergeability-row";
+import { PRWorkflowAttentionNotice } from "./pr-workflow-attention-notice";
 import {
   ChangeRequestCIPopoverFrame,
   ChangeRequestChecksSection,
@@ -99,6 +100,7 @@ function PRCIPopoverHeader({
     <ChangeRequestPopoverHeader
       number={pr.pr_number}
       title={title}
+      author={pr.author_login}
       url={pr.pr_url}
       onOpenReview={onOpenDetailPanel}
       openDetailsLabel={t("github:openDetails", { title: `#${pr.pr_number} ${title}` })}
@@ -288,6 +290,7 @@ export function PRCIPopover({
   return (
     <ChangeRequestCIPopoverFrame>
       <PRCIPopoverHeader pr={pr} onOpenDetailPanel={onOpenDetailPanel} />
+      <PRWorkflowAttentionNotice pr={pr} attention={feedback?.workflow_attention} />
       {authLost ? (
         <ReconnectGitHubBlock />
       ) : (

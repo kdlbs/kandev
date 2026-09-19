@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
@@ -15,6 +16,19 @@ func seedParticipantTask(t *testing.T, repo *sqlite.Repository, taskID, stepID s
 		VALUES (?, 'ws-1', ?, 'Task', datetime('now'), datetime('now'))
 	`, taskID, stepID); err != nil {
 		t.Fatalf("seed task %s: %v", taskID, err)
+	}
+}
+
+// seedParticipantAgent inserts a minimal, live agent_profiles row so
+// AddTaskParticipant's existence check (AC-OFFICE-SEAT-PROVENANCE-005.8)
+// treats id as a real agent eligible to claim a cast seat.
+func seedParticipantAgent(t *testing.T, repo *sqlite.Repository, id string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(context.Background(), `
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES (?, '', ?, ?, 'ws-1', '', datetime('now'), datetime('now'))
+	`, id, id, id); err != nil {
+		t.Fatalf("seed agent profile %s: %v", id, err)
 	}
 }
 
@@ -53,7 +67,7 @@ func TestAddTaskParticipant_IsIdempotentPerNaturalKey(t *testing.T) {
 
 	seedParticipantTask(t, repo, "ap-1", "step-1")
 
-	if err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant: %v", err)
 	}
 	got, err := repo.ListTaskParticipants(ctx, "ap-1", "reviewer")
@@ -69,7 +83,7 @@ func TestAddTaskParticipant_IsIdempotentPerNaturalKey(t *testing.T) {
 	}
 
 	// A second identical call adds no row.
-	if err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant (repeat): %v", err)
 	}
 	if n := participantRowCount(t, repo, "ap-1"); n != 1 {
@@ -77,14 +91,194 @@ func TestAddTaskParticipant_IsIdempotentPerNaturalKey(t *testing.T) {
 	}
 
 	// A different role or agent is a distinct participant.
-	if err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "approver"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "approver"); err != nil {
 		t.Fatalf("AddTaskParticipant (other role): %v", err)
 	}
-	if err := repo.AddTaskParticipant(ctx, "ap-1", "agent-s", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-1", "agent-s", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant (other agent): %v", err)
 	}
 	if n := participantRowCount(t, repo, "ap-1"); n != 3 {
 		t.Errorf("rows = %d, want 3", n)
+	}
+}
+
+// seedAutoSeat inserts an engine auto-cast (provenance="auto") participant
+// row directly, bypassing AddTaskParticipant, to simulate the on_enter
+// ensure_participant_seat action having already run before a manual
+// registration arrives.
+func seedAutoSeat(t *testing.T, repo *sqlite.Repository, id, stepID, taskID, role, agentID string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(context.Background(), `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES (?, ?, ?, ?, ?, 1, 0, 'auto')
+	`, id, stepID, taskID, role, agentID); err != nil {
+		t.Fatalf("seed auto seat: %v", err)
+	}
+}
+
+// TestAddTaskParticipant_ClaimsUndecidedAutoSeat covers the seat-provenance
+// race: the engine's on_enter ensure_participant_seat action auto-casts a
+// fallback reviewer, then a human manually registers a different reviewer
+// moments later. Without claiming, this produces two seats for one role, so
+// an all_approve quorum guard needing 2 decisions never resolves from a
+// single human decision. The manual call must claim the undecided auto
+// seat in place instead of inserting a second one.
+func TestAddTaskParticipant_ClaimsUndecidedAutoSeat(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "ap-claim", "step-1")
+	seedAutoSeat(t, repo, "auto-seat-1", "step-1", "ap-claim", "reviewer", "agent-auto")
+	seedParticipantAgent(t, repo, "agent-human")
+	// Distinctive position and creation time: the invariance assertions
+	// below compare real values rather than two column defaults.
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE workflow_step_participants
+		SET position = 3, created_at = '2020-05-05 01:02:03'
+		WHERE id = 'auto-seat-1'
+	`); err != nil {
+		t.Fatalf("set distinctive seat fields: %v", err)
+	}
+	before := readParticipantSeatRow(t, repo, "auto-seat-1")
+	// Guard against a vacuous comparison: if the seed above silently failed,
+	// before and after would both hold column defaults and every invariance
+	// assertion would pass without proving anything.
+	if before.Position != 3 || before.CreatedAt.IsZero() {
+		t.Fatalf("seeded seat = %+v, want position 3 and a non-zero created_at", before)
+	}
+
+	if _, err := repo.AddTaskParticipant(ctx, "ap-claim", "agent-human", "reviewer"); err != nil {
+		t.Fatalf("AddTaskParticipant: %v", err)
+	}
+	after := readParticipantSeatRow(t, repo, "auto-seat-1")
+
+	if n := participantRowCount(t, repo, "ap-claim"); n != 1 {
+		t.Fatalf("rows = %d, want 1 (claimed in place, not duplicated)", n)
+	}
+	got, err := repo.ListTaskParticipants(ctx, "ap-claim", "reviewer")
+	if err != nil {
+		t.Fatalf("ListTaskParticipants: %v", err)
+	}
+	if len(got) != 1 || got[0].AgentProfileID != "agent-human" {
+		t.Fatalf("participants = %+v, want single row claimed by agent-human", got)
+	}
+
+	var provenance string
+	if err := repo.ReaderDB().Get(&provenance,
+		`SELECT provenance FROM workflow_step_participants WHERE id = 'auto-seat-1'`); err != nil {
+		t.Fatalf("read provenance: %v", err)
+	}
+	if provenance != "manual" {
+		t.Errorf("provenance = %q, want %q after claim", provenance, "manual")
+	}
+
+	// AC-OFFICE-SEAT-ASSURANCE-002.9: the agent profile and provenance are
+	// the only two fields a claim may touch. The seat's identity, its
+	// decision-required flag, its position in the slate and its creation
+	// time are the same row's, unchanged — a claim reassigns a seat, it does
+	// not mint one (AC-OFFICE-SEAT-PROVENANCE-002.2).
+	if after.ID != before.ID {
+		t.Errorf("seat id = %q, want %q (a claim reassigns the seat, not replaces it)", after.ID, before.ID)
+	}
+	if after.DecisionRequired != before.DecisionRequired {
+		t.Errorf("decision_required = %v, want %v (unchanged)", after.DecisionRequired, before.DecisionRequired)
+	}
+	if after.Position != before.Position {
+		t.Errorf("position = %d, want %d (unchanged)", after.Position, before.Position)
+	}
+	if !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Errorf("created_at = %v, want %v (unchanged)", after.CreatedAt, before.CreatedAt)
+	}
+}
+
+// participantSeatRow is the seat as the table stores it. The office-side
+// Participant projection carries neither provenance nor a real creation
+// time, so an invariance assertion has to read the columns. Named distinctly
+// from this package's other seat-row test helper (participant_claim_decision_guard_test.go),
+// which reads a different column set for a different test.
+type participantSeatRow struct {
+	ID               string    `db:"id"`
+	AgentProfileID   string    `db:"agent_profile_id"`
+	Provenance       string    `db:"provenance"`
+	DecisionRequired bool      `db:"decision_required"`
+	Position         int       `db:"position"`
+	CreatedAt        time.Time `db:"created_at"`
+}
+
+func readParticipantSeatRow(t *testing.T, repo *sqlite.Repository, seatID string) participantSeatRow {
+	t.Helper()
+	var row participantSeatRow
+	if err := repo.ReaderDB().Get(&row, `
+		SELECT id, agent_profile_id, provenance, decision_required, position, created_at
+		FROM workflow_step_participants WHERE id = ?
+	`, seatID); err != nil {
+		t.Fatalf("read seat row %s: %v", seatID, err)
+	}
+	return row
+}
+
+// TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat: once the auto-cast
+// seat already has a decision recorded against it, claiming would silently
+// reassign a seat whose vote is already on the record — so a second manual
+// registration must insert a distinct seat instead.
+func TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "ap-decided", "step-1")
+	seedAutoSeat(t, repo, "auto-seat-2", "step-1", "ap-decided", "reviewer", "agent-auto")
+	seedParticipantAgent(t, repo, "agent-human")
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_decisions (id, task_id, step_id, participant_id, decision, decided_at)
+		VALUES ('dec-1', 'ap-decided', 'step-1', 'auto-seat-2', 'approved', datetime('now'))
+	`); err != nil {
+		t.Fatalf("seed decision: %v", err)
+	}
+
+	if _, err := repo.AddTaskParticipant(ctx, "ap-decided", "agent-human", "reviewer"); err != nil {
+		t.Fatalf("AddTaskParticipant: %v", err)
+	}
+
+	if n := participantRowCount(t, repo, "ap-decided"); n != 2 {
+		t.Fatalf("rows = %d, want 2 (decided auto seat must not be claimed)", n)
+	}
+	var provenance string
+	if err := repo.ReaderDB().Get(&provenance,
+		`SELECT provenance FROM workflow_step_participants WHERE id = 'auto-seat-2'`); err != nil {
+		t.Fatalf("read provenance: %v", err)
+	}
+	if provenance != "auto" {
+		t.Errorf("provenance = %q, want unchanged %q", provenance, "auto")
+	}
+}
+
+// TestAddTaskParticipant_MultiReviewerManualSeatsUntouched preserves the
+// legitimate multi-reviewer scenario TestAddTaskParticipant_IsIdempotentPerNaturalKey
+// already covers for distinct agents: two manually-added seats (both
+// provenance="manual") for the same role are never collapsed by the claim
+// logic, since neither carries provenance="auto". Both agents are seeded as
+// live agent_profiles rows so each registration actually reaches
+// findClaimableAutoSeat's claim search (and finds no "auto" seat to claim)
+// instead of short-circuiting at the unknown-agent check attemptClaim
+// applies first.
+func TestAddTaskParticipant_MultiReviewerManualSeatsUntouched(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	seedParticipantTask(t, repo, "ap-multi", "step-1")
+	seedParticipantAgent(t, repo, "agent-one")
+	seedParticipantAgent(t, repo, "agent-two")
+
+	if _, err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-one", "reviewer"); err != nil {
+		t.Fatalf("AddTaskParticipant (first): %v", err)
+	}
+	if _, err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-two", "reviewer"); err != nil {
+		t.Fatalf("AddTaskParticipant (second): %v", err)
+	}
+
+	if n := participantRowCount(t, repo, "ap-multi"); n != 2 {
+		t.Fatalf("rows = %d, want 2 distinct manual reviewer seats", n)
 	}
 }
 
@@ -96,7 +290,7 @@ func TestAddTaskParticipant_SkipsTasksWithoutAStep(t *testing.T) {
 
 	seedParticipantTask(t, repo, "ap-nostep", "")
 
-	if err := repo.AddTaskParticipant(ctx, "ap-nostep", "agent-r", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-nostep", "agent-r", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant = %v, want nil", err)
 	}
 	if n := participantRowCount(t, repo, "ap-nostep"); n != 0 {
@@ -104,7 +298,7 @@ func TestAddTaskParticipant_SkipsTasksWithoutAStep(t *testing.T) {
 	}
 
 	// Same for a task that does not exist at all.
-	if err := repo.AddTaskParticipant(ctx, "ap-ghost", "agent-r", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-ghost", "agent-r", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant(missing task) = %v, want nil", err)
 	}
 	if n := participantRowCount(t, repo, "ap-ghost"); n != 0 {
@@ -122,7 +316,7 @@ func TestRemoveTaskParticipant(t *testing.T) {
 		{"agent-r", "approver"},
 		{"agent-s", "reviewer"},
 	} {
-		if err := repo.AddTaskParticipant(ctx, "rp-1", spec.agent, spec.role); err != nil {
+		if _, err := repo.AddTaskParticipant(ctx, "rp-1", spec.agent, spec.role); err != nil {
 			t.Fatalf("AddTaskParticipant(%v): %v", spec, err)
 		}
 	}
@@ -303,4 +497,17 @@ func participantRowCount(t *testing.T, repo *sqlite.Repository, taskID string) i
 		t.Fatalf("count participants: %v", err)
 	}
 	return n
+}
+
+// seedManualSeat inserts a seat already carrying "manual" provenance — an
+// operator's confirmed choice, which no claim may consume.
+func seedManualSeat(t *testing.T, repo *sqlite.Repository, id, stepID, taskID, role, agentID string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(context.Background(), `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
+		VALUES (?, ?, ?, ?, ?, 1, 0, 'manual')
+	`, id, stepID, taskID, role, agentID); err != nil {
+		t.Fatalf("seed manual seat: %v", err)
+	}
 }

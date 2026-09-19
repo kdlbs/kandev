@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/acp-shell-command-output.md"
+spec: "../../specs/ui/requirements/acp-shell-command-output.md"
 ---
 
 # Task 01: Gate empty output disclosure
@@ -49,7 +49,7 @@ share the same summary predicate and must be verified together.
 
 ## Inputs
 
-- `docs/specs/ui/acp-shell-command-output.md`, especially the disclosure and
+- `docs/specs/ui/requirements/acp-shell-command-output.md`, especially the disclosure and
   no-output scenarios.
 - `docs/plans/shell-output-disclosure-visibility/plan.md`.
 - Existing `ShellOutputDisclosure` lazy-fetch behavior and the current desktop

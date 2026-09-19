@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agent-stall-recovery/spec.md
+spec: docs/specs/agents/requirements/agent-stall-recovery.md
 created: 2026-08-19
 status: done
 ---

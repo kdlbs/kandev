@@ -11,8 +11,15 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository/admission"
+	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 const (
@@ -21,8 +28,169 @@ const (
 	clarificationPendingStatus = "pending"
 )
 
+var ErrMessageIDConflict = errors.New("client message id is already used")
+
+var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
+type planCommentMessageWriter interface {
+	CreateMessageWithPlanComments(
+		context.Context,
+		*models.Message,
+		[]models.TaskPlanCommentRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type queuedPlanCommentMessageWriter interface {
+	CreateMessageWithPlanCommentsAndQueue(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		[]models.TaskPlanCommentRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+		int,
+	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type initialTaskBriefMessageWriter interface {
+	CreateMessageWithInitialTaskBrief(context.Context, *models.Message, *admission.InitialTaskBriefCandidate) error
+}
+
+type initialTaskBriefPlanCommentMessageWriter interface {
+	CreateMessageWithPlanCommentsWithInitialTaskBrief(
+		context.Context,
+		*models.Message,
+		*admission.InitialTaskBriefCandidate,
+		[]models.TaskPlanCommentRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type initialTaskBriefQueuedPlanCommentMessageWriter interface {
+	CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		*admission.InitialTaskBriefCandidate,
+		[]models.TaskPlanCommentRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+		int,
+	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type conversationMessageReceiptWriter interface {
+	CreateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
+	UpdateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
+	DeleteMessageWithConversationReceipt(context.Context, string) (*models.ConversationMutationReceipt, error)
+}
+
+type agentPlanMessageWriter interface {
+	UpsertAgentPlanMessageWithConversationReceipt(
+		context.Context,
+		*models.Message,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
+}
+
+type planCommentAdmissionLocker interface {
+	AcquirePlanCommentAdmission(context.Context, string) (context.Context, func(), error)
+}
+
+type messageAdmissionLocker interface {
+	AcquireMessageAdmission(context.Context, string) (context.Context, func(), error)
+}
+
+type planCommentAndMessageAdmissionLocker interface {
+	AcquirePlanCommentAndMessageAdmission(context.Context, string, string) (context.Context, func(), error)
+}
+
+// AcquirePlanCommentMessageAdmission serializes an exact comment preflight
+// through final message acceptance. The repository implementation extends the
+// process-local guard across PostgreSQL processes.
+func (s *Service) AcquirePlanCommentMessageAdmission(
+	ctx context.Context,
+	taskID string,
+) (context.Context, func(), error) {
+	if locker, ok := s.messages.(planCommentAdmissionLocker); ok {
+		return locker.AcquirePlanCommentAdmission(ctx, taskID)
+	}
+	release, err := plancommenttx.AcquireLocalAdmission(ctx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return plancommenttx.WithLocalAdmission(ctx, taskID), release, nil
+}
+
+// AcquireMessageAdmission serializes caller-owned message replay identity from
+// the handler preflight through final persistence, including across PostgreSQL
+// backend processes.
+func (s *Service) AcquireMessageAdmission(
+	ctx context.Context,
+	messageID string,
+) (context.Context, func(), error) {
+	key := "message:" + messageID
+	if locker, ok := s.messages.(messageAdmissionLocker); ok {
+		return locker.AcquireMessageAdmission(ctx, messageID)
+	}
+	release, err := plancommenttx.AcquireLocalAdmission(ctx, key)
+	if err != nil {
+		return nil, nil, err
+	}
+	return plancommenttx.WithLocalAdmission(ctx, key), release, nil
+}
+
+// AcquirePlanCommentAndMessageAdmission holds task-comment and caller-message
+// authority in one repository lease. PostgreSQL implementations use one
+// dedicated connection for both advisory locks so the write transaction still
+// has a connection available in a two-connection pool.
+func (s *Service) AcquirePlanCommentAndMessageAdmission(
+	ctx context.Context,
+	taskID, messageID string,
+) (context.Context, func(), error) {
+	if locker, ok := s.messages.(planCommentAndMessageAdmissionLocker); ok {
+		return locker.AcquirePlanCommentAndMessageAdmission(ctx, taskID, messageID)
+	}
+	planCtx, planRelease, err := s.AcquirePlanCommentMessageAdmission(ctx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	messageCtx, messageRelease, err := s.AcquireMessageAdmission(planCtx, messageID)
+	if err != nil {
+		planRelease()
+		return nil, nil, err
+	}
+	return messageCtx, func() {
+		messageRelease()
+		planRelease()
+	}, nil
+}
+
+func (s *Service) acquireMessageCreateAdmission(
+	ctx context.Context,
+	messageID string,
+	req *CreateMessageRequest,
+) (context.Context, func(), error) {
+	if req != nil && len(req.PlanCommentRefs) > 0 {
+		return s.AcquirePlanCommentAndMessageAdmission(ctx, req.TaskID, messageID)
+	}
+	return s.AcquireMessageAdmission(ctx, messageID)
+}
+
 // CreateMessage creates a new message on an agent session
 func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
+	if err := preparePlanCommentMessageRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return nil, err
+	}
 	messageID := uuid.New().String()
 	session, err := s.getSessionWithRetry(
 		ctx,
@@ -81,7 +249,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		TaskID:        taskID,
 		TurnID:        turnID,
 		AuthorType:    authorType,
-		AuthorID:      req.AuthorID,
+		AuthorID:      s.resolveAuthorID(ctx, authorType, req.AuthorID),
 		Content:       req.Content,
 		Type:          messageType,
 		Metadata:      req.Metadata,
@@ -93,13 +261,15 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		// as an explicit import and reject same-microsecond creates.
 	}
 
-	if err := s.messages.CreateMessage(ctx, message); err != nil {
+	snapshot, receipt, err := s.persistMessage(ctx, message, req)
+	if err != nil {
 		s.logger.Error("failed to create message", zap.Error(err))
 		return nil, err
 	}
 
 	// Publish message.added event
-	s.publishMessageEvent(ctx, events.MessageAdded, message)
+	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, receipt)
+	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
 
 	s.logger.Info("message created",
 		zap.String("message_id", message.ID),
@@ -120,9 +290,24 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 	if id == "" {
 		return nil, errors.New("message id is required for idempotent creation")
 	}
+	if err := preparePlanCommentMessageRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return nil, err
+	}
+	admissionCtx, releaseAdmission, err := s.acquireMessageCreateAdmission(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseAdmission()
+	ctx = admissionCtx
 
 	existing, err := s.messages.GetMessageWithPromptIndex(ctx, id)
 	if err == nil && existing != nil {
+		if err := s.validateMessageReplay(ctx, existing, req); err != nil {
+			return nil, err
+		}
 		return existing, nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -138,9 +323,179 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 	// its turn. Read the committed row and treat that duplicate as success.
 	existing, lookupErr := s.messages.GetMessageWithPromptIndex(ctx, id)
 	if lookupErr == nil && existing != nil {
+		if replayErr := s.validateMessageReplay(ctx, existing, req); replayErr != nil {
+			return nil, replayErr
+		}
 		return existing, nil
 	}
 	return nil, err
+}
+
+type planCommentMessageValidator interface {
+	ValidateMessagePlanComments(
+		context.Context,
+		string,
+		string,
+		string,
+		[]models.TaskPlanCommentRef,
+		bool,
+		models.TaskSessionState,
+	) error
+}
+
+// ValidatePlanCommentMessage rejects stale references before callers execute
+// stateful turn-start hooks. Persistence repeats the same validation under its
+// atomic message/comment boundary to close races.
+func (s *Service) ValidatePlanCommentMessage(
+	ctx context.Context,
+	taskID, sessionID, content string,
+	refs []models.TaskPlanCommentRef,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	validator, ok := s.messages.(planCommentMessageValidator)
+	if !ok {
+		return errors.New("plan comment message validation is unavailable")
+	}
+	return validator.ValidateMessagePlanComments(
+		ctx, taskID, sessionID, plancomments.WithPlaceholder(content), refs, requirePrimary, expectedState,
+	)
+}
+
+// CreateQueuedMessageIdempotent commits a comment-bearing user message and
+// its deferred queue delivery in the same repository transaction. Exact
+// caller-ID replays return the original message without adding another queue
+// entry or consuming another comment snapshot.
+func (s *Service) CreateQueuedMessageIdempotent(
+	ctx context.Context,
+	id string,
+	req *CreateMessageRequest,
+	queued *messagequeue.QueuedMessage,
+	maxPerSession int,
+) (*models.Message, error) {
+	if err := validateQueuedPlanCommentMessage(id, req, queued); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return nil, err
+	}
+	admissionCtx, releaseAdmission, err := s.acquireMessageCreateAdmission(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseAdmission()
+	ctx = admissionCtx
+	existing, found, err := s.findPlanCommentMessageReplay(ctx, id, req)
+	if err != nil || found {
+		return existing, err
+	}
+
+	session, err := s.getSessionWithRetry(ctx, req.TaskSessionID, id, messageCreateMaxRetries, messageCreateRetryDelay)
+	if err != nil {
+		return nil, err
+	}
+	message, err := s.buildMessage(ctx, id, req, session)
+	if err != nil {
+		return nil, err
+	}
+	queued.ID = id
+	queued.SessionID = message.TaskSessionID
+	queued.TaskID = message.TaskID
+	queued.Content = message.Content
+	queued.QueuedBy = messagequeue.QueuedByUser
+
+	writer, ok := s.messages.(queuedPlanCommentMessageWriter)
+	if !ok {
+		return nil, errors.New("queued plan comment message admission is unavailable")
+	}
+	var snapshot *models.TaskPlanCommentSnapshot
+	if req.InitialTaskBrief != nil {
+		initialWriter, initialOK := s.messages.(initialTaskBriefQueuedPlanCommentMessageWriter)
+		if !initialOK {
+			return nil, errors.New("queued initial task brief admission is unavailable")
+		}
+		snapshot, err = initialWriter.CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
+			ctx, message, queued, req.InitialTaskBrief, req.PlanCommentRefs,
+			req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
+		)
+	} else {
+		snapshot, err = writer.CreateMessageWithPlanCommentsAndQueue(
+			ctx, message, queued, req.PlanCommentRefs, req.RequirePrimarySession,
+			req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
+		)
+	}
+	if err != nil {
+		existing, found, lookupErr := s.findPlanCommentMessageReplay(ctx, id, req)
+		if lookupErr == nil && found {
+			return existing, nil
+		}
+		return nil, err
+	}
+
+	_ = s.publishMessageEvent(ctx, events.MessageAdded, message)
+	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
+	s.logger.Info("queued message created with ID",
+		zap.String("message_id", message.ID),
+		zap.String("session_id", message.TaskSessionID),
+		zap.String("author_type", string(message.AuthorType)))
+	return message, nil
+}
+
+func validateQueuedPlanCommentMessage(
+	id string,
+	req *CreateMessageRequest,
+	queued *messagequeue.QueuedMessage,
+) error {
+	if id == "" {
+		return errors.New("message id is required for idempotent creation")
+	}
+	if req == nil || len(req.PlanCommentRefs) == 0 {
+		return errors.New("plan comment refs are required for queued message creation")
+	}
+	if queued == nil {
+		return errors.New("queued message is required")
+	}
+	return preparePlanCommentMessageRequest(req)
+}
+
+func (s *Service) findPlanCommentMessageReplay(
+	ctx context.Context,
+	id string,
+	req *CreateMessageRequest,
+) (*models.Message, bool, error) {
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && existing == nil) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("check existing queued message: %w", err)
+	}
+	if err := s.validateMessageReplay(ctx, existing, req); err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
+}
+
+func (s *Service) validateMessageReplay(
+	ctx context.Context,
+	existing *models.Message,
+	req *CreateMessageRequest,
+) error {
+	if existing == nil || req == nil {
+		return ErrMessageIDConflict
+	}
+	if err := s.AuthorizeSessionScope(ctx, existing.TaskSessionID, authz.ScopeSessionPrompt); err != nil {
+		return err
+	}
+	if existing.TaskSessionID != req.TaskSessionID ||
+		(req.TaskID != "" && existing.TaskID != req.TaskID) ||
+		!matchesPlanCommentMessageReplay(existing, req) {
+		return ErrMessageIDConflict
+	}
+	return nil
 }
 
 // CreateMessageWithID creates a new message with a pre-generated ID.
@@ -148,6 +503,12 @@ func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *C
 // It includes retry logic to handle transient database errors and ensure
 // message chunks are not lost during streaming.
 func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *CreateMessageRequest) (*models.Message, error) {
+	if err := preparePlanCommentMessageRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return nil, err
+	}
 	session, err := s.getSessionWithRetry(ctx, req.TaskSessionID, id, messageCreateMaxRetries, messageCreateRetryDelay)
 	if err != nil {
 		return nil, err
@@ -158,12 +519,16 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		return nil, err
 	}
 
-	if err := s.createMessageWithRetry(ctx, message, messageCreateMaxRetries, messageCreateRetryDelay); err != nil {
+	snapshot, receipt, err := s.createMessageWithRequestRetry(
+		ctx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
 		return nil, err
 	}
 
 	// Publish message.added event
-	s.publishMessageEvent(ctx, events.MessageAdded, message)
+	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, receipt)
+	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
 
 	s.logger.Info("message created with ID",
 		zap.String("message_id", message.ID),
@@ -171,6 +536,16 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		zap.String("author_type", string(message.AuthorType)))
 
 	return message, nil
+}
+
+func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessageRequest) error {
+	if req == nil || req.AuthorType == createdByAgent {
+		return nil
+	}
+	if req.TaskID != "" {
+		return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+	}
+	return s.AuthorizeSessionScope(ctx, req.TaskSessionID, authz.ScopeSessionPrompt)
 }
 
 // getSessionWithRetry fetches a session, retrying on transient errors caused by out-of-order events.
@@ -268,7 +643,7 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 		TaskID:        taskID,
 		TurnID:        turnID,
 		AuthorType:    authorType,
-		AuthorID:      req.AuthorID,
+		AuthorID:      s.resolveAuthorID(ctx, authorType, req.AuthorID),
 		Content:       req.Content,
 		Type:          messageType,
 		Metadata:      req.Metadata,
@@ -279,15 +654,26 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 }
 
 // createMessageWithRetry persists a message with retry logic for transient DB errors.
-func (s *Service) createMessageWithRetry(ctx context.Context, message *models.Message, maxRetries int, retryDelay time.Duration) error {
+func (s *Service) createMessageWithRequestRetry(
+	ctx context.Context,
+	message *models.Message,
+	req *CreateMessageRequest,
+	maxRetries int,
+	retryDelay time.Duration,
+) (*models.TaskPlanCommentSnapshot, *models.ConversationMutationReceipt, error) {
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		err = s.messages.CreateMessage(ctx, message)
+		var snapshot *models.TaskPlanCommentSnapshot
+		var receipt *models.ConversationMutationReceipt
+		snapshot, receipt, err = s.persistMessage(ctx, message, req)
 		if err == nil {
-			return nil
+			return snapshot, receipt, nil
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, nil, ctx.Err()
+		}
+		if errors.Is(err, repoerrors.ErrInitialTaskBriefStale) {
+			return nil, nil, err
 		}
 		if attempt < maxRetries-1 {
 			s.logger.Debug("failed to create message, retrying",
@@ -302,7 +688,116 @@ func (s *Service) createMessageWithRetry(ctx context.Context, message *models.Me
 		zap.String("id", message.ID),
 		zap.Int("retries", maxRetries),
 		zap.Error(err))
-	return err
+	return nil, nil, err
+}
+
+func (s *Service) persistMessage(
+	ctx context.Context,
+	message *models.Message,
+	req *CreateMessageRequest,
+) (*models.TaskPlanCommentSnapshot, *models.ConversationMutationReceipt, error) {
+	if len(req.PlanCommentRefs) == 0 {
+		if req.InitialTaskBrief != nil {
+			writer, ok := s.messages.(initialTaskBriefMessageWriter)
+			if !ok {
+				return nil, nil, errors.New("initial task brief admission is unavailable")
+			}
+			return nil, nil, writer.CreateMessageWithInitialTaskBrief(ctx, message, req.InitialTaskBrief)
+		}
+		if writer, ok := s.messages.(conversationMessageReceiptWriter); ok {
+			receipt, err := writer.CreateMessageWithConversationReceipt(ctx, message)
+			return nil, receipt, err
+		}
+		return nil, nil, s.messages.CreateMessage(ctx, message)
+	}
+	if req.InitialTaskBrief != nil {
+		writer, ok := s.messages.(initialTaskBriefPlanCommentMessageWriter)
+		if !ok {
+			return nil, nil, errors.New("plan comment initial task brief admission is unavailable")
+		}
+		snapshot, err := writer.CreateMessageWithPlanCommentsWithInitialTaskBrief(
+			ctx, message, req.InitialTaskBrief, req.PlanCommentRefs, req.RequirePrimarySession,
+			req.ExpectedSessionState, req.AttachmentClaim,
+		)
+		return snapshot, nil, err
+	}
+	writer, ok := s.messages.(planCommentMessageWriter)
+	if !ok {
+		return nil, nil, errors.New("plan comment message admission is unavailable")
+	}
+	snapshot, err := writer.CreateMessageWithPlanComments(
+		ctx, message, req.PlanCommentRefs, req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim,
+	)
+	return snapshot, nil, err
+}
+
+type planCommentMessageReplayIdentity struct {
+	TaskSessionID  string                      `json:"session_id"`
+	TaskID         string                      `json:"task_id"`
+	TurnID         string                      `json:"turn_id"`
+	Content        string                      `json:"content"`
+	AuthorID       string                      `json:"author_id"`
+	MessageType    string                      `json:"message_type"`
+	Metadata       map[string]interface{}      `json:"metadata"`
+	Refs           []models.TaskPlanCommentRef `json:"refs"`
+	RequirePrimary bool                        `json:"require_primary"`
+}
+
+func preparePlanCommentMessageRequest(req *CreateMessageRequest) error {
+	if req == nil || len(req.PlanCommentRefs) == 0 {
+		return nil
+	}
+	metadata := make(map[string]interface{}, len(req.Metadata)+2)
+	for key, value := range req.Metadata {
+		if key != plancomments.MetadataRefs && key != plancomments.MetadataRequestFingerprint {
+			metadata[key] = value
+		}
+	}
+	identity := planCommentMessageReplayIdentity{
+		TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, TurnID: req.TurnID,
+		Content: req.Content, AuthorID: req.AuthorID, MessageType: req.Type,
+		Metadata: metadata, Refs: req.PlanCommentRefs, RequirePrimary: req.RequirePrimarySession,
+	}
+	fingerprint, err := plancomments.Fingerprint(identity)
+	if err != nil {
+		return err
+	}
+	metadata[plancomments.MetadataRefs] = req.PlanCommentRefs
+	metadata[plancomments.MetadataRequestFingerprint] = fingerprint
+	req.Metadata = metadata
+	return nil
+}
+
+func matchesPlanCommentMessageReplay(existing *models.Message, req *CreateMessageRequest) bool {
+	if want, _ := req.Metadata[plancomments.MetadataClientMessageFingerprint].(string); want != "" {
+		got, _ := existing.Metadata[plancomments.MetadataClientMessageFingerprint].(string)
+		return got == want
+	}
+	if len(req.PlanCommentRefs) == 0 {
+		return true
+	}
+	want, _ := req.Metadata[plancomments.MetadataRequestFingerprint].(string)
+	got, _ := existing.Metadata[plancomments.MetadataRequestFingerprint].(string)
+	return want != "" && got == want
+}
+
+func (s *Service) publishMessagePlanCommentSnapshot(
+	ctx context.Context,
+	snapshot *models.TaskPlanCommentSnapshot,
+) {
+	if snapshot == nil || s.eventBus == nil {
+		return
+	}
+	if err := s.eventBus.Publish(ctx, events.TaskPlanCommentsChanged,
+		bus.NewEvent(events.TaskPlanCommentsChanged, "task-service", snapshot)); err != nil {
+		s.logger.Error("publish consumed plan comments",
+			zap.String("task_id", snapshot.TaskID),
+			zap.String("plan_id", snapshot.PlanID),
+			zap.Int64("comments_revision", snapshot.Revision),
+			zap.Int("comment_count", len(snapshot.Comments)),
+			zap.Error(err),
+		)
+	}
 }
 
 // GetMessage retrieves a message by ID
@@ -352,17 +847,22 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		return nil, false, err
 	}
 	limit := req.Limit
-	if limit <= 0 && (req.Before != "" || req.After != "") {
+	if limit <= 0 && (req.Before != "" || req.After != "" || req.Around != "" ||
+		req.AuthorType != "" || len(req.AuthorTypes) > 0 || req.TaskID != "") {
 		limit = DefaultMessagesPageSize
 	}
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
 	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
-		Limit:  limit,
-		Before: req.Before,
-		After:  req.After,
-		Sort:   req.Sort,
+		Limit:       limit,
+		Before:      req.Before,
+		After:       req.After,
+		Sort:        req.Sort,
+		AuthorType:  req.AuthorType,
+		AuthorTypes: req.AuthorTypes,
+		TaskID:      req.TaskID,
+		Around:      req.Around,
 	})
 }
 
@@ -388,13 +888,20 @@ func (s *Service) SearchMessages(ctx context.Context, sessionID, query string, l
 // DeleteMessage deletes a message
 func (s *Service) DeleteMessage(ctx context.Context, id string) error {
 	message, getErr := s.messages.GetMessage(ctx, id)
-	if err := s.messages.DeleteMessage(ctx, id); err != nil {
+	var receipt *models.ConversationMutationReceipt
+	var err error
+	if writer, ok := s.messages.(conversationMessageReceiptWriter); ok {
+		receipt, err = writer.DeleteMessageWithConversationReceipt(ctx, id)
+	} else {
+		err = s.messages.DeleteMessage(ctx, id)
+	}
+	if err != nil {
 		s.logger.Error("failed to delete message", zap.String("message_id", id), zap.Error(err))
 		return err
 	}
 
 	if getErr == nil && message != nil {
-		s.publishMessageEvent(ctx, events.MessageDeleted, message)
+		_ = s.publishMessageEvent(ctx, events.MessageDeleted, message, receipt)
 	}
 	s.logger.Info("message deleted", zap.String("message_id", id))
 	return nil
@@ -402,7 +909,8 @@ func (s *Service) DeleteMessage(ctx context.Context, id string) error {
 
 // UpdateMessage updates an existing message and publishes an event.
 func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) error {
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to update message",
 			zap.String("message_id", message.ID),
 			zap.Error(err))
@@ -426,9 +934,16 @@ func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) er
 
 	// Publish message.updated event for real-time streaming. Delivery is best
 	// effort after the durable write succeeded (see publishMessageEvent).
-	_ = s.publishMessageEvent(ctx, events.MessageUpdated, published)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, published, receipt)
 
 	return nil
+}
+
+func (s *Service) updateMessageWithReceipt(ctx context.Context, message *models.Message) (*models.ConversationMutationReceipt, error) {
+	if writer, ok := s.messages.(conversationMessageReceiptWriter); ok {
+		return writer.UpdateMessageWithConversationReceipt(ctx, message)
+	}
+	return nil, s.messages.UpdateMessage(ctx, message)
 }
 
 // AppendMessageContent appends additional content to an existing message.
@@ -445,7 +960,8 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 	// Append the new content
 	message.Content += additionalContent
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to append message content",
 			zap.String("message_id", messageID),
 			zap.Error(err))
@@ -453,7 +969,7 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 	}
 
 	// Publish message.updated event for real-time streaming
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	s.logger.Debug("message content appended",
 		zap.String("message_id", messageID),
@@ -486,7 +1002,8 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 	}
 	message.Metadata["thinking"] = existingThinking + additionalContent
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to append thinking content",
 			zap.String("message_id", messageID),
 			zap.Error(err))
@@ -494,7 +1011,7 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 	}
 
 	// Publish message.updated event for real-time streaming
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	s.logger.Debug("thinking content appended",
 		zap.String("message_id", messageID),
@@ -510,6 +1027,130 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 // The normalized parameter contains typed tool payload data that gets added to metadata.
 func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, normalized *streams.NormalizedPayload) error {
 	return s.UpdateToolCallMessageWithCreate(ctx, sessionID, toolCallID, "", status, result, title, normalized, "", "", "")
+}
+
+// UpsertAgentPlanMessage persists the latest snapshot for one plan-producing
+// tool call. Its deterministic identity makes first delivery and retries use
+// the same row without the missing-tool retry delay.
+func (s *Service) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, sessionID, content, turnID string,
+) error {
+	name := fmt.Sprintf("%s\x00%s\x00%s", sessionID, turnID, sourceToolCallID)
+	messageID := uuid.NewSHA1(agentPlanMessageIDNamespace, []byte(name)).String()
+	correlationID := "agent-plan:" + messageID
+	req := &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeAgentPlan),
+		Metadata: map[string]interface{}{
+			"tool_call_id":            correlationID,
+			"agent_plan_tool_call_id": sourceToolCallID,
+		},
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return err
+	}
+	session, err := s.getSessionWithRetry(
+		ctx, sessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return err
+	}
+	message, err := s.buildMessage(ctx, messageID, req, session)
+	if err != nil {
+		return err
+	}
+	if writer, ok := s.messages.(agentPlanMessageWriter); ok {
+		persisted, receipt, created, err := writer.UpsertAgentPlanMessageWithConversationReceipt(ctx, message)
+		if errors.Is(err, repoerrors.ErrMessageIdentityConflict) {
+			return ErrMessageIDConflict
+		}
+		if err != nil || receipt == nil {
+			return err
+		}
+		return s.publishAgentPlanMessage(ctx, persisted, receipt, created)
+	}
+	return s.upsertAgentPlanMessageFallback(ctx, message, req)
+}
+
+func (s *Service) upsertAgentPlanMessageFallback(
+	ctx context.Context,
+	message *models.Message,
+	req *CreateMessageRequest,
+) error {
+	admissionCtx, releaseAdmission, err := s.AcquireMessageAdmission(ctx, message.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseAdmission()
+
+	existing, err := s.messages.GetMessageWithPromptIndex(admissionCtx, message.ID)
+	if err == nil && existing != nil {
+		if !sameAgentPlanMessageIdentity(existing, message) {
+			return ErrMessageIDConflict
+		}
+		if existing.Content == message.Content {
+			return nil
+		}
+		existing.Content = message.Content
+		receipt, err := s.updateMessageWithReceipt(admissionCtx, existing)
+		if err != nil {
+			return err
+		}
+		return s.publishAgentPlanMessage(admissionCtx, existing, receipt, false)
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check existing agent plan message: %w", err)
+	}
+	_, receipt, err := s.createMessageWithRequestRetry(
+		admissionCtx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return err
+	}
+	return s.publishAgentPlanMessage(admissionCtx, message, receipt, true)
+}
+
+func (s *Service) publishAgentPlanMessage(
+	ctx context.Context,
+	message *models.Message,
+	receipt *models.ConversationMutationReceipt,
+	created bool,
+) error {
+	eventType := events.MessageUpdated
+	if created {
+		eventType = events.MessageAdded
+	}
+	err := s.publishMessageEvent(ctx, eventType, message, receipt)
+	if created {
+		return nil
+	}
+	return err
+}
+
+func sameAgentPlanMessageIdentity(existing, incoming *models.Message) bool {
+	if existing.ID != incoming.ID ||
+		existing.TaskSessionID != incoming.TaskSessionID ||
+		existing.TaskID != incoming.TaskID ||
+		existing.TurnID != incoming.TurnID ||
+		existing.AuthorType != incoming.AuthorType ||
+		existing.AuthorID != incoming.AuthorID ||
+		existing.Type != incoming.Type ||
+		existing.RequestsInput != incoming.RequestsInput {
+		return false
+	}
+	for _, key := range []string{"tool_call_id", "agent_plan_tool_call_id"} {
+		existingValue, existingOK := existing.Metadata[key].(string)
+		incomingValue, incomingOK := incoming.Metadata[key].(string)
+		if !existingOK || !incomingOK || existingValue != incomingValue {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateToolCallMessageWithCreate is like UpdateToolCallMessage but can create the message if not found.
@@ -537,7 +1178,8 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 
 	s.applyToolCallMessageUpdate(message, status, result, title, normalized)
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to update tool call message",
 			zap.String("message_id", message.ID),
 			zap.String("tool_call_id", toolCallID),
@@ -546,7 +1188,7 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 	}
 
 	// Publish message.updated event
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	s.logger.Info("tool call message updated",
 		zap.String("message_id", message.ID),
@@ -645,11 +1287,11 @@ func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, re
 		message.Metadata = make(map[string]interface{})
 	}
 	message.Metadata["status"] = status
-	if result != "" {
+	if result != "" && !models.ToolPayloadRemoved(message.Metadata) {
 		message.Metadata["result"] = result
 	}
 
-	if normalized != nil {
+	if normalized != nil && !models.ToolPayloadRemoved(message.Metadata) {
 		message.Metadata["normalized"] = normalized
 		// Update message type if the normalized kind changed
 		// This handles cases like Read on a directory converting to code_search
@@ -673,7 +1315,13 @@ func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, re
 
 // UpdatePermissionMessage updates a permission request message's status.
 // It includes retry logic to handle race conditions.
-func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
+//
+// The lookup is qualified by the full (task, session, request, pending)
+// identity rather than pending_id alone: a provider may reuse a pending_id
+// for a later, unrelated request once the original is resolved, and a
+// delayed event about the old request must not be able to expire the new
+// one's message.
+func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -682,7 +1330,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 
 	// Retry loop to handle race condition
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		message, err = s.messages.GetMessageByPendingID(ctx, sessionID, pendingID)
+		message, err = s.messages.GetPermissionMessageByIdentity(ctx, taskID, sessionID, requestID, pendingID)
 		if err == nil {
 			break
 		}
@@ -694,6 +1342,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 		if attempt < maxRetries-1 {
 			s.logger.Debug("permission message not found, retrying",
 				zap.String("session_id", sessionID),
+				zap.String("request_id", requestID),
 				zap.String("pending_id", pendingID),
 				zap.Int("attempt", attempt+1),
 				zap.Int("max_retries", maxRetries))
@@ -715,7 +1364,8 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	}
 	message.Metadata["status"] = string(status)
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to update permission message",
 			zap.String("message_id", message.ID),
 			zap.String("pending_id", pendingID),
@@ -724,7 +1374,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	}
 
 	// Publish message.updated event
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	// When a permission expires, also mark the related tool call as cancelled
 	// so the UI no longer shows a loading spinner on the tool call.
@@ -745,6 +1395,49 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 		zap.String("status", string(status)))
 
 	return nil
+}
+
+// ClaimPermissionResolution durably serializes the first resolver before any
+// option is delivered to the live agent process.
+func (s *Service) ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	result, err := s.messages.ClaimPermissionResolution(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to claim permission resolution",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.Audit.RequestID),
+			zap.String("pending_id", request.Audit.PendingID),
+			zap.Error(err))
+		return nil, err
+	}
+	if result.Outcome == models.PermissionClaimed && result.Message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, result.Message)
+	}
+	return result, nil
+}
+
+// FinalizePermissionResolution records the outcome for the exact durable
+// claim. Only successful writes publish the existing message update event.
+func (s *Service) FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	result, err := s.messages.FinalizePermissionResolution(ctx, request)
+	if err != nil {
+		s.logger.Error("failed to finalize permission resolution",
+			zap.String("task_id", request.TaskID),
+			zap.String("session_id", request.SessionID),
+			zap.String("request_id", request.RequestID),
+			zap.String("pending_id", request.PendingID),
+			zap.String("result", string(request.Result)),
+			zap.Error(err))
+		return nil, err
+	}
+	if result.Outcome == models.PermissionFinalized && result.Message != nil {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, result.Message)
+	}
+	return result, nil
+}
+
+func (s *Service) GetPermissionResolutionAudit(ctx context.Context, taskID, sessionID, requestID, pendingID string) (*models.PermissionResolutionAudit, error) {
+	return s.messages.GetPermissionResolutionAudit(ctx, taskID, sessionID, requestID, pendingID)
 }
 
 // UpdateClarificationMessageForQuestion updates a single clarification message
@@ -797,7 +1490,8 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		message.Metadata["response"] = answer
 	}
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to update clarification message",
 			zap.String("message_id", message.ID),
 			zap.String("pending_id", pendingID),
@@ -806,7 +1500,7 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		return err
 	}
 
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	s.logger.Info("clarification message updated",
 		zap.String("message_id", message.ID),
@@ -897,4 +1591,22 @@ func firstRestoredClarification(messages []*models.Message) *models.Message {
 		}
 	}
 	return nil
+}
+
+// resolveAuthorID stamps a human message with the *authenticated* caller
+// rather than whatever author_id the browser sent.
+//
+// Attribution is the whole reason a team uses accounts instead of a shared
+// login, so it cannot be client-supplied: any user could otherwise post as a
+// colleague. Agent messages keep the caller-supplied ID, which names an agent
+// execution rather than a person, and an unauthenticated (internal or
+// auth-disabled) caller keeps today's behavior.
+func (s *Service) resolveAuthorID(ctx context.Context, authorType models.MessageAuthorType, requested string) string {
+	if authorType != models.MessageAuthorUser {
+		return requested
+	}
+	if userID, scoped := callerScope(ctx); scoped {
+		return userID
+	}
+	return requested
 }

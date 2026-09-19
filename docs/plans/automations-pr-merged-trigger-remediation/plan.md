@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/automations-pr-merged-trigger/spec.md
+spec: docs/specs/office/requirements/automations-pr-merged-trigger.md
 created: 2026-08-09
 status: complete
 ---

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-duplicate-endpoint", "02-frontend-duplicate-ui"]
 plan: "plan.md"
-spec: "../../specs/agents/profile-duplicate.md"
+spec: "../../specs/agents/requirements/profile-duplicate.md"
 ---
 
 # Task 03: E2E duplicate flow

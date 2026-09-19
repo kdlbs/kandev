@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-descriptor-api-boot"]
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 03: Reconcile descriptors in the web app

@@ -2,31 +2,65 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+type blockingAgentProfileRecentUseRecorder struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingAgentProfileRecentUseRecorder) RecordAgentProfileRecentUse(
+	context.Context,
+	usermodels.AgentProfileRecentUseContext,
+	string,
+) (*usermodels.AgentProfileRecentUse, error) {
+	close(r.started)
+	<-r.release
+	return nil, nil
+}
+
+type successfulWSLaunchOrchestrator struct{}
+
+func (successfulWSLaunchOrchestrator) LaunchSession(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+	return &orchestrator.LaunchSessionResponse{
+		Success:        true,
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+	}, nil
+}
+
+func (successfulWSLaunchOrchestrator) EnsureSession(context.Context, string, ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
+	return nil, nil
+}
 
 // wsTaskRepo owns everything as "user-b" and records every write, so a request
 // made as "user-a" both fails and leaves no trace.
 type wsTaskRepo struct {
 	mockRepository
 
-	updated       []*models.Task
-	deleted       []string
-	archived      []string
-	stateUpdates  []string
-	sessionsCalls []string
-	created       []*models.Task
+	updated        []*models.Task
+	deleted        []string
+	cascadeDeleted []string
+	archived       []string
+	stateUpdates   []string
+	sessionsCalls  []string
+	created        []*models.Task
 }
 
 func (r *wsTaskRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -48,14 +82,35 @@ func (r *wsTaskRepo) UpdateTask(_ context.Context, task *models.Task) error {
 	return nil
 }
 
+func (r *wsTaskRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
 func (r *wsTaskRepo) DeleteTask(_ context.Context, id string) error {
 	r.deleted = append(r.deleted, id)
+	return nil
+}
+
+func (r *wsTaskRepo) DeleteTaskWithVacatedStep(_ context.Context, id string) (string, error) {
+	r.cascadeDeleted = append(r.cascadeDeleted, id)
+	return "", nil
+}
+
+func (r *wsTaskRepo) ListStructuralChildrenLimited(_ context.Context, _ string, _ int) ([]*models.Task, error) {
+	return nil, nil
+}
+
+func (r *wsTaskRepo) ReparentDirectChildrenInWorkspace(_ context.Context, _, _, _ string) error {
 	return nil
 }
 
 func (r *wsTaskRepo) ArchiveTask(_ context.Context, id string) error {
 	r.archived = append(r.archived, id)
 	return nil
+}
+func (r *wsTaskRepo) ArchiveTaskIfActiveWithVacatedStep(_ context.Context, id, _ string) (string, bool, error) {
+	r.archived = append(r.archived, id)
+	return "", true, nil
 }
 
 func (r *wsTaskRepo) UpdateTaskState(_ context.Context, id string, _ v1.TaskState) error {
@@ -160,33 +215,37 @@ func TestWSTaskReadsDenyForeignTask(t *testing.T) {
 // separately rather than endorsed here.
 func TestWSTaskMutationsDenyForeignTask(t *testing.T) {
 	for name, tc := range map[string]struct {
-		call    func(*TaskHandlers, context.Context) (*ws.Message, error)
-		writes  func(*wsTaskRepo) int
-		wantMsg string
+		call     func(*TaskHandlers, context.Context) (*ws.Message, error)
+		writes   func(*wsTaskRepo) int
+		wantMsg  string
+		wantCode string
 	}{
 		"update": {
 			call: func(h *TaskHandlers, ctx context.Context) (*ws.Message, error) {
 				return h.wsUpdateTask(ctx, wsWorkflowRequest(t, ws.ActionTaskUpdate,
 					map[string]any{"id": "task-b", "title": "Hijacked"}))
 			},
-			writes:  func(r *wsTaskRepo) int { return len(r.updated) },
-			wantMsg: "Failed to update task",
+			writes:   func(r *wsTaskRepo) int { return len(r.updated) },
+			wantMsg:  "Failed to update task",
+			wantCode: string(ws.ErrorCodeInternalError),
 		},
 		"delete": {
 			call: func(h *TaskHandlers, ctx context.Context) (*ws.Message, error) {
 				return h.wsDeleteTask(ctx, wsWorkflowRequest(t, ws.ActionTaskDelete,
 					map[string]any{"id": "task-b"}))
 			},
-			writes:  func(r *wsTaskRepo) int { return len(r.deleted) },
-			wantMsg: "failed to delete task",
+			writes:   func(r *wsTaskRepo) int { return len(r.deleted) },
+			wantMsg:  "Task not found",
+			wantCode: string(ws.ErrorCodeNotFound),
 		},
 		"archive": {
 			call: func(h *TaskHandlers, ctx context.Context) (*ws.Message, error) {
 				return h.wsArchiveTask(ctx, wsWorkflowRequest(t, ws.ActionTaskArchive,
 					map[string]any{"id": "task-b"}))
 			},
-			writes:  func(r *wsTaskRepo) int { return len(r.archived) },
-			wantMsg: "failed to archive task",
+			writes:   func(r *wsTaskRepo) int { return len(r.archived) },
+			wantMsg:  "Task not found",
+			wantCode: string(ws.ErrorCodeNotFound),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -197,9 +256,51 @@ func TestWSTaskMutationsDenyForeignTask(t *testing.T) {
 
 			require.NoError(t, err)
 			payload := wsWorkflowError(t, resp)
-			require.Equal(t, string(ws.ErrorCodeInternalError), payload.Code)
+			require.Equal(t, tc.wantCode, payload.Code)
 			require.Equal(t, tc.wantMsg, payload.Message)
 			require.Zero(t, tc.writes(repo), "a denied mutation must not reach the repository")
+		})
+	}
+}
+
+func TestWSDeleteTaskUsesHandoffCascadeWhenWired(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+	h.handoffSvc = service.NewHandoffService(repo, nil, nil, nil, nil, h.logger)
+
+	resp, err := h.wsDeleteTask(asUser("user-a"), wsWorkflowRequest(t, ws.ActionTaskDelete,
+		map[string]any{"id": "task-b"}))
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Equal(t, []string{"task-b"}, repo.cascadeDeleted)
+	require.Empty(t, repo.deleted, "wired handoff deletion must not use the legacy service path")
+}
+
+func TestWSLifecycleReturnsPendingAfterPostCommitHousekeepingFailure(t *testing.T) {
+	for name, tc := range map[string]struct {
+		action string
+		call   func(*TaskHandlers, context.Context, *ws.Message) (*ws.Message, error)
+	}{
+		"delete":  {action: ws.ActionTaskDelete, call: (*TaskHandlers).wsDeleteTask},
+		"archive": {action: ws.ActionTaskArchive, call: (*TaskHandlers).wsArchiveTask},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &wsTaskRepo{}
+			h := newWSTaskHandlers(t, repo)
+			handoff := service.NewHandoffService(repo, nil, nil, nil, nil, h.logger)
+			handoff.SetTaskResourceCleaner(&postCommitCleanupFailure{err: fmt.Errorf("cleanup unavailable")})
+			h.SetHandoffService(handoff)
+
+			resp, err := tc.call(h, asUser("user-b"), wsWorkflowRequest(t, tc.action,
+				map[string]any{"id": "task-b"}))
+			require.NoError(t, err)
+			require.Equal(t, ws.MessageTypeResponse, resp.Type)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+			require.Equal(t, false, payload["success"])
+			require.Equal(t, true, payload["pending"])
+			require.Equal(t, "task-b", payload["task_id"])
 		})
 	}
 }
@@ -455,4 +556,50 @@ func TestWSCreateTask_PlanModeStartAgentPreservesPlanMode(t *testing.T) {
 	require.True(t, present, "the deferred intent must carry the plan_mode key (to assert the !StartAgent guard)")
 	assert.Equal(t, true, pmFlag,
 		"plan_mode=true must remain true in the deferred launch intent")
+}
+
+func TestWSCreateTaskDoesNotWaitForRecentUsePersistence(t *testing.T) {
+	repo := &wsTaskRepo{}
+	h := newWSTaskHandlers(t, repo)
+	recorder := &blockingAgentProfileRecentUseRecorder{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	h.orchestrator = successfulWSLaunchOrchestrator{}
+	h.agentProfileRecentUseRecorder = recorder
+	defer close(recorder.release)
+
+	result := make(chan struct {
+		response *ws.Message
+		err      error
+	}, 1)
+	go func() {
+		response, err := h.wsCreateTask(asUser("user-b"), wsWorkflowRequest(t, ws.ActionTaskCreate, map[string]any{
+			"workspace_id":     "ws-b",
+			"workflow_id":      "wf-b",
+			"title":            "Async recency",
+			"description":      "Start without waiting for preference persistence",
+			"start_agent":      true,
+			"agent_profile_id": "profile-1",
+		}))
+		result <- struct {
+			response *ws.Message
+			err      error
+		}{response: response, err: err}
+	}()
+
+	select {
+	case <-recorder.started:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("recent-use recorder was not invoked")
+	}
+
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		require.NotNil(t, got.response)
+		require.Equal(t, ws.MessageTypeResponse, got.response.Type)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("successful task.create waited for best-effort recent-use persistence")
+	}
 }

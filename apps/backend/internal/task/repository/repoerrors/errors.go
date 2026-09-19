@@ -12,8 +12,42 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrNoPrimarySession reports that a task exists but has no primary session.
+// Callers can repair that state without hiding other repository failures.
+var ErrNoPrimarySession = errors.New("no primary session")
+
+// ErrInitialTaskBriefStale reports that a prepared task's description changed
+// before its first direct message could be admitted.
+var ErrInitialTaskBriefStale = errors.New("initial task brief is stale")
+
+// ErrMessageNotFound reports that no message row matched the supplied id.
+var ErrMessageNotFound = errors.New("message not found")
+
+// ErrMessageIdentityConflict reports that a deterministic message id already
+// belongs to a different immutable message identity.
+var ErrMessageIdentityConflict = errors.New("message identity conflict")
+
+// ErrTaskParentMismatch reports that a task no longer has the parent/workspace
+// relation a cross-task mutation was authorized against.
+var ErrTaskParentMismatch = errors.New("task parent relation no longer matches")
+
 // ErrTaskPlanNotFound reports that no task plan row matched the supplied task id.
 var ErrTaskPlanNotFound = errors.New("task plan not found")
+
+// ErrTaskPlanCommentsChanged reports that a comment mutation was based on a
+// stale plan identity, row version, or caller-generated comment identity.
+var ErrTaskPlanCommentsChanged = errors.New("task plan comments changed")
+
+// ErrPrimarySessionChanged reports that a guarded delivery no longer targets
+// the task's current primary session.
+var ErrPrimarySessionChanged = errors.New("primary session changed")
+
+// ErrTaskSessionMismatch reports that a delivery target does not belong to its task.
+var ErrTaskSessionMismatch = errors.New("session does not belong to task")
+
+// ErrTaskSessionUnavailable reports that a message or queue target became
+// terminal or otherwise changed state before final prompt admission.
+var ErrTaskSessionUnavailable = errors.New("session is unavailable for prompt admission")
 
 // ErrRepositoryNotFound reports that no live repository row matched the supplied id.
 var ErrRepositoryNotFound = errors.New("repository not found")
@@ -21,12 +55,23 @@ var ErrRepositoryNotFound = errors.New("repository not found")
 // ErrRepositorySetNotFound reports that no repository set row matched the supplied id.
 var ErrRepositorySetNotFound = errors.New("repository set not found")
 
+// ErrRepositoryBranchPolicyNotFound reports that no policy row matched the id.
+var ErrRepositoryBranchPolicyNotFound = errors.New("repository branch policy not found")
+
+// ErrRepositoryBranchPoliciesExist reports that a Gitflow starter cannot seed
+// a repository that already has one or more policies.
+var ErrRepositoryBranchPoliciesExist = errors.New("repository branch policies already exist")
+
 // ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
 var ErrTaskEnvironmentNotFound = errors.New("task environment not found")
 
+// ErrTaskEnvironmentOwnershipChanged reports that an ownership transfer's
+// expected owner or generation is no longer current.
+var ErrTaskEnvironmentOwnershipChanged = errors.New("task environment ownership changed")
+
 // ErrExternalIDConflict reports that a task insert lost the uniqueness race
 // on uniq_tasks_external_id — the TOCTOU backstop for the create sequence's
-// step-3 lookup (docs/specs/tasks/external-id-idempotency/spec.md). Callers
+// step-3 lookup (docs/specs/tasks/system-design/external-id-idempotency.md). Callers
 // must re-read by (workspace_id, external_id) and return the winner as a
 // Found outcome rather than surfacing this error.
 var ErrExternalIDConflict = errors.New("external_id already claimed by another task")
@@ -36,3 +81,52 @@ var ErrExternalIDConflict = errors.New("external_id already claimed by another t
 // task. Creation races resolve by rejecting the late comer; the cleanup
 // inventory was captured under the same barrier.
 var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
+
+// ErrWorkflowResolutionConflict reports that a caller's expected current
+// workflow (passed to guard a write against a concurrent reassignment) no
+// longer matches the task's persisted workflow_id, checked atomically inside
+// the write transaction immediately before the row is updated. The write is
+// rejected rather than silently reverting whatever the concurrent move just
+// did. See task/service.MoveTaskOptions.ExpectedWorkflowID for the caller
+// contract.
+var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
+
+// ErrRunnerMutabilityConflict wraps one of the ten ordered mutability reason
+// codes rejecting a runner switch. Reason is always a member of the same
+// closed vocabulary the projection uses, never "eligible" and never empty.
+type ErrRunnerMutabilityConflict struct {
+	Reason string
+}
+
+func (e *ErrRunnerMutabilityConflict) Error() string {
+	return "runner switch rejected: " + e.Reason
+}
+
+// ErrRunnerCompatibilityConflict reports that the mutability gate passed but
+// the target runner cannot materialize the task's repository. Unlike
+// ErrRunnerMutabilityConflict this code is never projected on the task's
+// runner_ineligible_reason field — it describes the target, not the task.
+var ErrRunnerCompatibilityConflict = errors.New("target cannot materialize repository")
+
+// ErrExecutorProfileNotFound reports that no executor profile row matched
+// the supplied id.
+var ErrExecutorProfileNotFound = errors.New("executor profile not found")
+
+// ErrRunnerEvaluationUnavailable reports that a runner switch could not be
+// decided or applied — a failed read, a failed lock acquisition, a stale
+// compatibility-gate snapshot, a failed metadata write, or a failed commit.
+// It is the one retriable outcome: a caller may repeat the request.
+var ErrRunnerEvaluationUnavailable = errors.New("runner switch evaluation unavailable")
+
+// ErrStepChanged reports that a reorder's submitted band membership no
+// longer exactly matches the band's persisted membership
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.19). The whole request is rejected
+// atomically and the caller reconciles to the authoritative order the error
+// carries, silently rather than showing the user a message.
+var ErrStepChanged = errors.New("step_changed")
+
+// ErrInvalidReorder reports a malformed reorder request
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.18): no valid band named, an empty or
+// duplicate id list, or an id that names a task outside the named step/band.
+// Unlike ErrStepChanged this implies nothing about the persisted order.
+var ErrInvalidReorder = errors.New("invalid_reorder")

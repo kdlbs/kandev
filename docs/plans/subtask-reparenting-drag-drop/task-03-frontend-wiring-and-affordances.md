@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-frontend-nest-drop-infrastructure"]
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-reparenting-drag-drop.md"
+spec: "../../specs/tasks/requirements/subtask-reparenting-drag-drop.md"
 ---
 
 # Task 03: Frontend wiring and affordances

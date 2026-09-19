@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/automation-runs.md"
+spec: "../../specs/office/requirements/automation-runs.md"
 ---
 
 # Task 01: Keep visible run status live
@@ -51,7 +51,7 @@ the same behavior and should be developed in one TDD cycle.
 
 ## Inputs
 
-- `docs/specs/office/automation-runs.md`, especially the live-status scenarios
+- `docs/specs/office/requirements/automation-runs.md`, especially the live-status scenarios
   and the visible-row/zero-summary regression.
 - `apps/web/components/runs/use-live-refresh.ts` for interval ownership.
 - `apps/web/components/runs/use-automation-activity.ts` for the capped-window

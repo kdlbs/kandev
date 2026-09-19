@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-composite-semantics"]
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-reparenting-drag-drop.md"
+spec: "../../specs/tasks/requirements/subtask-reparenting-drag-drop.md"
 ---
 
 # Task 02: Frontend nest-drop infrastructure

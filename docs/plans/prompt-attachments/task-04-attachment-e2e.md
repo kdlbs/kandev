@@ -5,7 +5,7 @@ status: pending
 wave: 4
 depends_on: ["03-frontend-staged-uploads"]
 plan: "plan.md"
-spec: "../../specs/tasks/prompt-attachments.md"
+spec: "../../specs/tasks/requirements/prompt-attachments.md"
 ---
 
 # Task 04: Attachment E2E coverage

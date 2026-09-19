@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/review-file-status.md"
+spec: "../../specs/ui/requirements/review-file-status.md"
 ---
 
 # Task 01: Preserve Review path punctuation
@@ -44,7 +44,7 @@ The managed desktop and mobile E2E commands each rebuild the production backend 
 - `apps/web/e2e/helpers/layout-assertions.ts`
 - `apps/web/e2e/tests/review/review-file-status.spec.ts`
 - `apps/web/e2e/tests/review/mobile-review-file-status.spec.ts`
-- `docs/specs/ui/review-file-status.md`
+- `docs/specs/ui/requirements/review-file-status.md`
 - `docs/plans/review-path-punctuation/plan.md`
 - `docs/plans/review-path-punctuation/task-01-preserve-review-path-punctuation.md`
 
@@ -58,7 +58,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/ui/review-file-status.md`, especially the sticky-header path and mobile overflow scenarios.
+- `docs/specs/ui/requirements/review-file-status.md`, especially the sticky-header path and mobile overflow scenarios.
 - `docs/plans/review-path-punctuation/plan.md`, including the confirmed root cause and mobile design contract.
 - `apps/web/components/review/AGENTS.md` and `apps/web/AGENTS.md`.
 - `/tdd`, `/e2e`, and `/mobile-parity` guidance during implementation.

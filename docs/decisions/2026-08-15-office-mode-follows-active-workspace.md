@@ -69,7 +69,7 @@ dashboards) render under the active workspace's chrome; they do not redirect.
 - The legacy `office-active-workspace` cookie keeps its ADR-0023 role as a
   read-only fallback for the office boot paths; office selections now write
   the port-scoped name (amended 2026-08-17, see
-  `docs/specs/fix-multi-instance-cookie-isolation/spec.md`).
+  `docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md`).
 
 ## Alternatives Considered
 

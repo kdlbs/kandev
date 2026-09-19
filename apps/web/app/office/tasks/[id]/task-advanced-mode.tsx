@@ -11,6 +11,8 @@ import { ExecutionIndicator } from "../../components/execution-indicator";
 import { useOfficeTopbar } from "../../components/office-topbar-context";
 import type { Task } from "./types";
 import { useTranslation } from "react-i18next";
+import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
+import { TaskSharedError } from "@/components/task/task-shared-error";
 
 const OfficeDockviewLayout = dynamic(
   () => import("./office-dockview-layout").then((m) => ({ default: m.OfficeDockviewLayout })),
@@ -57,14 +59,24 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
   });
 
   return (
-    <div className="flex flex-col h-full">
-      {isSessionEnded && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-muted border-b border-border shrink-0">
-          <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">{t("office:agentSessionEnded")}</span>
-        </div>
-      )}
-      <OfficeDockviewLayout taskId={task.id} sessionId={sessionId} />
-    </div>
+    <TaskLaunchErrorProvider
+      value={{
+        taskId: task.id,
+        workspaceId: task.workspaceId,
+        statusSummary: task.statusSummary,
+        repositories: task.repositories,
+      }}
+    >
+      <div className="flex flex-col h-full">
+        {isSessionEnded && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-muted border-b border-border shrink-0">
+            <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">{t("office:agentSessionEnded")}</span>
+          </div>
+        )}
+        <TaskSharedError />
+        <OfficeDockviewLayout taskId={task.id} sessionId={sessionId} task={task} />
+      </div>
+    </TaskLaunchErrorProvider>
   );
 }

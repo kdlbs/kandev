@@ -3,19 +3,29 @@ import { Label } from "@kandev/ui/label";
 import { useTranslation } from "react-i18next";
 import { StorageActionButton } from "./storage-action-button";
 import { StorageSettingHelp } from "./storage-setting-help";
+import { settingsControlClassName } from "@/components/settings/settings-control";
 
 type Props = {
   path: string;
   setPath: (path: string) => void;
   onOpen: () => void;
   pending: boolean;
+  /** Overrides the default pending explanation, e.g. for the admin gate. */
+  pendingReason?: string;
   enabled: boolean;
 };
 
-export function StorageAdoptionField({ path, setPath, onOpen, pending, enabled }: Props) {
+export function StorageAdoptionField({
+  path,
+  setPath,
+  onOpen,
+  pending,
+  pendingReason,
+  enabled,
+}: Props) {
   const { t } = useTranslation();
   let disabledReason: string | undefined;
-  if (pending) disabledReason = t("system:storageActionPending");
+  if (pending) disabledReason = pendingReason ?? t("system:storageActionPending");
   else if (!enabled) disabledReason = t("system:storageEnableGoCacheFirst");
   else if (!path.trim()) disabledReason = t("system:storageEnterCachePathFirst");
   const fieldLabel = t("system:storageExternalGoCache");
@@ -37,7 +47,7 @@ export function StorageAdoptionField({ path, setPath, onOpen, pending, enabled }
           disabled={pending || !enabled}
           onChange={(event) => setPath(event.target.value)}
           placeholder="/root/.cache/go-build"
-          className="h-11 min-w-0 font-mono"
+          className={settingsControlClassName("min-w-0 font-mono")}
           data-testid="storage-go-cache-adopt-path"
         />
         <StorageActionButton

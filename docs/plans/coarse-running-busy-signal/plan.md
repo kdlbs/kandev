@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/background-work-liveness.md
+spec: docs/specs/platform/requirements/background-work-liveness.md
 created: 2026-07-28
 status: completed
 ---

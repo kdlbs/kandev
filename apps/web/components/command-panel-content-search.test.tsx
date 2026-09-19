@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceContentSearchResult } from "@/lib/types/backend";
+import type { Task } from "@/lib/types/http";
+import { taskId, workflowId, workspaceId } from "@/lib/types/ids";
 
 vi.mock("@kandev/ui/command", () => ({
   Command: ({ children, shouldFilter }: { children: ReactNode; shouldFilter?: boolean }) => (
@@ -9,8 +11,23 @@ vi.mock("@kandev/ui/command", () => ({
       {children}
     </div>
   ),
-  CommandDialog: ({ children, open }: { children: ReactNode; open: boolean }) =>
-    open ? <div>{children}</div> : null,
+  CommandDialog: ({
+    children,
+    open,
+    onOpenChange,
+  }: {
+    children: ReactNode;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) =>
+    open ? (
+      <div>
+        <button type="button" onClick={() => onOpenChange(false)}>
+          Dismiss test dialog
+        </button>
+        {children}
+      </div>
+    ) : null,
   CommandEmpty: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandGroup: ({
     children,
@@ -51,7 +68,13 @@ vi.mock("@kandev/ui/command", () => ({
       />
     </div>
   ),
-  CommandItem: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  // Forwards onSelect: without it the mock silently swallows every selection
+  // handler and any assertion about picking a row would prove nothing.
+  CommandItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => (
+    <div role="option" aria-selected="false" onClick={onSelect}>
+      {children}
+    </div>
+  ),
   CommandList: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandShortcut: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
@@ -94,6 +117,7 @@ import {
   CommandPanelView,
   MODE_COMMANDS,
   MODE_SEARCH_CONTENT,
+  MODE_SEARCH_TASKS,
   type CommandPanelViewProps,
 } from "./command-panel-footer";
 
@@ -108,6 +132,8 @@ const result: WorkspaceContentSearchResult = {
 
 const ARIA_SELECTED_ATTRIBUTE = "aria-selected";
 const CMDK_GROUP_HEADING_SELECTOR = "[cmdk-group-heading]";
+const ACTIONS_GROUP = "Actions";
+const CONFIRMATION_LABEL = "Remove selected item";
 
 function viewProps(overrides: Partial<CommandPanelViewProps> = {}): CommandPanelViewProps {
   return {
@@ -138,6 +164,8 @@ function viewProps(overrides: Partial<CommandPanelViewProps> = {}): CommandPanel
     taskResults: [],
     stepMap: new Map(),
     repoMap: new Map(),
+    liveTasksById: new Map(),
+    lastStepIdByWorkflowId: new Map(),
     handleTaskSelect: vi.fn(),
     ...overrides,
   };
@@ -168,14 +196,21 @@ describe("CommandPanelView task content search mode", () => {
     fireEvent.click(screen.getByTestId("mock-content-search"));
     expect(props.handleContentSelect).toHaveBeenCalledWith(result);
   });
+});
 
+describe("CommandPanelView scope switcher", () => {
   it("makes all palette scopes visible and switches without clearing the query", () => {
     const onScopeChange = vi.fn();
     const props = viewProps({ onScopeChange });
     render(<CommandPanelView {...props} />);
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(3);
+    expect(tabs.map((tab) => tab.getAttribute("aria-label"))).toEqual([
+      "Commands",
+      "Tasks",
+      "Files",
+      "Contents",
+    ]);
     expect(
       screen.getByRole("tab", { name: "Commands" }).getAttribute(ARIA_SELECTED_ATTRIBUTE),
     ).toBe("false");
@@ -245,7 +280,7 @@ describe("CommandPanelView task content search mode", () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it("hides workspace modes and leaves Tab alone outside a task workbench", () => {
+  it("hides workspace modes but keeps commands and tasks outside a task workbench", () => {
     const onScopeChange = vi.fn();
     render(
       <CommandPanelView
@@ -258,10 +293,15 @@ describe("CommandPanelView task content search mode", () => {
     );
     const input = screen.getByRole("combobox");
 
-    expect(screen.queryByRole("tablist", { name: "Command palette mode" })).toBeNull();
-    expect(screen.queryByText("Switch mode")).toBeNull();
-    expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
-    expect(onScopeChange).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("aria-label"))).toEqual([
+      "Commands",
+      "Tasks",
+    ]);
+    // Tab still cycles, but only between the two scopes that need no worktree.
+    expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(false);
+    expect(onScopeChange).toHaveBeenLastCalledWith("search-tasks");
+    expect(fireEvent.keyDown(input, { key: "Tab", shiftKey: true })).toBe(false);
+    expect(onScopeChange).toHaveBeenLastCalledWith("search-tasks");
   });
 });
 
@@ -366,8 +406,8 @@ describe("CommandPanelView mode result safety", () => {
           mode: "commands",
           search: "needle",
           commands: [
-            { id: "matching-command", label: "Needle command", group: "Actions" },
-            { id: "unrelated-command", label: "Unrelated action", group: "Actions" },
+            { id: "matching-command", label: "Needle command", group: ACTIONS_GROUP },
+            { id: "unrelated-command", label: "Unrelated action", group: ACTIONS_GROUP },
           ],
         })}
       />,
@@ -417,5 +457,165 @@ describe("CommandPanelView mode result safety", () => {
     expect(groups).toHaveLength(2);
     expect(groups[0].getAttribute("data-repository")).toBe("backend");
     expect(groups[1].getAttribute("data-repository")).toBe("frontend");
+  });
+});
+
+describe("CommandPanelView confirmations", () => {
+  it("labels generic confirmations from their command and hides the command row", () => {
+    const confirmationCommand = {
+      id: "destructive-command",
+      label: CONFIRMATION_LABEL,
+      group: ACTIONS_GROUP,
+      confirmation: <div>Confirm removal</div>,
+    };
+    const regularCommand = {
+      id: "regular-command",
+      label: "Keep working",
+      group: ACTIONS_GROUP,
+    };
+
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "",
+          commands: [confirmationCommand, regularCommand],
+          grouped: [[ACTIONS_GROUP, [confirmationCommand, regularCommand]]],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("alertdialog", { name: CONFIRMATION_LABEL })).toBeTruthy();
+    expect(screen.getByText("Confirm removal")).toBeTruthy();
+    expect(screen.queryByText(CONFIRMATION_LABEL)).toBeNull();
+    expect(screen.getByText("Keep working")).toBeTruthy();
+  });
+
+  it("dismisses an owned confirmation when the palette closes", () => {
+    const onConfirmationDismiss = vi.fn();
+    const setOpen = vi.fn();
+    const confirmationCommand = {
+      id: "destructive-command",
+      label: CONFIRMATION_LABEL,
+      group: ACTIONS_GROUP,
+      confirmation: <div>Confirm removal</div>,
+      onConfirmationDismiss,
+    };
+
+    render(
+      <CommandPanelView
+        {...viewProps({
+          setOpen,
+          mode: MODE_COMMANDS,
+          commands: [confirmationCommand],
+          grouped: [[ACTIONS_GROUP, [confirmationCommand]]],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss test dialog" }));
+
+    expect(onConfirmationDismiss).toHaveBeenCalledOnce();
+    expect(setOpen).toHaveBeenCalledWith(false);
+  });
+});
+
+function task(id: string, title: string): Task {
+  return {
+    id: taskId(id),
+    workspace_id: workspaceId("workspace-1"),
+    workflow_id: workflowId("workflow-1"),
+    workflow_step_id: "step-1",
+    position: 0,
+    title,
+    description: "",
+    state: "IN_PROGRESS",
+    priority: "medium",
+    created_at: "2026-08-24T09:00:00Z",
+    updated_at: "2026-08-24T09:00:00Z",
+  };
+}
+
+describe("CommandPanelView commands scope ordering", () => {
+  const archiveCommand = {
+    id: "task-archive",
+    label: "Archive task",
+    group: "Task",
+    action: vi.fn(),
+  };
+
+  function groupHeadings() {
+    return Array.from(document.querySelectorAll(CMDK_GROUP_HEADING_SELECTOR)).map(
+      (heading) => heading.textContent,
+    );
+  }
+
+  it("puts matching commands above the task preview once the user types", () => {
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "archive",
+          commands: [archiveCommand],
+          grouped: [],
+          taskResults: [task("task-1", "Close every remaining archive item")],
+        })}
+      />,
+    );
+
+    expect(groupHeadings()).toEqual(["Commands", "Tasks"]);
+  });
+
+  it("keeps the active task list on top while nothing is typed", () => {
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "",
+          commands: [archiveCommand],
+          grouped: [["Task", [archiveCommand]]],
+          taskResults: [task("task-1", "Resume yesterday's work")],
+        })}
+      />,
+    );
+
+    expect(groupHeadings()).toEqual(["Active Tasks", "Task"]);
+  });
+});
+
+describe("CommandPanelView tasks scope", () => {
+  it("lists task results and opens the one that is picked", () => {
+    const target = task("task-1", "Palette task");
+    const props = viewProps({
+      mode: MODE_SEARCH_TASKS,
+      search: "palette",
+      taskResults: [target],
+    });
+    render(<CommandPanelView {...props} />);
+
+    expect(screen.getByPlaceholderText("Search for tasks...")).toBeTruthy();
+    expect(screen.getByText("Palette task")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute(ARIA_SELECTED_ATTRIBUTE)).toBe(
+      "true",
+    );
+
+    fireEvent.click(screen.getByText("Palette task"));
+    expect(props.handleTaskSelect).toHaveBeenCalledWith(target);
+  });
+
+  it("reports an empty task search instead of falling back to commands", () => {
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_SEARCH_TASKS,
+          search: "nothing",
+          taskResults: [],
+          commands: [{ id: "nav-home", label: "Go Home", group: "Navigation" }],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("No tasks found.")).toBeTruthy();
+    expect(screen.queryByText("Go Home")).toBeNull();
   });
 });

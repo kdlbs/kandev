@@ -55,6 +55,8 @@ import {
 } from "./use-remote-contribution-resolution";
 import { useRemoteContributionResolution } from "./use-remote-contribution-resolution";
 import { useTranslation } from "react-i18next";
+import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
+import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 
 function useChangesPanelStoreData() {
   const { t } = useTranslation();
@@ -137,7 +139,7 @@ export type ChangesPanelBodyProps = {
   onUnstage: (path: string, repo?: string) => Promise<void>;
   onBulkStage: (paths: string[]) => void;
   onBulkUnstage: (paths: string[]) => void;
-  onBulkDiscard: (paths: string[]) => void;
+  onBulkDiscard: (paths: string[], anchor?: HTMLElement) => void;
   onPush: () => void;
   onForcePush: () => void;
   stagedFileCount: number;
@@ -156,6 +158,11 @@ export type ChangesPanelBodyProps = {
     pullBehind: number;
   }>;
   prByRepo?: Record<string, string | undefined>;
+  workspaceRestoration?: WorkspaceRestorationAttempt | null;
+  onRestoreWorkspace?: () => void;
+  restoreWorkspaceDisabled?: boolean;
+  /** Monotonic token used to expand both histories after comparison navigation. */
+  comparisonRequestToken?: number;
 };
 
 function usePerRepoCallbacks(
@@ -335,9 +342,11 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     useRepositoryKeys,
     relation: relationState.relation,
     prs,
+    repositoryScope: relationState.repositoryScope,
     repositoryName: relationState.repositoryName,
     selectedPR: taskPR,
     refreshProviderEvidence: relationState.refreshProviderEvidence,
+    contributionHistoryTarget: relationState.contributionHistoryTarget,
   };
 }
 
@@ -347,7 +356,7 @@ function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): 
 
 function useChangesPanelResolutionTarget(
   relation: RemoteContributionRelation,
-  repositoryName: string | undefined,
+  repositoryScope: string,
   selectedPR: TaskPR | null | undefined,
   t: (key: string) => string,
 ) {
@@ -356,11 +365,11 @@ function useChangesPanelResolutionTarget(
     () =>
       buildRemoteContributionResolutionTarget(
         relation,
-        repositoryName,
+        repositoryScope,
         selectedPR,
         remoteRepositoryLabel,
       ),
-    [relation, repositoryName, selectedPR, remoteRepositoryLabel],
+    [relation, repositoryScope, selectedPR, remoteRepositoryLabel],
   );
 }
 
@@ -368,6 +377,7 @@ export function useChangesPanelData() {
   const { t } = useTranslation();
   const { activeTaskId, activeSessionId, baseBranch, gitCredentialDisplay } =
     useChangesPanelStoreData();
+  const workspaceRestoration = useWorkspaceRestoration(activeTaskId, activeSessionId);
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
@@ -383,7 +393,7 @@ export function useChangesPanelData() {
   );
   const resolutionTarget = useChangesPanelResolutionTarget(
     prData.relation,
-    prData.repositoryName,
+    prData.repositoryScope,
     prData.selectedPR,
     t,
   );
@@ -453,6 +463,7 @@ export function useChangesPanelData() {
     walkthroughRequestReady,
     resolution,
     resolutionTarget,
+    workspaceRestoration,
     pushDisabled: remoteActionPolicy.pushDisabled,
     pullDisabled: remoteActionPolicy.pullDisabled,
     pullDisabledReason,
@@ -467,11 +478,80 @@ type ChangesPanelCallbacks = {
   onOpenReview?: () => void;
 };
 
+type ChangesPanelWorkspaceActions = Pick<
+  ChangesPanelBodyProps,
+  | "onRevertCommit"
+  | "onStageAll"
+  | "onUnstageAll"
+  | "onStage"
+  | "onUnstage"
+  | "onBulkStage"
+  | "onBulkUnstage"
+  | "onBulkDiscard"
+  | "onPush"
+  | "onForcePush"
+  | "onRepoStageAll"
+  | "onRepoUnstageAll"
+  | "onRepoCommit"
+  | "onRepoPush"
+  | "onRepoCreatePR"
+>;
+
+function buildChangesPanelWorkspaceActions(
+  data: ReturnType<typeof useChangesPanelData>,
+  workspaceBlocked: boolean,
+): ChangesPanelWorkspaceActions {
+  const { git, gitHandlers, localDialogs, repoCallbacks } = data;
+  if (workspaceBlocked) {
+    return {
+      onRevertCommit: undefined,
+      onStageAll: () => undefined,
+      onUnstageAll: () => undefined,
+      onStage: async () => undefined,
+      onUnstage: async () => undefined,
+      onBulkStage: () => undefined,
+      onBulkUnstage: () => undefined,
+      onBulkDiscard: () => undefined,
+      onPush: () => undefined,
+      onForcePush: () => undefined,
+      onRepoStageAll: undefined,
+      onRepoUnstageAll: undefined,
+      onRepoCommit: undefined,
+      onRepoPush: undefined,
+      onRepoCreatePR: undefined,
+    };
+  }
+  return {
+    onRevertCommit: gitHandlers.handleRevertCommit,
+    onStageAll: git.stageAll,
+    onUnstageAll: git.unstageAll,
+    onStage: (path, repo) => git.stageFile([path], repo).then(() => undefined),
+    onUnstage: (path, repo) => git.unstageFile([path], repo).then(() => undefined),
+    onBulkStage: (paths) => {
+      git.stageFile(paths).catch(() => undefined);
+    },
+    onBulkUnstage: (paths) => {
+      git.unstageFile(paths).catch(() => undefined);
+    },
+    onBulkDiscard: localDialogs.handleBulkDiscardClick,
+    onPush: () => gitHandlers.handlePush(),
+    onForcePush: () => gitHandlers.handleForcePush(),
+    onRepoStageAll: repoCallbacks.onRepoStageAll,
+    onRepoUnstageAll: repoCallbacks.onRepoUnstageAll,
+    onRepoCommit: repoCallbacks.onRepoCommit,
+    onRepoPush: repoCallbacks.onRepoPush,
+    onRepoCreatePR: repoCallbacks.onRepoCreatePR,
+  };
+}
+
 export function buildChangesPanelBodyProps(
   data: ReturnType<typeof useChangesPanelData>,
   callbacks: ChangesPanelCallbacks,
 ): ChangesPanelBodyProps {
-  const { git, gitHandlers, localDialogs, repoCallbacks, staged } = data;
+  const { git, staged } = data;
+  const workspaceBlocked =
+    data.workspaceRestoration.status !== null && data.workspaceRestoration.status !== "ready";
+  const workspaceActions = buildChangesPanelWorkspaceActions(data, workspaceBlocked);
   return {
     hasAnything: git.hasAnything || data.hasPRFiles || data.hasPRCommits,
     hasUnstaged: git.hasUnstaged,
@@ -483,10 +563,10 @@ export function buildChangesPanelBodyProps(
     resolution: data.resolution,
     resolutionTarget: data.resolutionTarget,
     providerPRNumber: data.selectedPR?.pr_number,
-    pushDisabled: data.pushDisabled,
-    pullDisabled: data.pullDisabled,
-    canPush: git.canPush,
-    canCreatePR: git.canCreatePR,
+    pushDisabled: data.pushDisabled || workspaceBlocked,
+    pullDisabled: data.pullDisabled || workspaceBlocked,
+    canPush: git.canPush && !workspaceBlocked,
+    canCreatePR: git.canCreatePR && !workspaceBlocked,
     existingPrUrl: data.existingPrUrl,
     unstagedFiles: data.unstagedFiles,
     stagedFiles: data.stagedFiles,
@@ -506,31 +586,16 @@ export function buildChangesPanelBodyProps(
     onOpenDiffFile: callbacks.onOpenDiffFile,
     onEditFile: callbacks.onEditFile,
     onOpenCommitDetail: callbacks.onOpenCommitDetail,
-    onRevertCommit: gitHandlers.handleRevertCommit,
     onOpenReview: callbacks.onOpenReview,
-    onStageAll: git.stageAll,
-    onUnstageAll: git.unstageAll,
-    onStage: (path, repo) => git.stageFile([path], repo).then(() => undefined),
-    onUnstage: (path, repo) => git.unstageFile([path], repo).then(() => undefined),
-    onBulkStage: (paths) => {
-      git.stageFile(paths).catch(() => undefined);
-    },
-    onBulkUnstage: (paths) => {
-      git.unstageFile(paths).catch(() => undefined);
-    },
-    onBulkDiscard: localDialogs.handleBulkDiscardClick,
-    onPush: () => gitHandlers.handlePush(),
-    onForcePush: () => gitHandlers.handleForcePush(),
+    ...workspaceActions,
     stagedFileCount: staged.stagedFileCount,
     stagedAdditions: staged.stagedAdditions,
     stagedDeletions: staged.stagedDeletions,
-    onRepoStageAll: repoCallbacks.onRepoStageAll,
-    onRepoUnstageAll: repoCallbacks.onRepoUnstageAll,
-    onRepoCommit: repoCallbacks.onRepoCommit,
-    onRepoPush: repoCallbacks.onRepoPush,
-    onRepoCreatePR: repoCallbacks.onRepoCreatePR,
     repoDisplayName: data.repoDisplayName,
     perRepoStatus: git.perRepoStatus,
     prByRepo: data.prByRepo,
+    workspaceRestoration: data.workspaceRestoration.attempt,
+    onRestoreWorkspace: () => void data.workspaceRestoration.restore(),
+    restoreWorkspaceDisabled: data.workspaceRestoration.status === "pending",
   };
 }

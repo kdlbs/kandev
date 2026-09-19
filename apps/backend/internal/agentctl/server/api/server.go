@@ -16,8 +16,10 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
@@ -38,7 +40,24 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	lspInstaller     lspInstallerRegistry
 
+	// credentialSource, when set via SetCredentialSource, authenticates this
+	// instance's requests and streams against the control server's single
+	// rotating credential instead of the static cfg.AuthToken captured at
+	// construction (design 01 "Single driver",
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). Nil preserves the legacy
+	// static-token behavior every test constructing a Server without a
+	// running control server alongside it relies on.
+	credentialSource InstanceCredentialSource
+
 	upgrader websocket.Upgrader
+}
+
+// SetCredentialSource wires this instance server's authentication and
+// stream lifetime to the control server's single rotating credential,
+// replacing the static per-instance token captured at construction. Call
+// once, before the server starts accepting requests.
+func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
+	s.credentialSource = src
 }
 
 // NewServer creates a new API server for an agent instance.
@@ -69,7 +88,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
 	//   runs in the same trust boundary but does not possess the auth token.
-	s.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
@@ -100,6 +119,7 @@ func (s *Server) setupRoutes() {
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/start", s.handleStart)
 		api.POST("/stop", s.handleStop)
 
@@ -113,6 +133,7 @@ func (s *Server) setupRoutes() {
 
 		// Workspace state (poll mode driven by gateway focus signal)
 		api.POST("/workspace/poll-mode", s.handleSetPollMode)
+		api.POST("/workspace/refresh", s.handleRefreshWorkspace)
 
 		// Workspace rescan: triggered by the kandev backend after a new
 		// sibling worktree appears on disk (multi-branch add_branch flow).
@@ -137,7 +158,10 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.GET("/workspace/file/content-at-ref", s.handleFileContentAtRef)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
+		api.POST("/workspace/html-previews", s.handleWorkspacePreviewPublish)
 		api.POST("/workspace/file/create", s.handleFileCreate)
+		api.POST("/workspace/file/upload", s.handleFileUpload)
+		api.POST("/workspace/file/upload-preflight", s.handleUploadPreflight)
 		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)
@@ -147,6 +171,7 @@ func (s *Server) setupRoutes() {
 		// Docker, Sprites — to seed the workspace with gitignored config
 		// after the in-container clone).
 		api.POST("/workspace/copy-files", s.handleWorkspaceCopyFiles)
+		api.POST(agentctltypes.CanvasSourceTransferPath[len("/api/v1"):], s.handleCanvasSourceTransfer)
 		api.POST("/attachments/materialize", s.handleMaterializeAttachment)
 		api.POST("/workspace/diagnostics/:id", s.handleWorkspaceDiagnostics)
 		api.POST("/workspace/materialize-repository", s.handleWorkspaceMaterializeRepository)
@@ -190,6 +215,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/push-preflight", s.handleGitPushPreflight)
 		api.POST("/git/contribution/replace", s.handleGitReplaceContribution)
 		api.POST("/git/contribution/use", s.handleGitUseContribution)
+		api.POST("/git/contribution/history-explanation", s.handleGitContributionHistoryExplanation)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
 		api.POST("/git/abort", s.handleGitAbort)
@@ -327,8 +353,10 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeTaskTitlePending && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', or 'office'"})
+	// ModeExternal stays rejected on purpose: it belongs to the backend's own
+	// MCP endpoint for external coding agents, and no launch path can emit it.
+	if !mcpmode.IsInstanceMode(req.Mode) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', or 'automation'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)
@@ -427,10 +455,11 @@ func (s *Server) handleStart(c *gin.Context) {
 type AgentConfigureRequest struct {
 	Command         string            `json:"command"`
 	AgentArgs       optionalArgs      `json:"agent_args"`
-	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents (Amp): command for follow-up prompts
+	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
 	ContinueArgs    optionalArgs      `json:"continue_args"`
 	Env             map[string]string `json:"env,omitempty"`
-	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
+	ReplaceEnv      bool              `json:"replace_env,omitempty"`
+	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // "untrusted", "on-failure", "on-request", or "never"
 }
 
 type optionalArgs struct {
@@ -467,11 +496,17 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	if err := s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present); err != nil {
-		s.logger.Error("failed to configure agent", zap.Error(err), zap.String("command", req.Command))
+	var configureErr error
+	if req.ReplaceEnv {
+		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+	} else {
+		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+	}
+	if configureErr != nil {
+		s.logger.Error("failed to configure agent", zap.Error(configureErr), zap.String("command", req.Command))
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,
-			Error:   err.Error(),
+			Error:   configureErr.Error(),
 		})
 		return
 	}

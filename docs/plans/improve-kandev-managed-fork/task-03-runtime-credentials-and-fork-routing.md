@@ -5,7 +5,7 @@ status: complete
 wave: 3
 depends_on: ["02-creation-preparation-and-bootstrap"]
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 03: Runtime Credentials and Fork Routing

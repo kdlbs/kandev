@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/settings-prompt-editor.md
+spec: docs/specs/ui/requirements/settings-prompt-editor.md
 created: 2026-08-20
 status: done
 ---

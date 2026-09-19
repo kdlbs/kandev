@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/settings-prompt-editor.md"
+spec: "../../specs/ui/requirements/settings-prompt-editor.md"
 ---
 
 # Task 01: Fix prompt completion insertion and filtering
@@ -56,7 +56,7 @@ the changed files, and `git diff --check` before marking the task done.
 - `apps/web/e2e/tests/workflow/workflow-step-autocomplete.spec.ts`
 - `apps/web/e2e/tests/integrations/github-quick-action-prompt-autocomplete.spec.ts`
 - `apps/web/e2e/tests/integrations/mobile-github-quick-action-prompt-autocomplete.spec.ts`
-- `docs/specs/ui/settings-prompt-editor.md`
+- `docs/specs/ui/requirements/settings-prompt-editor.md`
 - `docs/plans/settings-prompt-completion-regressions/plan.md`
 - `docs/plans/settings-prompt-completion-regressions/task-01-completion-provider-regressions.md`
 
@@ -71,7 +71,7 @@ contract.
 
 ## Inputs
 
-- The repaired behavior and scenarios in `docs/specs/ui/settings-prompt-editor.md`.
+- The repaired behavior and scenarios in `docs/specs/ui/requirements/settings-prompt-editor.md`.
 - The confirmed root causes and exact source files in `plan.md`.
 - Existing Monaco provider tests and the shared prompt-editor E2E helpers.
 

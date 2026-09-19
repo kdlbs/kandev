@@ -44,7 +44,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: backend
             initialDelaySeconds: 10
             periodSeconds: 10

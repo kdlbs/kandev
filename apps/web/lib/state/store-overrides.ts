@@ -4,12 +4,16 @@ import type { DefaultState } from "./default-state";
 // after all slice spreads so that caller-supplied initialState wins over slice defaults.
 // Note: collapsedSubtaskParents is intentionally omitted — createUISlice hydrates it
 // from sessionStorage and we want that to win.
+// eslint-disable-next-line max-lines-per-function -- this explicit projection documents the state merge boundary
 export function buildStateOverrides(m: DefaultState) {
   return {
     kanban: m.kanban,
     kanbanMulti: m.kanbanMulti,
     workflows: m.workflows,
+    workspaceContextGeneration: m.workspaceContextGeneration,
+    workspaceContextRead: m.workspaceContextRead,
     tasks: m.tasks,
+    taskRemoval: m.taskRemoval,
     workspaces: m.workspaces,
     repositories: m.repositories,
     repositoryBranches: m.repositoryBranches,
@@ -26,10 +30,12 @@ export function buildStateOverrides(m: DefaultState) {
     settingsData: m.settingsData,
     sleepInhibition: m.sleepInhibition,
     userSettings: m.userSettings,
+    agentProfileRecentUse: m.agentProfileRecentUse,
     messages: m.messages,
     turns: m.turns,
     taskSessions: m.taskSessions,
     taskSessionsByTask: m.taskSessionsByTask,
+    pendingActionProjectionsBySessionId: m.pendingActionProjectionsBySessionId,
     sessionAgentctl: m.sessionAgentctl,
     worktrees: m.worktrees,
     sessionWorktreesBySessionId: m.sessionWorktreesBySessionId,
@@ -40,6 +46,7 @@ export function buildStateOverrides(m: DefaultState) {
     shell: m.shell,
     processes: m.processes,
     gitStatus: m.gitStatus,
+    gitCheckoutGeneration: m.gitCheckoutGeneration,
     contextWindow: m.contextWindow,
     agents: m.agents,
     sessionMode: m.sessionMode,
@@ -75,6 +82,8 @@ export function buildStateOverrides(m: DefaultState) {
     office: m.office,
     features: m.features,
     auth: m.auth,
+    sessionHostnames: m.sessionHostnames,
+    sessionHostnamesEpoch: m.sessionHostnamesEpoch,
     automations: m.automations,
     automationRuns: m.automationRuns,
     system: m.system,
@@ -93,6 +102,8 @@ export function buildStateOverrides(m: DefaultState) {
     sessionFailureNotification: m.sessionFailureNotification,
     bottomTerminal: m.bottomTerminal,
     sidebarViews: m.sidebarViews,
+    sidebarViewsByWorkspace: m.sidebarViewsByWorkspace,
+    threadViews: m.threadViews,
     sidebarTaskPrefs: m.sidebarTaskPrefs,
   };
 }

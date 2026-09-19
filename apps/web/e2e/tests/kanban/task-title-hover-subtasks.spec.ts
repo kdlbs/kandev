@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 
 /**
  * Seeds a parent task with two subtasks. No agent is started (mirrors the
@@ -90,7 +91,7 @@ test.describe("Task title hover card on the Kanban card", () => {
     await expect(testPage).toHaveURL(new RegExp(`/t/${childOne.id}`));
   });
 
-  test("AC15: a task with no subtasks still opens the hover card with only the bold title", async ({
+  test("AC15: a task with no subtasks does not open a title hover card", async ({
     testPage,
     apiClient,
     seedData,
@@ -108,10 +109,13 @@ test.describe("Task title hover card on the Kanban card", () => {
     await expect(card).toBeVisible({ timeout: 45_000 });
 
     await card.getByTestId("task-card-title").hover();
-    const hoverCard = testPage.getByTestId("task-title-hover-card");
-    await expect(hoverCard).toBeVisible();
-    await expect(hoverCard).toContainText("Childless title hover task");
-    await expect(hoverCard.getByTestId("task-title-hover-subtasks")).toHaveCount(0);
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      "a childless Kanban card must not open a title preview",
+    );
+    await expect(testPage.getByTestId("task-title-hover-card")).toHaveCount(0);
   });
 
   test("the open hover card does not swallow the click that opens the parent task", async ({

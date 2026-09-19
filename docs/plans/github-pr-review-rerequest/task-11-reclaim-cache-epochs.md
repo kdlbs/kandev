@@ -6,7 +6,7 @@ wave: 5
 depends_on:
   - "09-key-scoped-cache-invalidation"
 plan: "plan.md"
-spec: "../../specs/ui/github-pr-review-actions.md"
+spec: "../../specs/ui/requirements/github-pr-review-actions.md"
 ---
 
 # Task 11: Reclaim Key Invalidation Metadata

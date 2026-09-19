@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-layout-profile-domain"]
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 04: Workbench Default Integration

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agent-rich-output/spec.md
+spec: docs/specs/agents/requirements/agent-rich-output.md
 created: 2026-08-14
 status: complete
 ---

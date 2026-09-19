@@ -10,6 +10,8 @@ export class AutomationsPage {
   readonly nameInput: Locator;
   readonly saveButton: Locator;
   readonly deleteButton: Locator;
+  readonly deleteConfirmation: Locator;
+  readonly deleteConfirmButton: Locator;
   readonly frequencySelector: Locator;
   readonly customScheduleInput: Locator;
   readonly timeInput: Locator;
@@ -17,7 +19,6 @@ export class AutomationsPage {
   readonly nextRun: Locator;
   readonly addConditionButton: Locator;
   readonly workflowSelector: Locator;
-  readonly workflowStepSelector: Locator;
 
   constructor(
     private page: Page,
@@ -34,14 +35,15 @@ export class AutomationsPage {
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: /save changes/i });
     this.deleteButton = page.getByTestId("automation-delete-button");
+    this.deleteConfirmation = page.getByTestId("automation-delete-confirm-dialog");
+    this.deleteConfirmButton = this.deleteConfirmation.getByTestId("automation-delete-confirm");
     this.frequencySelector = page.getByTestId("schedule-frequency");
     this.customScheduleInput = page.getByTestId("schedule-custom-input");
     this.timeInput = page.getByTestId("schedule-time");
     this.timezoneButton = page.getByTestId("schedule-timezone");
     this.nextRun = page.getByTestId("schedule-next-run");
     this.addConditionButton = page.getByTestId("add-condition-button");
-    this.workflowSelector = page.getByTestId("workflow-selector");
-    this.workflowStepSelector = page.getByTestId("workflow-step-selector");
+    this.workflowSelector = page.getByTestId("workflow-selector-trigger");
   }
 
   async goto() {
@@ -93,12 +95,6 @@ export class AutomationsPage {
   /** Select a workflow by clicking the selector and picking an item by name. */
   async selectWorkflow(name: string) {
     await this.workflowSelector.click();
-    await this.page.getByRole("option", { name }).click();
-  }
-
-  /** Select a workflow step by clicking the selector and picking an item by name. */
-  async selectWorkflowStep(name: string) {
-    await this.workflowStepSelector.click();
-    await this.page.getByRole("option", { name }).click();
+    await this.page.getByRole("button", { name: new RegExp(name) }).click();
   }
 }

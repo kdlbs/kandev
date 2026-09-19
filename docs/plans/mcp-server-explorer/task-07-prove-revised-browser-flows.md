@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["06-refine-explorer-ux"]
 plan: "plan.md"
-spec: "../../specs/mcp-session-observability/spec.md"
+spec: "../../specs/platform/requirements/mcp-session-observability.md"
 ---
 
 # Task 07: Prove the Revised Browser Flows

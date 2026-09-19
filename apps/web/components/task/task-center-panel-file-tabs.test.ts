@@ -12,15 +12,15 @@ const file: OpenFileTab = {
 };
 
 describe("upsertOpenFileTab", () => {
-  it("enables Markdown preview on an already-open tab", () => {
-    const result = upsertOpenFileTab([file], { ...file, markdownPreview: true });
+  it("enables rendered preview on an already-open tab", () => {
+    const result = upsertOpenFileTab([file], { ...file, renderedPreview: true });
 
-    expect(result).toEqual([{ ...file, markdownPreview: true }]);
+    expect(result).toEqual([{ ...file, renderedPreview: true }]);
   });
 
   it("keeps same-path tabs from different repositories separate", () => {
     const frontend = { ...file, repo: "frontend" };
-    const backend = { ...file, repo: "backend", markdownPreview: true };
+    const backend = { ...file, repo: "backend", renderedPreview: true };
 
     expect(upsertOpenFileTab([frontend], backend)).toEqual([frontend, backend]);
   });
@@ -28,6 +28,30 @@ describe("upsertOpenFileTab", () => {
   it("preserves an existing tab when no preview state is requested", () => {
     const tabs = [file];
     expect(upsertOpenFileTab(tabs, file)).toBe(tabs);
+  });
+
+  it.each([
+    [{ previous: "target.txt", next: undefined }, "symlink to regular file"],
+    [{ previous: undefined, next: "target.txt" }, "regular file to symlink"],
+  ] as const)("refreshes resolvedPath for an existing clean tab (%s)", (paths, _label) => {
+    const existing = { ...file, resolvedPath: paths.previous };
+    const refreshed = { ...file, resolvedPath: paths.next, content: "fresh content" };
+
+    expect(upsertOpenFileTab([existing], refreshed)).toEqual([refreshed]);
+  });
+
+  it("refreshes resolvedPath without clobbering a dirty tab", () => {
+    const existing = {
+      ...file,
+      content: "local edits",
+      isDirty: true,
+      resolvedPath: "old-target.txt",
+    };
+    const refreshed = { ...file, content: "disk content", resolvedPath: "new-target.txt" };
+
+    expect(upsertOpenFileTab([existing], refreshed)).toEqual([
+      { ...existing, resolvedPath: "new-target.txt" },
+    ]);
   });
 
   it("adds a new tab", () => {

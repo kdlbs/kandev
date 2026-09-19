@@ -24,7 +24,10 @@ const LOCAL_REPO_ID = "local-repo";
 
 const mocks = vi.hoisted(() => ({
   dialogProps: undefined as
-    | { initialValues?: Record<string, unknown>; onSuccess?: (task: Task) => void }
+    | {
+        initialValues?: Record<string, unknown>;
+        onSuccess?: (task: Task, mode?: "create" | "edit", meta?: { autoFocus?: boolean }) => void;
+      }
     | undefined,
   push: vi.fn(),
   createTaskPR: vi.fn(),
@@ -267,27 +270,31 @@ describe("QuickTaskLauncher repository defaults", () => {
 });
 
 describe("QuickTaskLauncher issue linking", () => {
-  it("links and immediately stores a newly created task for the launched issue", async () => {
-    const link = {
-      task_id: "task-1",
-      task_title: "Review: add Download option",
-      owner: "kdlbs",
-      repo: "kandev",
-      issue_number: 1567,
-      issue_url: ISSUE_URL,
-      issue_title: "add Download option",
-    };
-    mocks.linkTaskIssue.mockResolvedValue(link);
-    renderIssueLauncher([repo({ id: LOCAL_REPO_ID })]);
+  it.each([true, false])(
+    "links and stores the launched issue with auto-focus %s",
+    async (autoFocus) => {
+      const link = {
+        task_id: "task-1",
+        task_title: "Review: add Download option",
+        owner: "kdlbs",
+        repo: "kandev",
+        issue_number: 1567,
+        issue_url: ISSUE_URL,
+        issue_title: "add Download option",
+      };
+      mocks.linkTaskIssue.mockResolvedValue(link);
+      renderIssueLauncher([repo({ id: LOCAL_REPO_ID })]);
 
-    mocks.dialogProps?.onSuccess?.({ id: "task-1" } as Task);
+      mocks.dialogProps?.onSuccess?.({ id: "task-1" } as Task, "create", { autoFocus });
 
-    expect(mocks.linkTaskIssue).toHaveBeenCalledWith("task-1", { issue: ISSUE_URL });
-    await waitFor(() => {
-      expect(mocks.upsertTaskIssue).toHaveBeenCalledWith(WORKSPACE_ID, link);
-    });
-    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
-  });
+      expect(mocks.linkTaskIssue).toHaveBeenCalledWith("task-1", { issue: ISSUE_URL });
+      await waitFor(() => {
+        expect(mocks.upsertTaskIssue).toHaveBeenCalledWith(WORKSPACE_ID, link);
+      });
+      expect(mocks.push).toHaveBeenCalledTimes(autoFocus ? 1 : 0);
+      if (autoFocus) expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+    },
+  );
 
   it("navigates when issue linking fails", async () => {
     mocks.linkTaskIssue.mockRejectedValueOnce(new Error("offline"));

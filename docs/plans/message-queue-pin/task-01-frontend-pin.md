@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-pin.md"
+spec: "../../specs/ui/requirements/message-queue-pin.md"
 ---
 
 # Task 01: Frontend pin control and open-state persistence

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-session-activity-ownership"]
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 03: Client state contract

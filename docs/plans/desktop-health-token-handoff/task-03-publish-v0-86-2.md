@@ -5,7 +5,7 @@ status: pending
 wave: 3
 depends_on: ["02-validate-desktop-release-candidate"]
 plan: "plan.md"
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 ---
 
 # Task 03: Publish stable v0.86.2

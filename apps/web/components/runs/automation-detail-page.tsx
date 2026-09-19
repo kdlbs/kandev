@@ -1,8 +1,8 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { useCallback, useEffect } from "react";
-import { IconBolt, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
+import { useCallback, useEffect, useState } from "react";
+import { IconBolt, IconPlayerPlay, IconPlayerStop, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { PageTopbar } from "@/components/page-topbar";
 import { AutomationEditor } from "@/components/automations/automation-editor";
@@ -10,6 +10,7 @@ import { SettingsSaveProvider } from "@/components/settings/settings-save-provid
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
 import { cn } from "@/lib/utils";
+import { stopAutomationRun } from "@/lib/api/domains/automation-api";
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { nextFiring } from "./automation-rows";
 import { RunsDrawer } from "./runs-drawer";
@@ -22,6 +23,7 @@ import { useLiveRefresh } from "./use-live-refresh";
 import { useRailWidth } from "./use-rail-width";
 import { useManualTrigger } from "./use-manual-trigger";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { statusLabelKey } from "./run-status";
 
 const MUTED_NOTE = "py-16 text-center text-sm text-muted-foreground";
 
@@ -180,15 +182,41 @@ function ConfigureView({ automation }: { automation: Automation }) {
  * for every time.
  */
 function ActivityView({
+  automationId,
   selected,
   hasRuns,
   loading,
+  refresh,
 }: {
+  automationId: string;
   selected: AutomationRun | null;
   hasRuns: boolean;
   loading: boolean;
+  refresh: () => void;
 }) {
   const { t } = useTranslation();
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStopping(false);
+    setStopError(null);
+  }, [selected?.id]);
+
+  const handleStop = async () => {
+    if (!selected || !isOpenRun(selected.status) || stopping) return;
+    setStopping(true);
+    setStopError(null);
+    try {
+      await stopAutomationRun(automationId, selected.id);
+      refresh();
+    } catch (error) {
+      setStopError(error instanceof Error ? error.message : t("common:requestFailed"));
+    } finally {
+      setStopping(false);
+    }
+  };
+
   if (!selected) {
     if (loading && !hasRuns)
       return <p className={MUTED_NOTE}>{t("automations:loadingActivity")}</p>;
@@ -200,12 +228,41 @@ function ActivityView({
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="automation-activity">
-      {/* Keyed on the session so switching runs remounts the conversation
-          rather than letting one run's messages animate into another's. */}
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium" data-testid="run-display-title">
+            {selected.display_title || t("automations:run")}
+          </p>
+          <p className="truncate text-xs text-muted-foreground">
+            {t(statusLabelKey(selected.status))}
+          </p>
+        </div>
+        {isOpenRun(selected.status) && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="min-h-11 shrink-0 cursor-pointer"
+            onClick={() => void handleStop()}
+            disabled={stopping}
+            data-testid="automation-stop-run"
+          >
+            <IconPlayerStop className="h-3.5 w-3.5" />
+            {stopping ? t("automations:stopping") : t("automations:stopCurrentRun")}
+          </Button>
+        )}
+      </div>
+      {stopError && (
+        <p className="shrink-0 px-4 py-2 text-sm text-destructive" role="alert">
+          {t("automations:failedToStopRun", { error: stopError })}
+        </p>
+      )}
+      {/* Keyed on the exact session turn so selecting two runs in one shared
+          session remounts the conversation for the requested firing. */}
       <RunTranscript
-        key={selected.session_id}
+        key={`${selected.session_id}:${selected.turn_id ?? ""}:${selected.id}`}
         sessionId={selected.session_id ?? ""}
         taskId={selected.task_id || null}
+        turnId={selected.turn_id}
       />
     </div>
   );
@@ -225,6 +282,7 @@ function DetailBody({
   selected,
   openRuns,
   loading,
+  refresh,
   isMobile,
   rail,
   onSelectRun,
@@ -235,6 +293,7 @@ function DetailBody({
   selected: AutomationRun | null;
   openRuns: number;
   loading: boolean;
+  refresh: () => void;
   isMobile: boolean;
   rail: ReturnType<typeof useRailWidth>;
   onSelectRun: (run: AutomationRun) => void;
@@ -276,7 +335,13 @@ function DetailBody({
         {tab === "configure" ? (
           <ConfigureView automation={automation} />
         ) : (
-          <ActivityView selected={selected} hasRuns={runs.length > 0} loading={loading} />
+          <ActivityView
+            automationId={automation.id}
+            selected={selected}
+            hasRuns={runs.length > 0}
+            loading={loading}
+            refresh={refresh}
+          />
         )}
       </main>
       {!isMobile && switcher}
@@ -335,6 +400,7 @@ export function AutomationDetailPage({
           selected={selected}
           openRuns={openRuns}
           loading={loading}
+          refresh={refresh}
           isMobile={isMobile}
           rail={rail}
           onSelectRun={(run) => router.push(runHref(automationId, run.id))}

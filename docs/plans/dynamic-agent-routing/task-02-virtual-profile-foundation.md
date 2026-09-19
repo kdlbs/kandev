@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-runtime-rollout-flag"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 02: Virtual profile foundation

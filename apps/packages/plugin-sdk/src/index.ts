@@ -27,12 +27,44 @@ export type PluginIcon = string | Component<PluginIconProps>;
 /** Placement for a registered nav item; see `PluginRegistry.registerNavItem`. */
 export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
-/** Context passed to components registered for the `main-top-bar` slot. */
+/**
+ * Context for the `main-top-bar` slot. Phone listing contributions live in the
+ * menu with 44px touch targets; interactions retain the slot's local state.
+ */
 export interface MainTopBarSlotProps {
   workspaceId: string | null;
   workspaceLabel?: string;
   currentPage: "kanban" | "tasks";
   presentation: "desktop" | "mobile";
+}
+
+/**
+ * Context passed to components registered for the `chat-submit-decoration`
+ * slot, which renders *over* the chat composer's send button rather than
+ * beside it. The host positions the layer against the button's box and makes
+ * it `pointer-events-none`. Keep decorations inert when possible; hover or
+ * focus disclosure can observe the host button from an effect. A decoration
+ * renders inside the layer, not beside the button, and `pointer-events-auto`
+ * is a last resort for a separate hit target that does not obstruct send.
+ */
+export interface ChatSubmitDecorationSlotProps {
+  /** Task the composer belongs to, or null for task-less quick chat. */
+  taskId: string | null;
+  /** Display title of the task, when known. */
+  taskTitle?: string;
+  /** Session the composer is currently bound to, or null before one exists. */
+  activeSessionId: string | null;
+  /** Every kandev session id on the task (includes `activeSessionId`). */
+  sessionIds: string[];
+  presentation: "desktop" | "mobile";
+  /** True while the composer is dispatching the current message. */
+  isSending: boolean;
+  /** True when the agent is mid-turn, so the next send queues behind it. */
+  isAgentBusy: boolean;
+  /** True when the send button itself is disabled. */
+  disabled: boolean;
+  /** True when plan mode is on (the button sends a plan request). */
+  planModeEnabled: boolean;
 }
 
 export type StateUpdater<Value> = Value | ((previous: Value) => Value);
@@ -53,6 +85,7 @@ export interface HostReact {
   createElement: ElementFactory;
   useState<Value>(initialValue: Value | (() => Value)): [Value, StateSetter<Value>];
   useEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]): void;
+  useLayoutEffect(effect: () => void | (() => void), dependencies?: readonly unknown[]): void;
   useMemo<Value>(factory: () => Value, dependencies: readonly unknown[]): Value;
   useCallback<Callback extends (...args: never[]) => unknown>(
     callback: Callback,
@@ -259,19 +292,107 @@ export interface PluginRouteOptions {
   topbar?: boolean | PluginPageChrome;
 }
 
-export interface PluginTaskPanelProps {
-  panelId: string;
+export type PluginSessionKind = "managed" | "passthrough" | null;
+export type PluginConversationAuthor = "user" | "agent";
+export type PluginConversationSort = "asc" | "desc";
+
+export interface PluginConversationMessage {
+  id: string;
+  taskId: string | null;
+  sessionId: string;
+  turnId?: string;
+  authorType: PluginConversationAuthor;
+  type: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  promptIndex?: number;
+  senderTaskId?: string;
+}
+
+export interface PluginConversationTurn {
+  id: string;
+  taskId: string | null;
+  sessionId: string;
+  startedAt: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+
+export interface PluginSessionMessagesQuery {
+  sessionId: string | null;
+  taskId?: string | null;
+  authorTypes?: readonly PluginConversationAuthor[];
+  sort?: PluginConversationSort;
+  pageSize?: number;
+}
+
+export type PluginConversationErrorCode =
+  | "unauthenticated"
+  | "not_found"
+  | "invalid_query"
+  | "upstream_failure";
+
+export interface PluginConversationError {
+  code: PluginConversationErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+export interface PluginSessionMessagesState {
+  messages: readonly PluginConversationMessage[];
+  loading: boolean;
+  hydrated: boolean;
+  loadingMore: boolean;
+  error: PluginConversationError | null;
+  hasMore: boolean;
+  removed: boolean;
+  loadMore(): Promise<number>;
+  retry(): void;
+}
+
+export interface PluginSessionTurnsState {
+  turns: readonly PluginConversationTurn[];
+  loading: boolean;
+  hydrated: boolean;
+  error: PluginConversationError | null;
+  removed: boolean;
+  retry(): void;
+}
+
+export interface PluginConversationApi {
+  useSessionMessages(query: PluginSessionMessagesQuery): PluginSessionMessagesState;
+  useSessionTurns(sessionId: string | null, taskId?: string | null): PluginSessionTurnsState;
+  useMessageFavorite(sessionId: string | null, messageId: string): boolean;
+}
+
+export type PluginOpenMessageResult = { status: "accepted" | "unavailable" };
+
+export interface PluginTaskPanelConversationCapability {
+  openMessage(messageId: string): PluginOpenMessageResult;
+  history: PluginConversationApi;
+}
+
+export interface PluginTaskPanelContext {
   taskId: string;
   sessionId: string | null;
+  sessionKind: PluginSessionKind;
   presentation: "desktop" | "mobile";
+}
+
+export interface PluginTaskPanelProps extends PluginTaskPanelContext {
+  panelId: string;
+  conversation: PluginTaskPanelConversationCapability;
 }
 
 export interface TaskPanelRegistration {
   id: string;
   title: string;
+  titleKey?: string;
   icon?: PluginIcon;
   Component: Component<PluginTaskPanelProps>;
   mobileEnabled?: boolean;
+  visible?(context: PluginTaskPanelContext): boolean;
 }
 
 export interface PluginTaskMenuContext {
@@ -302,6 +423,20 @@ export interface TaskFilterRegistration {
   label: string;
   getOptions(): PluginTaskFilterOption[];
   matches(context: { taskId: string }, selected: string[]): boolean;
+}
+
+export interface TaskListFacetValue {
+  value: string;
+  label: string;
+  color?: string;
+}
+
+/** A synchronous, page-local facet contribution for the host task list. */
+export interface TaskListFacetRegistration {
+  id: string;
+  label: string;
+  getValues(context: { taskId: string; workspaceId?: string }): readonly TaskListFacetValue[];
+  subscribe?(listener: () => void): () => void;
 }
 
 export type PluginStorageScope = "instance" | "workspace" | "task" | "session" | "repository";
@@ -439,6 +574,7 @@ interface PluginUIShape {
   PopoverTitle: unknown;
   PopoverTrigger: unknown;
   Progress: unknown;
+  PromptMentionText: Component<{ text: string; interactive?: boolean }>;
   RichTextEditor: unknown;
   RichTextReadOnly: unknown;
   ScrollArea: unknown;
@@ -498,7 +634,9 @@ export type SettingsSaveContributor = {
 };
 
 export type PluginUIApi = {
-  readonly [Name in keyof PluginUIShape]: HostComponent;
+  readonly [Name in keyof PluginUIShape]: PluginUIShape[Name] extends Component<infer Props>
+    ? Component<Props>
+    : HostComponent;
 };
 
 export interface PluginToastApi {
@@ -534,6 +672,7 @@ export interface PluginHostApi {
   React: HostReact;
   jsx: ElementFactory;
   ui: PluginUIApi;
+  conversation: PluginConversationApi;
   i18n: PluginI18nApi;
   context: PluginContextApi;
   api: {
@@ -692,6 +831,7 @@ export interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
   registerTaskFilter(registration: TaskFilterRegistration): void;
+  registerTaskListFacet(registration: TaskListFacetRegistration): void;
 }
 
 export type PluginHost = PluginHostApi;

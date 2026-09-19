@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-advanced-settings-ui"]
 plan: "plan.md"
-spec: "../../specs/task-dependencies/create-dialog-advanced-settings.md"
+spec: "../../specs/tasks/requirements/task-dependencies-create-dialog-advanced-settings.md"
 ---
 
 # Task 02: Verify disclosure behavior on desktop and mobile
@@ -61,7 +61,7 @@ but they depend on the final UI contract.
 ## Inputs
 
 - Scenarios and mobile contract in
-  `docs/specs/task-dependencies/create-dialog-advanced-settings.md`
+  `docs/specs/tasks/requirements/task-dependencies-create-dialog-advanced-settings.md`
 - Existing desktop coverage in
   `apps/web/e2e/tests/task/create-task-dependency-selector.spec.ts`
 - Existing mobile coverage in

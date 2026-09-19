@@ -159,24 +159,26 @@ func TestHandleFileContent_ReturnsFileBytes(t *testing.T) {
 	}
 }
 
-// TestHandleFileContent_Rejections covers every 400 branch of the read path.
+// TestHandleFileContent_Rejections covers validation and error-status branches
+// of the read path.
 func TestHandleFileContent_Rejections(t *testing.T) {
 	srv, _ := newWorkspaceFileServer(t)
 
 	cases := []struct {
-		name      string
-		query     string
-		wantError string
+		name       string
+		query      string
+		wantStatus int
+		wantError  string
 	}{
-		{"missing path", "", "path is required"},
-		{"unresolvable repo", "?path=one.txt&repo=nope", "repo subpath not found"},
-		{"missing file", "?path=absent.txt", "no such file"},
+		{"missing path", "", http.StatusBadRequest, "path is required"},
+		{"unresolvable repo", "?path=one.txt&repo=nope", http.StatusBadRequest, "repo subpath not found"},
+		{"missing file", "?path=absent.txt", http.StatusNotFound, "no such file"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := workspaceRequest(t, srv, http.MethodGet, "/api/v1/workspace/file/content"+tc.query, nil)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400 (body %s)", rec.Code, rec.Body.String())
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tc.wantStatus, rec.Body.String())
 			}
 			got := decodeWorkspaceBody[streams.FileContentResponse](t, rec)
 			if !strings.Contains(got.Error, tc.wantError) {

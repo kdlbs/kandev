@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -72,10 +73,17 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
+	if execution.OfficeAgentProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+	}
 	running := &models.ExecutorRunning{
-		ID:                 execution.SessionID,
-		SessionID:          execution.SessionID,
+		ID:                 executionInventorySessionID(execution),
+		SessionID:          executionInventorySessionID(execution),
 		TaskID:             execution.TaskID,
+		ExecutorID:         strings.TrimSpace(getMetadataString(metadata, "executor_id")),
 		ExecutionProfileID: execution.AgentProfileID,
 		Runtime:            execution.RuntimeName,
 		Status:             executorRunningStatusFromExecution(execution),
@@ -91,8 +99,24 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		Metadata:           FilterPersistentMetadata(metadata),
 		LastSeenAt:         lastSeenAt,
 	}
+	if officeProfileID := strings.TrimSpace(execution.OfficeAgentProfileID); officeProfileID != "" {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[MetadataKeyOfficeAgentProfileID] = officeProfileID
+	}
+	if execution.Owner.Kind == ExecutionOwnerRun {
+		if running.Metadata == nil {
+			running.Metadata = make(map[string]interface{})
+		}
+		running.Metadata[runExecutionOwnerMetadataKey] = execution.Owner
+		running.Resumable = false
+		running.WorktreePath = execution.WorkspacePath
+	}
 	if prior != nil {
-		running.ExecutorID = prior.ExecutorID
+		if strings.TrimSpace(prior.ExecutorID) != "" {
+			running.ExecutorID = prior.ExecutorID
+		}
 		if prior.ExecutionProfileID == execution.AgentProfileID {
 			running.ResumeToken = prior.ResumeToken
 			running.LastMessageUUID = prior.LastMessageUUID
@@ -263,7 +287,7 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 	// its current columns and the next transition (or reconciliation) re-persists.
 	var prior *models.ExecutorRunning
 	if reader, ok := m.runningWriter.(executorRunningReader); ok {
-		existing, err := reader.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+		existing, err := reader.GetExecutorRunningBySessionID(ctx, executionInventorySessionID(execution))
 		switch {
 		case err == nil:
 			prior = existing
@@ -444,6 +468,28 @@ func (m *Manager) deleteExecutorRunningRow(ctx context.Context, sessionID, expec
 // fresh state (acceptable for first-time inserts).
 type executorRunningReader interface {
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+}
+
+// executorRunningLister is the optional read-side used to enumerate the
+// startup recovery inventory: every live (non-terminal) executors_running row
+// on the standalone control server (worktree/local executors). A writer that
+// doesn't implement it has no recovery candidates to offer.
+type executorRunningLister interface {
+	ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error)
+}
+
+// ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
+// every live standalone executors_running row, read at startup step 3 before
+// any control-server contact, so the recovery guard can be taken against it
+// (discovery H). Best-effort: a writer that doesn't support listing yields no
+// candidates rather than an error, matching this file's other optional
+// capabilities.
+func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	lister, ok := m.runningWriter.(executorRunningLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListExecutorsRunningLiveStandalone(ctx)
 }
 
 type executorRunningCASWriter interface {

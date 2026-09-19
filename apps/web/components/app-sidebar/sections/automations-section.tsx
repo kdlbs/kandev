@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconBolt, IconListDetails } from "@tabler/icons-react";
+import { IconBolt, IconListDetails, IconLoader2 } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -12,9 +12,11 @@ import {
 } from "@/components/runs/automation-rows";
 import type { AutomationRow } from "@/components/runs/automation-rows";
 import { useAutomationSummaries } from "@/components/runs/use-automation-summaries";
+import { useLiveRefresh } from "@/components/runs/use-live-refresh";
 import { useWorkspaceAutomations } from "@/components/runs/use-workspace-automations";
 import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { usePathname } from "@/lib/routing/client-router";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useNow } from "@/hooks/use-now";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import {
@@ -78,10 +80,18 @@ function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolea
         active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
       )}
     >
-      <span
-        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT_CLASS[state])}
-        aria-hidden="true"
-      />
+      {state === "running" ? (
+        <IconLoader2
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-blue-500"
+          aria-hidden="true"
+          data-testid={`sidebar-automation-running-${automation.id}`}
+        />
+      ) : (
+        <span
+          className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATE_DOT_CLASS[state])}
+          aria-hidden="true"
+        />
+      )}
       {/* The dot is decorative, so the state reaches a screen reader here. */}
       <span className="sr-only">{`${t(STATE_LABEL_KEY[state])}.`}</span>
       <span className="min-w-0 flex-1 truncate">{automation.name}</span>
@@ -118,6 +128,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const pathname = usePathname();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const { isMobile } = useResponsiveBreakpoint();
   // Folded until asked for. Automations are a background concern — they run
   // whether or not anyone is looking — so they should not push the tasks
   // someone came here to work on off the bottom of the rail.
@@ -130,11 +141,12 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   // has to say how many it is hiding — a section that starts shut and shows
   // nothing reads as empty, and nobody opens it. Health summaries are the
   // heavier read and buy nothing until the rows themselves are on screen.
-  const showing = !collapsed && expanded;
+  const showing = !collapsed && expanded && !isMobile;
   const listScope = collapsed ? undefined : (workspaceId ?? undefined);
   const summaryScope = showing ? (workspaceId ?? undefined) : undefined;
   const { automations } = useWorkspaceAutomations(listScope);
-  const { summaries } = useAutomationSummaries(summaryScope);
+  const { summaries, refresh } = useAutomationSummaries(summaryScope);
+  useLiveRefresh(showing, refresh);
   const rows = buildAutomationRows(automations, summaries);
 
   return (

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agent-stall-recovery/spec.md
+spec: docs/specs/agents/requirements/agent-stall-recovery.md
 decision: docs/decisions/2026-08-02-agent-terminal-diagnostics-over-stderr.md
 created: 2026-08-02
 status: done

@@ -23,6 +23,7 @@ import {
 } from "@/components/task-create-dialog-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
+import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
 import type {
   DialogFormBodyProps,
   TaskCreateDialogProps,
@@ -52,6 +53,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onTaskNameChange,
     onRowRepositoryChange,
     onRowBranchChange,
+    onRowPolicyChange,
     onToggleRemote,
     onToggleFreshBranch,
     repositories,
@@ -73,6 +75,10 @@ function CreateModeBody(props: DialogFormBodyProps) {
         workspaceId={workspaceId}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={
+          isLocalExecutor && freshBranchAvailable ? () => onToggleFreshBranch(true) : undefined
+        }
         onToggleRemote={onToggleRemote}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}
@@ -96,12 +102,14 @@ function CreateModeBody(props: DialogFormBodyProps) {
       )}
       <DialogPromptSection
         isSessionMode={false}
+        promptReferencesEnabled={isCreateMode}
         isTaskStarted={isTaskStarted}
         initialDescription={props.initialDescription}
         fs={fs}
         onPendingAttachmentUploadsChange={fs.setHasPendingAttachmentUploads}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
+        launchPreview={props.launchPreview}
         workspaceId={workspaceId}
         onJiraImport={onJiraImport}
         onLinearImport={onLinearImport}
@@ -131,8 +139,12 @@ function CreateModeAgentSelectors(props: DialogFormBodyProps) {
       onAgentProfileChange={props.onAgentProfileChange}
       onExecutorProfileChange={props.onExecutorProfileChange}
       workflowAgentLocked={props.workflowAgentLocked}
-      noCompatibleAgent={props.noCompatibleAgent}
+      agentCompatState={props.agentCompatState}
+      selectedAgentProfileName={props.selectedAgentProfileName}
+      effectiveWorkflowName={props.effectiveWorkflowName}
       executorProfileName={props.executorProfileName}
+      runnerEditable={props.runnerEditable}
+      runnerIneligibleReason={props.runnerIneligibleReason}
     />
   );
 }
@@ -172,7 +184,7 @@ function SessionModeBody(props: DialogFormBodyProps) {
 function DialogFormBody(props: DialogFormBodyProps) {
   const { isSessionMode, isCreateMode, isTaskStarted, workflows, snapshots } = props;
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+    <div className="flex-1 space-y-4 overflow-y-auto pr-1" data-testid="task-create-form-body">
       {isSessionMode ? <SessionModeBody {...props} /> : <CreateModeBody {...props} />}
       <WorkflowSection
         isCreateMode={isCreateMode}
@@ -182,6 +194,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
         effectiveWorkflowId={props.effectiveWorkflowId}
         onWorkflowChange={props.onWorkflowChange}
         agentProfiles={props.agentProfiles}
+        launchPreview={props.launchPreview}
         workflowLocked={props.workflowLocked}
       />
       <TaskCreateAdvancedSettings
@@ -189,8 +202,16 @@ function DialogFormBody(props: DialogFormBodyProps) {
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}
-        dependenciesDisabled={props.isCreatingSession}
+        priority={props.fs.priority}
+        onPriorityChange={props.fs.setPriority}
+        dependenciesDisabled={props.isCreatingSession || props.isCreatingTask}
       />
+      {props.isEditMode && (
+        <TaskEditDialogDependencies
+          state={props.editDependencies}
+          disabled={props.isCreatingSession || props.isCreatingTask}
+        />
+      )}
     </div>
   );
 }
@@ -201,6 +222,33 @@ function DialogFormBody(props: DialogFormBodyProps) {
 // missing on `HTMLFormElement`. `guardedHandleSubmit` only reads
 // `preventDefault` off the event, so a stubbed shape is sufficient.
 const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+
+function useTaskCreateFocusReturn(props: TaskCreateDialogProps, isCreateMode: boolean) {
+  const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
+  const activeElement = () =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const [openingFocus, setOpeningFocus] = useState(() => ({
+    open: props.open,
+    target: activeElement(),
+  }));
+  // Capture the opener before descendants run their input-focus effects.
+  if (openingFocus.open !== props.open) {
+    setOpeningFocus({
+      open: props.open,
+      target: props.open ? activeElement() : openingFocus.target,
+    });
+  }
+  return {
+    onCloseAutoFocus: (event: Event) => {
+      const target =
+        props.focusReturnRef?.current ??
+        (isCreateMode && !autoFocusNewTasks ? openingFocus.target : null);
+      if (!target || !document.contains(target)) return;
+      event.preventDefault();
+      target.focus();
+    },
+  };
+}
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { t } = useTranslation("chat");
@@ -223,6 +271,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   }, []);
   const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
   const { guardedHandleSubmit } = setup;
+  const focusReturn = useTaskCreateFocusReturn(props, setup.isCreateMode);
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (props.open) {
@@ -256,6 +305,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
         onEscapeKeyDown={(event) => {
           if (setup.isCreateMode) event.preventDefault();
         }}
+        {...focusReturn}
         data-testid="create-task-dialog"
         data-webkit-safe-motion="true"
         showCloseButton={false}
@@ -279,7 +329,10 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               {...buildDialogFormBodyProps(setup, props)}
               onComposerSubmit={handleComposerSubmit}
             />
-            <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
+            <DialogFooter
+              className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2"
+              data-testid="task-create-dialog-footer"
+            >
               <TaskCreateDialogFooter
                 {...buildDialogFooterProps(setup, props, pendingAttachmentReason)}
               />

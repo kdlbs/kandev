@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/plugins/voice-extraction-host.md"
+spec: "../../specs/plugins/requirements/voice-extraction-host.md"
 ---
 
 # Task 02: Extend Webhook Declarations

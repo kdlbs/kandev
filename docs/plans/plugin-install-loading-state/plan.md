@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/plugins/spec.md
+spec: docs/specs/plugins/requirements/plugins.md
 created: 2026-08-08
 status: complete
 ---

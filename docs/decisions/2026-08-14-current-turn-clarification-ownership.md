@@ -1,6 +1,6 @@
 # ADR-2026-08-14-current-turn-clarification-ownership: Current Turn Owns Active Clarification
 
-**Status:** accepted (amended 2026-08-15)
+**Status:** accepted (amended 2026-08-15, 2026-08-24)
 **Date:** 2026-08-14
 **Area:** backend, frontend, protocol, workflow
 
@@ -27,8 +27,17 @@ and hides the question.
 The session's current turn owns active clarification state.
 
 - A pending clarification is operational only when its message belongs to the session's newest durable
-  `task_session_turns` record. Missing status retains the existing legacy meaning of pending only after
-  current-turn ownership matches.
+  **conversational** `task_session_turns` record — a turn whose `metadata.lifecycle_only` flag is not
+  set. "Set" means exactly the value-set `{true, 1, "true", "1"}`; every other encoding — an absent
+  key, `null`, `false`, `0`, `""`, `"false"`, `"0"`, any other string, an object, or an array — is
+  conversational, matching `turnMetadataFlagPredicate`'s `IN ('true','1')` test on both dialects. That
+  marker identifies a synthetic turn born already-completed by lifecycle bookkeeping (for example the
+  agent-boot-on-resume record), not a turn representing genuine conversation; a lifecycle turn is
+  excluded from current-turn resolution entirely, however recent. Among conversational turns,
+  the newest is the one with no open successor: an open turn (`completed_at IS NULL`) always outranks
+  a completed one regardless of timestamps, and only when both candidates are open or both are
+  completed do `started_at`, then `created_at`, then `id` (all descending) break the tie. Missing
+  status retains the existing legacy meaning of pending only after current-turn ownership matches.
 - Deleting messages never moves current-turn ownership backward or reactivates a superseded bundle.
 - Detachment preserves late-answer behavior only while that turn remains current. Once a newer turn is
   accepted, older pending rows become inert history without requiring a destructive rewrite.
@@ -74,8 +83,8 @@ This ownership rule stands independently if ADR 0015 is later rejected, supersed
   session.
 - Pending projection performs bounded database reads on pending-sensitive events and normal list/boot
   hydration. It avoids unbounded transcript delivery or inactive-session subscriptions.
-- SQLite and PostgreSQL must select the same newest durable turn; dialect-sensitive repository tests
-  are required.
+- SQLite and PostgreSQL must select the same newest durable conversational turn; dialect-sensitive
+  repository tests are required.
 
 ## Alternatives considered
 

@@ -55,8 +55,22 @@ func (s *Service) Disable(id string) error {
 	if rec.Status == StatusDisabled {
 		return nil
 	}
+	if err := s.cancelAutomationDeliveries(id); err != nil {
+		return err
+	}
 	if s.runtime != nil {
 		s.runtime.Stop(id)
+	}
+	if err := s.deletePluginAgentConversations(context.Background(), id); err != nil {
+		// The plugin is already stopped, so leaving its record active would
+		// advertise a runtime that cannot serve requests. Keep the failed cleanup
+		// visible and let a later Disable retry remove the remaining conversations.
+		if setErr := s.SetStatus(id, StatusError); setErr != nil {
+			s.log.Warn("plugins: could not mark plugin errored after disable cleanup failure",
+				zap.String("plugin_id", id), zap.Error(setErr))
+		}
+		s.notifyDeliverer()
+		return fmt.Errorf("plugins: disable aborted, could not purge plugin agent conversations: %w", err)
 	}
 	if err := s.SetStatus(id, StatusDisabled); err != nil {
 		return err
@@ -202,6 +216,9 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 	}
 	s.mu.Unlock()
 	if status != StatusActive {
+		if err := s.cancelAutomationDeliveries(id); err != nil {
+			return err
+		}
 		s.revokeGitCredentialProviderLeases(updated.RepositoryProviders)
 	}
 	return nil
@@ -305,7 +322,16 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 				s.notifyDeliverer()
 				s.notifyAgentToolCatalogChanged()
 			}
+			continue
 		}
+		// Boot is the only trigger that reaches an instance which already
+		// accumulated superseded versions but installs nothing new (a plugin
+		// already at its latest version, or one whose auto-update is off), so
+		// it prunes too — under the same confirmed-start precondition as
+		// Install, which is what keeps disabled plugins, sideloads registered
+		// disabled, and plugins that fail to spawn untouched. Unlike Install,
+		// this loop holds no lifecycle lock, so the prune takes one itself.
+		s.pruneUnderLifecycleLock(rec.ID, rec.Version, "")
 	}
 }
 

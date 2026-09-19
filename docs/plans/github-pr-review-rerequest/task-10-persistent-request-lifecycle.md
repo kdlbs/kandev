@@ -7,7 +7,7 @@ depends_on:
   - "06-pr-scoped-request-state"
   - "07-mobile-pr-identity-layout"
 plan: "plan.md"
-spec: "../../specs/ui/github-pr-review-actions.md"
+spec: "../../specs/ui/requirements/github-pr-review-actions.md"
 ---
 
 # Task 10: Persistent Review-request Lifecycle

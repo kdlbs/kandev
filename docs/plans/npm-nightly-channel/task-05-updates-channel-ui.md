@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["04-backend-api-apply"]
 plan: "plan.md"
-spec: "../../specs/npm-nightly-channel/spec.md"
+spec: "../../specs/release/requirements/npm-nightly-channel.md"
 ---
 
 # Task 05: Responsive Updates setting

@@ -15,7 +15,7 @@ import (
 // This pair exists because handlePromptUsage previously had two silent
 // early returns (decode failure, task lookup failure) and a silent insert
 // failure — "if this writer silently stops, nothing today would notice"
-// (docs/specs/office/costs.md).
+// (docs/specs/office/requirements/costs.md).
 var (
 	costEventsWrittenTotal = expvar.NewMap("cost_events_written_total")
 	costEventsDroppedTotal = expvar.NewMap("cost_events_dropped_total")

@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
@@ -24,6 +26,16 @@ import (
 type WorktreeCleanup interface {
 	// OnTaskDeleted is called when a task is deleted to clean up its worktree.
 	OnTaskDeleted(ctx context.Context, taskID string) error
+}
+
+// CanvasCleanup removes plugin-backed canvas authority owned by a task or
+// workspace. It is optional so focused task-service users do not need the
+// canvas subsystem. Both cleanup methods run before their owning task or
+// workspace delete commits, so release-artifact cleanup ownership is recorded
+// before any canvas authority can become orphaned.
+type CanvasCleanup interface {
+	CleanupTaskCanvases(ctx context.Context, taskID string) error
+	CleanupWorkspaceCanvases(ctx context.Context, workspaceID string) error
 }
 
 // WorkspaceSecretDeleter removes secrets owned by a workspace. It is optional
@@ -53,11 +65,48 @@ type WorktreeProvider interface {
 	GetAllByTaskID(ctx context.Context, taskID string) ([]*worktree.Worktree, error)
 }
 
+// WorktreeCleanupIdentityProvider captures immutable checkout identities before
+// a durable cleanup snapshot is stored. Implementations that do not provide it
+// remain compatible with legacy cleanup wiring, which uses the older live-state
+// fallback in the worktree manager.
+type WorktreeCleanupIdentityProvider interface {
+	CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*worktree.Worktree) (map[string]string, error)
+}
+
+// WorktreeDirtyInspector reports local changes before a task deletion mutates
+// task rows or persists a cleanup job.
+type WorktreeDirtyInspector interface {
+	InspectDirtyWorktrees(ctx context.Context, worktrees []*worktree.Worktree) ([]worktree.DirtyWorktree, error)
+}
+
 // WorktreeBatchCleaner extends WorktreeProvider with batch cleanup.
 type WorktreeBatchCleaner interface {
 	WorktreeProvider
 	// CleanupWorktrees removes multiple worktrees in a single operation.
 	CleanupWorktrees(ctx context.Context, worktrees []*worktree.Worktree) error
+}
+
+// WorktreeBatchCleanerWithOptions is the consent-aware cleanup extension. The
+// legacy batch method remains available for archive and non-consented cleanup.
+type WorktreeBatchCleanerWithOptions interface {
+	WorktreeBatchCleaner
+	CleanupWorktreesWithOptions(
+		ctx context.Context,
+		worktrees []*worktree.Worktree,
+		options worktree.WorktreeCleanupOptions,
+	) error
+}
+
+// DeleteTaskOptions controls destructive task deletion behavior.
+type DeleteTaskOptions struct {
+	DiscardWorktreeChanges bool
+}
+
+// WorktreeArchiveBatchCleaner removes archived task worktrees without deleting
+// the local branches required for later recovery.
+type WorktreeArchiveBatchCleaner interface {
+	WorktreeBatchCleaner
+	CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*worktree.Worktree) error
 }
 
 type worktreeReferenceGuard interface {
@@ -75,10 +124,38 @@ type TaskExecutionStopper interface {
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
 }
 
+// synchronousTaskExecutionStopper is an optional cleanup-only extension. The
+// normal StopSession contract schedules process teardown asynchronously, but
+// destructive resource cleanup must wait until the process exits.
+type synchronousTaskExecutionStopper interface {
+	StopSessionSynchronously(ctx context.Context, sessionID, reason string, force bool) error
+}
+
 // TerminalClarificationCanceller expires durable input requests after a task
 // service-owned terminal transition, such as archive cancellation.
 type TerminalClarificationCanceller interface {
 	ExpireSessionAndNotify(ctx context.Context, sessionID string) (int, error)
+}
+
+// ParkedProjectionCanceller clears the orchestrator's in-memory
+// parked_on_background_work projection (spec: docs/specs/disambiguate-waiting)
+// for a session terminated through a task service-owned bulk path — archive's
+// batch session cancellation and delete's cascaded session removal — neither
+// of which goes through the orchestrator's own per-session state-transition
+// chokepoint. newState mirrors the D8 session-state term: pass the session's
+// new terminal state (e.g. CANCELLED) for archive, or "" for delete, matching
+// the same convention the orchestrator uses for its own session-deleted path.
+type ParkedProjectionCanceller interface {
+	ClearParkedProjectionOnSessionTerminated(ctx context.Context, taskID, sessionID string, newState models.TaskSessionState)
+}
+
+// SessionCeilingReleaser releases the orchestrator's session-ceiling
+// reservation for a session cancelled through a task service-owned bulk path
+// (archive's batch session cancellation, delete's cascaded session removal),
+// neither of which passes through the orchestrator's own persistence
+// funnels. Releasing a session that held no reservation is a defined no-op.
+type SessionCeilingReleaser interface {
+	ReleaseCeilingReservation(sessionID string)
 }
 
 // TaskRowLivenessProber classifies an executors_running row's backing-process
@@ -145,7 +222,18 @@ type BranchMaterializer interface {
 	// task_repositories row. Best-effort: when no active session exists yet
 	// the implementation may choose to no-op and let the next session launch
 	// create the worktree via the standard multi-repo prepare path.
-	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error)
+	MaterializeBranch(
+		ctx context.Context,
+		taskID, taskRepositoryID string,
+		target BranchMaterializationTarget,
+	) (*BranchMaterializationResult, error)
+}
+
+// BranchMaterializationTarget pins the live session/environment identity
+// selected by the task service so the materializer can reject a racing rebind.
+type BranchMaterializationTarget struct {
+	SessionID         string
+	TaskEnvironmentID string
 }
 
 // BranchMaterializationResult describes the live worktree created for a
@@ -190,6 +278,13 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 }
 
+// WorkflowMovePreflight validates the destination lifecycle before a task
+// move is committed. The orchestrator owns the credential and session-target
+// checks, while the task service owns the move transaction.
+type WorkflowMovePreflight interface {
+	PreflightWorkflowStepMove(ctx context.Context, taskID string, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
+}
+
 // workflowStepLister is an optional extension used to find WIP steps that
 // pull work from a feeder when new work arrives in that feeder.
 type workflowStepLister interface {
@@ -207,6 +302,7 @@ type PRTaskResolver interface {
 type StartStepResolver interface {
 	ResolveStartStep(ctx context.Context, workflowID string) (string, error)
 	ResolveFirstStep(ctx context.Context, workflowID string) (string, error)
+	ResolveAutoStartStep(ctx context.Context, workflowID string) (string, error)
 }
 
 // StepHistoryRecorder persists an ADR 0015 session-step transition audit
@@ -218,7 +314,7 @@ type StepHistoryRecorder interface {
 }
 
 type asyncStepHistoryRecorder interface {
-	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{})
+	EnqueueStepTransition(sessionID, fromStepID, toStepID string, trigger wfmodels.StepTransitionTrigger, actorID *string, metadata map[string]interface{}) bool
 }
 
 // ContributionDestinationPreparer is an internal creation-time hook for a
@@ -279,7 +375,9 @@ type Repos struct {
 	Sessions          repository.SessionRepository
 	GitSnapshots      repository.GitSnapshotRepository
 	RepoEntities      repository.RepositoryEntityRepository
+	DiscoveryRoots    repository.DesktopDiscoveryRootRepository
 	RepositorySets    repository.RepositorySetRepository
+	BranchPolicies    repository.RepositoryBranchPolicyRepository
 	RepositoryCleanup repository.RepositoryCleanupRepository
 	Executors         repository.ExecutorRepository
 	Environments      repository.EnvironmentRepository
@@ -289,11 +387,16 @@ type Repos struct {
 	StatusSummaries   repository.TaskStatusSummaryRepository
 	TaskActivity      repository.TaskActivityRepository
 	SubagentContexts  repository.SubagentContextRepository
+	Usage             repository.UsageRepository
 }
 
 // Service provides task business logic
 type Service struct {
 	workspaces                      repository.WorkspaceRepository
+	userDirectory                   UserDirectory
+	unitPlacer                      UnitPlacer
+	unitReach                       UnitReachResolver
+	userOrgs                        func(ctx context.Context, userID string) (string, error)
 	tasks                           repository.TaskRepository
 	taskRepos                       repository.TaskRepoRepository
 	workspaceFolders                repository.TaskWorkspaceFolderRepository
@@ -304,7 +407,9 @@ type Service struct {
 	sessions                        repository.SessionRepository
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
+	desktopRootStore                repository.DesktopDiscoveryRootRepository
 	repositorySets                  repository.RepositorySetRepository
+	branchPolicies                  repository.RepositoryBranchPolicyRepository
 	repositoryCleanup               repository.RepositoryCleanupRepository
 	executors                       repository.ExecutorRepository
 	environments                    repository.EnvironmentRepository
@@ -314,16 +419,32 @@ type Service struct {
 	statusSummaries                 repository.TaskStatusSummaryRepository
 	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
+	usage                           repository.UsageRepository
+	workspacePolicyAttacher         WorkspacePolicyAttacher
+	autoArchiveCoordinator          AutoArchiveCoordinator
+	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
+	taskLifecycleCoordinator        TaskLifecycleCoordinator
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
+	statusSummaryLaunchQueue        TaskStatusSummaryLaunchQueueReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
 	queuedPromptCounter             QueuedPromptCounter
 	eventBus                        bus.EventBus
 	logger                          *logger.Logger
 	discoveryConfig                 RepositoryDiscoveryConfig
+	discoveryCacheMu                sync.Mutex
+	discoveryCache                  map[string]discoveryCacheEntry
+	discoveryRootCache              map[string]discoveryRootCacheEntry
+	discoveryFlights                map[string]*discoveryFlight
+	discoveryNow                    func() time.Time
+	discoveryScanRoot               func(context.Context, string, int) (repositoryDiscoveryScanResult, error)
+	filesystemWarnings              *fsdiagnostics.WarningLimiter
 	worktreeCleanup                 WorktreeCleanup
+	canvasCleanup                   CanvasCleanup
 	executionStopper                TaskExecutionStopper
 	clarificationCanceller          TerminalClarificationCanceller
+	parkedProjectionCanceller       ParkedProjectionCanceller
+	sessionCeilingReleaser          SessionCeilingReleaser
 	rowLivenessProber               TaskRowLivenessProber
 	contextWindowResetter           func(context.Context, string) error
 	cleanupActivity                 TaskResourceCleanupActivityGate
@@ -336,6 +457,7 @@ type Service struct {
 	workflowStepCreator             WorkflowStepCreator
 	workspaceBootstrapper           WorkspaceBootstrapper
 	workflowStepGetter              WorkflowStepGetter
+	workflowMovePreflight           WorkflowMovePreflight
 	startStepResolver               StartStepResolver
 	stepHistoryRecorder             StepHistoryRecorder
 	contributionDestinationPreparer ContributionDestinationPreparer
@@ -343,21 +465,28 @@ type Service struct {
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
-	sessionRunningChecker           SessionRunningChecker
-	remoteBranchLister              RemoteBranchLister
-	repoCloneLocation               RepoCloneLocation
-	blockers                        BlockerRepository
-	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
-	// two concurrent adds cannot each pass a cycle walk that predates the
-	// other's insert and commit a cycle between them.
-	dependencyEdgeMu       sync.Mutex
-	comments               CommentRepository
-	taskStateActivity      TaskStateActivityLogger
-	secretStore            secrets.SecretStore
-	workspaceSecretDeleter WorkspaceSecretDeleter
-	baseBranchPusher       AgentBaseBranchPusher
-	comparisonTargetPusher AgentComparisonTargetPusher
-	runtimeOverridesMu     sync.Mutex
+	wsGroupMembership               WorkspaceGroupMembershipReader
+	executorCapabilityProber        ExecutorCapabilityProber
+	sshTaskDirReclaimer             SSHTaskDirReclaimer
+	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
+	// host process detection. Nil selects the real platform implementation
+	// (resource_cleanup_orphan_reap_host_*.go); tests override them
+	// directly since they are unexported and this is a whitebox package.
+	orphanReapHostSnapshotter   orphanReapHostSnapshotter
+	orphanReapVerifier          orphanReapVerifier
+	orphanReapSignaler          orphanReapSignaler
+	sessionRunningChecker       SessionRunningChecker
+	remoteBranchLister          RemoteBranchLister
+	repositorySelectionResolver RepositorySelectionResolver
+	repoCloneLocation           RepoCloneLocation
+	blockers                    BlockerRepository
+	comments                    CommentRepository
+	taskStateActivity           TaskStateActivityLogger
+	secretStore                 secrets.SecretStore
+	workspaceSecretDeleter      WorkspaceSecretDeleter
+	baseBranchPusher            AgentBaseBranchPusher
+	comparisonTargetPusher      AgentComparisonTargetPusher
+	runtimeOverridesMu          sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -366,6 +495,12 @@ type Service struct {
 	// session (satisfied by the orchestrator). Used to compute the task-level
 	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
 	foregroundActivity ForegroundActivityProvider
+	// taskParkedProvider resolves the task-level parked_on_background_work
+	// OR-aggregate and its own monotonic revision (satisfied by the
+	// orchestrator; spec: docs/specs/disambiguate-waiting/spec.md). Carried on
+	// task.updated events. Optional — unset omits the field's live update path
+	// and task.updated payloads read false/0/0, matching D9's defaults.
+	taskParkedProvider TaskParkedProvider
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.
@@ -378,13 +513,32 @@ type Service struct {
 	taskPublicationMu sync.Mutex
 	taskPublications  map[string]*taskPublicationQueue
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
-	cleanupDoneForTest  chan struct{}
-	cleanupWorkerMu     sync.Mutex
-	cleanupWorkerCancel context.CancelFunc
-	cleanupWorkerWG     sync.WaitGroup
-	cleanupWorkerWake   chan struct{}
-	cleanupRunsMu       sync.Mutex
-	cleanupRuns         map[*taskResourceCleanupRun]struct{}
+	cleanupDoneForTest chan struct{}
+	// bulkMoveAfterTaskForTest is a test-only hook invoked synchronously after
+	// each task's MoveTask call inside BulkMoveSelectedTasks's and
+	// BulkMoveTasks's dispatch loops, while their arrival locks are still
+	// held. Lets a test prove the lock spans the whole loop by blocking a
+	// concurrent arrival attempt from inside this hook. Nil in production.
+	bulkMoveAfterTaskForTest func()
+	// bulkMoveAfterLockForTest is a test-only hook invoked synchronously
+	// after BulkMoveSelectedTasks/BulkMoveTasks acquire their step lock set,
+	// before the dispatch loop starts. Lets a test force a concurrent
+	// opposite-direction MoveTask into the acquisition window and prove the
+	// two do not deadlock. Nil in production.
+	bulkMoveAfterLockForTest func()
+	// bulkMoveBeforeLockForTest is a test-only hook invoked synchronously
+	// once, before BulkMoveSelectedTasks/BulkMoveTasks make their first
+	// LockStepArrivalsForBatch attempt. Lets a test move one of the batch's
+	// tasks to a different source step in that window and prove the lock
+	// acquisition re-reads and corrects for it instead of locking a step the
+	// task has already left. Nil in production.
+	bulkMoveBeforeLockForTest func()
+	cleanupWorkerMu           sync.Mutex
+	cleanupWorkerCancel       context.CancelFunc
+	cleanupWorkerWG           sync.WaitGroup
+	cleanupWorkerWake         chan struct{}
+	cleanupRunsMu             sync.Mutex
+	cleanupRuns               map[*taskResourceCleanupRun]struct{}
 	// repoResolveMu serializes the check-then-create sections of
 	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
 	// resolvers racing to register the same not-yet-known repository (by
@@ -399,6 +553,44 @@ type Service struct {
 	pendingActionProjectionMu       sync.Mutex
 	pendingActionProjectionEpoch    string
 	pendingActionProjectionSequence uint64
+	lastPendingActionProjections    map[string]pendingActionProjectionState
+}
+
+// WorkspacePolicyAttacher persists the workspace-group relationship that is
+// required before a newly created child can be returned or launched.
+type WorkspacePolicyAttacher interface {
+	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
+}
+
+// AutoArchiveCoordinator owns the full lifecycle transition for automatic
+// archive candidates, including workspace-group membership release and
+// resource cleanup.
+type AutoArchiveCoordinator interface {
+	ArchiveAutoTask(ctx context.Context, candidate *models.Task) (*CascadeOutcome, error)
+}
+
+// WorkflowTaskArchiveCoordinator routes workflow deletion through the same
+// lifecycle path as user archive requests.
+type WorkflowTaskArchiveCoordinator interface {
+	ArchiveTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error)
+}
+
+// TaskLifecycleCoordinator owns destructive task lifecycle transitions that
+// must release workspace-group state before or alongside deleting the task.
+type TaskLifecycleCoordinator interface {
+	DeleteTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error)
+}
+
+type taskLifecycleCoordinatorWithReason interface {
+	DeleteTaskTreeWithReason(ctx context.Context, rootID string, cascade bool, reason string) (*CascadeOutcome, error)
+}
+
+// WorkspacePolicyMembershipReleaser removes a task's workspace-group
+// membership after a post-create rollback. It is an optional companion to
+// WorkspacePolicyAttacher because lightweight task-service test harnesses may
+// not persist workspace groups.
+type WorkspacePolicyMembershipReleaser interface {
+	ReleaseWorkspacePolicy(ctx context.Context, taskID, reason string) error
 }
 
 // SetAttachmentService wires the file-backed prompt attachment owner into the
@@ -433,6 +625,61 @@ func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
 	s.workspaceSecretDeleter = deleter
 }
 
+// SetWorkspacePolicyAttacher installs the canonical child-workspace
+// coordinator used by every CreateTask caller.
+func (s *Service) SetWorkspacePolicyAttacher(attacher WorkspacePolicyAttacher) {
+	s.workspacePolicyAttacher = attacher
+}
+
+// SetTaskLifecycleCoordinator installs the canonical destructive task
+// transition used by automatic cleanup callers.
+func (s *Service) SetTaskLifecycleCoordinator(coordinator TaskLifecycleCoordinator) {
+	s.taskLifecycleCoordinator = coordinator
+}
+
+// DeleteTaskWithLifecycle deletes a task through the canonical coordinator
+// when one is wired, preserving the legacy service path for isolated callers.
+func (s *Service) DeleteTaskWithLifecycle(ctx context.Context, id string) error {
+	if s.taskLifecycleCoordinator == nil {
+		return s.DeleteTask(ctx, id)
+	}
+	_, err := s.taskLifecycleCoordinator.DeleteTaskTree(ctx, id, false)
+	var postCommitErr *CascadePostCommitError
+	if errors.As(err, &postCommitErr) {
+		return nil
+	}
+	return err
+}
+
+// DeleteTaskWithLifecycleAndReason preserves deletion attribution when the
+// configured coordinator supports reason-aware task-deleted events.
+func (s *Service) DeleteTaskWithLifecycleAndReason(ctx context.Context, id, reason string) error {
+	if s.taskLifecycleCoordinator == nil {
+		return s.DeleteTaskWithReason(ctx, id, reason)
+	}
+	if coordinator, ok := s.taskLifecycleCoordinator.(taskLifecycleCoordinatorWithReason); ok {
+		_, err := coordinator.DeleteTaskTreeWithReason(ctx, id, false, reason)
+		var postCommitErr *CascadePostCommitError
+		if errors.As(err, &postCommitErr) {
+			return nil
+		}
+		return err
+	}
+	return s.DeleteTaskWithLifecycle(ctx, id)
+}
+
+// SetAutoArchiveCoordinator installs the lifecycle coordinator used by the
+// automatic archive loop.
+func (s *Service) SetAutoArchiveCoordinator(coordinator AutoArchiveCoordinator) {
+	s.autoArchiveCoordinator = coordinator
+}
+
+// SetWorkflowTaskArchiveCoordinator installs the shared archive lifecycle used
+// when deleting a workflow.
+func (s *Service) SetWorkflowTaskArchiveCoordinator(coordinator WorkflowTaskArchiveCoordinator) {
+	s.workflowTaskArchiveCoordinator = coordinator
+}
+
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
@@ -447,7 +694,9 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		sessions:              repos.Sessions,
 		gitSnapshots:          repos.GitSnapshots,
 		repoEntities:          repos.RepoEntities,
+		desktopRootStore:      repos.DiscoveryRoots,
 		repositorySets:        repos.RepositorySets,
+		branchPolicies:        repos.BranchPolicies,
 		repositoryCleanup:     repos.RepositoryCleanup,
 		executors:             repos.Executors,
 		environments:          repos.Environments,
@@ -457,15 +706,23 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		statusSummaries:       repos.StatusSummaries,
 		taskActivity:          repos.TaskActivity,
 		subagentContexts:      repos.SubagentContexts,
+		usage:                 repos.Usage,
 		eventBus:              eventBus,
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
+		discoveryCache:        make(map[string]discoveryCacheEntry),
+		discoveryRootCache:    make(map[string]discoveryRootCacheEntry),
+		discoveryFlights:      make(map[string]*discoveryFlight),
+		discoveryNow:          time.Now,
+		discoveryScanRoot:     scanRootForRepos,
+		filesystemWarnings:    fsdiagnostics.NewWarningLimiter(0),
 		branchFetcher:         newBranchFetcher(log.Zap()),
 		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
 		lastTaskSubagentCount: make(map[string]int),
 		// Focused service tests do not run backend composition. Production
 		// replaces this fallback with a database-allocated generation.
 		pendingActionProjectionEpoch: "1",
+		lastPendingActionProjections: make(map[string]pendingActionProjectionState),
 	}
 }
 
@@ -474,13 +731,18 @@ func (s *Service) SetWorktreeCleanup(cleanup WorktreeCleanup) {
 	s.worktreeCleanup = cleanup
 }
 
+// SetCanvasCleanup wires lifecycle cleanup for plugin-backed canvases.
+func (s *Service) SetCanvasCleanup(cleanup CanvasCleanup) {
+	s.canvasCleanup = cleanup
+}
+
 func (s *Service) setCleanupDoneForTestHook(ch chan struct{}) {
 	s.cleanupDoneForTest = ch
 }
 
 // SetBranchMaterializer wires the mid-session worktree materializer for
-// AddBranchToTask. Optional — when unset, MCP add_branch only inserts the
-// task_repositories row and the worktree appears on next session launch.
+// AddBranchToTask. It may be unset for pre-launch tasks, whose worktrees are
+// created on the next session launch; live tasks require the materializer.
 func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 	s.branchMaterializer = m
 }
@@ -527,6 +789,20 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 // transitions owned by the task service.
 func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCanceller) {
 	s.clarificationCanceller = canceller
+}
+
+// SetParkedProjectionCanceller wires parked-projection cleanup (orchestrator)
+// for session terminations driven by the task service's own bulk paths —
+// archive cancellation and delete cascade — which never pass through the
+// orchestrator's per-session state-transition chokepoint.
+func (s *Service) SetParkedProjectionCanceller(canceller ParkedProjectionCanceller) {
+	s.parkedProjectionCanceller = canceller
+}
+
+// SetSessionCeilingReleaser wires session-ceiling release (orchestrator) for
+// the same task service-owned bulk paths SetParkedProjectionCanceller covers.
+func (s *Service) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
+	s.sessionCeilingReleaser = releaser
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe
@@ -578,6 +854,13 @@ func (s *Service) SetWorkspaceDefaultsInitializer(initializer WorkspaceDefaultsI
 // SetWorkflowStepGetter wires the workflow step getter for MoveTask.
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
+}
+
+// SetWorkflowMovePreflight wires the orchestrator's synchronous destination
+// lifecycle validation for task moves. It is optional for standalone task
+// service users and tests.
+func (s *Service) SetWorkflowMovePreflight(preflight WorkflowMovePreflight) {
+	s.workflowMovePreflight = preflight
 }
 
 // SetStartStepResolver wires the start step resolver for CreateTask.
@@ -634,6 +917,13 @@ type RemoteBranchLister interface {
 // SetRemoteBranchLister wires the provider-neutral remote branch source.
 func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
 	s.remoteBranchLister = lister
+}
+
+// SetRepositorySelectionResolver wires server-side inspection for first-use
+// plugin repository selections. The resolver is optional for focused callers;
+// plugin selections fail closed when it is not wired.
+func (s *Service) SetRepositorySelectionResolver(resolver RepositorySelectionResolver) {
+	s.repositorySelectionResolver = resolver
 }
 
 // RepoCloneLocation reports the base path the orchestrator clones repos into

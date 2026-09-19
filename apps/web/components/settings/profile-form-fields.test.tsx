@@ -1,10 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { SettingsSaveProvider, useSettingsSaveContributor } from "./settings-save-provider";
-import { resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
+import { fetchDynamicModels, resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
 import { __resetModelConfigResolutionCache } from "@/hooks/domains/settings/use-dynamic-models";
 import { ProfileFormFields, type ProfileFormData } from "./profile-form-fields";
 import type { ModelConfig } from "@/lib/types/http";
@@ -150,6 +150,18 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(trigger.textContent).toContain("claude-gone");
   });
 
+  it("does not infer an advertised variation for a gone saved model", () => {
+    renderForm(formData({ model: "opus" }), {
+      ...modelConfig,
+      available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
+    });
+
+    expect(screen.queryByTestId("profile-model-variation-advisory")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: profileStartModelSettingsLabel }).textContent,
+    ).toContain("opus");
+  });
+
   it("shows the agent fallback row when auto-fallback is off", () => {
     renderForm(formData({ auto_fallback: false }));
     expandFallbackSettings();
@@ -162,6 +174,21 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
     expect(screen.getByRole("switch", { name: "Agent fallback" })).toHaveProperty("disabled", true);
     expect(screen.queryByTestId("profile-auto-fallback-field")).not.toBeNull();
+  });
+
+  it("disables fallback controls while exact model is required", () => {
+    renderForm(formData({ require_exact_model: true, fallback_model: "mock-fast" }));
+    expandFallbackSettings();
+    expect(
+      screen.getByRole("switch", { name: "Require exact model" }).getAttribute("data-state"),
+    ).toBe("checked");
+    expect(
+      screen.getByRole("switch", { name: "Fallback automatically to next model" }),
+    ).toHaveProperty("disabled", true);
+    expect(screen.getByRole("switch", { name: "Agent fallback" })).toHaveProperty("disabled", true);
+    expect(screen.getByTestId("profile-fallback-settings-summary").textContent).toContain(
+      "Exact model required",
+    );
   });
 
   it("marks a gone fallback model red in its picker", () => {
@@ -197,7 +224,92 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
   });
 });
 
+describe("ProfileFormFields Copilot model options", () => {
+  const opusId = "claude-opus-5";
+  const opusName = "Claude Opus 5";
+  const haikuId = "claude-haiku-4.5";
+  const haikuName = "Claude Haiku 4.5";
+  const copilotModelConfig: ModelConfig = {
+    default_model: opusId,
+    available_models: [
+      { id: opusId, name: opusName, meta: { copilotUsage: "15x" } },
+      { id: haikuId, name: haikuName, meta: { copilotUsage: "0.33x" } },
+    ],
+    supports_dynamic_models: false,
+    config_options: [
+      {
+        type: "select",
+        id: "model",
+        name: "Model",
+        category: "model",
+        current_value: opusId,
+        options: [
+          { value: opusId, name: opusName, description: opusName },
+          { value: haikuId, name: haikuName, description: haikuName },
+        ],
+      },
+    ],
+  };
+
+  it("shows the usage multiplier and drops the duplicated name from the config-option list", () => {
+    renderForm(formData({ model: opusId }), copilotModelConfig);
+
+    fireEvent.click(screen.getByRole("button", { name: profileStartModelSettingsLabel }));
+
+    const opusOption = screen.getByRole("option", { name: /Claude Opus 5/ });
+    // The multiplier survives the config-option path (it lives on available_models meta).
+    expect(within(opusOption).getByText("15x")).not.toBeNull();
+    // The duplicated name is replaced by the model id, not shown twice.
+    expect(within(opusOption).getByText(opusId)).not.toBeNull();
+    expect(within(opusOption).queryAllByText(opusName)).toHaveLength(1);
+
+    const haikuOption = screen.getByRole("option", { name: /Claude Haiku 4\.5/ });
+    expect(within(haikuOption).getByText("0.33x")).not.toBeNull();
+  });
+});
+
 describe("ProfileFormFields model options", () => {
+  it("uses a free-text model input for an OpenAI-compatible provider", async () => {
+    __resetModelConfigResolutionCache();
+    vi.mocked(fetchDynamicModels).mockClear();
+    vi.mocked(resolveAgentModelConfig).mockClear();
+    const onChange = vi.fn();
+
+    renderForm(
+      formData({ provider_kind: "openai_compatible", model: "gateway-model" }),
+      { ...modelConfig, supports_dynamic_models: true },
+      onChange,
+    );
+
+    const input = screen.getByTestId("profile-model-input");
+    expect((input as HTMLInputElement).value).toBe("gateway-model");
+    fireEvent.change(input, { target: { value: "gateway-only" } });
+    expect(onChange).toHaveBeenCalledWith({ model: "gateway-only" });
+    await waitFor(() => {
+      expect(fetchDynamicModels).not.toHaveBeenCalled();
+      expect(resolveAgentModelConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  it("constrains a single start model field on desktop", () => {
+    renderForm(formData());
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
+  });
+
+  it("keeps the model and mode fields balanced when modes are available", () => {
+    renderForm(formData({ mode: "default" }), {
+      ...modelConfig,
+      available_modes: [{ id: "default", name: "Default" }],
+      current_mode_id: "default",
+    });
+
+    const row = screen.getByTestId("profile-capabilities-model-row");
+    expect(row.firstElementChild?.className).toContain("flex-1");
+    expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
+  });
+
   it("loads model-specific options in the profile model selector", async () => {
     const dynamicModelConfig: ModelConfig = {
       default_model: "model-a",

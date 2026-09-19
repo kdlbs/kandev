@@ -7,7 +7,7 @@ depends_on:
   - "03-visible-queue-removal-ui"
   - "04-message-queue-settings-ui"
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-management.md"
+spec: "../../specs/ui/requirements/message-queue-management.md"
 ---
 
 # Task 05: Prove End-to-End Behavior and Update Public Docs

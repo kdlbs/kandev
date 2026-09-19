@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-mobile-task-actions", "02-mobile-kanban-navigation"]
 plan: "plan.md"
-spec: "../../specs/ui/mobile-task-navigation.md"
+spec: "../../specs/ui/requirements/mobile-task-navigation.md"
 ---
 
 # Task 03: Mobile E2E and verification

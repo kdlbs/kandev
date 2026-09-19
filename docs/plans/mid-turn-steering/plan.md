@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/mid-turn-steering.md
+spec: docs/specs/platform/requirements/mid-turn-steering.md
 created: 2026-08-04
 status: complete
 ---

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["04-release-desktop-artifacts"]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 05: Signing and Release Trust

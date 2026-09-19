@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
 )
@@ -80,6 +81,42 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 		response.WorkspaceID = workspaceID
 	}
 	return response, err
+}
+
+// RetryTaskCIAutoMerge authorizes one new evaluation of a failed automatic
+// merge for the exact linked PR. The caller publishes the returned PR through
+// the normal PR-updated event path; this method never calls GitHub.
+func (s *Service) RetryTaskCIAutoMerge(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) (*TaskPR, error) {
+	if s.store == nil {
+		return nil, errStoreUnavailable
+	}
+	if _, err := s.resolveAuthorizedTaskWorkspace(ctx, taskID); err != nil {
+		return nil, err
+	}
+	targets, err := s.resolveTaskPRAutomationTargets(ctx, taskID, &repositoryID, &prNumber)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) != 1 {
+		return nil, ErrTaskPRNotLinked
+	}
+	if err := s.store.AuthorizeTaskCIMergeRetry(ctx, taskID, repositoryID, prNumber, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	return targets[0], nil
+}
+
+// ClearTaskCIMergeRetryAuthorization removes a retry authorization that could
+// not be delivered to the automation evaluator.
+func (s *Service) ClearTaskCIMergeRetryAuthorization(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ClearTaskCIMergeRetryAuthorization(ctx, taskID, repositoryID, prNumber)
 }
 
 // resolveAuthorizedTaskWorkspace resolves ownership through the task service
@@ -216,12 +253,66 @@ func (s *Service) GetTaskCIPRState(ctx context.Context, taskID, repositoryID str
 	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
 }
 
+// ListTaskCIAutoFixStates returns all persisted PR automation state rows for
+// startup reconciliation.
+func (s *Service) ListTaskCIAutoFixStates(ctx context.Context) ([]*TaskCIPRAutomationState, error) {
+	if s.store == nil {
+		return nil, errStoreUnavailable
+	}
+	return s.store.ListAllTaskCIPRStates(ctx)
+}
+
 // RecordTaskCIFixAttempt records an auto-fix attempt.
 func (s *Service) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAttempt) error {
 	if s.store == nil {
 		return errStoreUnavailable
 	}
 	return s.store.RecordTaskCIFixAttempt(ctx, attempt)
+}
+
+// BindTaskCIAutoFixAttemptTurn binds a queued or direct auto-fix attempt to
+// the exact accepted agent turn.
+func (s *Service) BindTaskCIAutoFixAttemptTurn(ctx context.Context, binding TaskCIAutoFixAttemptBinding) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.BindTaskCIAutoFixAttemptTurn(ctx, binding)
+}
+
+// ReportTaskCIAutoFixOutcome accepts the first explicit disposition from a
+// matching auto-fix turn.
+func (s *Service) ReportTaskCIAutoFixOutcome(ctx context.Context, report TaskCIAutoFixOutcomeReport) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ReportTaskCIAutoFixOutcome(ctx, report)
+}
+
+// ReconcileTaskCIAutoFixTurnCompletion marks an undispositioned matching turn
+// retryable after normal completion or recoverable failure.
+func (s *Service) ReconcileTaskCIAutoFixTurnCompletion(ctx context.Context, taskID, sessionID, turnID string) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ReconcileTaskCIAutoFixTurnCompletion(ctx, taskID, sessionID, turnID)
+}
+
+// ReconcileTaskCIAutoFixQueuedDispatchFailure releases a queued reservation
+// when delivery fails before agent acceptance.
+func (s *Service) ReconcileTaskCIAutoFixQueuedDispatchFailure(ctx context.Context, binding TaskCIAutoFixAttemptBinding) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ReconcileTaskCIAutoFixQueuedDispatchFailure(ctx, binding)
+}
+
+// ReconcileTaskCIAutoFixProviderProgress advances an action_taken attempt when
+// a settled provider generation changes or its progress deadline expires.
+func (s *Service) ReconcileTaskCIAutoFixProviderProgress(ctx context.Context, progress TaskCIAutoFixProviderProgress) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.ReconcileTaskCIAutoFixProviderProgress(ctx, progress)
 }
 
 // RefreshTaskCIFixCheckpoint records the current CI checkpoint without recording a prompt dispatch.
@@ -240,12 +331,39 @@ func (s *Service) RecordTaskCIMergeAttempt(ctx context.Context, attempt TaskCIMe
 	return s.store.RecordTaskCIMergeAttempt(ctx, attempt)
 }
 
+// RecordTaskCIMergeAttemptResult completes a reserved auto-merge attempt.
+func (s *Service) RecordTaskCIMergeAttemptResult(
+	ctx context.Context, taskID, repositoryID string, prNumber int, signature, result, message string,
+) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.RecordTaskCIMergeAttemptResult(ctx, taskID, repositoryID, prNumber, signature, result, message)
+}
+
+// RecordTaskCIMergeQueueObservation persists active queue membership and the
+// latest removal cause so automation can recover safely after a restart.
+func (s *Service) RecordTaskCIMergeQueueObservation(ctx context.Context, observation TaskCIMergeQueueObservation) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.RecordTaskCIMergeQueueObservation(ctx, observation)
+}
+
 // RecordTaskCIError records a CI automation error.
 func (s *Service) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
 	if s.store == nil {
 		return errStoreUnavailable
 	}
 	return s.store.RecordTaskCIError(ctx, taskID, repositoryID, prNumber, message)
+}
+
+// RecordTaskCIAutoMergeError records a typed automatic-merge error.
+func (s *Service) RecordTaskCIAutoMergeError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	if s.store == nil {
+		return errStoreUnavailable
+	}
+	return s.store.RecordTaskCIAutoMergeError(ctx, taskID, repositoryID, prNumber, message)
 }
 
 // MarkTaskCIAutoFixExhausted records that auto-fix reached its per-PR round cap.

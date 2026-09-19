@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-selector-ui"]
 plan: "plan.md"
-spec: "../../specs/task-dependencies/create-dialog-dependency-selector.md"
+spec: "../../specs/tasks/requirements/task-dependencies-create-dialog-dependency-selector.md"
 ---
 
 # Task 02: Verify desktop and mobile flows
@@ -52,7 +52,7 @@ implementation.
 ## Inputs
 
 - Spec scenarios and Mobile design contract in
-  `docs/specs/task-dependencies/create-dialog-dependency-selector.md`
+  `docs/specs/tasks/requirements/task-dependencies-create-dialog-dependency-selector.md`
 - Plan E2E Tests and Mobile parity contract in `plan.md`
 - `apps/web/e2e/fixtures/test-base.ts`, `pages/kanban-page.ts`, and
   `pages/mobile-kanban-page.ts`

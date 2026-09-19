@@ -26,12 +26,28 @@ type TaskStatusSummaryPRReader interface {
 	) (map[string][]statussummary.PullRequestInput, error)
 }
 
+// TaskStatusSummaryLaunchQueueReader supplies the task-owned launch queue
+// projection and may refresh shared admission observations once for a batch.
+// The task service does not depend on the orchestrator's controller type.
+type TaskStatusSummaryLaunchQueueReader func(
+	context.Context,
+	[]*models.Task,
+) map[string]*statussummary.LaunchQueueSummary
+
 // SetTaskStatusSummaryPRReader wires the optional provider-backed PR reader.
 // The task service keeps the interface narrow so it does not depend on the
 // GitHub package.
 func (s *Service) SetTaskStatusSummaryPRReader(reader TaskStatusSummaryPRReader) {
 	if s != nil {
 		s.statusSummaryPRs = reader
+	}
+}
+
+// SetTaskStatusSummaryLaunchQueueReader wires the optional live admission
+// observation used when boot and task-list summaries are rebuilt.
+func (s *Service) SetTaskStatusSummaryLaunchQueueReader(reader TaskStatusSummaryLaunchQueueReader) {
+	if s != nil {
+		s.statusSummaryLaunchQueue = reader
 	}
 }
 
@@ -54,8 +70,9 @@ func (s *Service) ReconcileTaskStatusSummaries(
 		return summaries, nil
 	}
 	activityByTask, activityObserved := s.loadSummaryActivity(ctx, taskIDs(tasks))
+	launchQueueByTask := s.launchQueueSummaries(ctx, tasks)
 	failedTaskIDs, reconcileErr := s.reconcileExistingSummaries(
-		ctx, tasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved,
+		ctx, tasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved, launchQueueByTask,
 	)
 	rebuildTasks := tasks
 	if len(failedTaskIDs) > 0 {
@@ -70,7 +87,7 @@ func (s *Service) ReconcileTaskStatusSummaries(
 		}
 	}
 	summaries = s.rebuildMissingSummaries(
-		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved,
+		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved, launchQueueByTask,
 	)
 	return summaries, reconcileErr
 }
@@ -83,6 +100,7 @@ func (s *Service) reconcileExistingSummaries(
 	summaries map[string]*statussummary.TaskStatusSummary,
 	activityByTask map[string]time.Time,
 	activityObserved bool,
+	launchQueueByTask map[string]*statussummary.LaunchQueueSummary,
 ) (map[string]struct{}, error) {
 	var reconcileErr error
 	failedTaskIDs := make(map[string]struct{})
@@ -99,6 +117,7 @@ func (s *Service) reconcileExistingSummaries(
 			action,
 			activityByTask[task.ID],
 			activityObserved,
+			launchQueueByTask[task.ID],
 		)
 		if err != nil {
 			if reconciled != nil {
@@ -134,13 +153,15 @@ func (s *Service) rebuildMissingSummaries(
 	summaries map[string]*statussummary.TaskStatusSummary,
 	activityByTask map[string]time.Time,
 	activityObserved bool,
+	launchQueueByTask map[string]*statussummary.LaunchQueueSummary,
 ) map[string]*statussummary.TaskStatusSummary {
 	missing := missingSummaryTasks(tasks, summaries)
 	if len(missing) == 0 {
 		return summaries
 	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
-	gitBySession, gitObserved := s.loadSummaryGit(ctx, sessionIDsForTasks(missing, sessionsByTask))
+	environmentIDsByTask, environmentIDs := s.taskEnvironmentIDsForTasks(ctx, missing, sessionsByTask)
+	gitByEnvironment, gitObserved := s.loadSummaryGit(ctx, environmentIDs)
 	queuedByTask := s.loadQueuedSummaryCounts(ctx, taskIDs(missing))
 	activityAtByTask := activityByTask
 	now := time.Now().UTC()
@@ -149,12 +170,14 @@ func (s *Service) rebuildMissingSummaries(
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			taskLaunchErrorSummary(task),
 			sessionsByTask[task.ID],
+			environmentIDsByTask[task.ID],
 			pendingBySession,
-			gitBySession,
+			gitByEnvironment,
 			gitObserved,
 			prByTask[task.ID],
 			prObserved,
 			queuedByTask[task.ID],
+			launchQueueByTask[task.ID],
 			activityAt,
 			activityObserved,
 			now,
@@ -186,6 +209,55 @@ func (s *Service) loadSummaryActivity(ctx context.Context, taskIDs []string) (ma
 		return nil, false
 	}
 	return activityByTask, true
+}
+
+func (s *Service) launchQueueSummaries(
+	ctx context.Context,
+	tasks []*models.Task,
+) map[string]*statussummary.LaunchQueueSummary {
+	if s.statusSummaryLaunchQueue != nil {
+		if queues := s.statusSummaryLaunchQueue(ctx, tasks); queues != nil {
+			return queues
+		}
+	}
+	queues := make(map[string]*statussummary.LaunchQueueSummary, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		queues[task.ID] = statussummary.LaunchQueueSummaryFromTask(task)
+	}
+	return queues
+}
+
+func cloneLaunchQueueForService(queue *statussummary.LaunchQueueSummary) *statussummary.LaunchQueueSummary {
+	if queue == nil {
+		return nil
+	}
+	copy := *queue
+	if queue.Capacity != nil {
+		capacity := *queue.Capacity
+		copy.Capacity = &capacity
+	}
+	return &copy
+}
+
+func statussummaryLaunchQueueEqual(left, right *statussummary.LaunchQueueSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.SessionID != right.SessionID || left.AgentProfileID != right.AgentProfileID ||
+		left.WorkflowStepID != right.WorkflowStepID || !left.QueuedAt.Equal(right.QueuedAt) ||
+		left.Reason != right.Reason || left.Retrying != right.Retrying {
+		return false
+	}
+	if left.Capacity == nil || right.Capacity == nil {
+		return left.Capacity == right.Capacity
+	}
+	// The sample time is an in-memory freshness overlay. Persist only changes
+	// to the queue's identity or capacity values.
+	return left.Capacity.InUse == right.Capacity.InUse &&
+		left.Capacity.Limit == right.Capacity.Limit
 }
 
 func (s *Service) rebuildMissingSummary(
@@ -239,10 +311,19 @@ func (s *Service) reconcileExistingSummary(
 	pendingAction string,
 	authoritativeActivity time.Time,
 	activityObserved bool,
+	launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
+	var launchQueue *statussummary.LaunchQueueSummary
+	// Older repair tests and partial task snapshots can omit Metadata entirely.
+	// In that shape there is no authoritative queue to compare, unless the
+	// persisted summary still advertises one that must be cleared.
+	launchQueueObserved := len(launchQueueValues) > 0 && (task.Metadata != nil || current.LaunchQueue != nil)
+	if launchQueueObserved {
+		launchQueue = launchQueueValues[0]
+	}
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
-		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved) {
-			return current, nil
+		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved) {
+			return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 		}
 		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
 			return nil, err
@@ -252,6 +333,7 @@ func (s *Service) reconcileExistingSummary(
 		if activityObserved && authoritativeActivity.After(time.Time{}) {
 			next.LastActivityAt = maxSummaryActivity(current.LastActivityAt, authoritativeActivity)
 		}
+		next.LaunchQueue = cloneLaunchQueueForService(launchQueue)
 		next.Revision = current.Revision + 1
 		next.UpdatedAt = advancedSummaryTime(current.UpdatedAt, time.Now().UTC())
 		if err := next.Validate(); err != nil {
@@ -269,7 +351,7 @@ func (s *Service) reconcileExistingSummary(
 			s.publishReconciledSummary(ctx, task, next)
 			return &next, nil
 		}
-		current, pendingAction, err = s.reloadSummaryReconcileState(ctx, task.ID)
+		current, pendingAction, launchQueue, err = s.reloadSummaryReconcileState(ctx, task.ID, launchQueueObserved)
 		if err != nil {
 			return nil, err
 		}
@@ -277,11 +359,33 @@ func (s *Service) reconcileExistingSummary(
 			return nil, nil
 		}
 	}
-	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved) {
-		return current, nil
+	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved) {
+		return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 	}
 	s.logSummaryReconcileExhaustion(task.ID, current)
 	return nil, errors.New("exhausted compare-and-set retries")
+}
+
+// overlayLaunchQueueObservation returns a response-only copy when the live
+// queue has only a newer capacity sample. Observation time is intentionally
+// excluded from the durable equality contract, but task-list consumers still
+// need the fresh timestamp to render age and connectivity state accurately.
+func overlayLaunchQueueObservation(
+	current *statussummary.TaskStatusSummary,
+	observed *statussummary.LaunchQueueSummary,
+	observedEnabled bool,
+) *statussummary.TaskStatusSummary {
+	if !observedEnabled || current == nil || observed == nil || current.LaunchQueue == nil ||
+		!statussummaryLaunchQueueEqual(current.LaunchQueue, observed) {
+		return current
+	}
+	if current.LaunchQueue.Capacity == nil || observed.Capacity == nil ||
+		current.LaunchQueue.Capacity.ObservedAt.Equal(observed.Capacity.ObservedAt) {
+		return current
+	}
+	copy := *current
+	copy.LaunchQueue = cloneLaunchQueueForService(observed)
+	return &copy
 }
 
 func summaryNeedsReconcile(
@@ -289,11 +393,16 @@ func summaryNeedsReconcile(
 	pendingAction string,
 	authoritativeActivity time.Time,
 	activityObserved bool,
+	launchQueue *statussummary.LaunchQueueSummary,
+	launchQueueObserved bool,
 ) bool {
 	if current == nil {
 		return false
 	}
 	if current.PendingAction != pendingAction {
+		return true
+	}
+	if launchQueueObserved && !statussummaryLaunchQueueEqual(current.LaunchQueue, launchQueue) {
 		return true
 	}
 	return activityObserved && authoritativeActivity.After(time.Time{}) &&
@@ -303,27 +412,36 @@ func summaryNeedsReconcile(
 func (s *Service) reloadSummaryReconcileState(
 	ctx context.Context,
 	taskID string,
-) (*statussummary.TaskStatusSummary, string, error) {
+	loadLaunchQueue bool,
+) (*statussummary.TaskStatusSummary, string, *statussummary.LaunchQueueSummary, error) {
 	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{taskID})
 	if err != nil {
-		return nil, "", fmt.Errorf("reload after compare-and-set rejection: %w", err)
+		return nil, "", nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
 	}
 	current := rows[taskID]
 	if current == nil {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 	if s.sessions == nil {
-		return nil, "", errors.New("reload sessions: session repository unavailable")
+		return nil, "", nil, errors.New("reload sessions: session repository unavailable")
 	}
 	refreshedSessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
-		return nil, "", fmt.Errorf("reload sessions: %w", err)
+		return nil, "", nil, fmt.Errorf("reload sessions: %w", err)
 	}
 	pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
 	if err != nil {
-		return nil, "", fmt.Errorf("reload pending actions: %w", err)
+		return nil, "", nil, fmt.Errorf("reload pending actions: %w", err)
 	}
-	return current, pendingActionForTask(refreshedSessions, pendingBySession), nil
+	if !loadLaunchQueue {
+		return current, pendingActionForTask(refreshedSessions, pendingBySession), nil, nil
+	}
+	task, err := s.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("reload task for launch queue: %w", err)
+	}
+	queues := s.launchQueueSummaries(ctx, []*models.Task{task})
+	return current, pendingActionForTask(refreshedSessions, pendingBySession), queues[taskID], nil
 }
 
 func maxSummaryActivity(current *time.Time, candidate time.Time) *time.Time {
@@ -460,25 +578,58 @@ func taskIDs(tasks []*models.Task) []string {
 	return ids
 }
 
-func sessionIDsForTasks(tasks []*models.Task, sessionsByTask map[string][]*models.TaskSession) []string {
+func (s *Service) taskEnvironmentIDsForTasks(
+	ctx context.Context,
+	tasks []*models.Task,
+	sessionsByTask map[string][]*models.TaskSession,
+) (map[string][]string, []string) {
 	seen := make(map[string]struct{})
+	seenByTask := make(map[string]map[string]struct{}, len(tasks))
+	idsByTask := make(map[string][]string, len(tasks))
 	ids := make([]string, 0)
+	add := func(taskID, environmentID string) {
+		if environmentID == "" {
+			return
+		}
+		taskSeen := seenByTask[taskID]
+		if taskSeen == nil {
+			taskSeen = make(map[string]struct{})
+			seenByTask[taskID] = taskSeen
+		}
+		if _, ok := taskSeen[environmentID]; ok {
+			return
+		}
+		taskSeen[environmentID] = struct{}{}
+		idsByTask[taskID] = append(idsByTask[taskID], environmentID)
+		if _, ok := seen[environmentID]; ok {
+			return
+		}
+		seen[environmentID] = struct{}{}
+		ids = append(ids, environmentID)
+	}
 	for _, task := range tasks {
 		if task == nil {
 			continue
 		}
+		if s != nil && s.taskEnvironments != nil {
+			environment, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, task.ID)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.Warn("failed to load task environment for status summary repair",
+						zap.String("task_id", task.ID), zap.Error(err))
+				}
+			} else if environment != nil {
+				add(task.ID, environment.ID)
+			}
+		}
 		for _, session := range sessionsByTask[task.ID] {
-			if session == nil || session.ID == "" {
+			if session == nil || session.TaskEnvironmentID == "" {
 				continue
 			}
-			if _, ok := seen[session.ID]; ok {
-				continue
-			}
-			seen[session.ID] = struct{}{}
-			ids = append(ids, session.ID)
+			add(task.ID, session.TaskEnvironmentID)
 		}
 	}
-	return ids
+	return idsByTask, ids
 }
 
 func (s *Service) loadSummaryPRs(
@@ -500,30 +651,39 @@ func (s *Service) loadSummaryPRs(
 
 func (s *Service) loadSummaryGit(
 	ctx context.Context,
-	sessionIDs []string,
-) (map[string]*models.GitSnapshot, bool) {
-	if s.gitSnapshots == nil || len(sessionIDs) == 0 {
+	taskEnvironmentIDs []string,
+) (map[string][]*models.GitSnapshot, bool) {
+	if s.gitSnapshots == nil || len(taskEnvironmentIDs) == 0 {
 		return nil, false
 	}
-	snapshots, err := s.gitSnapshots.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := s.gitSnapshots.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, taskEnvironmentIDs)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to load Git state for status summary repair", zap.Error(err))
 		}
 		return nil, false
 	}
-	return snapshots, true
+	byEnvironment := make(map[string][]*models.GitSnapshot, len(taskEnvironmentIDs))
+	for _, snapshot := range snapshots {
+		if snapshot == nil || snapshot.TaskEnvironmentID == "" {
+			continue
+		}
+		byEnvironment[snapshot.TaskEnvironmentID] = append(byEnvironment[snapshot.TaskEnvironmentID], snapshot)
+	}
+	return byEnvironment, true
 }
 
 func (s *Service) rebuildInput(
 	taskError *statussummary.ActiveErrorSummary,
 	sessions []*models.TaskSession,
+	taskEnvironmentIDs []string,
 	pendingBySession map[string]models.TaskPendingAction,
-	gitBySession map[string]*models.GitSnapshot,
+	gitByEnvironment map[string][]*models.GitSnapshot,
 	gitObserved bool,
 	prs []statussummary.PullRequestInput,
 	prObserved bool,
 	queuedPromptCount int,
+	launchQueue *statussummary.LaunchQueueSummary,
 	lastActivityAt time.Time,
 	activityObserved bool,
 	now time.Time,
@@ -538,6 +698,7 @@ func (s *Service) rebuildInput(
 		PRObserved:        prObserved,
 		GitObserved:       gitObserved,
 		QueuedPromptCount: maxInt(queuedPromptCount, 0),
+		LaunchQueue:       cloneLaunchQueueForService(launchQueue),
 		Now:               now,
 	}
 	if activityObserved && !lastActivityAt.IsZero() {
@@ -563,13 +724,19 @@ func (s *Service) rebuildInput(
 		var activeError *statussummary.ActiveErrorSummary
 		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok && !lastError.IsDismissed() {
 			activeError = &statussummary.ActiveErrorSummary{
+				Scope:            models.ErrorScopeSession,
 				SessionID:        session.ID,
 				TaskRepositoryID: lastError.TaskRepositoryID,
+				ExecutionID:      lastError.ExecutionID,
+				AttemptID:        lastError.AttemptID,
+				Phase:            lastError.Phase,
 				Stamp:            lastError.Stamp(),
 				OccurredAt:       lastError.OccurredAt,
 				Preview:          lastError.Message,
+				Details:          lastError.Details,
 				Category:         lastError.Code,
 				RecoveryActions:  lastError.RecoveryActions,
+				Causes:           lastError.Causes,
 			}
 		}
 		input.Sessions = append(input.Sessions, statussummary.RebuildSession{
@@ -583,9 +750,14 @@ func (s *Service) rebuildInput(
 		if action := string(pendingBySession[session.ID]); strings.TrimSpace(action) != "" {
 			input.PendingActions[session.ID] = action
 		}
-		if snapshot := gitBySession[session.ID]; snapshot != nil {
+	}
+	for _, environmentID := range taskEnvironmentIDs {
+		for _, snapshot := range gitByEnvironment[environmentID] {
+			if snapshot == nil {
+				continue
+			}
 			input.Git = append(input.Git, statussummary.RebuildGit{
-				Repository: snapshotRepositoryKey(snapshot, session.ID),
+				Repository: snapshotRepositoryKey(snapshot, ""),
 				Summary:    gitSummaryFromSnapshot(snapshot),
 			})
 		}
@@ -602,10 +774,13 @@ func taskLaunchErrorSummary(task *models.Task) *statussummary.ActiveErrorSummary
 		return nil
 	}
 	return &statussummary.ActiveErrorSummary{
+		Scope:            models.ErrorScopeTask,
+		SessionID:        errorValue.SessionID,
 		TaskRepositoryID: errorValue.TaskRepositoryID,
 		Stamp:            errorValue.Stamp(),
 		OccurredAt:       errorValue.OccurredAt,
 		Preview:          errorValue.Message,
+		Details:          errorValue.Details,
 		Category:         errorValue.Code,
 		RecoveryActions:  errorValue.RecoveryActions,
 	}

@@ -2,15 +2,18 @@
 
 import React, { useCallback, useEffect } from "react";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
+import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { t } from "@/lib/i18n";
-import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { getWebSocketClient } from "@/lib/ws/connection";
+import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
@@ -101,6 +104,29 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   );
 }
 
+/**
+ * Request a fresh git-status snapshot when a diff surface becomes active.
+ * The workspace poller can be in its slower mode after startup, so relying on
+ * its next tick leaves the Changes panel showing an unavailable comparison
+ * after the target becomes reachable again.
+ */
+function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
+  useEffect(() => {
+    if (!sessionId) return;
+    const entry = panelPortalManager.get(panelId);
+    if (!entry?.api) return;
+
+    const refreshNow = () => {
+      getWebSocketClient()?.refreshSessionData(sessionId);
+    };
+    if (entry.api.isActive) refreshNow();
+    const disposable = entry.api.onDidActiveChange((event) => {
+      if (event.isActive) refreshNow();
+    });
+    return () => disposable.dispose();
+  }, [panelId, sessionId]);
+}
+
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
  *  "file"), closing the panel when it becomes empty. */
 function DiffViewerContent({
@@ -113,13 +139,17 @@ function DiffViewerContent({
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
   const selectedRepositoryName =
     panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
   const selectedPRKey = panelKind === "file" ? (params?.prKey as string | undefined) : undefined;
+  const selectedChangeLayer =
+    panelKind === "file" ? (params?.changeLayer as OpenDiffOptions["changeLayer"]) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
@@ -132,6 +162,7 @@ function DiffViewerContent({
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}
       prKey={selectedPRKey}
+      changeLayer={selectedChangeLayer}
       sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
@@ -153,6 +184,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count - use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const totalCount = useSessionChangesCount(activeSessionId);
 
   useEffect(() => {
@@ -171,6 +203,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
         source: options?.source,
         repositoryName: options?.repositoryName,
         prKey: options?.prKey,
+        changeLayer: options?.changeLayer,
       }),
     [addFileDiffPanel],
   );
@@ -210,6 +243,19 @@ function PlanContent() {
   return <TaskPlanPanel taskId={taskId} visible />;
 }
 
+function CanvasContent({ params }: { params: Record<string, unknown> }) {
+  const enabled = useFeature("canvases");
+  if (!enabled) return null;
+  return (
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+      data-testid="canvas-panel-boundary"
+    >
+      <CanvasHostRoute canvasId={typeof params.canvasId === "string" ? params.canvasId : ""} />
+    </div>
+  );
+}
+
 const COMPONENT_ALIASES: Record<string, string> = {
   "diff-files": "changes",
   "all-files": "files",
@@ -242,6 +288,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
   "prompt-history": () => <PromptHistoryContent />,
+  canvas: (_panelId, params) => <CanvasContent params={params} />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -123,6 +124,25 @@ func TestCreateAutomation_AcceptsValidRepositoryIDs(t *testing.T) {
 	if len(a.RepositoryIDs) != 2 || a.RepositoryIDs[0] != "repo-a" || a.RepositoryIDs[1] != "repo-b" {
 		t.Fatalf("expected repository_ids [repo-a repo-b], got %v", a.RepositoryIDs)
 	}
+	if len(a.Repositories) != 2 || a.Repositories[0].BaseBranch != "main" || a.Repositories[1].BaseBranch != "main" {
+		t.Fatalf("expected legacy IDs to resolve repository default branches, got %#v", a.Repositories)
+	}
+}
+
+func TestCreateAutomation_PreservesExplicitRepositoryBaseBranch(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{"repo-a": "ws-a"}})
+
+	a, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		Name: "x", WorkspaceID: "ws-a",
+		Repositories: []AutomationRepository{{RepositoryID: "repo-a", BaseBranch: "release/2"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := a.Repositories[0].BaseBranch; got != "release/2" {
+		t.Fatalf("base branch = %q, want release/2", got)
+	}
 }
 
 func TestUpdateAutomation_RejectsForeignRepositoryID(t *testing.T) {
@@ -226,6 +246,50 @@ func TestService_DeleteRun_TaskNotFound_StillDeletesRun(t *testing.T) {
 	}
 }
 
+func TestService_DeleteRun_PreservesVisibleAutomationTask(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	svc.SetTaskOriginLookup(&fakeTaskOriginLookup{results: map[string]fakeOriginResult{
+		"visible-task": {workspaceID: "ws-1", isAutomationRun: false, ok: true},
+	}})
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "visible", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	run := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated,
+		TaskID: "visible-task", TriggerData: json.RawMessage(`{}`),
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+
+	require.NoError(t, svc.DeleteRun(ctx, run.ID))
+	require.Empty(t, deleter.deleted)
+}
+
+func TestService_DeleteAutomation_PreservesVisibleAutomationTasks(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	svc.SetTaskOriginLookup(&fakeTaskOriginLookup{results: map[string]fakeOriginResult{
+		"visible-task": {workspaceID: "ws-1", isAutomationRun: false, ok: true},
+	}})
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "visible", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	require.NoError(t, svc.store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusSucceeded,
+		TaskID: "visible-task", TriggerData: json.RawMessage(`{}`),
+	}))
+
+	require.NoError(t, svc.DeleteAutomation(ctx, a.ID))
+	require.Empty(t, deleter.deleted)
+	jobs, err := svc.store.ListCleanupJobs(ctx)
+	require.NoError(t, err)
+	require.Empty(t, jobs)
+}
+
 func TestService_DeleteAllRuns_CallsTaskDeleterForEach(t *testing.T) {
 	svc := newTestService(t)
 	deleter := &fakeTaskDeleter{}
@@ -271,6 +335,32 @@ func TestService_DeleteAllRuns_CallsTaskDeleterForEach(t *testing.T) {
 	if len(runs) != 0 {
 		t.Errorf("expected 0 runs, got %d", len(runs))
 	}
+}
+
+func TestService_DeleteAllRuns_PreservesVisibleAutomationTasks(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	svc.SetTaskOriginLookup(&fakeTaskOriginLookup{results: map[string]fakeOriginResult{
+		"hidden-task":  {workspaceID: "ws-1", isAutomationRun: true, ok: true},
+		"visible-task": {workspaceID: "ws-1", isAutomationRun: false, ok: true},
+	}})
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "visible delete-all", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	for _, taskID := range []string{"hidden-task", "visible-task"} {
+		require.NoError(t, svc.store.CreateRun(ctx, &AutomationRun{
+			AutomationID: a.ID,
+			TriggerType:  TriggerTypeScheduled,
+			Status:       RunStatusSucceeded,
+			TaskID:       taskID,
+			TriggerData:  json.RawMessage(`{}`),
+		}))
+	}
+
+	require.NoError(t, svc.DeleteAllRuns(ctx, a.ID))
+	require.Equal(t, []string{"hidden-task"}, deleter.deleted)
 }
 
 func TestService_DeleteAllRuns_TaskNotFound_StillClearsRuns(t *testing.T) {

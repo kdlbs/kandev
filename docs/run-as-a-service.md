@@ -24,6 +24,8 @@ sudo kandev service install --system
 
 After install, kandev is reachable at `http://localhost:38429` (or `--port <N>` if you passed it).
 
+For phone access through Tailscale, Cloudflare Tunnel, or another VPN, follow [Mobile Remote Access](public/mobile-remote-access.md).
+
 ## Run the Current Checkout as a Service
 
 When developing from a cloned repo, use the root Make targets instead of the globally installed `kandev` binary. They install dependencies, build the currently checked-out branch, assemble a local release-style bundle under `dist/kandev`, and install the service with `KANDEV_BUNDLE_DIR` pointing at that bundle.

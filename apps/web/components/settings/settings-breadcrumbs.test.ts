@@ -184,6 +184,7 @@ describe("settings breadcrumb: executors", () => {
   it("puts every executor route under the Executors page", () => {
     expect(chain(`${EXECUTORS_HREF}/exec-profile-1`)).toEqual([SETTINGS, EXECUTORS, PROFILE_NAME]);
     expect(chain(`${EXECUTORS_HREF}/ssh/exec-1`)).toEqual([SETTINGS, EXECUTORS, EXECUTOR_NAME]);
+    expect(chain(`${EXECUTORS_HREF}/k8s/exec-1`)).toEqual([SETTINGS, EXECUTORS, EXECUTOR_NAME]);
     expect(chain(`${EXECUTORS_HREF}/new/local_docker`)).toEqual([
       SETTINGS,
       EXECUTORS,

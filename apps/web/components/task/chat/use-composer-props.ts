@@ -16,6 +16,7 @@ type ComposerPropsArgs = {
   handleSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   handleCancelTurn: () => Promise<void>;
   isSending: boolean;
+  launchErrorOwned?: boolean;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   onClarificationResolved: () => void;
@@ -41,6 +42,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     handleSubmit,
     handleCancelTurn,
     isSending,
+    launchErrorOwned,
     showRequestChangesTooltip,
     onRequestChangesTooltipDismiss,
     onClarificationResolved,
@@ -49,7 +51,9 @@ export function useComposerProps(args: ComposerPropsArgs) {
     hideAgentControls,
     hidePlanMode,
   } = args;
-  const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
+  const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
+    panelState;
+  const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
   const hasContextComments =
     panelState.planComments.length > 0 ||
@@ -70,11 +74,14 @@ export function useComposerProps(args: ComposerPropsArgs) {
     mcpAttachmentHistory: panelState.mcpAttachmentHistory,
     onPlanModeChange: panelState.handlePlanModeChange,
     isAgentBusy,
+    isWorking,
     supportsSteering,
     isStarting: panelState.isStarting,
+    canQueueWhileStarting,
     isPreparingEnvironment: panelState.isPreparingEnvironment,
     isMoving,
     isSending,
+    launchErrorOwned,
     onCancel: handleCancelTurn,
     placeholder,
     pendingClarification: panelState.pendingClarification,
@@ -87,6 +94,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     hasAgentCommands: !!(panelState.agentCommands && panelState.agentCommands.length > 0),
     isFailed: panelState.isFailed,
     isCompleted: panelState.isCompleted,
+    sessionErrorMessage: panelState.session?.error_message,
     needsRecovery,
     executorUnavailable: executor.unavailable,
     executorUnavailableReason: executor.reason,

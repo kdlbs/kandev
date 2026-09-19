@@ -1,9 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { createSubmoduleReviewFixture } from "./submodule-review-helpers";
+import {
+  createSubmoduleReviewFixture,
+  expectStickyReviewHeaderClearance,
+} from "./submodule-review-helpers";
 
 test.describe("Nested submodule Review on mobile", () => {
-  test.describe.configure({ retries: 1, timeout: 180_000 });
+  test.describe.configure({ timeout: 180_000 });
 
   test("keeps nested scope and diff context touch-reachable", async ({
     testPage,
@@ -25,7 +28,7 @@ test.describe("Nested submodule Review on mobile", () => {
       await session.waitForChatIdle({ timeout: 45_000 });
 
       const worktreePath = await fixture.waitForWorktree(apiClient);
-      fixture.applyNestedChanges(worktreePath);
+      await fixture.applyNestedChanges(worktreePath);
 
       await testPage.getByRole("button", { name: "Changes" }).tap();
       const changesPanel = testPage.getByTestId("mobile-changes-panel");
@@ -44,6 +47,7 @@ test.describe("Nested submodule Review on mobile", () => {
         hasText: /^vendor\/outer\/vendor\/inner$/,
       });
       await expect(innerLabel).toBeVisible({ timeout: 15_000 });
+      await expectStickyReviewHeaderClearance(review, "touch");
 
       const innerHeader = review
         .getByTestId("review-file-header")

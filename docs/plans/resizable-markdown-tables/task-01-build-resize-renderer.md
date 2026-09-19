@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/resizable-markdown-tables.md"
+spec: "../../specs/ui/requirements/resizable-markdown-tables.md"
 ---
 
 # Task 01: Build the Ephemeral Resize Renderer
@@ -76,7 +76,7 @@ wiring must stay in one RED-GREEN cycle.
 
 ## Inputs
 
-- `docs/specs/ui/resizable-markdown-tables.md`
+- `docs/specs/ui/requirements/resizable-markdown-tables.md`
 - Existing table wrapper in `apps/web/components/shared/markdown-components.tsx`
 - Existing wrapping rules in `apps/web/app/globals.css`
 - Fine-pointer and phone capability in `apps/web/hooks/use-responsive-breakpoint.ts`

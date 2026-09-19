@@ -5,7 +5,7 @@ status: pending
 wave: 4
 depends_on: ["03-service-writer"]
 plan: "plan.md"
-spec: "../../specs/subagent-context-persistence/spec.md"
+spec: "../../specs/agents/requirements/subagent-context-persistence.md"
 ---
 
 > **Amendment 1 update:** the orchestrator must supply the execution identity

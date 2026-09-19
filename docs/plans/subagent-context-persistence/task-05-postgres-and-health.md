@@ -5,7 +5,7 @@ status: pending
 wave: 5
 depends_on: ["04-orchestrator-wiring"]
 plan: "plan.md"
-spec: "../../specs/subagent-context-persistence/spec.md"
+spec: "../../specs/agents/requirements/subagent-context-persistence.md"
 ---
 
 > **Current implementation boundary:** Postgres parity covers the final

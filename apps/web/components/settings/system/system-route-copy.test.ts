@@ -1,6 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { t } from "@/lib/i18n";
-import { BACKUP_DIR, BACKUP_SQL_COMMAND } from "./system-route-shell";
+import { DataLogsSettings } from "./data-logs-settings";
+import { BACKUP_SQL_COMMAND } from "./system-route-shell";
+
+const databaseState = vi.hoisted(() => ({ value: null as unknown }));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: { system: { database: unknown } }) => unknown) =>
+    selector({ system: { database: databaseState.value } }),
+}));
+vi.mock("@/components/settings/settings-target", () => ({
+  SettingsTarget: ({ children }: { children?: ReactNode }) => children ?? null,
+}));
+vi.mock("./backups-table", () => ({ BackupsTable: () => null }));
+vi.mock("./database-stats-card", () => ({ DatabaseStatsCard: () => null }));
+vi.mock("./log-viewer", () => ({ LogViewer: () => null }));
+vi.mock("./retention-settings-card", () => ({ RetentionSettingsCard: () => null }));
+vi.mock("./tool-payload-retention-card", () => ({ ToolPayloadRetentionCard: () => null }));
+afterEach(() => {
+  cleanup();
+  databaseState.value = null;
+});
 
 /**
  * Byte-for-byte English for the nine System route headers, as `SETTINGS_ROUTES`
@@ -39,7 +61,7 @@ const ROUTE_COPY: Array<{ route: string; titleKey: string; title: string; descri
     description: "Database driver, size, and available maintenance controls.",
   },
   {
-    // /settings/system/logs now redirects into Data & Storage, whose Logs
+    // /settings/system/logs now redirects into Data & Logs, whose Logs
     // section titles itself with `system:navLogs`. The description key is
     // unchanged, so the sentence users read is still pinned below.
     route: "logs",
@@ -89,10 +111,54 @@ describe("System route headers keep their pre-migration English", () => {
    * pseudo-localized into dead pointers.
    */
   it("backups", () => {
+    const path = "/var/lib/kandev/backups";
     expect(t("system:navBackups")).toBe("Backups");
-    expect(
-      t("system:backupsPageDescription", { command: BACKUP_SQL_COMMAND, path: BACKUP_DIR }),
-    ).toBe("VACUUM INTO snapshots stored under <data-dir>/backups/.");
+    expect(t("system:backupsPageDescription", { command: BACKUP_SQL_COMMAND, path })).toBe(
+      `VACUUM INTO snapshots stored under ${path}.`,
+    );
+  });
+});
+
+describe("Data & Logs backup location copy", () => {
+  it("renders the resolved SQLite backup directory", () => {
+    const path = "/var/lib/kandev/backups";
+    databaseState.value = { backup_directory: path };
+
+    render(createElement(DataLogsSettings));
+
+    expect(screen.getByText(`VACUUM INTO snapshots stored under ${path}.`)).toBeTruthy();
+  });
+
+  it("omits the location when database information is unavailable", () => {
+    render(createElement(DataLogsSettings));
+
+    expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
+  });
+
+  it("omits the location when the backend has no backup directory", () => {
+    databaseState.value = { backup_directory: "" };
+
+    render(createElement(DataLogsSettings));
+
+    expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
+  });
+});
+
+describe("Data & Logs composition", () => {
+  it("keeps database, backups, and logs without the Storage section", () => {
+    render(createElement(DataLogsSettings));
+
+    expect(screen.getAllByText(t("system:navDatabase")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(t("system:navRetention"))).toBeNull();
+    expect(screen.getByRole("heading", { name: t("system:navBackups") })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: t("system:navLogs") })).toBeTruthy();
+    expect(screen.queryByText(t("system:storageTitle"))).toBeNull();
+  });
+
+  it("describes only database statistics, backups, and server logs", () => {
+    expect(t("system:dataStoragePageDescription")).toBe(
+      "Database statistics, backups, and server logs.",
+    );
   });
 });
 

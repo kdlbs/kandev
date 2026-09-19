@@ -11,17 +11,20 @@ package system
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/system/backups"
 	"github.com/kandev/kandev/internal/system/database"
 	"github.com/kandev/kandev/internal/system/disk"
@@ -30,11 +33,14 @@ import (
 	"github.com/kandev/kandev/internal/system/jobs"
 	"github.com/kandev/kandev/internal/system/logbundle"
 	"github.com/kandev/kandev/internal/system/metrics"
+	systempersistence "github.com/kandev/kandev/internal/system/persistence"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/restart"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	"github.com/kandev/kandev/internal/system/sleepinhibition"
 	"github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/toolretention"
 	"github.com/kandev/kandev/internal/system/updates"
 	"go.uber.org/zap"
 )
@@ -51,16 +57,24 @@ type BuildInfo struct {
 
 // Wiring supplies the runtime hooks and repositories owned by the wider
 // application. OrchestratorShutdown stops in-flight agent executions before
-// destructive resets. RestoreQuiesce stops the complete database-backed
-// runtime before a SQLite restore closes the shared pool. TaskSessions is the
-// authoritative session reader used by the install-wide sleep-inhibition
-// service.
+// destructive resets. DatabaseQuiesce stops database-backed workers before a
+// factory reset mutates the shared schema. RestoreQuiesce stops the complete
+// database-backed runtime before a SQLite restore closes the shared pool.
+// TaskSessions is the authoritative session reader used by the install-wide
+// sleep-inhibition service.
 type Wiring struct {
-	OrchestratorShutdown func()
-	RestoreQuiesce       func() error
-	MessageQueue         queuesettings.Target
-	MessageQueueConfig   queuesettings.Configuration
-	TaskSessions         sleepinhibition.SessionReader
+	OrchestratorShutdown       func()
+	DatabaseQuiesce            func() error
+	RestoreQuiesce             func() error
+	SystemSettings             *systemsettings.Store
+	RequiredStores             *requiredstores.Tracker
+	PersistenceHealth          *requiredstores.Health
+	MessageQueue               queuesettings.Target
+	MessageQueueConfig         queuesettings.Configuration
+	SessionCapacity            sessioncapacity.Target
+	SessionCapacityEnvironment sessioncapacity.Environment
+	TaskSessions               sleepinhibition.SessionReader
+	ToolPayloadChanged         func(context.Context, []string)
 }
 
 // Service exposes the composed system sub-services. Each field is
@@ -77,12 +91,15 @@ type Service struct {
 	FrontendErrors  *frontenderrors.Service
 	Metrics         *metrics.Service
 	MessageQueue    *queuesettings.Service
+	SessionCapacity *sessioncapacity.Service
 	SleepInhibition *sleepinhibition.Service
 	Updates         *updates.Service
 	Restart         restart.Manager
 	Storage         *storage.Handler
+	ToolRetention   *toolretention.Service
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
+	Persistence    *systempersistence.Handler
 }
 
 // Provide constructs the composed Service. The HTTP routes are
@@ -107,17 +124,35 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	dbSvc := database.NewService(pool, databasePath, resetDirs, tracker, log)
 	dbSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
+	markPersistenceUnavailable := func() {
+		if wiring.PersistenceHealth != nil {
+			wiring.PersistenceHealth.MarkUnavailable()
+		}
+	}
+	dbSvc.PersistenceUnavailable = markPersistenceUnavailable
 
 	backupsSvc := backups.NewService(databasePath, pool, tracker, log)
 	backupsSvc.OrchestratorShutdown = wiring.OrchestratorShutdown
-	backupsSvc.RestoreQuiesce = wiring.RestoreQuiesce
+	backupsSvc.PersistenceUnavailable = markPersistenceUnavailable
+	retentionSvc := provideToolRetention(pool, backupsSvc, eventBus, log, wiring)
+	dbSvc.DatabaseQuiesce = retentionQuiesce(retentionSvc, wiring.DatabaseQuiesce)
+	restoreQuiesce := wiring.RestoreQuiesce
+	if restoreQuiesce == nil && wiring.OrchestratorShutdown != nil {
+		restoreQuiesce = func() error { wiring.OrchestratorShutdown(); return nil }
+	}
+	backupsSvc.RestoreQuiesce = retentionQuiesce(retentionSvc, restoreQuiesce)
 
-	settingsStore, err := systemsettings.NewStore(pool)
-	if err != nil {
-		log.Error("Failed to initialize system settings store", zap.Error(err))
+	settingsStore := wiring.SystemSettings
+	if settingsStore == nil {
+		var err error
+		settingsStore, err = systemsettings.NewStore(pool)
+		if err != nil {
+			log.Error("Failed to initialize system settings store", zap.Error(err))
+		}
 	}
 	var metricsSvc *metrics.Service
 	var queueSettingsSvc *queuesettings.Service
+	var sessionCapacitySvc *sessioncapacity.Service
 	var sleepInhibitionSvc *sleepinhibition.Service
 	updatesOpts := []updates.Option{updates.WithHomeDir(homeDir), updates.WithJobs(tracker)}
 	if settingsStore != nil {
@@ -127,6 +162,12 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 			queueSettingsSvc = queuesettings.NewService(
 				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
 				wiring.MessageQueueConfig,
+			)
+		}
+		if wiring.SessionCapacity != nil {
+			sessionCapacitySvc = sessioncapacity.NewService(
+				sessioncapacity.NewStore(settingsStore), wiring.SessionCapacity,
+				wiring.SessionCapacityEnvironment, log,
 			)
 		}
 		if wiring.TaskSessions != nil {
@@ -146,13 +187,21 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		updatesSvc.SetNightlyURL(registryURL)
 	}
 
+	var persistenceHandler *systempersistence.Handler
+	if wiring.RequiredStores != nil {
+		persistenceHandler = systempersistence.NewHandler(
+			wiring.RequiredStores, wiring.PersistenceHealth, pool.Writer().DriverName(),
+		)
+	}
+
 	return &Service{
-		logger:   log,
-		Info:     info.NewService(build.Version, build.Commit, build.BuildTime),
-		Jobs:     tracker,
-		Disk:     disk.NewService(homeDir, tracker, log),
-		Database: dbSvc,
-		Backups:  backupsSvc,
+		logger:        log,
+		Info:          info.NewService(build.Version, build.Commit, build.BuildTime),
+		Jobs:          tracker,
+		Disk:          disk.NewService(homeDir, tracker, log),
+		Database:      dbSvc,
+		Backups:       backupsSvc,
+		ToolRetention: retentionSvc,
 		LogBundles: logbundle.New(logbundle.Config{
 			HomeDir: homeDir, Version: build.Version, Commit: build.Commit,
 			BuildTime: build.BuildTime, Log: log,
@@ -160,9 +209,11 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		FrontendErrors:  frontenderrors.New(log, nil),
 		Metrics:         metricsSvc,
 		MessageQueue:    queueSettingsSvc,
+		SessionCapacity: sessionCapacitySvc,
 		SleepInhibition: sleepInhibitionSvc,
 		Updates:         updatesSvc,
 		Restart:         restart.NewManagerFromEnv(),
+		Persistence:     persistenceHandler,
 	}
 }
 
@@ -181,12 +232,13 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	// Destructive install-wide mutations require the admin role. With
 	// authentication disabled the synthetic single-user identity is an admin,
 	// so behavior is unchanged; with it enabled, members are read-only here.
-	admin := g.Group("", authn.RequireAdmin())
+	admin := g.Group("", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {
-		storage.RegisterRoutes(g, s.Storage)
+		storage.RegisterRoutes(g, admin, s.Storage)
 	}
+	systempersistence.RegisterRoutes(g, s.Persistence)
 
 	g.GET("/disk-usage", disk.HandleGet(s.Disk))
 	g.POST("/disk-usage/refresh", disk.HandleRefresh(s.Disk))
@@ -197,7 +249,10 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	admin.POST("/database/optimize", database.HandleOptimize(s.Database))
 	admin.POST("/database/reset", database.HandleReset(s.Database))
 
-	backups.RegisterRoutes(g, s.Backups)
+	backups.RegisterRoutes(g, admin, s.Backups)
+	if s.ToolRetention != nil {
+		toolretention.RegisterRoutes(g, admin, s.ToolRetention)
+	}
 
 	if s.FrontendErrors != nil {
 		g.POST("/logs/frontend-errors", frontenderrors.Handle(s.FrontendErrors))
@@ -211,6 +266,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	}
 	if s.MessageQueue != nil {
 		queuesettings.RegisterRoutes(g, admin, s.MessageQueue)
+	}
+	if s.SessionCapacity != nil {
+		sessioncapacity.RegisterRoutes(g, admin, s.SessionCapacity)
 	}
 	if s.SleepInhibition != nil {
 		sleepinhibition.RegisterRoutes(g, admin, s.SleepInhibition)
@@ -231,6 +289,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 // StartBackground starts the System-owned pollers and reconciliation loops.
 // They stop when the application cleanup path calls StopBackground.
 func (s *Service) StartBackground(ctx context.Context) {
+	if s.ToolRetention != nil {
+		s.ToolRetention.Start(ctx)
+	}
 	if s.LogBundles != nil {
 		s.LogBundles.Start(ctx)
 	}
@@ -251,6 +312,9 @@ func (s *Service) StartBackground(ctx context.Context) {
 
 // StopBackground joins owned storage background workers.
 func (s *Service) StopBackground() {
+	if s.ToolRetention != nil {
+		s.ToolRetention.Stop()
+	}
 	if s.SleepInhibition != nil {
 		s.SleepInhibition.Stop()
 	}
@@ -259,5 +323,57 @@ func (s *Service) StopBackground() {
 	}
 	if s.StorageRuntime != nil {
 		s.StorageRuntime.Stop()
+	}
+}
+
+func provideToolRetention(pool *db.Pool, snapshots *backups.Service, eventBus bus.EventBus, log *logger.Logger, wiring Wiring) *toolretention.Service {
+	return toolretention.New(pool, toolretention.Options{
+		CreateBackup: func(ctx context.Context) (string, error) {
+			receipt, err := snapshots.CreateForRetention(ctx)
+			if err != nil {
+				return "", err
+			}
+			encoded, err := json.Marshal(receipt)
+			return string(encoded), err
+		},
+		VerifyBackup: func(ctx context.Context, raw string) error {
+			var receipt backups.RetentionReceipt
+			if err := json.Unmarshal([]byte(raw), &receipt); err != nil {
+				return err
+			}
+			return snapshots.VerifyRetentionBackupUnderLease(ctx, receipt)
+		},
+		Changed: wiring.ToolPayloadChanged,
+		Report:  func(ctx context.Context, op *toolretention.Operation) { reportToolRetention(ctx, eventBus, log, op) },
+	})
+}
+
+func retentionQuiesce(service *toolretention.Service, next func() error) func() error {
+	return func() error {
+		// Stop cancels pending admission before joining the worker. Restore/reset
+		// already owns maintenance admission when this callback runs.
+		service.Stop()
+		if next != nil {
+			return next()
+		}
+		return nil
+	}
+}
+
+func reportToolRetention(ctx context.Context, eventBus bus.EventBus, log *logger.Logger, op *toolretention.Operation) {
+	if eventBus == nil || op == nil {
+		return
+	}
+	state := jobs.State(op.State)
+	if op.State == "cancelled" {
+		state = jobs.StateFailed
+	}
+	job := &jobs.Job{ID: op.ID, Kind: "tool-payload-retention-" + op.Kind, State: state, StartedAt: op.StartedAt,
+		Result: map[string]interface{}{"scanned": op.Scanned, "eligible_tasks": op.EligibleTasks, "eligible_messages": op.EligibleMessages, "removed_messages": op.RemovedMessages, "payload_bytes": op.PayloadBytes, "state": op.State}}
+	if op.FinishedAt != nil {
+		job.EndedAt = *op.FinishedAt
+	}
+	if err := eventBus.Publish(ctx, events.SystemJobUpdate, bus.NewEvent(events.SystemJobUpdate, "tool-payload-retention", job)); err != nil && log != nil {
+		log.Warn("failed to publish tool payload retention progress", zap.Error(err))
 	}
 }

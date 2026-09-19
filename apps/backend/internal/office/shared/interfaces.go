@@ -5,9 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-
 	"github.com/kandev/kandev/internal/office/models"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -15,6 +14,34 @@ import (
 // no active or reusable session, so the workflow engine cannot evaluate a
 // trigger for it.
 var ErrEngineNoSession = errors.New("workflow engine: no active session for task")
+
+// ErrWorkspacePaused is the typed error every gate site (workspace-kill-
+// switch) returns when PauseGate.PauseState reports a confirmed pause. It
+// is a shared sentinel — not office/pause's own type — so every consumer
+// package (routines, service, scheduler, wakeup) and every caller that
+// branches on it (routine HTTP handlers, the cron ticker, reactivity, the
+// approval adapter) can import it without importing office/pause itself.
+var ErrWorkspacePaused = errors.New("office: workspace paused")
+
+// ErrPauseGateUnavailable is the typed error a gate site returns when
+// PauseGate.PauseState itself failed (read error), distinct from a
+// confirmed pause: the gate fails closed on this error too, but callers
+// that map it to HTTP use 503, not 409, and cron/event logging keeps it at
+// its ordinary level rather than swallowing it the way a confirmed pause is.
+var ErrPauseGateUnavailable = errors.New("office: workspace pause state unavailable")
+
+// PauseGate is the narrow read-only surface every gate site consults
+// before dispatching, queueing, or launching work. Implemented by
+// office/pause.Service and wired in via each consumer's own SetPauseGate
+// setter — defined once here (rather than duplicated per consumer package)
+// because every implementation and every caller share the identical
+// signature and the same two sentinel errors above.
+type PauseGate interface {
+	// PauseState returns the workspace's active pause record, or (nil, nil)
+	// when the workspace is running. A non-nil error means the read itself
+	// failed (fail closed); it is not a signal that the workspace is paused.
+	PauseState(ctx context.Context, workspaceID string) (*models.WorkspacePause, error)
+}
 
 // AgentReader provides read access to agent instances.
 // Implemented by the agents feature (and transitionally by office/service.Service).
@@ -41,8 +68,11 @@ type AgentWriter interface {
 // Implemented by the run feature (and transitionally by office/service.Service).
 type RunQueuer interface {
 	// QueueRun enqueues a run for agentInstanceID with the given reason, payload,
-	// and optional idempotency key (empty string disables deduplication).
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+	// and optional idempotency key (empty string disables deduplication). The
+	// returned QueueOutcome reports what actually happened (queued / deduped /
+	// coalesced / none-on-error) so callers that need to distinguish a fresh
+	// insert from a no-op don't have to infer it from side effects.
+	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
 }
 
 // WorkflowEngineDispatcher routes typed office task events through the
@@ -183,30 +213,4 @@ type PricingLookupWithVersion interface {
 	// read from the same snapshot so the two can never describe different
 	// catalogue states.
 	LookupForModelWithVersion(ctx context.Context, modelID string) (pricing ModelPricing, version string, ok bool)
-}
-
-// SessionUsageWriter increments the cumulative tokens/cost columns on
-// task_sessions when a cost event lands. Implemented by the task repo.
-type SessionUsageWriter interface {
-	IncrementTaskSessionUsage(ctx context.Context, sessionID string,
-		tokensIn, tokensCachedIn, tokensOut, costSubcents int64) error
-}
-
-// SessionUsageWriterTx is an optional capability a SessionUsageWriter
-// implementation may satisfy to run the increment inside a caller-supplied
-// transaction, so it can be made atomic with the office_cost_events insert
-// that produced the deltas (docs/specs/office/costs.md, PR #2606 review):
-// without this, a rollup-increment failure after a successful cost-event
-// insert is logged and swallowed, and any later redelivery of the same
-// completion is caught by the usage_event_id unique index and dropped as a
-// duplicate before the rollup gets another chance — a permanent desync with
-// no recovery path. Callers type-assert and fall back to the plain
-// (non-atomic) SessionUsageWriter method when unavailable — e.g. a
-// simplified test double that doesn't need transactional coupling. Every
-// production wiring (backendapp's SetSessionUsageWriter(repos.Task))
-// satisfies it, since office_cost_events and task_sessions share one
-// underlying *sqlx.DB (see internal/backendapp/storage.go).
-type SessionUsageWriterTx interface {
-	IncrementTaskSessionUsageTx(ctx context.Context, tx *sqlx.Tx, sessionID string,
-		tokensIn, tokensCachedIn, tokensOut, costSubcents int64) error
 }

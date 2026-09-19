@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 01: Paginate review threads
@@ -32,7 +32,7 @@ popover and automation.
 - `apps/backend/internal/github/graphql.go`
 - `apps/backend/internal/github/graphql_test.go`
 - `apps/backend/internal/github/poller_test.go`
-- `docs/specs/ui/ci-pr-automation.md`
+- `docs/specs/ui/requirements/ci-pr-automation.md`
 - `docs/plans/ci-popover-review-thread-pagination/plan.md`
 - `docs/plans/ci-popover-review-thread-pagination/task-01-paginate-review-threads.md`
 
@@ -50,7 +50,7 @@ test executors and status contract.
 
 ## Inputs
 
-- `docs/specs/ui/ci-pr-automation.md` requirements for complete counts and
+- `docs/specs/ui/requirements/ci-pr-automation.md` requirements for complete counts and
   partial-page failure behavior.
 - `docs/plans/ci-popover-review-thread-pagination/plan.md` backend design,
   risks, and out-of-scope boundaries.

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/settings-prompt-editor.md"
+spec: "../../specs/ui/requirements/settings-prompt-editor.md"
 ---
 
 # Task 01: Build shared prompt editor

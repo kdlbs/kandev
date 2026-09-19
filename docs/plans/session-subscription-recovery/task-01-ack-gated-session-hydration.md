@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/session-subscription-recovery/spec.md"
+spec: "../../specs/platform/requirements/session-subscription-recovery.md"
 ---
 
 # Task 01: Gate session hydration on subscribe acknowledgement
@@ -70,7 +70,7 @@ file and must be tested before E2E workaround cleanup.
 
 ## Inputs
 
-- `docs/specs/session-subscription-recovery/spec.md`
+- `docs/specs/platform/requirements/session-subscription-recovery.md`
 - `docs/plans/session-subscription-recovery/plan.md`
 - Existing backend acknowledgement/snapshot behavior in
   `apps/backend/internal/gateway/websocket/client.go` and

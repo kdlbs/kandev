@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/subtask-detachment.md
+spec: docs/specs/tasks/requirements/subtask-detachment.md
 created: 2026-07-18
 status: complete
 ---
@@ -14,17 +14,19 @@ Add one canonical backend detach operation that atomically clears hierarchy and 
 
 ### Canonical service operation
 
-- Add `Service.DetachTask(ctx, taskID)` in `apps/backend/internal/task/service/service_detachment.go`.
-- Load the task, return roots unchanged, and otherwise clear `ParentID` while preserving all unrelated fields.
-- Copy and normalize `Metadata["workspace"]`: change only `mode: "inherit_parent"` to `mode: "shared_group"`.
-- Persist through the task repository, reload repositories for the response, and publish `task.updated`.
-- Update `apps/backend/internal/task/service/service_events.go` so `parent_id` is always present in task lifecycle payloads, including its cleared value.
+- Add `Store.DetachTask(ctx, actor, command)` in
+  `internal/task/archivecascade`; it owns hierarchy, conditional workspace
+  stewardship, lifecycle revision, and outbox atomically.
+- `Service.DetachTask` and Office's empty-parent path invoke only that aggregate
+  command. No service or dashboard repository method writes detachment fields.
+- A non-empty reparent uses the narrow `Store.SetTaskParent` command; it owns
+  parent and mode changes without direct SQL writers.
 
 ### HTTP contract and Office parity
 
-- Register `POST /api/v1/tasks/:id/detach` in `apps/backend/internal/task/handlers/task_handlers.go` and implement the handler beside existing task HTTP handlers.
+- Route the Office dashboard's empty-parent mutation through `Store.DetachTask`;
+  non-empty reparenting uses the narrow `Store.SetTaskParent` command.
 - Return the updated task DTO, map missing tasks to `404`, and surface persistence errors consistently.
-- Route the Office dashboard's empty-parent mutation through the canonical detach operation while leaving non-empty reparenting behavior unchanged.
 
 ## Frontend
 
@@ -38,9 +40,9 @@ Add one canonical backend detach operation that atomically clears hierarchy and 
 
 - Add a reusable `TaskDetachConfirmDialog` under `apps/web/components/task/` with concise hierarchy-only copy and a conditional shared-workspace warning.
 - Add `Detach from parent` with the existing unlink icon to `apps/web/components/task/task-switcher-context-menu.tsx` for single subtasks only.
-- Thread the action through `TaskSwitcher`, desktop sidebar actions, and mobile action presentation.
+- Route the Office parent picker's `No parent` selection through `detachTask`;
+  non-empty parent changes use the `SetTaskParent` aggregate command.
 - Add the same entry to `apps/web/components/kanban-card-menu-items.tsx`; the shared entry builder keeps card right-click and three-dot menus aligned.
-- Route the Office parent picker's `No parent` selection through `detachTask`; non-empty parent changes continue using the Office update API.
 
 ## Tests
 

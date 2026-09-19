@@ -1,15 +1,21 @@
 import type { StateCreator } from "zustand";
 import type { WorkspaceSlice, WorkspaceSliceState } from "./types";
-import type { RepositorySet } from "@/lib/types/http";
+import type { RepositoryBranchPolicy, RepositorySet } from "@/lib/types/http";
 
 export const defaultWorkspaceState: WorkspaceSliceState = {
-  workspaces: { items: [], activeId: null },
+  workspaces: { items: [], activeId: null, activeIdRevision: 0 },
   repositories: { itemsByWorkspaceId: {}, loadingByWorkspaceId: {}, loadedByWorkspaceId: {} },
   repositorySets: {
     itemsByWorkspaceId: {},
     loadingByWorkspaceId: {},
     loadedByWorkspaceId: {},
     revisionByWorkspaceId: {},
+  },
+  repositoryBranchPolicies: {
+    itemsByRepositoryId: {},
+    loadingByRepositoryId: {},
+    loadedByRepositoryId: {},
+    revisionByRepositoryId: {},
   },
   repositoryBranches: {
     itemsByRepositoryId: {},
@@ -36,8 +42,13 @@ export const createWorkspaceSlice: StateCreator<
     if (get().workspaces.activeId === workspaceId) {
       return;
     }
+    // Workspace selection is the canonical boundary for all workspace-scoped
+    // reads. The action is optional on isolated workspace-slice stores used by
+    // tests; the composed app store always provides it from the kanban slice.
+    (get() as WorkspaceSliceWithKanbanReset).resetKanbanWorkspaceContext?.();
     set((draft) => {
       draft.workspaces.activeId = workspaceId;
+      draft.workspaces.activeIdRevision = (draft.workspaces.activeIdRevision ?? 0) + 1;
     });
   },
   setWorkspaces: (workspaces) =>
@@ -113,7 +124,12 @@ export const createWorkspaceSlice: StateCreator<
       draft.repositories.loadedByWorkspaceId[workspaceId] = false;
     }),
   ...createRepositorySetActions(set),
+  ...createRepositoryBranchPolicyActions(set),
 });
+
+type WorkspaceSliceWithKanbanReset = WorkspaceSlice & {
+  resetKanbanWorkspaceContext?: () => void;
+};
 
 /**
  * The repository-set actions, split out so the slice factory stays under the
@@ -192,4 +208,60 @@ function sortRepositorySets(sets: RepositorySet[]): RepositorySet[] {
   return [...sets].sort((left, right) =>
     left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
   );
+}
+
+function createRepositoryBranchPolicyActions(
+  set: (recipe: (draft: WorkspaceSlice) => void) => void,
+): Pick<
+  WorkspaceSlice,
+  | "setRepositoryBranchPolicies"
+  | "setRepositoryBranchPoliciesLoading"
+  | "upsertRepositoryBranchPolicy"
+  | "removeRepositoryBranchPolicy"
+> {
+  return {
+    setRepositoryBranchPolicies: (repositoryId, policies, expectedRevision) =>
+      set((draft) => {
+        const current = draft.repositoryBranchPolicies.revisionByRepositoryId[repositoryId] ?? 0;
+        if (expectedRevision !== undefined && expectedRevision !== current) return;
+        draft.repositoryBranchPolicies.itemsByRepositoryId[repositoryId] =
+          sortBranchPolicies(policies);
+        draft.repositoryBranchPolicies.loadingByRepositoryId[repositoryId] = false;
+        draft.repositoryBranchPolicies.loadedByRepositoryId[repositoryId] = true;
+      }),
+    setRepositoryBranchPoliciesLoading: (repositoryId, loading) =>
+      set((draft) => {
+        draft.repositoryBranchPolicies.loadingByRepositoryId[repositoryId] = loading;
+      }),
+    upsertRepositoryBranchPolicy: (policy) =>
+      set((draft) => {
+        const policies =
+          draft.repositoryBranchPolicies.itemsByRepositoryId[policy.repository_id] ?? [];
+        const index = policies.findIndex((candidate) => candidate.id === policy.id);
+        if (index === -1) policies.push(policy);
+        else policies[index] = policy;
+        draft.repositoryBranchPolicies.itemsByRepositoryId[policy.repository_id] =
+          sortBranchPolicies(policies);
+        draft.repositoryBranchPolicies.revisionByRepositoryId[policy.repository_id] =
+          (draft.repositoryBranchPolicies.revisionByRepositoryId[policy.repository_id] ?? 0) + 1;
+      }),
+    removeRepositoryBranchPolicy: (repositoryId, policyId) =>
+      set((draft) => {
+        const policies = draft.repositoryBranchPolicies.itemsByRepositoryId[repositoryId];
+        if (policies) {
+          draft.repositoryBranchPolicies.itemsByRepositoryId[repositoryId] = policies.filter(
+            (policy) => policy.id !== policyId,
+          );
+        }
+        draft.repositoryBranchPolicies.revisionByRepositoryId[repositoryId] =
+          (draft.repositoryBranchPolicies.revisionByRepositoryId[repositoryId] ?? 0) + 1;
+      }),
+  };
+}
+
+function sortBranchPolicies(policies: RepositoryBranchPolicy[]): RepositoryBranchPolicy[] {
+  return [...policies].sort((left, right) => {
+    const byName = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    return byName || left.id.localeCompare(right.id);
+  });
 }

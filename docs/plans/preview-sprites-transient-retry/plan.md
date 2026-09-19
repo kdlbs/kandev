@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/preview-sprites-transient-retry/spec.md
+spec: docs/specs/ui/requirements/preview-sprites-transient-retry.md
 created: 2026-07-31
 status: complete
 ---

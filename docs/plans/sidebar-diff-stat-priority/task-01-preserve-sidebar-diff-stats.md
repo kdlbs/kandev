@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-diff-stat-priority.md"
+spec: "../../specs/ui/requirements/sidebar-diff-stat-priority.md"
 ---
 
 # Task 01: Preserve sidebar diff stats
@@ -22,7 +22,7 @@ spec: "../../specs/ui/sidebar-diff-stat-priority.md"
   `apps/web/e2e/tests/task/sidebar-diff-stats.spec.ts`.
 - **Dependencies:** None.
 - **Parallelism:** Sequential; the shared row and its desktop E2E coverage are coupled.
-- **Inputs:** `docs/specs/ui/sidebar-diff-stat-priority.md`, `plan.md`,
+- **Inputs:** `docs/specs/ui/requirements/sidebar-diff-stat-priority.md`, `plan.md`,
   `apps/web/components/task/task-switcher-context-menu.tsx`, and the existing mobile assertion in
   `apps/web/e2e/tests/task/mobile-sidebar-task-actions.spec.ts`.
 - **Verification:**

@@ -119,6 +119,17 @@ func TestPostgresTaskLastActivityBatch(t *testing.T) {
 	}, 10); err != nil {
 		t.Fatalf("insert postgres queued agent prompt: %v", err)
 	}
+	lifecycleCompletedAt := base.Add(8 * time.Hour)
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-activity-postgres-lifecycle",
+		TaskSessionID: "session-activity-postgres",
+		TaskID:        "task-activity-postgres",
+		StartedAt:     base.Add(7 * time.Hour),
+		CompletedAt:   &lifecycleCompletedAt,
+		Metadata:      map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+	}); err != nil {
+		t.Fatalf("create postgres lifecycle turn: %v", err)
+	}
 
 	got, err := repo.LoadTaskLastActivity(ctx, []string{"task-activity-postgres"})
 	if err != nil {

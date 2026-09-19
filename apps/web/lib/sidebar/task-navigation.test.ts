@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   TASK_ROW_DOM_ATTR,
+  TASK_ROW_REVEAL_CLASS,
   cancelSidebarTaskReveal,
   revealSidebarTask,
   taskRowSelector,
@@ -41,9 +42,18 @@ function mountRow(viewport: HTMLElement, taskId: string, rect: Rect) {
   return row;
 }
 
+function setReducedMotion(reducedMotion: boolean) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => ({ matches: reducedMotion })),
+  );
+}
+
 afterEach(() => {
   document.body.innerHTML = "";
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("taskRowSelector", () => {
@@ -53,20 +63,32 @@ describe("taskRowSelector", () => {
 });
 
 describe("revealSidebarTask", () => {
-  it("scrolls an off-screen rendered row with nearest alignment", async () => {
+  it("smoothly scrolls and cues an off-screen rendered row", async () => {
+    setReducedMotion(false);
     const viewport = mountViewport();
     const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 120, width: 320, height: 24 });
 
     await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
-    expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+    expect(row.scrollIntoView).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
   });
 
-  it("scrolls an off-screen row above the viewport with nearest alignment", async () => {
+  it("uses immediate nearest scrolling and a non-animated cue for reduced motion", async () => {
+    setReducedMotion(true);
     const viewport = mountViewport();
     const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: -24, width: 320, height: 24 });
 
     await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
-    expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+    expect(row.scrollIntoView).toHaveBeenCalledWith({
+      behavior: "auto",
+      block: "nearest",
+      inline: "nearest",
+    });
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
   });
 
   it("does not reposition a row that is already inside the viewport", async () => {
@@ -75,8 +97,29 @@ describe("revealSidebarTask", () => {
 
     await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
     expect(row.scrollIntoView).not.toHaveBeenCalled();
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
   });
 
+  it("restarts the cue without letting stale cleanup clear the newer cue", async () => {
+    vi.useFakeTimers();
+    const viewport = mountViewport();
+    const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 120, width: 320, height: 24 });
+
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
+    vi.advanceTimersByTime(1_000);
+
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
+    vi.advanceTimersByTime(400);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
+
+    vi.advanceTimersByTime(999);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(false);
+  });
+});
+
+describe("revealSidebarTask edge cases", () => {
   it("finds a row that renders after a later animation frame", async () => {
     const viewport = mountViewport();
     const callbacks: Array<() => void> = [];
@@ -121,6 +164,19 @@ describe("revealSidebarTask", () => {
 
     await expect(navigation).resolves.toBe(false);
     expect(row.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("clears an applied cue when navigation is canceled", async () => {
+    vi.useFakeTimers();
+    const viewport = mountViewport();
+    const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 120, width: 320, height: 24 });
+
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
+
+    cancelSidebarTaskReveal();
+
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(false);
   });
 
   it("ignores a matching row inside a hidden sidebar viewport", async () => {

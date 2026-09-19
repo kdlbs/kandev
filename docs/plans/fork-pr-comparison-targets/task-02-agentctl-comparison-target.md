@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-comparison-target-domain"]
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 02: Agentctl comparison remote and authoritative ref

@@ -36,7 +36,7 @@ export function useTaskListingView() {
   useEffect(() => {
     const kanbanViewMode = effectiveView === "pipeline" ? "graph2" : null;
     if (userSettings.kanbanViewMode === kanbanViewMode) return;
-    setUserSettings({ ...userSettings, kanbanViewMode, loaded: true });
+    setUserSettings({ ...userSettings, kanbanViewMode });
   }, [effectiveView, setUserSettings, userSettings]);
 
   const setView = useCallback((view: TaskListingView) => {

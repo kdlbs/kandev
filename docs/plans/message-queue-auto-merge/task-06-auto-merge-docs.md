@@ -5,7 +5,7 @@ status: completed
 wave: 6
 depends_on: ["05-auto-merge-e2e"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-auto-merge.md"
+spec: "../../specs/ui/requirements/message-queue-auto-merge.md"
 ---
 
 # Task 06: Document automatic queue merging
@@ -37,9 +37,9 @@ git diff --check
 - `docs/public/operations.md`
 - `docs/public/configuration.md`
 - `docs/public/websocket-api.md`
-- `docs/specs/ui/message-queue-management.md`
-- `docs/specs/ui/message-queue-merge.md`
-- `docs/specs/ui/message-queue-auto-merge.md`
+- `docs/specs/ui/requirements/message-queue-management.md`
+- `docs/specs/ui/requirements/message-queue-merge.md`
+- `docs/specs/ui/requirements/message-queue-auto-merge.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/message-queue-auto-merge/plan.md`
 - `docs/plans/message-queue-auto-merge/task-*.md`

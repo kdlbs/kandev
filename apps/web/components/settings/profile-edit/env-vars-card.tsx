@@ -148,7 +148,7 @@ function EnvVarRowComponent({
         variant="ghost"
         size="icon"
         onClick={() => onRemove(index)}
-        className="h-8 w-8 shrink-0 cursor-pointer"
+        className="shrink-0 cursor-pointer"
         data-testid={`env-var-remove-${index}`}
         aria-label={
           row.key ? t("executors:removeEnvVarNamed", { key: row.key }) : t("executors:removeEnvVar")
@@ -352,6 +352,10 @@ function EnvVarsFieldBody({
 export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
   const [envVarRows, setEnvVarRows] = useState<EnvVarRow[]>(() => envVarsToRows(initialEnvVars));
 
+  const resetEnvVars = useCallback((envVars?: ProfileEnvVar[]) => {
+    setEnvVarRows(envVarsToRows(envVars));
+  }, []);
+
   const addEnvVar = useCallback((row: EnvVarRow) => {
     setEnvVarRows((prev) => [...prev, row]);
   }, []);
@@ -364,7 +368,7 @@ export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
     setEnvVarRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
   }, []);
 
-  return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar };
+  return { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars };
 }
 
 export function EnvVarsCard(props: EnvVarsFieldProps) {

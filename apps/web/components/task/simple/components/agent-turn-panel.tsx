@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { IconChevronDown, IconLoader2 } from "@tabler/icons-react";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
@@ -73,7 +74,9 @@ export function AgentTurnPanel({
     <Collapsible open={open} onOpenChange={setOpen} className="mt-2">
       <CollapsibleTrigger className="flex items-center gap-2 w-full py-1 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
         {isLive ? (
-          <IconLoader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
+          <CompositorSpin className="h-3 w-3 text-primary shrink-0">
+            <IconLoader2 className="size-full" />
+          </CompositorSpin>
         ) : (
           <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 shrink-0" />
         )}

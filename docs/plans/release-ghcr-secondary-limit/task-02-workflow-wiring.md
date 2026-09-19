@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-retry-helper"]
 plan: "plan.md"
-spec: "../../specs/release-ghcr-secondary-limit/spec.md"
+spec: "../../specs/release/requirements/release-ghcr-secondary-limit.md"
 ---
 
 # Task 02: Wire retry into releases
@@ -42,7 +42,7 @@ sequential
 
 ## Inputs
 
-- `docs/specs/release-ghcr-secondary-limit/spec.md`, especially What and Scenarios.
+- `docs/specs/release/requirements/release-ghcr-secondary-limit.md`, especially What and Scenarios.
 - `docs/plans/release-ghcr-secondary-limit/plan.md`, Wave 2.
 - Existing Docker jobs and dependency assertions in `.github/workflows/release.yml` and `.github/scripts/release-workflow-contract_test.py`.
 

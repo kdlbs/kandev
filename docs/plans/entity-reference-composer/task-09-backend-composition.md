@@ -12,7 +12,7 @@ depends_on:
   - "07-sentry-provider"
   - "08-message-reference-metadata"
 plan: "plan.md"
-spec: "../../specs/ui/entity-reference-composer.md"
+spec: "../../specs/ui/requirements/entity-reference-composer.md"
 ---
 
 # Task 09: Backend Provider Composition

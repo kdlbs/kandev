@@ -8,7 +8,8 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
-import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { useAgentSaveContributor } from "./agent-save-contributor";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import type {
   Agent,
   AgentDiscovery,
@@ -24,11 +25,13 @@ import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import { useAppStore } from "@/components/state-provider";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
+import { isHandledApiError } from "@/lib/api/client";
 
 const defaultMcpConfig: NonNullable<DraftProfile["mcp_config"]> = {
   enabled: false,
@@ -361,38 +364,6 @@ function useProfileHandlers(
   };
 }
 
-function areAgentProfilesValid(agent: DraftAgent): boolean {
-  return agent.profiles.every((profile) => {
-    if (!profile.name.trim()) return false;
-    if (profile.kind === "dynamic") return (profile.dynamic?.candidates.length ?? 0) > 0;
-    return profile.model.trim().length > 0;
-  });
-}
-
-function useAgentSaveRevision(agent: DraftAgent) {
-  const revision = JSON.stringify(agent);
-  const initial = agent.profiles.some((profile) => profile.mcp_config?.dirty) ? "" : revision;
-  const [saved, setSaved] = useState(initial);
-  return { revision, saved, setSaved };
-}
-
-/**
- * Explains why the shared Save control is blocked, or undefined when it is not.
- * Extracted so AgentSetupForm stays within the file's function-length limit.
- */
-function resolveSaveInvalidReason(
-  t: (key: string) => string,
-  profilesValid: boolean,
-  hasInvalidMcpConfig: boolean,
-  dynamic: boolean,
-): string | undefined {
-  if (!profilesValid) {
-    return t(dynamic ? "agents:noDynamicCandidates" : "agents:everyProfileNeedsNameAndModel");
-  }
-  if (hasInvalidMcpConfig) return t("agents:fixInvalidMcpConfig");
-  return undefined;
-}
-
 function AgentSetupForm({
   initialAgent,
   savedAgent,
@@ -403,6 +374,7 @@ function AgentSetupForm({
   const { t } = useTranslation();
   const router = useRouter();
   const availableAgents = useAvailableAgents().items;
+  const { items: secrets } = useSecrets();
   const { upsertAgent } = useAgentStoreSync();
 
   const {
@@ -444,27 +416,16 @@ function AgentSetupForm({
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });
-  const saveRevision = useAgentSaveRevision(draftAgent);
-  const handleCoordinatedSave = async () => {
-    const savedDraft = await handleSave();
-    if (savedDraft) saveRevision.setSaved(JSON.stringify(savedDraft));
-  };
-  const profilesValid = areAgentProfilesValid(draftAgent);
-  const saveInvalidReason = resolveSaveInvalidReason(
-    t,
-    profilesValid,
+  useAgentSaveContributor({
+    draftAgent,
+    savedAgent,
+    isCreateMode,
     hasInvalidMcpConfig,
-    draftAgent.name === "dynamic",
-  );
-  useSettingsSaveContributor({
-    id: `agent:${draftAgent.id}`,
-    revision: saveRevision.revision,
-    isDirty: isCreateMode ? isAgentDirty : saveRevision.revision !== saveRevision.saved,
-    canSave: profilesValid && !hasInvalidMcpConfig,
-    invalidReason: saveInvalidReason,
-    save: handleCoordinatedSave,
-    discard: () => undefined,
+    isAgentDirty,
+    handleSave,
+    t,
   });
+  const canManage = useIsAdmin();
 
   const displayName = draftAgent.profiles[0]?.agentDisplayName ?? draftAgent.name;
 
@@ -476,7 +437,7 @@ function AgentSetupForm({
         isCreateMode={isCreateMode}
         savedAgent={savedAgent}
         showInstallationStatus={draftAgent.name !== "dynamic"}
-        onDelete={handleDeleteAgent}
+        onDelete={canManage ? handleDeleteAgent : undefined}
       />
       <Separator />
       <ProfilesCard
@@ -489,6 +450,7 @@ function AgentSetupForm({
         currentAgentModelConfig={currentAgentModelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
+        secrets={secrets}
         onAddProfile={handleAddProfile}
         onProfileChange={handleProfileChange}
         onProfileMcpChange={handleProfileMcpChange}
@@ -582,6 +544,7 @@ export default function AgentSetupPage() {
   if (!initialAgent) return null;
 
   const handleToastError = (error: unknown) => {
+    if (isHandledApiError(error)) return;
     toast({
       title: t("agents:failedToSaveAgent"),
       description: error instanceof Error ? error.message : t("agents:requestFailed"),

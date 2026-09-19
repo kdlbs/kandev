@@ -16,6 +16,7 @@ import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import * as officeApi from "@/lib/api/domains/office-api";
 import type { GitStatusData } from "@/lib/api/domains/office-api";
+import { useOfficeConfigSyncActive } from "@/hooks/domains/office/use-office-config-sync-active";
 import { useTranslation } from "react-i18next";
 
 function useGitOperations(activeWorkspaceId: string) {
@@ -71,6 +72,10 @@ export function GitSection() {
   const [branch, setBranch] = useState("main");
   const [commitMessage, setCommitMessage] = useState("");
   const { gitStatus, loading, error, fetchStatus, runOp } = useGitOperations(activeWorkspaceId);
+  // AC-OFFICE-CONFIG-SYNC-006.6: clone/pull are refused server-side while
+  // config sync owns this workspace's configuration; push stays available
+  // since it is never refused (AC-OFFICE-CONFIG-SYNC-005.5).
+  const configSyncActive = useOfficeConfigSyncActive(activeWorkspaceId);
 
   const handleClone = useCallback(
     () =>
@@ -128,6 +133,7 @@ export function GitSection() {
           repoUrl={repoUrl}
           branch={branch}
           loading={loading}
+          disabled={configSyncActive}
           onRepoUrlChange={setRepoUrl}
           onBranchChange={setBranch}
           onClone={handleClone}
@@ -139,6 +145,7 @@ export function GitSection() {
           status={gitStatus}
           commitMessage={commitMessage}
           loading={loading}
+          pullDisabled={configSyncActive}
           onCommitMessageChange={setCommitMessage}
           onPull={handlePull}
           onPush={handlePush}
@@ -162,6 +169,7 @@ function CloneForm({
   repoUrl,
   branch,
   loading,
+  disabled,
   onRepoUrlChange,
   onBranchChange,
   onClone,
@@ -169,6 +177,7 @@ function CloneForm({
   repoUrl: string;
   branch: string;
   loading: boolean;
+  disabled: boolean;
   onRepoUrlChange: (v: string) => void;
   onBranchChange: (v: string) => void;
   onClone: () => void;
@@ -195,10 +204,20 @@ function CloneForm({
           className="mt-1"
         />
       </div>
-      <Button onClick={onClone} disabled={loading || !repoUrl} className="cursor-pointer">
+      <Button
+        onClick={onClone}
+        disabled={loading || !repoUrl || disabled}
+        className="cursor-pointer"
+        data-testid="office-git-clone"
+      >
         <IconGitBranch className="h-4 w-4 mr-1" />
         {loading ? t("office:cloning") : t("office:clone")}
       </Button>
+      {disabled && (
+        <p className="text-xs text-muted-foreground" data-testid="office-git-clone-disabled-reason">
+          {t("office:configSyncActiveGuardReason")}
+        </p>
+      )}
     </div>
   );
 }
@@ -207,6 +226,7 @@ function GitStatusDisplay({
   status,
   commitMessage,
   loading,
+  pullDisabled,
   onCommitMessageChange,
   onPull,
   onPush,
@@ -215,6 +235,7 @@ function GitStatusDisplay({
   status: GitStatusData;
   commitMessage: string;
   loading: boolean;
+  pullDisabled: boolean;
   onCommitMessageChange: (v: string) => void;
   onPull: () => void;
   onPush: () => void;
@@ -265,8 +286,9 @@ function GitStatusDisplay({
           variant="outline"
           size="sm"
           onClick={onPull}
-          disabled={loading}
+          disabled={loading || pullDisabled}
           className="cursor-pointer"
+          data-testid="office-git-pull"
         >
           <IconArrowDown className="h-3.5 w-3.5 mr-1" />
           {loading ? t("office:pulling") : t("common:commandPreviewPull")}
@@ -282,6 +304,11 @@ function GitStatusDisplay({
           {loading ? t("office:pushing") : t("office:push")}
         </Button>
       </div>
+      {pullDisabled && (
+        <p className="text-xs text-muted-foreground" data-testid="office-git-pull-disabled-reason">
+          {t("office:configSyncActiveGuardReason")}
+        </p>
+      )}
 
       <div>
         <label className="text-sm text-muted-foreground">{t("office:commitMessage")}</label>

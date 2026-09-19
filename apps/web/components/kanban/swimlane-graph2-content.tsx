@@ -1,13 +1,46 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useSwimlaneMove } from "@/hooks/domains/kanban/use-swimlane-move";
+import { useTaskMoveGuard } from "@/hooks/domains/kanban/use-task-move-guard";
+import { useAppStore } from "@/components/state-provider";
+import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
+import { useKanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
 import { Graph2TaskPipeline } from "./graph2-task-pipeline";
 import { ORPHAN_STEP, ORPHAN_STEP_ID, remapOrphanTasks } from "./swimlane-kanban-content";
 import type { ViewContentProps } from "@/lib/kanban/view-registry";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTranslation } from "react-i18next";
+import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
+import { compareStepOrder, sortTasksForPipelineView } from "@/lib/kanban/task-order";
+
+/**
+ * Pipeline row order: each step's contiguous run of rows in step-list order
+ * (a task with no resolvable current step sorts after every task that has
+ * one), then within one step the full AC.1 total order
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001.2, .38) — position is not by itself a
+ * total order, and ties are the ship-time norm for tasks that arrived
+ * together.
+ */
+export function sortGraph2Tasks(
+  displayTasks: Task[],
+  displaySteps: WorkflowStep[],
+  sortToken: Parameters<typeof sortTasksForPipelineView>[2] = "created_desc",
+): Task[] {
+  if (sortToken === "created_desc" && displayTasks.some((task) => "position" in task)) {
+    const noStepSentinel = displaySteps.length;
+    const stepIndex = new Map(displaySteps.map((step, index) => [step.id, index]));
+    return [...displayTasks].sort((left, right) => {
+      const stepDiff =
+        (stepIndex.get(left.workflowStepId) ?? noStepSentinel) -
+        (stepIndex.get(right.workflowStepId) ?? noStepSentinel);
+      if (stepDiff !== 0) return stepDiff;
+      return compareStepOrder(left, right);
+    });
+  }
+  return sortTasksForPipelineView(displayTasks, displaySteps, sortToken);
+}
 
 export function getGraph2DisplayState(
   tasks: Task[],
@@ -25,9 +58,11 @@ export function getGraph2DisplayState(
 export function SwimlaneGraph2Content({
   workflowId,
   steps,
+  moveTargetSteps,
   tasks,
   onPreviewTask,
   onOpenTask,
+  onEditTask,
   onDeleteTask,
   onArchiveTask,
   onMoveError,
@@ -35,42 +70,48 @@ export function SwimlaneGraph2Content({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
 }: ViewContentProps) {
   const { t } = useTranslation();
   const { moveTask } = useSwimlaneMove(workflowId, {
     onMoveError,
   });
-  const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
+  const { movingTaskIds, handleMoveTask } = useTaskMoveGuard(moveTask);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
+  const repositories = useActiveWorkspaceRepositories();
+  const externalLinkAvailability = useKanbanExternalLinkAvailability(workspaceId);
   const { displayTasks, displaySteps } = useMemo(
     () => getGraph2DisplayState(tasks, steps, t("kanban:needsReassignment")),
     [tasks, steps, t],
   );
+  const pipelineMoveTargetSteps = useMemo(() => {
+    const orphan = displaySteps.find((step) => step.id === ORPHAN_STEP_ID);
+    return orphan ? [...moveTargetSteps, orphan] : moveTargetSteps;
+  }, [displaySteps, moveTargetSteps]);
 
   const sortedTasks = useMemo(
-    () =>
-      [...displayTasks].sort((a, b) => {
-        const aStepIdx = displaySteps.findIndex((c) => c.id === a.workflowStepId);
-        const bStepIdx = displaySteps.findIndex((c) => c.id === b.workflowStepId);
-        if (aStepIdx !== bStepIdx) return aStepIdx - bStepIdx;
-        return (a.position ?? 0) - (b.position ?? 0);
-      }),
-    [displayTasks, displaySteps],
+    () => sortGraph2Tasks(displayTasks, displaySteps, kanbanSort),
+    [displayTasks, displaySteps, kanbanSort],
   );
-
-  const handleMoveTask = async (task: (typeof tasks)[number], targetStepId: string) => {
-    setMovingTaskId(task.id);
-    try {
-      await moveTask(task, targetStepId);
-    } finally {
-      setMovingTaskId(null);
-    }
-  };
+  const orderedTaskIds = useMemo(() => sortedTasks.map((task) => task.id), [sortedTasks]);
 
   if (displayTasks.length === 0) {
     return (
       <div className="px-3 pb-3">
-        <div className="text-xs text-muted-foreground text-center py-4">{t("kanban:noTasks")}</div>
+        <div
+          className="text-xs text-muted-foreground text-center py-4"
+          data-testid={
+            areAllEmptyStepsAutoHidden(steps, moveTargetSteps)
+              ? "pipeline-auto-hidden-empty-state"
+              : undefined
+          }
+        >
+          {areAllEmptyStepsAutoHidden(steps, moveTargetSteps)
+            ? t("kanban:allEmptyStepsAutoHidden")
+            : t("kanban:noTasks")}
+        </div>
       </div>
     );
   }
@@ -83,16 +124,25 @@ export function SwimlaneGraph2Content({
             key={task.id}
             task={task}
             steps={displaySteps}
+            moveTargetSteps={pipelineMoveTargetSteps}
+            workspaceId={workspaceId}
+            externalLinkAvailability={externalLinkAvailability}
+            repositories={repositories}
             onMoveTask={handleMoveTask}
             onPreviewTask={onPreviewTask}
             onOpenTask={onOpenTask}
+            onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
             onArchiveTask={onArchiveTask}
-            isMoving={movingTaskId === task.id}
+            isMoving={movingTaskIds.has(task.id)}
             isDeleting={deletingTaskId === task.id}
             isArchiving={archivingTaskId === task.id}
             isSelected={selectedIds?.has(task.id)}
+            selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
+            onRangeSelect={
+              onSelectRange ? (taskId) => onSelectRange(taskId, orderedTaskIds) : undefined
+            }
             isMultiSelectMode={isMultiSelectMode}
           />
         ))}

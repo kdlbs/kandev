@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["04-stabilize-session-transport"]
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 05: Consume Summaries in Task Switchers

@@ -1,5 +1,5 @@
 // Package manifest defines the plugin manifest data model and validation
-// rules described in docs/specs/plugins/spec.md ("Data model / Plugin
+// rules described in docs/specs/plugins/requirements/plugins.md ("Data model / Plugin
 // registration"). A manifest is the YAML document an operator supplies to
 // POST /api/plugins/register.
 package manifest
@@ -13,6 +13,15 @@ import (
 // MaxActionBodyBytes is the largest request body an authenticated action may
 // declare. Individual actions must still declare their own smaller bound.
 const MaxActionBodyBytes = 1 << 20
+
+const (
+	// LegacyAPIVersion preserves the original webhook behavior: an omitted
+	// access field means public.
+	LegacyAPIVersion = 1
+	// CurrentAPIVersion makes omitted webhook access authenticated. Authors can
+	// still opt individual integration callbacks into public access.
+	CurrentAPIVersion = 2
+)
 
 // Manifest is the plugin registration manifest.
 type Manifest struct {
@@ -45,6 +54,8 @@ type Manifest struct {
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
+	AutomationConditions []AutomationCondition `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
+
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
 	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
 	// RepositoryProviders declares provider IDs this plugin owns while active.
@@ -67,6 +78,11 @@ type Manifest struct {
 
 	Runtime          Runtime `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 	MinKandevVersion string  `yaml:"min_kandev_version,omitempty" json:"min_kandev_version,omitempty"`
+
+	// Distribution declares an optional portable package profile. Legacy
+	// plugins and locally-authored canvases may omit it; registry-ready canvas
+	// packages must provide the complete profile.
+	Distribution *Distribution `yaml:"distribution,omitempty" json:"distribution,omitempty"`
 }
 
 const (
@@ -119,8 +135,8 @@ type Capabilities struct {
 	APIWrite []string `yaml:"api_write,omitempty" json:"api_write,omitempty"`
 	State    bool     `yaml:"state,omitempty" json:"state,omitempty"`
 	Secrets  bool     `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-	// AgentInvoke gates Host.InvokeUtilityAgent (ADR 0048): a one-shot,
-	// non-interactive completion run by the operator-configured utility agent.
+	// AgentInvoke gates Host.InvokeUtilityAgent: a one-shot, non-interactive
+	// completion run by the platform default or an explicitly selected profile.
 	AgentInvoke bool `yaml:"agent_invoke,omitempty" json:"agent_invoke,omitempty"`
 	// Auth gates a plugin's ability to establish an authenticated kandev
 	// browser session for an external identity it has validated against an
@@ -138,6 +154,14 @@ type Capabilities struct {
 	// browser session's user with no Go backend of its own (Approach D1,
 	// docs/decisions/2026-08-01-per-user-plugin-storage.md).
 	UserState bool `yaml:"user_state,omitempty" json:"user_state,omitempty"`
+	// AgentConversation gates the plugin's access to managed workspace agent
+	// conversations (EnsureAgentConversation / DispatchAgentConversation /
+	// DeleteAgentConversation Host RPCs). A plugin holding this capability can
+	// create, prompt, and delete a hidden workflowless ephemeral task/session
+	// per (plugin_id, workspace_id, conversation_key). The host owns identity,
+	// visibility, and lifecycle — the plugin never receives raw database or
+	// user identity through this surface.
+	AgentConversation bool `yaml:"agent_conversation,omitempty" json:"agent_conversation,omitempty"`
 }
 
 // AuthProvider is a login option a plugin contributes to the pre-auth login
@@ -149,7 +173,9 @@ type AuthProvider struct {
 	Initiate    string `yaml:"initiate" json:"initiate"`
 }
 
-// Webhook is a proxied external webhook endpoint the plugin declares.
+// Webhook is a proxied external webhook endpoint the plugin declares. The
+// manifest api_version selects the default when Access is omitted: v1 remains
+// public for compatibility, while v2 defaults to authenticated.
 type Webhook struct {
 	Key          string `yaml:"key" json:"key"`
 	Description  string `yaml:"description,omitempty" json:"description,omitempty"`
@@ -165,9 +191,12 @@ const (
 	MaximumWebhookMaxBodyBytes int64 = 16 << 20
 )
 
-func (w Webhook) EffectiveAccess() string {
+func (w Webhook) EffectiveAccess(apiVersion int) string {
 	if w.Access == "" {
-		return WebhookAccessPublic
+		if apiVersion == LegacyAPIVersion {
+			return WebhookAccessPublic
+		}
+		return WebhookAccessAuthenticated
 	}
 	return w.Access
 }
@@ -185,14 +214,26 @@ func (w Webhook) EffectiveMaxBodyBytes() int64 {
 type Action struct {
 	Key           string `yaml:"key" json:"key"`
 	ResourceScope string `yaml:"scope" json:"scope"`
+	Access        string `yaml:"access,omitempty" json:"access,omitempty"`
 	MaxBodyBytes  int    `yaml:"max_body_bytes" json:"max_body_bytes"`
 }
 
 const (
-	ActionScopeWorkspace  = "workspace"
-	ActionScopeTask       = "task"
-	ActionScopeRepository = "repository"
+	ActionScopeWorkspace      = "workspace"
+	ActionScopeTask           = "task"
+	ActionScopeRepository     = "repository"
+	ActionAccessAuthenticated = "authenticated"
+	ActionAccessAdmin         = "admin"
 )
+
+// EffectiveAccess preserves the original action contract: actions are
+// available to any authenticated caller unless a manifest opts into admin.
+func (a Action) EffectiveAccess() string {
+	if a.Access == "" {
+		return ActionAccessAuthenticated
+	}
+	return a.Access
+}
 
 // UnmarshalYAML accepts the frozen manifest field name (scope) and the
 // pre-release resource_scope spelling so stored local plugin records remain
@@ -202,6 +243,7 @@ func (a *Action) UnmarshalYAML(value *yaml.Node) error {
 		Key                 string `yaml:"key"`
 		Scope               string `yaml:"scope"`
 		LegacyResourceScope string `yaml:"resource_scope"`
+		Access              string `yaml:"access"`
 		MaxBodyBytes        int    `yaml:"max_body_bytes"`
 	}
 	if err := value.Decode(&raw); err != nil {
@@ -215,6 +257,7 @@ func (a *Action) UnmarshalYAML(value *yaml.Node) error {
 	if a.ResourceScope == "" {
 		a.ResourceScope = raw.LegacyResourceScope
 	}
+	a.Access = raw.Access
 	a.MaxBodyBytes = raw.MaxBodyBytes
 	return nil
 }
@@ -243,6 +286,23 @@ type UISection struct {
 	Bundle      string         `yaml:"bundle,omitempty" json:"bundle,omitempty"`
 	Styles      []string       `yaml:"styles,omitempty" json:"styles,omitempty"`
 	Keybindings []UIKeybinding `yaml:"keybindings,omitempty" json:"keybindings,omitempty"`
+	WebApps     []WebApp       `yaml:"web_apps,omitempty" json:"web_apps,omitempty"`
+}
+
+const (
+	WebAppPlacementTask      = "task-canvas"
+	WebAppPlacementWorkspace = "workspace-canvas"
+)
+
+// WebApp declares one packaged static web application. The host owns its
+// placement, navigation, and permissions; the package only supplies the
+// immutable entry document and its supported host placements.
+type WebApp struct {
+	Key            string   `yaml:"key" json:"key"`
+	Title          string   `yaml:"title" json:"title"`
+	Entry          string   `yaml:"entry" json:"entry"`
+	Placements     []string `yaml:"placements" json:"placements"`
+	NetworkOrigins []string `yaml:"network_origins,omitempty" json:"network_origins,omitempty"`
 }
 
 // UIPage is a single UI page contributed by the plugin.

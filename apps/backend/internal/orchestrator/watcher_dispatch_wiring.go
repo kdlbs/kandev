@@ -212,7 +212,7 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, src WatcherSource, e
 	// Per-watcher throttle. Synchronous: we MUST acquire the slot before
 	// spawning the goroutine, otherwise a tight burst of bus events all
 	// read the same pre-creation DB count and overshoot the cap. See
-	// docs/specs/throttle-watcher-fanout/spec.md.
+	// docs/specs/tasks/system-design/wip-limit-pull-system.md.
 	//
 	// The slot covers the WHOLE dispatch pipeline, including the case where
 	// Dispatch returns early because Reserve loses the dedup race (no task

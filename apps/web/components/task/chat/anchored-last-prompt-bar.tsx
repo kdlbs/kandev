@@ -6,8 +6,15 @@ import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
+import { BoundedMessagePreview } from "./messages/bounded-message-preview";
 import { ScrollToLastPromptButton } from "./scroll-to-last-prompt-button";
 import { useTranslation } from "react-i18next";
+import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  usePromptMentionMarkdownComponents,
+  useStablePromptMentionNames,
+} from "./messages/prompt-mention-components";
 
 type AnchoredLastPromptBarProps = {
   /** Raw content of the user's last prompt. */
@@ -28,6 +35,7 @@ type AnchoredLastPromptBarProps = {
    * of it actually opening (see resolveLastPromptControls). */
   onHeightChange?: (height: number) => void;
 };
+const NO_ENTITY_REFERENCES: readonly never[] = [];
 
 /** Reports `contentRef`'s rendered height to `onHeightChange` on mount and
  * on every subsequent resize, and 0 once unmounted. */
@@ -111,6 +119,43 @@ function useCanExpand(
   return canExpand;
 }
 
+function AnchoredPromptExpandButton({
+  canExpand,
+  expanded,
+  isFinePointer,
+  onToggle,
+}: {
+  canExpand: boolean;
+  expanded: boolean;
+  isFinePointer: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!canExpand) return null;
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      onClick={onToggle}
+      aria-label={expanded ? t("task:collapseLastPrompt") : t("task:expandLastPrompt")}
+      aria-expanded={expanded}
+      data-testid="anchored-last-prompt-expand"
+      className={cn(
+        "shrink-0 cursor-pointer text-muted-foreground hover:text-foreground",
+        isFinePointer ? "h-6 w-6" : "h-11 w-11",
+      )}
+    >
+      {expanded ? (
+        <IconChevronUp className="h-3.5 w-3.5" />
+      ) : (
+        <IconChevronDown className="h-3.5 w-3.5" />
+      )}
+    </Button>
+  );
+}
+
 /**
  * Desktop-only, opt-in "anchored bar" affordance: while the user's last
  * prompt sits fully outside the transcript viewport, a shortened copy sticks
@@ -127,7 +172,13 @@ export function AnchoredLastPromptBar({
   showScrollToLastPrompt = true,
   onHeightChange,
 }: AnchoredLastPromptBarProps) {
-  const { t } = useTranslation();
+  const { prompts } = useCustomPrompts();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const promptNames = useStablePromptMentionNames(prompts.map((prompt) => prompt.name));
+  const promptMentionComponents = usePromptMentionMarkdownComponents(
+    promptNames,
+    NO_ENTITY_REFERENCES,
+  );
   const [expanded, setExpanded] = useState(false);
   const textRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -169,43 +220,39 @@ export function AnchoredLastPromptBar({
             {showScrollToLastPrompt && (
               <ScrollToLastPromptButton
                 onClick={onScrollUp}
-                className="mt-0.5 h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+                className="mt-0.5 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
               />
             )}
             {/* Mirrors the real user-message bubble (rounded-2xl bg-primary/30)
               so the pinned copy reads as "the same prompt", just docked. */}
-            <div
-              ref={textRef}
-              data-testid="anchored-last-prompt-text"
-              data-expanded={expanded ? "true" : "false"}
-              style={expanded ? { maxHeight: expandedMaxHeight } : undefined}
-              className={cn(
+            <BoundedMessagePreview
+              source={visible}
+              fileName="kandev-last-prompt.txt"
+              previewRef={textRef}
+              previewTestId="anchored-last-prompt-text"
+              previewDataExpanded={expanded}
+              previewStyle={expanded ? { maxHeight: expandedMaxHeight } : undefined}
+              previewClassName={cn(
                 "min-w-0 flex-1 break-words rounded-2xl bg-primary/30 px-4 py-2.5 text-sm text-foreground/80",
                 expanded ? "overflow-y-auto" : "max-h-[3.75rem] overflow-hidden leading-5",
               )}
-            >
-              <div className="markdown-body markdown-body-user max-w-none">
-                <MemoizedMarkdown content={visible} />
-              </div>
-            </div>
-            {canExpand && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={() => setExpanded((v) => !v)}
-                aria-label={expanded ? t("task:collapseLastPrompt") : t("task:expandLastPrompt")}
-                aria-expanded={expanded}
-                data-testid="anchored-last-prompt-expand"
-                className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
-              >
-                {expanded ? (
-                  <IconChevronUp className="h-3.5 w-3.5" />
-                ) : (
-                  <IconChevronDown className="h-3.5 w-3.5" />
-                )}
-              </Button>
-            )}
+              className="min-w-0 flex-1"
+              renderContent={(preview) => (
+                <div className="markdown-body markdown-body-user max-w-none">
+                  <MemoizedMarkdown
+                    key={isVisible ? "visible" : "hidden"}
+                    content={preview}
+                    components={promptMentionComponents}
+                  />
+                </div>
+              )}
+            />
+            <AnchoredPromptExpandButton
+              canExpand={canExpand}
+              expanded={expanded}
+              isFinePointer={isFinePointer}
+              onToggle={() => setExpanded((v) => !v)}
+            />
           </div>
         </div>
       </div>

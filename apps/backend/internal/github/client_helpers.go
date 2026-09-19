@@ -95,13 +95,15 @@ func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int
 	if checks == nil {
 		checks = []CheckRun{}
 	}
+	workflowAttention, _ := collectWorkflowAttention(ctx, c, owner, repo, pr)
 	hasIssues := hasFailingChecks(checks) || hasChangesRequested(reviews)
 	return &PRFeedback{
-		PR:        pr,
-		Reviews:   reviews,
-		Comments:  comments,
-		Checks:    checks,
-		HasIssues: hasIssues,
+		PR:                pr,
+		Reviews:           reviews,
+		Comments:          comments,
+		Checks:            checks,
+		HasIssues:         hasIssues,
+		WorkflowAttention: workflowAttention,
 	}, nil
 }
 
@@ -126,7 +128,8 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 	if checks == nil {
 		checks = []CheckRun{}
 	}
-	return newPRStatus(pr, reviews, checks), nil
+	workflowAttention, _ := collectWorkflowAttention(ctx, c, owner, repo, pr)
+	return newPRStatusWithWorkflow(pr, reviews, checks, workflowAttention), nil
 }
 
 // newPRStatus derives the PRStatus rollup from the three upstream reads every
@@ -140,13 +143,27 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 // UnresolvedReviewThreadsPopulated stays false — neither REST caller fetches
 // review threads, so SyncTaskPR must preserve whatever the GraphQL path stored.
 func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
+	return newPRStatusWithWorkflow(pr, reviews, checks, nil)
+}
+
+func newPRStatusWithWorkflow(pr *PR, reviews []PRReview, checks []CheckRun, workflowAttention *WorkflowAttention) *PRStatus {
 	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
 	total, passing := countCheckResults(checks)
 	return &PRStatus{
-		PR:             pr,
-		ReviewState:    reviewState,
-		ChecksState:    computeOverallCheckStatus(checks),
-		MergeableState: pr.MergeableState,
+		PR:                                    pr,
+		WorkflowAttention:                     workflowAttention,
+		ReviewState:                           reviewState,
+		ChecksState:                           computeOverallCheckStatus(checks),
+		MergeableState:                        pr.MergeableState,
+		MergeQueueState:                       pr.MergeQueueState,
+		MergeQueuePosition:                    pr.MergeQueuePosition,
+		MergeQueueEntryID:                     pr.MergeQueueEntryID,
+		MergeQueueEntryHeadSHA:                pr.MergeQueueEntryHeadSHA,
+		MergeQueueEstimatedTimeToMergeSeconds: pr.MergeQueueEstimatedTimeToMergeSeconds,
+		MergeQueueLastRemovalID:               pr.MergeQueueLastRemovalID,
+		MergeQueueLastRemovedAt:               pr.MergeQueueLastRemovedAt,
+		MergeQueueLastRemovalReason:           pr.MergeQueueLastRemovalReason,
+		MergeQueueLastRemovalBeforeSHA:        pr.MergeQueueLastRemovalBeforeSHA,
 		// ReviewCount is the number of distinct reviewers whose latest review
 		// state is APPROVED — it's the value the popover renders as
 		// "Approved (N)" / "Approved N / M required". Counting raw review
@@ -165,7 +182,10 @@ func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
 		// "I didn't look" (AC-10). ClosureAttributionPopulated stays false:
 		// neither REST caller can see the closing actor — that's GraphQL-only
 		// (AC-15).
-		OutcomeFieldsPopulated: true,
+		OutcomeFieldsPopulated:      true,
+		WorkflowAttentionPopulated:  workflowAttention != nil,
+		mergeQueuePopulated:         pr.mergeQueuePopulated,
+		mergeQueueRecoveryPopulated: pr.mergeQueueRecoveryPopulated,
 	}
 }
 
@@ -303,6 +323,7 @@ func convertRawComments(raw []ghComment) []PRComment {
 	for i, c := range raw {
 		comments[i] = PRComment{
 			ID:           c.ID,
+			HTMLURL:      c.HTMLURL,
 			Author:       c.User.Login,
 			AuthorAvatar: c.User.AvatarURL,
 			AuthorIsBot:  isGitHubBot(c.User.Type),
@@ -322,6 +343,7 @@ func convertRawComments(raw []ghComment) []PRComment {
 // ghIssueComment is the JSON shape for issue comments from the GitHub API.
 type ghIssueComment struct {
 	ID        int64     `json:"id"`
+	HTMLURL   string    `json:"html_url"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -338,6 +360,7 @@ func convertRawIssueComments(raw []ghIssueComment) []PRComment {
 	for i, c := range raw {
 		comments[i] = PRComment{
 			ID:           c.ID,
+			HTMLURL:      c.HTMLURL,
 			Author:       c.User.Login,
 			AuthorAvatar: c.User.AvatarURL,
 			AuthorIsBot:  isGitHubBot(c.User.Type),

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import {
+  dropSupersededEmptyTurnNotices,
+  filterVisibleMessages,
   hasFailedAgentBootAfter,
   hasSessionRecoveryResolutionAfter,
   hasSuccessfulAgentBootAfter,
@@ -117,6 +119,272 @@ describe("isSuccessfulScriptExecutionMetadata", () => {
     expect(isSuccessfulScriptExecutionMetadata({ status: "exited", exit_code: 0 })).toBe(true);
     expect(isSuccessfulScriptExecutionMetadata({ status: "exited", exit_code: 1 })).toBe(false);
     expect(isSuccessfulScriptExecutionMetadata({ status: "running" })).toBe(false);
+  });
+});
+
+function baseMessage(overrides: Partial<Message>): Message {
+  return {
+    id: "m",
+    session_id: toSessionId("s1"),
+    task_id: toTaskId("t1"),
+    author_type: "agent",
+    content: "",
+    type: "message",
+    created_at: "2026-05-30T00:00:00Z",
+    ...overrides,
+  } as Message;
+}
+
+const PLAN_TURN_ID = "turn-1";
+const AGENT_PLAN_TYPE = "agent_plan";
+const FIRST_PLAN_CONTENT = "# Plan\n\n1. Read";
+const LATEST_PLAN_CONTENT = `${FIRST_PLAN_CONTENT}\n2. Write`;
+const LEGACY_PLAN_1_ID = "legacy-plan-1";
+const LEGACY_PLAN_2_ID = "legacy-plan-2";
+
+function planMessage(id: string, content: string, overrides: Partial<Message> = {}): Message {
+  return baseMessage({
+    id,
+    turn_id: PLAN_TURN_ID,
+    type: AGENT_PLAN_TYPE,
+    content,
+    ...overrides,
+  });
+}
+
+function emptyTurnNotice(turnId: string): Message {
+  return baseMessage({
+    id: `empty-turn-${turnId}`,
+    turn_id: turnId,
+    type: "status",
+    content: "The agent finished without producing any output.",
+    metadata: { variant: "warning", empty_turn: true },
+  });
+}
+
+describe("dropSupersededEmptyTurnNotices", () => {
+  it("drops the notice once real agent text arrives on the same turn", () => {
+    const messages = [
+      baseMessage({ id: "u1", turn_id: "turn-1", author_type: "user", content: "hi" }),
+      emptyTurnNotice("turn-1"),
+      baseMessage({ id: "a1", turn_id: "turn-1", content: "here you go" }),
+    ];
+    const result = dropSupersededEmptyTurnNotices(messages);
+    expect(result.map((m) => m.id)).toEqual(["u1", "a1"]);
+  });
+
+  it("keeps the notice when the turn never received output", () => {
+    const messages = [
+      baseMessage({ id: "u1", turn_id: "turn-1", author_type: "user", content: "hi" }),
+      emptyTurnNotice("turn-1"),
+    ];
+    expect(dropSupersededEmptyTurnNotices(messages)).toHaveLength(2);
+  });
+
+  it("keeps the notice when the output belongs to a different turn", () => {
+    const messages = [
+      emptyTurnNotice("turn-1"),
+      baseMessage({ id: "a1", turn_id: "turn-2", content: "unrelated" }),
+    ];
+    expect(dropSupersededEmptyTurnNotices(messages)).toHaveLength(2);
+  });
+
+  it("keeps the notice when only status/thinking rows follow on the same turn", () => {
+    const messages = [
+      emptyTurnNotice("turn-1"),
+      baseMessage({ id: "s1", turn_id: "turn-1", type: "status", content: "New session started" }),
+      baseMessage({ id: "th1", turn_id: "turn-1", type: "thinking", content: "pondering" }),
+    ];
+    expect(dropSupersededEmptyTurnNotices(messages)).toHaveLength(3);
+  });
+
+  it("drops the notice when a tool call lands on the same turn", () => {
+    const messages = [
+      emptyTurnNotice("turn-1"),
+      baseMessage({
+        id: "tc1",
+        turn_id: "turn-1",
+        type: "tool_call",
+        metadata: { tool_call_id: "call-1" },
+      }),
+    ];
+    const result = dropSupersededEmptyTurnNotices(messages);
+    expect(result.map((m) => m.id)).toEqual(["tc1"]);
+  });
+
+  it("drops the notice when a search tool lands on the same turn", () => {
+    const messages = [
+      emptyTurnNotice("turn-1"),
+      baseMessage({ id: "search-1", turn_id: "turn-1", type: "tool_search" }),
+    ];
+    const result = dropSupersededEmptyTurnNotices(messages);
+    expect(result.map((m) => m.id)).toEqual(["search-1"]);
+  });
+});
+
+describe("filterVisibleMessages empty-turn notice supersession", () => {
+  it("drops an empty-turn notice once an approved permission_request lands on its turn, even though approval hides that request from the visible list", () => {
+    const notice = emptyTurnNotice("turn-1");
+    const approvedPermission = baseMessage({
+      id: "perm-1",
+      turn_id: "turn-1",
+      type: "permission_request",
+      metadata: { status: "approved" },
+    });
+
+    expect(
+      filterVisibleMessages([notice, approvedPermission], new Set<string>(), new Set<string>()).map(
+        (message) => message.id,
+      ),
+    ).toEqual([]);
+  });
+
+  it("drops an empty-turn notice once a permission_request tied to a visible tool call lands on its turn", () => {
+    const notice = emptyTurnNotice("turn-2");
+    const linkedPermission = baseMessage({
+      id: "perm-2",
+      turn_id: "turn-2",
+      type: "permission_request",
+      metadata: { tool_call_id: "call-1" },
+    });
+
+    expect(
+      filterVisibleMessages(
+        [notice, linkedPermission],
+        new Set<string>(["call-1"]),
+        new Set<string>(),
+      ).map((message) => message.id),
+    ).toEqual([]);
+  });
+});
+
+const filterPlanMessages = (messages: Message[]) =>
+  filterVisibleMessages(messages, new Set<string>(), new Set<string>());
+
+describe("filterVisibleMessages correlated agent plans", () => {
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.1
+  it("keeps only the latest snapshot for a correlated plan stream", () => {
+    const correlation = { tool_call_id: "agent-plan:correlation-1" };
+    const first = planMessage("plan-1", FIRST_PLAN_CONTENT, { metadata: correlation });
+    const latest = planMessage("plan-2", LATEST_PLAN_CONTENT, { metadata: correlation });
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.id)).toEqual(["plan-2"]);
+  });
+
+  it("keeps only the final delivery when repeated snapshots share a message id", () => {
+    const correlation = { tool_call_id: "agent-plan:correlation-1" };
+    const first = planMessage("plan-1", FIRST_PLAN_CONTENT, { metadata: correlation });
+    const latest = planMessage("plan-1", LATEST_PLAN_CONTENT, { metadata: correlation });
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.content)).toEqual([
+      LATEST_PLAN_CONTENT,
+    ]);
+  });
+
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.2
+  it("keeps separate correlated plan streams in one turn", () => {
+    const first = planMessage("plan-1", "# First plan", {
+      metadata: { tool_call_id: "agent-plan:correlation-1" },
+    });
+    const second = planMessage("plan-2", "# Second plan", {
+      metadata: { tool_call_id: "agent-plan:correlation-2" },
+    });
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      "plan-1",
+      "plan-2",
+    ]);
+  });
+});
+
+describe("filterVisibleMessages legacy agent plans", () => {
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.4
+  it("collapses a contiguous same-turn legacy prefix chain", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, FIRST_PLAN_CONTENT);
+    const latest = planMessage(LEGACY_PLAN_2_ID, LATEST_PLAN_CONTENT);
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps legacy plans separated by another conversation item", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, FIRST_PLAN_CONTENT);
+    const message = baseMessage({ id: "message-1", turn_id: PLAN_TURN_ID, content: "Working" });
+    const latest = planMessage(LEGACY_PLAN_2_ID, LATEST_PLAN_CONTENT);
+
+    expect(filterPlanMessages([first, message, latest]).map((item) => item.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      "message-1",
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps legacy prefix plans from different turns", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, "# Plan");
+    const second = planMessage(LEGACY_PLAN_2_ID, FIRST_PLAN_CONTENT, { turn_id: "turn-2" });
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps same-turn legacy plans when the content is not a prefix", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, "# First plan");
+    const second = planMessage(LEGACY_PLAN_2_ID, "# Different plan");
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+});
+
+describe("filterVisibleMessages recovery history", () => {
+  const RECOVERY_MESSAGE = "Could not resume the saved session.";
+  const FIRST_RECOVERY_ID = "recovery-1";
+
+  it("keeps a session failure after later agent output arrives", () => {
+    const failure = baseMessage({
+      id: FIRST_RECOVERY_ID,
+      type: "status",
+      content: RECOVERY_MESSAGE,
+      metadata: { recovery_actions: true, recovery_stamp: "failure-1" },
+    });
+    const output = baseMessage({
+      id: "agent-1",
+      type: "message",
+      content: "The resumed session is ready.",
+      created_at: AFTER,
+    });
+
+    expect(
+      filterVisibleMessages([failure, output], new Set(), new Set()).map((message) => message.id),
+    ).toEqual([FIRST_RECOVERY_ID, "agent-1"]);
+  });
+
+  it("collapses duplicate deliveries of one failure while keeping later failures", () => {
+    const first = baseMessage({
+      id: FIRST_RECOVERY_ID,
+      type: "status",
+      content: RECOVERY_MESSAGE,
+      metadata: { recovery_actions: true, recovery_stamp: "failure-1" },
+    });
+    const duplicate = { ...first, id: `${FIRST_RECOVERY_ID}-duplicate` };
+    const second = baseMessage({
+      id: "recovery-2",
+      type: "status",
+      content: RECOVERY_MESSAGE,
+      metadata: { recovery_actions: true, recovery_stamp: "failure-2" },
+      created_at: AFTER,
+    });
+
+    expect(
+      filterVisibleMessages([first, duplicate, second], new Set(), new Set()).map(
+        (message) => message.id,
+      ),
+    ).toEqual([FIRST_RECOVERY_ID, "recovery-2"]);
   });
 });
 

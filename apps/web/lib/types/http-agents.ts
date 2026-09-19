@@ -58,6 +58,8 @@ export type Agent = {
    */
   capability_status?: CapabilityStatus;
   capability_error?: string;
+  /** Whether this agent supports sessionless host-utility inference. */
+  inference_capable?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -231,7 +233,9 @@ export type RuntimeUpdate = {
   supported: boolean;
   package: string;
   current_version?: string;
+  default_version?: string;
   active_version?: string;
+  effective_version?: string;
 };
 
 export type AvailableAgent = {
@@ -326,11 +330,34 @@ export type TaskPlan = {
   implementation_started_at?: string | null;
   implementation_started_session_id?: string | null;
   implementation_started_by?: string | null;
+  comments_revision?: number;
 };
 
 export type TaskPlanResponse = {
   plan: TaskPlan | null;
 };
+
+export type TaskPlanComment = {
+  id: string;
+  task_id: string;
+  plan_id: string;
+  body: string;
+  selected_text: string;
+  anchor_from: number;
+  anchor_to: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPlanCommentSnapshot = {
+  task_id: string;
+  plan_id: string;
+  revision: number;
+  comments: TaskPlanComment[];
+};
+
+export type TaskPlanCommentRef = Pick<TaskPlanComment, "id" | "version">;
 
 /** A single anchored stop in a code walkthrough. */
 export type WalkthroughStep = {
@@ -370,9 +397,17 @@ export type TaskPlanRevision = {
   revision_number: number;
   title: string;
   content?: string;
+  // Character count of `content`, computed server-side so it survives even
+  // when list/WS payloads omit `content` for size.
+  content_length?: number;
   author_kind: "agent" | "user";
   author_name: string;
   revert_of_revision_id?: string | null;
+  // Workflow step snapshot at write time; empty for revisions written before
+  // this stamping existed.
+  workflow_step_id?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
   coalesced?: boolean;
   created_at: string;
   updated_at: string;

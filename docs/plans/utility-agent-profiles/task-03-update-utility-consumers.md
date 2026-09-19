@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-persist-profile-bindings", "02-profile-aware-one-shot-runtime"]
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 03: Update utility execution consumers

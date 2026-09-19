@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/settings-profile-layout.md"
+spec: "../../specs/agents/requirements/settings-profile-layout.md"
 ---
 
 # Task 01: Agent settings layout
@@ -52,7 +52,7 @@ small vertical slice.
 
 ## Inputs
 
-- Spec: `docs/specs/agents/settings-profile-layout.md`, especially What and
+- Spec: `docs/specs/agents/requirements/settings-profile-layout.md`, especially What and
   the first four scenarios.
 - Plan: `plan.md`, Frontend and Mobile design contract sections.
 - Existing patterns: `InstalledAgentCard`, `AgentProfilesSubList`, and the

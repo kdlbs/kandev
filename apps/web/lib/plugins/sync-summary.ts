@@ -1,7 +1,7 @@
 /**
  * Formats a POST /api/plugins/sync SyncResult into the one-line toast
  * summary the Plugins settings page shows after a sync
- * (docs/specs/plugins/spec.md "Filesystem sideloading & sync"). Errors are
+ * (docs/specs/plugins/requirements/plugins.md "Filesystem sideloading & sync"). Errors are
  * surfaced separately (an inline `plugins-sync-errors` region) — they do
  * not affect this summary line.
  */

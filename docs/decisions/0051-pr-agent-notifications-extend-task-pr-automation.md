@@ -155,7 +155,7 @@ error.
   for the task. `auto_fix_prompt_override` and the resolved reviewer login
   remain the one task-level control plane described below; only the five
   boolean switches moved. MCP callers that omit PR identity keep today's
-  fan-out-to-every-linked-PR behavior. See `docs/specs/ui/ci-pr-automation.md`
+  fan-out-to-every-linked-PR behavior. See `docs/specs/ui/requirements/ci-pr-automation.md`
   and the GitLab MR automation follow-up for the mirrored change.
 - Lifecycle evaluation runs inside the single CI automation pass — one goroutine
   and one in-flight map handle auto-fix, auto-merge, and lifecycle for a PR.

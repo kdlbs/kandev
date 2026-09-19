@@ -6,7 +6,7 @@ wave: 1
 parallelism: sequential
 depends_on: ["01-shared-predicate-and-removal"]
 plan: "plan.md"
-spec: "../../specs/prevent-agent-autostart-on-open/spec.md"
+spec: "../../specs/tasks/requirements/prevent-agent-autostart-on-open.md"
 ---
 
 # Task 02: Composer hint UI and i18n

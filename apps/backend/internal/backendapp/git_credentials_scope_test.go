@@ -107,6 +107,72 @@ func TestGitHubBrokerScopeAuthorizerRejectsForeignRepositoryScope(t *testing.T) 
 	}
 }
 
+func TestGitHubBrokerScopeAuthorizerRechecksTaskScopeBeforeLegacyFallback(t *testing.T) {
+	for name, mutate := range map[string]func(*fakeGitHubBrokerTaskRepository){
+		"terminal session": func(repo *fakeGitHubBrokerTaskRepository) {
+			repo.session.State = taskmodels.TaskSessionStateCompleted
+		},
+		"session for another task": func(repo *fakeGitHubBrokerTaskRepository) {
+			repo.session.TaskID = "other-task"
+		},
+		"unlinked repository": func(repo *fakeGitHubBrokerTaskRepository) {
+			repo.links = nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := gitCredentialScopeTestRepository("https://github.com/acme/widgets.git")
+			mutate(repo)
+			authorizer := &githubBrokerScopeAuthorizer{repo: repo}
+
+			if err := authorizer.AuthorizeGitCredential(
+				context.Background(), gitCredentialScopeForPath("/acme/widgets.git"),
+			); err == nil {
+				t.Fatal("AuthorizeGitCredential() error = nil, want live task scope denial")
+			}
+		})
+	}
+}
+
+func TestGitHubBrokerScopeAuthorizerDoesNotBypassProviderIdentityOnLegacyFallback(t *testing.T) {
+	for name, identity := range map[string]gitcredentials.Scope{
+		"mismatched provider identity": {
+			IdentityProviderID: "999",
+		},
+		"unexpected parent identity": {
+			IdentityProviderID: "100", ParentProviderID: "200",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := gitCredentialScopeTestRepository("https://github.com/acme/widgets.git")
+			repo.repository.ProviderHost = ""
+			repo.repository.ProviderRepoID = "100"
+			authorizer := &githubBrokerScopeAuthorizer{repo: repo}
+			scope := gitCredentialScopeForPath("/acme/widgets.git")
+			scope.IdentityProviderID = identity.IdentityProviderID
+			scope.ParentProviderID = identity.ParentProviderID
+
+			if err := authorizer.AuthorizeGitCredential(context.Background(), scope); err == nil {
+				t.Fatal("AuthorizeGitCredential() error = nil, want provider identity denial")
+			}
+		})
+	}
+}
+
+func TestGitHubBrokerScopeAuthorizerAcceptsPluginRepositoryScope(t *testing.T) {
+	repository := &taskmodels.Repository{
+		ID: "repository-1", WorkspaceID: "workspace-1", Provider: "bitbucket",
+		ProviderHost: "https://bitbucket.example", RemoteURL: "https://bitbucket.example/scm/ENG/widgets.git",
+	}
+	authorizer := &githubBrokerScopeAuthorizer{repo: gitCredentialScopeTaskRepository(repository)}
+
+	if err := authorizer.AuthorizeGitCredential(context.Background(), gitcredentials.Scope{
+		ProviderID: "bitbucket", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
+		RepositoryID: "repository-1", Host: "bitbucket.example", Path: "/scm/ENG/widgets.git",
+	}); err != nil {
+		t.Fatalf("AuthorizeGitCredential() error = %v", err)
+	}
+}
+
 // An SSH URL cannot express the provider's HTTPS port, so the persisted
 // provider identity, not a rewrite of the remote, decides the origin.
 func TestGitHubBrokerScopeAuthorizerUsesProviderHostPortForSSHRemote(t *testing.T) {

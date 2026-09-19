@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-repository-reorder"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-reorder.md"
+spec: "../../specs/ui/requirements/message-queue-reorder.md"
 ---
 
 # Task 02: Backend service and WS handler reorder

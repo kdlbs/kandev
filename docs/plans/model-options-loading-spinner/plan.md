@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/dynamic-provider-options.md
+spec: docs/specs/agents/requirements/dynamic-provider-options.md
 created: 2026-08-19
 status: implemented
 ---

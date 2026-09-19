@@ -6,6 +6,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { CreateTaskResponse } from "../../../lib/types/http";
+import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
 
 const SLOW_COMMAND = {
   name: "slow",
@@ -84,9 +85,7 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   }
   await dialog.getByTestId("quick-chat-start").click();
 
-  const editor = chatEditor(dialog);
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  await waitForQuickChatComposerReady(dialog);
   return dialog;
 }
 
@@ -103,6 +102,13 @@ test.describe("Slash command composer", () => {
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
     const editor = chatEditor(testPage);
+    // @covers AC-UI-COMPOSER-FOCUS-HINT-001.2
+    await editor.fill("");
+    await editor.blur();
+    const composer = session.chat.filter({ visible: true });
+    await expect(composer.getByText("to focus", { exact: true })).toBeVisible();
+    await editor.click();
+    await expect(composer.getByText("to focus", { exact: true })).not.toBeVisible();
     await selectSlowCommandWithEnter(testPage, editor);
 
     const chatList = session.chat.locator(".chat-message-list:visible");

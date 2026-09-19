@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 
 	"go.uber.org/zap"
 
@@ -11,12 +12,20 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
+var errMCPHandlerUnavailable = errors.New("MCP handler is not configured")
+
 // MCPIdentityScoper attaches the identity of the user who owns taskID to ctx,
 // so the in-session MCP tools an agent gets automatically are authorized as
 // that user instead of running unscoped. Returning an error denies the
 // dispatch — see internal/mcp/scope for the production implementation and why
 // it fails closed rather than falling back to full access.
 type MCPIdentityScoper func(ctx context.Context, taskID string) (context.Context, error)
+
+// MCPPrincipalScoper attaches the server-derived task/session MCP principal.
+// It runs after the owner identity scoper and is independent of auth mode:
+// automation self/workspace boundaries are required even on single-user
+// installations.
+type MCPPrincipalScoper func(ctx context.Context, taskID, sessionID string) (context.Context, error)
 
 // taskScopedMCPHandler scopes every MCP request on one agent stream to the
 // owner of that stream's task.
@@ -28,10 +37,37 @@ type MCPIdentityScoper func(ctx context.Context, taskID string) (context.Context
 type taskScopedMCPHandler struct {
 	inner       agentctl.MCPHandler
 	scope       MCPIdentityScoper
+	principal   MCPPrincipalScoper
 	executionID string
 	taskID      string
 	sessionID   string
 	logger      *logger.Logger
+}
+
+type currentMCPHandler struct {
+	streamManager *StreamManager
+	executionID   string
+	taskID        string
+	sessionID     string
+}
+
+func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	inner, scope, principal := h.streamManager.mcpDispatchState()
+	if inner == nil {
+		return nil, errMCPHandlerUnavailable
+	}
+	if h.taskID == "" {
+		return inner.Dispatch(ctx, msg)
+	}
+	return (&taskScopedMCPHandler{
+		inner:       inner,
+		scope:       scope,
+		principal:   principal,
+		executionID: h.executionID,
+		taskID:      h.taskID,
+		sessionID:   h.sessionID,
+		logger:      h.streamManager.logger,
+	}).Dispatch(ctx, msg)
 }
 
 func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -40,34 +76,67 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 		TaskID:      h.taskID,
 		SessionID:   h.sessionID,
 	})
-	if h.scope == nil {
-		return h.inner.Dispatch(ctx, msg)
+	scoped := ctx
+	if h.scope != nil {
+		var err error
+		scoped, err = h.scope(ctx, h.taskID)
+		if err != nil {
+			h.logger.Error("denying in-session MCP request: cannot resolve the task owner",
+				zap.String("task_id", h.taskID),
+				zap.String("action", msg.Action),
+				zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to resolve the session owner", nil)
+		}
 	}
-	scoped, err := h.scope(ctx, h.taskID)
+	if h.principal == nil {
+		return h.inner.Dispatch(scoped, msg)
+	}
+	principalScoped, err := h.principal(scoped, h.taskID, h.sessionID)
 	if err != nil {
-		h.logger.Error("denying in-session MCP request: cannot resolve the task owner",
+		h.logger.Error("denying in-session MCP request: cannot resolve the caller principal",
 			zap.String("task_id", h.taskID),
+			zap.String("session_id", h.sessionID),
 			zap.String("action", msg.Action),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"failed to resolve the session owner", nil)
+			"failed to resolve the session principal", nil)
 	}
-	return h.inner.Dispatch(scoped, msg)
+	return h.inner.Dispatch(principalScoped, msg)
 }
 
 // mcpHandlerFor returns the MCP handler for one execution's stream. The
 // backend-owned execution identity is always attached; user identity is also
 // attached when per-user scoping has been wired.
 func (sm *StreamManager) mcpHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
-	if sm.mcpHandler == nil || execution.TaskID == "" {
-		return sm.mcpHandler
+	return &currentMCPHandler{
+		streamManager: sm,
+		executionID:   execution.ID,
+		taskID:        execution.TaskID,
+		sessionID:     execution.SessionID,
 	}
-	return &taskScopedMCPHandler{
-		inner:       sm.mcpHandler,
-		scope:       sm.mcpIdentityScoper,
-		executionID: execution.ID,
-		taskID:      execution.TaskID,
-		sessionID:   execution.SessionID,
-		logger:      sm.logger,
-	}
+}
+
+func (sm *StreamManager) mcpDispatchState() (agentctl.MCPHandler, MCPIdentityScoper, MCPPrincipalScoper) {
+	sm.mcpMu.RLock()
+	defer sm.mcpMu.RUnlock()
+	return sm.mcpHandler, sm.mcpIdentityScoper, sm.mcpPrincipalScoper
+}
+
+func (sm *StreamManager) setMCPHandler(handler agentctl.MCPHandler) {
+	sm.mcpMu.Lock()
+	defer sm.mcpMu.Unlock()
+	sm.mcpHandler = handler
+}
+
+func (sm *StreamManager) setMCPIdentityScoper(scoper MCPIdentityScoper) {
+	sm.mcpMu.Lock()
+	defer sm.mcpMu.Unlock()
+	sm.mcpIdentityScoper = scoper
+}
+
+func (sm *StreamManager) setMCPPrincipalScoper(scoper MCPPrincipalScoper) {
+	sm.mcpMu.Lock()
+	defer sm.mcpMu.Unlock()
+	sm.mcpPrincipalScoper = scoper
 }

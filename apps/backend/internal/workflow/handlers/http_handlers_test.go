@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/controller"
 	"github.com/kandev/kandev/internal/workflow/models"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
 // fakeWorkflowProvider is the task-domain seam the workflow service reads
@@ -86,6 +88,24 @@ func (p *fakeWorkflowProvider) UpdateWorkflow(_ context.Context, workflow *taskm
 // fakeWorkspaceProvider resolves workspaces for the read-only guard.
 type fakeWorkspaceProvider struct {
 	workspaces map[string]*taskmodels.Workspace
+}
+
+type fakeImportProfileCatalog struct {
+	profiles []workflowservice.ImportProfileCandidate
+}
+
+func (c *fakeImportProfileCatalog) ListEligibleProfiles(context.Context) ([]workflowservice.ImportProfileCandidate, error) {
+	return append([]workflowservice.ImportProfileCandidate(nil), c.profiles...), nil
+}
+
+func (c *fakeImportProfileCatalog) GetEligibleProfile(_ context.Context, id string) (*workflowservice.ImportProfileCandidate, error) {
+	for _, profile := range c.profiles {
+		if profile.ID == id {
+			copy := profile
+			return &copy, nil
+		}
+	}
+	return nil, workflowservice.ErrImportProfileNotFound
 }
 
 func (p *fakeWorkspaceProvider) GetWorkspace(_ context.Context, id string) (*taskmodels.Workspace, error) {
@@ -209,6 +229,41 @@ func TestStepMutationValidationRejections(t *testing.T) {
 		}
 		if len(rec.events) != 0 {
 			t.Fatalf("rejected create published %v", rec.subjects())
+		}
+	})
+
+	t.Run("create rejects explicit null completion policy", func(t *testing.T) {
+		h := setupStepRouter(t)
+		rec := recordStepEvents(t, h.eventBus)
+		resp := doRaw(t, h, http.MethodPost, "/api/v1/workflow/steps", `{"workflow_id":"workflow-1","name":"Null completion","complete_task_on_enter":null}`)
+		if resp.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body = %s", resp.Code, resp.Body.String())
+		}
+		if len(rec.events) != 0 {
+			t.Fatalf("rejected create published %v", rec.subjects())
+		}
+	})
+
+	t.Run("update rejects explicit null completion policy without mutation", func(t *testing.T) {
+		h := setupStepRouter(t)
+		step := createStepViaHTTP(t, h.router, map[string]interface{}{
+			"workflow_id": "workflow-1", "name": "Done", "position": 0,
+			"complete_task_on_enter": true,
+		})
+		rec := recordStepEvents(t, h.eventBus)
+		resp := doRaw(t, h, http.MethodPut, "/api/v1/workflow/steps/"+step.ID, `{"complete_task_on_enter":null}`)
+		if resp.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body = %s", resp.Code, resp.Body.String())
+		}
+		if len(rec.events) != 0 {
+			t.Fatalf("rejected update published %v", rec.subjects())
+		}
+		stored, err := h.service.GetStep(context.Background(), step.ID)
+		if err != nil {
+			t.Fatalf("reload step: %v", err)
+		}
+		if !stored.CompleteTaskOnEnter {
+			t.Fatal("explicit null update changed the saved completion policy")
 		}
 	})
 
@@ -463,7 +518,7 @@ func TestExportWorkflowEndpoints(t *testing.T) {
 	t.Run("single workflow export carries its steps", func(t *testing.T) {
 		h := newExportHarness(t)
 		export := decodeExport(t, doJSON(t, h.router, http.MethodGet, "/api/v1/workflows/workflow-1/export", nil))
-		if export.Version != models.ExportVersion || export.Type != models.ExportType {
+		if export.Version != models.LegacyExportVersion || export.Type != models.ExportType {
 			t.Fatalf("export envelope = %d/%q", export.Version, export.Type)
 		}
 		if len(export.Workflows) != 1 || export.Workflows[0].Name != "Main" {
@@ -610,6 +665,219 @@ workflows:
 		}
 		if len(provider.created) != 0 {
 			t.Fatalf("invalid import created %v", provider.created)
+		}
+	})
+}
+
+func TestPreviewImportWorkflowsEndpoint(t *testing.T) {
+	h := setupStepRouter(t)
+	h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+
+	rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import/preview", `version: 1
+type: kandev_workflow
+workflows:
+  - name: Previewed
+    steps:
+      - name: Start
+        position: 0
+        color: bg-blue-500
+`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var got struct {
+		Skipped []string `json:"skipped"`
+		Steps   []struct {
+			WorkflowIndex int    `json:"workflow_index"`
+			StepPosition  int    `json:"step_position"`
+			WorkflowName  string `json:"workflow_name"`
+			StepName      string `json:"step_name"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Skipped) != 0 || len(got.Steps) != 0 {
+		t.Fatalf("preview = %#v, want no skipped workflows or profile steps", got)
+	}
+}
+
+func TestImportWorkflowProfileSelectionHTTP(t *testing.T) {
+	updatedAt := time.Date(2026, 9, 17, 13, 0, 0, 0, time.UTC)
+	profile := workflowservice.ImportProfileCandidate{
+		ID: "profile-1", Name: "Codex Default", AgentName: "Codex", Model: "gpt-5", Mode: "full", UpdatedAt: updatedAt,
+	}
+
+	t.Run("preview includes an exact match", func(t *testing.T) {
+		h := setupStepRouter(t)
+		h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+		h.service.SetImportProfileCatalog(&fakeImportProfileCatalog{profiles: []workflowservice.ImportProfileCandidate{profile}})
+		h.service.SetAgentProfileFuncs(nil, func(string, string, string, string) string { return profile.ID })
+
+		rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import/preview", `version: 1
+type: kandev_workflow
+workflows:
+  - name: Previewed
+    steps:
+      - name: Build
+        position: 0
+        color: bg-blue-500
+        agent_profile:
+          agent_name: Codex
+          model: gpt-5
+          mode: full
+`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got struct {
+			Steps []struct {
+				MatchedProfile *struct {
+					ID string `json:"id"`
+				} `json:"matched_profile"`
+			} `json:"steps"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(got.Steps) != 1 || got.Steps[0].MatchedProfile == nil || got.Steps[0].MatchedProfile.ID != profile.ID {
+			t.Fatalf("preview = %#v", got)
+		}
+	})
+
+	t.Run("preview serializes an empty eligible catalog as an array", func(t *testing.T) {
+		h := setupStepRouter(t)
+		h.service.SetWorkflowProvider(&fakeWorkflowProvider{})
+		h.service.SetImportProfileCatalog(&fakeImportProfileCatalog{})
+		h.service.SetAgentProfileFuncs(nil, func(string, string, string, string) string { return "" })
+
+		rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import/preview", `version: 1
+type: kandev_workflow
+workflows:
+  - name: Missing profile
+    steps:
+      - name: Build
+        position: 0
+        color: bg-blue-500
+        agent_profile:
+          agent_name: Missing
+          model: unavailable
+          mode: full
+`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got struct {
+			Profiles json.RawMessage `json:"profiles"`
+			Steps    []struct {
+				MatchedProfile *struct{} `json:"matched_profile"`
+			} `json:"steps"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if string(got.Profiles) != "[]" {
+			t.Fatalf("profiles = %s, want []", got.Profiles)
+		}
+		if len(got.Steps) != 1 || got.Steps[0].MatchedProfile != nil {
+			t.Fatalf("steps = %#v, want one unmatched step", got.Steps)
+		}
+	})
+
+	t.Run("stale selection is a structured conflict", func(t *testing.T) {
+		h := setupStepRouter(t)
+		provider := &fakeWorkflowProvider{}
+		h.service.SetWorkflowProvider(provider)
+		h.service.SetImportProfileCatalog(&fakeImportProfileCatalog{profiles: []workflowservice.ImportProfileCandidate{profile}})
+		body := map[string]any{
+			"yaml": `version: 1
+type: kandev_workflow
+workflows:
+  - name: Selected
+    steps:
+      - name: Build
+        position: 0
+        color: bg-blue-500
+        agent_profile:
+          agent_name: Missing
+`,
+			"step_profile_bindings": []map[string]any{{
+				"workflow_index": 0,
+				"step_position":  0,
+				"requested_profile": map[string]any{
+					"agent_name": "Missing",
+				},
+				"profile_id":         profile.ID,
+				"profile_updated_at": updatedAt.Add(-time.Minute).Format(time.RFC3339),
+			}},
+		}
+		rec := doJSON(t, h.router, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import", body)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var got struct {
+			Code  string `json:"code"`
+			Steps []struct {
+				Reason string `json:"reason"`
+			} `json:"steps"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.Code != "workflow_import_profiles_required" || len(got.Steps) != 1 || got.Steps[0].Reason != workflowservice.ImportProfileReasonChanged {
+			t.Fatalf("conflict = %#v", got)
+		}
+		if len(provider.created) != 0 {
+			t.Fatalf("conflict created workflows: %v", provider.created)
+		}
+	})
+
+	t.Run("valid JSON envelope persists the selected ID", func(t *testing.T) {
+		h := setupStepRouter(t)
+		provider := &fakeWorkflowProvider{}
+		h.service.SetWorkflowProvider(provider)
+		h.service.SetImportProfileCatalog(&fakeImportProfileCatalog{profiles: []workflowservice.ImportProfileCandidate{profile}})
+		body := map[string]any{
+			"yaml": `version: 1
+type: kandev_workflow
+workflows:
+  - name: Selected
+    steps:
+      - name: Build
+        position: 0
+        color: bg-blue-500
+        agent_profile:
+          agent_name: Missing
+`,
+			"step_profile_bindings": []map[string]any{{
+				"workflow_index": 0,
+				"step_position":  0,
+				"requested_profile": map[string]any{
+					"agent_name": "Missing",
+				},
+				"profile_id":         profile.ID,
+				"profile_updated_at": updatedAt.Format(time.RFC3339),
+			}},
+		}
+		rec := doJSON(t, h.router, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import", body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		steps, err := h.repo.ListStepsByWorkflow(context.Background(), "created-Selected")
+		if err != nil {
+			t.Fatalf("list imported steps: %v", err)
+		}
+		if len(steps) != 1 || steps[0].AgentProfileID != profile.ID {
+			t.Fatalf("steps = %#v", steps)
+		}
+	})
+
+	t.Run("oversized body is rejected explicitly", func(t *testing.T) {
+		h := setupStepRouter(t)
+		rec := doRaw(t, h, http.MethodPost, "/api/v1/workspaces/ws-1/workflows/import/preview", strings.Repeat("x", maxImportSize+1))
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 		}
 	})
 }

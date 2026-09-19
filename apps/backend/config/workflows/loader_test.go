@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
 )
@@ -60,6 +61,32 @@ func TestLoadTemplates_CancelTriggersTurnCompleteDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadTemplates_CompletionPolicyUsesExplicitFinalStepSetting(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+	for _, template := range templates {
+		for _, step := range template.Steps {
+			want := template.ID != "improve-kandev" && template.ID != "report-kandev-issue" &&
+				step.Position == lastTemplatePosition(template.Steps)
+			if step.CompleteTaskOnEnter != want {
+				t.Errorf("template %q step %q completion policy = %t, want %t", template.ID, step.Name, step.CompleteTaskOnEnter, want)
+			}
+		}
+	}
+}
+
+func lastTemplatePosition(steps []models.StepDefinition) int {
+	last := 0
+	for i, step := range steps {
+		if i == 0 || step.Position > last {
+			last = step.Position
+		}
+	}
+	return last
+}
+
 func TestLoadTemplates_AllValid(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -78,6 +105,35 @@ func TestLoadTemplates_AllValid(t *testing.T) {
 		if len(tmpl.Steps) == 0 {
 			t.Errorf("template %q has no steps", tmpl.ID)
 		}
+	}
+}
+
+func TestConvertStep_PreservesAgentProfileAndSessionPolicies(t *testing.T) {
+	var raw templateYAML
+	if err := yaml.Unmarshal([]byte(`
+id: test
+name: Test
+steps:
+  - id: review
+    name: Review
+    agent_profile_id: profile-review
+    profile_session_start_policy: new
+    profile_session_end_policy: park
+`), &raw); err != nil {
+		t.Fatalf("unmarshal template: %v", err)
+	}
+	step, err := convertStep(raw.Steps[0])
+	if err != nil {
+		t.Fatalf("convertStep returned error: %v", err)
+	}
+	if step.AgentProfileID != "profile-review" {
+		t.Fatalf("agent profile ID = %q, want profile-review", step.AgentProfileID)
+	}
+	if step.ProfileSessionStartPolicy != taskmodels.WorkflowProfileSessionStartPolicyNew {
+		t.Fatalf("profile session start policy = %q, want new", step.ProfileSessionStartPolicy)
+	}
+	if step.ProfileSessionEndPolicy != taskmodels.WorkflowProfileSessionEndPolicyPark {
+		t.Fatalf("profile session end policy = %q, want park", step.ProfileSessionEndPolicy)
 	}
 }
 
@@ -270,6 +326,45 @@ func TestLoadTemplates_HiddenFlag(t *testing.T) {
 	}
 }
 
+// TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal verifies that the
+// office-default template's `work` step gates its turn-end auto-advance
+// (Work -> Review) on the ADR 0015 declarative completion signal, now that
+// step_complete_kandev is registered for the Office MCP surface. Without
+// this flag the new signal would be decorative: the step would still
+// advance on bare turn-end regardless of whether the agent called the tool.
+func TestLoadTemplates_OfficeDefaultWorkStepRequiresSignal(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var officeDefault *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "office-default" {
+			officeDefault = tmpl
+			break
+		}
+	}
+	if officeDefault == nil {
+		t.Fatal("office-default template not found")
+	}
+
+	var work *models.StepDefinition
+	for i := range officeDefault.Steps {
+		if officeDefault.Steps[i].ID == "work" {
+			work = &officeDefault.Steps[i]
+			break
+		}
+	}
+	if work == nil {
+		t.Fatal("office-default template step \"work\" not found")
+	}
+
+	if got := boolFieldForTest(t, work, "AutoAdvanceRequiresSignal"); !got {
+		t.Error("office-default template step \"work\" must set auto_advance_requires_signal: true")
+	}
+}
+
 func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -369,11 +464,9 @@ func TestLoadTemplates_ImproveKandevManagedPublicationPromptContract(t *testing.
 	}
 }
 
-// TestLoadTemplates_PRReviewMRAutomationInstruction is AC30: the pr-review
-// template's review step must instruct the agent to enable lifecycle
-// notifications on whichever provider the task's linked review target is
-// on — update_task_pr_automation_kandev for a GitHub PR,
-// update_task_mr_automation_kandev for a GitLab MR.
+// TestLoadTemplates_PRReviewMRAutomationInstruction verifies that the pr-review
+// template uses the shared automation contract and asks the agent to select the
+// linked provider explicitly before enabling lifecycle notifications.
 func TestLoadTemplates_PRReviewMRAutomationInstruction(t *testing.T) {
 	templates, err := LoadTemplates()
 	if err != nil {
@@ -402,8 +495,10 @@ func TestLoadTemplates_PRReviewMRAutomationInstruction(t *testing.T) {
 		t.Fatal("pr-review template has no review step")
 	}
 	for _, required := range []string{
-		"update_task_pr_automation_kandev",
-		"update_task_mr_automation_kandev",
+		"get_task_change_requests_kandev",
+		"update_task_change_request_automation_kandev",
+		`target.scope="task"`,
+		`providers`,
 		"prompt_on_review_requested",
 		"prompt_on_merged",
 		"prompt_on_closed",

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/session-delete-resource-cleanup/spec.md"
+spec: "../../specs/tasks/requirements/session-delete-resource-cleanup.md"
 ---
 
 # Task 01: Normalize Terminal Worktree History
@@ -32,7 +32,7 @@ make -C apps/backend test GOFLAGS="-v -count=1"
 
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_normalize.go`
 - `apps/backend/internal/task/repository/sqlite/worktree_ownership_migration_test.go`
-- `docs/specs/session-delete-resource-cleanup/spec.md`
+- `docs/specs/tasks/requirements/session-delete-resource-cleanup.md`
 - `docs/plans/task-owned-worktree-cutover-terminal-history/plan.md`
 - `docs/plans/task-owned-worktree-cutover-terminal-history/task-01-normalize-terminal-history.md`
 

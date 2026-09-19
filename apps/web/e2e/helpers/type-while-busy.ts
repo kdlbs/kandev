@@ -10,17 +10,16 @@ import { expect, type Locator, type Page } from "@playwright/test";
  * the toolbar has re-rendered into queue mode, which is why these call sites
  * used to chase it with a fixed sleep.
  *
- * The cancel button is the rendered signal of that second derivation, so
- * waiting on it gives the same guarantee reactively: it returns immediately
- * when the composer is already busy and keeps waiting when the store is slow,
- * instead of spending a fixed budget that is simultaneously too long and too
- * short.
+ * The cancel button is also available while direct input is working, so it is
+ * not a queue-mode signal. Wait on the explicit queue-derived input mode,
+ * scoped to the visible composer in the supplied surface.
  */
 export async function waitForComposerQueueMode(
   scope: Page | Locator,
   timeout = 15_000,
 ): Promise<void> {
-  await expect(scope.getByTestId("cancel-agent-button")).toBeVisible({ timeout });
+  const activeComposer = scope.locator('[data-testid="chat-input-area"]:visible');
+  await expect(activeComposer).toHaveAttribute("data-input-mode", "queue", { timeout });
 }
 
 /**

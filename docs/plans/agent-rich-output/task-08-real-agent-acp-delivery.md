@@ -5,7 +5,7 @@ status: complete
 wave: 8
 depends_on: ["07-chart-axes-legends"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 08: Real-agent ACP delivery
@@ -71,7 +71,7 @@ spec: "../../specs/agent-rich-output/spec.md"
 - `apps/web/components/task/chat/messages/kandev/parse.ts`
 - `apps/web/components/task/chat/messages/kandev/parse.test.ts`
 - `apps/web/components/task/chat/messages/kandev/kandev-tool-message.test.tsx`
-- `docs/specs/agent-rich-output/spec.md`
+- `docs/specs/agents/requirements/agent-rich-output.md`
 - `docs/plans/agent-rich-output/plan.md`
 
 ## Risks

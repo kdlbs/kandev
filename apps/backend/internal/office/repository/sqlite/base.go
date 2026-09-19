@@ -31,6 +31,12 @@ func newParticipantUUID() string { return uuid.New().String() }
 // The alias is the table alias of the tasks row (e.g. "t" or "tasks");
 // the resulting SQL fragment evaluates to "" when neither a runner row
 // nor a step primary exists.
+//
+// The third fallback orders by workflow_step_participants.created_at, a
+// persisted, dialect-portable column, with id as a named tiebreak — the
+// same ordering ResolveCurrentRunner uses for its identical tier, so both
+// resolvers agree and both database engines return the same runner for the
+// same data.
 func RunnerProjection(alias string) string {
 	if alias == "" {
 		alias = "tasks"
@@ -45,7 +51,7 @@ func RunnerProjection(alias string) string {
 		NULLIF((SELECT wsp.agent_profile_id FROM workflow_step_participants wsp
 		 WHERE wsp.task_id = ` + alias + `.id
 		   AND wsp.role = 'runner'
-		 ORDER BY wsp.rowid DESC LIMIT 1), ''),
+		 ORDER BY wsp.created_at DESC, wsp.id ASC LIMIT 1), ''),
 		''
 	)`
 }
@@ -64,6 +70,30 @@ type Repository struct {
 	ro      *sqlx.DB // reader
 	log     *logger.Logger
 	migrate *db.MigrateLogger
+
+	// failBudgetPolicyUpdateErr is a test-only failpoint: when set,
+	// updateBudgetPolicyTx returns it after the claim discard has run but
+	// before the policy row update, so a test can prove the two are
+	// transactional without a fault-injecting driver.
+	failBudgetPolicyUpdateErr error
+
+	// failBudgetClaimsRecreateErr is a test-only failpoint: when set,
+	// recreateBudgetClaimsForRevision returns it instead of touching the
+	// database, so a test can prove initSchema surfaces the error rather
+	// than swallowing it.
+	failBudgetClaimsRecreateErr error
+
+	// failBudgetClaimsRecreateAfterDropErr is a test-only failpoint: when
+	// set, recreateBudgetClaimsForRevision returns it after DROP TABLE has
+	// run but before CREATE TABLE, inside the same transaction, so a test
+	// can prove the two are atomic rather than two independent statements.
+	failBudgetClaimsRecreateAfterDropErr error
+
+	// failBudgetExceededCompanionErr is a test-only failpoint: when set,
+	// ClaimExceeded returns it after the exceeded-level insert has run but
+	// before the companion alert-level insert, so a test can prove the
+	// pair rolls back together.
+	failBudgetExceededCompanionErr error
 }
 
 // NewWithDB creates a new office repository with existing database connections.
@@ -73,7 +103,7 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 		db:         writer,
 		ro:         reader,
 		log:        log,
-		migrate:    db.NewMigrateLogger(writer, log),
+		migrate:    db.NewRequiredMigrateLogger(writer, log),
 	}
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize office schema: %w", err)
@@ -109,26 +139,25 @@ func (r *Repository) ExecRaw(ctx context.Context, query string, args ...interfac
 // package should keep using typed methods.
 func (r *Repository) ReaderDB() *sqlx.DB { return r.ro }
 
-// BeginTx starts a transaction on the shared writer connection. Exposed so
-// the office service layer can make CreateCostEventTx atomic with another
-// package's write (e.g. task.Repository.IncrementTaskSessionUsageTx via
-// shared.SessionUsageWriterTx) — safe because both repositories are
-// constructed from the same underlying *sqlx.DB (internal/backendapp/storage.go),
-// so a transaction begun here can execute statements against tables either
-// package owns.
-func (r *Repository) BeginTx(ctx context.Context) (*sqlx.Tx, error) {
-	return r.db.BeginTxx(ctx, nil)
-}
-
 // initSchema creates all office tables if they don't exist.
 func (r *Repository) initSchema() error {
 	if err := r.createCoreTables(); err != nil {
 		return err
 	}
+	// Runs after createCoreTables (which creates office_budget_claims) so
+	// it probes the real table rather than racing its creation. Its error
+	// is returned, not swallowed: see recreateBudgetClaimsForRevision.
+	if err := r.recreateBudgetClaimsForRevision(); err != nil {
+		return fmt.Errorf("recreate office_budget_claims: %w", err)
+	}
 	if err := r.createExtensionTables(); err != nil {
 		return err
 	}
-	r.runMigrations()
+	if err := r.runMigrations(); err != nil {
+		return fmt.Errorf("required office migration: %w", err)
+	}
+	r.activateRunOutcome()
+	r.activateLoopLiveness()
 	return nil
 }
 
@@ -159,6 +188,9 @@ func (r *Repository) createCoreTables() error {
 		return err
 	}
 	if err := r.createApprovalTables(); err != nil {
+		return err
+	}
+	if err := r.createWorkspacePauseTable(); err != nil {
 		return err
 	}
 	return nil
@@ -194,6 +226,9 @@ func (r *Repository) createExtensionTables() error {
 		return err
 	}
 	if err := r.createAgentWakeupRequestTable(); err != nil {
+		return err
+	}
+	if err := r.createParentChildWakeReceiptsTable(); err != nil {
 		return err
 	}
 	return nil
@@ -278,7 +313,7 @@ func (r *Repository) createCostTables() error {
 	// columns must stay byte-identical to — see base_migrations.go). NULL
 	// means "not recorded" (legacy row, or an adapter that did not report
 	// cache data); 0 would silently claim zero cache activity. See
-	// docs/specs/office/costs.md.
+	// docs/specs/office/requirements/costs.md.
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS office_cost_events (
 		id TEXT PRIMARY KEY,
@@ -311,13 +346,7 @@ func (r *Repository) createCostTables() error {
 	CREATE INDEX IF NOT EXISTS idx_office_cost_agent ON office_cost_events(agent_profile_id);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_occurred ON office_cost_events(occurred_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_office_cost_task ON office_cost_events(task_id);
-	-- Indexes the join column internal/task/repository/sqlite's
-	-- BackfillSessionTokensCachedIn correlates task_sessions against. Lives
-	-- here (not in the task repository) because it indexes a table this
-	-- repository owns. Without it that correlated subquery falls back to a
-	-- full table scan per task_sessions row - measured at 76.72s at a modest
-	-- 4,000 sessions / 80,000 events versus 0.17s indexed.
-	CREATE INDEX IF NOT EXISTS idx_office_cost_events_session_id ON office_cost_events(session_id);
+	DROP INDEX IF EXISTS idx_office_cost_events_session_id;
 	-- uniq_office_cost_usage_event is created by migrateCostEventContract
 	-- (base_migrations.go), not here: schema init runs before migrations,
 	-- so indexing usage_event_id inline would crash a pre-migration
@@ -333,11 +362,46 @@ func (r *Repository) createCostTables() error {
 		alert_threshold_pct INTEGER DEFAULT 80,
 		action_on_exceed TEXT DEFAULT 'notify_only',
 		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		revision INTEGER NOT NULL DEFAULT 1
+	);
+
+	-- Built-in default spend ceiling (REQ-OFFICE-BUDGET-003): a stable
+	-- per-workspace identifier distinct from any office_budget_policies row
+	-- (AC-OFFICE-BUDGET-003.7), never listed alongside operator policies.
+	CREATE TABLE IF NOT EXISTS office_budget_default_settings (
+		workspace_id TEXT PRIMARY KEY,
+		limit_subcents INTEGER NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
-	`)
+	` + budgetClaimsDDL)
 	return err
 }
+
+// budgetClaimsDDL is the final office_budget_claims shape: one row per
+// (policy, evaluation period, level, policy revision) that has already
+// produced its budget.alert / budget.exceeded notification. revision is
+// part of the primary key, not just a fence input, so a claim written
+// against a revision a concurrent update has already superseded can never
+// match a later evaluation's fenced insert. Used both for fresh-database
+// creation here and for the recreate in recreateBudgetClaimsForRevision, so
+// a fresh database and a migrated one converge. office_budget_claims must
+// be created after office_budget_policies: its foreign key references that
+// table, and PostgreSQL rejects a forward reference at CREATE TABLE time
+// even though SQLite tolerates it. ON DELETE CASCADE removes a policy's
+// claims on every deletion path without a matching code change at any of
+// them.
+const budgetClaimsDDL = `
+	CREATE TABLE IF NOT EXISTS office_budget_claims (
+		policy_id TEXT NOT NULL,
+		period_key TEXT NOT NULL,
+		level TEXT NOT NULL,
+		revision INTEGER NOT NULL,
+		claimed_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (policy_id, period_key, level, revision),
+		FOREIGN KEY (policy_id) REFERENCES office_budget_policies(id) ON DELETE CASCADE
+	);
+`
 
 func (r *Repository) createRunTables() error {
 	_, err := r.db.Exec(`
@@ -359,6 +423,11 @@ func (r *Repository) createRunTables() error {
 		scheduled_retry_at TIMESTAMP,
 		error_message TEXT NOT NULL DEFAULT '',
 		cancel_reason TEXT,
+		-- outcome (task-delivery-ledger): nullable, one of the eight
+		-- Office run outcome values on the finished path, NULL on failed
+		-- and on every pre-activation row. See migrateRunOutcome for the
+		-- ADD COLUMN that converges existing databases.
+		outcome TEXT,
 		-- Provider routing (office-provider-routing).
 		logical_provider_order TEXT,
 		requested_tier TEXT,
@@ -380,6 +449,23 @@ func (r *Repository) createRunTables() error {
 		result_json TEXT NOT NULL DEFAULT '{}',
 		assembled_prompt TEXT NOT NULL DEFAULT '',
 		summary_injected TEXT NOT NULL DEFAULT '',
+		-- continuation_scope is the continuation-summary scope key
+		-- (models.ContinuationScopeForRun) decided once at run creation
+		-- and persisted so every later reader/writer of this run's
+		-- continuation summary uses the same value instead of
+		-- re-deriving it against a context_snapshot a coalesced wakeup
+		-- may have since patched.
+		continuation_scope TEXT NOT NULL DEFAULT '',
+		-- Completion-wave identity (parent-wake-wave-identity): both
+		-- columns are set together, only for task_children_completed
+		-- runs, from one derivation per queued run. wake_wave_key is
+		-- the digest idx_run_wake_wave indexes; wake_wave_string is the
+		-- plain string the backstop's candidate query compares.
+		wake_wave_key TEXT NOT NULL DEFAULT '',
+		wake_wave_string TEXT NOT NULL DEFAULT '',
+		-- causation_id (office-loop-liveness): copied from the wakeup
+		-- request that created this run. '' means uncorrelated.
+		causation_id TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP
@@ -390,11 +476,37 @@ func (r *Repository) createRunTables() error {
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,
 		skill_id TEXT NOT NULL,
+		display_name TEXT NOT NULL DEFAULT '',
+		slug TEXT NOT NULL DEFAULT '',
+		label_source TEXT NOT NULL DEFAULT '',
 		version TEXT NOT NULL,
 		content_hash TEXT NOT NULL,
 		materialized_path TEXT NOT NULL,
 		PRIMARY KEY (run_id, skill_id)
 	);
+
+	CREATE TABLE IF NOT EXISTS office_run_sessions (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		agent_profile_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		attempt INTEGER NOT NULL,
+		state TEXT NOT NULL,
+		execution_id TEXT NOT NULL DEFAULT '',
+		execution_profile_id TEXT NOT NULL DEFAULT '',
+		adapter TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		acp_session_id TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		started_at TIMESTAMP,
+		finished_at TIMESTAMP,
+		cancel_requested_at TIMESTAMP,
+		error_message TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL DEFAULT 1,
+		UNIQUE (run_id, attempt)
+	);
+	CREATE INDEX IF NOT EXISTS idx_office_run_sessions_run ON office_run_sessions(run_id, attempt);
+	CREATE INDEX IF NOT EXISTS idx_office_run_sessions_live ON office_run_sessions(workspace_id, state);
 	`)
 	if err != nil {
 		return err
@@ -421,7 +533,7 @@ func (r *Repository) createRoutineTables() error {
 		assignee_agent_profile_id TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'active',
 		concurrency_policy TEXT DEFAULT 'skip_if_active',
-		catch_up_policy TEXT NOT NULL DEFAULT 'enqueue_missed_with_cap',
+		catch_up_policy TEXT NOT NULL DEFAULT 'summarize_missed',
 		catch_up_max INTEGER NOT NULL DEFAULT 25,
 		variables TEXT DEFAULT '{}',
 		last_run_at TIMESTAMP,
@@ -434,7 +546,7 @@ func (r *Repository) createRoutineTables() error {
 		routine_id TEXT NOT NULL,
 		kind TEXT NOT NULL,
 		cron_expression TEXT DEFAULT '',
-		timezone TEXT DEFAULT '',
+		timezone TEXT DEFAULT 'UTC',
 		public_id TEXT DEFAULT '',
 		signing_mode TEXT DEFAULT '',
 		secret TEXT DEFAULT '',
@@ -456,11 +568,23 @@ func (r *Repository) createRoutineTables() error {
 		linked_task_id TEXT DEFAULT '',
 		coalesced_into_run_id TEXT DEFAULT '',
 		dispatch_fingerprint TEXT DEFAULT '',
+		catch_up_missed_ticks INTEGER,
+		catch_up_first_missed_at TIMESTAMP,
+		catch_up_truncated INTEGER NOT NULL DEFAULT 0,
 		started_at TIMESTAMP,
 		completed_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
+		skip_reason TEXT NOT NULL DEFAULT '',
+		pause_id TEXT NOT NULL DEFAULT '',
+		causation_id TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (routine_id) REFERENCES office_routines(id) ON DELETE CASCADE
 	);
+	CREATE INDEX IF NOT EXISTS idx_office_routine_runs_active_fingerprint
+		ON office_routine_runs(routine_id, dispatch_fingerprint, created_at DESC)
+		WHERE status = 'task_created';
+	CREATE INDEX IF NOT EXISTS idx_office_routine_runs_linked_task
+		ON office_routine_runs(linked_task_id, created_at DESC)
+		WHERE linked_task_id != '';
 	`)
 	return err
 }
@@ -676,10 +800,10 @@ func (r *Repository) createContinuationSummaryTable() error {
 // dispatcher coalesces / claims / drops them per the agent's policy
 // before creating the corresponding runs row.
 //
-// idempotency_key carries source-level dedup (e.g. heartbeat:<agent>:
-// <unix_minute>) — duplicates within the window land on the partial
-// UNIQUE index and are rejected. The "" sentinel keeps the index free
-// for rows without a key.
+// idempotency_key carries source-level dedup (for example, a cron routine
+// trigger and minute bucket). Duplicates with the same source identity land
+// on the partial UNIQUE index and are rejected. The "" sentinel keeps the
+// index free for rows without a key.
 func (r *Repository) createAgentWakeupRequestTable() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS agent_wakeup_requests (
@@ -694,11 +818,40 @@ func (r *Repository) createAgentWakeupRequestTable() error {
 		run_id                TEXT NOT NULL DEFAULT '',
 		requested_at          TIMESTAMP NOT NULL,
 		claimed_at            TIMESTAMP,
-		finished_at           TIMESTAMP
+		finished_at           TIMESTAMP,
+		causation_id          TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_wakeup_agent_status ON agent_wakeup_requests(agent_profile_id, status);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency ON agent_wakeup_requests(idempotency_key)
 		WHERE idempotency_key IS NOT NULL AND idempotency_key != '';
+	`)
+	return err
+}
+
+// createParentChildWakeReceiptsTable creates the table backing
+// ParentWakeReconciler's level-triggered sweep (see
+// scheduler_wake_reconciler.go). One row per parent task records the
+// child set (sorted child IDs + terminal states, compared directly — no
+// hashing) a task_children_completed run was last delivered for, so a
+// healthy steady state costs one indexed lookup per tick and emits
+// nothing.
+//
+// The companion tasks(parent_id) index ListStuckParents needs lives in
+// runMigrations (migrateParentWakeIndexes) via r.migrate.Apply, not here:
+// tasks is a table this package doesn't own (see runMigrations' doc
+// comment), so a plain r.db.Exec against it is fatal in the minimal
+// single-domain test repos under internal/office/repository/sqlite,
+// which build a tasks table only after NewWithDB returns.
+func (r *Repository) createParentChildWakeReceiptsTable() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS parent_child_wake_receipts (
+		parent_task_id        TEXT PRIMARY KEY,
+		child_set_key         TEXT NOT NULL,
+		delivered_run_id      TEXT NOT NULL DEFAULT '',
+		delivery_operation_id TEXT NOT NULL DEFAULT '',
+		delivered_at          TIMESTAMP NOT NULL,
+		child_generation      TEXT NOT NULL DEFAULT ''
+	);
 	`)
 	return err
 }

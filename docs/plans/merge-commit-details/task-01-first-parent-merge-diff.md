@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/merge-commit-details/spec.md"
+spec: "../../specs/ui/requirements/merge-commit-details.md"
 ---
 
 # Task 01: First-parent merge commit diff

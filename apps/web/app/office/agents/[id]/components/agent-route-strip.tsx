@@ -7,6 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useAgentRoute } from "@/hooks/domains/office/use-agent-route";
 import { useWorkspaceRouting } from "@/hooks/domains/office/use-workspace-routing";
 import { providerLabel } from "../../../workspace/routing/components/provider-order-editor";
+import { TIER_SOURCE_LABEL_KEYS } from "../../../lib/label-keys";
 import { useTranslation } from "react-i18next";
 
 // Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
@@ -76,9 +77,12 @@ function ConfiguredRow({ preview }: { preview: AgentRoutePreview }) {
           </span>
         ))}
       </span>
-      <Badge variant="secondary" className="capitalize ml-auto">
-        {preview.effective_tier}
-      </Badge>
+      <div className="flex items-center gap-1.5 ml-auto">
+        <Badge variant="secondary" className="capitalize">
+          {preview.effective_tier}
+        </Badge>
+        <span className={LABEL_CLASS}>{t(TIER_SOURCE_LABEL_KEYS[preview.tier_source])}</span>
+      </div>
     </div>
   );
 }

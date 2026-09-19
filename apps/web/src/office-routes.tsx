@@ -18,6 +18,7 @@ import type { SetupWizardRouteProps } from "@/app/office/setup/setup-route-data"
 import ProviderRoutingPage from "@/app/office/workspace/routing/page";
 import { RoutinesPageClient } from "@/app/office/routines/routines-page-client";
 import SettingsPage from "@/app/office/workspace/settings/page";
+import ExportPage from "@/app/office/workspace/settings/export/page";
 import SyncPage from "@/app/office/workspace/settings/sync/page";
 import OrgPage from "@/app/office/workspace/org/page";
 import IssueDetailPage from "@/app/office/tasks/[id]/page";
@@ -48,6 +49,7 @@ import {
 import { RoutineDetailRoute } from "./office-routine-client-routes";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { Trans, useTranslation } from "react-i18next";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
 type RouteRenderer = () => React.ReactNode;
 
@@ -62,7 +64,12 @@ const OFFICE_ROUTES: Record<string, RouteRenderer> = {
   "/office/workspace/costs": () => <CostsPageClient initialCostSummary={null} />,
   "/office/workspace/skills": () => <SkillsPageClient initialSkills={[]} />,
   "/office/workspace/routing": () => <ProviderRoutingPage />,
-  "/office/workspace/settings": () => <SettingsPage />,
+  "/office/workspace/settings": () => (
+    <SettingsSaveProvider placement="content">
+      <SettingsPage />
+    </SettingsSaveProvider>
+  ),
+  "/office/workspace/settings/export": () => <ExportPage />,
   "/office/workspace/settings/sync": () => <SyncPage />,
   "/office/workspace/org": () => <OrgPage />,
 };
@@ -103,7 +110,7 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
 
   return (
     <TooltipProvider>
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="relative flex h-full min-h-0 flex-col">
         <OfficeShell routePath={normalizedPathname}>
           {renderOfficeRoute(normalizedPathname)}
         </OfficeShell>
@@ -188,7 +195,7 @@ type OfficeBootstrapState = {
   onboardingComplete: boolean | null;
 };
 
-function useOfficeRouteBootstrap(
+export function useOfficeRouteBootstrap(
   officeEnabled: boolean,
   routeWorkspaceId: string | null,
 ): OfficeBootstrapState {
@@ -236,13 +243,21 @@ function useOfficeRouteBootstrap(
         userSettingsResponse?.settings?.workspace_id ?? null,
       );
 
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        workspaces: { items: workspaceItems, activeId: workspaceBeforeHydration },
         userSettings: {
           ...mapUserSettingsResponse(userSettingsResponse),
           workspaceId: activeWorkspaceId,
         },
       });
+      // Routing the actual switch through `setActiveWorkspace` (rather than
+      // letting `hydrate` overwrite `activeId` directly) keeps
+      // `activeIdRevision` accurate for consumers that key staleness off it,
+      // such as the Failed-inbox cache.
+      if (activeWorkspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(activeWorkspaceId);
+      }
       // Data loading is not this bootstrap's job: agents, projects, inbox and
       // meta follow the active workspace via `useOfficeWorkspaceData`, mounted
       // in the always-present `AppSidebar`. Setting the active workspace above

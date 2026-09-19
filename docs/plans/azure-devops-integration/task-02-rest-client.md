@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: ["01-workspace-configuration"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 02: REST Client

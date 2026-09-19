@@ -1,12 +1,28 @@
 export const TASK_ROW_DOM_ATTR = "data-task-row-id";
 export const TASK_SIDEBAR_SCROLL_SELECTOR = '[data-testid="task-sidebar-scroll"]';
+export const TASK_ROW_REVEAL_CLASS = "task-sidebar-row-reveal";
 
 const MAX_TASK_NAVIGATION_ATTEMPTS = 60;
+const TASK_ROW_REVEAL_DURATION_MS = 1400;
 let latestNavigationRequestId = 0;
+let latestCueId = 0;
+
+type ActiveTaskRowCue = {
+  cueId: number;
+  row: HTMLElement;
+  timeoutId: number;
+};
+
+let activeTaskRowCue: ActiveTaskRowCue | null = null;
 
 /** Invalidates the current reveal so a pending selection cannot scroll a stale row. */
 export function cancelSidebarTaskReveal(): void {
   latestNavigationRequestId += 1;
+  if (!activeTaskRowCue) return;
+
+  window.clearTimeout(activeTaskRowCue.timeoutId);
+  activeTaskRowCue.row.classList.remove(TASK_ROW_REVEAL_CLASS);
+  activeTaskRowCue = null;
 }
 
 /** CSS selector for a rendered task row by its stable task id. */
@@ -63,6 +79,35 @@ function defaultRequestFrame(callback: () => void): void {
   }
 }
 
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/** Restarts the short-lived cue on the latest command-selected row. */
+function cueTaskRow(row: HTMLElement): void {
+  if (activeTaskRowCue) {
+    window.clearTimeout(activeTaskRowCue.timeoutId);
+    activeTaskRowCue.row.classList.remove(TASK_ROW_REVEAL_CLASS);
+  }
+
+  const cueId = ++latestCueId;
+  row.classList.remove(TASK_ROW_REVEAL_CLASS);
+  // Force a reflow so selecting the same task twice restarts its animation.
+  void row.offsetWidth;
+  row.classList.add(TASK_ROW_REVEAL_CLASS);
+
+  const timeoutId = window.setTimeout(() => {
+    if (activeTaskRowCue?.cueId !== cueId) return;
+    row.classList.remove(TASK_ROW_REVEAL_CLASS);
+    activeTaskRowCue = null;
+  }, TASK_ROW_REVEAL_DURATION_MS);
+  activeTaskRowCue = { cueId, row, timeoutId };
+}
+
 /**
  * Reveals a rendered task row in the visible desktop sidebar.
  *
@@ -92,8 +137,13 @@ export function revealSidebarTask(
           return;
         }
         if (!isInsideViewport(match.row, match.viewport)) {
-          match.row.scrollIntoView({ block: "nearest", inline: "nearest" });
+          match.row.scrollIntoView({
+            behavior: prefersReducedMotion() ? "auto" : "smooth",
+            block: "nearest",
+            inline: "nearest",
+          });
         }
+        cueTaskRow(match.row);
         resolve(true);
         return;
       }

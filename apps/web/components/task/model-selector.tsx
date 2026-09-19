@@ -3,6 +3,8 @@
 import { memo, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { AgentLogo } from "@/components/agent-logo";
+import { resolveModelSelectorAgentName } from "./model-selector-provider";
 
 import {
   configOptionToModelOptions,
@@ -36,6 +38,7 @@ type SessionModelsEntry = {
 type ModelSelectorProps = {
   sessionId: string | null;
   triggerClassName?: string;
+  showAgentIcon?: boolean;
 };
 
 const debug = createDebugLogger("model-selector:gate");
@@ -141,19 +144,16 @@ export function hasCompleteDynamicConfig(
   const hasFlatModelList = !!sessionModelsData.models.length;
   const catalogSettled = sessionModelsData.configOptionsSettled === true;
   const hasLegacyAgentConfig = catalogSettled && isLegacyAgentConfig(session, agents);
-  // Keys written only by a prior agent type into persisted runtime metadata are
-  // not required for the selector to render: once the current agent's catalog
-  // has settled without advertising them, they are stale cross-agent leftovers
-  // that the backend replay also drops.
-  const profileRequired = session ? profileRequiredConfigKeys(session, agents) : new Set<string>();
-  const isPersistedOnlyStaleKey = (key: string): boolean =>
-    key !== AGENT_CONFIG_KEY && catalogSettled && !available.has(key) && !profileRequired.has(key);
+  // A settled catalog is authoritative for which non-agent config keys apply
+  // to the selected model.
+  const isUnadvertisedSettledKey = (key: string): boolean =>
+    key !== AGENT_CONFIG_KEY && catalogSettled && !available.has(key);
   return required.every(
     (key) =>
       available.has(key) ||
       (key === AGENT_CONFIG_KEY && hasLegacyAgentConfig) ||
       (key === MODEL_CONFIG_KEY && hasFlatModelList) ||
-      isPersistedOnlyStaleKey(key),
+      isUnadvertisedSettledKey(key),
   );
 }
 
@@ -507,6 +507,7 @@ function useModelSelectorState(sessionId: string | null) {
 export const ModelSelector = memo(function ModelSelector({
   sessionId,
   triggerClassName,
+  showAgentIcon = false,
 }: ModelSelectorProps) {
   const { t } = useTranslation();
   const {
@@ -521,6 +522,23 @@ export const ModelSelector = memo(function ModelSelector({
     handleModelChange,
     handleConfigChange,
   } = useModelSelectorState(sessionId);
+  const agentName = useAppStore((state) =>
+    showAgentIcon
+      ? resolveModelSelectorAgentName(
+          sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
+          state.agentProfiles.items,
+        )
+      : null,
+  );
+  const providerIcon = useMemo(
+    () =>
+      agentName ? (
+        <span aria-hidden="true" className="flex shrink-0" data-testid="model-provider-icon">
+          <AgentLogo agentName={agentName} size={14} className="size-3.5 shrink-0" />
+        </span>
+      ) : undefined,
+    [agentName],
+  );
   const modelConfig = configOptions.find(isModelConfigOption);
   // Explicit "using fallback" signal: annotate the trigger so the user sees
   // the session is not on the configured start model.
@@ -559,6 +577,7 @@ export const ModelSelector = memo(function ModelSelector({
 
   return (
     <ModelConfigSelector
+      providerIcon={providerIcon}
       modelOptions={modelOptions}
       currentModel={currentModel}
       configOptions={configOptions}

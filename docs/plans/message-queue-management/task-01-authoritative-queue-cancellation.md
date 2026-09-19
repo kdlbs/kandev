@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-management.md"
+spec: "../../specs/ui/requirements/message-queue-management.md"
 ---
 
 # Task 01: Make Pending Queue Cancellation Authoritative

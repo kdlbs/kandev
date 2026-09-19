@@ -2,14 +2,20 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -99,6 +105,46 @@ func TestGetPromptGenerationForSessionUnknownSession(t *testing.T) {
 	_, err := mgr.GetPromptGenerationForSession(context.Background(), "session-absent")
 
 	require.ErrorIs(t, err, ErrNoExecutionForSession)
+}
+
+// TestGetPromptActivityForSessionReturnsTrackedSnapshot is the codex P1 gap
+// flagged during WO-38 Build round 7: GetPromptActivityForSession (the
+// primitive the stuck-signal watchdog reads to gate reclaims on real elapsed
+// inactivity, orchestrator/stuck_signal_watchdog.go) had no direct unit test
+// of its own — only indirect coverage through the watchdog's mock. This pins
+// its two branches: a tracked execution returns the execution ID, prompt
+// generation, activity epoch, and lastActivityAt that markAgentActivity last
+// recorded; an untracked session returns ErrNoExecutionForSession.
+func TestGetPromptActivityForSessionReturnsTrackedSnapshot(t *testing.T) {
+	mgr := newTestManager(t)
+	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	generation, err := mgr.BeginPrompt("exec-1")
+	require.NoError(t, err)
+	exec.markAgentActivity()
+	wantActivityAt, _, wantEpoch := exec.promptActivitySnapshot()
+
+	executionID, gotGeneration, gotEpoch, gotActivityAt, err := mgr.GetPromptActivityForSession(context.Background(), "session-1")
+
+	require.NoError(t, err)
+	require.Equal(t, "exec-1", executionID)
+	require.Equal(t, generation, gotGeneration)
+	require.Equal(t, wantEpoch, gotEpoch)
+	require.True(t, wantActivityAt.Equal(gotActivityAt),
+		"expected the session-scoped read to observe the same lastActivityAt markAgentActivity recorded")
+}
+
+func TestGetPromptActivityForSessionUnknownSession(t *testing.T) {
+	mgr := newTestManager(t)
+
+	executionID, generation, epoch, activityAt, err := mgr.GetPromptActivityForSession(context.Background(), "session-absent")
+
+	require.ErrorIs(t, err, ErrNoExecutionForSession)
+	require.Empty(t, executionID)
+	require.Zero(t, generation)
+	require.Zero(t, epoch)
+	require.True(t, activityAt.IsZero())
 }
 
 func TestBeginPromptUnknownExecution(t *testing.T) {
@@ -318,6 +364,218 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 
 	require.True(t, stopTracker.forced, "force must be forwarded to StopInstance")
 	require.Equal(t, StopReasonBackendShutdown, stopTracker.stopReason)
+}
+
+func TestStopAgentWithReasonRetainsExecutionWhenBackendCleanupFails(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	cleanupErr := errors.New("exact Kubernetes cleanup failed")
+	stopTracker := &mockStopTracker{name: executor.NameKubernetes, stopErr: cleanupErr}
+	execRegistry.Register(stopTracker)
+	bus := &MockEventBus{}
+	mgr := NewManager(newTestRegistry(), bus, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	runtimeSecrets := newInMemorySecretStore()
+	for id := range map[string]struct{}{"legacy-auth-ref": {}, "legacy-nonce-ref": {}} {
+		require.NoError(t, runtimeSecrets.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: "secret",
+		}))
+	}
+	mgr.SetSecretStore(runtimeSecrets)
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-k8s", TaskID: "task-k8s", SessionID: "session-k8s",
+		RuntimeName: executor.NameKubernetes, Status: v1.AgentStatusRunning,
+		metadata: map[string]interface{}{
+			MetadataKeyAuthTokenSecret:      "legacy-auth-ref",
+			MetadataKeyBootstrapNonceSecret: "legacy-nonce-ref",
+		},
+	}))
+
+	err := mgr.StopAgentWithReason(context.Background(), "exec-k8s", StopReasonTaskDeleted, true)
+
+	require.ErrorIs(t, err, cleanupErr)
+	require.Equal(t, "session-k8s", stopTracker.stoppedSessionID)
+	execution, exists := mgr.GetExecution("exec-k8s")
+	require.True(t, exists, "failed exact cleanup must remain retryable")
+	require.Equal(t, v1.AgentStatusRunning, execution.Status)
+	require.Len(t, runtimeSecrets.store, 2, "runtime cleanup failure must preserve recovery secrets")
+	for _, event := range bus.PublishedEvents {
+		require.NotEqual(t, events.AgentStopped, event.Type)
+	}
+}
+
+func TestStopAgentWithReasonCleansPersistedKubernetesInventoryAfterRestart(t *testing.T) {
+	testPersistedKubernetesCleanupAfterRestart(t, StopReasonTaskDeleted, true)
+}
+
+func TestForceStopAgentCleansPersistedKubernetesInventoryAfterRestartWithoutTerminalReason(t *testing.T) {
+	testPersistedKubernetesCleanupAfterRestart(t, "", true)
+}
+
+func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, force bool) {
+	t.Helper()
+	controlPort := startKubernetesAgentctlServer(t, true, 41001)
+	instancePort := startKubernetesAgentctlServer(t, false, 0)
+	resources := &fakeKubernetesResources{}
+	initial := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, map[uint16]uint16{
+		uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+		41001:                                    instancePort,
+	})
+	req := validKubernetesCreateRequest()
+	setManagedKubernetesWorkspace(req)
+	instance, err := initial.CreateInstance(context.Background(), req)
+	require.NoError(t, err)
+	metadata := cloneKubernetesMetadata(req.Metadata)
+	for key, value := range instance.Metadata {
+		metadata[key] = value
+	}
+	metadata[MetadataKeyKubernetesAuthMode] = "kubeconfig"
+	metadata[MetadataKeyKubernetesKubeconfigPath] = "/stale/kubeconfig"
+	metadata[MetadataKeyKubernetesKubeContext] = "stale-context"
+	metadata[MetadataKeyKubernetesRequestTimeoutSeconds] = "10"
+	runtimeSecrets := newInMemorySecretStore()
+	for id, value := range map[string]string{
+		"legacy-auth-ref": "agentctl-token", "legacy-nonce-ref": "bootstrap-nonce",
+	} {
+		require.NoError(t, runtimeSecrets.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: id, Name: id}, Value: value,
+		}))
+	}
+	metadata[MetadataKeyAuthTokenSecret] = "legacy-auth-ref"
+	metadata[MetadataKeyBootstrapNonceSecret] = "legacy-nonce-ref"
+	row := &models.ExecutorRunning{
+		ID: instance.SessionID, SessionID: instance.SessionID, TaskID: instance.TaskID,
+		ExecutorID: "executor-1", ExecutionProfileID: "agent-profile-1", AgentExecutionID: instance.InstanceID,
+		Runtime: agentruntime.RuntimeKubernetes, Metadata: metadata,
+	}
+	store := &restartKubernetesInventoryStore{
+		captureExecutorRunningWriter: captureExecutorRunningWriter{prior: row},
+		rows:                         []*models.ExecutorRunning{row},
+		executors: map[string]*models.Executor{"executor-1": {
+			ID: "executor-1", Type: models.ExecutorTypeKubernetes,
+			Config: map[string]string{
+				MetadataKeyKubernetesAuthMode:              "in_cluster",
+				MetadataKeyKubernetesConfigNamespace:       "new-agents",
+				MetadataKeyKubernetesRequestTimeoutSeconds: "45",
+			},
+		}},
+	}
+	restarted := newFakeKubernetesExecutor(t, resources, &recordingKubernetesExec{}, nil)
+	originalFactory := restarted.clientFactory
+	var cleanupConfig kubeexecutor.ExecutorConfig
+	restarted.clientFactory = func(config kubeexecutor.ExecutorConfig) (*kubernetesRuntimeClient, error) {
+		cleanupConfig = config
+		return originalFactory(config)
+	}
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	registry.Register(restarted)
+	mgr := NewManager(nil, &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetExecutorRunningWriter(store)
+	mgr.SetSecretStore(runtimeSecrets)
+
+	err = mgr.StopAgentWithReason(context.Background(), instance.InstanceID, reason, force)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"pod", "pvc"}, resources.deletionOrder)
+	require.Equal(t, kubeexecutor.AuthModeInCluster, cleanupConfig.AuthMode)
+	require.Empty(t, cleanupConfig.KubeconfigPath)
+	require.Empty(t, cleanupConfig.KubeContext)
+	require.Equal(t, 45, cleanupConfig.RequestTimeoutSeconds)
+	require.Equal(t, "new-agents", cleanupConfig.Namespace)
+	require.Nil(t, store.running, "service cleanup owns row deletion after successful remote teardown")
+	require.Empty(t, runtimeSecrets.store, "destructive restart cleanup must remove recorded runtime secret refs")
+}
+
+func TestStopAgentWithReasonPreservesPersistedKubernetesInventoryForBackendShutdown(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	stopTracker := &mockStopTracker{name: executor.NameKubernetes}
+	registry.Register(stopTracker)
+	store := &restartKubernetesInventoryStore{rows: []*models.ExecutorRunning{{
+		AgentExecutionID: "instance-1", Runtime: agentruntime.RuntimeKubernetes,
+	}}}
+	mgr := NewManager(nil, &MockEventBus{}, registry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetExecutorRunningWriter(store)
+
+	err := mgr.StopAgentWithReason(context.Background(), "instance-1", StopReasonBackendShutdown, false)
+
+	require.ErrorIs(t, err, ErrExecutionNotFound)
+	require.False(t, stopTracker.stopCalled)
+}
+
+type restartKubernetesInventoryStore struct {
+	captureExecutorRunningWriter
+	rows      []*models.ExecutorRunning
+	executors map[string]*models.Executor
+}
+
+func (s *restartKubernetesInventoryStore) ListExecutorsRunning(context.Context) ([]*models.ExecutorRunning, error) {
+	return s.rows, nil
+}
+
+func (s *restartKubernetesInventoryStore) GetExecutor(_ context.Context, id string) (*models.Executor, error) {
+	executor := s.executors[id]
+	if executor == nil {
+		return nil, models.ErrExecutorNotFound
+	}
+	return executor, nil
+}
+
+func TestStopAgentWithReason_BackendFailureKeepsExecutionRetryable(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &retryableStopBackend{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		stopErr:      errors.New("runtime stop failed"),
+	}
+	execRegistry.Register(backend)
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	runningLease, err := coordinator.AcquireTask(context.Background(), activity.KindExecutionRunning)
+	require.NoError(t, err)
+	mgr.trackActivity(executionActivityKey("exec-retryable-stop"), runningLease)
+
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID:          "exec-retryable-stop",
+		TaskID:      "task-retryable-stop",
+		SessionID:   "session-retryable-stop",
+		RuntimeName: executor.NameStandalone,
+		Status:      v1.AgentStatusRunning,
+	}))
+
+	err = mgr.StopAgentWithReason(context.Background(), "exec-retryable-stop", "idle cleanup", false)
+	require.ErrorIs(t, err, backend.stopErr)
+	_, exists := mgr.executionStore.Get("exec-retryable-stop")
+	require.True(t, exists, "a failed runtime stop must retain the execution for retry")
+
+	bus := mgr.eventBus.(*MockEventBus)
+	require.Empty(t, bus.PublishedEvents, "a failed runtime stop must not publish agent.stopped")
+	_, _, err = coordinator.TryAcquireMaintenance(context.Background(), 0)
+	require.ErrorIs(t, err, activity.ErrBusy, "a failed stop must retain execution activity")
+
+	backend.stopErr = nil
+	require.NoError(t, mgr.StopAgentWithReason(context.Background(), "exec-retryable-stop", "idle cleanup retry", false))
+	_, exists = mgr.executionStore.Get("exec-retryable-stop")
+	require.False(t, exists)
+	require.Len(t, bus.PublishedEvents, 1)
+	require.Equal(t, events.AgentStopped, bus.PublishedEvents[0].Type)
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	require.NoError(t, err)
+	maintenance.Release()
+}
+
+type retryableStopBackend struct {
+	MockExecutor
+	stopErr error
+}
+
+func (b *retryableStopBackend) StopInstance(context.Context, *ExecutorInstance, bool) error {
+	return b.stopErr
 }
 
 type forceRecordingStopTracker struct {

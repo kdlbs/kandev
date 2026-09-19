@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["06-backend-sub-setting-field"]
 plan: "plan.md"
-spec: "../../specs/ui/agent-todo-list-panel.md"
+spec: "../../specs/ui/requirements/agent-todo-list-panel.md"
 ---
 
 # Task 07: Frontend settings plumbing and UI

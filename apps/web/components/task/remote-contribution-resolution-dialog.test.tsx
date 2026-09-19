@@ -33,10 +33,12 @@ describe("RemoteContributionResolutionDialog", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Replace PR branch" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Publish task version..." })).toBeTruthy();
     expect(screen.getByText(/frontend/)).toBeTruthy();
     expect(screen.getByText(/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/)).toBeTruthy();
-    expect(screen.getByText(/provider branch/)).toBeTruthy();
+    expect(
+      screen.getByText(/replaces the published PR history with the task history/),
+    ).toBeTruthy();
     fireEvent.click(screen.getByTestId("remote-contribution-confirm"));
     expect(onConfirm).toHaveBeenCalledOnce();
   });
@@ -54,7 +56,7 @@ describe("RemoteContributionResolutionDialog", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Use PR version" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Restore published PR version..." })).toBeTruthy();
     expect(screen.getByText(/recovery branch/)).toBeTruthy();
     expect(screen.getByText(/working tree must be clean/)).toBeTruthy();
   });

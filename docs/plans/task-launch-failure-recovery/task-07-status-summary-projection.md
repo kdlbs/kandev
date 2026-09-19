@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-failure-taxonomy-contracts", "04-launch-failure-classification", "05-pr-review-autostart-gating"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 07: Project bounded launch errors

@@ -167,6 +167,25 @@ export async function updateTaskCIAutomationOptions(
   );
 }
 
+export async function retryTaskCIAutoMerge(
+  taskId: string,
+  repositoryId: string,
+  prNumber: number,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<{ accepted: boolean }>(
+    `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-automation/retry-merge`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ repository_id: repositoryId, pr_number: prNumber }),
+      },
+    },
+  );
+}
+
 // PR watches
 export async function listPRWatches(workspaceId: string, options?: ApiRequestOptions) {
   const params = new URLSearchParams({ workspace_id: workspaceId });

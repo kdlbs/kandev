@@ -22,6 +22,7 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/netprobe"
 	"go.uber.org/zap"
 )
 
@@ -141,6 +142,16 @@ func agentctlBinaryName() string {
 	return "agentctl"
 }
 
+// FindAgentctlBinary resolves the local agentctl binary path using the same
+// search order New uses for an unspecified BinaryPath. Exported so a caller
+// that adopts an already-running control server -- and therefore never
+// calls New -- can still resolve the local binary artifact for callers that
+// need it (e.g. uploading it into a remote/container executor), independent
+// of whether this launch adopted or spawned.
+func FindAgentctlBinary() string {
+	return findAgentctlBinary()
+}
+
 // findAgentctlBinary attempts to locate the agentctl binary.
 func findAgentctlBinary() string {
 	name := agentctlBinaryName()
@@ -245,11 +256,22 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
 	}
 	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
-	l.cmd.SysProcAttr = buildSysProcAttr()
+	l.cmd.SysProcAttr = buildSysProcAttr(l.startupConfig.AgentSurvivalEnabled)
 
-	pipeWrite, err := setupLivenessPipe(l.cmd)
-	if err != nil {
-		return err
+	// Kill-path #1 (design 01's kill-paths list, "parent-liveness pipe"):
+	// skipped entirely when the capability is engaged for this launch, for
+	// the same AC-EXECUTORS-SURVIVAL-001.2 reason buildSysProcAttr above
+	// omits Pdeathsig -- both fire on any parent death, including SIGKILL,
+	// independent of anything Stop() does.
+	var pipeWrite *os.File
+	if l.startupConfig.AgentSurvivalEnabled {
+		clearInheritedLivenessPipeEnv(l.cmd)
+	} else {
+		var err error
+		pipeWrite, err = setupLivenessPipe(l.cmd)
+		if err != nil {
+			return err
+		}
 	}
 
 	stdout, err := l.cmd.StdoutPipe()
@@ -322,8 +344,20 @@ func (l *Launcher) performHandshake(ctx context.Context, nonce string) (string, 
 	return token, nil
 }
 
-// Stop gracefully shuts down the agentctl subprocess.
+// Stop gracefully shuts down the agentctl subprocess. Kill-path #5 (design
+// 01's kill-paths list, "registered cleanup"): when the agent-survival
+// capability is engaged for this launch, Stop is the sole thing the
+// backend's registered shutdown cleanup calls (see provider.go), and
+// AC-EXECUTORS-SURVIVAL-001.1 requires that a graceful backend shutdown
+// "shall not issue a stop" to the control server or its instances -- so
+// Stop becomes a no-op rather than closing the (already-unarmed) pipe and
+// sending SIGTERM.
 func (l *Launcher) Stop(ctx context.Context) error {
+	if l.startupConfig.AgentSurvivalEnabled {
+		l.logger.Info("agent-survival capability engaged; leaving agentctl running instead of stopping it")
+		return nil
+	}
+
 	l.mu.Lock()
 
 	if l.cmd == nil || l.cmd.Process == nil {
@@ -393,14 +427,20 @@ func (l *Launcher) closeParentPipeLocked() {
 	}
 }
 
-// checkPortAvailable verifies the given port is not in use.
-// It checks by attempting a wildcard bind (matching what agentctl does with ":port").
+// checkPortAvailable reports whether the given port is free, using the same
+// probe contract the process launcher uses (internal/common/netprobe): a
+// dual-stack loopback connect must find nothing listening AND a fresh
+// loopback bind must succeed.
+//
+// A bind alone is not enough. A surviving agentctl holds the wildcard
+// address, and on macOS/BSD a bind against an active wildcard listener can
+// still succeed, which would report the occupied control port as free and
+// send this launch to a second server on a port the record does not name.
 func checkPortAvailable(port int) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return err
+	if !netprobe.PortAvailable(port) {
+		return fmt.Errorf("port %d is already in use", port)
 	}
-	return ln.Close()
+	return nil
 }
 
 // findFreePort asks the OS for an available port by binding to :0.
@@ -518,21 +558,94 @@ func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 	}
 }
 
-// childLogLevel extracts the level token from a line emitted by the agentctl
-// child's console-format zap logger: "<ts>\t<LEVEL>\t<caller>\t<msg>", where
-// LEVEL is capitalized and may be wrapped in ANSI color codes. It returns the
-// uppercased level ("INFO"/"WARN"/…) or "" when the line does not match that
-// shape.
+// childLogLevel extracts a recognized level from the agentctl child's trusted
+// structured log formats. It returns the uppercased level ("INFO"/"WARN"/…)
+// or "" when the line does not match one of those formats.
 func childLogLevel(line string) string {
 	// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
 	// level token must be bounded by at least a following caller field. Requiring
 	// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
 	// field is not actually a level, so they fall back to WARN.
 	fields := strings.SplitN(line, "\t", 4)
-	if len(fields) < 3 {
+	if len(fields) >= 3 {
+		if level := recognizedChildLogLevel(stripANSI(fields[1])); level != "" {
+			return level
+		}
+	}
+
+	if level := childSlogTextLevel(line); level != "" {
+		return level
+	}
+
+	// slog.Default uses the standard log package's date/time prefix followed by
+	// the level and message, for example "2026/08/12 10:00:00 INFO message".
+	defaultFields := strings.Fields(line)
+	if len(defaultFields) < 3 {
 		return ""
 	}
-	level := strings.ToUpper(stripANSI(fields[1]))
+	if _, err := time.Parse("2006/01/02 15:04:05", defaultFields[0]+" "+defaultFields[1]); err != nil {
+		return ""
+	}
+	return recognizedChildLogLevel(stripANSI(defaultFields[2]))
+}
+
+func childSlogTextLevel(line string) string {
+	fields, ok := splitSlogTextFields(line)
+	if !ok || len(fields) < 3 || !strings.HasPrefix(fields[0], "time=") ||
+		!strings.HasPrefix(fields[1], "level=") {
+		return ""
+	}
+	for _, field := range fields[2:] {
+		if strings.HasPrefix(field, "msg=") {
+			return recognizedChildLogLevel(stripANSI(strings.TrimPrefix(fields[1], "level=")))
+		}
+	}
+	return ""
+}
+
+func splitSlogTextFields(line string) ([]string, bool) {
+	fields := make([]string, 0, 4)
+	start := -1
+	inQuotes := false
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if start < 0 {
+			if ch == ' ' || ch == '\t' {
+				continue
+			}
+			start = i
+		}
+		if inQuotes {
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
+				inQuotes = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inQuotes = true
+		case ' ', '\t':
+			fields = append(fields, line[start:i])
+			start = -1
+		}
+	}
+	if inQuotes || escaped {
+		return nil, false
+	}
+	if start >= 0 {
+		fields = append(fields, line[start:])
+	}
+	return fields, true
+}
+
+func recognizedChildLogLevel(level string) string {
+	level = strings.ToUpper(level)
 	switch level {
 	case "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "PANIC", "DPANIC":
 		return level

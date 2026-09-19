@@ -56,6 +56,11 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/watches/issue/:id/trigger", c.httpTriggerIssueWatch)
 	api.GET("/watches/issue/:id/reset/preview", c.httpPreviewResetIssueWatch)
 	api.POST("/watches/issue/:id/reset", c.httpResetIssueWatch)
+
+	// OAuth 2.0 (3LO) flow — start, callback, manual refresh.
+	api.GET("/oauth/start", c.httpOAuthStart)
+	api.GET("/oauth/callback", c.httpOAuthCallback)
+	api.POST("/oauth/refresh", c.httpOAuthRefresh)
 }
 
 // --- HTTP handlers ---
@@ -235,7 +240,8 @@ func (c *Controller) httpCopyConfig(ctx *gin.Context) {
 	if err != nil {
 		status := http.StatusInternalServerError
 		switch {
-		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy), errors.Is(err, ErrInvalidConfig):
+		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy),
+			errors.Is(err, ErrOAuthConfigCopyUnsupported), errors.Is(err, ErrInvalidConfig):
 			status = http.StatusBadRequest
 		case workspaceDenied(err):
 			status = http.StatusNotFound
@@ -585,4 +591,103 @@ func wsListProjects(svc *Service) func(ctx context.Context, msg *ws.Message) (*w
 		}
 		return wsReply(msg, gin.H{"projects": projects})
 	}
+}
+
+// --- OAuth handlers ---
+
+// httpOAuthStart initiates the OAuth 2.0 (3LO) flow. Returns the Atlassian
+// authorization URL for the frontend to open in a popup/redirect.
+func (c *Controller) httpOAuthStart(ctx *gin.Context) {
+	workspaceID := c.workspaceID(ctx)
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		return
+	}
+	if err := c.service.authorizeWorkspaceAccess(ctx.Request.Context(), workspaceID); err != nil {
+		if workspaceDenied(err) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	siteURL := ctx.Query("siteUrl")
+	if siteURL == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "siteUrl required"})
+		return
+	}
+	redirectURI := c.service.oauthRedirectURI
+	if redirectURI == "" {
+		redirectURI = "http://localhost:38429/api/v1/jira/oauth/callback"
+	}
+	authURL, err := c.service.StartOAuthFlow(ctx.Request.Context(), workspaceID, siteURL, redirectURI)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"authUrl": authURL})
+}
+
+// httpOAuthCallback handles the redirect from Atlassian after user consent.
+// When called via browser redirect (popup), returns an HTML page that uses
+// postMessage to send the code back to the opener window, then auto-closes.
+// When called via fetch (paste-URL flow), returns JSON.
+func (c *Controller) httpOAuthCallback(ctx *gin.Context) {
+	code := ctx.Query("code")
+	state := ctx.Query("state")
+	if code == "" || state == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "code and state required"})
+		return
+	}
+	// If this is a fetch/API request (paste-URL flow), return JSON.
+	if ctx.Query("api") == "1" {
+		_, err := c.service.CompleteOAuthFlow(ctx.Request.Context(), code, state)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+	// Browser redirect (popup flow): return an HTML page that postMessages
+	// the code+state back to the opener window, then closes itself.
+	// The opener (Kandev settings page) listens for the message and completes
+	// the OAuth flow via the API endpoint.
+	ctx.Header("Content-Type", "text/html; charset=utf-8")
+	ctx.String(http.StatusOK, `<!doctype html>
+<html><body>
+<p>Authorization complete. You can close this window.</p>
+<script>
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var data = { type: "jira-oauth-callback", code: params.get("code"), state: params.get("state") };
+  if (window.opener) {
+    window.opener.postMessage(data, window.location.origin);
+    setTimeout(function() { window.close(); }, 100);
+  }
+})();
+</script>
+</body></html>`)
+}
+
+// httpOAuthRefresh manually triggers a token refresh for testing/debugging.
+func (c *Controller) httpOAuthRefresh(ctx *gin.Context) {
+	workspaceID := c.workspaceID(ctx)
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id required"})
+		return
+	}
+	if err := c.service.authorizeWorkspaceAccess(ctx.Request.Context(), workspaceID); err != nil {
+		if workspaceDenied(err) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	if err := c.service.RefreshOAuthToken(ctx.Request.Context(), workspaceID, ""); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"ok": true})
 }

@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/plugins/spec.md"
+spec: "../../specs/plugins/requirements/plugins.md"
 ---
 
 # Task 03: Responsive task-menu context

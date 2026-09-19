@@ -9,10 +9,13 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
-import { getTerminalTheme } from "@/lib/theme/terminal-theme";
+import { useTheme } from "@/components/theme/app-theme";
+import type { ResolvedTheme } from "@/components/theme/app-theme";
+import { getTerminalTheme, TERMINAL_MINIMUM_CONTRAST_RATIO } from "@/lib/theme/terminal-theme";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
 import { buildTerminalFontFamily } from "@/lib/terminal/terminal-font";
-import { exposeBufferReader } from "./terminal-buffer-reader";
+import { clearBufferReader, exposeBufferReader } from "./terminal-buffer-reader";
+import { useTerminalTheme } from "./use-terminal-theme";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { useTerminalSearch } from "./use-terminal-search";
@@ -22,6 +25,7 @@ import { suppressIOSKeyboardAssists } from "@/lib/terminal/suppress-ios-keyboard
 import { sendShellInput } from "@/lib/terminal/send-shell-input";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
 import { useTranslation } from "react-i18next";
+import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
 import { t } from "@/lib/i18n";
 
 type ShellTerminalProps = {
@@ -48,6 +52,7 @@ type ShellTerminalInitOptions = {
   fontFamily?: string;
   fontSize?: number;
   onReady?: () => void;
+  resolvedTheme: ResolvedTheme;
 };
 
 function useTerminalInit({
@@ -59,11 +64,17 @@ function useTerminalInit({
   fontFamily,
   fontSize,
   onReady,
+  resolvedTheme,
 }: ShellTerminalInitOptions) {
   const { terminalRef, xtermRef, fitAddonRef, lastOutputLengthRef, outputRef } = refs;
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
 
+  // Theme changes update the existing xterm through useTerminalTheme; this
+  // initialization effect intentionally does not rerun for them.
   useEffect(() => {
-    if (!terminalRef.current || xtermRef.current) return;
+    const container = terminalRef.current;
+    if (!container || xtermRef.current) return;
     const terminal = new Terminal({
       cursorBlink: !isReadOnlyMode,
       disableStdin: isReadOnlyMode,
@@ -72,15 +83,16 @@ function useTerminalInit({
       // i18n-exempt: CSS font stack.
       fontFamily: fontFamily || 'Menlo, Monaco, "Courier New", monospace',
       macOptionIsMeta: true,
-      theme: getTerminalTheme(terminalRef.current),
+      minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+      theme: getTerminalTheme(container, resolvedThemeRef.current),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     const webLinksAddon = new WebLinksAddon(linkHandler);
     terminal.loadAddon(webLinksAddon);
-    terminal.open(terminalRef.current);
-    suppressIOSKeyboardAssists(terminalRef.current);
-    exposeBufferReader(terminalRef.current, terminal);
+    terminal.open(container);
+    suppressIOSKeyboardAssists(container);
+    exposeBufferReader(container, terminal);
     fitAddon.fit();
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
@@ -97,7 +109,7 @@ function useTerminalInit({
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
     });
-    resizeObserver.observe(terminalRef.current);
+    resizeObserver.observe(container);
     const intersectionObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -110,13 +122,14 @@ function useTerminalInit({
       },
       { threshold: 0.1 },
     );
-    intersectionObserver.observe(terminalRef.current);
+    intersectionObserver.observe(container);
     if (!isReadOnlyMode) lastOutputLengthRef.current = 0;
 
     return () => {
       clearTimeout(initialFitTimeout);
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
+      clearBufferReader(container);
       terminal.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
@@ -376,21 +389,30 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
   );
   const agentctlStatus = useSessionAgentctl(isReadOnlyMode ? null : sessionId);
   const taskId = session?.task_id ?? null;
+  const workspaceRestoration = useWorkspaceRestoration(taskId, isReadOnlyMode ? null : sessionId);
   const isSessionFailed = !isReadOnlyMode && isFailed;
   const shellOutput = useAppStore((state) => {
     if (!sessionId || isReadOnlyMode) return "";
     const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
     return state.shell.outputs[envKey] || "";
   });
-  const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode && !agentctlStatus.isError);
+  const canSubscribe = Boolean(
+    sessionId &&
+    isActive &&
+    !isReadOnlyMode &&
+    !agentctlStatus.isError &&
+    (!workspaceRestoration.status || workspaceRestoration.status === "ready"),
+  );
   return {
     sessionId,
     taskId,
+    isActive,
     isSessionFailed,
     errorMessage,
     shellOutput,
     canSubscribe,
     agentctlStatusKey: agentctlStatus.status,
+    workspaceRestoration,
   };
 }
 
@@ -402,6 +424,7 @@ export function ShellTerminal({
   isStopping = false,
 }: ShellTerminalProps) {
   const { t } = useTranslation();
+  const { resolvedTheme } = useTheme();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -420,7 +443,12 @@ export function ShellTerminal({
     shellOutput,
     canSubscribe,
     agentctlStatusKey,
+    workspaceRestoration,
   } = useShellSessionState(propSessionId, isReadOnlyMode);
+  const workspaceBlocked =
+    !isReadOnlyMode &&
+    workspaceRestoration.status !== null &&
+    workspaceRestoration.status !== "ready";
   useReadOnlyOutputSync({
     xtermRef,
     isReadOnlyMode,
@@ -451,6 +479,13 @@ export function ShellTerminal({
     fontFamily: buildTerminalFontFamily(terminalFontFamily),
     fontSize: terminalFontSize ?? undefined,
     onReady: onTerminalReady,
+    resolvedTheme,
+  });
+  useTerminalTheme({
+    terminalRef: xtermRef,
+    containerRef: terminalRef,
+    isTerminalReady,
+    resolvedTheme,
   });
 
   const search = useTerminalSearch({ xtermRef, isTerminalReady });
@@ -462,10 +497,16 @@ export function ShellTerminal({
     onClose: search.close,
   });
 
-  useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId });
+  useShellInputHandler({
+    xtermRef,
+    onDataDisposableRef,
+    isReadOnlyMode: isReadOnlyMode || workspaceBlocked,
+    taskId,
+    sessionId,
+  });
   useShellTerminalKeyHandler({
     xtermRef,
-    isReadOnlyMode,
+    isReadOnlyMode: isReadOnlyMode || workspaceBlocked,
     sessionId,
     send,
     onFindInPanel: search.open,
@@ -504,7 +545,7 @@ export function ShellTerminal({
       </div>
     );
   }
-  if (isSessionFailed) {
+  if (isSessionFailed && workspaceRestoration.status === null) {
     return <WorkspaceUnavailable error={errorMessage} />;
   }
   return (
@@ -516,6 +557,15 @@ export function ShellTerminal({
     >
       <div ref={terminalRef} className="h-full w-full" />
       {searchBar}
+      {workspaceBlocked && (
+        <div className="absolute inset-0 z-10 bg-background">
+          <WorkspaceUnavailable
+            restoration={workspaceRestoration.attempt}
+            onRetry={() => void workspaceRestoration.restore()}
+            retryDisabled={workspaceRestoration.status === "pending"}
+          />
+        </div>
+      )}
     </div>
   );
 }

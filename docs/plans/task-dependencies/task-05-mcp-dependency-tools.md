@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["01-core-dependency-relationship"]
 plan: "plan.md"
-spec: "../../specs/task-dependencies/spec.md"
+spec: "../../specs/tasks/system-design/task-dependencies.md"
 ---
 
 # Task 05: MCP Dependency Tools

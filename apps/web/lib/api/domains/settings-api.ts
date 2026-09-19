@@ -103,6 +103,10 @@ export async function updateMessageQueueSettings(
     },
   });
 }
+export {
+  fetchSessionCapacitySettings,
+  updateSessionCapacitySettings,
+} from "./session-capacity-api";
 
 // Executors
 export async function listExecutors(options?: ApiRequestOptions): Promise<ListExecutorsResponse> {
@@ -144,6 +148,16 @@ export async function updateExecutor(
   await fetchJson<void>(`/api/v1/executors/${executorId}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
+}
+
+export async function deleteExecutor(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>(`/api/v1/executors/${encodeURIComponent(executorId)}`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "DELETE" },
   });
 }
 
@@ -236,18 +250,11 @@ export async function deleteExecutorProfile(
 }
 
 // Agents
-import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize";
-
-function normalizeAgentResponse(agent: Agent): Agent {
-  return {
-    ...agent,
-    profiles: (agent.profiles ?? []).map((profile) => normalizeAgentProfile(profile)),
-  };
-}
+import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 
 export async function listAgents(options?: ApiRequestOptions): Promise<ListAgentsResponse> {
   const res = await fetchJson<ListAgentsResponse>("/api/v1/agents", options);
-  return { ...res, agents: (res.agents ?? []).map(normalizeAgentResponse) };
+  return { ...res, agents: (res.agents ?? []).map(normalizeAgentProfiles) };
 }
 
 export async function listAgentDiscovery(
@@ -346,7 +353,7 @@ export async function createCustomTUIAgent(
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
-  return normalizeAgentResponse(res);
+  return normalizeAgentProfiles(res);
 }
 
 /**
@@ -381,7 +388,7 @@ export async function updateCustomTUIAgentMCPStrategy(
       ...(options?.init ?? {}),
     },
   });
-  return normalizeAgentResponse(res);
+  return normalizeAgentProfiles(res);
 }
 
 export async function fetchDynamicModels(

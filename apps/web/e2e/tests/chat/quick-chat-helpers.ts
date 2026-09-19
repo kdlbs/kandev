@@ -1,11 +1,71 @@
 import { type Locator, type Page } from "@playwright/test";
 import { expect } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
+import type { WsWatcher } from "../../helpers/causal-waits";
 
 /**
  * Shared Quick Chat drivers. Kept out of the spec files so several specs
  * (single-client behaviour and cross-device sync) can drive the same surface
  * without duplicating its eager-init timing workarounds.
  */
+
+const SETTLED_SESSION_STATES = new Set([
+  "IDLE",
+  "WAITING_FOR_INPUT",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+const ACTIVE_SESSION_STATES = new Set(["STARTING", "RUNNING"]);
+
+export function quickChatTabReferences(dialog: Locator): Promise<string[]> {
+  return dialog
+    .getByTestId("quick-chat-sortable-tab")
+    .evaluateAll((tabs) =>
+      tabs
+        .map((tab) => tab.getAttribute("data-tab-reference"))
+        .filter((reference): reference is string => Boolean(reference)),
+    );
+}
+
+/**
+ * Establish a backend-confirmed settle point before arming waits for the next
+ * turn. The WS watcher does not replay notifications, so the startup settle
+ * must be observed through the session snapshot rather than a guessed delay.
+ */
+export async function waitForSessionSettledBaseline(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        const session = sessions.find((candidate) => candidate.id === sessionId);
+        return session ? SETTLED_SESSION_STATES.has(session.state) : false;
+      },
+      {
+        timeout: 30_000,
+        message: `session ${sessionId} did not reach a settled baseline`,
+      },
+    )
+    .toBe(true);
+}
+
+/**
+ * Wait for the settle transition caused by the next turn. Requiring an active
+ * old state prevents a queued startup/previous-turn notification from being
+ * mistaken for the response to the message under test.
+ */
+export function waitForSessionSettled(ws: WsWatcher, sessionId: string) {
+  return ws.waitForEvent("session.state_changed", {
+    where: (payload) =>
+      payload.session_id === sessionId &&
+      ACTIVE_SESSION_STATES.has(payload.old_state ?? "") &&
+      SETTLED_SESSION_STATES.has(payload.new_state ?? ""),
+  });
+}
 
 export async function openQuickChatSetup(page: Page, navigateHome = true): Promise<Locator> {
   if (navigateHome) {
@@ -50,22 +110,55 @@ export async function selectAgentIfNeeded(dialog: Locator, page: Page) {
   }).toPass({ timeout: 10_000, intervals: [250, 500, 1_000] });
 }
 
+export async function waitForQuickChatComposerReady(dialog: Locator): Promise<Locator> {
+  const editor = dialog.locator(".tiptap.ProseMirror:visible").first();
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  await expect(dialog.locator('[data-testid="submit-message-button"]:visible').first()).toBeEnabled(
+    {
+      timeout: 30_000,
+    },
+  );
+  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  return editor;
+}
+
+/**
+ * Wait for Quick Chat to accept a direct prompt instead of queueing it behind
+ * the active turn. The composer remains editable while the agent is running,
+ * so checking editability alone can submit a message too early.
+ */
+export async function waitForQuickChatDirectInput(dialog: Locator): Promise<void> {
+  const idlePlaceholder = dialog
+    .locator(
+      '[data-placeholder="Continue working on the task..."]:visible, [data-placeholder="Continue working on the plan..."]:visible, [data-placeholder="Continue working on the file..."]:visible',
+    )
+    .first();
+  const editor = dialog.locator('.tiptap.ProseMirror[contenteditable="true"]:visible').first();
+  await expect(idlePlaceholder).toBeVisible({ timeout: 15_000 });
+  await expect(editor).toBeEditable({ timeout: 15_000 });
+}
+
 export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
   await selectAgentIfNeeded(dialog, page);
   await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
   await dialog.getByTestId("quick-chat-start").click();
 
-  // Wait for chat input to appear AND become editable. Eager init means the
-  // agent starts during the HTTP request, so the input is briefly disabled
-  // while the FE store catches up to the RUNNING session state.
-  const editor = dialog.locator(".tiptap.ProseMirror");
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  // The composer is intentionally editable during STARTING, so editability
+  // alone is no longer a readiness signal. Wait for the submit gate to clear
+  // before callers begin a turn; this keeps tests from typing into a draft that
+  // cannot yet be submitted.
+  await waitForQuickChatComposerReady(dialog);
 }
 
 export async function openQuickChatWithAgent(page: Page, navigateHome = true): Promise<Locator> {
   const dialog = await openQuickChatSetup(page, navigateHome);
   await startQuickChatFromSetup(dialog, page);
+  // The composer becomes usable before the session model catalog is hydrated.
+  // Wait for the model control as well so callers can immediately inspect or
+  // change the session configuration without racing that second readiness gate.
+  await expect(dialog.getByRole("button", { name: "Session model settings" })).toBeVisible({
+    timeout: 30_000,
+  });
   return dialog;
 }
 
@@ -86,4 +179,40 @@ export async function sendQuickChatMessage(dialog: Locator, page: Page, text: st
     await dialog.getByTestId("submit-message-button").click({ timeout: 1_000 });
     await expect(editor).toHaveText("", { timeout: 2_000 });
   }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
+}
+
+export async function readQuickChatViewportLayout(dialog: Locator) {
+  return dialog.evaluate(async (element) => {
+    const animations = element.getAnimations({ subtree: true }).filter((animation) => {
+      const iterations = animation.effect?.getComputedTiming().iterations;
+      return typeof iterations === "number" && Number.isFinite(iterations);
+    });
+    await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+
+    const content = element.querySelector<HTMLElement>('[data-testid="quick-chat-content"]');
+    const messages = element.querySelector<HTMLElement>('[data-testid="quick-chat-messages"]');
+    const composer = element.querySelector<HTMLElement>('[data-testid="chat-input-area"]');
+    const messageScroller = messages?.querySelector<HTMLElement>(
+      ".session-panel-content-wrapper > div",
+    );
+    if (!content || !composer || !messageScroller) {
+      throw new Error("Quick Chat viewport layout elements are unavailable");
+    }
+
+    const dialogBounds = element.getBoundingClientRect();
+    const contentBounds = content.getBoundingClientRect();
+    const composerBounds = composer.getBoundingClientRect();
+    return {
+      dialogTop: dialogBounds.top,
+      dialogBottom: dialogBounds.bottom,
+      dialogClientHeight: element.clientHeight,
+      dialogScrollHeight: element.scrollHeight,
+      contentTop: contentBounds.top,
+      contentBottom: contentBounds.bottom,
+      composerTop: composerBounds.top,
+      composerBottom: composerBounds.bottom,
+      messageScrollerClientHeight: messageScroller.clientHeight,
+      messageScrollerScrollHeight: messageScroller.scrollHeight,
+    };
+  });
 }

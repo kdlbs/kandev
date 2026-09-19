@@ -1,7 +1,7 @@
 ---
 status: implemented
 created: 2026-08-07
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Plan: Go dev launcher and minimal Node surface

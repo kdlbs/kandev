@@ -3,6 +3,8 @@ import { buildRepositoriesPayload, findDuplicateRemoteRepo } from "./task-create
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 
+const FRONT_REPOSITORY_ID = "repo-front";
+
 /** Minimal TaskRemoteRepoRow builder for the dedup tests. */
 function remoteRow(key: string, url: string, branch = ""): TaskRemoteRepoRow {
   return { key, url, branch, source: "paste" };
@@ -23,7 +25,7 @@ describe("buildRepositoriesPayload — unified rows", () => {
       useRemote: false,
       remoteRepos: [],
       repositories: [
-        { key: "r0", repositoryId: "repo-front", branch: "main" },
+        { key: "r0", repositoryId: FRONT_REPOSITORY_ID, branch: "main" },
         { key: "r1", repositoryId: "repo-back", branch: "develop" },
         { key: "r2", branch: "" }, // no repo picked yet — dropped
         { key: "r3", repositoryId: "repo-shared", branch: "" },
@@ -31,9 +33,38 @@ describe("buildRepositoriesPayload — unified rows", () => {
       discoveredRepositories: [],
     });
     expect(payload).toEqual([
-      { repository_id: "repo-front", base_branch: "main", checkout_branch: undefined },
+      {
+        repository_id: FRONT_REPOSITORY_ID,
+        base_branch: "main",
+        checkout_branch: undefined,
+      },
       { repository_id: "repo-back", base_branch: "develop", checkout_branch: undefined },
       { repository_id: "repo-shared", base_branch: undefined, checkout_branch: undefined },
+    ]);
+  });
+
+  it("submits a selected branch policy id without deriving identity from its label", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: false,
+      remoteRepos: [],
+      repositories: [
+        {
+          key: "r0",
+          repositoryId: FRONT_REPOSITORY_ID,
+          branch: "develop",
+          branchPolicyId: "policy-hotfix",
+        },
+      ],
+      discoveredRepositories: [],
+    });
+
+    expect(payload).toEqual([
+      {
+        repository_id: FRONT_REPOSITORY_ID,
+        base_branch: "develop",
+        checkout_branch: undefined,
+        branch_policy_id: "policy-hotfix",
+      },
     ]);
   });
 
@@ -125,16 +156,10 @@ describe("buildRepositoriesPayload — local executor branch split (core)", () =
 
 describe("buildRepositoriesPayload — local executor branch split (edge cases)", () => {
   it("fresh-branch flow: skips the split so the picked base is preserved as base_branch", () => {
-    // When the user enables "Fork a new branch", the chip's branch is the
-    // BASE TO FORK FROM (e.g. "develop"), not a working branch. The backend
-    // creates a new branch from that base and rewrites base_branch to the
-    // new branch name. If we split here, base_branch would land on the
-    // repo's default ("main") and the fork would happen from main instead
-    // of develop — silently wrong.
     const payload = buildRepositoriesPayload({
       useRemote: false,
       remoteRepos: [],
-      repositories: [{ key: "r0", repositoryId: "repo-1", branch: "develop" }],
+      repositories: [{ key: "r0", repositoryId: "repo-1", branch: "develop", baseBranch: "main" }],
       discoveredRepositories: [],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       workspaceRepositories: [{ id: "repo-1", default_branch: "main" }] as any,
@@ -154,13 +179,6 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
   });
 
   it("falls through when default_branch is unknown (legacy repos)", () => {
-    // Repos created before the backend probe fix may have an unset
-    // default_branch in the workspace store. If we synthesize base_branch=
-    // rowBranch here (as the original draft did), we reproduce the very bug
-    // this PR fixes: agentctl recomputes merge-base(HEAD, origin/<rowBranch>)
-    // → collapses to HEAD → empty changes panel. Better to leave the legacy
-    // shape alone — the next backend createRepository call will populate
-    // default_branch via the gitref probe.
     const payload = buildRepositoriesPayload({
       useRemote: false,
       remoteRepos: [],
@@ -187,6 +205,40 @@ describe("buildRepositoriesPayload — local executor branch split (edge cases)"
     });
     expect(payload).toEqual([
       { repository_id: "repo-1", base_branch: "main", checkout_branch: undefined },
+    ]);
+  });
+
+  it("uses a copied saved base for worktree execution", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: false,
+      remoteRepos: [],
+      repositories: [{ key: "r0", repositoryId: "repo-1", branch: "", baseBranch: "develop" }],
+      discoveredRepositories: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      workspaceRepositories: [{ id: "repo-1", default_branch: "main" }] as any,
+      isLocalExecutor: false,
+    });
+
+    expect(payload).toEqual([
+      { repository_id: "repo-1", base_branch: "develop", checkout_branch: undefined },
+    ]);
+  });
+
+  it("keeps a copied base separate from local checkout state", () => {
+    const payload = buildRepositoriesPayload({
+      useRemote: false,
+      remoteRepos: [],
+      repositories: [
+        { key: "r0", repositoryId: "repo-1", branch: "feature/x", baseBranch: "develop" },
+      ],
+      discoveredRepositories: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      workspaceRepositories: [{ id: "repo-1", default_branch: "main" }] as any,
+      isLocalExecutor: true,
+    });
+
+    expect(payload).toEqual([
+      { repository_id: "repo-1", base_branch: "develop", checkout_branch: "feature/x" },
     ]);
   });
 });

@@ -143,12 +143,39 @@ test.describe("Workflow settings", () => {
     await card.getByLabel("Override original session options").click();
     const editor = card.getByTestId(`${workStep.id}-session-config-editor`);
     await expect(editor.getByTestId("session-config-rule-0")).toBeVisible();
-    await expect(page.stepAgentProfileSelect(card)).toBeDisabled();
+    const profileSelector = page.stepAgentProfileSelect(card);
+    await expect(profileSelector).toBeEnabled();
+    await profileSelector.click();
+    await expect(testPage.getByTestId(`${workStep.id}-profile-option-none`)).toHaveAttribute(
+      "data-disabled",
+      "true",
+    );
+    await expect(
+      testPage.getByTestId(`${workStep.id}-profile-session-lifecycle-select`),
+    ).toBeEnabled();
+    await testPage.keyboard.press("Escape");
+    await expect(profileSelector).toHaveAttribute("aria-expanded", "false");
 
+    await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+      timeout: 15_000,
+    });
     const settings = editor.getByRole("button", { name: `Settings for ${agent!.name}` });
     await settings.click();
-    await testPage.getByText("Mock Smart", { exact: true }).click();
-    await testPage.getByTestId("config-option-trigger-effort").click();
+    await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeVisible({
+      timeout: 10_000,
+    });
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click({ force: true });
+    await expect(settings).toContainText("Mock Smart", { timeout: 15_000 });
+    // The shared picker stays open when dependent options are available. Close
+    // it explicitly so the next interaction starts from a deterministic state.
+    if ((await settings.getAttribute("aria-expanded")) === "true") {
+      await testPage.keyboard.press("Escape");
+    }
+    await expect(settings).toHaveAttribute("aria-expanded", "false");
+    await settings.click();
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible({ timeout: 10_000 });
+    await effortTrigger.click();
     await testPage.getByRole("button", { name: "Max", exact: true }).click();
     await testPage.keyboard.press("Escape");
     await prCapture.screenshot("desktop-original-session-editor", {

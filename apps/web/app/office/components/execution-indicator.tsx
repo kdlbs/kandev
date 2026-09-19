@@ -2,6 +2,7 @@
 
 import { IconPointFilled } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { CompositorPulse } from "@kandev/ui/compositor-pulse";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
@@ -27,7 +28,9 @@ export function ExecutionIndicator({ status, className }: ExecutionIndicatorProp
           <span
             className={cn("inline-flex items-center gap-1 text-xs text-emerald-500", className)}
           >
-            <IconPointFilled className="h-3 w-3 animate-pulse" />
+            <CompositorPulse className="inline-flex animate-pulse">
+              <IconPointFilled className="h-3 w-3" />
+            </CompositorPulse>
             {t("office:live")}
           </span>
         </TooltipTrigger>

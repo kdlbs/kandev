@@ -3,6 +3,8 @@ package statussummary
 import (
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // RebuildSession is the durable/session-backed portion of a task summary.
@@ -35,11 +37,14 @@ type PullRequestInput struct {
 	ReviewState           string
 	ChecksState           string
 	MergeableState        string
+	MergeQueueState       string
 	UnresolvedReviewCount int
 	PendingReviewCount    int
 	RequiredReviews       int
 	ChecksTotal           int
 	ChecksPassing         int
+	AutoFixEnabled        bool
+	AutoMergeEnabled      bool
 }
 
 // RebuildInput contains the authoritative bounded facts available from
@@ -59,6 +64,7 @@ type RebuildInput struct {
 	// QueuedPromptCount is the authoritative pending prompt count for the task
 	// (all sessions). Supplied by the caller; 0 means nothing is queued.
 	QueuedPromptCount int
+	LaunchQueue       *LaunchQueueSummary
 	Now               time.Time
 }
 
@@ -68,18 +74,20 @@ type RebuildInput struct {
 // replaying any session stream.
 func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	state := &projectionState{
-		sessions:           make(map[string]sessionObservation, len(input.Sessions)),
-		pending:            make(map[string]string, len(input.PendingActions)),
-		pendingRequests:    make(map[string]pendingRequestIdentity),
-		errors:             make(map[string]*ActiveErrorSummary),
-		clearedErrorStamps: make(map[string]string),
-		git:                make(map[string]GitSummary, len(input.Git)),
-		prs:                make(map[string]pullRequestObservation, len(input.PullRequests)),
-		pendingObserved:    true,
-		activityObserved:   input.ActivityObserved,
-		errorsObserved:     true,
-		gitObserved:        input.GitObserved,
-		prObserved:         input.PRObserved,
+		sessions:            make(map[string]sessionObservation, len(input.Sessions)),
+		pending:             make(map[string]string, len(input.PendingActions)),
+		pendingRequests:     make(map[string]pendingRequestIdentity),
+		errors:              make(map[string]*ActiveErrorSummary),
+		clearedErrorStamps:  make(map[string]string),
+		git:                 make(map[string]GitSummary, len(input.Git)),
+		prs:                 make(map[string]pullRequestObservation, len(input.PullRequests)),
+		pendingObserved:     true,
+		activityObserved:    input.ActivityObserved,
+		errorsObserved:      true,
+		gitObserved:         input.GitObserved,
+		prObserved:          input.PRObserved,
+		launchQueueObserved: true,
+		launchQueue:         cloneLaunchQueue(input.LaunchQueue),
 	}
 	for _, inputSession := range input.Sessions {
 		if strings.TrimSpace(inputSession.ID) == "" {
@@ -112,7 +120,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	for _, git := range input.Git {
 		repository := strings.TrimSpace(git.Repository)
 		if repository == "" {
-			repository = "default"
+			repository = RootRepositoryKey
 		}
 		state.git[repository] = git.Summary
 	}
@@ -135,13 +143,31 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 		copy.OccurredAt = now.UTC()
 	}
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
+	copy.Scope = normalizeErrorScope(copy.Scope, copy.SessionID != "")
 	copy.SessionID = truncateString(copy.SessionID, maxSessionIDBytes)
 	copy.TaskRepositoryID = truncateString(copy.TaskRepositoryID, maxTaskRepositoryIDBytes)
+	copy.ExecutionID = truncateString(copy.ExecutionID, maxSessionIDBytes)
+	copy.AttemptID = truncateString(copy.AttemptID, maxSessionIDBytes)
+	if copy.Phase != models.LaunchErrorPhaseBootstrap {
+		copy.Phase = ""
+	}
 	copy.Category = truncateString(copy.Category, maxActiveErrorCategoryBytes)
-	copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
+	copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
+	copy.Causes = models.NormalizeAgentErrorCauses(copy.Causes)
+	copy.Details = models.NormalizeAgentErrorDetails(copy.Details, copy.Causes)
 	if copy.Stamp == "" {
 		copy.Stamp = copy.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + copy.Preview
 	}
 	copy.Stamp = truncateString(copy.Stamp, maxActiveErrorStampBytes)
 	return &copy
+}
+
+func normalizeErrorScope(scope string, sessionOwned bool) string {
+	if scope == models.ErrorScopeSession || scope == models.ErrorScopeTask {
+		return scope
+	}
+	if sessionOwned {
+		return models.ErrorScopeSession
+	}
+	return models.ErrorScopeTask
 }

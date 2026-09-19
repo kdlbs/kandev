@@ -6,7 +6,7 @@ wave: 6
 depends_on:
   - "05-adapt-integration-watchers"
 plan: "plan.md"
-spec: "../../specs/tasks/wip-limit-pull-system.md"
+spec: "../../specs/tasks/system-design/wip-limit-pull-system.md"
 ---
 
 # Task 06: Expose Visible Queue UX

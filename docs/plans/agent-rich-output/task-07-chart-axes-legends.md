@@ -5,7 +5,7 @@ status: done
 wave: 7
 depends_on: ["06-csv-chart-sources"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 07: Chart axes and legends
@@ -47,7 +47,7 @@ registration and produced a plot with no ticks, grid, or tooltip.
 - `apps/web/e2e/tests/chat/rich-output-helpers.ts`
 - `apps/web/e2e/tests/chat/rich-output.spec.ts`
 - `apps/web/e2e/tests/chat/mobile-rich-output.spec.ts`
-- `docs/specs/agent-rich-output/spec.md`
+- `docs/specs/agents/requirements/agent-rich-output.md`
 - `docs/plans/agent-rich-output/plan.md`
 
 ## Risks

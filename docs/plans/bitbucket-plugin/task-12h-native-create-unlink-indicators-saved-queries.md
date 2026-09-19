@@ -5,7 +5,7 @@ status: completed
 wave: 3h
 depends_on: ["12g-bitbucket-status-detail-adapters"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 decision: "../../decisions/2026-08-10-plugin-change-request-mutations.md"
 ---
 

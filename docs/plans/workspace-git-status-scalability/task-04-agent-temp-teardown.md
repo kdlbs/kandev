@@ -5,7 +5,7 @@ status: superseded
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 superseded_by: "../storage-maintenance/task-10-inherit-service-temp.md"
 ---
 
@@ -63,7 +63,7 @@ None.
 
 ## Inputs
 
-- Agent-session temporary-data requirements in `docs/specs/system-page/storage-maintenance.md`.
+- Agent-session temporary-data requirements in `docs/specs/system-page/requirements/storage-maintenance.md`.
 - ADR 0045's lifecycle-owned ephemeral-resource amendment.
 - Existing `ensureAgentTempEnv`, `Manager.Stop`, and process-group teardown order.
 

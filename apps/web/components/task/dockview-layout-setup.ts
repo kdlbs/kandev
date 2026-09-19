@@ -11,9 +11,15 @@ import {
   RIGHT_BOTTOM_GROUP,
   setPinnedTarget,
 } from "@/lib/state/layout-manager";
-import { getManualRightWidth, setEnvLayout, setManualRightWidth } from "@/lib/local-storage";
+import {
+  getManualRightWidth,
+  setEnvLayout,
+  setEnvLayoutProfile,
+  setManualRightWidth,
+} from "@/lib/local-storage";
 import { resolveResponsiveRightWidth } from "@/lib/state/layout-manager/right-width";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
+import { withHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
 import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
@@ -359,7 +365,11 @@ export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
     useDockviewStore.setState({ activeGroupId: group?.id ?? null });
   });
   useDockviewStore.setState({ activeGroupId: api.activeGroup?.id ?? null });
-  const d2 = api.onDidLayoutChange(() => trackPinnedWidths(api));
+  const d2 = api.onDidLayoutChange(() => {
+    trackPinnedWidths(api);
+    const store = useDockviewStore.getState();
+    if (!store.isRestoringLayout) store.refreshRightPaneState();
+  });
   trackPinnedWidths(api);
   return () => {
     d1.dispose();
@@ -387,7 +397,8 @@ export function setupLayoutPersistence(
       const envId = envIdRef.current;
       localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
       if (envId) {
-        setEnvLayout(envId, json);
+        setEnvLayout(envId, withHiddenRightPaneMetadata(json, live.hiddenRightPane));
+        setEnvLayoutProfile(envId, live.activeLayoutProfile);
       }
       if (isDebug()) {
         debugWidths(

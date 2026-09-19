@@ -73,7 +73,7 @@ function settleViaSetTaskSession(store: ReturnType<typeof makeStore>): void {
 }
 
 function settleViaSetTaskSessionsForTask(store: ReturnType<typeof makeStore>): void {
-  store.getState().setTaskSessionsForTask(TASK_ID, [IDLE_SESSION]);
+  store.getState().setTaskSessionsForTask(TASK_ID, [IDLE_SESSION], {});
 }
 
 function settleViaUpsertTaskSessionFromEvent(store: ReturnType<typeof makeStore>): void {
@@ -205,6 +205,23 @@ describe("session turn WebSocket handlers", () => {
     send(store, TURN_COMPLETED, turn("turn-1", TURN_STARTED_AT, completed));
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
     expect(store.getState().turns.bySession[SESSION_ID][0].completed_at).toBe(completed);
+  });
+
+  it("preserves cancelled tool-call status when the containing turn completes", () => {
+    const store = makeStore();
+    store.getState().addMessage({
+      id: "msg-1",
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      type: "tool_call",
+      metadata: { status: "cancelled", tool_call_id: "tc-1" },
+    } as never);
+
+    send(store, TURN_COMPLETED, turn("turn-1", TURN_STARTED_AT, TURN_COMPLETED_AT));
+
+    expect(store.getState().messages.bySession[SESSION_ID][0].metadata).toEqual(
+      expect.objectContaining({ status: "cancelled" }),
+    );
   });
 
   it("flushes batched message updates before completing a turn", () => {

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/settings-profile-layout.md
+spec: docs/specs/agents/requirements/settings-profile-layout.md
 created: 2026-08-13
 status: building
 ---

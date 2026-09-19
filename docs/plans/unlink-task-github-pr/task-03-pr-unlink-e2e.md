@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-unlink-contract", "02-frontend-multi-pr-unlink"]
 plan: "plan.md"
-spec: "../../specs/tasks/link-existing-task-github-issue.md"
+spec: "../../specs/tasks/requirements/link-existing-task-github-issue.md"
 ---
 
 # Task 03: PR Unlink E2E Coverage

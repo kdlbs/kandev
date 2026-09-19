@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,14 +14,34 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// newTestRouter mounts the config routes over a fresh service.
+var errGuardUnavailable = errors.New("guard: source unavailable")
+
+// newTestRouter mounts the config routes over a fresh service, with no
+// config sync guard wired (nil guard: no workspace is ever active).
 func newTestRouter(t *testing.T) (*gin.Engine, *testEnv) {
+	t.Helper()
+	return newTestRouterWithGuard(t, nil)
+}
+
+// newTestRouterWithGuard mounts the config routes over a fresh service with
+// the given ActiveSourceChecker.
+func newTestRouterWithGuard(t *testing.T, guard ActiveSourceChecker) (*gin.Engine, *testEnv) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	env := newTestEnv(t)
 	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1"), NewHandler(env.svc, logger.Default()))
+	RegisterRoutes(router.Group("/api/v1"), NewHandler(env.svc, guard, logger.Default()))
 	return router, env
+}
+
+// fakeActiveSourceChecker is a test double for ActiveSourceChecker.
+type fakeActiveSourceChecker struct {
+	active bool
+	err    error
+}
+
+func (f *fakeActiveSourceChecker) HasActiveSource(context.Context, string) (bool, error) {
+	return f.active, f.err
 }
 
 // do issues a request and returns the recorder.
@@ -62,9 +83,13 @@ func assertErrorBody(t *testing.T, rec *httptest.ResponseRecorder) {
 
 func TestNewHandler_WiresDependencies(t *testing.T) {
 	env := newTestEnv(t)
-	h := NewHandler(env.svc, logger.Default())
+	guard := &fakeActiveSourceChecker{}
+	h := NewHandler(env.svc, guard, logger.Default())
 	if h.svc != env.svc {
 		t.Error("service not wired")
+	}
+	if h.guard != guard {
+		t.Error("guard not wired")
 	}
 	if h.logger == nil {
 		t.Error("logger not wired")
@@ -76,7 +101,9 @@ func TestRegisterRoutes_RegistersEveryEndpoint(t *testing.T) {
 
 	want := map[string]string{
 		"GET /api/v1/workspaces/:wsId/config/export":          "",
+		"GET /api/v1/workspaces/:wsId/config/export/manifest": "",
 		"GET /api/v1/workspaces/:wsId/config/export/zip":      "",
+		"POST /api/v1/workspaces/:wsId/config/export/zip":     "",
 		"POST /api/v1/workspaces/:wsId/config/preview":        "",
 		"POST /api/v1/workspaces/:wsId/config/import":         "",
 		"GET /api/v1/workspaces/:wsId/config/sync/incoming":   "",
@@ -147,6 +174,45 @@ func TestHandler_ExportConfigZip_ServiceError(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); strings.HasPrefix(got, "application/zip") {
 		t.Errorf("error response should not claim to be a zip, got %q", got)
 	}
+}
+
+func TestHandler_ExportSelectedConfigZip(t *testing.T) {
+	router, env := newTestRouter(t)
+	seedAgent(t, env, testWorkspaceID, "ada")
+	manifest, err := env.svc.ExportManifest(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ExportManifest: %v", err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"revision": manifest.Revision,
+		"paths":    []string{manifest.Files[0].Path},
+	})
+	rec := do(t, router, http.MethodPost,
+		"/api/v1/workspaces/"+testWorkspaceID+"/config/export/zip", string(body))
+	assertStatus(t, rec, http.StatusOK)
+	entries := readZip(t, rec.Body)
+	if len(entries) != 1 {
+		t.Fatalf("selected archive entries = %d, want 1", len(entries))
+	}
+	if _, ok := entries[manifest.Files[0].Path]; !ok {
+		t.Fatalf("selected path %q missing from %v", manifest.Files[0].Path, entries)
+	}
+}
+
+func TestHandler_ExportSelectedConfigZipRejectsStaleRevision(t *testing.T) {
+	router, env := newTestRouter(t)
+	seedAgent(t, env, testWorkspaceID, "ada")
+	manifest, err := env.svc.ExportManifest(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("ExportManifest: %v", err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"revision": "sha256:stale",
+		"paths":    []string{manifest.Files[0].Path},
+	})
+	rec := do(t, router, http.MethodPost,
+		"/api/v1/workspaces/"+testWorkspaceID+"/config/export/zip", string(body))
+	assertStatus(t, rec, http.StatusConflict)
 }
 
 func TestHandler_PreviewImport(t *testing.T) {
@@ -357,4 +423,50 @@ func TestHandler_SyncApplyOutgoing_ServiceError(t *testing.T) {
 	rec := do(t, router, http.MethodPost, "/api/v1/workspaces/ws/config/sync/export-fs", "")
 	assertStatus(t, rec, http.StatusInternalServerError)
 	assertErrorBody(t, rec)
+}
+
+// guardedRoutes are the write routes that must refuse (409) when config sync
+// is the active source for the target workspace (AC-OFFICE-CONFIG-SYNC-005.2/005.2b).
+var guardedRoutes = []struct {
+	name   string
+	method string
+	path   string
+}{
+	{"applyImport", http.MethodPost, "/api/v1/workspaces/" + testWorkspaceID + "/config/import"},
+	{"syncApplyIncoming", http.MethodPost, "/api/v1/workspaces/" + testWorkspaceID + "/config/sync/import-fs"},
+	{"syncApplyOutgoing", http.MethodPost, "/api/v1/workspaces/" + testWorkspaceID + "/config/sync/export-fs"},
+}
+
+func TestHandler_GuardedRoutes_RefuseWhenConfigSyncActive(t *testing.T) {
+	for _, rt := range guardedRoutes {
+		t.Run(rt.name, func(t *testing.T) {
+			router, _ := newTestRouterWithGuard(t, &fakeActiveSourceChecker{active: true})
+			rec := do(t, router, rt.method, rt.path, "{}")
+			assertStatus(t, rec, http.StatusConflict)
+			assertErrorBody(t, rec)
+		})
+	}
+}
+
+func TestHandler_GuardedRoutes_RefuseWhenGuardErrors(t *testing.T) {
+	for _, rt := range guardedRoutes {
+		t.Run(rt.name, func(t *testing.T) {
+			router, _ := newTestRouterWithGuard(t, &fakeActiveSourceChecker{err: errGuardUnavailable})
+			rec := do(t, router, rt.method, rt.path, "{}")
+			assertStatus(t, rec, http.StatusConflict)
+			assertErrorBody(t, rec)
+		})
+	}
+}
+
+func TestHandler_GuardedRoutes_ProceedWhenConfigSyncInactive(t *testing.T) {
+	for _, rt := range guardedRoutes {
+		t.Run(rt.name, func(t *testing.T) {
+			router, _ := newTestRouterWithGuard(t, &fakeActiveSourceChecker{active: false})
+			rec := do(t, router, rt.method, rt.path, "{}")
+			if rec.Code == http.StatusConflict {
+				t.Errorf("expected the route to proceed past the guard, got 409: %s", rec.Body.String())
+			}
+		})
+	}
 }

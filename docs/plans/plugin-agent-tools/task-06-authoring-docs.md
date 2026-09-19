@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["05-end-to-end-fixture"]
 plan: "plan.md"
-spec: "../../specs/plugins/agent-tools.md"
+spec: "../../specs/plugins/requirements/agent-tools.md"
 adr: "../../decisions/2026-08-11-plugin-tools-through-kandev-mcp.md"
 ---
 
@@ -34,8 +34,8 @@ git diff --check && make -C apps/backend build
 - `docs/public/plugins-authoring.md`
 - `docs/public/automation-and-mcp.md`
 - `docs/public/feature-status.md`
-- `docs/specs/plugins/spec.md`
-- `docs/specs/plugins/agent-tools.md`
+- `docs/specs/plugins/requirements/plugins.md`
+- `docs/specs/plugins/requirements/agent-tools.md`
 - `apps/backend/AGENTS.md`
 
 ## Dependencies

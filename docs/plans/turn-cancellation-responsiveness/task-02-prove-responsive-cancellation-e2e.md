@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-break-cancellation-stream-cycle"]
 plan: "plan.md"
-spec: "../../specs/workflow/cancelled-turn-completion/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cancelled-turn-completion.md"
 ---
 
 # Task 02: Prove responsive cancellation end to end

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- queue ghost behavior is covered in one focused suite. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
@@ -15,6 +16,7 @@ import type { QueuedMessage } from "@/lib/state/slices/session/types";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  triggerFileDownload.mockReset();
 });
 
 vi.mock("@kandev/ui/tooltip", () => ({
@@ -35,6 +37,11 @@ const EDIT_TESTID = "queue-entry-edit";
 const REMOVE_TESTID = "queue-entry-remove";
 const EDIT_TITLE = "Edit queued message";
 const MERGE_TITLE = "Merge with above";
+
+const QUEUE_EDIT_TEXTAREA_TESTID = "queue-edit-textarea";
+const { triggerFileDownload } = vi.hoisted(() => ({ triggerFileDownload: vi.fn() }));
+
+vi.mock("@/lib/utils/file-download", () => ({ triggerFileDownload }));
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -195,6 +202,67 @@ describe("QueuedGhostMessage reorder handle", () => {
     renderRow({ queued_by: "user-1" }, { canEdit: true });
     fireEvent.click(screen.getByTestId(EDIT_TESTID));
     expect(screen.queryByTestId(HANDLE_TESTID)).toBeNull();
+  });
+});
+describe("QueuedGhostMessage lease lifecycle", () => {
+  it("leaves edit mode when its lease is lost", () => {
+    const queuedEntry = entry({ queued_by: "user-1" });
+    const view = render(
+      <QueuedGhostMessage
+        entry={queuedEntry}
+        canEdit
+        editLeaseActive
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeTruthy();
+
+    view.rerender(
+      <QueuedGhostMessage
+        entry={queuedEntry}
+        canEdit
+        editLeaseActive={false}
+        onSave={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeNull();
+  });
+  it("passes the acquired edit token to delayed save completion", async () => {
+    let resolveSave!: () => void;
+    const onSave = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const onEditComplete = vi.fn();
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry()}
+        canEdit
+        onEditStart={async () => "edit-1"}
+        onSave={onSave}
+        onEditComplete={onEditComplete}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    await waitFor(() => expect(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID)).toBeTruthy());
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), {
+      target: { value: "updated" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+
+    resolveSave();
+    await waitFor(() => expect(onEditComplete).toHaveBeenCalledWith("edit-1", true));
   });
 });
 
@@ -424,7 +492,7 @@ describe("QueuedGhostMessage entity references", () => {
     );
 
     fireEvent.click(screen.getByTitle(EDIT_TITLE));
-    fireEvent.change(screen.getByTestId("queue-edit-textarea"), { target: { value: edited } });
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), { target: { value: edited } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(edited, [issue, task]));
@@ -447,12 +515,32 @@ describe("QueuedGhostMessage entity references", () => {
     );
 
     fireEvent.click(screen.getByTitle(EDIT_TITLE));
-    fireEvent.change(screen.getByTestId("queue-edit-textarea"), {
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), {
       target: { value: "reference removed" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith("reference removed", []));
+  });
+
+  it("allows clearing text while retaining attachments", async () => {
+    const attachments = [{ type: "resource", data: "ZmlsZQ==", mime_type: "text/plain" }];
+    const onSave = vi.fn(async () => {});
+
+    renderWithProviders(
+      <QueuedGhostMessage
+        entry={entry({ attachments })}
+        canEdit
+        onSave={onSave}
+        onRemove={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle(EDIT_TITLE));
+    fireEvent.change(screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("", [], attachments));
   });
 });
 
@@ -599,6 +687,19 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
     expect(canMergeEntry(entry({ queued_by: "server" }))).toBe(false);
   });
 
+  it("rejects entries carrying plan-comment admission identity", () => {
+    expect(
+      canMergeEntry(
+        entry({ queued_by: "user-1", metadata: { client_queue_id: "comment-request" } }),
+      ),
+    ).toBe(false);
+    expect(
+      canMergeEntry(
+        entry({ queued_by: "user-1", metadata: { plan_comment_refs: [{ id: "c1" }] } }),
+      ),
+    ).toBe(false);
+  });
+
   it("allows user behind user owned by the caller", () => {
     const above = entry({ id: "q-a", queued_by: "user-1" });
     const below = entry({ id: "q-b", queued_by: "user-1" });
@@ -669,5 +770,36 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
     const above = entry({ id: "q-a", queued_by: "user-1" });
     const below = entry({ id: "q-b", queued_by: "server" });
     expect(canMergeWithAbove(below, above)).toBe(false);
+  });
+});
+
+describe("QueuedGhostMessage bounded previews", () => {
+  it("bounds the display while keeping complete download and edit values", async () => {
+    const content = Array.from({ length: 240 }, (_, index) => `queued-${index}`).join("\n");
+    const onSave = vi.fn(async (_content: string) => undefined);
+
+    renderWithProviders(
+      <QueuedGhostMessage entry={entry({ content })} canEdit onSave={onSave} onRemove={vi.fn()} />,
+    );
+
+    const preview = screen.getByTestId("queue-entry-text");
+    expect(preview.textContent).not.toContain("queued-239");
+    fireEvent.click(screen.getByTestId("bounded-message-preview-download"));
+    expect(triggerFileDownload).toHaveBeenCalledWith({
+      fileName: "kandev-queued-message.txt",
+      content,
+      isBinary: false,
+    });
+
+    fireEvent.click(screen.getByTestId(EDIT_TESTID));
+    const textarea = screen.getByTestId(QUEUE_EDIT_TEXTAREA_TESTID) as HTMLTextAreaElement;
+    expect(textarea.value).toBe(content);
+
+    const editedContent = `${content}\nedited`;
+    fireEvent.change(textarea, { target: { value: editedContent } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0]?.[0]).toBe(editedContent);
   });
 });

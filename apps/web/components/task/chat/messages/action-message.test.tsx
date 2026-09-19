@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- recovery action variants share one rendering harness. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -11,6 +12,10 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
 
 const requestMock = vi.fn().mockResolvedValue({});
 const getWebSocketClientMock = vi.fn<() => { request: typeof requestMock } | null>(() => ({
@@ -138,12 +143,17 @@ function renderAction(
   sessionState?: TaskSessionState,
   sessionError?: string,
   activeTurnId?: string,
+  sessionMetadata?: Record<string, unknown> | null,
 ) {
   const initialState: Partial<AppState> = sessionState
     ? {
         taskSessions: {
           items: {
-            [TEST_SESSION_ID]: { state: sessionState, error_message: sessionError } as TaskSession,
+            [TEST_SESSION_ID]: {
+              state: sessionState,
+              error_message: sessionError,
+              metadata: sessionMetadata,
+            } as TaskSession,
           },
         },
         turns: {
@@ -284,21 +294,68 @@ describe("ActionMessage — transient retry (warning variant)", () => {
     renderAction(errorMsg, "WAITING_FOR_INPUT", "");
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
   });
+});
 
-  it("hides a recovery card after its Resume request succeeds", async () => {
+describe("ActionMessage — session recovery history", () => {
+  it("keeps the recovery entry after its Resume request succeeds and removes controls", async () => {
     const errorMsg = recoveryMessage(true);
 
     renderAction(errorMsg, "WAITING_FOR_INPUT", "");
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
-    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+    await waitFor(() => expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy());
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
   });
 
-  it("keeps the recovery card hidden after a successful resume settles back to waiting", async () => {
+  it("shows recovery controls only for the current stamped failure", () => {
+    const historical = recoveryMessage(true);
+    historical.metadata = {
+      ...(historical.metadata as Record<string, unknown>),
+      error_stamp: "failure-old",
+    };
+    const current = recoveryMessage(true);
+    current.metadata = {
+      ...(current.metadata as Record<string, unknown>),
+      error_stamp: "failure-current",
+    };
+    const { rerender } = renderAction(historical, "WAITING_FOR_INPUT", "", undefined, {
+      last_agent_error: {
+        message: "The newer session failure.",
+        stamp: "failure-current",
+      },
+    });
+
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+
+    rerender(<ActionMessage comment={current} />);
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps controls for an unstamped legacy row matching the current failure", () => {
+    const legacy = recoveryMessage(true);
+    legacy.content = "Agent encountered an error: The agent could not start.";
+    legacy.metadata = {
+      ...(legacy.metadata as Record<string, unknown>),
+      error_stamp: undefined,
+    };
+
+    renderAction(legacy, "WAITING_FOR_INPUT", "", undefined, {
+      last_agent_error: {
+        message: "The agent could not start.",
+        occurred_at: legacy.created_at,
+      },
+    });
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps the historical recovery entry after a successful resume settles back to waiting", async () => {
     const errorMsg = recoveryMessage(true);
 
     const { setSessionState } = renderActionWithStore(errorMsg, "WAITING_FOR_INPUT", "");
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
-    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+    await waitFor(() => expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy());
 
     // A successful resume drives the session through an active state (which
     // hides the card via isSessionActive) and then back to WAITING_FOR_INPUT
@@ -308,7 +365,7 @@ describe("ActionMessage — transient retry (warning variant)", () => {
     setSessionState("STARTING");
     setSessionState("WAITING_FOR_INPUT");
 
-    expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull();
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
     expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
   });
 
@@ -370,7 +427,8 @@ describe("ActionMessage — running stall notice", () => {
     expect(notice.className).not.toContain("text-red");
     expect(notice.querySelector("svg")).toBeNull();
     const button = screen.getByTestId(STALL_CANCEL_TEST_ID);
-    expect(button.className).toContain("min-h-11");
+    expect(button.className).toContain("h-6");
+    expect(button.className).toContain("max-md:min-h-11");
     expect(button.className).not.toContain("w-full");
   });
 
@@ -449,8 +507,8 @@ describe("ActionMessage — missing PR branch", () => {
     expect(screen.getByText("codex/enhance-prompt-result-delivery")).toBeTruthy();
     const technicalDetails = screen.getByText(TECHNICAL_DETAILS).closest("details");
     expect(technicalDetails?.open).toBe(false);
-    expect(screen.getByTestId("missing-branch-archive-button").className).toContain("min-h-11");
-    expect(screen.getByTestId("missing-branch-delete-button").className).toContain("min-h-11");
+    expect(screen.getByTestId("missing-branch-archive-button").className).toContain("h-7");
+    expect(screen.getByTestId("missing-branch-delete-button").className).toContain("h-7");
 
     fireEvent.click(screen.getByText(TECHNICAL_DETAILS));
     expect(technicalDetails?.open).toBe(true);
@@ -517,7 +575,8 @@ describe("ActionMessage — provider quota recovery", () => {
     expect(screen.getByText(/kimi-k3/i)).toBeTruthy();
     const details = screen.getByText(TECHNICAL_DETAILS).closest("details");
     expect(details?.open).toBe(false);
-    expect(screen.getByTestId(RESUME_TEST_ID).className).toContain("min-h-11");
+    expect(screen.getByTestId(RESUME_TEST_ID).className).toContain("h-7");
+    expect(screen.getByTestId(RESUME_TEST_ID).className).toContain("max-md:h-11");
 
     fireEvent.click(screen.getByText(TECHNICAL_DETAILS));
     expect(details?.open).toBe(true);
@@ -636,7 +695,8 @@ describe("ActionMessage — remediation link", () => {
     expect(link.href).toBe(REMEDIATION_URL);
     expect(link.target).toBe("_blank");
     expect(link.rel).toBe("noopener noreferrer");
-    expect(link.className).toContain("min-h-11");
+    expect(link.className).toContain("h-7");
+    expect(link.className).toContain("max-md:h-11");
     // The sanitized message and collapsed details stay URL-free.
     expect(screen.queryByText(/opencode\.ai\/workspace/i)).toBeNull();
     expect(screen.getByTestId("provider-quota-recovery").textContent).toContain(QUOTA_OUTPUT);

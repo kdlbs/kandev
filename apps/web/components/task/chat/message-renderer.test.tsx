@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageRenderer } from "./message-renderer";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
+const REMOVED_PAYLOAD = "removed secret";
+
 const fallbackOpenFile = vi.hoisted(() => vi.fn());
 const useOpenFileAtLine = vi.hoisted(() =>
   vi.fn((onOpenFile: ((path: string) => void) | undefined) => (path: string) => onOpenFile?.(path)),
@@ -117,3 +119,35 @@ describe("MessageRenderer markdown file links", () => {
     expect(fallbackOpenFile).not.toHaveBeenCalled();
   });
 });
+
+it.each(["tool_read", "tool_edit", "tool_search", "tool_call"])(
+  "renders removed %s details without old payloads",
+  (type) => {
+    const view = render(
+      <MessageRenderer
+        comment={message({
+          type: type as Message["type"],
+          content: "Retained title",
+          metadata: {
+            status: "complete",
+            title: "Retained title",
+            payload_retention: { version: 1, removed_at: "2026-09-14T00:00:00Z" },
+            normalized: {
+              generic: { output: REMOVED_PAYLOAD },
+              read_file: { output: { content: REMOVED_PAYLOAD } },
+              modify_file: { mutations: [{ content: REMOVED_PAYLOAD }] },
+              code_search: { output: { files: [REMOVED_PAYLOAD] } },
+              http_request: { response: REMOVED_PAYLOAD },
+            },
+          },
+        })}
+        isTaskDescription={false}
+      />,
+    );
+    expect(view.getByText("Retained title")).toBeTruthy();
+    expect(view.getByText("Completed")).toBeTruthy();
+    expect(view.getByTestId("tool-payload-removed").textContent).toMatch(/Tool details removed on/);
+    expect(view.queryByText(REMOVED_PAYLOAD)).toBeNull();
+    view.unmount();
+  },
+);

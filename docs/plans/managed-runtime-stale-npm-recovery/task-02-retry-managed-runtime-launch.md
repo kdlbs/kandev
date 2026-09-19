@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-classify-and-build-recovery-command"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 02: Retry managed runtime launch

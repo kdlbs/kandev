@@ -1,6 +1,6 @@
 ---
-spec: docs/specs/native-kandev-cli/spec.md
-related_spec: docs/specs/integrations/github-authentication.md
+spec: docs/specs/cli/requirements/native-kandev-cli.md
+related_spec: docs/specs/integrations/requirements/github-authentication.md
 decision: docs/decisions/2026-07-31-system-service-user-continuity.md
 created: 2026-07-31
 status: complete

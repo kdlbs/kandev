@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,11 +10,51 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestDispatchInitialPromptReportsDeliveryFailure(t *testing.T) {
+	agentConfig, ok := newTestRegistry().Get("claude-acp")
+	if !ok {
+		t.Fatal("claude-acp test agent is not registered")
+	}
+	sm := NewSessionManager(logger.Default(), nil)
+	wantErr := "has no agentctl client"
+	failures := make(chan InitialPromptFailure, 1)
+	sm.SetInitialPromptFailureHandler(func(failure InitialPromptFailure) {
+		if failure.ExecutionID != "execution-initial-prompt" {
+			t.Errorf("execution ID = %q", failure.ExecutionID)
+		}
+		failures <- failure
+	})
+	execution := &AgentExecution{
+		ID:        "execution-initial-prompt",
+		TaskID:    "task-initial-prompt",
+		SessionID: "session-initial-prompt",
+	}
+
+	sm.dispatchInitialPrompt(
+		context.Background(),
+		execution,
+		agentConfig,
+		"deliver this prompt",
+		nil,
+		func(string) error { return errors.New("mark ready must not run") },
+	)
+
+	select {
+	case failure := <-failures:
+		if failure.Err == nil || !strings.Contains(failure.Err.Error(), wantErr) {
+			t.Fatalf("initial prompt error = %v, want %q", failure.Err, wantErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial prompt failure callback")
+	}
+}
 
 type testAttachmentReader struct{}
 

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/profile-duplicate.md
+spec: docs/specs/agents/requirements/profile-duplicate.md
 created: 2026-08-11
 status: complete
 ---

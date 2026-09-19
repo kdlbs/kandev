@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-sidebar-new-view-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-view-creation.md"
+spec: "../../specs/ui/requirements/sidebar-view-creation.md"
 ---
 
 # Task 03: Sidebar View Creation E2E
@@ -43,7 +43,7 @@ make typecheck test lint
 - `apps/web/e2e/pages/sidebar-filter-popover.ts`
 - `apps/web/e2e/tests/task/sidebar-filter.spec.ts`
 - `apps/web/e2e/tests/task/mobile-sidebar-views.spec.ts`
-- `docs/specs/ui/sidebar-view-creation.md`
+- `docs/specs/ui/requirements/sidebar-view-creation.md`
 - `docs/plans/sidebar-view-creation/plan.md`
 - `docs/plans/sidebar-view-creation/task-03-sidebar-view-e2e.md`
 

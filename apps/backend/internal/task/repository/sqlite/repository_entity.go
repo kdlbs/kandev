@@ -161,6 +161,7 @@ func (r *Repository) UpdateRepositoryWithSecretBindings(
 func (r *Repository) pruneRepositoryDependents(ctx context.Context, tx *sqlx.Tx, id string) error {
 	statements := []string{
 		`DELETE FROM repository_secret_bindings WHERE repository_id = ?`,
+		`DELETE FROM repository_branch_policies WHERE repository_id = ?`,
 		// A membership row pointing at a deleted repository would offer the user
 		// a repository they can no longer select. Repository sets keep existing
 		// with their remaining members.

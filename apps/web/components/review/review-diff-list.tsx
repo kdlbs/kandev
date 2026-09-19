@@ -10,6 +10,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
+import { ReviewFileComments } from "./review-file-comments";
 import type { DiffComment } from "@/lib/diff/types";
 import {
   diffSkipReasonLabel,
@@ -26,6 +27,7 @@ import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 const SCROLL_KEYS = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "]);
 
@@ -89,8 +91,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   // All in-memory state (selectedFile, reviewedFiles, staleFiles, fileRefs)
   // is keyed by `reviewFileKey(file)` so two files at the same path in
   // different repos (e.g. `kandev/README.md` + `lvc/README.md`) get
-  // distinct rows. Without this every multi-repo review with same-named
-  // files would mark them all reviewed when one is checked.
+  // distinct rows. Layer-qualified mixed changes use the same key helper so
+  // reviewing one facet does not mark the other facet reviewed.
   const selectedIndex = selectedFile
     ? files.findIndex((f) => reviewFileKey(f) === selectedFile)
     : -1;
@@ -115,7 +117,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
             const key = reviewFileKey(file);
             return (
               <FileDiffSection
-                key={key}
+                key={`${sessionId}:${key}`}
                 file={file}
                 fileKey={key}
                 isReviewed={reviewedFiles.has(key) && !staleFiles.has(key)}
@@ -124,6 +126,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 autoMarkOnScroll={autoMarkOnScroll}
                 wordWrap={wordWrap}
                 enableWalkthroughAnnotations={enableWalkthroughAnnotations}
+                hasStickyRepoHeader={showRepoHeaders}
                 isSelected={selectedFile === key}
                 forceLoad={
                   selectedIndex >= 0 &&
@@ -164,6 +167,7 @@ type FileDiffSectionProps = {
   autoMarkOnScroll: boolean;
   wordWrap: boolean;
   enableWalkthroughAnnotations: boolean;
+  hasStickyRepoHeader: boolean;
   isSelected?: boolean;
   forceLoad?: boolean;
   onToggleReviewed: (key: string, reviewed: boolean) => void;
@@ -433,7 +437,7 @@ function renderDiffContent(opts: {
             hideHeader
             expandUnchanged={expandUnchanged}
             onToggleExpandUnchanged={onToggleExpandUnchanged}
-            repo={file.repository_name}
+            repo={file.repository_name ?? ""}
           />
         </DiffErrorBoundary>
         {file.diff_skip_reason === "truncated" && (
@@ -454,14 +458,23 @@ function renderDiffContent(opts: {
   );
 }
 
-function useMarkdownPreview(file: ReviewFile) {
+function useMarkdownPreview(
+  file: ReviewFile,
+  onPreviewMarkdown?: FileDiffSectionProps["onPreviewMarkdown"],
+) {
   const [markdownPreview, setMarkdownPreview] = useState(false);
   const markdownPreviewContent = useMemo(() => extractReviewMarkdownPreview(file), [file]);
   const handleToggleMarkdownPreview = useCallback(() => setMarkdownPreview((v) => !v), []);
   useEffect(() => {
     if (markdownPreviewContent.fragments.length === 0) setMarkdownPreview(false);
   }, [markdownPreviewContent.fragments.length]);
-  return { markdownPreview, markdownPreviewContent, handleToggleMarkdownPreview };
+  const onToggleMarkdownPreview = getMarkdownPreviewToggle({
+    file,
+    fragments: markdownPreviewContent.fragments,
+    onPreviewMarkdown,
+    onTogglePreview: handleToggleMarkdownPreview,
+  });
+  return { markdownPreview, markdownPreviewContent, onToggleMarkdownPreview };
 }
 
 function useFileDiffDisplayControls(wordWrap: boolean) {
@@ -530,6 +543,23 @@ function useFileDiffActions({
   return { handleCheckboxChange, handleDiscard, handleRevertBlock, handleCommentRun };
 }
 
+function useFileCommentEditor(
+  file: ReviewFile,
+  sessionId: string,
+  setCollapsed: (value: boolean) => void,
+  suppressAutoMark: React.RefObject<boolean>,
+) {
+  const [creating, setCreating] = useState(false);
+  return {
+    openCommentFile: () => {
+      suppressAutoMark.current = true;
+      setCollapsed(false);
+      setCreating(true);
+    },
+    fileCommentsProps: { file, sessionId, creating, onClose: () => setCreating(false) },
+  };
+}
+
 function FileDiffSection({
   file,
   fileKey,
@@ -539,6 +569,7 @@ function FileDiffSection({
   autoMarkOnScroll,
   wordWrap,
   enableWalkthroughAnnotations,
+  hasStickyRepoHeader,
   isSelected,
   forceLoad,
   onToggleReviewed,
@@ -551,8 +582,16 @@ function FileDiffSection({
   externalLinkContext,
 }: FileDiffSectionProps) {
   const controls = useFileDiffDisplayControls(wordWrap);
-  const { markdownPreview, markdownPreviewContent, handleToggleMarkdownPreview } =
-    useMarkdownPreview(file);
+  const { openCommentFile, fileCommentsProps } = useFileCommentEditor(
+    file,
+    sessionId,
+    controls.setCollapsed,
+    suppressAutoMark,
+  );
+  const { markdownPreview, markdownPreviewContent, onToggleMarkdownPreview } = useMarkdownPreview(
+    file,
+    onPreviewMarkdown,
+  );
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
   // Force load when visible via intersection observer, or forceLoad is true
   const shouldRenderContent = isVisible || !!forceLoad;
@@ -576,15 +615,12 @@ function FileDiffSection({
     externalLinkContext.baseBranchByRepo,
     externalLinkContext.fallbackBaseBranch,
   );
-  const onToggleMarkdownPreview = getMarkdownPreviewToggle({
-    file,
-    fragments: markdownPreviewContent.fragments,
-    onPreviewMarkdown,
-    onTogglePreview: handleToggleMarkdownPreview,
-  });
 
   return (
-    <div ref={sectionRef} className="border-b border-border">
+    <div
+      ref={sectionRef}
+      className={cn("border-b border-border", hasStickyRepoHeader && "scroll-mt-8")}
+    >
       <div ref={scrollSentinelRef} className="h-0" />
       <ReviewDiffHeader
         file={file}
@@ -594,8 +630,10 @@ function FileDiffSection({
         collapsed={controls.collapsed}
         wordWrap={controls.effectiveWordWrap}
         expandUnchanged={controls.expandUnchanged}
+        hasStickyRepoHeader={hasStickyRepoHeader}
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
+        onCommentFile={openCommentFile}
         onOpenFile={onOpenFile}
         markdownPreview={!onPreviewMarkdown && markdownPreview}
         onToggleMarkdownPreview={onToggleMarkdownPreview}
@@ -605,6 +643,7 @@ function FileDiffSection({
         {...externalLinkContext}
       />
       <div ref={sentinelRef} />
+      {!controls.collapsed && <ReviewFileComments {...fileCommentsProps} />}
       {!controls.collapsed &&
         (markdownPreview ? (
           <ReviewMarkdownDiffPreviewContent preview={markdownPreviewContent} />

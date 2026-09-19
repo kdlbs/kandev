@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-build-resize-renderer"]
 plan: "plan.md"
-spec: "../../specs/ui/resizable-markdown-tables.md"
+spec: "../../specs/ui/requirements/resizable-markdown-tables.md"
 ---
 
 # Task 02: Prove Resize Interaction and Mobile Parity
@@ -61,7 +61,7 @@ may legitimately feed a defect back into Task 01 files.
 ## Inputs
 
 - Existing exact pnpm-table and wide-table fixtures in both wrapping suites
-- `docs/specs/ui/resizable-markdown-tables.md`, especially desktop interaction,
+- `docs/specs/ui/requirements/resizable-markdown-tables.md`, especially desktop interaction,
   local-scroll ownership, and mobile capability scenarios
 
 ## Output contract

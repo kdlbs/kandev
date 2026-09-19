@@ -10,7 +10,7 @@ depends_on:
   - "04-chinese-locale-e2e"
   - "05-localization-documentation"
 plan: "plan.md"
-spec: "../../specs/platform/i18n.md"
+spec: "../../specs/platform/requirements/i18n.md"
 ---
 
 # Task 06: Repository verification

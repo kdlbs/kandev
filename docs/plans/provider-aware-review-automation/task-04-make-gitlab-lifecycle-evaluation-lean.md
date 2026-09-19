@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/provider-aware-review-automation.md"
+spec: "../../specs/integrations/requirements/provider-aware-review-automation.md"
 ---
 
 # Task 04: Make GitLab lifecycle evaluation lean

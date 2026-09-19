@@ -3,13 +3,13 @@
 - Status: accepted
 - Date: 2026-07-17
 - Area: backend, protocol
-- Related: [docs/specs/plugins/spec.md](../specs/plugins/spec.md) ("Host data API"),
+- Related: [docs/specs/plugins/requirements/plugins.md](../specs/plugins/requirements/plugins.md) ("Host data API"),
   [docs/plans/plugins/GRPC-CONTRACT.md](../plans/plugins/GRPC-CONTRACT.md),
   [docs/plans/plugins/host-data-api/plan.md](../plans/plugins/host-data-api/plan.md)
 
 ## Context
 
-The plugin system (spec `docs/specs/plugins/spec.md`) gives plugins a
+The plugin system (spec `docs/specs/plugins/requirements/plugins.md`) gives plugins a
 capability-gated `Host` gRPC service — `GetState`/`SetState`/`DeleteState`/
 `ListState`/`RevealSecret`/`EmitEvent` — but **no sanctioned way to read or write
 kandev's own domain data** (tasks, sessions, workspaces, workflows, agent
@@ -102,6 +102,11 @@ Concretely:
      empty.
    - **Write provenance:** the server stamps `source = "plugin:<id>"` on created
      rows/comments; a plugin cannot set it.
+   - **API v1 compatibility:** DTO fields are additive-only. The read-side
+     `Task.labels` field shipped in v0.93.0 and remains at field 23 as deprecated
+     source/wire compatibility. New provider integrations keep their annotations
+     in plugin-owned task state and UI slot data; task label writes are not part
+     of the plugin write contract.
 
 ## Open decisions (recorded, with recommendation)
 
@@ -128,6 +133,9 @@ Concretely:
   carrot is sufficient.
 - The proto is a public contract: DTO fields are additive-only thereafter;
   removing or renaming a field is a breaking change requiring a new api_version.
+- Deprecated fields remain generated in API v1. In particular, `Task.labels`
+  stays readable for clients compiled against v0.93.0 even though new plugins
+  should not use it for provider-specific annotations.
 - A **new read-only per-session LOC aggregation must be added** at the service/
   repository layer. `internal/analytics/repository/sqlite/stats.go` aggregates git
   stats at workspace and per-repository granularity only; nothing computes
@@ -158,8 +166,9 @@ verbatim. Concretely:
   best-effort launches an agent through the orchestrator (a launch failure never
   fails the create, matching REST/MCP's async auto-start). `UpdateTask` exposes
   a **conservative field mask** — `title` / `description` / `state` /
-  `workflow_step_id`, each optional — deliberately smaller than the full REST
-  update surface.
+  `priority`, each optional — deliberately smaller than the full REST
+  update surface. `workflow_step_id` remains present for wire compatibility but
+  is rejected by Update; plugins must use `MoveTask` for workflow transitions.
 - **`SendMessage`** (capability `api_write:messages`) replaced the originally
   planned `CreateComment`: an office `TaskComment` is an office/dashboard
   construct, not a way to message the agent working a task. SendMessage delivers

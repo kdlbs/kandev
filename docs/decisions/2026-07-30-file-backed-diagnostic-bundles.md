@@ -1,8 +1,12 @@
 # ADR-2026-07-30-file-backed-diagnostic-bundles: File-backed diagnostic bundles
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-23; backend file retention amended by ADR-2026-08-22-preserve-newest-bounded-backend-logs)
 **Date:** 2026-07-30
 **Area:** backend, frontend, infra, protocol, workflow
+
+The 2026-08-22 amendment replaces the stop-at-256-MiB behavior with bounded
+size segments and one 256 MiB budget across retained backend logs. The original
+bundle, privacy, UTC-day, and maximum-age decisions remain accepted.
 
 ## Context
 
@@ -51,6 +55,14 @@ the first per-tab capture stream to claim a browser-profile installation ID
 owns that upload so interleaved tabs cannot mix snapshots. Local records are
 partitioned by authenticated Kandev identity so an account switch inside one
 browser profile cannot disclose the previous user's history.
+
+Browser retention totals live beside the entries in the same IndexedDB
+database. The entry count, serialized byte count, appends, age removals, and
+capacity evictions commit in one transaction. Transactions cover both the entry
+and metadata stores, so IndexedDB serializes competing writers across tabs.
+The schema upgrade scans existing entries once to initialize the totals. Normal
+writes inspect the appended batch, the expired prefix, and only the oldest rows
+that must be evicted. Each tab also serializes its staged write batches.
 
 Users download one clearly disclosed combined ZIP from System Logs. It contains
 separate `backend/` and `frontend/` directories plus `manifest.json`. Frontend
@@ -104,7 +116,7 @@ download flow because its content and permission boundary differ materially
 from the standard support bundle.
 
 The observable contract lives in
-[`docs/specs/platform/diagnostic-logging.md`](../specs/platform/diagnostic-logging.md).
+[`docs/specs/platform/requirements/diagnostic-logging.md`](../specs/platform/requirements/diagnostic-logging.md).
 
 ## Consequences
 
@@ -120,16 +132,21 @@ request/HTTP chunk response adds a short-lived capture protocol, and bundles
 need expiry and cleanup ownership. A combined ZIP may be partial, so consumers
 must inspect the manifest before assuming both sources are present.
 
+Transactional totals add one metadata record and a one-time schema-upgrade
+scan. They keep the entry and byte limits exact across tabs. If the totals are
+missing or invalid, one repair transaction rebuilds them before normal
+incremental maintenance resumes.
+
 Some lower-priority logs can be deliberately omitted during sustained resource
 pressure. The manifest exposes queue, persistence, and archive loss so support
 does not mistake a best-effort bundle for complete evidence. Diagnostic bundle
 requests can be temporarily busy or coalesced instead of competing with normal
 product activity.
 
-The fixed daily file bound limits worst-case disk growth but can omit later
-same-day evidence after sustained pressure. Count and byte limits reduce how
-quickly automatic browser reports consume that budget, while UTC rollover
-restores capacity without operator action.
+The aggregate backend-log budget limits worst-case disk growth while oldest
+closed segments are evicted first, so later evidence remains available during
+sustained pressure. Count and byte limits reduce how quickly automatic browser
+reports consume that budget, while UTC age cleanup removes stale evidence.
 
 Fixed byte/profile caps mean a very large retained backend file or a fifth
 browser profile may be represented only partially. Newest backend bytes are
@@ -185,6 +202,11 @@ backend custody of raw frames, at the cost of some historical completeness.
   tool payloads, file content, identities, and arbitrary configuration.
 - **Upload only the current 500-entry memory buffer.** Rejected because it
   cannot match the selected three-day diagnostic window across reloads.
+- **Scan every retained browser entry after each append batch.** Rejected
+  because work grows with retained history and can consume a renderer core
+  during active logging.
+- **Cache retention totals in each tab's memory.** Rejected because tabs can
+  commit stale totals and exceed shared browser-profile limits.
 - **Have the initiating frontend attach logs directly to the ZIP request.**
   Rejected in favor of a backend-requested capture protocol that also supports
   agent-triggered frontend bundles and multiple connected browser profiles.

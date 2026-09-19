@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/hide-disabled-profiles-nav.md"
+spec: "../../specs/agents/requirements/hide-disabled-profiles-nav.md"
 ---
 
 # Task 01: Hide-setting hook and settings-page toggle

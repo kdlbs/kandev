@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-reorder.md"
+spec: "../../specs/ui/requirements/message-queue-reorder.md"
 ---
 
 # Task 01: Backend repository reorder

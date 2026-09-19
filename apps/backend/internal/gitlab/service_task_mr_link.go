@@ -158,6 +158,11 @@ func bracketedHostname(hostname string) string {
 
 // AssociateExistingMRByURL validates a workspace-owned task/repository pair,
 // fetches the configured-host MR, and idempotently persists its association.
+// `repositoryID` is repositories.ID (or empty to auto-resolve the task's
+// single repository) — the same id space AssociatePRWithTask uses on the
+// GitHub side. A row id from task_repositories instead fails closed here
+// (ValidateTaskMRRepositoryIdentity / ResolveTaskMRRepository reject it)
+// rather than silently duplicating the association.
 func (s *Service) AssociateExistingMRByURL(
 	ctx context.Context,
 	workspaceID, taskID, repositoryID, mrURL string,
@@ -310,6 +315,14 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
 		return err
 	}
+	if s.eventBus != nil && association != nil {
+		event := bus.NewEvent(events.GitLabTaskMRDeleted, eventSource, &TaskMRDeletedEvent{
+			WorkspaceID: workspaceID, TaskID: association.TaskID, AssociationID: association.ID,
+		})
+		if err := s.eventBus.Publish(ctx, events.GitLabTaskMRDeleted, event); err != nil {
+			s.logger.Debug("failed to publish GitLab task MR deletion event", zap.Error(err))
+		}
+	}
 	return nil
 }
 
@@ -319,7 +332,7 @@ func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MR
 	return &TaskMR{
 		TaskID: taskID, RepositoryID: repositoryID, Host: host,
 		ProjectPath: projectPath, MRIID: mr.IID, MRURL: mr.WebURL, MRTitle: mr.Title,
-		HeadBranch: mr.HeadBranch, BaseBranch: mr.BaseBranch, AuthorUsername: mr.AuthorUsername,
+		HeadBranch: mr.HeadBranch, HeadSHA: mr.HeadSHA, BaseBranch: mr.BaseBranch, BaseSHA: mr.BaseSHA, AuthorUsername: mr.AuthorUsername,
 		State: mr.State, ApprovalState: status.ApprovalState, PipelineState: status.PipelineState,
 		MergeStatus: status.MergeStatus, Draft: mr.Draft, ApprovalCount: status.ApprovalCount,
 		RequiredApprovals: status.RequiredApprovals, PipelineJobsTotal: status.PipelineJobsTotal,
@@ -357,6 +370,18 @@ func (e *TaskMRUpdatedEvent) GetWorkspaceID() string {
 	}
 	return e.WorkspaceID
 }
+
+// TaskMRDeletedEvent identifies one task-MR association removed from active
+// task surfaces. The upstream merge request remains unchanged.
+type TaskMRDeletedEvent struct {
+	WorkspaceID   string `json:"workspace_id"`
+	TaskID        string `json:"task_id"`
+	AssociationID string `json:"association_id"`
+}
+
+// GetWorkspaceID lets the websocket broadcaster route the deletion to the
+// owning workspace.
+func (e TaskMRDeletedEvent) GetWorkspaceID() string { return e.WorkspaceID }
 
 // publishTaskMRLifecycleSyncEvent publishes a TaskMRUpdatedEvent after the
 // poller's lifecycle sync pass refreshes a linked MR (AC22). Unlike

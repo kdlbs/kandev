@@ -1,0 +1,2439 @@
+[
+  {
+    "browser": "149.0.7827.55",
+    "autoHideComposer": false,
+    "zoom": 1,
+    "zoomLabel": "Real browser zoom via chrome.tabs.setZoom; 1366x768 content area at 100%",
+    "before": {
+      "wheelEvents": [],
+      "viewport": {
+        "innerWidth": 1366,
+        "innerHeight": 768,
+        "dpr": 1,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 332,
+          "y": 52,
+          "width": 1022,
+          "height": 346,
+          "bottom": 398,
+          "clientHeight": 344,
+          "scrollHeight": 344,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 278.5,
+          "bottom": 397,
+          "clientHeight": 279,
+          "scrollHeight": 279,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 80,
+          "bottom": 198.5,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 126,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333,
+          "y": 198.5,
+          "width": 1020,
+          "height": 198.5,
+          "bottom": 397,
+          "clientHeight": 199,
+          "scrollHeight": 541,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333,
+          "y": 199.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 583.5,
+          "clientHeight": 384,
+          "scrollHeight": 384,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "384px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333,
+          "y": 199.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 583.5,
+          "clientHeight": 384,
+          "scrollHeight": 475,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333,
+          "y": 583.5,
+          "width": 1020,
+          "height": 156,
+          "bottom": 739.5,
+          "clientHeight": 156,
+          "scrollHeight": 156,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353,
+          "y": 384.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 441.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353,
+          "y": 447.25,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 503.75,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353,
+          "y": 509.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 566.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1271.03125,
+          "y": 636.25,
+          "width": 61.96875,
+          "height": 26,
+          "bottom": 662.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1186.421875,
+          "y": 209.5,
+          "width": 82.578125,
+          "height": 24,
+          "bottom": 233.5,
+          "hit": true
+        }
+      ]
+    },
+    "afterWheel": {
+      "wheelEvents": [
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        },
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        },
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        }
+      ],
+      "viewport": {
+        "innerWidth": 1366,
+        "innerHeight": 768,
+        "dpr": 1,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 332,
+          "y": 52,
+          "width": 1022,
+          "height": 346,
+          "bottom": 398,
+          "clientHeight": 344,
+          "scrollHeight": 344,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 278.5,
+          "bottom": 397,
+          "clientHeight": 279,
+          "scrollHeight": 279,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 80,
+          "bottom": 198.5,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 126,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333,
+          "y": 198.5,
+          "width": 1020,
+          "height": 198.5,
+          "bottom": 397,
+          "clientHeight": 199,
+          "scrollHeight": 541,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333,
+          "y": 199.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 583.5,
+          "clientHeight": 384,
+          "scrollHeight": 384,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "384px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333,
+          "y": 199.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 583.5,
+          "clientHeight": 384,
+          "scrollHeight": 475,
+          "scrollTop": 90,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333,
+          "y": 583.5,
+          "width": 1020,
+          "height": 156,
+          "bottom": 739.5,
+          "clientHeight": 156,
+          "scrollHeight": 156,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353,
+          "y": 294.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 351.25,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353,
+          "y": 357.25,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 413.75,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353,
+          "y": 419.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 476.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1271.03125,
+          "y": 546.25,
+          "width": 61.96875,
+          "height": 26,
+          "bottom": 572.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1186.421875,
+          "y": 119.5,
+          "width": 82.578125,
+          "height": 24,
+          "bottom": 143.5,
+          "hit": false
+        }
+      ]
+    },
+    "afterKeyboard": {
+      "wheelEvents": [
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        },
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        },
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        }
+      ],
+      "viewport": {
+        "innerWidth": 1366,
+        "innerHeight": 768,
+        "dpr": 1,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 332,
+          "y": 52,
+          "width": 1022,
+          "height": 346,
+          "bottom": 398,
+          "clientHeight": 344,
+          "scrollHeight": 344,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 278.5,
+          "bottom": 397,
+          "clientHeight": 279,
+          "scrollHeight": 279,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 80,
+          "bottom": 198.5,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 126,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333,
+          "y": 198.5,
+          "width": 1020,
+          "height": 198.5,
+          "bottom": 397,
+          "clientHeight": 199,
+          "scrollHeight": 541,
+          "scrollTop": 306,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333,
+          "y": -106.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 277.5,
+          "clientHeight": 384,
+          "scrollHeight": 384,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "384px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333,
+          "y": -106.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 277.5,
+          "clientHeight": 384,
+          "scrollHeight": 475,
+          "scrollTop": 91,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333,
+          "y": 277.5,
+          "width": 1020,
+          "height": 156,
+          "bottom": 433.5,
+          "clientHeight": 156,
+          "scrollHeight": 156,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353,
+          "y": -12.25,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 44.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353,
+          "y": 50.25,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 106.75,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353,
+          "y": 112.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 169.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1271.03125,
+          "y": 239.25,
+          "width": 61.96875,
+          "height": 26,
+          "bottom": 265.25,
+          "hit": true
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1186.421875,
+          "y": -187.5,
+          "width": 82.578125,
+          "height": 24,
+          "bottom": -163.5,
+          "hit": false
+        }
+      ]
+    },
+    "focusTrail": [
+      {
+        "text": "2",
+        "id": "clarification-step"
+      },
+      {
+        "text": "3",
+        "id": "clarification-step"
+      },
+      {
+        "text": "Submit",
+        "id": "clarification-submit-shortcut"
+      },
+      {
+        "text": "",
+        "id": "clarification-skip"
+      },
+      {
+        "text": "",
+        "id": "clarification-collapse-toggle"
+      },
+      {
+        "text": "1PostgreSQLRelational database with strong consistency",
+        "id": "clarification-option"
+      },
+      {
+        "text": "2MongoDBDocument database for flexible schemas",
+        "id": "clarification-option"
+      },
+      {
+        "text": "3SQLiteEmbedded database for simplicity",
+        "id": "clarification-option"
+      },
+      {
+        "text": "",
+        "id": "clarification-input"
+      },
+      {
+        "text": "Next",
+        "id": "clarification-next"
+      },
+      {
+        "text": "",
+        "id": "auto-scroll-toggle-button"
+      },
+      {
+        "text": "",
+        "id": "scroll-to-last-prompt-button"
+      },
+      {
+        "text": "",
+        "id": "share-task-button"
+      },
+      {
+        "text": "",
+        "id": "chat-input-editor"
+      }
+    ]
+  },
+  {
+    "browser": "149.0.7827.55",
+    "autoHideComposer": false,
+    "zoom": 0.9,
+    "zoomLabel": "Real browser zoom via chrome.tabs.setZoom; 1366x768 content area at 100%",
+    "before": {
+      "wheelEvents": [],
+      "viewport": {
+        "innerWidth": 1517,
+        "innerHeight": 853,
+        "dpr": 0.8999999761581421,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 331.9965515136719,
+          "y": 51.99652862548828,
+          "width": 1173.7847900390625,
+          "height": 388.6632080078125,
+          "bottom": 440.6597366333008,
+          "clientHeight": 386,
+          "scrollHeight": 386,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 320.8680725097656,
+          "bottom": 439.5486373901367,
+          "clientHeight": 321,
+          "scrollHeight": 321,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 80,
+          "bottom": 198.6805648803711,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 125.55555725097656,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333.107666015625,
+          "y": 198.68057250976562,
+          "width": 1171.5625,
+          "height": 240.86807250976562,
+          "bottom": 439.54864501953125,
+          "clientHeight": 241,
+          "scrollHeight": 584,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333.107666015625,
+          "y": 199.7916717529297,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 626.4583587646484,
+          "clientHeight": 427,
+          "scrollHeight": 427,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "426.667px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333.107666015625,
+          "y": 199.7916717529297,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 626.4583587646484,
+          "clientHeight": 427,
+          "scrollHeight": 475,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333.107666015625,
+          "y": 626.4583740234375,
+          "width": 1171.5625,
+          "height": 156.18055725097656,
+          "bottom": 782.6389312744141,
+          "clientHeight": 156,
+          "scrollHeight": 156,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353.0903015136719,
+          "y": 384.94793701171875,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 441.63196563720703,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353.0903015136719,
+          "y": 447.6215515136719,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 504.30558013916016,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353.0903015136719,
+          "y": 510.295166015625,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 566.9791946411133,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1422.5869140625,
+          "y": 636.9618530273438,
+          "width": 62.1006965637207,
+          "height": 26.197917938232422,
+          "bottom": 663.1597709655762,
+          "hit": false
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1338.24658203125,
+          "y": 209.7916717529297,
+          "width": 82.4826431274414,
+          "height": 23.97569465637207,
+          "bottom": 233.76736640930176,
+          "hit": true
+        }
+      ]
+    },
+    "afterWheel": {
+      "wheelEvents": [
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        },
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        },
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        }
+      ],
+      "viewport": {
+        "innerWidth": 1517,
+        "innerHeight": 853,
+        "dpr": 0.8999999761581421,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 331.9965515136719,
+          "y": 51.99652862548828,
+          "width": 1173.7847900390625,
+          "height": 388.6632080078125,
+          "bottom": 440.6597366333008,
+          "clientHeight": 386,
+          "scrollHeight": 386,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 320.8680725097656,
+          "bottom": 439.5486373901367,
+          "clientHeight": 321,
+          "scrollHeight": 321,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 80,
+          "bottom": 198.6805648803711,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 125.55555725097656,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333.107666015625,
+          "y": 198.68057250976562,
+          "width": 1171.5625,
+          "height": 240.86807250976562,
+          "bottom": 439.54864501953125,
+          "clientHeight": 241,
+          "scrollHeight": 584,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333.107666015625,
+          "y": 199.7916717529297,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 626.4583587646484,
+          "clientHeight": 427,
+          "scrollHeight": 427,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "426.667px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333.107666015625,
+          "y": 199.7916717529297,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 626.4583587646484,
+          "clientHeight": 427,
+          "scrollHeight": 475,
+          "scrollTop": 48.88888931274414,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333.107666015625,
+          "y": 626.4583740234375,
+          "width": 1171.5625,
+          "height": 156.18055725097656,
+          "bottom": 782.6389312744141,
+          "clientHeight": 156,
+          "scrollHeight": 156,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353.0903015136719,
+          "y": 336.0590515136719,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 392.74308013916016,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353.0903015136719,
+          "y": 398.732666015625,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 455.4166946411133,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353.0903015136719,
+          "y": 461.4062805175781,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 518.0903091430664,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1422.5869140625,
+          "y": 588.0729370117188,
+          "width": 62.1006965637207,
+          "height": 26.197917938232422,
+          "bottom": 614.2708549499512,
+          "hit": false
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1338.24658203125,
+          "y": 160.9027862548828,
+          "width": 82.4826431274414,
+          "height": 23.97569465637207,
+          "bottom": 184.87848091125488,
+          "hit": false
+        }
+      ]
+    },
+    "afterKeyboard": {
+      "wheelEvents": [
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        },
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        },
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        }
+      ],
+      "viewport": {
+        "innerWidth": 1517,
+        "innerHeight": 853,
+        "dpr": 0.8999999761581421,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 331.9965515136719,
+          "y": 51.99652862548828,
+          "width": 1173.7847900390625,
+          "height": 388.6632080078125,
+          "bottom": 440.6597366333008,
+          "clientHeight": 386,
+          "scrollHeight": 386,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 320.8680725097656,
+          "bottom": 439.5486373901367,
+          "clientHeight": 321,
+          "scrollHeight": 321,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 80,
+          "bottom": 198.6805648803711,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 125.55555725097656,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333.107666015625,
+          "y": 198.68057250976562,
+          "width": 1171.5625,
+          "height": 240.86807250976562,
+          "bottom": 439.54864501953125,
+          "clientHeight": 241,
+          "scrollHeight": 584,
+          "scrollTop": 327.7778015136719,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333.107666015625,
+          "y": -127.98611450195312,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 298.6805725097656,
+          "clientHeight": 427,
+          "scrollHeight": 427,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "426.667px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333.107666015625,
+          "y": -127.98611450195312,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 298.6805725097656,
+          "clientHeight": 427,
+          "scrollHeight": 475,
+          "scrollTop": 48.88888931274414,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333.107666015625,
+          "y": 298.6805725097656,
+          "width": 1171.5625,
+          "height": 156.18055725097656,
+          "bottom": 454.8611297607422,
+          "clientHeight": 156,
+          "scrollHeight": 156,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353.0903015136719,
+          "y": 8.28125,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 64.96527862548828,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353.0903015136719,
+          "y": 70.95486450195312,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 127.6388931274414,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353.0903015136719,
+          "y": 133.62847900390625,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 190.31250762939453,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1422.5869140625,
+          "y": 260.295166015625,
+          "width": 62.1006965637207,
+          "height": 26.197917938232422,
+          "bottom": 286.4930839538574,
+          "hit": true
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1338.24658203125,
+          "y": -166.87501525878906,
+          "width": 82.4826431274414,
+          "height": 23.97569465637207,
+          "bottom": -142.899320602417,
+          "hit": false
+        }
+      ]
+    },
+    "focusTrail": [
+      {
+        "text": "2",
+        "id": "clarification-step"
+      },
+      {
+        "text": "3",
+        "id": "clarification-step"
+      },
+      {
+        "text": "Submit",
+        "id": "clarification-submit-shortcut"
+      },
+      {
+        "text": "",
+        "id": "clarification-skip"
+      },
+      {
+        "text": "",
+        "id": "clarification-collapse-toggle"
+      },
+      {
+        "text": "1PostgreSQLRelational database with strong consistency",
+        "id": "clarification-option"
+      },
+      {
+        "text": "2MongoDBDocument database for flexible schemas",
+        "id": "clarification-option"
+      },
+      {
+        "text": "3SQLiteEmbedded database for simplicity",
+        "id": "clarification-option"
+      },
+      {
+        "text": "",
+        "id": "clarification-input"
+      },
+      {
+        "text": "Next",
+        "id": "clarification-next"
+      },
+      {
+        "text": "",
+        "id": "auto-scroll-toggle-button"
+      },
+      {
+        "text": "",
+        "id": "scroll-to-last-prompt-button"
+      },
+      {
+        "text": "",
+        "id": "share-task-button"
+      },
+      {
+        "text": "",
+        "id": "chat-input-editor"
+      }
+    ]
+  },
+  {
+    "browser": "149.0.7827.55",
+    "autoHideComposer": true,
+    "zoom": 1,
+    "zoomLabel": "Real browser zoom via chrome.tabs.setZoom; 1366x768 content area at 100%",
+    "before": {
+      "wheelEvents": [],
+      "viewport": {
+        "innerWidth": 1366,
+        "innerHeight": 768,
+        "dpr": 1,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 332,
+          "y": 52,
+          "width": 1022,
+          "height": 346,
+          "bottom": 398,
+          "clientHeight": 344,
+          "scrollHeight": 344,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 278.5,
+          "bottom": 397,
+          "clientHeight": 279,
+          "scrollHeight": 279,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 80,
+          "bottom": 198.5,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 126,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333,
+          "y": 198.5,
+          "width": 1020,
+          "height": 198.5,
+          "bottom": 397,
+          "clientHeight": 199,
+          "scrollHeight": 573,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333,
+          "y": 199.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 583.5,
+          "clientHeight": 384,
+          "scrollHeight": 384,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "384px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333,
+          "y": 199.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 583.5,
+          "clientHeight": 384,
+          "scrollHeight": 475,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333,
+          "y": 583.5,
+          "width": 1020,
+          "height": 188,
+          "bottom": 771.5,
+          "clientHeight": 188,
+          "scrollHeight": 188,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353,
+          "y": 384.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 441.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353,
+          "y": 447.25,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 503.75,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353,
+          "y": 509.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 566.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1271.03125,
+          "y": 636.25,
+          "width": 61.96875,
+          "height": 26,
+          "bottom": 662.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1186.421875,
+          "y": 209.5,
+          "width": 82.578125,
+          "height": 24,
+          "bottom": 233.5,
+          "hit": true
+        }
+      ]
+    },
+    "afterWheel": {
+      "wheelEvents": [
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        },
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        },
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        }
+      ],
+      "viewport": {
+        "innerWidth": 1366,
+        "innerHeight": 768,
+        "dpr": 1,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 332,
+          "y": 52,
+          "width": 1022,
+          "height": 346,
+          "bottom": 398,
+          "clientHeight": 344,
+          "scrollHeight": 344,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 278.5,
+          "bottom": 397,
+          "clientHeight": 279,
+          "scrollHeight": 279,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 80,
+          "bottom": 198.5,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 126,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333,
+          "y": 198.5,
+          "width": 1020,
+          "height": 198.5,
+          "bottom": 397,
+          "clientHeight": 199,
+          "scrollHeight": 573,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333,
+          "y": 199.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 583.5,
+          "clientHeight": 384,
+          "scrollHeight": 384,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "384px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333,
+          "y": 199.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 583.5,
+          "clientHeight": 384,
+          "scrollHeight": 475,
+          "scrollTop": 90,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333,
+          "y": 583.5,
+          "width": 1020,
+          "height": 188,
+          "bottom": 771.5,
+          "clientHeight": 188,
+          "scrollHeight": 188,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353,
+          "y": 294.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 351.25,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353,
+          "y": 357.25,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 413.75,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353,
+          "y": 419.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 476.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1271.03125,
+          "y": 546.25,
+          "width": 61.96875,
+          "height": 26,
+          "bottom": 572.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1186.421875,
+          "y": 119.5,
+          "width": 82.578125,
+          "height": 24,
+          "bottom": 143.5,
+          "hit": false
+        }
+      ]
+    },
+    "afterKeyboard": {
+      "wheelEvents": [
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        },
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        },
+        {
+          "x": 843,
+          "y": 268,
+          "deltaY": 900,
+          "target": "clarification-question-card"
+        }
+      ],
+      "viewport": {
+        "innerWidth": 1366,
+        "innerHeight": 768,
+        "dpr": 1,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 332,
+          "y": 52,
+          "width": 1022,
+          "height": 346,
+          "bottom": 398,
+          "clientHeight": 344,
+          "scrollHeight": 344,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 278.5,
+          "bottom": 397,
+          "clientHeight": 279,
+          "scrollHeight": 279,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333,
+          "y": 118.5,
+          "width": 1020,
+          "height": 80,
+          "bottom": 198.5,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 126,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333,
+          "y": 198.5,
+          "width": 1020,
+          "height": 198.5,
+          "bottom": 397,
+          "clientHeight": 199,
+          "scrollHeight": 573,
+          "scrollTop": 306,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333,
+          "y": -106.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 277.5,
+          "clientHeight": 384,
+          "scrollHeight": 384,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "384px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333,
+          "y": -106.5,
+          "width": 1020,
+          "height": 384,
+          "bottom": 277.5,
+          "clientHeight": 384,
+          "scrollHeight": 475,
+          "scrollTop": 91,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333,
+          "y": 277.5,
+          "width": 1020,
+          "height": 188,
+          "bottom": 465.5,
+          "clientHeight": 188,
+          "scrollHeight": 188,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353,
+          "y": -12.25,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 44.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353,
+          "y": 50.25,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 106.75,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353,
+          "y": 112.75,
+          "width": 980,
+          "height": 56.5,
+          "bottom": 169.25,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1271.03125,
+          "y": 239.25,
+          "width": 61.96875,
+          "height": 26,
+          "bottom": 265.25,
+          "hit": true
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1186.421875,
+          "y": -187.5,
+          "width": 82.578125,
+          "height": 24,
+          "bottom": -163.5,
+          "hit": false
+        }
+      ]
+    },
+    "focusTrail": [
+      {
+        "text": "2",
+        "id": "clarification-step"
+      },
+      {
+        "text": "3",
+        "id": "clarification-step"
+      },
+      {
+        "text": "Submit",
+        "id": "clarification-submit-shortcut"
+      },
+      {
+        "text": "",
+        "id": "clarification-skip"
+      },
+      {
+        "text": "",
+        "id": "clarification-collapse-toggle"
+      },
+      {
+        "text": "1PostgreSQLRelational database with strong consistency",
+        "id": "clarification-option"
+      },
+      {
+        "text": "2MongoDBDocument database for flexible schemas",
+        "id": "clarification-option"
+      },
+      {
+        "text": "3SQLiteEmbedded database for simplicity",
+        "id": "clarification-option"
+      },
+      {
+        "text": "",
+        "id": "clarification-input"
+      },
+      {
+        "text": "Next",
+        "id": "clarification-next"
+      },
+      {
+        "text": "",
+        "id": "auto-scroll-toggle-button"
+      },
+      {
+        "text": "",
+        "id": "scroll-to-last-prompt-button"
+      },
+      {
+        "text": "",
+        "id": "share-task-button"
+      },
+      {
+        "text": "",
+        "id": "chat-input-editor"
+      }
+    ]
+  },
+  {
+    "browser": "149.0.7827.55",
+    "autoHideComposer": true,
+    "zoom": 0.9,
+    "zoomLabel": "Real browser zoom via chrome.tabs.setZoom; 1366x768 content area at 100%",
+    "before": {
+      "wheelEvents": [],
+      "viewport": {
+        "innerWidth": 1517,
+        "innerHeight": 853,
+        "dpr": 0.8999999761581421,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 331.9965515136719,
+          "y": 51.99652862548828,
+          "width": 1173.7847900390625,
+          "height": 388.6632080078125,
+          "bottom": 440.6597366333008,
+          "clientHeight": 386,
+          "scrollHeight": 386,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 320.8680725097656,
+          "bottom": 439.5486373901367,
+          "clientHeight": 321,
+          "scrollHeight": 321,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 80,
+          "bottom": 198.6805648803711,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 125.55555725097656,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333.107666015625,
+          "y": 198.68057250976562,
+          "width": 1171.5625,
+          "height": 240.86807250976562,
+          "bottom": 439.54864501953125,
+          "clientHeight": 241,
+          "scrollHeight": 616,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333.107666015625,
+          "y": 199.7916717529297,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 626.4583587646484,
+          "clientHeight": 427,
+          "scrollHeight": 427,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "426.667px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333.107666015625,
+          "y": 199.7916717529297,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 626.4583587646484,
+          "clientHeight": 427,
+          "scrollHeight": 475,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333.107666015625,
+          "y": 626.4583740234375,
+          "width": 1171.5625,
+          "height": 188.15972900390625,
+          "bottom": 814.6181030273438,
+          "clientHeight": 188,
+          "scrollHeight": 188,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353.0903015136719,
+          "y": 384.94793701171875,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 441.63196563720703,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353.0903015136719,
+          "y": 447.6215515136719,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 504.30558013916016,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353.0903015136719,
+          "y": 510.295166015625,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 566.9791946411133,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1422.5869140625,
+          "y": 636.9618530273438,
+          "width": 62.1006965637207,
+          "height": 26.197917938232422,
+          "bottom": 663.1597709655762,
+          "hit": false
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1338.24658203125,
+          "y": 209.7916717529297,
+          "width": 82.4826431274414,
+          "height": 23.97569465637207,
+          "bottom": 233.76736640930176,
+          "hit": true
+        }
+      ]
+    },
+    "afterWheel": {
+      "wheelEvents": [
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        },
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        },
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        }
+      ],
+      "viewport": {
+        "innerWidth": 1517,
+        "innerHeight": 853,
+        "dpr": 0.8999999761581421,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 331.9965515136719,
+          "y": 51.99652862548828,
+          "width": 1173.7847900390625,
+          "height": 388.6632080078125,
+          "bottom": 440.6597366333008,
+          "clientHeight": 386,
+          "scrollHeight": 386,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 320.8680725097656,
+          "bottom": 439.5486373901367,
+          "clientHeight": 321,
+          "scrollHeight": 321,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 80,
+          "bottom": 198.6805648803711,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 125.55555725097656,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333.107666015625,
+          "y": 198.68057250976562,
+          "width": 1171.5625,
+          "height": 240.86807250976562,
+          "bottom": 439.54864501953125,
+          "clientHeight": 241,
+          "scrollHeight": 616,
+          "scrollTop": 0,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333.107666015625,
+          "y": 199.7916717529297,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 626.4583587646484,
+          "clientHeight": 427,
+          "scrollHeight": 427,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "426.667px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333.107666015625,
+          "y": 199.7916717529297,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 626.4583587646484,
+          "clientHeight": 427,
+          "scrollHeight": 475,
+          "scrollTop": 48.88888931274414,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333.107666015625,
+          "y": 626.4583740234375,
+          "width": 1171.5625,
+          "height": 188.15972900390625,
+          "bottom": 814.6181030273438,
+          "clientHeight": 188,
+          "scrollHeight": 188,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353.0903015136719,
+          "y": 336.0590515136719,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 392.74308013916016,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353.0903015136719,
+          "y": 398.732666015625,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 455.4166946411133,
+          "hit": true
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353.0903015136719,
+          "y": 461.4062805175781,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 518.0903091430664,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1422.5869140625,
+          "y": 588.0729370117188,
+          "width": 62.1006965637207,
+          "height": 26.197917938232422,
+          "bottom": 614.2708549499512,
+          "hit": false
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1338.24658203125,
+          "y": 160.9027862548828,
+          "width": 82.4826431274414,
+          "height": 23.97569465637207,
+          "bottom": 184.87848091125488,
+          "hit": false
+        }
+      ]
+    },
+    "afterKeyboard": {
+      "wheelEvents": [
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        },
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        },
+        {
+          "x": 918,
+          "y": 268,
+          "deltaY": 1000.0000264909539,
+          "target": "clarification-overlay"
+        }
+      ],
+      "viewport": {
+        "innerWidth": 1517,
+        "innerHeight": 853,
+        "dpr": 0.8999999761581421,
+        "visualScale": 1
+      },
+      "layout": "grid",
+      "nodes": [
+        {
+          "id": "thread-column-10344556-5ab4-4b1a-bbdc-eb43a65ef72d",
+          "x": 331.9965515136719,
+          "y": 51.99652862548828,
+          "width": 1173.7847900390625,
+          "height": 388.6632080078125,
+          "bottom": 440.6597366333008,
+          "clientHeight": 386,
+          "scrollHeight": 386,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "session-chat",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 320.8680725097656,
+          "bottom": 439.5486373901367,
+          "clientHeight": 321,
+          "scrollHeight": 321,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "h-full overflow-y-auto overflow-x-hidden relative chat-message-list p-0 [overflow-anchor:auto]",
+          "x": 333.107666015625,
+          "y": 118.6805648803711,
+          "width": 1171.5625,
+          "height": 80,
+          "bottom": 198.6805648803711,
+          "clientHeight": 80,
+          "scrollHeight": 206,
+          "scrollTop": 125.55555725097656,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "thread-footer-allocation",
+          "x": 333.107666015625,
+          "y": 198.68057250976562,
+          "width": 1171.5625,
+          "height": 240.86807250976562,
+          "bottom": 439.54864501953125,
+          "clientHeight": 241,
+          "scrollHeight": 616,
+          "scrollTop": 327.7778015136719,
+          "overflowY": "auto",
+          "overscrollY": "contain",
+          "maxHeight": "calc(100% - 80px)",
+          "minHeight": "0px"
+        },
+        {
+          "id": "clarification-overlay-container",
+          "x": 333.107666015625,
+          "y": -127.98611450195312,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 298.6805725097656,
+          "clientHeight": 427,
+          "scrollHeight": 427,
+          "scrollTop": 0,
+          "overflowY": "hidden",
+          "overscrollY": "contain",
+          "maxHeight": "426.667px",
+          "minHeight": "120px"
+        },
+        {
+          "id": "clarification-scroll-region",
+          "x": 333.107666015625,
+          "y": -127.98611450195312,
+          "width": 1171.5625,
+          "height": 426.66668701171875,
+          "bottom": 298.6805725097656,
+          "clientHeight": 427,
+          "scrollHeight": 475,
+          "scrollTop": 48.88888931274414,
+          "overflowY": "auto",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        },
+        {
+          "id": "chat-input-area",
+          "x": 333.107666015625,
+          "y": 298.6805725097656,
+          "width": 1171.5625,
+          "height": 188.15972900390625,
+          "bottom": 486.8403015136719,
+          "clientHeight": 188,
+          "scrollHeight": 188,
+          "scrollTop": 0,
+          "overflowY": "visible",
+          "overscrollY": "auto",
+          "maxHeight": "none",
+          "minHeight": "0px"
+        }
+      ],
+      "targets": [
+        {
+          "id": "clarification-option",
+          "text": "1PostgreSQLRelational database with strong consistency",
+          "x": 353.0903015136719,
+          "y": 8.28125,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 64.96527862548828,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "2MongoDBDocument database for flexible schemas",
+          "x": 353.0903015136719,
+          "y": 70.95486450195312,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 127.6388931274414,
+          "hit": false
+        },
+        {
+          "id": "clarification-option",
+          "text": "3SQLiteEmbedded database for simplicity",
+          "x": 353.0903015136719,
+          "y": 133.62847900390625,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "bottom": 190.31250762939453,
+          "hit": false
+        },
+        {
+          "id": "clarification-next",
+          "text": "Next",
+          "x": 1422.5869140625,
+          "y": 260.295166015625,
+          "width": 62.1006965637207,
+          "height": 26.197917938232422,
+          "bottom": 286.4930839538574,
+          "hit": true
+        },
+        {
+          "id": "clarification-submit",
+          "text": "Submit",
+          "x": 1338.24658203125,
+          "y": -166.87501525878906,
+          "width": 82.4826431274414,
+          "height": 23.97569465637207,
+          "bottom": -142.899320602417,
+          "hit": false
+        }
+      ]
+    },
+    "focusTrail": [
+      {
+        "text": "2",
+        "id": "clarification-step"
+      },
+      {
+        "text": "3",
+        "id": "clarification-step"
+      },
+      {
+        "text": "Submit",
+        "id": "clarification-submit-shortcut"
+      },
+      {
+        "text": "",
+        "id": "clarification-skip"
+      },
+      {
+        "text": "",
+        "id": "clarification-collapse-toggle"
+      },
+      {
+        "text": "1PostgreSQLRelational database with strong consistency",
+        "id": "clarification-option"
+      },
+      {
+        "text": "2MongoDBDocument database for flexible schemas",
+        "id": "clarification-option"
+      },
+      {
+        "text": "3SQLiteEmbedded database for simplicity",
+        "id": "clarification-option"
+      },
+      {
+        "text": "",
+        "id": "clarification-input"
+      },
+      {
+        "text": "Next",
+        "id": "clarification-next"
+      },
+      {
+        "text": "",
+        "id": "auto-scroll-toggle-button"
+      },
+      {
+        "text": "",
+        "id": "scroll-to-last-prompt-button"
+      },
+      {
+        "text": "",
+        "id": "share-task-button"
+      },
+      {
+        "text": "",
+        "id": "chat-input-editor"
+      }
+    ],
+    "screenshot": "grid-90-before.png"
+  }
+]

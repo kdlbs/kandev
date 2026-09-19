@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/routing.md"
+spec: "../../specs/office/requirements/routing.md"
 ---
 
 # Task 01: Execution-profile routing contract

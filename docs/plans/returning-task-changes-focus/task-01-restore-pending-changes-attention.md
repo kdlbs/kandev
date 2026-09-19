@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 01: Restore Pending Changes Attention
@@ -36,7 +36,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/ui/task-layout-profiles.md`: returning-task attention and reload scenarios.
+- `docs/specs/ui/requirements/task-layout-profiles.md`: returning-task attention and reload scenarios.
 - `docs/plans/returning-task-changes-focus/plan.md`: root cause, responsive boundary, and risks.
 - Regression commit `ba8d99f33`, which added `hasSavedLayout` suppression and the conflicting E2E expectation.
 - Existing `applyChangesPanelAutoFocusState`, `activateChangesPanel`, and `markInactiveChangesIncreases` behavior.

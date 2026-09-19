@@ -67,6 +67,12 @@ func (h *Handlers) mrAutomationErrorResponse(msg *ws.Message, taskID, logMsg str
 	if errors.Is(err, repoerrors.ErrTaskNotFound) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
 	}
+	// Naming an MR that isn't linked to this task (or naming one only
+	// partially) is a caller mistake — report it as such instead of burying
+	// it in a generic internal error.
+	if errors.Is(err, gitlab.ErrTaskMRNotLinked) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 	h.logger.Error(logMsg, zap.String("task_id", taskID), zap.Error(err))
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to process MR automation request", nil)
 }
@@ -83,7 +89,13 @@ func (h *Handlers) handleUpdateTaskMRAutomation(ctx context.Context, msg *ws.Mes
 	if errResp != nil || err != nil {
 		return errResp, err
 	}
+	// repository_id/project_path/mr_iid optionally scope the switch changes
+	// to one linked MR; omitting all three applies them to every linked MR,
+	// which is what an agent with no MR identity to send gets.
 	var req struct {
+		RepositoryID            *string `json:"repository_id"`
+		ProjectPath             *string `json:"project_path"`
+		MRIID                   *int    `json:"mr_iid"`
 		AutoFixEnabled          *bool   `json:"auto_fix_enabled"`
 		AutoMergeEnabled        *bool   `json:"auto_merge_enabled"`
 		AutoFixPromptOverride   *string `json:"auto_fix_prompt_override"`
@@ -95,6 +107,9 @@ func (h *Handlers) handleUpdateTaskMRAutomation(ctx context.Context, msg *ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	patch := gitlab.TaskMRAutomationPatch{
+		RepositoryID:            req.RepositoryID,
+		ProjectPath:             req.ProjectPath,
+		MRIID:                   req.MRIID,
 		AutoFixEnabled:          req.AutoFixEnabled,
 		AutoMergeEnabled:        req.AutoMergeEnabled,
 		AutoFixPromptOverride:   req.AutoFixPromptOverride,

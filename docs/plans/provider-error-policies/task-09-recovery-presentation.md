@@ -5,7 +5,7 @@ status: done
 wave: 8
 depends_on: ["05-kanban-recovery-convergence", "06-utility-policy-integration", "07-office-policy-convergence", "08-dynamic-policy-settings-ui"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 09: Recovery presentation

@@ -6,7 +6,7 @@ wave: 1
 parallelism: sequential
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/prevent-agent-autostart-on-open/spec.md"
+spec: "../../specs/tasks/requirements/prevent-agent-autostart-on-open.md"
 ---
 
 # Task 04: Backend pin test — peer message resumes a stopped session

@@ -21,8 +21,9 @@ import { useCollapsedAgentBlocks } from "@/hooks/domains/settings/use-collapsed-
 import { AgentLogo } from "@/components/agent-logo";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
 import { AgentRuntimeUpdateControl } from "@/components/settings/agent-runtime-update-control";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
-import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
 import type { Agent, AgentDiscovery, RuntimeUpdate } from "@/lib/types/http";
 
 type Props = {
@@ -32,10 +33,19 @@ type Props = {
   /** Capability status from the host utility probe ("ok", "auth_required", etc.). */
   capabilityStatus?: string;
   runtimeUpdate?: RuntimeUpdate;
+  runtimeUpdateStatus?: AgentUpdateStatus;
   updateJob?: AgentUpdateJob;
   installJob?: InstallJob;
-  onPreview?: (agentName: string) => Promise<AgentUpdatePreview>;
-  onUpdate?: (agentName: string, targetVersion: string) => Promise<AgentUpdateJob>;
+  onPreview?: (
+    agentName: string,
+    targetVersion?: string,
+    useDefault?: boolean,
+  ) => Promise<AgentUpdatePreview>;
+  onUpdate?: (
+    agentName: string,
+    targetVersion: string,
+    useDefault?: boolean,
+  ) => Promise<AgentUpdateJob>;
   /**
    * Called when the auth/shell dialog closes so the page can refresh
    * discovery + availability. Without this the yellow lock stays put even
@@ -149,7 +159,7 @@ function AgentCollapseControl({
       // permanent grey while expanded — this button uses aria-expanded as a
       // disclosure state, not a select/trigger visual. Keep it transparent at
       // rest and grey only on hover, matching the update trigger beside it.
-      className="h-11 w-11 cursor-pointer active:scale-95 sm:h-7 sm:w-7 aria-expanded:bg-transparent hover:bg-muted!"
+      className="cursor-pointer active:scale-95 aria-expanded:bg-transparent hover:bg-muted!"
       onClick={onToggle}
       data-testid={`collapse-agent-${agentName}`}
       aria-expanded={!isCollapsed}
@@ -204,7 +214,7 @@ function AgentProfileActionButton({
   const { t } = useTranslation();
   if (configured) {
     return (
-      <Button className="h-11 cursor-pointer md:h-7" asChild>
+      <Button className={settingsActionClassName("cursor-pointer")} asChild>
         <Link href={`${agentHref}?mode=create`} data-testid={`new-profile-${agentName}`}>
           <IconPlus className="mr-2 h-4 w-4" />
           {t("agents:newProfile")}
@@ -215,7 +225,7 @@ function AgentProfileActionButton({
   // Keep the setup action for agents without a usable profile. A saved record
   // needs create mode so its first profile is drafted.
   return (
-    <Button className="h-11 cursor-pointer md:h-7" asChild>
+    <Button className={settingsActionClassName("cursor-pointer")} asChild>
       <Link
         href={hasAgentRecord ? `${agentHref}?mode=create` : agentHref}
         data-testid={`setup-profile-${agentName}`}
@@ -240,6 +250,7 @@ export function InstalledAgentCard({
   displayName,
   capabilityStatus,
   runtimeUpdate,
+  runtimeUpdateStatus,
   updateJob,
   installJob,
   onPreview,
@@ -304,6 +315,7 @@ export function InstalledAgentCard({
               agentName={agent.name}
               displayName={displayName}
               runtimeUpdate={runtimeUpdate}
+              runtimeUpdateStatus={runtimeUpdateStatus}
               job={updateJob}
               installJob={installJob}
               onPreview={onPreview}

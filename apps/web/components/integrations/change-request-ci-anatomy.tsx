@@ -95,6 +95,7 @@ function ChangeRequestPopoverHeaderActions({
 export function ChangeRequestPopoverHeader({
   number,
   title,
+  author,
   url,
   onOpenReview,
   onUnlink,
@@ -104,6 +105,7 @@ export function ChangeRequestPopoverHeader({
 }: {
   number: number | string;
   title: string;
+  author?: string;
   url?: string;
   onOpenReview?: () => void;
   onUnlink?: (signal: AbortSignal) => void | Promise<void>;
@@ -121,6 +123,7 @@ export function ChangeRequestPopoverHeader({
     [],
   );
   const displayTitle = `#${number} ${title || t("integrations:untitledPullRequest")}`;
+  const displayAuthor = author?.trim();
   const unlink = async () => {
     if (!onUnlink || unlinking) return;
     unlinkController.current?.abort();
@@ -141,26 +144,36 @@ export function ChangeRequestPopoverHeader({
       data-testid="pr-popover-header"
       className="flex items-center justify-between gap-2 border-b border-border/50 pb-2"
     >
-      {onOpenReview ? (
-        <button
-          type="button"
-          data-testid="pr-popover-title"
-          className="min-w-0 cursor-pointer truncate text-left text-sm font-medium hover:underline"
-          title={displayTitle}
-          aria-label={openDetailsLabel ?? t("integrations:openDetails", { title: displayTitle })}
-          onClick={onOpenReview}
-        >
-          {displayTitle}
-        </button>
-      ) : (
-        <span
-          data-testid="pr-popover-title"
-          className="min-w-0 truncate text-sm font-medium"
-          title={displayTitle}
-        >
-          {displayTitle}
-        </span>
-      )}
+      <div className="min-w-0 flex-1">
+        {onOpenReview ? (
+          <button
+            type="button"
+            data-testid="pr-popover-title"
+            className="block min-w-0 max-w-full cursor-pointer truncate text-left text-sm font-medium hover:underline"
+            title={displayTitle}
+            aria-label={openDetailsLabel ?? t("integrations:openDetails", { title: displayTitle })}
+            onClick={onOpenReview}
+          >
+            {displayTitle}
+          </button>
+        ) : (
+          <span
+            data-testid="pr-popover-title"
+            className="block min-w-0 max-w-full truncate text-sm font-medium"
+            title={displayTitle}
+          >
+            {displayTitle}
+          </span>
+        )}
+        {displayAuthor ? (
+          <div
+            data-testid="pr-popover-author"
+            className="mt-0.5 truncate text-[11px] text-muted-foreground"
+          >
+            {t("task:byAuthor", { author: displayAuthor })}
+          </div>
+        ) : null}
+      </div>
       <ChangeRequestPopoverHeaderActions
         number={number}
         url={url}

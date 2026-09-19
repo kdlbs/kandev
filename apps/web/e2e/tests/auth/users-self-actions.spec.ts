@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import path from "node:path";
 import { backendFixture as test } from "../../fixtures/backend";
 import { login, setupAdmin } from "../../helpers/auth";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { responseUserId } from "./users-auth-helpers";
 
 /**
@@ -112,8 +113,11 @@ test.describe.serial("users self-actions guard", () => {
     });
     expect(disable.status(), await disable.text()).toBe(200);
 
+    const disabledUsersRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
     await page.reload();
+    await disabledUsersRefresh;
     const disabledAdminRow = page.locator(`[data-user-id="${disabledAdminId}"]`);
+    await expect(ownRow).toBeVisible({ timeout: 15_000 });
     await expect(ownRow.getByTestId("users-table-toggle-role")).toBeDisabled();
     await expect(ownRow.getByTestId("users-table-toggle-status")).toBeDisabled();
     await expect(disabledAdminRow.getByTestId("users-table-toggle-role")).toBeEnabled();
@@ -131,12 +135,42 @@ test.describe.serial("users self-actions guard", () => {
     expect(secondRes.status(), await secondRes.text()).toBe(201);
     const secondAdminId = responseUserId(await secondRes.json());
 
+    const secondUsersRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
     await page.reload();
+    await secondUsersRefresh;
     const secondAdminRow = page.locator(`[data-user-id="${secondAdminId}"]`);
+    await expect(ownRow).toBeVisible({ timeout: 15_000 });
     await expect(ownRow.getByTestId("users-table-toggle-role")).toBeEnabled();
     await expect(ownRow.getByTestId("users-table-toggle-status")).toBeEnabled();
     await expect(secondAdminRow.getByTestId("users-table-toggle-role")).toBeEnabled();
     await expect(secondAdminRow.getByTestId("users-table-toggle-status")).toBeEnabled();
+
+    // Another user's role change stays anchored to that user's action and
+    // refreshes the existing list after confirmation.
+    const rolePatch = waitForHttp(page, "PATCH", new RegExp(`/api/v1/users/${memberId}$`));
+    const roleRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
+    await memberRow.getByTestId("users-table-toggle-role").click();
+    const roleConfirmation = page.getByTestId("users-table-confirm-popover");
+    await expect(roleConfirmation).toBeVisible();
+    await expect(roleConfirmation).toContainText(`Change ${MEMBER.email} to admin?`);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await roleConfirmation.getByTestId("users-table-confirm").click();
+    await rolePatch;
+    await roleRefresh;
+    await expect(memberRow.getByTestId("users-table-role")).toContainText("admin");
+
+    // Enabled-state changes use the same row-local confirmation and keep the
+    // existing target transition.
+    const statusPatch = waitForHttp(page, "PATCH", new RegExp(`/api/v1/users/${disabledAdminId}$`));
+    const statusRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
+    await disabledAdminRow.getByTestId("users-table-toggle-status").click();
+    const statusConfirmation = page.getByTestId("users-table-confirm-popover");
+    await expect(statusConfirmation).toBeVisible();
+    await expect(statusConfirmation).toContainText(`Re-enable ${DISABLED_ADMIN.email}?`);
+    await statusConfirmation.getByTestId("users-table-confirm").click();
+    await statusPatch;
+    await statusRefresh;
+    await expect(disabledAdminRow.getByTestId("users-table-status")).toContainText("active");
 
     // No new backend behavior: self-demotion is allowed again once another
     // active admin exists.

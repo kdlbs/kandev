@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["03-review-service-and-events"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 05: `publish_review_findings_kandev` MCP tool

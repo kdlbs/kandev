@@ -10,6 +10,7 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { ConfigurationChatToggle } from "@/components/quick-chat/configuration-chat-toggle";
+import { orderAgentProfilesByRecentUse } from "@/lib/agent-profile-recent-use";
 
 /**
  * Catalog KEYS, not copy. Resolving these at module scope would freeze them at
@@ -47,9 +48,13 @@ function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
   const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
   const dynamicRoutingEnabled = useFeature("dynamicAgentRouting");
   const { t } = useTranslation();
+  const recentProfileIds = useAppStore(
+    (state) => state.agentProfileRecentUse?.records.config_chat?.profileIds,
+  );
   const selectableProfiles = profiles.filter((profile) =>
     isSelectableAgentProfile(profile, dynamicRoutingEnabled),
   );
+  const orderedProfiles = orderAgentProfilesByRecentUse(selectableProfiles, recentProfileIds);
   return (
     <section className="space-y-3" aria-labelledby="config-chat-agent-label">
       <div>
@@ -59,7 +64,7 @@ function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
         <p className="text-xs text-muted-foreground">{t("configChat:agentProfileHelp")}</p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {selectableProfiles.map((profile) => (
+        {orderedProfiles.map((profile) => (
           <button
             key={profile.id}
             type="button"

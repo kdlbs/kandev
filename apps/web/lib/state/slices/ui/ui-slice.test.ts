@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- UI slice coverage shares one store harness. */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
 import { waitFor } from "@testing-library/react";
@@ -19,7 +21,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 function makeStore() {
   return create<UISlice>()(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    immer((...a) => ({ ...(createUISlice as any)(...a) })),
+    immer((...a) => ({ ...(createUISlice as any)(...a), workspaces: { activeId: "ws" } })),
   );
 }
 
@@ -42,6 +44,13 @@ function makeSidebarView(id: string, name: string): SidebarView {
     group: "none" as const,
     collapsedGroups: [],
   };
+}
+
+function setSidebarViews(store: UIStore, patch: Partial<UISlice["sidebarViews"]>): void {
+  store.setState((state) => ({
+    ...state,
+    sidebarViewsByWorkspace: { ws: { ...state.sidebarViews, ...patch } },
+  }));
 }
 
 describe("cancel-turn progress", () => {
@@ -276,15 +285,11 @@ describe("sidebar view sync rollback", () => {
   });
 
   function seedViews(store: UIStore) {
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [makeSidebarView("view-a", "View A"), makeSidebarView("view-b", "View B")],
-        activeViewId: "view-a",
-        draft: null,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [makeSidebarView("view-a", "View A"), makeSidebarView("view-b", "View B")],
+      activeViewId: "view-a",
+      draft: null,
+    });
   }
 
   it("does not roll back an active view changed after a failed view mutation", async () => {
@@ -302,11 +307,13 @@ describe("sidebar view sync rollback", () => {
     store.getState().setSidebarActiveView("view-b");
 
     await waitFor(() => {
-      expect(store.getState().sidebarViews.syncError).toBe(RENAME_FAILED);
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(RENAME_FAILED);
     });
 
-    expect(store.getState().sidebarViews.activeViewId).toBe("view-b");
-    expect(store.getState().sidebarViews.views.find((v) => v.id === "view-a")?.name).toBe("View A");
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe("view-b");
+    expect(
+      store.getState().sidebarViewsByWorkspace.ws.views.find((v) => v.id === "view-a")?.name,
+    ).toBe("View A");
   });
 });
 
@@ -548,31 +555,34 @@ describe("reorderSidebarViews", () => {
 
   it("reorders by id, persists the order, and syncs the backend payload", () => {
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [
-          makeSidebarView("all", "All"),
-          makeSidebarView("one", "One"),
-          makeSidebarView("two", "Two"),
-        ],
-        activeViewId: "two",
-        draft: null,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [
+        makeSidebarView("all", "All"),
+        makeSidebarView("one", "One"),
+        makeSidebarView("two", "Two"),
+      ],
+      activeViewId: "two",
+      draft: null,
+    });
 
     store.getState().reorderSidebarViews("two", "one");
 
-    expect(store.getState().sidebarViews.views.map((v) => v.id)).toEqual(["all", "two", "one"]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views.map((v) => v.id)).toEqual([
+      "all",
+      "two",
+      "one",
+    ]);
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_views: [
-        expect.objectContaining({ id: "all" }),
-        expect.objectContaining({ id: "two" }),
-        expect.objectContaining({ id: "one" }),
-      ],
-      sidebar_active_view_id: "two",
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: "ws",
+        views: [
+          expect.objectContaining({ id: "all" }),
+          expect.objectContaining({ id: "two" }),
+          expect.objectContaining({ id: "one" }),
+        ],
+        active_view_id: "two",
+        draft: null,
+      },
     });
   });
 
@@ -584,25 +594,25 @@ describe("reorderSidebarViews", () => {
       group: "workflow",
     };
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [
-          makeSidebarView("all", "All"),
-          makeSidebarView("one", "One"),
-          makeSidebarView("two", "Two"),
-        ],
-        activeViewId: "one",
-        draft,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [
+        makeSidebarView("all", "All"),
+        makeSidebarView("one", "One"),
+        makeSidebarView("two", "Two"),
+      ],
+      activeViewId: "one",
+      draft,
+    });
 
     store.getState().reorderSidebarViews("two", "all");
 
-    expect(store.getState().sidebarViews.views.map((v) => v.id)).toEqual(["two", "all", "one"]);
-    expect(store.getState().sidebarViews.activeViewId).toBe("one");
-    expect(store.getState().sidebarViews.draft).toEqual(draft);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views.map((v) => v.id)).toEqual([
+      "two",
+      "all",
+      "one",
+    ]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe("one");
+    expect(store.getState().sidebarViewsByWorkspace.ws.draft).toEqual(draft);
   });
 
   it("no-ops when ids are equal or missing", () => {
@@ -612,20 +622,22 @@ describe("reorderSidebarViews", () => {
       makeSidebarView("one", "One"),
       makeSidebarView("two", "Two"),
     ];
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: { ...state.sidebarViews, views, activeViewId: "all", draft: null },
-    }));
+    setSidebarViews(store, { views, activeViewId: "all", draft: null });
 
     store.getState().reorderSidebarViews("one", "one");
     store.getState().reorderSidebarViews("missing", "one");
     store.getState().reorderSidebarViews("one", "missing");
 
-    expect(store.getState().sidebarViews.views.map((v) => v.id)).toEqual(["all", "one", "two"]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views.map((v) => v.id)).toEqual([
+      "all",
+      "one",
+      "two",
+    ]);
     expect(updateUserSettings).not.toHaveBeenCalled();
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- sidebar backend state cases share one payload harness.
 describe("sidebar view backend state", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -634,41 +646,36 @@ describe("sidebar view backend state", () => {
 
   it("syncs active view changes to backend user settings", () => {
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [makeSidebarView("all", "All"), makeSidebarView("mine", "Mine")],
-        activeViewId: "all",
-        draft: {
-          baseViewId: "all",
-          filters: [],
-          sort: { key: "state", direction: "asc" },
-          group: "state",
-        },
+    setSidebarViews(store, {
+      views: [makeSidebarView("all", "All"), makeSidebarView("mine", "Mine")],
+      activeViewId: "all",
+      draft: {
+        baseViewId: "all",
+        filters: [],
+        sort: { key: "state", direction: "asc" },
+        group: "state",
       },
-    }));
+    });
 
     store.getState().setSidebarActiveView("mine");
 
-    expect(store.getState().sidebarViews.activeViewId).toBe("mine");
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe("mine");
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_active_view_id: "mine",
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: "ws",
+        active_view_id: "mine",
+        draft: null,
+      },
     });
   });
 
   it("syncs filter sort and group drafts to backend user settings", () => {
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [makeSidebarView("all", "All")],
-        activeViewId: "all",
-        draft: null,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [makeSidebarView("all", "All")],
+      activeViewId: "all",
+      draft: null,
+    });
 
     store.getState().updateSidebarDraft({
       sort: { key: "updatedAt", direction: "desc" },
@@ -676,12 +683,16 @@ describe("sidebar view backend state", () => {
     });
 
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_active_view_id: "all",
-      sidebar_draft: {
-        base_view_id: "all",
-        filters: [],
-        sort: { key: "updatedAt", direction: "desc" },
-        group: "workflow",
+      sidebar_view_state: {
+        workspace_id: "ws",
+        active_view_id: "all",
+        draft: {
+          base_view_id: "all",
+          filters: [],
+          sort: { key: "updatedAt", direction: "desc" },
+          group: "workflow",
+          task_row: expect.any(Object),
+        },
       },
     });
   });
@@ -694,29 +705,26 @@ describe("sidebar view backend state", () => {
       group: "state",
     };
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [makeSidebarView("all", "All"), makeSidebarView("two", "Two")],
-        activeViewId: "all",
-        draft,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [makeSidebarView("all", "All"), makeSidebarView("two", "Two")],
+      activeViewId: "all",
+      draft,
+    });
 
     store.getState().reorderSidebarViews("two", "all");
 
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_views: [
-        expect.objectContaining({ id: "two" }),
-        expect.objectContaining({ id: "all" }),
-      ],
-      sidebar_active_view_id: "all",
-      sidebar_draft: {
-        base_view_id: "all",
-        filters: [],
-        sort: { key: "updatedAt", direction: "desc" },
-        group: "state",
+      sidebar_view_state: {
+        workspace_id: "ws",
+        views: [expect.objectContaining({ id: "two" }), expect.objectContaining({ id: "all" })],
+        active_view_id: "all",
+        draft: {
+          base_view_id: "all",
+          filters: [],
+          sort: { key: "updatedAt", direction: "desc" },
+          group: "state",
+          task_row: expect.any(Object),
+        },
       },
     });
   });

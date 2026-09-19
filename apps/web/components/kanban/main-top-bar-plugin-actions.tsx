@@ -3,8 +3,19 @@
 import { useMemo } from "react";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import type { MainTopBarSlotProps } from "@/lib/plugins/types";
+import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
 
 export type { MainTopBarSlotProps } from "@/lib/plugins/types";
+
+/**
+ * The plugin contract predates Threads and names only the two surfaces that
+ * existed then. Threads is the same workspace-wide overview the board is, just
+ * arranged by conversation, so it reports as "kanban" rather than forcing every
+ * installed plugin to handle a third value it has never seen.
+ */
+export function toPluginTopBarPage(page: TaskListingPage): MainTopBarSlotProps["currentPage"] {
+  return page === "tasks" ? "tasks" : "kanban";
+}
 
 /**
  * Props forwarded to every plugin component registered for the `main-top-bar`
@@ -29,13 +40,18 @@ export type { MainTopBarSlotProps } from "@/lib/plugins/types";
 export function MainTopBarPluginActions(props: {
   workspaceId?: string;
   workspaceLabel?: string;
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   presentation?: MainTopBarSlotProps["presentation"];
 }) {
   const { workspaceId, workspaceLabel, currentPage, presentation = "desktop" } = props;
 
   const slotProps = useMemo<MainTopBarSlotProps>(
-    () => ({ workspaceId: workspaceId ?? null, workspaceLabel, currentPage, presentation }),
+    () => ({
+      workspaceId: workspaceId ?? null,
+      workspaceLabel,
+      currentPage: toPluginTopBarPage(currentPage),
+      presentation,
+    }),
     [workspaceId, workspaceLabel, currentPage, presentation],
   );
 
@@ -44,7 +60,7 @@ export function MainTopBarPluginActions(props: {
 
   return (
     <div
-      className="flex shrink-0 items-center gap-2 [&_[data-slot=button]]:!size-8 [&_[data-slot=button]]:!p-0 [&_[data-slot=button]_svg]:!size-4"
+      className="flex min-w-0 flex-wrap items-center gap-2 [&_[data-slot=button]]:!size-8 [&_[data-slot=button]]:!p-0 [&_[data-slot=button]_svg]:!size-4"
       data-testid="mobile-main-top-bar-plugin-actions"
     >
       {content}

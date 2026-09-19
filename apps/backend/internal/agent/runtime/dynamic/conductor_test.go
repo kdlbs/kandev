@@ -3,6 +3,7 @@ package dynamic
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -83,6 +84,176 @@ func TestConductorFallsBackAfterClassifiedLaunchFailure(t *testing.T) {
 	}
 	if got := downstream.launches[1].PriorACPSession; got != "" {
 		t.Fatalf("fallback prior ACP session = %q, want empty", got)
+	}
+}
+
+func TestConductorSanitizesPromptBeforeEveryDownstreamLaunch(t *testing.T) {
+	profile := Profile{
+		ID: "dynamic-profile",
+		Candidates: []Candidate{
+			{
+				ID:         "candidate-first",
+				Enabled:    true,
+				BindingKey: "first",
+				Rules:      map[string]Action{string(routingerr.CodeProviderUnavailable): ActionTryNext},
+			},
+			{ID: "candidate-second", Enabled: true, BindingKey: "second"},
+		},
+	}
+	const secret = "sk-abcdEFGH12345678ijklMNOPqrstUVWX"
+	downstream := &conductorTestDownstream{}
+	conductor := NewConductor(NewEngine(), conductorTestProfileLoader{profile: profile}, downstream)
+
+	_, err := conductor.Launch(context.Background(), ConductorLaunch{
+		SessionID:        "session-prompt-secret",
+		LogicalProfileID: profile.ID,
+		Prompt:           "continue the work with API_KEY=" + secret,
+		PriorACPSession:  "acp-first",
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if len(downstream.launches) != 2 {
+		t.Fatalf("launch count = %d, want 2", len(downstream.launches))
+	}
+	for i, launch := range downstream.launches {
+		if strings.Contains(launch.Prompt, secret) {
+			t.Fatalf("launch %d prompt retained the raw secret: %q", i, launch.Prompt)
+		}
+		if !strings.Contains(launch.Prompt, "continue the work") {
+			t.Fatalf("launch %d prompt lost the user request: %q", i, launch.Prompt)
+		}
+	}
+}
+
+// TestConductorPreservesLongUserAuthoredPromptOnEveryDownstreamLaunch proves
+// the primary launch prompt receives credential-only redaction, unbounded,
+// on both the first attempt and every fallback: a path, a commit SHA, a PR
+// URL and a task UUID all survive intact even past MaxRawExcerptBytes, while
+// a credential is still redacted.
+func TestConductorPreservesLongUserAuthoredPromptOnEveryDownstreamLaunch(t *testing.T) {
+	profile := Profile{
+		ID: "dynamic-profile",
+		Candidates: []Candidate{
+			{
+				ID:         "candidate-first",
+				Enabled:    true,
+				BindingKey: "first",
+				Rules:      map[string]Action{string(routingerr.CodeProviderUnavailable): ActionTryNext},
+			},
+			{ID: "candidate-second", Enabled: true, BindingKey: "second"},
+		},
+	}
+	const secret = "sk-abcdEFGH12345678ijklMNOPqrstUVWX"
+	const path = "/Users/alice/work/repo/main.go"
+	const sha = "94e7b02458b6c1a2d3e4f5061728394a5b6c7d8"
+	const url = "https://example.com/org/repo/pull/123?tab=files#discussion_r42"
+	const uuid = "3f9a1c2e-4b5d-4e6f-8a9b-0c1d2e3f4a5b"
+	filler := strings.Repeat("Then update the handler so it returns a typed error. ", 100)
+	prompt := filler + "Fix bug in " + path + " at commit " + sha + "; see " + url +
+		" and task " + uuid + ".\n API_KEY=" + secret
+
+	if len(prompt) <= routingerr.MaxRawExcerptBytes {
+		t.Fatalf("test prompt must exceed MaxRawExcerptBytes=%d, got %d", routingerr.MaxRawExcerptBytes, len(prompt))
+	}
+
+	downstream := &conductorTestDownstream{}
+	conductor := NewConductor(NewEngine(), conductorTestProfileLoader{profile: profile}, downstream)
+
+	_, err := conductor.Launch(context.Background(), ConductorLaunch{
+		SessionID:        "session-long-prompt",
+		LogicalProfileID: profile.ID,
+		Prompt:           prompt,
+		PriorACPSession:  "acp-first",
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if len(downstream.launches) != 2 {
+		t.Fatalf("launch count = %d, want 2", len(downstream.launches))
+	}
+	for i, launch := range downstream.launches {
+		if !strings.HasPrefix(launch.Prompt, "Then update the handler") {
+			t.Fatalf("launch %d prompt did not survive whole: %q", i, launch.Prompt)
+		}
+		for _, want := range []string{path, sha, url, uuid} {
+			if !strings.Contains(launch.Prompt, want) {
+				t.Fatalf("launch %d prompt lost %q: %q", i, want, launch.Prompt)
+			}
+		}
+		if strings.Contains(launch.Prompt, secret) {
+			t.Fatalf("launch %d prompt retained the raw secret: %q", i, launch.Prompt)
+		}
+		if !strings.Contains(launch.Prompt, "API_KEY: ***") {
+			t.Fatalf("launch %d prompt was not redacted, just dropped: %q", i, launch.Prompt)
+		}
+	}
+}
+
+type recordingConductorTestDownstream struct {
+	launches []DownstreamLaunch
+}
+
+func (d *recordingConductorTestDownstream) Launch(_ context.Context, launch DownstreamLaunch) (DownstreamExecution, error) {
+	d.launches = append(d.launches, launch)
+	return DownstreamExecution{ID: "execution-recorded"}, nil
+}
+
+func (*recordingConductorTestDownstream) Resume(context.Context, string, string) error { return nil }
+
+func (*recordingConductorTestDownstream) Stop(context.Context, string, string) error { return nil }
+
+func TestConductorSanitizesAndPersistsPrebuiltContinuation(t *testing.T) {
+	profile := Profile{
+		ID:         "dynamic-profile",
+		Candidates: []Candidate{{ID: "candidate-first", Enabled: true}},
+	}
+	engine := NewEngine()
+	decision, err := engine.Select("session-prebuilt-secret", profile, 0, "")
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	const secret = "sk-prebuiltABCD1234567890"
+	prebuilt := &Continuation{
+		TaskDescription:   "task token=" + secret,
+		Conversation:      "Authorization: " + secret,
+		ToolSummary:       "tool output token=" + secret,
+		RepositorySummary: "origin token=" + secret,
+		PlanSummary:       "plan token=" + secret,
+		FailureReason:     "provider failed with token=" + secret,
+	}
+	downstream := &recordingConductorTestDownstream{}
+	store := &conductorContinuationStore{}
+	conductor := NewConductor(
+		engine,
+		conductorTestProfileLoader{profile: profile},
+		downstream,
+		WithContinuationPersistence(store),
+	)
+
+	_, err = conductor.LaunchSelected(context.Background(), ConductorSelectedLaunch{
+		SessionID:            decision.SessionID,
+		LogicalProfileID:     profile.ID,
+		Decision:             decision,
+		Prompt:               "resume the task",
+		PrebuiltContinuation: prebuilt,
+	})
+	if err != nil {
+		t.Fatalf("LaunchSelected: %v", err)
+	}
+	if len(downstream.launches) != 1 {
+		t.Fatalf("launch count = %d, want 1", len(downstream.launches))
+	}
+	if strings.Contains(downstream.launches[0].Prompt, secret) {
+		t.Fatalf("prebuilt prompt retained the raw secret: %q", downstream.launches[0].Prompt)
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("saved continuation count = %d, want 1", len(store.saved))
+	}
+	saved := store.saved[0].Continuation
+	if strings.Contains(saved.TaskDescription+saved.Conversation+saved.ToolSummary+
+		saved.RepositorySummary+saved.PlanSummary+saved.FailureReason, secret) {
+		t.Fatalf("persisted continuation retained the raw secret: %#v", saved)
 	}
 }
 

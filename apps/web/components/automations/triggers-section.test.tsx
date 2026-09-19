@@ -79,11 +79,12 @@ describe("TriggersSection schedule config", () => {
   it("creates a scheduled trigger when none exists yet", () => {
     const props = renderTriggersSection();
 
-    fireEvent.change(screen.getByTestId("schedule-time"), { target: { value: "07:15" } });
+    fireEvent.click(screen.getByTestId("schedule-frequency"));
+    fireEvent.click(screen.getByRole("option", { name: "every day" }));
 
     expect(props.onAddTrigger).toHaveBeenCalledWith(
       "scheduled",
-      expect.objectContaining({ cron_expression: "15 7 * * *" }),
+      expect.objectContaining({ cron_expression: "0 9 * * *" }),
     );
   });
 });

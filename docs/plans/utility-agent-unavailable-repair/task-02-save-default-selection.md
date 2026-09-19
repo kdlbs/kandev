@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-normalize-empty-bindings"]
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 02: Save inherited utility selection
@@ -41,7 +41,7 @@ phone viewports.
 - **Dependencies:** Task 01.
 - **Parallelism:** sequential.
 - **Inputs:** The Utility Agents save and persistence scenarios in
-  `docs/specs/agents/utility-agent-profiles.md`, the current shared picker empty-value contract, the
+  `docs/specs/agents/requirements/utility-agent-profiles.md`, the current shared picker empty-value contract, the
   existing desktop Utility Agents spec, and the existing stacked mobile action-row spec.
 - **Output contract:** Report files changed, RED and GREEN test commands and results, saved PATCH
   payload and reload evidence, desktop/mobile outcomes, cleanup, and synchronized task/plan status.

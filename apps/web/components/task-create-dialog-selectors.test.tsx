@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
+import { StateProvider } from "@/components/state-provider";
 import {
   MAX_FILES,
   MAX_FILE_SIZE,
@@ -11,10 +12,15 @@ import {
 } from "@/components/task/chat/file-attachment";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
+import { TaskCreateLaunchPreviewToggle } from "./task-create-dialog-launch-preview-control";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
+import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-preview";
 import type { PluginComposerSlotProps } from "@/lib/plugins/types";
 
 const TOAST_MESSAGE_TEST_ID = "toast-message";
+const LAUNCH_PREVIEW_TOGGLE_TEST_ID = "task-create-launch-preview-toggle";
+const DESCRIPTION_INPUT_TEST_ID = "task-description-input";
+const ORIGINAL_PROMPT = "keep this prompt";
 
 vi.mock("@/components/task/chat/file-attachment", async () => {
   const actual = await vi.importActual<typeof import("@/components/task/chat/file-attachment")>(
@@ -37,21 +43,25 @@ vi.mock("@/components/plugins/plugin-slot", () => ({
 
 // Inert mention popover — the real hook installs a `keydown` listener that
 // drains React's event queue across re-renders and adds noise to assertions.
-vi.mock("@/hooks/use-task-create-prompt-mention", () => ({
-  useTaskCreatePromptMention: () => ({
+vi.mock("@/hooks/use-task-create-prompt-mention", () => {
+  const useMention = ({ onChange }: { onChange?: (value: string) => void } = {}) => ({
     isOpen: false,
     isLoading: false,
     position: null,
     items: [],
     query: "",
     selectedIndex: 0,
-    handleChange: (_: string) => {},
+    handleChange: (value: string) => onChange?.(value),
     handleKeyDown: mentionMocks.handleKeyDown,
     handleSelect: () => {},
     closeMenu: () => {},
     setSelectedIndex: () => {},
-  }),
-}));
+  });
+  return {
+    useTaskCreatePromptMention: useMention,
+    useTaskCreatePromptMentionForInput: useMention,
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -75,22 +85,127 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderTaskFormInputs(initial: string, strict = false) {
+function RichPromptWrapper({ children }: { children: ReactNode }) {
+  return (
+    <StateProvider initialState={{ prompts: { items: [], loaded: true, loading: false } }}>
+      <Wrapper>{children}</Wrapper>
+    </StateProvider>
+  );
+}
+
+function renderTaskFormInputs(
+  initial: string,
+  strict = false,
+  launchPreview: TaskCreateLaunchPreview | null = null,
+  promptReferencesEnabled = false,
+  onComposerSubmit?: () => boolean | Promise<boolean>,
+) {
   const ref = createRef<TaskFormInputsHandle>();
   const form = (
     <TaskFormInputs
       isSessionMode={false}
       autoFocus={false}
       initialDescription={initial}
+      promptReferencesEnabled={promptReferencesEnabled}
+      onComposerSubmit={onComposerSubmit}
       onDescriptionChange={() => {}}
       onKeyDown={() => {}}
       descriptionValueRef={ref}
+      launchPreview={launchPreview}
     />
   );
-  const utils = render(strict ? <StrictMode>{form}</StrictMode> : form, { wrapper: Wrapper });
-  const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
+  const wrapper = promptReferencesEnabled ? RichPromptWrapper : Wrapper;
+  const utils = render(strict ? <StrictMode>{form}</StrictMode> : form, { wrapper });
+  const textarea = screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement;
   return { ...utils, textarea, ref };
 }
+
+describe("TaskFormInputs launch prompt preview", () => {
+  const launchPreview: TaskCreateLaunchPreview = {
+    stepId: "step-1",
+    stepName: "In Progress",
+    stepPrompt: "Run {{task_prompt}} for {task_id}",
+  };
+
+  it("toggles a composed read-only preview without changing the draft", () => {
+    const { textarea, ref } = renderTaskFormInputs(ORIGINAL_PROMPT, false, launchPreview);
+    const toggle = screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID);
+
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+
+    expect(screen.queryByTestId(DESCRIPTION_INPUT_TEST_ID)).toBeNull();
+    expect(screen.getByTestId("task-create-launch-preview-content").textContent).toContain(
+      `Run ${ORIGINAL_PROMPT} for {task_id}`,
+    );
+    expect(ref.current?.getValue()).toBe(ORIGINAL_PROMPT);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(toggle);
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
+      ORIGINAL_PROMPT,
+    );
+    expect(textarea).not.toBe(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID));
+    expect(ref.current?.getValue()).toBe(ORIGINAL_PROMPT);
+  });
+
+  it("does not render a preview toggle without a nonempty step prompt", () => {
+    renderTaskFormInputs(ORIGINAL_PROMPT, false, {
+      ...launchPreview,
+      stepPrompt: "   ",
+    });
+
+    expect(screen.queryByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID)).toBeNull();
+  });
+
+  it("returns to the editor when the launch preview model disappears", () => {
+    const ref = createRef<TaskFormInputsHandle>();
+    const renderForm = (preview: TaskCreateLaunchPreview | null) => (
+      <TaskFormInputs
+        isSessionMode={false}
+        autoFocus={false}
+        initialDescription={ORIGINAL_PROMPT}
+        onDescriptionChange={() => {}}
+        onKeyDown={() => {}}
+        descriptionValueRef={ref}
+        launchPreview={preview}
+      />
+    );
+    const view = render(renderForm(launchPreview), { wrapper: Wrapper });
+
+    fireEvent.click(screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID));
+    view.rerender(renderForm(null));
+
+    expect(screen.getByTestId(DESCRIPTION_INPUT_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId("task-create-launch-preview-content")).toBeNull();
+    expect(screen.queryByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID)).toBeNull();
+    expect((screen.getByTestId(DESCRIPTION_INPUT_TEST_ID) as HTMLTextAreaElement).value).toBe(
+      ORIGINAL_PROMPT,
+    );
+  });
+});
+
+describe("TaskCreateLaunchPreviewToggle", () => {
+  it("keeps a disabled toggle tooltip trigger focusable", () => {
+    render(
+      <TaskCreateLaunchPreviewToggle
+        active={false}
+        disabled
+        stepName="In Progress"
+        onToggle={() => undefined}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    const toggle = screen.getByTestId(LAUNCH_PREVIEW_TOGGLE_TEST_ID);
+    expect(toggle.getAttribute("disabled")).not.toBeNull();
+    expect(toggle.getAttribute("aria-label")).toBe(
+      "Preview launch prompt with workflow step prompt: In Progress",
+    );
+    expect(toggle.parentElement?.getAttribute("tabindex")).toBe("0");
+    expect(toggle.parentElement?.classList.contains("inline-flex")).toBe(true);
+  });
+});
 
 describe("TaskFormInputs mention keyboard routing", () => {
   it("handles Escape in capture before a target listener stops the bubble phase", () => {
@@ -226,6 +341,24 @@ describe("TaskFormInputs plugin composer chained calls", () => {
     });
 
     expect(textarea.value).toBe("first second");
+  });
+
+  it("supports rich prompt references for literal plugin insertion and submit", async () => {
+    const onComposerSubmit = vi.fn(() => true);
+    const { ref } = renderTaskFormInputs("", false, null, true, onComposerSubmit);
+    const composer = lastPluginSlotProps().composer;
+    const first = "<p>hello</p> &amp;\n  first";
+    let result: Awaited<ReturnType<typeof composer.submit>> | undefined;
+
+    await act(async () => {
+      composer.insertText(first);
+      composer.insertText("tail");
+      result = await composer.submit();
+    });
+
+    expect(result).toEqual({ status: "submitted" });
+    expect(ref.current?.getValue()).toBe(`${first} tail`);
+    expect(onComposerSubmit).toHaveBeenCalledTimes(1);
   });
 });
 

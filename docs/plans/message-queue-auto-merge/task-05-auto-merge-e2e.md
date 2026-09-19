@@ -5,7 +5,7 @@ status: completed
 wave: 5
 depends_on: ["04-auto-merge-settings-ui"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-auto-merge.md"
+spec: "../../specs/ui/requirements/message-queue-auto-merge.md"
 ---
 
 # Task 05: Prove automatic merge flows

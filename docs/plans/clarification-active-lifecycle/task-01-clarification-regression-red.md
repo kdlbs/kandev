@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/clarification-active-lifecycle/spec.md"
+spec: "../../specs/tasks/requirements/clarification-active-lifecycle.md"
 ---
 
 # Task 01: Clarification regression red

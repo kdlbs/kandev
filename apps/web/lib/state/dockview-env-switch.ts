@@ -30,6 +30,7 @@ import {
   restoreSavedActiveViews,
 } from "./dockview-env-switch-active-views";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
+import { stripHiddenRightPaneMetadata } from "./dockview-right-pane";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   snapshotColumnWidths,
@@ -68,7 +69,24 @@ const EPHEMERAL_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 function getHealthyEnvLayout(envId: string): object | null {
   const saved = getEnvLayout(envId);
   if (!saved) return null;
-  return isLayoutShapeHealthy(saved) ? saved : null;
+  const dockviewLayout = stripHiddenRightPaneMetadata(saved);
+  return isLayoutShapeHealthy(dockviewLayout) ? dockviewLayout : null;
+}
+
+function restoreSerializedDockview(api: DockviewApi, next: SerializedDockview): void {
+  const previous = typeof api.toJSON === "function" ? api.toJSON() : null;
+  try {
+    api.fromJSON(next);
+  } catch (error) {
+    if (previous) {
+      try {
+        api.fromJSON(previous);
+      } catch {
+        // A failed rollback cannot be repaired by retrying without risking another partial mutation.
+      }
+    }
+    throw error;
+  }
 }
 
 /** Check whether a serialized dockview layout contains ephemeral panels. */
@@ -94,6 +112,8 @@ export type EnvSwitchParams = {
   /** Build the effective default, optionally honoring a route layout intent. */
   buildDefault: (api: DockviewApi, intentName?: string) => void;
   getDefaultLayout: () => LayoutState;
+  /** Resolve pinned widths from the effective custom default for a workbench. */
+  getDefaultPinnedWidths?: (totalWidth: number) => Map<string, number>;
   /** Explicit layout from the task route, such as `?layout=plan`. */
   initialLayout?: string | null;
 };
@@ -335,13 +355,14 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   // Column widths from the outgoing env stay live across the switch because
   // we skipped fromJSON. Apply the target env's widths explicitly:
   //   - saved layout exists → use responsive defaults (or a manual right width)
-  //   - no saved layout (brand-new env) → compute fresh defaults via
-  //     getPinnedWidth (ratio-based, clamped to legacy initial cap)
+  //   - no saved layout with a custom default → use its scaled pinned widths
+  //   - otherwise → compute fresh defaults via getPinnedWidth
   applyPinnedColumnSizes(
     api,
     saved as SerializedDockview | null,
     params.safeWidth,
     getManualRightWidth(newEnvId),
+    !saved ? (params.getDefaultPinnedWidths?.(params.safeWidth) ?? new Map()) : new Map(),
   );
 
   api.layout(params.safeWidth, params.safeHeight);
@@ -405,8 +426,7 @@ function extractSavedColumnSizes(saved: SerializedDockview): number[] | null {
   return root.data.map((child: any) => (typeof child?.size === "number" ? child.size : NaN));
 }
 
-/** Compute the target width for a pinned column. Right-column geometry from a
- *  serialized layout is intentionally ignored unless a manual preference exists. */
+/** Compute the target width for a pinned column from the target environment. */
 // eslint-disable-next-line max-params
 function targetPinnedWidth(
   col: LayoutState["columns"][number],
@@ -415,7 +435,12 @@ function targetPinnedWidth(
   totalWidth: number,
   manualRightWidth: number | null,
   sidebarWidth: number,
+  defaultPinnedWidths: ReadonlyMap<string, number>,
 ): number | undefined {
+  if (!savedSizes && manualRightWidth === null) {
+    const defaultWidth = defaultPinnedWidths.get(col.id);
+    if (typeof defaultWidth === "number" && defaultWidth > 0) return defaultWidth;
+  }
   if (col.id === "right") {
     return resolveResponsiveRightWidth(totalWidth, sidebarWidth, manualRightWidth);
   }
@@ -435,6 +460,7 @@ function applyPinnedColumnSizes(
   saved: SerializedDockview | null,
   totalWidth: number,
   manualRightWidth: number | null,
+  defaultPinnedWidths: ReadonlyMap<string, number> = new Map(),
 ): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
@@ -460,7 +486,15 @@ function applyPinnedColumnSizes(
     const target =
       col.id === "sidebar"
         ? getPinnedWidth(col, totalWidth, undefined)
-        : targetPinnedWidth(col, i, savedSizes, totalWidth, manualRightWidth, sidebarTarget);
+        : targetPinnedWidth(
+            col,
+            i,
+            savedSizes,
+            totalWidth,
+            manualRightWidth,
+            sidebarTarget,
+            defaultPinnedWidths,
+          );
     if (typeof target !== "number" || target <= 0) continue;
     try {
       sv.resizeView(i, target);
@@ -581,7 +615,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
             `savedRight=${savedRightColumnWidth(saved as SerializedDockview) ?? "-"}`,
         );
       }
-      api.fromJSON(saved as SerializedDockview);
+      restoreSerializedDockview(api, saved as SerializedDockview);
       // Saved layout may carry a stale session panel from a previously-deleted
       // task (phantom). Replace stale session panels with the incoming active
       // session in the same (group, tab-index), then close the stale ones —

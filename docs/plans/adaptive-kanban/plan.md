@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/adaptive-kanban.md
+spec: docs/specs/ui/requirements/adaptive-kanban.md
 created: 2026-07-27
 status: complete
 ---

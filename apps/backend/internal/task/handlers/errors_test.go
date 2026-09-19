@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +16,8 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/worktree"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // TestErrorsAreClassifiable verifies that the package's error-classification
@@ -93,6 +97,135 @@ func TestErrorsAreClassifiable(t *testing.T) {
 			t.Fatalf("status=%d, want %d", rec.Code, http.StatusConflict)
 		}
 	})
+
+	t.Run("dirty worktree delete returns a typed conflict", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		err := &service.TaskDeleteDirtyWorktreeError{DirtyWorktrees: []worktree.DirtyWorktree{{
+			WorktreeID: "wt-1", RepositoryID: "repo-1", Path: "/tasks/task-1/repo",
+			DirtyFiles: []string{"notes.txt"},
+		}}}
+		handleNotFound(ctx, newTestLogger(t), fmt.Errorf("delete task: %w", err), "task not deleted")
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status=%d, want %d", rec.Code, http.StatusConflict)
+		}
+		var payload struct {
+			ErrorCode      string                   `json:"error_code"`
+			DirtyWorktrees []worktree.DirtyWorktree `json:"dirty_worktrees"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if payload.ErrorCode != service.TaskDeleteDirtyWorktreeErrorCode {
+			t.Fatalf("error_code=%q, want %q", payload.ErrorCode, service.TaskDeleteDirtyWorktreeErrorCode)
+		}
+		if len(payload.DirtyWorktrees) != 1 || payload.DirtyWorktrees[0].DirtyFiles[0] != "notes.txt" {
+			t.Fatalf("dirty_worktrees=%+v, want the inspected file", payload.DirtyWorktrees)
+		}
+	})
+
+	t.Run("stale branch policies include a stable error code", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		err := fmt.Errorf("%w: %w", service.ErrInvalidRepositoryBranchPolicy, service.ErrRepositoryBranchPolicyStale)
+		handleNotFound(ctx, newTestLogger(t), err, "task not created")
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d, want %d", rec.Code, http.StatusBadRequest)
+		}
+		var payload map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if payload["error_code"] != service.BranchPolicyStaleErrorCode {
+			t.Fatalf("error_code=%q, want %q", payload["error_code"], service.BranchPolicyStaleErrorCode)
+		}
+	})
+}
+
+func TestTaskCreateRepositorySelectionErrorsMapToTransports(t *testing.T) {
+	tests := []struct {
+		name       string
+		errorCode  service.RepositorySelectionErrorCode
+		httpStatus int
+		wsCode     string
+	}{
+		{
+			name:       "invalid",
+			errorCode:  service.RepositorySelectionErrorInvalid,
+			httpStatus: http.StatusBadRequest,
+			wsCode:     ws.ErrorCodeValidation,
+		},
+		{
+			name:       "not found",
+			errorCode:  service.RepositorySelectionErrorNotFound,
+			httpStatus: http.StatusNotFound,
+			wsCode:     ws.ErrorCodeNotFound,
+		},
+		{
+			name:       "unavailable",
+			errorCode:  service.RepositorySelectionErrorUnavailable,
+			httpStatus: http.StatusServiceUnavailable,
+			wsCode:     ws.ErrorCodeUnavailable,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := service.NewRepositorySelectionError(test.errorCode, errors.New("plugin response secret"))
+
+			status, ok := repositorySelectionHTTPStatus(err)
+			if !ok || status != test.httpStatus {
+				t.Fatalf("repositorySelectionHTTPStatus() = (%d, %t), want (%d, true)", status, ok, test.httpStatus)
+			}
+			code, ok := repositorySelectionWSCode(err)
+			if !ok || code != test.wsCode {
+				t.Fatalf("repositorySelectionWSCode() = (%q, %t), want (%q, true)", code, ok, test.wsCode)
+			}
+
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(rec)
+			handleNotFound(ctx, newTestLogger(t), err, "task not created")
+			if rec.Code != test.httpStatus {
+				t.Fatalf("HTTP status = %d, want %d", rec.Code, test.httpStatus)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode HTTP response: %v", err)
+			}
+			if payload["error_code"] != string(test.errorCode) {
+				t.Fatalf("error_code = %q, want %q", payload["error_code"], test.errorCode)
+			}
+			if strings.Contains(rec.Body.String(), "plugin response secret") {
+				t.Fatal("HTTP response leaked the wrapped provider error")
+			}
+		})
+	}
+}
+
+func TestMoveConflictCode(t *testing.T) {
+	cases := []struct {
+		name string
+		err  string
+		want string
+	}{
+		{"active session", "task has an active session (running)", moveConflictCodeActiveSession},
+		{"archived task", "archived tasks cannot be moved", moveConflictCodeArchived},
+		{"different workspace", "target workflow is in a different workspace", moveConflictCodeDifferentWorkspace},
+		{"workflow step", "target workflow step does not belong to target workflow", moveConflictCodeWorkflowStep},
+		{"WIP limit", "WIP limit exceeded for workflow step", moveConflictCodeWIPLimit},
+		{"unrelated", "database is locked", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := moveConflictCode(errors.New(tc.err)); got != tc.want {
+				t.Fatalf("moveConflictCode(%q) = %q, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
 }
 
 // TestIsTimeoutError pins the UX-classification contract for the prompt

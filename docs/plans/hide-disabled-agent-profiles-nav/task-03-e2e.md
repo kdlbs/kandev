@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-hide-setting-hook-and-toggle", "02-settings-tree-filter"]
 plan: "plan.md"
-spec: "../../specs/agents/hide-disabled-profiles-nav.md"
+spec: "../../specs/agents/requirements/hide-disabled-profiles-nav.md"
 ---
 
 # Task 03: E2E — hide disabled agent profiles from left panel navigation

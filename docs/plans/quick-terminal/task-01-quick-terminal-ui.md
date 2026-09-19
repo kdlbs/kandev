@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 01: Build the shared Quick Terminal UI
@@ -62,7 +62,7 @@ and touch shared layout/header files.
 ## Inputs
 
 - Spec: `What`, `Failure modes`, and all `Scenarios` in
-  `docs/specs/quick-terminal/spec.md`.
+  `docs/specs/ui/requirements/quick-terminal.md`.
 - Plan: `Responsive PTY presentation`, `Global launcher ownership`, `Desktop sidebar action`,
   `Tablet and phone actions`, `Mobile design contract`, and `Risks` in `plan.md`.
 - Existing patterns: `apps/web/components/settings/host-shell-dialog.tsx`,

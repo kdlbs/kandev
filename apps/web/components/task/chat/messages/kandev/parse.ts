@@ -69,6 +69,10 @@ function unwrapContentBlocks(blocks: unknown[]): unknown {
   return tryParseJson(joined);
 }
 
+function hasValue(value: unknown): boolean {
+  return value !== undefined && value !== null;
+}
+
 // extractMcpResult walks the various shapes the ACP/MCP transport can emit and
 // returns the structured payload. Returns null if the value is empty/missing.
 export function extractMcpResult(value: unknown): unknown {
@@ -89,8 +93,12 @@ export function extractMcpResult(value: unknown): unknown {
       structuredContent?: unknown;
       structured_content?: unknown;
     };
-    if (obj.structuredContent !== undefined) return obj.structuredContent;
-    if (obj.structured_content !== undefined) return obj.structured_content;
+    if (hasValue(obj.structuredContent)) {
+      return obj.structuredContent;
+    }
+    if (hasValue(obj.structured_content)) {
+      return obj.structured_content;
+    }
     if (Array.isArray(obj.content)) return unwrapContentBlocks(obj.content);
     if (typeof obj.output === "string") return tryParseJson(obj.output);
     if (

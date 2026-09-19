@@ -2,7 +2,7 @@
 # probe-claude-midturn-fold — does the Claude CLI fold a stream-json message
 # into a turn that is already running?
 #
-# Context: docs/specs/platform/background-work-liveness.md scopes out "mid-turn
+# Context: docs/specs/platform/requirements/background-work-liveness.md scopes out "mid-turn
 # steering for agents without concurrent-prompt capability", and ADR-0049 admits
 # a prompt handoff only for adapters "fixture-tested to accept the next human
 # prompt echo while the earlier RPC remains open". Issue #1607 assumes the

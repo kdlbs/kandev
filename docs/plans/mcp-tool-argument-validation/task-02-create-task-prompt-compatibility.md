@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-enforce-registered-schemas"]
 plan: "plan.md"
-spec: "../../specs/integrations/mcp-tool-argument-validation.md"
+spec: "../../specs/integrations/requirements/mcp-tool-argument-validation.md"
 ---
 
 # Task 02: Converge create-task on prompt

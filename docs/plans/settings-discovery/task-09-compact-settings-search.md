@@ -5,7 +5,7 @@ status: completed
 wave: 9
 depends_on: ["08-command-palette-settings-group"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-discovery.md"
+spec: "../../specs/ui/requirements/settings-discovery.md"
 ---
 
 # Task 09: Compact Settings search field

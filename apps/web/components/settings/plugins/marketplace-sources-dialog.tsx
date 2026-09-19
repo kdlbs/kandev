@@ -21,6 +21,7 @@ import {
   updateMarketplaceSource,
 } from "@/lib/api/domains/marketplace-api";
 import type { MarketplaceSource } from "@/lib/types/plugins";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type MarketplaceSourcesDialogProps = {
   open: boolean;
@@ -43,7 +44,11 @@ export function MarketplaceSourcesDialog({
   const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        data-testid="marketplace-sources-dialog"
+        data-layout="contained"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+      >
         <DialogHeader>
           <DialogTitle>{t("plugins:marketplaceSources")}</DialogTitle>
           <DialogDescription>
@@ -52,7 +57,10 @@ export function MarketplaceSourcesDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2">
+        <div
+          data-testid="marketplace-sources-list"
+          className="min-h-0 min-w-0 space-y-2 overflow-x-hidden overflow-y-auto overscroll-contain"
+        >
           {sources.map((source) => (
             <SourceItem key={source.id} source={source} onChanged={onChanged} />
           ))}
@@ -121,7 +129,7 @@ function SourceItem({ source, onChanged }: { source: MarketplaceSource; onChange
             size="icon"
             disabled={busy}
             onClick={remove}
-            className="cursor-pointer"
+            className={controlSizingClassName("icon", "cursor-pointer")}
             aria-label={t("plugins:removeSource", { name: source.name })}
           >
             <IconTrash className="h-4 w-4" />
@@ -154,24 +162,29 @@ function AddSourceForm({ onChanged }: { onChanged: () => void }) {
   };
 
   return (
-    <div className="space-y-2 border-t border-border/60 pt-3">
+    <div
+      data-testid="marketplace-add-source-form"
+      className="space-y-2 border-t border-border/60 pt-3"
+    >
       <Input
         placeholder={t("plugins:sourceNamePlaceholder")}
         value={name}
         onChange={(e) => setName(e.target.value)}
+        className={controlSizingClassName("standard")}
         data-testid="marketplace-add-source-name"
       />
       <div className="flex items-center gap-2">
         <Input
-          placeholder="https://.../index.json"
+          placeholder={t("plugins:sourceUrlPlaceholder")}
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          className={controlSizingClassName("standard")}
           data-testid="marketplace-add-source-url"
         />
         <Button
           disabled={busy || !url.trim()}
           onClick={submit}
-          className="cursor-pointer shrink-0"
+          className={controlSizingClassName("standard", "cursor-pointer shrink-0")}
           data-testid="marketplace-add-source-submit"
         >
           {t("plugins:add")}

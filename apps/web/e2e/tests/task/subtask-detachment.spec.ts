@@ -108,11 +108,23 @@ test.describe("Subtask detachment", () => {
 
     await kanban.openTaskContextMenu(child.id);
     await expect(testPage.getByRole("menuitem", { name: DETACH_LABEL })).toBeVisible();
-    await testPage.keyboard.press("Escape");
+    await testPage.getByRole("menuitem", { name: DETACH_LABEL }).click();
+    const contextConfirmation = testPage.getByRole("dialog", { name: "Detach task from parent?" });
+    await expect(contextConfirmation).toBeVisible();
+    await contextConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(contextConfirmation).toHaveCount(0);
+    await expect(
+      kanban.taskCard(child.id).getByRole("button", { name: "More options" }),
+    ).toBeFocused();
+    await expect.poll(async () => (await apiClient.getTask(child.id)).parent_id).toBe(parent.id);
 
     await kanban.openTaskActionsMenu(child.id);
     await testPage.getByRole("menuitem", { name: DETACH_LABEL }).click();
-    await testPage.getByRole("alertdialog").getByTestId("detach-task-confirm").click();
+    const confirmation = testPage.getByRole("dialog", { name: "Detach task from parent?" });
+    await expect(confirmation).toBeVisible();
+    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(confirmation).toContainText("workflow, subtasks, and state will not change");
+    await confirmation.getByTestId("detach-task-confirm").click();
 
     await expect(kanban.taskCardInColumn("Detach kanban child", seedData.startStepId)).toBeVisible({
       timeout: 10_000,

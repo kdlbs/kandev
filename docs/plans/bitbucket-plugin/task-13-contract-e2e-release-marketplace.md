@@ -21,7 +21,7 @@ depends_on:
     "12h-native-create-unlink-indicators-saved-queries",
   ]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 13: Cross-repository contract E2E, release, and marketplace

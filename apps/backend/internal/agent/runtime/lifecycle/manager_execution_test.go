@@ -58,6 +58,38 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 	}
 }
 
+func TestPrepareExecutionCreateRequest_ReuseRequiredDockerUsesEnvironmentControlToken(t *testing.T) {
+	mgr := newTestManager(t)
+	store := newInMemorySecretStore()
+	store.store["session-auth"] = &secrets.SecretWithValue{Value: "sibling-session-token"}
+	store.store["container-control"] = &secrets.SecretWithValue{Value: "environment-control-token"}
+	mgr.secretStore = store
+
+	prepared, err := mgr.prepareExecutionCreateRequest(context.Background(), "task-1", &WorkspaceInfo{
+		TaskID:            "task-1",
+		SessionID:         "session-2",
+		TaskEnvironmentID: "environment-1",
+		WorkspacePath:     "/workspace",
+		AgentID:           "auggie",
+		ExecutorType:      string(models.ExecutorTypeLocalDocker),
+		Metadata: map[string]interface{}{
+			MetadataKeyContainerID:                "container-1",
+			MetadataKeyAuthTokenSecret:            "session-auth",
+			MetadataKeyContainerControlAuthSecret: "container-control",
+		},
+	}, "execution-2")
+	if err != nil {
+		t.Fatalf("prepareExecutionCreateRequest() error = %v", err)
+	}
+
+	if got := prepared.request.AuthToken; got != "environment-control-token" {
+		t.Fatalf("reconnect auth token = %q, want environment control token", got)
+	}
+	if !prepared.request.WorkspaceReuseRequired {
+		t.Fatal("on-demand execution for a task environment must attach rather than provision a replacement workspace")
+	}
+}
+
 func TestResolveSessionRuntimeDoesNotCreateUnsupportedExecution(t *testing.T) {
 	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
 		"session-ssh": {
@@ -338,9 +370,15 @@ func TestCreateExecutionRollsBackWhenRegistrationCannotPersist(t *testing.T) {
 			},
 		},
 	})
-	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
-		ID: sessionID, TaskID: "task-create-persist-failure", State: models.TaskSessionStateStarting,
-	}})
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{
+		session: &models.TaskSession{
+			ID: sessionID, TaskID: "task-create-persist-failure", State: models.TaskSessionStateStarting,
+		},
+		env: &models.TaskEnvironment{
+			ID: "env-create-persist-failure", TaskID: "task-create-persist-failure",
+			Status: models.TaskEnvironmentStatusStopped,
+		},
+	})
 	writer := &launchRegistrationWriter{
 		upserted:  make(chan struct{}),
 		upsertErr: errors.New("database is locked"),
@@ -378,16 +416,16 @@ func newTerminalSessionManager(t *testing.T, state models.TaskSessionState) (*Ma
 	})
 	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
 		ID: terminalSessionID, TaskID: terminalTaskID, State: state,
+	}, env: &models.TaskEnvironment{
+		ID: terminalEnvironmentID, TaskID: terminalTaskID,
+		Status: models.TaskEnvironmentStatusStopped,
 	}})
 	return mgr, backend
 }
 
-// A shell terminal left open on a terminal session reconnects on a timer, and
-// the file, git, LSP and port panels poll their own session-keyed path. Every
-// entry point must be rejected from the session state alone: creating the
-// runtime instance first and rolling it back turned an idle panel into a
-// spawn/teardown loop for as long as the tab stayed open.
-func TestEnsureExecutionRejectsTerminalSessionWithoutCreatingInstance(t *testing.T) {
+// Workspace surfaces can reconnect a retained runtime for a terminal session,
+// but they must not promote it to an agent launch.
+func TestEnsureExecutionAllowsWorkspaceRestoreForTerminalSession(t *testing.T) {
 	entryPoints := []struct {
 		name string
 		call func(*Manager) error
@@ -415,17 +453,19 @@ func TestEnsureExecutionRejectsTerminalSessionWithoutCreatingInstance(t *testing
 			t.Run(entryPoint.name+"/"+string(state), func(t *testing.T) {
 				mgr, backend := newTerminalSessionManager(t, state)
 
-				if err := entryPoint.call(mgr); !errors.Is(err, ErrSessionTerminal) {
-					t.Fatalf("%s error = %v, want ErrSessionTerminal", entryPoint.name, err)
+				if err := entryPoint.call(mgr); err != nil {
+					t.Fatalf("%s returned error: %v", entryPoint.name, err)
 				}
-				if got := backend.createCount.Load(); got != 0 {
-					t.Fatalf("CreateInstance calls = %d, want 0", got)
+				if got := backend.createCount.Load(); got != 1 {
+					t.Fatalf("CreateInstance calls = %d, want 1", got)
 				}
 				if got := backend.stopCount.Load(); got != 0 {
 					t.Fatalf("StopInstance calls = %d, want 0", got)
 				}
-				if _, exists := mgr.executionStore.GetBySessionID(terminalSessionID); exists {
-					t.Fatal("terminal session must not register an execution")
+				if execution, exists := mgr.executionStore.GetBySessionID(terminalSessionID); !exists {
+					t.Fatal("workspace restore did not register an execution")
+				} else if execution.AgentCommand != "" {
+					t.Fatalf("workspace restore promoted an agent command: %q", execution.AgentCommand)
 				}
 			})
 		}
@@ -1040,7 +1080,7 @@ func TestCreateExecutionRecoversRepositoryEnvironmentAndSSHApprovals(t *testing.
 	mgr.SetExecutorProfileReader(reader)
 
 	execution, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
-		SessionID: "session-1", WorkspaceID: "workspace-1", AgentProfileID: "agent-profile", ExecutionProfileID: "agent-profile",
+		TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1", AgentProfileID: "agent-profile", ExecutionProfileID: "agent-profile",
 		ExecutorProfileID: "executor-profile",
 		AgentID:           "auggie", WorkspacePath: "/workspace/task-1",
 	})

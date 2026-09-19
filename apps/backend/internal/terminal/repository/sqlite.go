@@ -74,9 +74,9 @@ func (r *Repository) initSchema() error {
 // agentctl PTY id). initialCommand is "" for plain shells.
 func (r *Repository) Create(ctx context.Context, taskID, envID, id, initialCommand string) (*models.Terminal, error) {
 	if _, err := r.db.ExecContext(ctx,
-		`INSERT INTO user_terminals (id, task_id, environment_id, seq, custom_name, state, initial_command)
+		r.db.Rebind(`INSERT INTO user_terminals (id, task_id, environment_id, seq, custom_name, state, initial_command)
 		 SELECT ?, ?, ?, COALESCE(MAX(seq), 0) + 1, NULL, 'open', ?
-		 FROM user_terminals WHERE task_id = ?`,
+		 FROM user_terminals WHERE task_id = ?`),
 		id, taskID, envID, initialCommand, taskID,
 	); err != nil {
 		return nil, fmt.Errorf("insert terminal: %w", err)
@@ -89,8 +89,8 @@ func (r *Repository) Create(ctx context.Context, taskID, envID, id, initialComma
 func (r *Repository) Get(ctx context.Context, id string) (*models.Terminal, error) {
 	var t models.Terminal
 	err := r.ro.GetContext(ctx, &t,
-		`SELECT id, task_id, environment_id, seq, custom_name, state, initial_command, created_at
-		 FROM user_terminals WHERE id = ?`,
+		r.ro.Rebind(`SELECT id, task_id, environment_id, seq, custom_name, state, initial_command, created_at
+		 FROM user_terminals WHERE id = ?`),
 		id,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -112,6 +112,7 @@ func (r *Repository) ListByTask(ctx context.Context, taskID string, includeParke
 		q += ` AND state = 'open'`
 	}
 	q += ` ORDER BY seq ASC`
+	q = r.ro.Rebind(q)
 
 	var rows []*models.Terminal
 	if err := r.ro.SelectContext(ctx, &rows, q, args...); err != nil {
@@ -130,7 +131,7 @@ func (r *Repository) Rename(ctx context.Context, id string, name *string) error 
 		nameArg = *name
 	}
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE user_terminals SET custom_name = ? WHERE id = ?`,
+		r.db.Rebind(`UPDATE user_terminals SET custom_name = ? WHERE id = ?`),
 		nameArg, id,
 	)
 	if err != nil {
@@ -147,7 +148,7 @@ func (r *Repository) Rename(ctx context.Context, id string, name *string) error 
 // the service's job.
 func (r *Repository) SetState(ctx context.Context, id string, state models.TerminalState) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE user_terminals SET state = ? WHERE id = ?`,
+		r.db.Rebind(`UPDATE user_terminals SET state = ? WHERE id = ?`),
 		string(state), id,
 	)
 	if err != nil {
@@ -162,7 +163,7 @@ func (r *Repository) SetState(ctx context.Context, id string, state models.Termi
 
 // Delete removes a single terminal row.
 func (r *Repository) Delete(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM user_terminals WHERE id = ?`, id)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM user_terminals WHERE id = ?`), id)
 	if err != nil {
 		return fmt.Errorf("delete terminal: %w", err)
 	}
@@ -172,7 +173,7 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 // DeleteByTask removes every row for a task and returns the count. Used by
 // the task.deleted cascade subscriber.
 func (r *Repository) DeleteByTask(ctx context.Context, taskID string) (int, error) {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM user_terminals WHERE task_id = ?`, taskID)
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM user_terminals WHERE task_id = ?`), taskID)
 	if err != nil {
 		return 0, fmt.Errorf("delete by task: %w", err)
 	}

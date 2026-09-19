@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,17 +27,22 @@ const (
 	// writeProbeWebhookKey triggers the Host data API write round-trip
 	// (CreateTask + CreateComment). Gated on this key so unrelated webhook
 	// deliveries don't attempt writes.
-	writeProbeWebhookKey   = "write"
-	fixtureReferenceSource = "fixture-pull-requests"
-	fixturePullRequestID   = "pull-request-42"
-	revokedPullRequestID   = "pull-request-revoked"
-	fixtureProviderID      = "fixture-source-control"
-	fixtureCredentialHost  = "bitbucket.example.test"
-	fixtureCredentialPath  = "/scm/TEAM/fixture"
-	connectionStatusAction = "connection-status"
-	searchPurpose          = "search"
-	submissionPurpose      = "submission"
-	fixtureTaskIDKey       = "task_id"
+	writeProbeWebhookKey        = "write"
+	fixtureReferenceSource      = "fixture-pull-requests"
+	fixturePullRequestID        = "pull-request-42"
+	revokedPullRequestID        = "pull-request-revoked"
+	fixtureProviderID           = "fixture-source-control"
+	fixtureCredentialHost       = "bitbucket.example.test"
+	fixtureCredentialPath       = "/scm/TEAM/fixture"
+	connectionStatusAction      = "connection-status"
+	utilityDefaultAction        = "utility-default"
+	utilityPreferenceAction     = "utility-preference"
+	utilityProfilePrompt        = "/e2e:utility-profile"
+	repositoryInspectActionKey  = "repositories.inspect"
+	repositoryBranchesActionKey = "repositories.branches"
+	searchPurpose               = "search"
+	submissionPurpose           = "submission"
+	fixtureTaskIDKey            = "task_id"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -178,12 +184,20 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 			response["connected"] = false
 			response["error"] = "connection unavailable"
 		}
+	case utilityDefaultAction:
+		return p.invokeUtilityAgent(ctx, false)
+	case utilityPreferenceAction:
+		return p.invokeUtilityAgent(ctx, true)
 	case "link-pull-request":
 		response["linked"] = true
 		response[fixtureTaskIDKey] = req.Context.TaskID
 		response["pull_request_id"] = fixturePullRequestID
 	case "watch-create-task":
 		return p.createWatchTask(ctx, req.Context.WorkspaceID)
+	case repositoryInspectActionKey:
+		return p.inspectRepository(req.Body)
+	case repositoryBranchesActionKey:
+		return p.listRepositoryBranches()
 	default:
 		return nil, fmt.Errorf("plugin-fixture: unknown action %q", req.ActionKey)
 	}
@@ -192,6 +206,65 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		return nil, fmt.Errorf("plugin-fixture: marshaling action response: %w", err)
 	}
 	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) invokeUtilityAgent(ctx context.Context, usePreference bool) (*pluginsdk.PluginActionResponse, error) {
+	host := p.Host()
+	if host == nil {
+		return nil, fmt.Errorf("plugin-fixture: host unavailable")
+	}
+
+	options, err := p.utilityAgentOptions(ctx, usePreference)
+	if err != nil {
+		return nil, err
+	}
+	response, err := host.InvokeUtilityAgent(ctx, utilityProfilePrompt, options...)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: invoke utility agent: %w", err)
+	}
+	body, err := json.Marshal(map[string]string{"response": response})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshaling utility response: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) utilityAgentOptions(ctx context.Context, usePreference bool) ([]pluginsdk.UtilityAgentOptions, error) {
+	if !usePreference {
+		return nil, nil
+	}
+	config, err := p.Host().GetConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: read config: %w", err)
+	}
+	profileID := ""
+	if raw, ok := config["agent_profile"]; ok {
+		var valid bool
+		profileID, valid = raw.(string)
+		if !valid {
+			return nil, fmt.Errorf("plugin-fixture: config %q must be a string", "agent_profile")
+		}
+	}
+	return []pluginsdk.UtilityAgentOptions{{ProfileID: profileID}}, nil
+}
+
+func (p *fixturePlugin) inspectRepository(body []byte) (*pluginsdk.PluginActionResponse, error) {
+	var request struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(body, &request); err != nil || !fixtureRepositoryURL(request.URL) {
+		return &pluginsdk.PluginActionResponse{Body: []byte(`{"matched":false}`)}, nil
+	}
+	return &pluginsdk.PluginActionResponse{Body: []byte(`{"repository":{"provider_id":"fixture-source-control","provider_host":"bitbucket.example.test","provider_scope":"","provider_repository_id":"fixture-repository","owner_or_project":"TEAM","name":"fixture","clone_url":"https://bitbucket.example.test/scm/TEAM/fixture.git","default_branch":"main"}}`)}, nil
+}
+
+func fixtureRepositoryURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && strings.EqualFold(parsed.Hostname(), fixtureCredentialHost)
+}
+
+func (p *fixturePlugin) listRepositoryBranches() (*pluginsdk.PluginActionResponse, error) {
+	return &pluginsdk.PluginActionResponse{Body: []byte(`{"branches":[{"name":"main","is_default":true},{"name":"feature/provider-contract"}]}`)}, nil
 }
 
 func (p *fixturePlugin) createWatchTask(ctx context.Context, workspaceID string) (*pluginsdk.PluginActionResponse, error) {

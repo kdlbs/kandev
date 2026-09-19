@@ -5,7 +5,7 @@ status: completed
 wave: 0
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 01: Design package and task files
@@ -21,9 +21,9 @@ None.
 
 ## Owned paths
 
-- `docs/specs/bitbucket-plugin/spec.md`
+- `docs/specs/integrations/requirements/bitbucket-plugin.md`
 - `docs/specs/INDEX.md`
-- `docs/specs/plugins/spec.md`
+- `docs/specs/plugins/requirements/plugins.md`
 - `docs/decisions/2026-07-31-authenticated-plugin-actions.md`
 - `docs/decisions/2026-07-31-plugin-repository-provider-extensions.md`
 - `docs/decisions/2026-07-31-provider-neutral-git-credential-broker.md`

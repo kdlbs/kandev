@@ -120,7 +120,10 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        const draft = settings.sidebar_draft as { base_view_id?: string } | null | undefined;
+        const draft = settings.sidebar_views_by_workspace[seedData.workspaceId].draft as
+          | { base_view_id?: string }
+          | null
+          | undefined;
         return draft?.base_view_id ?? null;
       })
       .toBe("view-all-tasks");
@@ -145,9 +148,11 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-          (view) => view.name === "Persist View",
-        );
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+            | Array<{ name?: string }>
+            | undefined
+        )?.some((view) => view.name === "Persist View");
       })
       .toBe(true);
 
@@ -192,7 +197,8 @@ test.describe("Sidebar filter — view ordering", () => {
 
     await filters.selectViewByName("Beta View");
     await filters.open();
-    await filters.deleteActiveView();
+    await filters.beginDeleteActiveView("Beta View");
+    await filters.confirmDeleteActiveView("Beta View");
     await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View"]);
     // Deleting the active view falls back to the first remaining view.
     await filters.expectActiveViewChip("All tasks");
@@ -302,7 +308,22 @@ test.describe("Sidebar filter — group + sort", () => {
   test("Group by none hides group headers", async ({ testPage, apiClient, seedData }) => {
     const { session, filters } = await openWithSeed(testPage, apiClient, seedData, ["One", "Two"]);
     await filters.open();
-    await filters.setGroup("None");
+    await filters.openGroupSettings();
+    await filters.popover.getByTestId("group-key-select").click();
+    for (const { label, description } of [
+      { label: "None", description: "Keep all tasks in one list." },
+      { label: "Repository", description: "Separate tasks by repository." },
+      { label: "Workflow", description: "Separate tasks by workflow." },
+      { label: "Workflow step", description: "Separate tasks by workflow step." },
+      { label: "Executor type", description: "Separate tasks by executor type." },
+      { label: "State", description: "Separate tasks by state." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.getByRole("option", { name: "None", exact: true }).click();
     await filters.close();
     await expect(session.sidebar.locator("[data-testid='sidebar-group-header']")).toHaveCount(0);
   });
@@ -319,6 +340,7 @@ test.describe("Sidebar filter — group + sort", () => {
   test("Sort direction toggle flips icon direction", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Sort A"]);
     await filters.open();
+    await filters.openSortSettings();
     const toggle = filters.popover.getByTestId("sort-direction-toggle");
     const initial = await toggle.getAttribute("data-direction");
     await toggle.click();
@@ -350,6 +372,46 @@ test.describe("Sidebar filter — group + sort", () => {
     await session.waitForLoad();
     const filters = new SidebarFilterPopoverPage(testPage);
     await filters.open();
+    await filters.openSortSettings();
+    await filters.popover.getByTestId("sort-key-select").click();
+    await expect(testPage.getByRole("option", { name: "Updated", exact: true })).toContainText(
+      "Last task summary refresh. Background events can change it.",
+    );
+    await expect(
+      testPage.getByRole("option", { name: "Last activity", exact: true }),
+    ).toContainText("Last user or agent action. Viewing a task does not change it.");
+    await expect(testPage.getByRole("option", { name: "Status", exact: true })).toContainText(
+      "Task state, from review to backlog.",
+    );
+    await expect(testPage.getByRole("option", { name: "Created", exact: true })).toContainText(
+      "When the task was created.",
+    );
+    await expect(testPage.getByRole("option", { name: "Title", exact: true })).toContainText(
+      "Task title in alphabetical order.",
+    );
+    await expect(testPage.getByRole("option", { name: "Custom", exact: true })).toContainText(
+      "The manual order you set for tasks.",
+    );
+    for (const { label, description } of [
+      {
+        label: "Updated",
+        description: "Last task summary refresh. Background events can change it.",
+      },
+      {
+        label: "Last activity",
+        description: "Last user or agent action. Viewing a task does not change it.",
+      },
+      { label: "Status", description: "Task state, from review to backlog." },
+      { label: "Created", description: "When the task was created." },
+      { label: "Title", description: "Task title in alphabetical order." },
+      { label: "Custom", description: "The manual order you set for tasks." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.keyboard.press("Escape");
     await filters.setGroup("None");
     await filters.setSort("Last activity", "desc");
     await filters.saveAs("Last activity view");
@@ -447,11 +509,15 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     const renameInput = await filters.beginNewView();
     await expect(renameInput).toHaveValue("New view");
     await expect(filters.popover.getByTestId("filter-clause-row")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("sort-key-select")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("group-key-select")).toHaveCount(0);
+    await filters.openSortSettings();
     await expect(filters.popover.getByTestId("sort-key-select")).toContainText("Status");
     await expect(filters.popover.getByTestId("sort-direction-toggle")).toHaveAttribute(
       "data-direction",
       "asc",
     );
+    await filters.openGroupSettings();
     await expect(filters.popover.getByTestId("group-key-select")).toContainText("Repository");
 
     await renameInput.fill("Planning view");
@@ -463,9 +529,11 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-          (view) => view.name === "Planning view",
-        );
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+            | Array<{ name?: string }>
+            | undefined
+        )?.some((view) => view.name === "Planning view");
       })
       .toBe(true);
 
@@ -514,7 +582,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return settings.sidebar_draft ?? null;
+        return settings.sidebar_views_by_workspace[seedData.workspaceId].draft ?? null;
       })
       .toBeNull();
 
@@ -527,15 +595,20 @@ test.describe("Sidebar filter — saved views CRUD", () => {
       collapsed_groups: [],
     }));
     const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-      sidebar_views: limitViews,
-      sidebar_active_view_id: limitViews[0].id,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: limitViews,
+        active_view_id: limitViews[0].id,
+        draft: null,
+      },
     });
     expect(response.ok).toBe(true);
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as unknown[] | undefined)?.length;
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as unknown[] | undefined
+        )?.length;
       })
       .toBe(50);
     await testPage.reload();
@@ -569,6 +642,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Delete View Task"]);
     await filters.addFilterRow();
@@ -578,7 +652,33 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await filters.expectActiveViewChip("Ephemeral");
 
     await filters.open();
-    await filters.deleteActiveView();
+    await filters.beginDeleteActiveView("Ephemeral");
+    await expect(filters.popover).toBeVisible();
+    if (prCapture.capturing) {
+      await filters.deleteConfirmation.evaluate(async (element) => {
+        await Promise.all(
+          element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+        );
+      });
+    }
+    await prCapture.screenshot("saved-task-view-delete-desktop", {
+      caption: "Desktop saved task view deletion names the target before removing filters.",
+    });
+    await filters.cancelDeleteActiveView();
+    await expect(filters.popover.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "Ephemeral",
+    );
+    const settingsAfterCancel = await apiClient.getUserSettings();
+    expect(
+      (
+        settingsAfterCancel.settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+          | Array<{ name?: string }>
+          | undefined
+      )?.some((view) => view.name === "Ephemeral"),
+    ).toBe(true);
+
+    await filters.beginDeleteActiveView("Ephemeral");
+    await filters.confirmDeleteActiveView("Ephemeral");
     await filters.close();
     await filters.openViewPicker();
     await expect(
@@ -657,6 +757,176 @@ test.describe("Sidebar filter — repository dimension (#1213)", () => {
     // Repo A's task survives (this was empty before the fix); repo B's is hidden.
     await expect(session.sidebar.getByText("Task in repo A")).toBeVisible();
     await expect(session.sidebar.getByText("Task in repo B")).toHaveCount(0);
+  });
+});
+
+test.describe("Sidebar filter — task-row presentation", () => {
+  test("previews, saves, discards, and reloads task row presentation with compact trailing content", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskTitle = "Desktop task row layout";
+    const secondTaskTitle = "Desktop task row layout second";
+    const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [
+      taskTitle,
+      secondTaskTitle,
+    ]);
+    const row = session.sidebar
+      .getByTestId("sidebar-task-item")
+      .filter({ has: testPage.getByText(taskTitle, { exact: true }) });
+    const secondRow = session.sidebar
+      .getByTestId("sidebar-task-item")
+      .filter({ has: testPage.getByText(secondTaskTitle, { exact: true }) });
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("sidebar-task-time")).toBeVisible();
+
+    await filters.open();
+    await expect(filters.taskRowSettings.getByTestId("task-row-settings-toggle")).toBeVisible();
+    await expect(filters.taskRowSettings.getByTestId("task-row-details-toggle")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toHaveCount(0);
+
+    await filters.openTaskRowSettings();
+    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toHaveCount(0);
+    await filters.taskRowSettings.getByTestId("task-row-trailing-select").click();
+    for (const { label, description } of [
+      { label: "Git changes", description: "Show added and removed lines." },
+      { label: "Relative time", description: "Show when the task was last updated." },
+      {
+        label: "Change request status",
+        description: "Show the pull request or merge request status.",
+      },
+      { label: "Nothing", description: "Leave the right side empty." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.keyboard.press("Escape");
+    await prCapture.screenshot("desktop-task-row-settings", {
+      caption: "Desktop task-row presentation settings with the section expanded",
+    });
+    const pullRequestHandle = filters.taskRowSettings.getByTestId(
+      "task-row-detail-handle-pull_request_number",
+    );
+    const relativeTimeHandle = filters.taskRowSettings.getByTestId(
+      "task-row-detail-handle-relative_time",
+    );
+    const sourceBox = await pullRequestHandle.boundingBox();
+    const targetBox = await relativeTimeHandle.boundingBox();
+    expect(sourceBox).not.toBeNull();
+    expect(targetBox).not.toBeNull();
+    await testPage.mouse.move(
+      sourceBox!.x + sourceBox!.width / 2,
+      sourceBox!.y + sourceBox!.height / 2,
+    );
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      sourceBox!.x + sourceBox!.width / 2,
+      sourceBox!.y + sourceBox!.height / 2 + 12,
+      { steps: 4 },
+    );
+    await testPage.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + 2, {
+      steps: 16,
+    });
+    await testPage.mouse.up();
+    await expect
+      .poll(() => filters.taskRowDetailOrder())
+      .toEqual(["pull_request_number", "relative_time", "repository"]);
+    await filters.toggleTaskRowDetail("repository");
+    await expect(row.getByTestId("sidebar-task-repository")).toHaveCount(0);
+
+    const detailsToggle = filters.taskRowSettings.getByTestId("task-row-details-toggle");
+    await detailsToggle.click();
+    await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(row.getByText(taskTitle, { exact: true })).toBeVisible();
+    const compactRowBox = await row.boundingBox();
+    const compactTitleBox = await row.getByText(taskTitle, { exact: true }).first().boundingBox();
+    expect(compactRowBox).not.toBeNull();
+    expect(compactTitleBox).not.toBeNull();
+    expect(
+      Math.abs(
+        compactTitleBox!.y +
+          compactTitleBox!.height / 2 -
+          (compactRowBox!.y + compactRowBox!.height / 2),
+      ),
+    ).toBeLessThanOrEqual(1);
+    await filters.saveAs("Compact task rows");
+    await filters.expectActiveViewChip("Compact task rows");
+
+    const savedSettings = await apiClient.getUserSettings();
+    const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
+      .views as Array<{
+      name?: string;
+      task_row?: { details_enabled?: boolean };
+    }>;
+    expect(savedViews.find((view) => view.name === "Compact task rows")?.task_row).toMatchObject({
+      details_enabled: false,
+    });
+
+    await filters.setTaskRowTrailing("Relative time");
+    await filters.saveOverwrite();
+    const trailingTime = row.getByTestId("sidebar-task-trailing-time");
+    const secondTrailingTime = secondRow.getByTestId("sidebar-task-trailing-time");
+    await expect(trailingTime).toBeVisible();
+    await expect(secondTrailingTime).toBeVisible();
+    await expect(trailingTime).not.toContainText(/ago|yesterday/i);
+    await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
+    const [timeBox, secondTimeBox] = await Promise.all([
+      trailingTime.boundingBox(),
+      secondTrailingTime.boundingBox(),
+    ]);
+    expect(timeBox).not.toBeNull();
+    expect(secondTimeBox).not.toBeNull();
+    expect(Math.abs(timeBox!.width - secondTimeBox!.width)).toBeLessThanOrEqual(1);
+
+    await filters.openTaskRowSettings();
+    await detailsToggle.click();
+    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toBeVisible();
+    await filters.discard();
+    await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    await filters.close();
+
+    await filters.selectViewByName("All tasks");
+    await expect(
+      session.sidebar
+        .getByTestId("sidebar-task-item")
+        .filter({ has: testPage.getByText(taskTitle, { exact: true }) }),
+    ).toBeVisible();
+    await expect(
+      session.sidebar
+        .getByTestId("sidebar-task-item")
+        .filter({ has: testPage.getByText(taskTitle, { exact: true }) })
+        .getByTestId("sidebar-task-time"),
+    ).toBeVisible();
+
+    await filters.selectViewByName("Compact task rows");
+    await expect
+      .poll(async () => {
+        const compactRow = session.sidebar
+          .getByTestId("sidebar-task-item")
+          .filter({ has: testPage.getByText(taskTitle, { exact: true }) });
+        return (await compactRow.getByTestId("sidebar-task-trailing-time").count()) === 1;
+      })
+      .toBe(true);
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    const reloadedFilters = new SidebarFilterPopoverPage(testPage);
+    await reloadedFilters.expectActiveViewChip("Compact task rows");
+    const reloadedRow = testPage
+      .getByTestId("sidebar-task-item")
+      .filter({ has: testPage.getByText(taskTitle, { exact: true }) });
+    await expect(reloadedRow.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(reloadedRow.getByTestId("sidebar-task-trailing-time")).toBeVisible();
+    await expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
   });
 });
 

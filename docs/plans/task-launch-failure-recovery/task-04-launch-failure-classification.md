@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-failure-taxonomy-contracts", "10-task-base-self-heal"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 04: Persist typed launch-failure reason

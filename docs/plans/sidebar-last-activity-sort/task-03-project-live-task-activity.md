@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["02-add-activity-reconstruction"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-last-activity-sort.md"
+spec: "../../specs/ui/requirements/sidebar-last-activity-sort.md"
 ---
 
 # Task 03: Project task activity live

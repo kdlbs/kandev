@@ -104,7 +104,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       config: { image_tag: E2E_IMAGE_TAG },
       prepare_script: "sleep 20",
       cleanup_script: "",
-      env_vars: [],
+      env_vars: seedData.gitConfigEnvVars,
     });
     const persistedProfile = await apiClient.getExecutorProfile(dockerExec!.id, profile.id);
     expect(persistedProfile.prepare_script).toBe("sleep 20");
@@ -473,7 +473,10 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.dockerExecutorProfileId,
       prompt: "/e2e:simple-message",
-      auto_start: true,
+      // This is a user-initiated New Session launch. `auto_start` is reserved
+      // for workflow on-enter automation and correctly prepares (rather than
+      // starts) a session when this simple workflow does not opt into it.
+      auto_start: false,
     });
 
     await waitForSessionEnvironment(apiClient, {
@@ -482,6 +485,16 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       expectedEnvironmentId: before!.id,
       message: "Waiting for second Docker session to reuse the task environment",
     });
+    // Binding the row is not enough: a sibling must establish its own
+    // agentctl instance inside the retained container and complete a prompt.
+    // This catches a missing durable Docker control handle, which otherwise
+    // surfaces only after the session has already claimed the environment.
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      launched.session_id,
+      "Waiting for sibling Docker session to run in the retained container",
+    );
 
     const after = await apiClient.getTaskEnvironment(task.id);
     expect(after?.id).toBe(before!.id);
@@ -537,7 +550,7 @@ git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@gi
       config: { image_tag: E2E_IMAGE_TAG },
       prepare_script: staleScript,
       cleanup_script: "",
-      env_vars: [],
+      env_vars: seedData.gitConfigEnvVars,
     });
 
     try {

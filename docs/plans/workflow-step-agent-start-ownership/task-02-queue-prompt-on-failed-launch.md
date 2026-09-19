@@ -6,7 +6,7 @@ wave: 2
 parallelism: sequential
 depends_on: ["01-reset-skips-created"]
 plan: "plan.md"
-spec: "../../specs/workflow-step-agent-start-ownership/spec.md"
+spec: "../../specs/tasks/requirements/workflow-step-agent-start-ownership.md"
 ---
 
 # Task 02: Queue the auto-start prompt when a CREATED launch fails

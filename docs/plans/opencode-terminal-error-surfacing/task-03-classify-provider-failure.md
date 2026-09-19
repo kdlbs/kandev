@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-settle-correlated-opencode-prompt"]
 plan: "plan.md"
-spec: "../../specs/agent-stall-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-stall-recovery.md"
 ---
 
 # Task 03: Classify and Persist Provider Failures

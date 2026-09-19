@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { Message, Turn } from "@/lib/types/http";
-import { buildPromptHistoryEntries, formatPromptDuration } from "./prompt-history";
+import {
+  buildPromptHistoryEntries,
+  formatPromptDuration,
+  messageTurnDurationSeconds,
+} from "./prompt-history";
 
 const MESSAGE_ID = "message-1";
 const TURN_ID = "turn-1";
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const ONE_SECOND_LATER = "2026-01-01T00:00:01.000Z";
+const FOUR_SECONDS_LATER = "2026-01-01T00:00:04.000Z";
+const FIVE_SECONDS_LATER = "2026-01-01T00:00:05.000Z";
+const INVALID_TIMESTAMP = "not-a-time";
 
 /** Builds a user Message with fixed defaults, merged with the given overrides. */
 function message(overrides: Partial<Message>): Message {
@@ -68,7 +75,7 @@ const ENTRY_CASES = [
   {
     name: "treats an absent turn_id as no completion bound even when a turn is id 'undefined'",
     messages: [message({ id: "no-turn-undefined" })],
-    turns: [turn({ id: "undefined", completed_at: "2026-01-01T00:00:05.000Z" })],
+    turns: [turn({ id: "undefined", completed_at: FIVE_SECONDS_LATER })],
     expected: [{ messageId: "no-turn-undefined", durationSeconds: null, isLastPrompt: true }],
   },
   {
@@ -93,8 +100,8 @@ const ENTRY_CASES = [
     name: "excludes invalid timestamps and uses the next valid prompt",
     messages: [
       message({ id: "first" }),
-      message({ id: "invalid", created_at: "not-a-time" }),
-      message({ id: "next", created_at: "2026-01-01T00:00:04.000Z" }),
+      message({ id: "invalid", created_at: INVALID_TIMESTAMP }),
+      message({ id: "next", created_at: FOUR_SECONDS_LATER }),
     ],
     turns: [],
     expected: [
@@ -105,16 +112,16 @@ const ENTRY_CASES = [
   {
     name: "treats an unparseable turn completed_at as absent with no later prompt",
     messages: [message({ id: "no-bound", turn_id: "turn-1" })],
-    turns: [turn({ completed_at: "not-a-time" })],
+    turns: [turn({ completed_at: INVALID_TIMESTAMP })],
     expected: [{ messageId: "no-bound", durationSeconds: null, isLastPrompt: true }],
   },
   {
     name: "lets the next-prompt bound win when the turn completed_at is unparseable",
     messages: [
       message({ id: "bad-turn", turn_id: "turn-1" }),
-      message({ id: "later", created_at: "2026-01-01T00:00:04.000Z" }),
+      message({ id: "later", created_at: FOUR_SECONDS_LATER }),
     ],
-    turns: [turn({ completed_at: "not-a-time" })],
+    turns: [turn({ completed_at: INVALID_TIMESTAMP })],
     expected: [
       { messageId: "later", durationSeconds: null, isLastPrompt: true },
       { messageId: "bad-turn", durationSeconds: 4, isLastPrompt: false },
@@ -147,7 +154,7 @@ const ENTRY_CASES = [
     name: "bounds the earlier prompt by the later prompt when both share one turn",
     messages: [
       message({ id: "first", turn_id: TURN_ID }),
-      message({ id: "second", turn_id: TURN_ID, created_at: "2026-01-01T00:00:04.000Z" }),
+      message({ id: "second", turn_id: TURN_ID, created_at: FOUR_SECONDS_LATER }),
     ],
     turns: [turn({ completed_at: "2026-01-01T00:00:10.000Z" })],
     expected: [
@@ -332,5 +339,105 @@ describe("formatPromptDuration", () => {
     [3723, "1h 2m 3s"],
   ])("formats %i seconds as %s", (seconds, expected) => {
     expect(formatPromptDuration(seconds, units)).toBe(expected);
+  });
+});
+
+describe("messageTurnDurationSeconds", () => {
+  it.each([
+    {
+      name: "floors completed turn duration to whole seconds",
+      message: message({ turn_id: TURN_ID }),
+      turn: turn({ completed_at: "2026-01-01T00:00:05.900Z" }),
+      expected: 5,
+    },
+    {
+      name: "keeps whole-second completed turn duration",
+      message: message({ turn_id: TURN_ID }),
+      turn: turn({ completed_at: FIVE_SECONDS_LATER }),
+      expected: 5,
+    },
+    {
+      name: "floors sub-second completed turn duration to zero",
+      message: message({ turn_id: TURN_ID }),
+      turn: turn({ completed_at: "2026-01-01T00:00:00.999Z" }),
+      expected: 0,
+    },
+    {
+      name: "returns null for a running turn",
+      message: message({ turn_id: TURN_ID }),
+      turn: turn({}),
+      expected: null,
+    },
+    {
+      name: "returns null for an unparseable completion timestamp",
+      message: message({ turn_id: TURN_ID }),
+      turn: turn({ completed_at: INVALID_TIMESTAMP }),
+      expected: null,
+    },
+    {
+      name: "returns null for an unparseable prompt timestamp",
+      message: message({ turn_id: TURN_ID, created_at: INVALID_TIMESTAMP }),
+      turn: turn({ completed_at: FIVE_SECONDS_LATER }),
+      expected: null,
+    },
+    {
+      name: "returns null for an agent message",
+      message: message({ author_type: "agent", turn_id: TURN_ID }),
+      turn: turn({ completed_at: FIVE_SECONDS_LATER }),
+      expected: null,
+    },
+    {
+      name: "returns null for a missing turn id",
+      message: message({}),
+      turn: turn({ completed_at: FIVE_SECONDS_LATER }),
+      expected: null,
+    },
+    {
+      name: "returns null for an empty turn id",
+      message: message({ turn_id: "" }),
+      turn: turn({ completed_at: FIVE_SECONDS_LATER }),
+      expected: null,
+    },
+    {
+      name: "returns null for an absent turn",
+      message: message({ turn_id: TURN_ID }),
+      turn: null,
+      expected: null,
+    },
+    {
+      name: "returns null for a mismatched turn id",
+      message: message({ turn_id: TURN_ID }),
+      turn: turn({ id: "different", completed_at: FIVE_SECONDS_LATER }),
+      expected: null,
+    },
+    {
+      name: "returns null for a mismatched turn session",
+      message: message({ turn_id: TURN_ID }),
+      turn: turn({
+        session_id: "different-session" as Turn["session_id"],
+        completed_at: FIVE_SECONDS_LATER,
+      }),
+      expected: null,
+    },
+    {
+      name: "clamps clock skew to zero",
+      message: message({ turn_id: TURN_ID }),
+      turn: turn({ completed_at: "2025-12-31T23:59:59.000Z" }),
+      expected: 0,
+    },
+  ])("$name", ({ message: prompt, turn: completedTurn, expected }) => {
+    expect(messageTurnDurationSeconds(prompt, completedTurn)).toBe(expected);
+  });
+
+  it("measures shared completed turns from each prompt's own timestamp", () => {
+    const completedTurn = turn({ completed_at: "2026-01-01T00:00:10.000Z" });
+
+    expect(messageTurnDurationSeconds(message({ turn_id: TURN_ID }), completedTurn)).toBe(10);
+    expect(
+      messageTurnDurationSeconds(
+        message({ id: "second", turn_id: TURN_ID, created_at: FOUR_SECONDS_LATER }),
+        completedTurn,
+      ),
+    ).toBe(6);
   });
 });

@@ -30,7 +30,7 @@ test("unarchive restores a quarantined workspace before branch recovery", async 
   const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
   fs.utimesSync(root, old, old);
 
-  await testPage.goto("/settings/system/data-storage");
+  await testPage.goto("/settings/system/storage");
   const runNow = testPage.getByTestId("storage-run-now");
   await expect(runNow).toBeEnabled({ timeout: 30_000 });
   await runNow.click();

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
 import { useSessionGitStatusByRepo } from "./use-session-git-status";
+import { splitFilesByChangeLayer } from "./git-change-facets";
 
 type RepositoryStatus = ReturnType<typeof useSessionGitStatusByRepo>[number];
 
@@ -69,10 +70,14 @@ export function deriveMultiRepoSummary(
 
   const stagedByRepo = new Map<string, boolean>();
   const unstagedByRepo = new Map<string, boolean>();
-  for (const file of allFiles) {
+  const { stagedFiles, unstagedFiles } = splitFilesByChangeLayer(allFiles);
+  for (const file of stagedFiles) {
     const repositoryName = file.repository_name ?? "";
-    if (file.staged) stagedByRepo.set(repositoryName, true);
-    else unstagedByRepo.set(repositoryName, true);
+    stagedByRepo.set(repositoryName, true);
+  }
+  for (const file of unstagedFiles) {
+    const repositoryName = file.repository_name ?? "";
+    unstagedByRepo.set(repositoryName, true);
   }
   const hasNamed = statusByRepo.some((status) => status.repository_name !== "");
   const filtered =

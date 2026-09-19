@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["06-ws-actions-and-dtos"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 08: Frontend review types, API client, store slice, WS handlers, helpers

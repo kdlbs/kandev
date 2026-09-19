@@ -7,7 +7,7 @@ import (
 
 func TestGeminiUsesManagedPackageOnEveryNPMCommandSurface(t *testing.T) {
 	ag := NewGemini()
-	wantACP := []string{"npx", "--yes", "--prefer-offline", "@google/gemini-cli", "--acp"}
+	wantACP := ag.ManagedNPMRuntime().CachedACPCommand().Args()
 	wantPassthrough := []string{"npx", "--yes", "--prefer-offline", "@google/gemini-cli"}
 
 	if got := ag.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, wantACP) {

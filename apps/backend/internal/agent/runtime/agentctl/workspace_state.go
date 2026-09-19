@@ -41,3 +41,15 @@ func (c *Client) SetWorkspacePollMode(ctx context.Context, mode string) error {
 	}
 	return nil
 }
+
+// RefreshWorkspace requests one file and Git scan from agentctl. The
+// turn_complete trigger is used by lifecycle completion; manual_refresh is
+// the default explicit retry from a visible workspace surface.
+func (c *Client) RefreshWorkspace(ctx context.Context, trigger string) error {
+	if trigger == "" {
+		trigger = "manual_refresh"
+	}
+	return c.updateWorkspace(ctx, "/api/v1/workspace/refresh", "refresh", struct {
+		Trigger string `json:"trigger"`
+	}{Trigger: trigger})
+}

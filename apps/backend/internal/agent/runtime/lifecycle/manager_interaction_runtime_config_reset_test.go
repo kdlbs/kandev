@@ -99,6 +99,55 @@ func TestManager_ResetAgentContext_ReappliesSessionRuntimeConfig(t *testing.T) {
 	require.Equal(t, v1.AgentStatusReady, exec.Status)
 }
 
+func TestReapplySessionModel_RejectsUnadvertisedExactModel(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{RequireExactModel: true}}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := runtimeConfigResetExecution(client, true)
+	exec.SetModelState(&CachedModelState{
+		CurrentModelID: "provider-default",
+		Models:         []streams.SessionModelInfo{{ModelID: "opus[1m]"}},
+	})
+
+	err := mgr.reapplySessionModelAfterReset(ctx, exec, "reset-session", "opus")
+	require.ErrorContains(t, err, "requested_not_advertised")
+	require.Empty(t, mock.getSetModelIDs())
+}
+
+func TestWorkspaceRebindModel_RejectsUnadvertisedExactModel(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{RequireExactModel: true}}
+	mock := newRestartMockAgentctlServer(t, false, false)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := runtimeConfigResetExecution(client, true)
+	exec.SetModelState(&CachedModelState{
+		CurrentModelID: "provider-default",
+		Models:         []streams.SessionModelInfo{{ModelID: "opus[1m]"}},
+	})
+
+	err := mgr.reapplyReboundSessionConfig(
+		ctx,
+		exec,
+		"rebind-session",
+		&CachedModelState{},
+		"opus",
+		nil,
+	)
+	require.ErrorContains(t, err, "requested_not_advertised")
+	require.Empty(t, mock.getSetModelIDs())
+}
+
 func TestManager_RestartAgentProcess_ReappliesSessionRuntimeConfig(t *testing.T) {
 	mgr := newTestManager(t)
 	provider := runtimeConfigResetWorkspaceInfo()

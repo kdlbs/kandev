@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: None
 plan: plan.md
-spec: ../../specs/ui/message-queue-merge.md
+spec: ../../specs/ui/requirements/message-queue-merge.md
 ---
 
 # Task 01: Backend repository merge

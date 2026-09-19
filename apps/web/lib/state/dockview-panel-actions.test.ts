@@ -403,6 +403,25 @@ describe("addFileDiffPanel — preview behavior", () => {
   });
 });
 
+describe("addFileDiffPanel — mixed-layer identity", () => {
+  it("does not reuse a pinned diff for another layer of the same file", () => {
+    const { api, actions } = build(makeApi());
+    actions.addFileDiffPanel(SHARED_PATH, {
+      pin: true,
+      repositoryName: "frontend",
+      changeLayer: "staged",
+    });
+    actions.addFileDiffPanel(SHARED_PATH, {
+      repositoryName: "frontend",
+      changeLayer: "unstaged",
+    });
+
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.changeLayer).toBe("unstaged");
+  });
+});
+
 describe("addCommitDetailPanel — preview behavior", () => {
   let api: DockviewApi;
   let actions: ReturnType<typeof buildPanelActions>;

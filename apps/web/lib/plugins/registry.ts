@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- The registry intentionally centralizes one atomic contribution state. */
 /**
  * Reactive singleton `PluginRegistry` (docs/plans/plugins/PLUGIN-API.md).
  *
@@ -23,6 +24,7 @@ import type {
   SlotComponent,
   TaskActionRegistration,
   TaskFilterRegistration,
+  TaskListFacetRegistration,
   TaskMenuActionRegistration,
   TaskPanelRegistration,
   WsHandler,
@@ -30,12 +32,21 @@ import type {
 import type { ComponentType } from "react";
 import { pluginSlotOrderingId, taskActionKey } from "./registry-normalization";
 import {
-  wrapRepositoryProviderLifecycle,
   wrapReviewProviderLifecycle,
+  wrapRepositoryProviderLifecycle,
 } from "./registry-provider-lifecycle";
+import {
+  PluginProviderOwnership,
+  type PluginProviderOwnershipSnapshot,
+} from "./registry-provider-ownership";
 import { PluginWorkLifecycle } from "./registry-work-lifecycle";
-import { PluginProviderOwnership } from "./registry-provider-ownership";
-import { registerPluginTranslations, unregisterPluginTranslations } from "./plugin-translations";
+import {
+  registerPluginTranslations,
+  restorePluginTranslations,
+  snapshotPluginTranslations,
+  unregisterPluginTranslations,
+  type PluginTranslationsSnapshot,
+} from "./plugin-translations";
 import type {
   PluginIntegrationSettingsRegistration,
   PluginKeybindingHandler,
@@ -49,6 +60,7 @@ import type {
   PluginTaskActionRegistration,
   PluginTaskFilterRegistration,
   PluginTaskMenuActionRegistration,
+  PluginTaskListFacetRegistration,
   PluginTaskPanelRegistration,
   RouteRegistration,
 } from "./registry-registration-types";
@@ -70,6 +82,30 @@ interface WsHandlerRegistration {
   action: string;
   handler: WsHandler;
 }
+
+type PluginRegistryStateSnapshot = {
+  routes: Owned<RouteRegistration>[];
+  settingsRoutes: Owned<RouteRegistration>[];
+  integrationSettings: Map<string, Owned<IntegrationSettingsRegistration>>;
+  integrationEnabled: Map<string, Map<string, boolean>>;
+  navItems: Owned<NavItem>[];
+  slotComponents: Owned<SlotRegistration>[];
+  wsHandlers: Owned<WsHandlerRegistration>[];
+  keybindingHandlers: Owned<PluginKeybindingHandler>[];
+  repositoryProviders: Map<string, Owned<RepositoryProviderRegistration>>;
+  taskActions: Map<string, Owned<TaskActionRegistration>>;
+  reviewProviders: Map<string, Owned<ReviewProviderRegistration>>;
+  taskPanels: Owned<TaskPanelRegistration>[];
+  taskMenuActions: Owned<TaskMenuActionRegistration>[];
+  taskFilters: Owned<TaskFilterRegistration>[];
+  taskListFacets: Owned<TaskListFacetRegistration>[];
+  nextSlotRegistrationId: number;
+  pluginNames: Map<string, string>;
+  pluginLifecycles: Map<string, PluginLifecycleSnapshot>;
+  declaredKeybindingIds: Map<string, Set<string>>;
+  providerOwnership: PluginProviderOwnershipSnapshot;
+  translations: PluginTranslationsSnapshot;
+};
 
 const CORE_INTEGRATION_SETTINGS_IDS = new Set([
   "azure-devops",
@@ -111,6 +147,7 @@ class PluginRegistryStore {
   private taskPanels: Owned<TaskPanelRegistration>[] = [];
   private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
   private taskFilters: Owned<TaskFilterRegistration>[] = [];
+  private taskListFacets: Owned<TaskListFacetRegistration>[] = [];
   private nextSlotRegistrationId = 0;
   /** Display names from the boot payload, used for derived page-chrome titles. */
   private pluginNames = new Map<string, string>();
@@ -126,6 +163,9 @@ class PluginRegistryStore {
   private declaredKeybindingIds = new Map<string, Set<string>>();
   private listeners = new Set<() => void>();
   private version = 0;
+  private mutationDepth = 0;
+  private mutationDirty = false;
+  private deferredWorkAborts = new Set<string>();
 
   constructor() {
     i18n.on("languageChanged", () => this.notify());
@@ -137,6 +177,89 @@ class PluginRegistryStore {
       this.listeners.delete(listener);
     };
   };
+  runAtomicMutation<T>(operation: () => T): T {
+    const snapshot = this.captureState();
+    const deferredWorkAborts = new Set(this.deferredWorkAborts);
+    const mutationDirty = this.mutationDirty;
+    this.mutationDepth += 1;
+    try {
+      return operation();
+    } catch (error) {
+      this.restoreState(snapshot);
+      this.deferredWorkAborts = deferredWorkAborts;
+      this.mutationDirty = mutationDirty;
+      throw error;
+    } finally {
+      this.mutationDepth -= 1;
+      if (this.mutationDepth === 0) {
+        if (this.mutationDirty) {
+          this.mutationDirty = false;
+          this.version += 1;
+          this.listeners.forEach((listener) => listener());
+        }
+        const deferred = [...this.deferredWorkAborts];
+        this.deferredWorkAborts.clear();
+        // The mutation committed; the registrations the work lifecycle backed
+        // are gone, so their in-flight operations may now be canceled. A
+        // rolled-back mutation clears the queue above so nothing is aborted.
+        deferred.forEach((pluginId) => this.workLifecycle.abort(pluginId));
+      }
+    }
+  }
+
+  private captureState(): PluginRegistryStateSnapshot {
+    return {
+      routes: [...this.routes],
+      settingsRoutes: [...this.settingsRoutes],
+      integrationSettings: new Map(this.integrationSettings),
+      integrationEnabled: new Map(
+        [...this.integrationEnabled].map(([id, values]) => [id, new Map(values)]),
+      ),
+      navItems: [...this.navItems],
+      slotComponents: [...this.slotComponents],
+      wsHandlers: [...this.wsHandlers],
+      keybindingHandlers: [...this.keybindingHandlers],
+      repositoryProviders: new Map(this.repositoryProviders),
+      taskActions: new Map(this.taskActions),
+      reviewProviders: new Map(this.reviewProviders),
+      taskPanels: [...this.taskPanels],
+      taskMenuActions: [...this.taskMenuActions],
+      taskFilters: [...this.taskFilters],
+      taskListFacets: [...this.taskListFacets],
+      nextSlotRegistrationId: this.nextSlotRegistrationId,
+      pluginNames: new Map(this.pluginNames),
+      pluginLifecycles: new Map(this.pluginLifecycles),
+      declaredKeybindingIds: new Map(
+        [...this.declaredKeybindingIds].map(([id, values]) => [id, new Set(values)]),
+      ),
+      providerOwnership: this.providerOwnership.snapshot(),
+      translations: snapshotPluginTranslations(),
+    };
+  }
+
+  private restoreState(snapshot: PluginRegistryStateSnapshot): void {
+    this.routes = snapshot.routes;
+    this.settingsRoutes = snapshot.settingsRoutes;
+    this.integrationSettings = snapshot.integrationSettings;
+    this.integrationEnabled = snapshot.integrationEnabled;
+    this.navItems = snapshot.navItems;
+    this.slotComponents = snapshot.slotComponents;
+    this.wsHandlers = snapshot.wsHandlers;
+    this.keybindingHandlers = snapshot.keybindingHandlers;
+    this.repositoryProviders = snapshot.repositoryProviders;
+    this.taskActions = snapshot.taskActions;
+    this.reviewProviders = snapshot.reviewProviders;
+    this.taskPanels = snapshot.taskPanels;
+    this.taskMenuActions = snapshot.taskMenuActions;
+    this.taskFilters = snapshot.taskFilters;
+    this.taskListFacets = snapshot.taskListFacets;
+    this.nextSlotRegistrationId = snapshot.nextSlotRegistrationId;
+    this.pluginNames = snapshot.pluginNames;
+    this.pluginLifecycles = snapshot.pluginLifecycles;
+    this.declaredKeybindingIds = snapshot.declaredKeybindingIds;
+    this.providerOwnership.restore(snapshot.providerOwnership);
+    restorePluginTranslations(snapshot.translations);
+  }
 
   getVersion = (): number => this.version;
 
@@ -305,6 +428,23 @@ class PluginRegistryStore {
     this.notify();
   }
 
+  registerTaskListFacet(pluginId: string, registration: TaskListFacetRegistration): void {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(registration.id)) {
+      throw new Error(`[plugins] task-list facet id "${registration.id}" must be URL-safe`);
+    }
+    if (
+      this.taskListFacets.some(
+        (entry) => entry.pluginId === pluginId && entry.value.id === registration.id,
+      )
+    ) {
+      throw new Error(
+        `[plugins] task-list facet "${registration.id}" is already registered by "${pluginId}"`,
+      );
+    }
+    this.taskListFacets.push({ pluginId, value: registration });
+    this.notify();
+  }
+
   /**
    * Records the keybinding ids declared in `pluginId`'s `ui.keybindings`
    * manifest, so `registerKeybinding` can warn on an undeclared id. Safe to
@@ -322,6 +462,19 @@ class PluginRegistryStore {
    */
   setDeclaredRepositoryProviderIds(pluginId: string, ids: string[]): void {
     this.providerOwnership.setDeclarations(pluginId, ids);
+  }
+
+  clearDeclaredRepositoryProviderIds(pluginId: string): void {
+    this.providerOwnership.clearDeclarations(pluginId);
+  }
+
+  restorePluginName(pluginId: string, name: string | undefined): void {
+    if (name) this.pluginNames.set(pluginId, name);
+    else this.pluginNames.delete(pluginId);
+  }
+
+  getDeclaredRepositoryProviderIds(pluginId: string): string[] | undefined {
+    return this.providerOwnership.getDeclarations(pluginId);
   }
 
   registerRepositoryProvider(pluginId: string, provider: RepositoryProviderRegistration): void {
@@ -395,6 +548,7 @@ class PluginRegistryStore {
     this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
     this.taskMenuActions = removeByPlugin(this.taskMenuActions, pluginId);
     this.taskFilters = removeByPlugin(this.taskFilters, pluginId);
+    this.taskListFacets = removeByPlugin(this.taskListFacets, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
     const removedEnabledState = removedIntegrationIds.reduce(
@@ -555,6 +709,10 @@ class PluginRegistryStore {
     return this.taskFilters.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
   }
 
+  getTaskListFacets(): PluginTaskListFacetRegistration[] {
+    return this.taskListFacets.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
   /** Registry view scoped to one plugin — matches the frozen `PluginRegistry` contract. */
   forPlugin(pluginId: string, pluginName?: string): PluginRegistry {
     if (pluginName) this.pluginNames.set(pluginId, pluginName);
@@ -576,6 +734,7 @@ class PluginRegistryStore {
       registerTaskPanel: (registration) => this.registerTaskPanel(pluginId, registration),
       registerTaskMenuAction: (registration) => this.registerTaskMenuAction(pluginId, registration),
       registerTaskFilter: (registration) => this.registerTaskFilter(pluginId, registration),
+      registerTaskListFacet: (registration) => this.registerTaskListFacet(pluginId, registration),
     };
   }
 
@@ -600,6 +759,13 @@ class PluginRegistryStore {
   }
 
   private abortPluginWork(pluginId: string): void {
+    if (this.mutationDepth > 0) {
+      // Deferred: an enclosing runAtomicMutation may still throw and roll
+      // registrations back. Aborting now would cancel work the rollback
+      // expects to stay alive. The abort runs only once the mutation commits.
+      this.deferredWorkAborts.add(pluginId);
+      return;
+    }
     this.workLifecycle.abort(pluginId);
   }
 
@@ -617,11 +783,16 @@ class PluginRegistryStore {
       this.reviewProviders.size +
       this.taskPanels.length +
       this.taskMenuActions.length +
-      this.taskFilters.length
+      this.taskFilters.length +
+      this.taskListFacets.length
     );
   }
 
   private notify(): void {
+    if (this.mutationDepth > 0) {
+      this.mutationDirty = true;
+      return;
+    }
     this.version += 1;
     this.listeners.forEach((listener) => listener());
   }

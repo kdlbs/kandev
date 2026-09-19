@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-default-inheritance"]
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 02: Render inherited action profiles
@@ -41,7 +41,7 @@ Update the Utility Agents page after the backend contract is in place.
 - **Dependencies:** Task 01.
 - **Parallelism:** sequential.
 - **Inputs:** The Utility Agents settings scenarios and mobile scenario in
-  `docs/specs/agents/utility-agent-profiles.md`, the existing stacked action-row mobile test, and
+  `docs/specs/agents/requirements/utility-agent-profiles.md`, the existing stacked action-row mobile test, and
   the shared `UtilityAgentProfilePicker`.
 - **Output contract:** Report rendered inherited and stale states, desktop/mobile checks, exact
   commands and results, and synchronized task/plan status. Do not add new copy unless existing

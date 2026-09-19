@@ -5,19 +5,16 @@ package e2e
 import (
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
 // https://www.npmjs.com/package/@augmentcode/auggie
 
-// auggieCommand is the CLI command for Auggie in ACP mode.
-// Derived from internal/agent/agents/auggie.go.
-const auggieCommand = "npx -y @augmentcode/auggie --acp"
-
 func TestAuggie_BasicPrompt(t *testing.T) {
 	result := RunAgent(t, AgentSpec{
 		Name:          "auggie",
-		Command:       auggieCommand,
+		Command:       acpCommand(t, agents.NewAuggie()),
 		Protocol:      agent.ProtocolACP,
 		DefaultPrompt: "What is 2 + 2? Reply with just the number.",
 		AutoApprove:   true,

@@ -1,12 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { StateProvider } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { WorkspaceRepoChips } from "./task-create-dialog-workspace-repo-chips";
 
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: () => ({ branches: [], isLoading: false }),
+}));
+
+vi.mock("@/hooks/domains/workspace/use-repository-branch-policies", () => ({
+  useRepositoryBranchPolicies: () => ({
+    policies: [
+      {
+        id: "policy-1",
+        repository_id: "repo-front",
+        name: "Feature branches",
+        description: "Policy description",
+        base_branch: "main",
+        branch_template: "feature/{title}-{suffix}",
+        pull_request_target: "develop",
+        created_at: "2026-08-24T10:00:00Z",
+        updated_at: "2026-08-24T10:00:00Z",
+      },
+    ],
+  }),
 }));
 
 const FRONTEND_ID = "repo-front";
@@ -58,7 +77,11 @@ function chips(overrides: Partial<ChipsProps> = {}) {
 }
 
 function renderChips(overrides: Partial<ChipsProps> = {}) {
-  return render(<TooltipProvider>{chips(overrides)}</TooltipProvider>);
+  return render(
+    <StateProvider>
+      <TooltipProvider>{chips(overrides)}</TooltipProvider>
+    </StateProvider>,
+  );
 }
 
 afterEach(cleanup);
@@ -84,7 +107,7 @@ describe("WorkspaceRepoChips duplicate policy", () => {
     renderChips({ allowDuplicateRepositories: false });
     fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[1]);
 
-    expect(screen.queryByText("Create new repository")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create new repository" })).toBeNull();
   });
 
   it("routes repository creation to the only row", () => {
@@ -107,11 +130,90 @@ describe("WorkspaceRepoChips duplicate policy", () => {
     expect(onRefreshRepositories).toHaveBeenCalledOnce();
   });
 
-  it("does not expose repository creation for multi-repository tasks", () => {
-    renderChips({ onCreateRepository: vi.fn() });
+  it("offers creation and refresh from a second repository row", () => {
+    const onCreateRepository = vi.fn();
+    const onRefreshRepositories = vi.fn();
+    renderChips({ onCreateRepository, onRefreshRepositories });
     fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[1]);
+    fireEvent.click(screen.getByTestId("repo-refresh-button"));
+    expect(onRefreshRepositories).toHaveBeenCalledOnce();
+    fireEvent.change(screen.getByPlaceholderText("Search repositories..."), {
+      target: { value: "no-matching-repository" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create new repository" }));
+    expect(onCreateRepository).toHaveBeenCalledWith("r1");
+  });
 
-    expect(screen.queryByText("Create new repository")).toBeNull();
+  it.each([0, 1])("keeps both actions in empty lists on row %i while refreshing", (rowIndex) => {
+    renderChips({
+      repositories: [],
+      onCreateRepository: vi.fn(),
+      onRefreshRepositories: vi.fn(),
+      repositoriesRefreshing: true,
+    });
+    fireEvent.click(screen.getAllByTestId(CHIP_TRIGGER)[rowIndex]);
+    expect(screen.getByTestId("repo-refresh-button").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Create new repository" })).toBeTruthy();
+  });
+});
+
+describe("WorkspaceRepoChips branch policy preview", () => {
+  it("keeps policy choices on one line and moves details behind an info control", () => {
+    renderChips({
+      rows: [row({ key: "r0", repositoryId: FRONTEND_ID, branch: "main" })],
+      showBranchPolicies: true,
+    });
+
+    fireEvent.click(screen.getByTestId("branch-chip-trigger"));
+
+    const option = screen.getByRole("option", { name: /Feature branches/ });
+    expect(option.textContent).not.toContain("feature/{title}-{suffix}");
+    expect(
+      screen.getByTestId("branch-policy-option-info-policy-1").getAttribute("aria-label"),
+    ).toContain("feature/{title}-{suffix}");
+  });
+});
+
+describe("WorkspaceRepoChips saved base display", () => {
+  it("shows the saved base separately from a local executor checkout branch", () => {
+    renderChips({
+      rows: [
+        row({
+          key: "r0",
+          repositoryId: FRONTEND_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+      isLocalExecutor: true,
+    });
+
+    expect(screen.getByTestId("repo-chip-base-branch").textContent).toContain("develop");
+    expect(screen.getByTestId("branch-chip-trigger").textContent).toContain("feature/task");
+  });
+
+  it("edits the local executor saved base without changing checkout state", () => {
+    const onRowBaseBranchChange = vi.fn();
+    const onRowBranchChange = vi.fn();
+    renderChips({
+      rows: [
+        row({
+          key: "r0",
+          repositoryId: FRONTEND_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+      isLocalExecutor: true,
+      onRowBaseBranchChange,
+      onRowBranchChange,
+    });
+
+    fireEvent.click(screen.getByTestId("repo-chip-base-branch"));
+    fireEvent.click(screen.getByRole("option", { name: /Task default/ }));
+
+    expect(onRowBaseBranchChange).toHaveBeenCalledWith("r0", "");
+    expect(onRowBranchChange).not.toHaveBeenCalledWith("r0", "");
   });
 });
 
@@ -155,9 +257,11 @@ describe("WorkspaceRepoChips workspace markers", () => {
     ).toBeTruthy();
 
     rerender(
-      <TooltipProvider>
-        {chips({ rows: [row({ key: "r0", repositoryId: BACKEND_ID }), row({ key: "r1" })] })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({ rows: [row({ key: "r0", repositoryId: BACKEND_ID }), row({ key: "r1" })] })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^frontend/ })).queryByTestId(ADDED_MARKER),
@@ -166,7 +270,11 @@ describe("WorkspaceRepoChips workspace markers", () => {
       within(screen.getByRole("option", { name: /^backend/ })).getByTestId(ADDED_MARKER),
     ).toBeTruthy();
 
-    rerender(<TooltipProvider>{chips({ rows: [row({ key: "r1" })] })}</TooltipProvider>);
+    rerender(
+      <StateProvider>
+        <TooltipProvider>{chips({ rows: [row({ key: "r1" })] })}</TooltipProvider>
+      </StateProvider>,
+    );
     expect(
       within(screen.getByRole("option", { name: /^backend/ })).queryByTestId(ADDED_MARKER),
     ).toBeNull();
@@ -189,24 +297,28 @@ describe("WorkspaceRepoChips discovered markers", () => {
     ).toBeTruthy();
 
     rerender(
-      <TooltipProvider>
-        {chips({
-          rows: [
-            row({ key: "r0", localPath: "/home/me/projects/another-project" }),
-            row({ key: "r1" }),
-          ],
-          discoveredRepositories,
-        })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({
+            rows: [
+              row({ key: "r0", localPath: "/home/me/projects/another-project" }),
+              row({ key: "r1" }),
+            ],
+            discoveredRepositories,
+          })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(ADDED_MARKER),
     ).toBeNull();
 
     rerender(
-      <TooltipProvider>
-        {chips({ rows: [row({ key: "r1" })], discoveredRepositories })}
-      </TooltipProvider>,
+      <StateProvider>
+        <TooltipProvider>
+          {chips({ rows: [row({ key: "r1" })], discoveredRepositories })}
+        </TooltipProvider>
+      </StateProvider>,
     );
     expect(
       within(screen.getByRole("option", { name: /^local-project/ })).queryByTestId(ADDED_MARKER),

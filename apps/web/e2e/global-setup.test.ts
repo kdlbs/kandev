@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import globalSetup, { assertBackendArtifactsFresh } from "./global-setup";
+import { assertBackendArtifactsFresh, isContainerRun, runGlobalSetup } from "./global-setup";
 
 let backendDir: string;
 let binPath: string;
@@ -44,6 +45,24 @@ function assertBackendBinaryFresh(
     binPaths.map((artifactPath) => ({ path: artifactPath, rebuildTarget: "build" })),
     env,
   );
+}
+
+function writeBuildIdentity(sourceRevision: string, artifacts: string[]): string {
+  const identityPath = path.join(backendDir, "bin", "e2e-build-identity.json");
+  fs.writeFileSync(
+    identityPath,
+    JSON.stringify({
+      schema_version: 1,
+      source_revision: sourceRevision,
+      artifacts: Object.fromEntries(
+        artifacts.map((artifactPath) => [
+          path.relative(backendDir, artifactPath).split(path.sep).join("/"),
+          createHash("sha256").update(fs.readFileSync(artifactPath)).digest("hex"),
+        ]),
+      ),
+    }),
+  );
+  return identityPath;
 }
 
 describe("assertBackendBinaryFresh", () => {
@@ -91,6 +110,45 @@ describe("assertBackendBinaryFresh", () => {
     ).not.toThrow();
   });
 
+  it("accepts stale artifact mtimes only after validating immutable build identity", () => {
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2026-01-02T00:00:00Z"),
+    );
+    const identityPath = writeBuildIdentity("revision-1", [binPath]);
+
+    expect(() =>
+      assertBackendBinaryFresh(backendDir, [binPath], {
+        KANDEV_E2E_BUILD_IDENTITY: identityPath,
+        KANDEV_E2E_EXPECTED_SOURCE_REVISION: "revision-1",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a build identity from another source revision", () => {
+    const identityPath = writeBuildIdentity("revision-1", [binPath]);
+
+    expect(() =>
+      assertBackendBinaryFresh(backendDir, [binPath], {
+        KANDEV_E2E_BUILD_IDENTITY: identityPath,
+        KANDEV_E2E_EXPECTED_SOURCE_REVISION: "revision-2",
+      }),
+    ).toThrow(/source revision.*revision-1.*revision-2/i);
+  });
+
+  it("rejects an artifact whose bytes do not match its build identity", () => {
+    const identityPath = writeBuildIdentity("revision-1", [binPath]);
+    fs.writeFileSync(binPath, "tampered binary");
+
+    expect(() =>
+      assertBackendBinaryFresh(backendDir, [binPath], {
+        KANDEV_E2E_BUILD_IDENTITY: identityPath,
+        KANDEV_E2E_EXPECTED_SOURCE_REVISION: "revision-1",
+      }),
+    ).toThrow(/build identity checksum mismatch.*bin\/kandev/i);
+  });
+
   it("throws when an embedded non-Go asset is newer than the binary", () => {
     // profiles.yaml is //go:embed-ed, so a runtime feature-flag edit here
     // changes backend behaviour without touching a single .go file.
@@ -124,6 +182,20 @@ describe("assertBackendBinaryFresh", () => {
     expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
   });
 
+  it("ignores generated plugin fixture UI rebuilt after the backend binary", () => {
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    const generated = path.join(backendDir, "cmd", "plugin-fixture", "fixture-package", "ui");
+    fs.mkdirSync(generated, { recursive: true });
+    fs.writeFileSync(path.join(generated, "bundle.js"), "generated");
+    touch(path.join(generated, "bundle.js"), new Date("2026-06-01T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
+  });
+
   it("ignores Go coverage and compiled-test artifacts left in the source tree", () => {
     // `make -C apps/backend test-coverage` writes these next to go.mod. They are
     // gitignored build outputs, so a test run must not demand a backend rebuild.
@@ -138,6 +210,34 @@ describe("assertBackendBinaryFresh", () => {
       fs.writeFileSync(artifact, "generated");
       touch(artifact, new Date("2026-06-01T00:00:00Z"));
     }
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
+  });
+
+  it("ignores nested Git metadata when checking backend source freshness", () => {
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    const gitInfo = path.join(backendDir, "internal", "task", ".git", "info");
+    fs.mkdirSync(gitInfo, { recursive: true });
+    const exclude = path.join(gitInfo, "exclude");
+    fs.writeFileSync(exclude, "# local repository metadata\n");
+    touch(exclude, new Date("2026-06-01T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
+  });
+
+  it("ignores Go test sources that are not linked into backend artifacts", () => {
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    const testSource = path.join(backendDir, "internal", "task", "service_test.go");
+    fs.writeFileSync(testSource, "package task\n");
+    touch(testSource, new Date("2026-06-01T00:00:00Z"));
 
     expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
   });
@@ -244,13 +344,22 @@ describe("assertBackendBinaryFresh", () => {
 });
 
 describe("globalSetup", () => {
+  it.each([
+    ["containers", ["node", "playwright", "test", "--project=containers"]],
+    ["docker", ["node", "playwright", "test", "--project=docker"]],
+    ["containers", ["node", "playwright", "test", "--project", "containers"]],
+    ["docker", ["node", "playwright", "test", "--project", "docker"]],
+  ])("recognizes the direct %s project selection", (_project, argv) => {
+    expect(isContainerRun({}, argv)).toBe(true);
+  });
+
   it("checks the selected custom backend path instead of the default backend", () => {
     const customBackend = path.join(backendDir, "custom", "kandev");
     vi.stubEnv("KANDEV_E2E_BIN", customBackend);
     vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).toHaveBeenCalledWith(customBackend);
     expect(existsSync).not.toHaveBeenCalledWith(path.join(backendDirForTest(), "bin", "kandev"));
@@ -263,7 +372,9 @@ describe("globalSetup", () => {
       .spyOn(fs, "existsSync")
       .mockImplementation((artifactPath) => artifactPath !== customBackend);
 
-    expect(() => (globalSetup as () => void)()).toThrow(/KANDEV_E2E_BIN file does not exist/);
+    expect(() => runGlobalSetup({ verifyPluginFixtureIdentity: false })).toThrow(
+      /KANDEV_E2E_BIN file does not exist/,
+    );
     expect(existsSync).toHaveBeenCalledWith(customBackend);
   });
 
@@ -281,7 +392,7 @@ describe("globalSetup", () => {
     vi.stubEnv(marker, value);
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
@@ -298,7 +409,24 @@ describe("globalSetup", () => {
     process.argv = [...originalArgv, "--project=containers"];
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
+
+    expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
+    );
+    expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "agentctl-linux-amd64"),
+    );
+  });
+
+  it("checks Linux helper binaries for a direct Kubernetes compatibility selection", () => {
+    vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
+    vi.stubEnv("KANDEV_E2E_CONTAINERS", "");
+    vi.stubEnv("KANDEV_E2E_DOCKER", "");
+    process.argv = [...originalArgv, "--project=kubernetes-compat"];
+    const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
@@ -314,7 +442,7 @@ describe("globalSetup", () => {
     vi.stubEnv("KANDEV_E2E_DOCKER", "");
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
-    (globalSetup as () => void)();
+    runGlobalSetup({ verifyPluginFixtureIdentity: false });
 
     expect(existsSync).not.toHaveBeenCalledWith(
       path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),

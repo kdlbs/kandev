@@ -11,7 +11,7 @@ plan: docs/plans/app-status-bar/plan.md
 
 ## Inputs
 
-[Spec: plugin slots](../../specs/ui/app-status-bar.md#plugin-slots); tasks 01 and 03; plugin fixture and existing plugin E2E setup.
+[Spec: plugin slots](../../specs/ui/requirements/app-status-bar.md#plugin-slots); tasks 01 and 03; plugin fixture and existing plugin E2E setup.
 
 ## Files
 

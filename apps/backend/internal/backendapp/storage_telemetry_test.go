@@ -20,8 +20,10 @@ import (
 // still calls it. A regression that dropped the call site, or moved it ahead
 // of a repository's initSchema, would leave telemetry_activations silently
 // missing rows on every real boot with the rest of the suite fully green —
-// mirrors TestProvideRepositoriesBackfillsSessionCachedTokens's rationale for
-// the neighboring backfillSessionCachedTokens call.
+// the same class of composition-level boot regression coverage this package
+// uses elsewhere for provideRepositories' other post-initSchema side effects
+// (see, for example, TestPostgresBootInitializesRepositories in
+// postgres_boot_test.go).
 //
 // telemetry_activations itself is created unconditionally by
 // telemetrycontract.NewWithDB, independent of ordering, so a row-count

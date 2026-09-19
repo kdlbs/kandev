@@ -19,7 +19,7 @@ export const SETTINGS_TYPOGRAPHY = {
   error: "text-sm/relaxed text-destructive",
   meta: "text-[10px]/relaxed text-muted-foreground",
   control: "text-sm md:text-xs",
-  mobileAction: "min-h-11 text-sm md:min-h-7 md:text-xs",
+  mobileAction: "text-sm md:text-xs",
 } as const;
 
 type SettingsFieldDescriptionProps = ComponentProps<"p">;
@@ -67,6 +67,7 @@ export function SettingsField({
 export type SettingsPageHeaderProps = {
   title: ReactNode;
   description?: ReactNode;
+  tabs?: ReactNode;
   actions?: ReactNode;
   titleTestId?: string;
   className?: string;
@@ -75,6 +76,7 @@ export type SettingsPageHeaderProps = {
 export function SettingsPageHeader({
   title,
   description,
+  tabs,
   actions,
   titleTestId,
   className,
@@ -83,13 +85,18 @@ export function SettingsPageHeader({
     <div
       className={cn("flex flex-col gap-3 md:flex-row md:items-start md:justify-between", className)}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <h2 className={SETTINGS_TYPOGRAPHY.pageTitle} data-testid={titleTestId}>
           {title}
         </h2>
         {description && <p className={SETTINGS_TYPOGRAPHY.pageDescription}>{description}</p>}
       </div>
-      {actions && <div className="w-full shrink-0 md:w-auto">{actions}</div>}
+      {(tabs || actions) && (
+        <div className="flex w-full min-w-0 shrink-0 flex-col gap-2 md:w-auto md:items-end">
+          {tabs}
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/parent-child-task-stop.md
+spec: docs/specs/tasks/requirements/parent-child-task-stop.md
 created: 2026-07-19
 status: complete
 ---

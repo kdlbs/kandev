@@ -14,6 +14,27 @@ func TestInvalidBaseBranchRemainsSentinelDetectable(t *testing.T) {
 	}
 }
 
+func TestIsRemoteRefMissingErrorRequiresConfirmedRemoteEvidence(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "missing ref", err: errors.New("fatal: couldn't find remote ref feature/lost"), want: true},
+		{name: "no remote", err: errors.New("fatal: no remote configured"), want: true},
+		{name: "authentication failure", err: errors.New("fatal: Authentication failed"), want: false},
+		{name: "network failure", err: errors.New("fatal: unable to access remote: connection timed out"), want: false},
+		{name: "generic invalid branch", err: fmt.Errorf("%w: feature/lost", ErrInvalidBaseBranch), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRemoteRefMissingError(tt.err); got != tt.want {
+				t.Fatalf("isRemoteRefMissingError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClassifyGitError_BranchCheckedOut(t *testing.T) {
 	output := "fatal: 'feature/pr-branch' is already checked out at '/tmp/worktree-123'"
 	err := ClassifyGitError(output, fmt.Errorf("exit status 128"))

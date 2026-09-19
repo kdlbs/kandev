@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/task-dependencies/create-dialog-dependency-selector.md
+spec: docs/specs/tasks/requirements/task-dependencies-create-dialog-dependency-selector.md
 created: 2026-08-13
 status: implemented
 ---

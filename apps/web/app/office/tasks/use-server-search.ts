@@ -13,6 +13,13 @@ export function useServerSearch(workspaceId: string | null) {
   const [results, setResults] = useState<OfficeTask[] | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const patchSearchResult = useCallback((taskId: string, patch: Partial<OfficeTask>) => {
+    setResults(
+      (current) =>
+        current?.map((task) => (task.id === taskId ? { ...task, ...patch } : task)) ?? current,
+    );
+  }, []);
+
   const search = useCallback(
     (query: string) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -38,5 +45,5 @@ export function useServerSearch(workspaceId: string | null) {
     };
   }, []);
 
-  return { searchResults: results, triggerSearch: search };
+  return { searchResults: results, triggerSearch: search, patchSearchResult };
 }

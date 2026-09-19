@@ -1,7 +1,10 @@
 package scriptengine
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -55,6 +58,60 @@ func TestAgentInstallProvider(t *testing.T) {
 			t.Fatalf("got %q, want %q", got, want)
 		}
 	})
+}
+
+func TestAgentctlProviderSupportsExecutorBinaryPath(t *testing.T) {
+	vars := AgentctlProviderWithOptions(8765, "/workspace", AgentctlProviderOptions{
+		BinaryPath: "/opt/kandev/agentctl",
+		Start:      true,
+	})()
+
+	if got, want := vars["kandev.agentctl.install"], "chmod +x '/opt/kandev/agentctl'"; got != want {
+		t.Fatalf("kandev.agentctl.install = %q, want %q", got, want)
+	}
+}
+
+func TestAgentctlProviderShellQuotesExecutorBinaryAndWorkspacePaths(t *testing.T) {
+	binaryPath := "/opt/kandev agentctl'$(touch /tmp/pwned)"
+	workspacePath := "/workspace/project name'$(touch /tmp/workspace-pwned)"
+	vars := AgentctlProviderWithOptions(8765, workspacePath, AgentctlProviderOptions{
+		BinaryPath: binaryPath,
+		Start:      true,
+	})()
+
+	if got, want := vars["kandev.agentctl.install"], "chmod +x "+shellQuote(binaryPath); got != want {
+		t.Fatalf("kandev.agentctl.install = %q, want %q", got, want)
+	}
+	wantStart := "nohup " + shellQuote(binaryPath) +
+		" --port 8765 --workdir " + shellQuote(workspacePath) +
+		" > /tmp/agentctl.log 2>&1 &\nsleep 1"
+	if got := vars["kandev.agentctl.start"]; got != wantStart {
+		t.Fatalf("kandev.agentctl.start = %q, want %q", got, wantStart)
+	}
+}
+
+func TestAgentctlProviderCanLeaveStartToManagedBootstrap(t *testing.T) {
+	vars := AgentctlProviderWithOptions(8765, "/workspace", AgentctlProviderOptions{
+		BinaryPath: "/opt/kandev/agentctl",
+		Start:      false,
+	})()
+
+	if got := vars["kandev.agentctl.start"]; got != "" {
+		t.Fatalf("kandev.agentctl.start = %q, want empty managed-bootstrap expansion", got)
+	}
+}
+
+func TestAgentctlProviderPreservesLegacyExpansions(t *testing.T) {
+	got := AgentctlProvider(8765, "/workspace")()
+	want := map[string]string{
+		"kandev.agentctl.port":    "8765",
+		"kandev.agentctl.install": "chmod +x '/usr/local/bin/agentctl'",
+		"kandev.agentctl.start":   "nohup 'agentctl' --port 8765 --workdir '/workspace' > /tmp/agentctl.log 2>&1 &\nsleep 1",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AgentctlProvider() = %#v, want %#v", got, want)
+	}
 }
 
 func TestRepositoryProvider_UsesRepositorySetupScriptKey(t *testing.T) {
@@ -257,4 +314,91 @@ func TestGitHubAuthProvider(t *testing.T) {
 			t.Error("expected gh auth setup-git backup")
 		}
 	})
+
+	// `gh auth setup-git` — emitted by the no-token branch above and by the
+	// with-token branch itself — leaves credential.https://github.com.helper
+	// multi-valued. A plain `git config --global <key> <value>` refuses to
+	// overwrite a multi-valued key and exits 5, aborting the prepare script
+	// under `set -euo pipefail`.
+	t.Run("credential helper write uses --replace-all", func(t *testing.T) {
+		provider := GitHubAuthProvider(map[string]string{"GH_TOKEN": "ghp_test"})
+		vars := provider()
+		setup := vars["github.auth_setup"]
+		if !strings.Contains(setup, "git config --global --replace-all credential.https://github.com.helper") {
+			t.Errorf("credential helper must be written with --replace-all, got %q", setup)
+		}
+	})
+}
+
+// TestGitHubAuthCredentialWriteIsIdempotent is a behavioural regression test: it
+// runs the complete auth setup against a real git binary and a real (temporary)
+// global config twice. The first setup leaves the key multi-valued, so the
+// second setup proves that the write handles the persistent state. Asserting
+// the flag string alone would not catch a future rewrite that drops back to a
+// single-value write by another spelling — git's exit 5 is the contract.
+func TestGitHubAuthCredentialWriteIsIdempotent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+
+	home := t.TempDir()
+	bin := t.TempDir()
+	ghPath := filepath.Join(bin, "gh")
+	ghScript := `#!/bin/sh
+case "$1 $2" in
+  "config set")
+    exit 0
+    ;;
+  "auth setup-git")
+    git config --global --add credential.https://github.com.helper ""
+    git config --global --add credential.https://github.com.helper "!/fake/gh auth git-credential"
+    exit 0
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+
+	env := []string{
+		"HOME=" + home,
+		"XDG_CONFIG_HOME=" + home,
+		"GH_TOKEN=ghp_test",
+		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}
+	runGit := func(args ...string) (string, error) {
+		cmd := exec.Command("git", args...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	setup := GitHubAuthProvider(map[string]string{"GH_TOKEN": "ghp_test"})()["github.auth_setup"]
+
+	// Run the complete setup twice. The fake gh command models the extra values
+	// that `gh auth setup-git` adds after the token helper write.
+	for i := 1; i <= 2; i++ {
+		cmd := exec.Command("sh", "-c", setup)
+		cmd.Env = env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("run %d: full auth setup failed: %v: %s", i, err, out)
+		}
+	}
+
+	out, err := runGit("config", "--global", "--get-all", "credential.https://github.com.helper")
+	if err != nil {
+		t.Fatalf("reading back config failed: %v: %s", err, out)
+	}
+	values := strings.Split(strings.TrimRight(out, "\r\n"), "\n")
+	if len(values) != 3 {
+		t.Fatalf("expected the full setup to leave three helper values, got %d: %q", len(values), values)
+	}
+	if !strings.Contains(values[0], "x-access-token") ||
+		values[1] != "" || values[2] != "!/fake/gh auth git-credential" {
+		t.Errorf("unexpected helper values after full setup: %q", values)
+	}
 }

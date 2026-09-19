@@ -19,7 +19,7 @@ import (
 // is opened; deletion is then requested on the opened handle.
 func removeNpxExecutionTree(cacheRoot, key string) error {
 	rootHandle, err := openManagedRuntimeDirectoryPath(cacheRoot)
-	if errors.Is(err, windows.ERROR_PATH_NOT_FOUND) || errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+	if isManagedRuntimeNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -28,7 +28,7 @@ func removeNpxExecutionTree(cacheRoot, key string) error {
 	defer windows.CloseHandle(rootHandle)
 
 	npxHandle, err := openManagedRuntimeDirectoryRelative(rootHandle, "_npx")
-	if errors.Is(err, windows.ERROR_PATH_NOT_FOUND) || errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+	if isManagedRuntimeNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -40,7 +40,7 @@ func removeNpxExecutionTree(cacheRoot, key string) error {
 	defer windows.CloseHandle(npxHandle)
 
 	targetHandle, err := openManagedRuntimeDirectoryRelative(npxHandle, key)
-	if errors.Is(err, windows.ERROR_PATH_NOT_FOUND) || errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+	if isManagedRuntimeNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -55,6 +55,18 @@ func removeNpxExecutionTree(cacheRoot, key string) error {
 		return fmt.Errorf("remove npm execution tree contents: %w", err)
 	}
 	return markManagedRuntimeForDelete(targetHandle)
+}
+
+func isManagedRuntimeNotFound(err error) bool {
+	if errors.Is(err, windows.ERROR_PATH_NOT_FOUND) || errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+		return true
+	}
+	var status windows.NTStatus
+	if !errors.As(err, &status) {
+		return false
+	}
+	errno := status.Errno()
+	return errors.Is(errno, windows.ERROR_PATH_NOT_FOUND) || errors.Is(errno, windows.ERROR_FILE_NOT_FOUND)
 }
 
 func openManagedRuntimeDirectoryPath(path string) (windows.Handle, error) {

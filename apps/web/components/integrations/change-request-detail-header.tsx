@@ -4,6 +4,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatTimeAgo, getTimeAgoColor } from "@/components/github/pr-shared";
 import { t } from "@/lib/i18n";
+import { ChangeRequestDetailCopyButton } from "./change-request-detail-copy-button";
 import type {
   ChangeRequestDetailAction,
   ChangeRequestDetailModel,
@@ -52,9 +53,8 @@ export function ChangeRequestActionButton({
   return (
     <Button
       type={type}
-      size="sm"
       variant={actionVariant(action.tone)}
-      className={`min-h-11 cursor-pointer sm:min-h-0 ${successClass}`}
+      className={`cursor-pointer ${successClass}`}
       disabled={action.disabled || busy}
       onClick={onAction}
       aria-label={ariaLabel}
@@ -181,19 +181,15 @@ export function ChangeRequestDetailHeader({
               onAction={() => void props.onAction?.({ actionId: action.id })}
             />
           ))}
-          {props.headerActions ? (
-            <div className="contents [&_button]:min-h-11 sm:[&_button]:min-h-0">
-              {props.headerActions}
-            </div>
-          ) : null}
+          {props.headerActions ? <div className="contents">{props.headerActions}</div> : null}
           {props.onRefresh ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   type="button"
-                  size="sm"
                   variant="ghost"
-                  className="h-11 w-11 cursor-pointer p-0 text-muted-foreground sm:h-6 sm:w-6"
+                  size="icon"
+                  className="cursor-pointer p-0 text-muted-foreground"
                   onClick={props.onRefresh}
                   disabled={props.loading}
                   aria-label={t("integrations:refresh")}
@@ -209,6 +205,11 @@ export function ChangeRequestDetailHeader({
       <div className="flex flex-wrap items-center gap-1.5">
         <StateBadge state={state} />
         <span className="text-xs text-muted-foreground">#{detail.number}</span>
+        <ChangeRequestDetailCopyButton
+          url={detail.url}
+          kind="changeRequest"
+          testId="change-request-copy-url"
+        />
         <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
           {detail.sourceBranch}
         </code>

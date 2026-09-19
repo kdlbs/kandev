@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-store-service-refresh"]
 plan: "plan.md"
-spec: "../../specs/auth/session-ip-refresh.md"
+spec: "../../specs/auth/requirements/session-ip-refresh.md"
 ---
 
 # Task 02: Wire ClientIP through the auth middleware

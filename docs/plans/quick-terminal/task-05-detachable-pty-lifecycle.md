@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-per-tab-host-shell-sessions"]
 plan: "plan.md"
-spec: "../../specs/quick-terminal/spec.md"
+spec: "../../specs/ui/requirements/quick-terminal.md"
 ---
 
 # Task 05: Extract detachable PTY lifecycle

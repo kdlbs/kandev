@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+import { useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useSidebarArchivedTasks } from "@/hooks/domains/kanban/use-sidebar-archived-tasks";
@@ -9,15 +10,163 @@ import {
 } from "@/components/task/task-session-sidebar-aggregate";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { WorkspaceContextReadError } from "@/lib/state/slices/kanban/types";
+import type { AppState } from "@/lib/state/store";
+import type { TaskRemovalState } from "@/lib/state/task-removal";
 import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
+  pendingArchiveTaskIds: ReadonlySet<string>;
   workflows: TaskMoveWorkflow[];
   wipQueueByTaskId: Map<string, WipQueueStatus>;
   isLoading: boolean;
   archivedError: string | null;
   retryArchivedTasks: () => void;
+  workspaceContextError: WorkspaceContextReadError | null;
+  workspaceContextPending: boolean;
+  workspaceContextAccessDenied: boolean;
+  retryWorkspaceContext: () => void;
 };
+
+const NOOP_REFRESH = () => {};
+
+type SidebarTask = AggregatedSidebarTasks["allTasks"][number];
+type SidebarTaskRemovalProjection = Pick<
+  TaskRemovalState,
+  "pendingTokenByTaskId" | "operationsByToken"
+>;
+
+function shallowTaskEqual(previous: SidebarTask, next: SidebarTask): boolean {
+  const previousKeys = Object.keys(previous) as Array<keyof SidebarTask>;
+  const nextKeys = Object.keys(next) as Array<keyof SidebarTask>;
+  return (
+    previousKeys.length === nextKeys.length &&
+    nextKeys.every((key) => Object.is(previous[key], next[key]))
+  );
+}
+
+function reuseUnchangedTasks(previous: SidebarTask[], next: SidebarTask[]): SidebarTask[] {
+  // Aggregation stamps `_workflowId` onto fresh objects. Restore the store's
+  // per-task structural sharing so downstream view models can stay granular.
+  const previousById = new Map(previous.map((task) => [task.id, task]));
+  let changed = previous.length !== next.length;
+  const shared = next.map((task, index) => {
+    const prior = previousById.get(task.id);
+    const value = prior && shallowTaskEqual(prior, task) ? prior : task;
+    if (value !== previous[index]) changed = true;
+    return value;
+  });
+  return changed ? shared : previous;
+}
+
+function reuseReferenceArray<T>(previous: T[], next: T[]): T[] {
+  return previous.length === next.length && previous.every((value, index) => value === next[index])
+    ? previous
+    : next;
+}
+
+function reuseStepRecord(
+  previous: AggregatedSidebarTasks["stepsByWorkflowId"],
+  next: AggregatedSidebarTasks["stepsByWorkflowId"],
+): AggregatedSidebarTasks["stepsByWorkflowId"] {
+  const previousKeys = Object.keys(previous);
+  const nextKeys = Object.keys(next);
+  let changed = previousKeys.length !== nextKeys.length;
+  const shared: AggregatedSidebarTasks["stepsByWorkflowId"] = {};
+  for (const workflowId of nextKeys) {
+    const steps = reuseReferenceArray(previous[workflowId] ?? [], next[workflowId]);
+    shared[workflowId] = steps;
+    if (steps !== previous[workflowId]) changed = true;
+  }
+  return changed ? shared : previous;
+}
+
+function useSharedStepMetadata(aggregated: AggregatedSidebarTasks) {
+  const previousAllStepsRef = useRef<AggregatedSidebarTasks["allSteps"]>([]);
+  const allSteps = reuseReferenceArray(previousAllStepsRef.current, aggregated.allSteps);
+  previousAllStepsRef.current = allSteps;
+  const previousStepsByWorkflowRef = useRef<AggregatedSidebarTasks["stepsByWorkflowId"]>({});
+  const stepsByWorkflowId = reuseStepRecord(
+    previousStepsByWorkflowRef.current,
+    aggregated.stepsByWorkflowId,
+  );
+  previousStepsByWorkflowRef.current = stepsByWorkflowId;
+  return { allSteps, stepsByWorkflowId };
+}
+
+function buildWipQueueByTaskId(
+  allTasks: SidebarTask[],
+  allSteps: AggregatedSidebarTasks["allSteps"],
+  stepsByWorkflowId: AggregatedSidebarTasks["stepsByWorkflowId"],
+): Map<string, WipQueueStatus> {
+  const result = new Map<string, WipQueueStatus>();
+  const activeTasks = allTasks.filter((task) => task.isArchived !== true);
+  const destinationStepIds = new Set(
+    activeTasks.map((task) => task.queuedForStepId).filter((stepId): stepId is string => !!stepId),
+  );
+  for (const stepId of destinationStepIds) {
+    for (const entry of getDestinationQueue(activeTasks, stepId)) {
+      const task = entry.task;
+      const stepTitle =
+        stepsByWorkflowId[task._workflowId]?.find((step) => step.id === stepId)?.title ??
+        allSteps.find((step) => step.id === stepId)?.title ??
+        stepId;
+      result.set(task.id, {
+        position: entry.position,
+        total: entry.total,
+        destinationTitle: stepTitle,
+      });
+    }
+  }
+  return result;
+}
+
+function matchesWorkspaceContextRead(
+  read: AppState["workspaceContextRead"],
+  generation: number,
+  workspaceId: string | null,
+): boolean {
+  return read?.workspaceId === workspaceId && read?.generation === generation;
+}
+
+function workspaceContextErrors(
+  read: AppState["workspaceContextRead"],
+): WorkspaceContextReadError[] {
+  return [...Object.values(read?.errors ?? {}), read?.snapshotError ?? null].filter(
+    (error): error is WorkspaceContextReadError => error !== null,
+  );
+}
+
+function workspaceContextIsPending(read: AppState["workspaceContextRead"]): boolean {
+  const pendingCollection = Object.entries(read?.pending ?? {}).some(
+    ([collection, pending]) =>
+      pending &&
+      (read?.requestIds === undefined ||
+        read.requestIds[collection as keyof typeof read.requestIds] !== null),
+  );
+  const pendingSnapshot =
+    read?.snapshotPending === true &&
+    (read.snapshotRequestId === undefined || read.snapshotRequestId !== null);
+  return pendingCollection || pendingSnapshot;
+}
+
+function getWorkspaceContextStatus(
+  workspaceContextRead: AppState["workspaceContextRead"],
+  workspaceContextGeneration: number,
+  workspaceId: string | null,
+) {
+  const matches = matchesWorkspaceContextRead(
+    workspaceContextRead,
+    workspaceContextGeneration,
+    workspaceId,
+  );
+  const errors = matches ? workspaceContextErrors(workspaceContextRead) : [];
+  return {
+    error: errors.find((error) => error === "access_denied") ?? errors[0] ?? null,
+    accessDenied: errors.includes("access_denied"),
+    pending: matches && workspaceContextIsPending(workspaceContextRead),
+  };
+}
 
 export function mergeSidebarArchivedTasks(
   activeTasks: AggregatedSidebarTasks["allTasks"],
@@ -38,6 +187,45 @@ export function mergeSidebarArchivedTasks(
   return archived.length > 0 ? [...activeTasks, ...archived] : activeTasks;
 }
 
+function useSidebarTaskProjection(
+  activeTasks: SidebarTask[],
+  archivedTasks: KanbanState["tasks"],
+  workspaceId: string | null,
+  needsArchivedTasks: boolean,
+  taskRemoval: SidebarTaskRemovalProjection,
+) {
+  const { operationsByToken, pendingTokenByTaskId } = taskRemoval;
+  const previousTasksRef = useRef<SidebarTask[]>([]);
+  const merged = useMemo(
+    () => mergeSidebarArchivedTasks(activeTasks, archivedTasks, workspaceId, needsArchivedTasks),
+    [activeTasks, archivedTasks, needsArchivedTasks, workspaceId],
+  );
+  const allTasks = useMemo(() => {
+    const shared = reuseUnchangedTasks(previousTasksRef.current, merged);
+    previousTasksRef.current = shared;
+    return shared;
+  }, [merged]);
+  const pendingArchiveTaskIds = useMemo(() => {
+    const pending = new Set<string>();
+    if (!workspaceId) return pending;
+    const activeTaskIds = new Set(
+      allTasks.filter((task) => task.isArchived !== true).map((task) => task.id),
+    );
+    for (const [taskId, token] of Object.entries(pendingTokenByTaskId)) {
+      const operation = operationsByToken[token];
+      if (
+        activeTaskIds.has(taskId) &&
+        operation?.action === "archive" &&
+        operation.workspaceId === workspaceId
+      ) {
+        pending.add(taskId);
+      }
+    }
+    return pending;
+  }, [allTasks, taskRemoval, workspaceId]);
+  return { allTasks, pendingArchiveTaskIds };
+}
+
 /**
  * Shared data source for the desktop sidebar and the mobile task-switcher sheet.
  *
@@ -56,7 +244,7 @@ export function mergeSidebarArchivedTasks(
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
   useAllWorkflowSnapshots(workspaceId);
 
-  const sidebarViews = useAppStore((state) => state.sidebarViews);
+  const sidebarViews = useAppStore((state) => selectSidebarViews(state, workspaceId));
   const effectiveView = useMemo(() => {
     const active =
       sidebarViews?.views.find((view) => view.id === sidebarViews.activeViewId) ??
@@ -69,12 +257,23 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   const needsArchivedTasks = viewRequiresArchivedTasks(effectiveView);
   const archived = useSidebarArchivedTasks(workspaceId, needsArchivedTasks);
 
+  const pendingTokenByTaskId = useAppStore((state) => state.taskRemoval.pendingTokenByTaskId);
+  const operationsByToken = useAppStore((state) => state.taskRemoval.operationsByToken);
+  const taskRemoval = useMemo(
+    () => ({ operationsByToken, pendingTokenByTaskId }),
+    [operationsByToken, pendingTokenByTaskId],
+  );
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
   const workflows = useAppStore((state) => state.workflows.items);
   const activeKanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
   const activeKanbanTasks = useAppStore((state) => state.kanban.tasks);
   const activeKanbanSteps = useAppStore((state) => state.kanban.steps);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration ?? 0);
+  const workspaceContextRead = useAppStore((state) => state.workspaceContextRead);
+  const retryWorkspaceContext = useAppStore(
+    (state) => state.requestWorkspaceContextRefresh ?? NOOP_REFRESH,
+  );
 
   // While `workspaceId` is unresolved (initial SSR / pre-hydration), return an
   // empty scope rather than every workflow in the store — otherwise snapshots
@@ -112,44 +311,30 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     [scopedSnapshots, fallbackWorkflowId, activeKanbanTasks, activeKanbanSteps],
   );
 
-  const allTasks = useMemo(() => {
-    return mergeSidebarArchivedTasks(
-      aggregated.allTasks,
-      archived.tasks,
-      workspaceId,
-      needsArchivedTasks,
-    );
-  }, [aggregated.allTasks, archived.tasks, needsArchivedTasks, workspaceId]);
+  const { allSteps, stepsByWorkflowId } = useSharedStepMetadata(aggregated);
 
-  const wipQueueByTaskId = useMemo(() => {
-    const result = new Map<string, WipQueueStatus>();
-    const activeTasks = allTasks.filter((task) => task.isArchived !== true);
-    const destinationStepIds = new Set(
-      activeTasks
-        .map((task) => task.queuedForStepId)
-        .filter((stepId): stepId is string => !!stepId),
-    );
-    for (const stepId of destinationStepIds) {
-      for (const entry of getDestinationQueue(activeTasks, stepId)) {
-        const task = entry.task;
-        const stepTitle =
-          aggregated.stepsByWorkflowId[task._workflowId]?.find((step) => step.id === stepId)
-            ?.title ??
-          aggregated.allSteps.find((step) => step.id === stepId)?.title ??
-          stepId;
-        result.set(task.id, {
-          position: entry.position,
-          total: entry.total,
-          destinationTitle: stepTitle,
-        });
-      }
-    }
-    return result;
-  }, [allTasks, aggregated.allSteps, aggregated.stepsByWorkflowId]);
+  const { allTasks, pendingArchiveTaskIds } = useSidebarTaskProjection(
+    aggregated.allTasks,
+    archived.tasks,
+    workspaceId,
+    needsArchivedTasks,
+    taskRemoval,
+  );
+
+  const wipQueueByTaskId = useMemo(
+    () => buildWipQueueByTaskId(allTasks, allSteps, stepsByWorkflowId),
+    [allTasks, allSteps, stepsByWorkflowId],
+  );
 
   const workspaceWorkflows = useMemo<TaskMoveWorkflow[]>(
     () => filteredWorkflows.map((w) => ({ id: w.id, name: w.name, hidden: w.hidden })),
     [filteredWorkflows],
+  );
+
+  const workspaceContextStatus = getWorkspaceContextStatus(
+    workspaceContextRead,
+    workspaceContextGeneration,
+    workspaceId,
   );
 
   // Only flash a skeleton on the very first fetch (no snapshots yet); refreshes
@@ -160,10 +345,17 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   return {
     ...aggregated,
     allTasks,
+    pendingArchiveTaskIds,
+    allSteps,
+    stepsByWorkflowId,
     wipQueueByTaskId,
     workflows: workspaceWorkflows,
     isLoading,
     archivedError: archived.error,
     retryArchivedTasks: archived.refresh,
+    workspaceContextError: workspaceContextStatus.error,
+    workspaceContextPending: workspaceContextStatus.pending,
+    workspaceContextAccessDenied: workspaceContextStatus.accessDenied,
+    retryWorkspaceContext,
   };
 }

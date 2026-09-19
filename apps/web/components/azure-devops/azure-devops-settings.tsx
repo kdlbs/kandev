@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import {
   IconBrandAzure,
@@ -19,6 +19,9 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
@@ -32,6 +35,7 @@ import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import { useAzureDevOpsProjects } from "@/hooks/domains/azure-devops/use-azure-devops-projects";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   deleteAzureDevOpsConfig,
   getAzureDevOpsConfig,
@@ -218,7 +222,6 @@ function useAzureDevOpsSettings(workspaceId: string) {
   }, [config, form, t, toast, workspaceId]);
 
   const remove = useCallback(async () => {
-    if (!confirm(t("azuredevops:removeConfigurationConfirm"))) return;
     try {
       await deleteAzureDevOpsConfig(workspaceId);
       setConfig(null);
@@ -439,6 +442,16 @@ function saveButtonLabel(t: (key: string) => string, state: SettingsState): stri
 
 function ConnectionActions({ state, disabled }: { state: SettingsState; disabled: boolean }) {
   const { t } = useTranslation();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const removeAnchorRef = useRef<HTMLButtonElement>(null);
+  const removeConfirmation = t("azuredevops:removeConfigurationConfirm");
+  const removeLabel = t("azuredevops:remove");
+
+  useEffect(() => {
+    if (!state.config && confirmingRemove) setConfirmingRemove(false);
+  }, [confirmingRemove, state.config]);
+
   return (
     <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       <Button
@@ -462,18 +475,63 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
         <IconDeviceFloppy className="h-4 w-4" />
         {saveButtonLabel(t, state)}
       </Button>
-      {state.config && (
+      {state.config && (isMobile || isFinePointer || !confirmingRemove) && (
         <Button
+          ref={removeAnchorRef}
           type="button"
           variant="destructive"
-          onClick={() => void state.remove()}
+          onClick={() => setConfirmingRemove(true)}
           className="w-full cursor-pointer sm:ml-auto sm:w-auto"
           data-testid="azure-devops-delete-button"
         >
           <IconTrash className="h-4 w-4" />
-          {t("azuredevops:remove")}
+          {removeLabel}
         </Button>
       )}
+      <MobileActionConfirmation
+        open={!!state.config && confirmingRemove}
+        targetKey={`${state.config?.workspaceId}:${state.config?.organizationUrl}`}
+        title={removeConfirmation}
+        subject={state.config?.organizationUrl}
+        cancelLabel={t("common:cancel")}
+        confirmLabel={removeLabel}
+        confirmAriaLabel={removeConfirmation}
+        confirmTestId="azure-devops-remove-confirm"
+        onOpenChange={setConfirmingRemove}
+        focusReturnRef={removeAnchorRef}
+        onConfirm={() => void state.remove()}
+        fallback={
+          !isFinePointer ? (
+            <InlineConfirmActions
+              density="touch"
+              testId="azure-devops-remove-inline-confirmation"
+              ariaLabel={removeConfirmation}
+              description={removeConfirmation}
+              cancelLabel={t("common:cancel")}
+              confirmLabel={removeLabel}
+              confirmAriaLabel={removeConfirmation}
+              confirmTestId="azure-devops-remove-confirm"
+              onCancel={() => setConfirmingRemove(false)}
+              onClose={() => setConfirmingRemove(false)}
+              onConfirm={() => void state.remove()}
+            />
+          ) : (
+            <ActionConfirmPopover
+              open={confirmingRemove}
+              anchorRef={removeAnchorRef}
+              title={removeConfirmation}
+              cancelLabel={t("common:cancel")}
+              confirmLabel={removeLabel}
+              confirmAriaLabel={removeConfirmation}
+              confirmTestId="azure-devops-remove-confirm"
+              testId="azure-devops-remove-confirm-popover"
+              onOpenChange={setConfirmingRemove}
+              onCancel={() => setConfirmingRemove(false)}
+              onConfirm={() => void state.remove()}
+            />
+          )
+        }
+      />
     </div>
   );
 }

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/notifications.md"
+spec: "../../specs/platform/requirements/notifications.md"
 ---
 
 # Task 03: Move Native Notification Permission to a User Gesture

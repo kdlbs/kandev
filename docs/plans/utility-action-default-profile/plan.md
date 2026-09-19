@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/utility-agent-profiles.md
+spec: docs/specs/agents/requirements/utility-agent-profiles.md
 created: 2026-08-12
 status: complete
 ---

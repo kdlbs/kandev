@@ -5,7 +5,7 @@ description: "Understand Kandev's process, code, runtime, persistence, event, pr
 
 # Architecture
 
-Kandev is a server-first development workbench. A Go backend owns durable product state and orchestration. The browser UI is a Vite-built React SPA. Agent processes run behind an `agentctl` sidecar in local, worktree, container, or remote task environments.
+Kandev is a server-first development workbench. The released application is a single native Go binary with the compiled web frontend embedded. It serves the web UI, HTTP API, WebSocket API, and MCP endpoint from one backend listener. Agent processes run behind an `agentctl` sidecar in local, worktree, container, or remote task environments.
 
 ## Read this page in order
 
@@ -14,16 +14,15 @@ Kandev is a server-first development workbench. A Go backend owns durable produc
 3. Use the protocol and event sections for cross-process contracts.
 4. Check trust boundaries before changing credentials, executors, providers, or MCP.
 
-```mermaid
-flowchart LR
-    UI["Browser or Tauri window"] -->|HTTP + WebSocket| BE["Go backend"]
-    BE --> DB[("SQLite or PostgreSQL")]
-    BE --> Providers["Git and provider APIs"]
-    BE -->|control channel| A1["agentctl: local/worktree"]
-    BE -->|control channel| A2["agentctl: Docker/SSH/Sprites"]
-    A1 --> Agent1["Agent CLI + task MCP"]
-    A2 --> Agent2["Agent CLI + task MCP"]
-```
+![Kandev architecture: a browser or Tauri window connects to the Go control plane, which owns persistence and provider access and routes scoped control channels to local and remote agentctl runtimes.](../screenshots/architecture.svg)
+
+[Open full-size SVG diagram][architecture-diagram]
+
+[architecture-diagram]: ../../docs/screenshots/architecture.svg
+
+The diagram separates the user surface from the Go control plane and the task
+runtimes below it. The backend owns the durable state and external provider
+boundary; `agentctl` owns the local or remote agent process and task MCP.
 
 ## Processes and launchers
 
@@ -35,7 +34,10 @@ These adjacent launch layers have different jobs:
 - The published `apps/cli/bin/` npm shim selects the matching `@kdlbs/runtime-*` package and starts its native `kandev` binary.
 - `apps/desktop/` is a Tauri shell. Rust starts its bundled `kandev --headless` on an owned loopback origin and owns native windows, external links, notifications, and updates. The product UI is still the backend-served SPA.
 
-The root build embeds generated web assets in the Go binary. `make dev` instead starts Vite and configures Go to proxy it, so HTTP, API, and WebSocket traffic still enters through Go.
+The release build embeds generated web assets in the Go binary. `make dev`
+instead starts Vite and configures Go to proxy it, so HTTP, API, and WebSocket
+traffic still enters through Go. Installed releases do not use a separate web
+server.
 
 ## Backend ownership
 
@@ -44,7 +46,7 @@ Backend code is under `apps/backend/internal/`. Common owners include:
 - `task/`, `workflow/`, `orchestrator/`, and `runs/` for work state and dispatch;
 - `agent/` for agent definitions, profiles, executor mapping, and lifecycle;
 - `agentctl/` for the sidecar server, process/protocol adapters, Git, files, shell, terminal, and workspace operations;
-- `worktree/` plus runtime implementations for local, Docker, remote Docker, SSH, and Sprites environments;
+- `worktree/` plus runtime implementations for local, Docker, Kubernetes, remote Docker, SSH, and Sprites environments;
 - provider domains such as `github/`, `gitlab/`, `jira/`, `linear/`, and `sentry/`;
 - `mcp/` for Kandev tool schemas and backend handlers;
 - `gateway/websocket/` for client broadcasts;
@@ -64,7 +66,7 @@ See [Web development](web-development.md) for settings and workbench ownership.
 
 ## Task runtime and agentctl
 
-A task selects repositories, an agent profile, and an executor profile. Product executor types are `local`, `worktree`, `local_docker`, `remote_docker`, `sprites`, `ssh`, and test-only `mock_remote`. They map to lifecycle backends `standalone`, `docker`, `remote_docker`, `sprites`, or `ssh`; local and worktree share a process backend but prepare different Git environments.
+A task selects repositories, an agent profile, and an executor profile. Product executor types are `local`, `worktree`, `local_docker`, `remote_docker`, `sprites`, `ssh`, `k8s`, and test-only `mock_remote`. They map to lifecycle backends `standalone`, `docker`, `remote_docker`, `sprites`, `ssh`, or `k8s`; local and worktree share a process backend but prepare different Git environments.
 
 `internal/agent/runtime/` is the intended high-level backend lifecycle facade, but it remains transitional and current callers also use `internal/agent/runtime/lifecycle/` directly. Backend-side clients in `internal/agent/runtime/agentctl/` reach the agentctl server implemented in `internal/agentctl/server/`.
 
@@ -80,7 +82,7 @@ These protocols are separate:
 - **REST and WebSocket** are backend/client and agentctl control surfaces.
 - **MCP** supplies Kandev and profile-configured tools to an agent. It is not an agent runtime adapter.
 
-agentctl hosts task MCP endpoints and relays tool calls over the agent stream to backend handlers. The backend also exposes external MCP routes. Kandev currently adds no user-auth middleware to those external routes; do not expose them on an untrusted network without binding, proxy authentication, and scoped credentials. See [Automation and MCP](automation-and-mcp.md).
+agentctl hosts task MCP endpoints and relays tool calls over the agent stream to backend handlers. The backend also exposes external MCP routes. Those routes remain open while authentication is disabled; when the experimental authentication feature is enabled, they require an authenticated identity and carry that user into dispatch. External clients use personal access tokens, while same-origin browser tooling can use a session. Do not expose them on an untrusted network without binding, TLS, and scoped credentials. See [Automation and MCP](automation-and-mcp.md).
 
 ## Events and persistence
 
@@ -98,7 +100,7 @@ Review each crossing explicitly:
 - backend to provider APIs and Git remotes;
 - backend to agentctl and a task environment;
 - agentctl to the selected agent and MCP servers;
-- host to Docker, SSH, Sprites, or other remote infrastructure.
+- host to Docker, Kubernetes, SSH, Sprites, or other remote infrastructure.
 
 Validate scope and identity server-side. Treat provider text, repository content, agent output, URLs, archives, paths, and command arguments as untrusted. Never rely on a frontend-only permission check.
 

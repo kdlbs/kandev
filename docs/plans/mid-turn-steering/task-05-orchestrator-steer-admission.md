@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-negotiate-steer-capability", "02-runtime-toggle", "04-adapter-steer-admission"]
 plan: "plan.md"
-spec: "../../specs/platform/mid-turn-steering.md"
+spec: "../../specs/platform/requirements/mid-turn-steering.md"
 ---
 
 # Task 05: Admit and order steers in the orchestrator
@@ -29,7 +29,7 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Dependencies:** Tasks 01, 02, 04.
 - **Inputs:** Spec "What" (order rule, single in-flight steer), "State machine",
   and the admission table in
-  `../../specs/platform/background-work-liveness.md`. ADR-0049's
+  `../../specs/platform/requirements/background-work-liveness.md`. ADR-0049's
   check-and-claim requirement and its `ErrAgentPromptInProgress` loser behavior
   are the precedent for the concurrency rule.
 - **Risks:** The existing `QueueAndInterruptForPeerMessage` path

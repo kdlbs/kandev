@@ -5,10 +5,13 @@ status: done
 wave: 2
 depends_on: ["01-backend-initialization"]
 plan: "plan.md"
-spec: "../../specs/create-local-repository/spec.md"
+spec: "../../specs/workspaces/requirements/create-local-repository.md"
 ---
 
 # Task 02: Task-Create Local Repository Selector
+
+The [availability follow-up](../repository-creation-availability/plan.md) replaces
+the single-row restriction recorded below and preserves multi-row executors.
 
 ## Acceptance
 

@@ -32,10 +32,14 @@ func (r *portForwardingHandlerRepo) GetTask(_ context.Context, _ string) (*model
 	return r.task, nil
 }
 
-func (r *portForwardingHandlerRepo) UpdateTask(_ context.Context, task *models.Task) error {
+func (r *portForwardingHandlerRepo) UpdateTaskPreservingDeferredLaunch(_ context.Context, task *models.Task) error {
 	r.updatedTask = task
 	r.updateCalls++
 	return nil
+}
+
+func (r *portForwardingHandlerRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
 }
 
 func newPortForwardingHandler(t *testing.T, repo *portForwardingHandlerRepo) *TaskHandlers {

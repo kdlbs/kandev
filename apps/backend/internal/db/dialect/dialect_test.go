@@ -18,6 +18,24 @@ func TestIsPostgres(t *testing.T) {
 	}
 }
 
+func TestTimestampType(t *testing.T) {
+	if got := TimestampType(SQLite3); got != "DATETIME" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := TimestampType(PGX); got != "TIMESTAMPTZ" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestByteOrderedText(t *testing.T) {
+	if got := ByteOrderedText(SQLite3, "t.id"); got != "t.id" {
+		t.Errorf("sqlite: expected bare expression, got %q", got)
+	}
+	if got := ByteOrderedText(PGX, "t.id"); got != `t.id COLLATE "C"` {
+		t.Errorf("pgx: expected explicit C collation, got %q", got)
+	}
+}
+
 func TestBoolToInt(t *testing.T) {
 	if BoolToInt(true) != 1 {
 		t.Error("expected 1 for true")
@@ -36,6 +54,15 @@ func TestBlobType(t *testing.T) {
 	}
 }
 
+func TestByteLength(t *testing.T) {
+	if got := ByteLength(SQLite3, "name"); got != "length(CAST(name AS BLOB))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := ByteLength(PGX, "name"); got != "octet_length(name)" {
+		t.Errorf("postgres: got %q", got)
+	}
+}
+
 func TestJSONExtract(t *testing.T) {
 	got := JSONExtract(SQLite3, "metadata", "status")
 	if got != "json_extract(metadata, '$.status')" {
@@ -44,6 +71,26 @@ func TestJSONExtract(t *testing.T) {
 	got = JSONExtract(PGX, "metadata", "status")
 	if got != "metadata::jsonb->>'status'" {
 		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestJSONExtractPath(t *testing.T) {
+	got := JSONExtractPath(SQLite3, "m.metadata", "question_id")
+	if got != "json_extract(m.metadata, '$.question_id')" {
+		t.Errorf("sqlite single segment: got %q", got)
+	}
+	got = JSONExtractPath(PGX, "m.metadata", "question_id")
+	if got != "m.metadata::jsonb->>'question_id'" {
+		t.Errorf("pgx single segment: got %q", got)
+	}
+
+	got = JSONExtractPath(SQLite3, "m.metadata", "question", "id")
+	if got != "json_extract(m.metadata, '$.question.id')" {
+		t.Errorf("sqlite nested: got %q", got)
+	}
+	got = JSONExtractPath(PGX, "m.metadata", "question", "id")
+	if got != "m.metadata::jsonb->'question'->>'id'" {
+		t.Errorf("pgx nested: got %q", got)
 	}
 }
 
@@ -80,6 +127,17 @@ func TestExcludeConfigModePredicate(t *testing.T) {
 	}
 }
 
+func TestExcludeTruthyMetadataPredicate(t *testing.T) {
+	got := ExcludeTruthyMetadataPredicate(SQLite3, "m.metadata", "parent_question")
+	if got != "json_extract(m.metadata, '$.parent_question') IS NOT 1" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = ExcludeTruthyMetadataPredicate(PGX, "m.metadata", "parent_question")
+	if got != "COALESCE(m.metadata::jsonb->>'parent_question', '') NOT IN ('true', '1')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestDurationMs(t *testing.T) {
 	got := DurationMs(SQLite3, "completed_at", "started_at")
 	if got != "(julianday(completed_at) - julianday(started_at)) * 86400000" {
@@ -102,6 +160,15 @@ func TestDateOf(t *testing.T) {
 	}
 }
 
+func TestDateText(t *testing.T) {
+	if got := DateText(SQLite3, "date"); got != "date(date)" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := DateText(PGX, "date"); got != "to_char(date, 'YYYY-MM-DD')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestDateTimeOf(t *testing.T) {
 	got := DateTimeOf(SQLite3, "activation.value")
 	if got != "datetime(activation.value)" {
@@ -113,6 +180,15 @@ func TestDateTimeOf(t *testing.T) {
 	}
 }
 
+func TestNullableTimestamp(t *testing.T) {
+	if got := NullableTimestamp(SQLite3, "?"); got != "?" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := NullableTimestamp(PGX, "?"); got != "(?)::timestamptz" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestNaiveUTCTimestampOf(t *testing.T) {
 	got := NaiveUTCTimestampOf(SQLite3, "ts.started_at")
 	if got != "datetime(ts.started_at)" {
@@ -120,6 +196,17 @@ func TestNaiveUTCTimestampOf(t *testing.T) {
 	}
 	got = NaiveUTCTimestampOf(PGX, "ts.started_at")
 	if got != "(ts.started_at AT TIME ZONE 'UTC')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestSecondPrecisionText(t *testing.T) {
+	got := SecondPrecisionText(SQLite3, "MAX(c.updated_at)")
+	if got != "strftime('%Y-%m-%d %H:%M:%S', MAX(c.updated_at))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = SecondPrecisionText(PGX, "MAX(c.updated_at)")
+	if got != "to_char(MAX(c.updated_at), 'YYYY-MM-DD HH24:MI:SS')" {
 		t.Errorf("pgx: got %q", got)
 	}
 }
@@ -159,7 +246,7 @@ func TestCurrentDate(t *testing.T) {
 	if CurrentDate(SQLite3) != "date('now')" {
 		t.Errorf("sqlite: got %q", CurrentDate(SQLite3))
 	}
-	if CurrentDate(PGX) != "CURRENT_DATE" {
+	if CurrentDate(PGX) != "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date" {
 		t.Errorf("pgx: got %q", CurrentDate(PGX))
 	}
 }
@@ -170,7 +257,7 @@ func TestDateNowMinusDays(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DateNowMinusDays(PGX, "?")
-	if got != "CURRENT_DATE - (? || ' days')::interval" {
+	if got != "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - (?::int)" {
 		t.Errorf("pgx: got %q", got)
 	}
 }
@@ -181,7 +268,7 @@ func TestDatePlusOneDay(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DatePlusOneDay(PGX, "date")
-	if got != "(date)::date + INTERVAL '1 day'" {
+	if got != "(date)::date + 1" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

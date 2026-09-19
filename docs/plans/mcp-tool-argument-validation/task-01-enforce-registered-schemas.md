@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/mcp-tool-argument-validation.md"
+spec: "../../specs/integrations/requirements/mcp-tool-argument-validation.md"
 ---
 
 # Task 01: Enforce registered schemas at the MCP boundary

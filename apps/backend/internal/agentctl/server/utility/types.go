@@ -3,6 +3,8 @@
 // designed for quick tasks like generating commit messages or PR descriptions.
 package utility
 
+import "github.com/kandev/kandev/internal/common/acpprovider"
+
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
 	// Prompt is the fully resolved prompt text to send to the LLM.
@@ -93,6 +95,10 @@ type ProbeResponse struct {
 	// Error is the error message if the probe failed.
 	Error string `json:"error,omitempty"`
 
+	// FailureCode is a stable classification for failures the backend can
+	// handle without receiving raw subprocess diagnostics.
+	FailureCode ProbeFailureCode `json:"failure_code,omitempty"`
+
 	// DurationMs is the probe duration in milliseconds.
 	DurationMs int `json:"duration_ms,omitempty"`
 
@@ -130,6 +136,15 @@ type ProbeResponse struct {
 	// PromptCapabilities reports which content block types the agent accepts.
 	PromptCapabilities ProbePromptCapabilities `json:"prompt_capabilities,omitempty"`
 }
+
+// ProbeFailureCode identifies a bounded, machine-actionable probe failure.
+type ProbeFailureCode string
+
+const (
+	// ProbeFailureManagedRuntimeNPMResolution means the trusted top-level npm
+	// package failed exact-version resolution with ETARGET.
+	ProbeFailureManagedRuntimeNPMResolution ProbeFailureCode = "managed_runtime_npm_resolution"
+)
 
 // ProbeAuthMethod is a single advertised authentication method.
 type ProbeAuthMethod struct {
@@ -203,6 +218,11 @@ type InferenceConfigDTO struct {
 	StripEnv      []string `json:"strip_env,omitempty"`
 	CLIFlags      []string `json:"cli_flags,omitempty"`
 	CommandPrefix []string `json:"command_prefix,omitempty"`
+	// ProviderGatewayAuth, when set, makes the probe/inference subprocess
+	// authenticate against a Kandev-configured OpenAI-compatible provider
+	// (base URL + bearer key) right after the ACP initialize handshake, the
+	// same mechanism the live session adapter uses.
+	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
 }
 
 // PromptResponse is the response from executing a utility prompt.

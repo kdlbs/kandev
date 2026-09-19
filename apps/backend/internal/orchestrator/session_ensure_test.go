@@ -90,6 +90,70 @@ func TestEnsureSession_ReturnsExistingNewest_NoPrimary(t *testing.T) {
 	}
 }
 
+func TestEnsureSession_PassiveOpenReturnsExactQueuedDestination(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	seedTaskAndSession(t, repo, "task1", "session-astra", models.TaskSessionStateWaitingForInput)
+	if err := repo.SetSessionPrimary(ctx, "session-astra"); err != nil {
+		t.Fatalf("set parked session primary: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-luna", TaskID: "task1", State: models.TaskSessionStateCreated,
+		AgentProfileID: "profile-luna", StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create queued destination: %v", err)
+	}
+	queuedAt := now.Add(-time.Minute)
+	record := models.CeilingRecordKeys(models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID:      "session-luna",
+			metaKeyAgentProfileID: "profile-luna",
+			metaKeyWorkflowStepID: "step-implement",
+		},
+		Origin:          string(launchOriginAutomatic),
+		QueuedAt:        queuedAt,
+		Population:      5,
+		PopulationKnown: true,
+		Ceiling:         5,
+	})
+	if err := repo.SetTaskMetadataKey(ctx, "task1", models.MetaKeyDeferredLaunch, record); err != nil {
+		t.Fatalf("set queued launch: %v", err)
+	}
+
+	response, err := svc.EnsureSession(ctx, "task1", EnsureSessionOptions{
+		ActivationSource: LaunchActivationSourceSessionOpen,
+	})
+	if err != nil {
+		t.Fatalf("EnsureSession: %v", err)
+	}
+	if response.SessionID != "session-luna" {
+		t.Fatalf("passive ensure session = %q, want exact queued destination", response.SessionID)
+	}
+	if response.Source != "existing_queued" || response.ActivationDisposition != "queued" ||
+		response.ActivationReason != "session_capacity" {
+		t.Fatalf("passive queued response = %+v", response)
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, "task1")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("passive ensure created or removed a session: got %d rows", len(sessions))
+	}
+	queuedTask, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if !models.HasCeilingDeferredIntent(queuedTask) {
+		t.Fatal("passive ensure cleared the queued launch")
+	}
+}
+
 func TestFindOfficeSessionForResumeUsesCanonicalOfficeProjection(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -126,9 +190,12 @@ func TestFindOfficeSessionForResumeUsesCanonicalOfficeProjection(t *testing.T) {
 			if tt.viewer != "" {
 				ctx = WithViewerAgent(ctx, tt.viewer)
 			}
-			got := svc.findOfficeSessionForResume(ctx, "task1")
-			if (got != nil) != tt.wantOffice {
-				t.Fatalf("office session found = %v, want %v", got != nil, tt.wantOffice)
+			got, isOffice := svc.findOfficeSessionForResume(ctx, "task1")
+			if isOffice != tt.wantOffice {
+				t.Fatalf("is office task = %v, want %v", isOffice, tt.wantOffice)
+			}
+			if (got != nil) != (tt.wantOffice && tt.viewer != "") {
+				t.Fatalf("office session found = %v, want %v", got != nil, tt.wantOffice && tt.viewer != "")
 			}
 		})
 	}
@@ -291,6 +358,64 @@ func TestPrepareTaskSession_UsesExecutorIDFromTaskMetadata(t *testing.T) {
 	}
 	if session.ExecutorID != "exec-special" {
 		t.Fatalf("ExecutorID = %q, want exec-special", session.ExecutorID)
+	}
+}
+
+func TestPrepareTaskSession_InheritParentKeepsImplicitParentExecutor(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Test Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "parent1", WorkflowID: "wf1", WorkspaceID: "ws1", Title: "Parent", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed parent task: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "child1", ParentID: "parent1", WorkflowID: "wf1", WorkspaceID: "ws1", Title: "Child",
+		Metadata:  map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed child task: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-parent", TaskID: "parent1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("seed parent environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "parent-session", TaskID: "parent1", IsPrimary: true,
+		State: models.TaskSessionStateRunning, AgentProfileID: "parent-agent",
+		TaskEnvironmentID: "env-parent", StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed parent session: %v", err)
+	}
+	taskRepo.tasks["child1"] = &v1.Task{
+		ID: "child1", ParentID: "parent1", WorkspaceID: "ws1", WorkflowID: "wf1",
+		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
+	}
+
+	sessionID, err := svc.PrepareTaskSession(ctx, "child1", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.ExecutorID != "" {
+		t.Fatalf("ExecutorID = %q, want empty to preserve the parent's implicit local executor", session.ExecutorID)
+	}
+	if session.TaskEnvironmentID != "env-parent" {
+		t.Fatalf("TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
 	}
 }
 

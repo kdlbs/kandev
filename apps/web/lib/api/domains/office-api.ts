@@ -4,10 +4,6 @@ import type {
   AgentProfile,
   Project,
   CostSummary,
-  BudgetPolicy,
-  Routine,
-  RoutineTrigger,
-  RoutineRun,
   Approval,
   InboxItem,
   OfficeMeta,
@@ -24,6 +20,8 @@ export {
   setupChannel,
   deleteChannel,
   exportConfig,
+  exportConfigManifest,
+  exportSelectedConfigZip,
   exportConfigZipUrl,
   previewImport,
   applyImport,
@@ -64,6 +62,20 @@ export {
   gitPull,
   gitPush,
 } from "./office-extended-api";
+export { listBudgets, createBudget, updateBudget, deleteBudget } from "./office-budget-api";
+export {
+  listRoutines,
+  createRoutine,
+  getRoutine,
+  updateRoutine,
+  deleteRoutine,
+  runRoutine,
+  listRoutineTriggers,
+  createRoutineTrigger,
+  deleteRoutineTrigger,
+  listRoutineRuns,
+  listAllRoutineRuns,
+} from "./office-routine-api";
 export type {
   ImportDiff,
   ImportPreview,
@@ -254,6 +266,26 @@ export function updateAgentProfile(
   }).then((res) => normalizeAgent(res.agent));
 }
 
+// Dedicated status transition endpoint: validates the transition table and
+// clears pause_reason as a side effect. The general agent update endpoint
+// above accepts a status field too but writes it unchecked, so callers that
+// need transition validation (e.g. agent recovery) must use this instead.
+// `expectedStatus` selects the guarded recovery form, which refuses to
+// overwrite a status that is no longer paused or stopped.
+export function updateAgentStatus(
+  id: string,
+  status: AgentStatus,
+  options?: ApiRequestOptions & { expectedStatus?: AgentStatus },
+) {
+  const { expectedStatus, ...requestOptions } = options ?? {};
+  const body: { status: AgentStatus; expected_status?: AgentStatus } = { status };
+  if (expectedStatus) body.expected_status = expectedStatus;
+  return fetchJson<AgentResponse>(`${BASE}/agents/${id}/status`, {
+    ...requestOptions,
+    init: { method: "PATCH", body: JSON.stringify(body), ...requestOptions.init },
+  }).then((res) => normalizeAgent(res.agent));
+}
+
 export function deleteAgentProfile(id: string, options?: ApiRequestOptions) {
   return fetchJson<void>(`${BASE}/agents/${id}`, {
     ...options,
@@ -403,124 +435,33 @@ type CostBreakdownItemRaw = {
   total_subcents: number;
 };
 
-// --- Budget Policies ---
+// --- Built-in default spend ceiling (AC-OFFICE-BUDGET-003.5) ---
 
-export function listBudgets(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ budgets: BudgetPolicy[] }>(
-    `${BASE}/workspaces/${workspaceId}/budgets`,
-    options,
-  );
+// DefaultCeilingRaw is the wire shape of GET/PUT .../budgets/default
+// (internal/office/costs/dto.go's DefaultCeilingResponse /
+// SetDefaultCeilingRequest, both `{"limit_subcents": ...}`). Named "Raw"
+// and read as snake_case directly by the caller, matching this file's
+// existing CostBreakdownItemRaw convention, rather than assuming a
+// camelCase field the backend does not send.
+type DefaultCeilingRaw = { limit_subcents: number };
+
+export function getDefaultCeiling(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<DefaultCeilingRaw>(`${BASE}/workspaces/${workspaceId}/budgets/default`, options);
 }
 
-export function createBudget(
+export function setDefaultCeiling(
   workspaceId: string,
-  data: Partial<BudgetPolicy>,
+  limitSubcents: number,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<BudgetPolicy>(`${BASE}/workspaces/${workspaceId}/budgets`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function updateBudget(id: string, data: Partial<BudgetPolicy>, options?: ApiRequestOptions) {
-  return fetchJson<BudgetPolicy>(`${BASE}/budgets/${id}`, {
-    ...options,
-    init: { method: "PATCH", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function deleteBudget(id: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/budgets/${id}`, {
-    ...options,
-    init: { method: "DELETE", ...options?.init },
-  });
-}
-
-// --- Routines ---
-
-export function listRoutines(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ routines: Routine[] }>(`${BASE}/workspaces/${workspaceId}/routines`, options);
-}
-
-export function createRoutine(
-  workspaceId: string,
-  data: Partial<Routine>,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<Routine>(`${BASE}/workspaces/${workspaceId}/routines`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function getRoutine(id: string, options?: ApiRequestOptions) {
-  return fetchJson<Routine>(`${BASE}/routines/${id}`, options);
-}
-
-export function updateRoutine(id: string, data: Partial<Routine>, options?: ApiRequestOptions) {
-  return fetchJson<Routine>(`${BASE}/routines/${id}`, {
-    ...options,
-    init: { method: "PATCH", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function deleteRoutine(id: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/routines/${id}`, {
-    ...options,
-    init: { method: "DELETE", ...options?.init },
-  });
-}
-
-export function runRoutine(
-  id: string,
-  variables?: Record<string, string>,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<{ run: RoutineRun }>(`${BASE}/routines/${id}/run`, {
+  return fetchJson<DefaultCeilingRaw>(`${BASE}/workspaces/${workspaceId}/budgets/default`, {
     ...options,
     init: {
-      method: "POST",
-      body: variables ? JSON.stringify({ variables }) : undefined,
+      method: "PUT",
+      body: JSON.stringify({ limit_subcents: limitSubcents }),
       ...options?.init,
     },
   });
-}
-
-export function listRoutineTriggers(routineId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ triggers: RoutineTrigger[] }>(
-    `${BASE}/routines/${routineId}/triggers`,
-    options,
-  );
-}
-
-export function createRoutineTrigger(
-  routineId: string,
-  data: Partial<RoutineTrigger>,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<{ trigger: RoutineTrigger }>(`${BASE}/routines/${routineId}/triggers`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function deleteRoutineTrigger(triggerId: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/routine-triggers/${triggerId}`, {
-    ...options,
-    init: { method: "DELETE", ...options?.init },
-  });
-}
-
-export function listRoutineRuns(routineId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ runs: RoutineRun[] }>(`${BASE}/routines/${routineId}/runs`, options);
-}
-
-export function listAllRoutineRuns(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ runs: RoutineRun[] }>(
-    `${BASE}/workspaces/${workspaceId}/routine-runs`,
-    options,
-  );
 }
 
 // --- Approvals ---

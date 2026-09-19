@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/clarification-context.md
+spec: docs/specs/ui/requirements/clarification-context.md
 created: 2026-08-17
 status: done
 ---

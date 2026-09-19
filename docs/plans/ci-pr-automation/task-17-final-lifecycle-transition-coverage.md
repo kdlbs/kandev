@@ -6,7 +6,7 @@ wave: 8
 depends_on:
   - "16-ci-error-precedence"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 17: Final lifecycle transition coverage

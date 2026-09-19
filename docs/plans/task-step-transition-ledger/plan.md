@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow/task-step-transition-ledger/spec.md
+spec: docs/specs/tasks/requirements/workflow-task-step-transition-ledger.md
 created: 2026-08-13
 status: draft
 ---
@@ -558,7 +558,7 @@ is subsumed by the equal-values check above it) — harmless, left as-is rather
 than churning a working file for a no-op cleanup.
 
 **Test-honesty audit** against all ~47 GIVEN/WHEN/THEN scenarios in
-`docs/specs/workflow/task-step-transition-ledger/spec.md` § Scenarios, by
+`docs/specs/tasks/requirements/workflow-task-step-transition-ledger.md` § Scenarios, by
 category:
 
 | Category | Scenarios | Result |

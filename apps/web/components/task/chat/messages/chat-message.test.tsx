@@ -1,7 +1,9 @@
+/* eslint-disable max-lines -- ChatMessage integration coverage stays in one spec. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import { ToastProvider } from "@/components/toast-provider";
 import { ChatMessage } from "./chat-message";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
@@ -26,10 +28,19 @@ const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
 const PROMPT_MENTION_TESTID = "custom-prompt-mention";
 const ENTITY_REFERENCE_TESTID = "entity-reference-chip";
+const { copyMessage } = vi.hoisted(() => ({
+  copyMessage: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/hooks/use-copy-to-clipboard", () => ({
+  useCopyToClipboard: () => ({ copied: false, copy: copyMessage }),
+}));
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  copyMessage.mockReset();
+  copyMessage.mockResolvedValue(undefined);
 });
 
 /** Builds a user Message with default test fields, merged with the given overrides. */
@@ -142,7 +153,60 @@ describe("ChatMessage prompt mentions", () => {
     expect(chip.getAttribute("data-slot")).toBe("hover-card-trigger");
     expect(chip.getAttribute("title")).toBeNull();
   });
+  it.each(["Enter", " "])("opens a saved prompt preview with the %s key", (key) => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
 
+    render(
+      <Wrapper>
+        <ChatMessage comment={userMessage({ content: "@hello" })} label="Message" className="" />
+      </Wrapper>,
+    );
+
+    const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+    fireEvent.keyDown(chip, { key });
+
+    expect(screen.getByText("hello content")).toBeTruthy();
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+describe("Prompt mention touch previews", () => {
+  it("uses a touch-sized drawer trigger for prompt previews on coarse pointers", () => {
+    const originalWidth = window.innerWidth;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+      const listeners = new Set<() => void>();
+      return {
+        media: query,
+        matches: false,
+        onchange: null,
+        addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+        dispatchEvent: () => true,
+      } as unknown as MediaQueryList;
+    });
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+
+    try {
+      const Wrapper = wrapper([], [customPrompt("hello")]);
+      render(
+        <Wrapper>
+          <ChatMessage comment={userMessage({ content: "@hello" })} label="Message" className="" />
+        </Wrapper>,
+      );
+
+      const [chip] = screen.getAllByTestId(PROMPT_MENTION_TESTID);
+      expect(chip.tagName).toBe("BUTTON");
+      expect(chip.getAttribute("data-slot")).toBe("drawer-trigger");
+      expect(chip.className).toContain("h-11");
+      fireEvent.click(chip);
+      expect(chip.getAttribute("aria-expanded")).toBe("true");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
+  });
+});
+
+describe("ChatMessage prompt mention fallbacks", () => {
   it("falls back to a plain chip with a title when the prompt has no contents", () => {
     // A prompt with empty content has nothing to reveal on hover, so keep the
     // lightweight title tooltip instead of a hover card.
@@ -179,6 +243,44 @@ describe("ChatMessage prompt mentions", () => {
     expect(checkbox.checked).toBe(true);
     expect(checkbox.closest("li")?.className).toContain("task-list-item");
     expect(screen.getByRole("cell").getAttribute("style")).toContain("text-align: center");
+  });
+  it("renders aliases nested in formatted Markdown nodes", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+    render(
+      <ToastProvider>
+        <Wrapper>
+          <ChatMessage
+            comment={userMessage({
+              content: "**@hello** and _@hello_ and [**@hello**](https://example.com) and `@hello`",
+            })}
+            label="Message"
+            className=""
+          />
+        </Wrapper>
+      </ToastProvider>,
+    );
+
+    expect(screen.getAllByTestId(PROMPT_MENTION_TESTID)).toHaveLength(3);
+    const linkedMention = screen
+      .getByRole("link", { name: "@hello" })
+      .querySelector<HTMLElement>(`[data-testid="${PROMPT_MENTION_TESTID}"]`);
+    expect(linkedMention).not.toBeNull();
+    expect(linkedMention?.getAttribute("role")).toBeNull();
+    expect(linkedMention?.getAttribute("tabindex")).toBeNull();
+  });
+  it("does not chip an alias that follows formatted text without a boundary", () => {
+    const Wrapper = wrapper([], [customPrompt("hello")]);
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({ content: "**bold**@hello" })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByTestId(PROMPT_MENTION_TESTID)).toBeNull();
   });
 });
 
@@ -529,6 +631,34 @@ Visible agent response.`;
 
     expect(screen.getByText(/Hidden agent context/)).not.toBeNull();
     expect(screen.getByText(/Visible agent response/)).not.toBeNull();
+  });
+});
+
+describe("ChatMessage bounded user source", () => {
+  it("keeps complete copy and attachment values while shortening the rendered preview", () => {
+    const content = Array.from({ length: 240 }, (_, index) => `message-${index}`).join("\n");
+
+    render(
+      <StateProvider>
+        <ChatMessage
+          comment={userMessage({
+            content,
+            metadata: {
+              attachments: [{ type: "resource", mime_type: "text/plain", name: "full-log.txt" }],
+            },
+          })}
+          label="Message"
+          className=""
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("message-file-attachment").textContent).toContain("full-log.txt");
+    expect(screen.getByTestId("user-message-bubble").textContent).not.toContain("message-239");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message to clipboard" }));
+
+    expect(copyMessage).toHaveBeenCalledWith(content);
   });
 });
 

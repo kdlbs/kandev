@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["02-app-token-primitives", "03-workspace-credential-resolver", "04-app-oauth-webhooks"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 05: Workspace-Aware GitHub Service Routing

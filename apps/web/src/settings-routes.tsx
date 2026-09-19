@@ -5,13 +5,12 @@ import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentsBrowsePage from "@/app/settings/agents/browse/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
 import AgentProfileRoute from "@/app/settings/agents/[agentId]/profiles/[profileId]/page";
-import ExecutorEditPage from "@/app/settings/executor/[id]/page";
-import ProfileDetailPage from "@/app/settings/executor/[id]/profile/[profileId]/page";
 import ExecutorCreatePage from "@/app/settings/executor/new/page";
 import ExecutorsPage from "@/app/settings/executors/page";
 import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
+import KubernetesExecutorPage from "@/app/settings/executors/k8s/[executorId]/page";
 import ExternalMcpPage from "@/app/settings/external-mcp/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
@@ -28,6 +27,7 @@ import {
   KeyboardShortcutsSettings,
 } from "@/components/settings/general-settings";
 import { SettingsIndex } from "@/components/settings/settings-index";
+import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
 import { readLastSettingsPath } from "@/lib/settings/last-settings-page";
 import { SettingsRedirect, useRememberSettingsPath } from "./settings-route-helpers";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
@@ -35,18 +35,22 @@ import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
+import { PluginShortcutsCard } from "@/components/settings/plugins/plugin-shortcuts-card";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
 import { TerminalEditorsSettings } from "@/components/settings/terminal-editors-settings";
 import { AboutSettings } from "@/components/settings/system/about-settings";
 import { ApiTokens } from "@/components/settings/account/api-tokens";
 import { SecuritySettings } from "@/components/settings/account/security-settings";
 import { UsersTable } from "@/components/settings/system/users-table";
-import { DataStorageSettings } from "@/components/settings/system/data-storage-settings";
+import { DataLogsSettings } from "@/components/settings/system/data-logs-settings";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
 import { FeatureTogglesRoute } from "@/components/settings/system/feature-toggles-route";
+import { OrganizationsPage } from "@/components/settings/system/organizations/organizations-page";
+import { UnitsPage } from "@/components/settings/units/units-page";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
+import { StorageSettings } from "@/components/settings/system/storage-settings";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -75,6 +79,7 @@ import {
   PluginRouteFallback,
 } from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
+import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import {
   fetchUserSettings,
   listAgentDiscovery,
@@ -115,6 +120,7 @@ type SettingsInitialStateData = {
   availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
   availableTools: NonNullable<Awaited<ReturnType<typeof listAvailableAgents>>["tools"]>;
   userSettingsResponse: UserSettingsResponse | null;
+  agentProfilesVersion?: number;
 };
 
 const licenseEntries = licenses as LicenseEntry[];
@@ -195,16 +201,27 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <AboutSettings licenses={licenseEntries} />
     </SystemRouteShell>
   ),
-  "/settings/system/data-storage": () => (
-    <SystemRouteShell
-      titleKey="system:navDataStorage"
-      descriptionKey="system:dataStoragePageDescription"
-    >
-      <DataStorageSettings />
+  "/settings/system/data-storage": () => <DataLogsSettings />,
+  "/settings/system/backups": () => (
+    <SettingsRedirect
+      to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=database#setting-system-backups`}
+    />
+  ),
+  "/settings/system/database": () => (
+    <SettingsRedirect
+      to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=database#setting-system-database`}
+    />
+  ),
+  "/settings/units": () => (
+    <SystemRouteShell titleKey="settings:unitsTitle" descriptionKey="settings:unitsDescription">
+      <UnitsPage />
     </SystemRouteShell>
   ),
-  "/settings/system/backups": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
-  "/settings/system/database": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/organizations": () => (
+    <SystemRouteShell titleKey="orgs:navOrganizations" descriptionKey="orgs:description">
+      <OrganizationsPage />
+    </SystemRouteShell>
+  ),
   "/settings/system/feature-toggles": () => (
     <SystemRouteShell
       titleKey="system:navFeatureToggles"
@@ -214,7 +231,9 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
     </SystemRouteShell>
   ),
   "/settings/system/licenses": () => <SettingsRedirect to={SYSTEM_ABOUT_SETTINGS_HREF} />,
-  "/settings/system/logs": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/logs": () => (
+    <SettingsRedirect to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=logs#setting-system-logs`} />
+  ),
   "/settings/system/message-queue": () => <SettingsRedirect to={TASK_BEHAVIOR_SETTINGS_HREF} />,
   "/settings/system/status": () => (
     <SystemRouteShell titleKey="common:status" descriptionKey="system:statusPageDescription">
@@ -226,7 +245,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UIStateCard />
     </SystemRouteShell>
   ),
-  "/settings/system/storage": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/storage": () => <StorageSettings />,
   "/settings/system/updates": renderUpdatesRoute,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };
@@ -301,10 +320,14 @@ function renderDynamicSettingsRoute(pathname: string) {
 
   const pluginId = matchSingle(pathname, /^\/settings\/plugins\/([^/]+)$/);
   if (pluginId) {
-    // A plugin-authored settings route registered at exactly this path
-    // (registry.registerSettingsRoute) wins over the first-party detail
-    // page, so a plugin can fully replace its own settings surface.
-    return renderPluginSettingsRoute(pathname) ?? <PluginDetailPage pluginId={pluginId} />;
+    const pluginRoute = renderPluginSettingsRoute(pathname);
+    // A plugin may replace its detail content, but host-owned personal
+    // shortcuts remain reachable beside that contribution.
+    return pluginRoute ? (
+      <PluginRootSettingsRoute pluginId={pluginId}>{pluginRoute}</PluginRootSettingsRoute>
+    ) : (
+      <PluginDetailPage pluginId={pluginId} />
+    );
   }
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
@@ -319,36 +342,51 @@ function renderDynamicSettingsRoute(pathname: string) {
     return <AgentSetupPage />;
   }
 
+  const executorRoute = renderExecutorSettingsRoute(pathname);
+  if (executorRoute) return executorRoute;
+
+  return null;
+}
+
+function PluginRootSettingsRoute({
+  pluginId,
+  children,
+}: {
+  pluginId: string;
+  children: ReactNode;
+}) {
+  const { items } = usePlugins();
+  const plugin = items.find((candidate) => candidate.id === pluginId);
+  return (
+    <div className="min-w-0 space-y-6">
+      {children}
+      {plugin && <PluginShortcutsCard plugin={plugin} plugins={items} />}
+    </div>
+  );
+}
+
+function renderExecutorSettingsRoute(pathname: string): ReactNode {
   const executorProfile = matchDouble(
     pathname,
     /^\/settings\/executor\/([^/]+)\/profile\/([^/]+)$/,
   );
   if (executorProfile) {
     const [id, profileId] = executorProfile;
-    return <ProfileDetailPage executorId={id} profileId={profileId} />;
+    return <LegacyExecutorSettingsRoute executorId={id} profileId={profileId} />;
   }
 
   const executorId = matchSingle(pathname, /^\/settings\/executor\/([^/]+)$/);
   if (executorId && executorId !== "new") {
-    return <ExecutorEditPage executorId={executorId} />;
+    return <LegacyExecutorSettingsRoute executorId={executorId} />;
   }
-
   const profileId = matchSingle(pathname, /^\/settings\/executors\/([^/]+)$/);
-  if (profileId) {
-    return <ProfileEditPage profileId={profileId} />;
-  }
-
+  if (profileId) return <ProfileEditPage profileId={profileId} />;
   const executorType = matchSingle(pathname, /^\/settings\/executors\/new\/([^/]+)$/);
-  if (executorType) {
-    return <CreateProfilePage executorType={executorType} />;
-  }
-
+  if (executorType) return <CreateProfilePage executorType={executorType} />;
   const sshExecutorId = matchSingle(pathname, /^\/settings\/executors\/ssh\/([^/]+)$/);
-  if (sshExecutorId) {
-    return <SSHExecutorPage executorId={sshExecutorId} />;
-  }
-
-  return null;
+  if (sshExecutorId) return <SSHExecutorPage executorId={sshExecutorId} />;
+  const kubernetesExecutorId = matchSingle(pathname, /^\/settings\/executors\/k8s\/([^/]+)$/);
+  return kubernetesExecutorId ? <KubernetesExecutorPage executorId={kubernetesExecutorId} /> : null;
 }
 
 // One component per workspace sub-page tab. A lookup rather than a ternary
@@ -516,7 +554,7 @@ function UpdatesRoute() {
   );
 }
 
-function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
+export function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
   const store = useAppStoreApi();
   const bootstrappedRef = useRef(false);
 
@@ -526,9 +564,26 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
     let cancelled = false;
 
     async function bootstrap() {
-      const initialState = await loadSettingsInitialState();
-      if (!cancelled && Object.keys(initialState).length > 0) {
-        store.getState().hydrate(initialState);
+      const initialState = await loadSettingsInitialState(
+        () => store.getState().agentProfiles.version,
+      );
+      if (cancelled || Object.keys(initialState).length === 0) return;
+      const desiredWorkspaceId = initialState.workspaces?.activeId ?? null;
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
+      // Routing the actual switch through `setActiveWorkspace` (rather than
+      // letting `hydrate` overwrite `activeId` directly) keeps
+      // `activeIdRevision` accurate for consumers that key staleness off it,
+      // such as the Failed-inbox cache.
+      store.getState().hydrate(
+        initialState.workspaces
+          ? {
+              ...initialState,
+              workspaces: { ...initialState.workspaces, activeId: workspaceBeforeHydration },
+            }
+          : initialState,
+      );
+      if (initialState.workspaces && desiredWorkspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(desiredWorkspaceId);
       }
     }
 
@@ -542,26 +597,36 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
   return null;
 }
 
-async function loadSettingsInitialState(): Promise<HydrationState> {
-  const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
-    await Promise.all([
-      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-      listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
-      listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
-      listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
-      listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
-      fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    ]);
+export async function loadSettingsInitialState(
+  getAgentProfilesVersion: () => number,
+): Promise<HydrationState> {
+  // A profile event can arrive while any of these requests are in flight. Do
+  // not publish a partial snapshot as loaded; repeat the complete read until
+  // it was captured at one stable local generation.
+  for (;;) {
+    const agentProfilesVersion = getAgentProfilesVersion();
+    const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
+      await Promise.all([
+        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+        listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
+        listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
+        listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
+        listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
+        fetchUserSettings({ cache: "no-store" }).catch(() => null),
+      ]);
 
-  return buildSettingsInitialStateForRoute({
-    workspaces: workspaces.workspaces,
-    executors: executors.executors,
-    agents: agents.agents,
-    discoveryAgents: discovery.agents,
-    availableAgents: available.agents,
-    availableTools: available.tools ?? [],
-    userSettingsResponse,
-  });
+    const initialState = buildSettingsInitialStateForRoute({
+      workspaces: workspaces.workspaces,
+      executors: executors.executors,
+      agents: agents.agents,
+      discoveryAgents: discovery.agents,
+      availableAgents: available.agents,
+      availableTools: available.tools ?? [],
+      userSettingsResponse,
+      agentProfilesVersion,
+    });
+    if (getAgentProfilesVersion() === agentProfilesVersion) return initialState;
+  }
 }
 
 export function buildSettingsInitialStateForRoute({
@@ -572,6 +637,7 @@ export function buildSettingsInitialStateForRoute({
   availableAgents,
   availableTools,
   userSettingsResponse,
+  agentProfilesVersion = 0,
 }: SettingsInitialStateData): HydrationState {
   const workspaceItems = workspaces.map(mapWorkspaceItem);
   promoteLegacyWorkspaceSelection(workspaceItems);
@@ -589,7 +655,7 @@ export function buildSettingsInitialStateForRoute({
       items: agents.flatMap((agent) =>
         agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
       ),
-      version: 0,
+      version: agentProfilesVersion,
     },
     settingsAgents: { items: agents },
     agentDiscovery: { items: discoveryAgents, loading: false, loaded: true },

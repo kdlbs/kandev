@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-child-completion-repository", "02-workflow-event-contracts"]
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-completion-trigger.md"
+spec: "../../specs/tasks/requirements/subtask-completion-trigger.md"
 ---
 
 # Task 03: Orchestrator trigger dispatch
@@ -41,7 +41,7 @@ go test ./internal/orchestrator/...
 
 ## Inputs
 
-- Spec: `docs/specs/tasks/subtask-completion-trigger.md`, sections `State
+- Spec: `docs/specs/tasks/requirements/subtask-completion-trigger.md`, sections `State
   machine`, `Failure modes`, `Persistence guarantees`, `Scenarios`.
 - Plan: Backend `Workflow Trigger Dispatch`.
 - Existing patterns: `processOnTurnCompleteViaEngine`,

@@ -95,6 +95,11 @@ export async function createKotlinTask(
     path.join(backend.tmpDir, "repos", options.repositoryDirectory ?? "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
+  // Task repositories use main unless a test explicitly supplies another
+  // branch. A preceding Git test can leave the shared seed repository checked
+  // out on a feature branch; committing the LSP fixture there makes the task's
+  // main checkout legitimately omit the file.
+  git.exec("git checkout -f main");
   for (const [index, filePath] of filePaths.entries()) {
     const isTypeScript = filePath.endsWith(".ts");
     const defaultContent = isTypeScript
@@ -131,6 +136,13 @@ export async function createKotlinTask(
     },
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 45_000,
+      message: "Kotlin task environment did not become ready",
+    })
+    .toBe("ready");
 
   const session = new SessionPage(page);
   if (options.navigate !== false) {
@@ -259,38 +271,70 @@ export async function openDesktopFile(
   session: SessionPage,
   filePath: string,
 ): Promise<void> {
-  await session.clickTab("Files");
-  await expect(session.files).toBeVisible({ timeout: 10_000 });
   const pathSegments = filePath.split("/");
-  for (let index = 1; index < pathSegments.length; index++) {
-    const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
-    await expect(ancestor).toBeVisible({ timeout: 15_000 });
-    if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
-      await ancestor.click();
-    }
-  }
   const fileNode = session.fileTreeNode(filePath);
   // Git status updates can auto-activate the Changes panel just after the
   // file tree renders. Re-select Files and click only while the row is still
   // visible so a late panel switch cannot turn a successful visibility check
-  // into a 180-second click timeout. Executor startup toasts can cover the
-  // dockview tab, so force that tab activation and keep the file-row click
-  // user-facing and actionability checked.
+  // into a 180-second click timeout. Virtualized trees can also omit a valid
+  // file row from the DOM, so use the exact file search in that case.
+  await session.clickTab("Files", { force: true });
+  await expect(session.files).toBeVisible({ timeout: 30_000 });
+  const existingSearch = session.fileSearchInput();
+  if (await existingSearch.isVisible()) {
+    await existingSearch.press("Escape");
+  }
+
+  let openMode: "tree" | "search" | false = false;
   await expect
     .poll(
       async () => {
         try {
           await session.clickTab("Files", { force: true });
-          if (!(await fileNode.isVisible())) return false;
-          await fileNode.click({ timeout: 2_000 });
-          return true;
+          if (!(await session.files.isVisible())) return false;
+          if (await session.fileSearchInput().isVisible()) {
+            await session.fileSearchInput().press("Escape");
+            return false;
+          }
+          for (let index = 1; index < pathSegments.length; index++) {
+            const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
+            if (!(await ancestor.isVisible())) {
+              openMode = (await session.fileSearchButton().isVisible()) ? "search" : false;
+              return openMode;
+            }
+            if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
+              await ancestor.click();
+            }
+          }
+          if (await fileNode.isVisible()) {
+            await fileNode.click({ timeout: 2_000 });
+            openMode = "tree";
+            return openMode;
+          }
+          openMode = (await session.fileSearchButton().isVisible()) ? "search" : false;
+          return openMode;
         } catch {
+          openMode = false;
           return false;
         }
       },
       { timeout: 30_000, intervals: [500, 1000, 2000] },
     )
-    .toBe(true);
+    .toBeTruthy();
+
+  if (openMode === "search") {
+    await session.fileSearchButton().click();
+    const searchInput = session.fileSearchInput();
+    await expect(searchInput).toBeVisible({ timeout: 5_000 });
+    // Search matches the repository-relative path, while the task tree path
+    // may include a repository prefix. Query the exact filename so paths with
+    // spaces or punctuation remain searchable, then select by the exact path.
+    await searchInput.fill(path.posix.basename(filePath));
+    const searchResult = session.fileSearchResult(filePath);
+    await expect(searchResult).toBeVisible({ timeout: 15_000 });
+    await searchResult.click();
+    await searchInput.press("Escape");
+  }
   await expect(page.locator(".dv-default-tab", { hasText: path.basename(filePath) })).toBeVisible({
     timeout: 10_000,
   });

@@ -2,7 +2,7 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import { getFileName } from "@/lib/utils/file-path";
 import { t } from "@/lib/i18n";
 import type { ContextItem } from "@/lib/types/context";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   PlanComment,
   PRFeedbackComment,
@@ -21,10 +21,10 @@ export type BuildContextItemsParams = {
   addPlan: () => void;
   promptsMap: Map<string, { content: string }>;
   onOpenFile?: (path: string) => void;
-  pendingCommentsByFile: Record<string, DiffComment[]>;
+  pendingCommentsByFile: Record<string, ReviewComment[]>;
   handleRemoveCommentFile: (filePath: string) => void;
   handleRemoveComment: (commentId: string) => void;
-  onOpenFileAtLine?: (filePath: string) => void;
+  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
   planComments: PlanComment[];
   handleClearPlanComments: () => void;
   pendingPRFeedback: PRFeedbackComment[];
@@ -98,9 +98,6 @@ function buildPromptContextItem(
     onRemove: makeRemoveHandler(helpers.sid, f.path, helpers.removeContextFile),
     onUnpin: makeUnpinHandler(f.pinned, helpers.sid, f.path, helpers.unpinFile),
     promptContent: prompt?.content,
-    onClick: () => {
-      /* navigate to settings/prompts if desired */
-    },
   };
 }
 
@@ -149,18 +146,22 @@ function buildCommentItems(params: BuildContextItemsParams): ContextItem[] {
     params;
   const items: ContextItem[] = [];
   if (!pendingCommentsByFile) return items;
-  for (const [filePath, comments] of Object.entries(pendingCommentsByFile)) {
+  for (const [groupKey, comments] of Object.entries(pendingCommentsByFile)) {
     if (comments.length === 0) continue;
+    const first = comments[0];
+    const filePath = first.filePath;
+    const repositoryName = first.repositoryName;
     const fileName = getFileName(filePath);
     items.push({
       kind: "comment",
-      id: `comment:${filePath}`,
+      id: `comment:${groupKey}`,
       label: `${fileName} (${comments.length})`,
       filePath,
+      repositoryName,
       comments,
-      onRemove: () => handleRemoveCommentFile(filePath),
+      onRemove: () => handleRemoveCommentFile(groupKey),
       onRemoveComment: (cid) => handleRemoveComment(cid),
-      onOpen: onOpenFileAtLine ? () => onOpenFileAtLine(filePath) : undefined,
+      onOpen: onOpenFileAtLine ? () => onOpenFileAtLine(filePath, repositoryName) : undefined,
     });
   }
   return items;
@@ -250,7 +251,6 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
       id: "plan-comments",
       label: t("task:planCommentCount", { count: params.planComments.length }),
       comments: params.planComments,
-      onRemove: params.handleClearPlanComments,
       onOpen: params.addPlan,
     });
   }

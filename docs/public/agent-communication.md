@@ -146,18 +146,15 @@ Task A (backend) was created by a coordinator. The coordinator also created Task
 
 ### The exchange
 
-```mermaid
-sequenceDiagram
-    participant A as Agent A (Backend)
-    participant B as Agent B (Frontend)
-    A->>B: message_task_kandev(B, "Proposing GET /items → {id, name}. Does this cover your needs?")
-    Note over B: idle → "sent" (new turn)
-    B->>A: message_task_kandev(A, "Need created_at too, ISO-8601 format please.")
-    Note over A: running → "queued" (next turn)
-    A->>B: message_task_kandev(B, "Agreed: GET /items → {id, name, created_at} (ISO-8601). Starting impl.")
-    Note over A,B: Contract agreed; both implement
-    A-->>A: get_task_conversation_kandev(B) to confirm spec
-```
+![Agent communication sequence: a backend agent proposes a GET items contract, the frontend agent requests created_at, the backend queues an agreement, and both agents implement after a conversation read-back.](../screenshots/agent-communication.svg)
+
+[Open full-size SVG diagram][agent-communication-diagram]
+
+[agent-communication-diagram]: ../../docs/screenshots/agent-communication.svg
+
+The sequence keeps the state changes beside the messages: an idle recipient is
+sent a new turn, a running sender queues its next turn, and a final read-back
+confirms the contract before implementation.
 
 ### Agent A's actual tool calls (turn by turn)
 
@@ -228,6 +225,20 @@ Task B processes each incoming message as a normal turn. When it receives Agent 
 
 **Avoid loops.** Do not enter an infinite exchange. Agree on a clear stopping condition (e.g. "reply with 'agreed' or a specific counter-proposal") and implement after at most two or three rounds.
 
+### Move a task with entry options
+
+`move_task_kandev` accepts an optional nested `entry_options` object for a one-time destination exception:
+
+```json
+{
+  "reset_context": true,
+  "instructions": "Start QA by reproducing the failing checkout test.",
+  "skip_step_prompt": true
+}
+```
+
+The server normalizes this object once and omits empty optional strings. Reset is additive with the destination reset policy, and instructions are appended once after the normal destination prompt. When `skip_step_prompt` is set, the destination step's configured prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The destination and options are validated together. Every call returns a move-result envelope: `disposition` is `"deferred"` when the current agent is running (the options persist through the turn boundary, WIP queue promotion, and backend restart before they are applied) or `"applied"` when an idle move committed immediately, `task` is the moved (or target-step) task, and an optioned move also returns a `move_id` plus the accepted `entry_options` so you can correlate the retained one-shot override with the eventual step entry. The legacy top-level `prompt` argument remains accepted as an alias for `entry_options.instructions`; when both are non-empty, validation fails. Pull-request draft/readiness is not a generic move option.
+
 **No secrets or large dumps.** Messages are coordination, not a code-delivery channel. Do not send credentials, private keys, or large file contents through cross-task messages. Reference files by path; share access via the repository, not the message.
 
 **Failed/cancelled tasks cannot receive messages.** If `message_task_kandev` returns an error, the target task is in a terminal state. Create a fresh task with `create_task_kandev` and start over.
@@ -244,9 +255,13 @@ These tools complement cross-task communication for common coordination patterns
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
 | `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the effective profile after workflow resolution; use the `session_id` field to message the new session directly |
-| `move_task_kandev` | Hand off a task to the next workflow step with an optional prompt for the receiving agent |
+| `move_task_kandev` | Hand off a task to a workflow step with optional one-time entry options for the receiving agent |
 | `create_task_plan_kandev` | Record an agreed implementation plan (both tasks can create/update their own plans) |
 | `get_task_plan_kandev` | Read a task's plan; useful before messaging to share a structured proposal |
+| `edit_task_plan_kandev` | Apply one exact, unique text edit to a reachable task plan |
+| `list_task_plan_revisions_kandev` | List bounded metadata for a reachable task plan's history |
+| `get_task_plan_revision_kandev` | Read one exact revision before a conditional restore |
+| `restore_task_plan_revision_kandev` | Restore a revision after checking current and source versions |
 | `step_complete_kandev` | Signal that the current workflow step is done (task-mode only) |
 | `ask_user_question_kandev` | Escalate to a human when agent negotiation cannot resolve a question |
 

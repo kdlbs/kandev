@@ -20,6 +20,15 @@ export { createAutomationsSlice, defaultAutomationsState } from "./automations/a
 export { createSystemSlice, defaultSystemState } from "./system/system-slice";
 export { createPluginsSlice, defaultPluginsState } from "./plugins/plugins-slice";
 export { createReviewSlice, defaultReviewState } from "./review/review-slice";
+export {
+  createNeedsYouInboxSlice,
+  defaultNeedsYouInboxState,
+} from "./needs-you-inbox/needs-you-inbox-slice";
+export { createFailedInboxSlice, defaultFailedInboxState } from "./failed-inbox/failed-inbox-slice";
+export {
+  createInboxHistorySlice,
+  defaultInboxHistoryState,
+} from "./inbox-history/inbox-history-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -92,6 +101,28 @@ export type {
   PluginsState,
 } from "./plugins/types";
 export type { ReviewSlice, ReviewSliceActions, ReviewSliceState } from "./review/types";
+export type {
+  NeedsYouInboxSlice,
+  NeedsYouInboxSliceActions,
+  NeedsYouInboxSliceState,
+  NeedsYouInboxWorkspaceState,
+  NeedsYouInboxReadStatus,
+  NeedsYouInboxBootSeed,
+} from "./needs-you-inbox/types";
+export type {
+  FailedInboxSlice,
+  FailedInboxSliceActions,
+  FailedInboxSliceState,
+  FailedInboxWorkspaceState,
+  FailedInboxReadStatus,
+} from "./failed-inbox/types";
+export type {
+  InboxHistorySlice,
+  InboxHistorySliceActions,
+  InboxHistorySliceState,
+  InboxHistoryWorkspaceState,
+  InboxHistoryReadStatus,
+} from "./inbox-history/types";
 
 // Re-export commonly used types from each domain
 export type {
@@ -121,6 +152,8 @@ export type {
   SettingsDataState,
   SleepInhibitionStoreState,
   UserSettingsState,
+  AgentProfileRecentUseState,
+  AgentProfileRecentUseRecord,
 } from "./settings/types";
 export type {
   MessagesState,
@@ -139,6 +172,12 @@ export type {
   QueuedMessage,
   QueueState,
 } from "./session/types";
+export type {
+  WorkspaceRestorationAttempt,
+  WorkspaceRestorationInput,
+  WorkspaceRestorationState,
+  WorkspaceRestorationStatus,
+} from "./session-runtime/workspace-restoration";
 export type {
   TerminalState,
   ShellState,

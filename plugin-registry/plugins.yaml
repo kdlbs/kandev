@@ -32,6 +32,9 @@ plugins:
   - id: kandev-plugin-kandy
     repo: kdlbs/kandev-plugin-kandy
     categories: [tools]
+  - id: kandev-plugin-task-manager
+    repo: kdlbs/kandev-plugin-task-manager
+    categories: [tools]
   - id: kandev-plugin-slack
     repo: kdlbs/kandev-plugin-slack
     categories: [integrations, automation]
@@ -53,6 +56,15 @@ plugins:
   - id: kandev-plugin-youtrack
     repo: ahmedbally/kandev-plugin-youtrack
     categories: [integrations]
+  - id: kandev-plugin-deepseek-balance
+    repo: Fclem/kandev-plugin-deepseek-balance
+    categories: [analytics]
+  - id: kandev-plugin-redmine
+    repo: yattdev/kandev-plugin-redmine
+    categories: [integrations]
+  - id: kandev-plugin-prompt-history
+    repo: Fclem/kandev-plugin-prompt-history
+    categories: [tools]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:

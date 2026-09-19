@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand";
 import { createDebugLogger } from "@/lib/debug/log";
+import { isTerminalToolCallStatus } from "@/lib/utils/tool-call-status";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -17,7 +18,7 @@ function completePendingToolCalls(store: StoreApi<AppState>, sessionId: string):
   for (const message of messages) {
     if (message.type === "permission_request") continue;
     const metadata = message.metadata as Record<string, unknown> | undefined;
-    if (metadata?.tool_call_id && metadata.status !== "complete" && metadata.status !== "error") {
+    if (metadata?.tool_call_id && !isTerminalToolCallStatus(String(metadata.status ?? ""))) {
       store.getState().updateMessage({
         ...message,
         metadata: { ...metadata, status: "complete" },

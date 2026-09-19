@@ -1,9 +1,12 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedPreset } from "./saved-preset-model";
 import { PresetsSidebar } from "./presets-sidebar";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+});
 
 const savedPreset: SavedPreset = {
   id: "saved-pr",
@@ -15,7 +18,8 @@ const savedPreset: SavedPreset = {
   isDefault: false,
 };
 
-function expectDeleteDoesNotSelect() {
+async function expectDeleteDoesNotSelect(phone = false) {
+  if (phone) Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
   const onSelect = vi.fn();
   const onDeleteSaved = vi.fn();
   render(
@@ -33,9 +37,26 @@ function expectDeleteDoesNotSelect() {
     />,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "Delete Kandev PRs saved query" }));
+  const trigger = screen.getByRole("button", { name: "Delete Kandev PRs saved query" });
+  fireEvent.click(trigger);
+  if (phone) {
+    expect(trigger.isConnected).toBe(true);
+    expect(
+      screen.getByRole("dialog", { name: "Delete Kandev PRs?" }).getAttribute("data-slot"),
+    ).toBe("drawer-content");
+  }
 
-  expect(onDeleteSaved).toHaveBeenCalledWith(savedPreset.id);
+  expect(onDeleteSaved).not.toHaveBeenCalled();
+  expect(onSelect).not.toHaveBeenCalled();
+  const confirmation = screen.getByRole("group", { name: "Delete Kandev PRs?" });
+  fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+  expect(onDeleteSaved).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete Kandev PRs saved query" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete Kandev PRs" }));
+
+  await waitFor(() => expect(onDeleteSaved).toHaveBeenCalledWith(savedPreset.id));
+  expect(onDeleteSaved).toHaveBeenCalledOnce();
   expect(onSelect).not.toHaveBeenCalled();
 }
 
@@ -111,5 +132,7 @@ describe("PresetsSidebar saved defaults", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("deletes a saved query without selecting it", expectDeleteDoesNotSelect);
+  it("deletes a saved query without selecting it", () => expectDeleteDoesNotSelect());
+  it("keeps a phone saved query row mounted during confirmation", () =>
+    expectDeleteDoesNotSelect(true));
 });

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-unify-setup-timeout-paths"]
 plan: "plan.md"
-spec: "../../specs/platform/setup-launch-timeout.md"
+spec: "../../specs/platform/requirements/setup-launch-timeout.md"
 ---
 
 # Task 02: Align Shared Launch and Docs

@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,36 +14,140 @@ import (
 
 func boolPtr(b bool) *bool       { return &b }
 func stringPtr(s string) *string { return &s }
+func intPtr(i int) *int          { return &i }
 
-// TestStore_UpdateTaskMRAutomationOptions_AutoMergeAndPromptOverrideRoundTrip
-// closes a coverage gap: auto_fix_enabled is exercised indirectly by
-// TestStore_UpdateTaskMRAutomationOptions_ReenablingAutoFixResetsRoundCap,
-// but nothing wrote auto_merge_enabled or auto_fix_prompt_override and read
-// them back, including the empty-string-normalizes-to-NULL path
-// (normalizedMRPromptOverride).
-func TestStore_UpdateTaskMRAutomationOptions_AutoMergeAndPromptOverrideRoundTrip(t *testing.T) {
+// mrIdentity builds the single-repo MR identity most of these tests use.
+func mrIdentity(projectPath string, iid int) MRIdentity {
+	return MRIdentity{ProjectPath: projectPath, MRIID: iid}
+}
+
+// setMRSwitches is the per-MR switch write these tests exercise, kept short
+// so the assertions stay the focus.
+func setMRSwitches(
+	t *testing.T, store *Store, taskID string, id MRIdentity, patch TaskMRAutomationSwitchPatch,
+) *TaskMRAutomationOptionsForMR {
+	t.Helper()
+	mrs, err := store.ListTaskMRsByTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("list linked MRs: %v", err)
+	}
+	linked := false
+	for _, mr := range mrs {
+		if (MRIdentity{RepositoryID: mr.RepositoryID, ProjectPath: mr.ProjectPath, MRIID: mr.MRIID}) == id {
+			linked = true
+			break
+		}
+	}
+	if !linked {
+		if err := store.UpsertTaskMR(context.Background(), newTestMR(taskID, id.RepositoryID, id.ProjectPath, id.MRIID)); err != nil {
+			t.Fatalf("link MR for switch write: %v", err)
+		}
+	}
+	got, err := store.UpdateTaskMRAutomationOptionsForMR(context.Background(), taskID, id, patch)
+	if err != nil {
+		t.Fatalf("UpdateTaskMRAutomationOptionsForMR(%s, %+v): %v", taskID, id, err)
+	}
+	return got
+}
+
+func TestStore_UpdateTaskMRAutomationOptionsForMR_RejectsUnlinkedMR(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	seedTask(t, store, "task-1", "")
+	id := mrIdentity("group/not-linked", 99)
 
-	updated, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
-		AutoMergeEnabled: boolPtr(true),
-	}, nil)
-	if err != nil {
-		t.Fatalf("enable auto-merge: %v", err)
+	_, err := store.UpdateTaskMRAutomationOptionsForMR(
+		ctx, "task-1", id, TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	)
+	if !errors.Is(err, ErrTaskMRNotLinked) {
+		t.Fatalf("expected ErrTaskMRNotLinked, got %v", err)
 	}
+	options, err := store.ListTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list options: %v", err)
+	}
+	if len(options) != 0 {
+		t.Fatalf("unlinked write created automation options: %+v", options)
+	}
+}
+
+// TestStore_UpdateTaskMRAutomationOptionsForMR_AutoMergeRoundTrip closes a
+// coverage gap: auto_fix_enabled is exercised indirectly by
+// TestStore_UpdateTaskMRAutomationOptionsForMR_ReenablingAutoFixResetsRoundCap,
+// but nothing wrote auto_merge_enabled and read it back.
+func TestStore_UpdateTaskMRAutomationOptionsForMR_AutoMergeRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+	id := mrIdentity("group/a", 1)
+
+	updated := setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{
+		AutoMergeEnabled: boolPtr(true),
+	})
 	if !updated.AutoMergeEnabled {
 		t.Fatalf("AutoMergeEnabled = false immediately after patch, want true")
 	}
-	got, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
+	got, err := store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", id)
 	if err != nil {
-		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+		t.Fatalf("GetTaskMRAutomationOptionsForMR: %v", err)
 	}
 	if !got.AutoMergeEnabled {
 		t.Fatalf("AutoMergeEnabled = false after persisted read-back, want true")
 	}
 
-	updated, err = store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+	// An unrelated per-MR patch must not disturb it.
+	setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{PromptOnClosed: boolPtr(true)})
+	got, err = store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", id)
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptionsForMR: %v", err)
+	}
+	if !got.AutoMergeEnabled || !got.PromptOnClosed {
+		t.Fatalf("expected both switches on after independent patches, got %+v", got)
+	}
+}
+
+// TestStore_UpdateTaskMRAutomationOptionsForMR_ScopesSwitchesPerMR is the
+// regression this change exists for: configuring one linked MR must leave
+// every other MR on the same task untouched.
+func TestStore_UpdateTaskMRAutomationOptionsForMR_ScopesSwitchesPerMR(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+	first := mrIdentity("group/a", 1)
+	second := mrIdentity("group/b", 2)
+
+	setMRSwitches(t, store, "task-1", first, TaskMRAutomationSwitchPatch{
+		AutoFixEnabled: boolPtr(true), AutoMergeEnabled: boolPtr(true),
+		PromptOnMerged: boolPtr(true),
+	})
+
+	other, err := store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", second)
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptionsForMR(second): %v", err)
+	}
+	if other.AutoFixEnabled || other.AutoMergeEnabled || other.PromptOnMerged ||
+		other.PromptOnReviewRequested || other.PromptOnClosed {
+		t.Fatalf("second MR inherited the first MR's switches: %+v", other)
+	}
+
+	stored, err := store.ListTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListTaskMRAutomationOptions: %v", err)
+	}
+	if len(stored) != 1 || stored[0].Identity() != first {
+		t.Fatalf("expected exactly the configured MR to be stored, got %+v", stored)
+	}
+}
+
+// TestStore_UpdateTaskMRAutomationOptions_PromptOverrideRoundTrip covers the
+// one field that is still genuinely task-level, including the
+// empty-string-normalizes-to-NULL path (normalizedMRPromptOverride).
+func TestStore_UpdateTaskMRAutomationOptions_PromptOverrideRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	updated, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
 		AutoFixPromptOverride: stringPtr("custom prompt text"),
 	}, nil)
 	if err != nil {
@@ -51,15 +156,13 @@ func TestStore_UpdateTaskMRAutomationOptions_AutoMergeAndPromptOverrideRoundTrip
 	if updated.AutoFixPromptOverride == nil || *updated.AutoFixPromptOverride != "custom prompt text" {
 		t.Fatalf("AutoFixPromptOverride = %v immediately after patch, want \"custom prompt text\"", updated.AutoFixPromptOverride)
 	}
-	got, err = store.GetTaskMRAutomationOptions(ctx, "task-1")
+	firstRevision := updated.AutomationRevision
+	got, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
 	}
 	if got.AutoFixPromptOverride == nil || *got.AutoFixPromptOverride != "custom prompt text" {
 		t.Fatalf("AutoFixPromptOverride = %v after persisted read-back, want \"custom prompt text\"", got.AutoFixPromptOverride)
-	}
-	if !got.AutoMergeEnabled {
-		t.Fatalf("AutoMergeEnabled reverted to false after an unrelated patch, want still true")
 	}
 
 	// Clearing via an empty string must normalize to NULL, not persist "".
@@ -71,6 +174,9 @@ func TestStore_UpdateTaskMRAutomationOptions_AutoMergeAndPromptOverrideRoundTrip
 	}
 	if updated.AutoFixPromptOverride != nil {
 		t.Fatalf("AutoFixPromptOverride = %v immediately after clearing, want nil", updated.AutoFixPromptOverride)
+	}
+	if updated.AutomationRevision <= firstRevision {
+		t.Fatalf("automation revision = %d after update, want > %d", updated.AutomationRevision, firstRevision)
 	}
 	got, err = store.GetTaskMRAutomationOptions(ctx, "task-1")
 	if err != nil {
@@ -94,37 +200,42 @@ func TestStore_GetTaskMRAutomationOptions_ImplicitDefault(t *testing.T) {
 	}
 }
 
-func TestStore_UpdateTaskMRAutomationOptions_RoundTrip(t *testing.T) {
+func TestStore_UpdateTaskMRAutomationOptionsForMR_RoundTrip(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	seedTask(t, store, "task-1", "")
-	updated, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+	id := mrIdentity("group/a", 1)
+
+	updated := setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{
 		PromptOnMerged: boolPtr(true),
-	}, nil)
-	if err != nil {
-		t.Fatalf("UpdateTaskMRAutomationOptions: %v", err)
-	}
+	})
 	if !updated.PromptOnMerged || updated.PromptOnReviewRequested || updated.PromptOnClosed {
 		t.Fatalf("unexpected options after first patch: %+v", updated)
 	}
 
-	username := "alice"
-	updated, err = store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+	updated = setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{
 		PromptOnReviewRequested: boolPtr(true),
-	}, &username)
-	if err != nil {
-		t.Fatalf("UpdateTaskMRAutomationOptions second patch: %v", err)
-	}
-	if !updated.PromptOnMerged || !updated.PromptOnReviewRequested || updated.ReviewReviewerUsername != "alice" {
-		t.Fatalf("expected merged switch preserved and reviewer set, got %+v", updated)
+	})
+	if !updated.PromptOnMerged || !updated.PromptOnReviewRequested {
+		t.Fatalf("expected merged switch preserved alongside the new one, got %+v", updated)
 	}
 
-	got, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
-	if err != nil {
-		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+	// The reviewer username stays task-level.
+	username := "alice"
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{}, &username); err != nil {
+		t.Fatalf("persist reviewer: %v", err)
 	}
-	if !got.PromptOnMerged || !got.PromptOnReviewRequested || got.ReviewReviewerUsername != "alice" {
-		t.Fatalf("persisted options mismatch: %+v", got)
+
+	got, err := store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", id)
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptionsForMR: %v", err)
+	}
+	if !got.PromptOnMerged || !got.PromptOnReviewRequested {
+		t.Fatalf("persisted switches mismatch: %+v", got)
+	}
+	taskOpts, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil || taskOpts.ReviewReviewerUsername != "alice" {
+		t.Fatalf("persisted reviewer mismatch: %+v err=%v", taskOpts, err)
 	}
 }
 
@@ -394,38 +505,33 @@ func TestStore_UpdateTaskMRAutomationOptions_ResendingSameSwitchResetsBaselineOn
 	}
 }
 
-// TestStore_UpdateTaskMRAutomationOptions_ReenablingMergedSwitchResetsCheckpoint
+// TestStore_UpdateTaskMRAutomationOptionsForMR_ReenablingMergedSwitchResetsCheckpoint
 // is the P1 finding: an MR that reached the merged state while the switch was
 // off must not stay permanently suppressed once the switch is re-enabled.
-func TestStore_UpdateTaskMRAutomationOptions_ReenablingMergedSwitchResetsCheckpoint(t *testing.T) {
+// The sibling MR proves the reset is scoped to the MR being reconfigured.
+func TestStore_UpdateTaskMRAutomationOptionsForMR_ReenablingMergedSwitchResetsCheckpoint(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	seedTask(t, store, "task-1", "")
+	id := mrIdentity("group/a", 1)
 
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
-		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable switch: %v", err)
-	}
-	if err := store.RecordTaskMRLifecyclePrompt(ctx, TaskMRLifecyclePrompt{
-		TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
-		Event: gitlabStateMerged, PromptedAt: time.Now().UTC(), ObservedState: gitlabStateMerged,
-	}); err != nil {
-		t.Fatalf("record merged prompt: %v", err)
+	setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{PromptOnMerged: boolPtr(true)})
+	for _, mr := range []struct {
+		project string
+		iid     int
+	}{{"group/a", 1}, {"group/b", 2}} {
+		if err := store.RecordTaskMRLifecyclePrompt(ctx, TaskMRLifecyclePrompt{
+			TaskID: "task-1", ProjectPath: mr.project, MRIID: mr.iid,
+			Event: gitlabStateMerged, PromptedAt: time.Now().UTC(), ObservedState: gitlabStateMerged,
+		}); err != nil {
+			t.Fatalf("record merged prompt for %s: %v", mr.project, err)
+		}
 	}
 
 	// Disable, then re-enable — the checkpoint from the still-merged MR must
 	// not survive, or the re-enabled switch would never fire for it again.
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
-		PromptOnMerged: boolPtr(false),
-	}, nil); err != nil {
-		t.Fatalf("disable switch: %v", err)
-	}
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
-		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("re-enable switch: %v", err)
-	}
+	setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{PromptOnMerged: boolPtr(false)})
+	setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{PromptOnMerged: boolPtr(true)})
 
 	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
 	if err != nil || got == nil {
@@ -434,22 +540,26 @@ func TestStore_UpdateTaskMRAutomationOptions_ReenablingMergedSwitchResetsCheckpo
 	if got.LastObservedState != "" || got.LastLifecycleEvent != "" {
 		t.Fatalf("expected terminal checkpoint reset after re-enabling the switch, got %+v", got)
 	}
+	sibling, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/b", 2)
+	if err != nil || sibling == nil {
+		t.Fatalf("GetTaskMRLifecycleState(sibling): %+v err=%v", sibling, err)
+	}
+	if sibling.LastLifecycleEvent != gitlabStateMerged {
+		t.Fatalf("sibling MR's checkpoint was cleared by another MR's switch flip: %+v", sibling)
+	}
 }
 
-// TestStore_UpdateTaskMRAutomationOptions_ReenablingAutoFixResetsRoundCap
+// TestStore_UpdateTaskMRAutomationOptionsForMR_ReenablingAutoFixResetsRoundCap
 // covers AC11: toggling auto-fix off and on again must clear
 // auto_fix_exhausted_at and auto_fix_round_count so a subsequent failing
 // pipeline can dispatch again.
-func TestStore_UpdateTaskMRAutomationOptions_ReenablingAutoFixResetsRoundCap(t *testing.T) {
+func TestStore_UpdateTaskMRAutomationOptionsForMR_ReenablingAutoFixResetsRoundCap(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	seedTask(t, store, "task-1", "")
+	id := mrIdentity("group/a", 1)
 
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
-		AutoFixEnabled: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable auto-fix: %v", err)
-	}
+	setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{AutoFixEnabled: boolPtr(true)})
 	if err := store.RecordTaskMRFixAttempt(ctx, TaskMRFixAttempt{
 		TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
 		Signature: "sig-1", CheckpointJSON: "{}", SessionID: "sess-1",
@@ -470,16 +580,8 @@ func TestStore_UpdateTaskMRAutomationOptions_ReenablingAutoFixResetsRoundCap(t *
 	}
 
 	// Disable, then re-enable — the round cap and exhaustion must clear.
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
-		AutoFixEnabled: boolPtr(false),
-	}, nil); err != nil {
-		t.Fatalf("disable auto-fix: %v", err)
-	}
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
-		AutoFixEnabled: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("re-enable auto-fix: %v", err)
-	}
+	setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{AutoFixEnabled: boolPtr(false)})
+	setMRSwitches(t, store, "task-1", id, TaskMRAutomationSwitchPatch{AutoFixEnabled: boolPtr(true)})
 
 	got, err = store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
 	if err != nil || got == nil {
@@ -564,10 +666,13 @@ func TestStore_TaskDeleteCascadesMRAutomationRows(t *testing.T) {
 	seedTask(t, store, "task-1", "")
 
 	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
-		PromptOnMerged: boolPtr(true),
+		AutoFixPromptOverride: stringPtr("custom"),
 	}, nil); err != nil {
 		t.Fatalf("seed options: %v", err)
 	}
+	setMRSwitches(t, store, "task-1", mrIdentity("group/a", 1), TaskMRAutomationSwitchPatch{
+		PromptOnMerged: boolPtr(true),
+	})
 	if err := store.SetTaskMRObservedState(ctx, "task-1", "", "group/a", 1, "opened"); err != nil {
 		t.Fatalf("seed checkpoint: %v", err)
 	}
@@ -580,8 +685,15 @@ func TestStore_TaskDeleteCascadesMRAutomationRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
 	}
-	if opts.PromptOnMerged {
+	if opts.AutoFixPromptOverride != nil {
 		t.Fatalf("expected options row cascaded away, got %+v", opts)
+	}
+	switches, err := store.ListTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListTaskMRAutomationOptions: %v", err)
+	}
+	if len(switches) != 0 {
+		t.Fatalf("expected per-MR switch rows cascaded away, got %+v", switches)
 	}
 	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
 	if err != nil {
@@ -612,19 +724,15 @@ func TestStore_ListAutomationSubscribedTaskMRs(t *testing.T) {
 	if err := store.UpsertTaskMR(ctx, autoFixOnly); err != nil {
 		t.Fatalf("upsert auto-fix-only MR: %v", err)
 	}
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+	setMRSwitches(t, store, "task-1", mrIdentity("group/subscribed", 1), TaskMRAutomationSwitchPatch{
 		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable switch for task-1: %v", err)
-	}
+	})
 	// task-3 has no lifecycle switch on, only auto-fix — must still be
 	// returned since the query was widened to OR in auto_fix_enabled /
 	// auto_merge_enabled (this task's change).
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-3", TaskMRAutomationPatch{
+	setMRSwitches(t, store, "task-3", mrIdentity("group/autofix", 3), TaskMRAutomationSwitchPatch{
 		AutoFixEnabled: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable auto-fix for task-3: %v", err)
-	}
+	})
 
 	rows, err := store.ListAutomationSubscribedTaskMRs(ctx)
 	if err != nil {
@@ -704,5 +812,157 @@ func assertMRAutomationTablesExist(t *testing.T, sqlxDB *sqlx.DB) {
 		if err := sqlxDB.Get(&name, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table); err != nil {
 			t.Fatalf("expected table %q to exist: %v", table, err)
 		}
+	}
+}
+
+// TestStore_DeleteTaskMRForWorkspace_DropsPerMRAutomationOptions covers the
+// unlink half of the per-MR switch lifecycle. Leaving the switch row behind
+// meant re-linking the same MR — by hand, or through push-detection auto-link
+// — silently re-armed whatever was configured before the unlink, including
+// auto-merge, with no surface showing it (taskMRAutomationOptionsList hides
+// rows whose MR is not linked) but the evaluator still reading it.
+func TestStore_DeleteTaskMRForWorkspace_DropsPerMRAutomationOptions(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+
+	mr := newTestMR("task-1", "", "group/a", 1)
+	if err := store.UpsertTaskMR(ctx, mr); err != nil {
+		t.Fatalf("upsert MR: %v", err)
+	}
+	id := MRIdentity{RepositoryID: "", ProjectPath: "group/a", MRIID: 1}
+	if _, err := store.UpdateTaskMRAutomationOptionsForMR(
+		ctx, "task-1", id, TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	); err != nil {
+		t.Fatalf("enable auto-merge: %v", err)
+	}
+	if err := store.SetTaskMRObservedState(ctx, "task-1", "", "group/a", 1, "merged"); err != nil {
+		t.Fatalf("seed lifecycle state: %v", err)
+	}
+
+	if err := store.DeleteTaskMRForWorkspace(ctx, "ws-1", mr.ID); err != nil {
+		t.Fatalf("DeleteTaskMRForWorkspace: %v", err)
+	}
+
+	stored, err := store.ListTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListTaskMRAutomationOptions: %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("unlink left automation rows behind: %+v", stored)
+	}
+	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil {
+		t.Fatalf("get lifecycle state: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("unlink left lifecycle state behind: %+v", state)
+	}
+
+	// Re-linking the same MR must start from all-off, not resurrect the
+	// pre-unlink configuration.
+	relinked := newTestMR("task-1", "", "group/a", 1)
+	if err := store.UpsertTaskMR(ctx, relinked); err != nil {
+		t.Fatalf("re-link MR: %v", err)
+	}
+	opts, err := store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", id)
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptionsForMR: %v", err)
+	}
+	if opts.AutoMergeEnabled {
+		t.Errorf("re-linked MR silently re-armed auto-merge: %+v", opts)
+	}
+}
+
+// TestStore_DeleteTaskMR_DropsPerMRAutomationOptions pins the same cleanup on
+// the association-ID delete path, which cascades to gitlab_task_mr_state
+// independently of DeleteTaskMRForWorkspace. The two must stay in step: a
+// caller routed through this one would otherwise leave an enabled auto-merge
+// switch behind for the next link of the same MR to inherit.
+func TestStore_DeleteTaskMR_DropsPerMRAutomationOptions(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+
+	mr := newTestMR("task-1", "", "group/a", 1)
+	if err := store.UpsertTaskMR(ctx, mr); err != nil {
+		t.Fatalf("upsert MR: %v", err)
+	}
+	id := MRIdentity{RepositoryID: "", ProjectPath: "group/a", MRIID: 1}
+	if _, err := store.UpdateTaskMRAutomationOptionsForMR(
+		ctx, "task-1", id, TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	); err != nil {
+		t.Fatalf("enable auto-merge: %v", err)
+	}
+
+	if err := store.DeleteTaskMR(ctx, mr.ID); err != nil {
+		t.Fatalf("DeleteTaskMR: %v", err)
+	}
+
+	stored, err := store.ListTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListTaskMRAutomationOptions: %v", err)
+	}
+	if len(stored) != 0 {
+		t.Fatalf("delete left automation rows behind: %+v", stored)
+	}
+}
+
+// TestStore_UpdateTaskMRAutomationOptionsForMRs_IsAllOrNothing pins the
+// fan-out atomicity: a failure partway through must not leave the switch
+// armed on the MRs processed before it while the caller is told the operation
+// failed. A trigger supplies the deterministic mid-batch failure — the second
+// identity's UPDATE aborts, and the first identity's already-applied write
+// must roll back with it.
+func TestStore_UpdateTaskMRAutomationOptionsForMRs_IsAllOrNothing(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+
+	first := MRIdentity{RepositoryID: "", ProjectPath: "group/a", MRIID: 1}
+	second := MRIdentity{RepositoryID: "", ProjectPath: "group/b", MRIID: 2}
+	for _, id := range []MRIdentity{first, second} {
+		if err := store.UpsertTaskMR(ctx, newTestMR("task-1", id.RepositoryID, id.ProjectPath, id.MRIID)); err != nil {
+			t.Fatalf("link MR %s: %v", id.ProjectPath, err)
+		}
+	}
+	if _, err := store.db.Exec(`
+		CREATE TRIGGER fail_second_mr BEFORE UPDATE ON gitlab_task_mr_automation_options
+		WHEN NEW.project_path = 'group/b'
+		BEGIN SELECT RAISE(ABORT, 'injected failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	err := store.UpdateTaskMRAutomationOptionsForMRs(
+		ctx, "task-1", []MRIdentity{first, second},
+		TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	)
+	if err == nil {
+		t.Fatal("expected the batch to fail on the second identity")
+	}
+
+	got, err := store.GetTaskMRAutomationOptionsForMR(ctx, "task-1", first)
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptionsForMR: %v", err)
+	}
+	if got.AutoMergeEnabled {
+		t.Error("first MR kept auto-merge after the batch failed — fan-out was not atomic")
+	}
+}
+
+// TestStore_UpdateTaskMRAutomationOptionsForMRs_EmptyIsNoop guards the
+// zero-target call so it cannot open an empty transaction per request.
+func TestStore_UpdateTaskMRAutomationOptionsForMRs_EmptyIsNoop(t *testing.T) {
+	store := newTestStore(t)
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+	if err := store.UpdateTaskMRAutomationOptionsForMRs(
+		context.Background(), "task-1", nil,
+		TaskMRAutomationSwitchPatch{AutoMergeEnabled: boolPtr(true)},
+	); err != nil {
+		t.Fatalf("empty batch should be a no-op, got %v", err)
 	}
 }

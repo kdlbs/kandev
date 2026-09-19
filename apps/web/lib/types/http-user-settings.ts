@@ -1,7 +1,7 @@
 import type { WorkspaceId } from "./ids";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
-export type StartupPage = "task_overview" | "last_task";
+export type StartupPage = "task_overview" | "last_task" | "threads";
 export type LspStatusLocation = "toolbar" | "status_bar";
 export type LastSeenDisplay = "absolute" | "relative";
 
@@ -20,6 +20,7 @@ export type SidebarViewApi = {
   sort: { key: string; direction: string };
   group: string;
   collapsed_groups: string[];
+  task_row?: SidebarTaskRowPresentationApi | null;
 };
 
 export type SidebarViewDraftApi = {
@@ -27,12 +28,115 @@ export type SidebarViewDraftApi = {
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
   sort: { key: string; direction: string };
   group: string;
+  task_row?: SidebarTaskRowPresentationApi | null;
+};
+
+export type SidebarTaskRowPresentationApi = {
+  details_enabled?: boolean;
+  detail_order?: unknown[];
+  visible_details?: unknown[];
+  trailing?: string;
 };
 
 export type SidebarTaskPrefsApi = {
   pinned_task_ids: string[];
   ordered_task_ids: string[];
   subtask_order_by_parent_id: Record<string, string[]>;
+};
+
+export type ThreadTaskScopeApi = {
+  mode: "all" | "selected";
+  task_ids: string[];
+};
+
+export type ThreadViewClauseApi = {
+  id: string;
+  dimension: string;
+  op: string;
+  value: unknown;
+};
+
+export type ThreadViewSortApi = {
+  key: string;
+  direction: string;
+};
+
+export type ThreadViewApi = {
+  id: string;
+  name: string;
+  task_scope: ThreadTaskScopeApi;
+  filters: ThreadViewClauseApi[];
+  sort: ThreadViewSortApi;
+  max_columns: number | null;
+  layout?: string;
+  auto_hide_composer?: boolean;
+};
+
+export type ThreadViewDraftApi = {
+  base_view_id: string;
+  task_scope: ThreadTaskScopeApi;
+  filters: ThreadViewClauseApi[];
+  sort: ThreadViewSortApi;
+  max_columns: number | null;
+  layout?: string;
+  auto_hide_composer?: boolean;
+};
+export type SidebarTaskColorDimension =
+  | "workflow_step"
+  | "repository"
+  | "workflow"
+  | "executor_profile"
+  | "task_state"
+  | "priority"
+  | "origin";
+
+export type FixedAutomaticTaskColor =
+  | "gray"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "cyan"
+  | "blue"
+  | "indigo"
+  | "purple"
+  | "pink";
+
+export type SidebarTaskColorRepositoryTarget =
+  | { kind: "workspace"; workspace_id: string; repository_id: string }
+  | {
+      kind: "provider";
+      provider_id: string;
+      host: string;
+      scope: string;
+      provider_repository_id: string;
+    }
+  | { kind: "local"; path: string };
+
+export type SidebarTaskColorRule = {
+  id: string;
+  enabled: boolean;
+  condition: {
+    dimension: SidebarTaskColorDimension;
+    value: unknown;
+    label: string;
+  };
+  output: { kind: "fixed"; color: FixedAutomaticTaskColor } | { kind: "workflow_step" };
+};
+
+export type SidebarTaskColorAutomation = {
+  enabled: boolean;
+  rules: SidebarTaskColorRule[];
+};
+
+/** User-settings wire alias kept explicit for API and boot-payload callers. */
+export type SidebarTaskColorAutomationApi = SidebarTaskColorAutomation;
+
+export type SidebarTaskColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink";
+export type SidebarTaskColorsApi = Record<string, SidebarTaskColor | null>;
+export type SidebarTaskColorPatchApi = {
+  colors: SidebarTaskColorsApi;
+  if_missing: boolean;
 };
 
 export type TaskCreateLastUsedApi = {
@@ -74,6 +178,7 @@ export type UserSettings = {
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  auto_focus_new_tasks?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -82,10 +187,16 @@ export type UserSettings = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_views_by_workspace?: Record<string, SidebarWorkspaceStateApi>;
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
+  thread_views?: ThreadViewApi[];
+  thread_active_view_id?: string;
+  thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
+  sidebar_task_color_automation?: SidebarTaskColorAutomationApi;
+  sidebar_task_colors?: SidebarTaskColorsApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown;
   jira_task_presets?: unknown;
@@ -104,8 +215,15 @@ export type UserSettings = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_hover_enabled?: boolean;
+  sidebar_hover_delay_ms?: number;
+  resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
+  quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  workflow_ids_with_auto_hide_empty_steps?: string[];
+  kanban_sort?: string;
+  kanban_priority_filter_tokens?: string[];
   revision?: number;
   updated_at: string;
 };
@@ -139,6 +257,7 @@ export type UserSettingsUpdatePayload = {
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  auto_focus_new_tasks?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -147,10 +266,21 @@ export type UserSettingsUpdatePayload = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_view_state?: {
+    workspace_id: string;
+    views?: SidebarViewApi[];
+    active_view_id?: string;
+    draft?: SidebarViewDraftApi | null;
+  };
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
+  thread_views?: ThreadViewApi[];
+  thread_active_view_id?: string;
+  thread_view_draft?: ThreadViewDraftApi | null;
   sidebar_task_prefs?: SidebarTaskPrefsApi;
+  sidebar_task_color_automation?: SidebarTaskColorAutomationApi;
+  sidebar_task_color_patch?: SidebarTaskColorPatchApi;
   task_create_last_used?: TaskCreateLastUsedApi;
   jira_saved_views?: unknown[] | null;
   jira_task_presets?: unknown[] | null;
@@ -169,6 +299,19 @@ export type UserSettingsUpdatePayload = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_hover_enabled?: boolean;
+  sidebar_hover_delay_ms?: number;
+  resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
+  quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
+  workflow_ids_with_auto_hide_empty_steps?: string[];
+  kanban_sort?: string;
+  kanban_priority_filter_tokens?: string[];
+};
+
+export type SidebarWorkspaceStateApi = {
+  views: SidebarViewApi[];
+  active_view_id: string;
+  draft: SidebarViewDraftApi | null;
 };

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-persistence-contracts"]
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 02: Repository Set Service, Validation, And Events

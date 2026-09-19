@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-backend-automation-execution", "05-frontend-popover-controls"]
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 06: E2E CI Automation

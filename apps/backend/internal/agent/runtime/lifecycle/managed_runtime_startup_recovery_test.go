@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -72,20 +71,35 @@ func TestOnlineManagedRuntimeArgsRejectsNonManagedCommands(t *testing.T) {
 	}
 }
 
-func TestOnlineManagedRuntimeArgsAcceptsTrustedUnversionedPackage(t *testing.T) {
+func TestOnlineManagedRuntimeArgsRejectsUnversionedPackage(t *testing.T) {
 	spec := agents.ManagedNPMRuntimeSpec{Package: "managed-acp"}
 	args := []string{"npx", "--yes", "--prefer-offline", "managed-acp", "--acp"}
 
-	got, packageSpec, ok := onlineManagedRuntimeArgs(args, spec)
-	if !ok {
-		t.Fatal("expected the trusted unversioned command to be eligible")
+	if _, _, ok := onlineManagedRuntimeArgs(args, spec); ok {
+		t.Fatal("unversioned managed runtime command should not be eligible")
 	}
-	if packageSpec != "managed-acp" {
-		t.Fatalf("package spec = %q, want managed-acp", packageSpec)
-	}
-	want := []string{"npx", "--yes", "--prefer-online", "managed-acp", "--acp"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("online args = %#v, want %#v", got, want)
+}
+
+func TestRetryManagedRuntimeStartupUsesAgentctlForExecutorLocalRuntimes(t *testing.T) {
+	initialErr := errors.New("ACP session initialization failed")
+	for _, runtimeName := range []agentruntime.Runtime{agentruntime.RuntimeDocker, agentruntime.RuntimeSSH} {
+		t.Run(runtimeName.String(), func(t *testing.T) {
+			mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
+			execution.RuntimeName = runtimeName
+
+			attempted, err := mgr.retryManagedRuntimeStartup(
+				context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
+			)
+			if err != nil {
+				t.Fatalf("retryManagedRuntimeStartup: %v", err)
+			}
+			if !attempted {
+				t.Fatal("expected one managed runtime retry")
+			}
+			if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop", "cache-repair", "configure", "start"}) {
+				t.Fatalf("HTTP actions = %#v", got)
+			}
+		})
 	}
 }
 
@@ -122,43 +136,7 @@ func TestManagedRuntimeRetryFailureClassificationPreservesSecondResult(t *testin
 	}
 }
 
-type managedRuntimeRetryInvalidator struct {
-	mu       sync.Mutex
-	calls    []string
-	err      error
-	cancel   context.CancelFunc
-	canceled bool
-}
-
-func (i *managedRuntimeRetryInvalidator) InvalidateExecutionCache(_ context.Context, packageName string) error {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.calls = append(i.calls, packageName)
-	if i.cancel != nil && !i.canceled {
-		i.canceled = true
-		i.cancel()
-	}
-	return i.err
-}
-
-func (i *managedRuntimeRetryInvalidator) InvalidateExecutionCacheVersion(_ context.Context, packageName, version string) error {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.calls = append(i.calls, packageName+"@"+version)
-	if i.cancel != nil && !i.canceled {
-		i.canceled = true
-		i.cancel()
-	}
-	return i.err
-}
-
-func (i *managedRuntimeRetryInvalidator) Calls() []string {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	return append([]string(nil), i.calls...)
-}
-
-func newManagedRuntimeRetryFixture(t *testing.T, failSessionNew bool) (*Manager, *AgentExecution, *restartMockAgentctlServer, agents.Agent, *managedRuntimeRetryInvalidator) {
+func newManagedRuntimeRetryFixture(t *testing.T, failSessionNew bool) (*Manager, *AgentExecution, *restartMockAgentctlServer, agents.Agent) {
 	t.Helper()
 	mgr := newTestManager(t)
 	mock := newRestartMockAgentctlServer(t, false, failSessionNew)
@@ -186,16 +164,14 @@ func newManagedRuntimeRetryFixture(t *testing.T, failSessionNew bool) (*Manager,
 		t.Fatalf("add execution: %v", err)
 	}
 	execution.beginStartupAttempt()
-	invalidator := &managedRuntimeRetryInvalidator{}
-	mgr.SetManagedRuntimeCacheInvalidator(invalidator)
-	return mgr, execution, mock, agentConfig, invalidator
+	return mgr, execution, mock, agentConfig
 }
 
 func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 	initialErr := errors.New("ACP session initialization failed")
 
 	t.Run("successful recovery uses one online replacement", func(t *testing.T) {
-		mgr, execution, mock, agentConfig, invalidator := newManagedRuntimeRetryFixture(t, false)
+		mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
 
 		attempted, err := mgr.retryManagedRuntimeStartup(
 			context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
@@ -206,13 +182,13 @@ func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 		if !attempted {
 			t.Fatal("expected one managed runtime retry")
 		}
-		if got := invalidator.Calls(); !slices.Equal(got, []string{"opencode-ai@1.2.3"}) {
-			t.Fatalf("invalidator calls = %#v", got)
+		if got := mock.getManagedRuntimeRepairSpecs(); !slices.Equal(got, []string{"opencode-ai@1.2.3"}) {
+			t.Fatalf("repair package specs = %#v", got)
 		}
 		if got := execution.AgentArgs; !slices.Contains(got, "--prefer-online") || slices.Contains(got, "--prefer-offline") {
 			t.Fatalf("replacement args = %#v, want online preference only", got)
 		}
-		if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop", "configure", "start"}) {
+		if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop", "cache-repair", "configure", "start"}) {
 			t.Fatalf("HTTP actions = %#v", got)
 		}
 		if execution.FailureCode != "" || execution.Status == v1.AgentStatusFailed {
@@ -220,8 +196,26 @@ func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 		}
 	})
 
+	t.Run("transitive ETARGET does not trigger top-level recovery", func(t *testing.T) {
+		mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
+		mock.stderrLines = []string{
+			"npm error code ETARGET",
+			"npm error notarget No matching version found for transitive-dependency@9.9.9",
+		}
+
+		attempted, err := mgr.retryManagedRuntimeStartup(
+			context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
+		)
+		if attempted || !errors.Is(err, initialErr) {
+			t.Fatalf("mismatched ETARGET result = (%v, %v), want no retry and original error", attempted, err)
+		}
+		if got := mock.getHTTPActions(); len(got) != 0 {
+			t.Fatalf("mismatched ETARGET HTTP actions = %#v, want none", got)
+		}
+	})
+
 	t.Run("repeated initialization failure is terminal after one retry", func(t *testing.T) {
-		mgr, execution, mock, agentConfig, invalidator := newManagedRuntimeRetryFixture(t, true)
+		mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, true)
 
 		attempted, err := mgr.retryManagedRuntimeStartup(
 			context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
@@ -239,17 +233,17 @@ func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 		if execution.FailureCode != string(routingerr.CodeManagedRuntimeNpmResolution) {
 			t.Fatalf("execution failure code = %q", execution.FailureCode)
 		}
-		if got := invalidator.Calls(); len(got) != 1 {
-			t.Fatalf("invalidator calls = %#v, want one call", got)
+		if got := mock.getManagedRuntimeRepairSpecs(); len(got) != 1 {
+			t.Fatalf("repair package specs = %#v, want one call", got)
 		}
-		if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop", "configure", "start"}) {
+		if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop", "cache-repair", "configure", "start"}) {
 			t.Fatalf("HTTP actions = %#v", got)
 		}
 	})
 
-	t.Run("invalidation failure is generic and does not start a replacement", func(t *testing.T) {
-		mgr, execution, mock, agentConfig, invalidator := newManagedRuntimeRetryFixture(t, false)
-		invalidator.err = errors.New("permission denied writing /home/alice/.npm/_npx")
+	t.Run("repair failure is generic and does not start a replacement", func(t *testing.T) {
+		mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
+		mock.failCacheRepair = true
 
 		attempted, err := mgr.retryManagedRuntimeStartup(
 			context.Background(), execution, initialErr, agentConfig, "", "", nil, nil,
@@ -267,10 +261,7 @@ func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 		if strings.Contains(startupErr.Details, "/home/alice/") {
 			t.Fatalf("repair details exposed a host path: %q", startupErr.Details)
 		}
-		if !strings.Contains(startupErr.Details, "permission denied") {
-			t.Fatalf("repair details = %q, want the sanitized repair error", startupErr.Details)
-		}
-		if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop"}) {
+		if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop", "cache-repair"}) {
 			t.Fatalf("HTTP actions = %#v, want no configure/start", got)
 		}
 		if execution.FailureCode != string(routingerr.CodeAgentRuntime) {
@@ -279,15 +270,15 @@ func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 	})
 
 	t.Run("cancellation wins over recovery", func(t *testing.T) {
-		mgr, execution, mock, agentConfig, invalidator := newManagedRuntimeRetryFixture(t, false)
+		mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
 		ctx, cancel := context.WithCancel(context.Background())
-		invalidator.cancel = cancel
+		mock.onCacheRepair = cancel
 
 		attempted, err := mgr.retryManagedRuntimeStartup(ctx, execution, initialErr, agentConfig, "", "", nil, nil)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancellation error = %v", err)
 		}
-		if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop"}) {
+		if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop", "cache-repair"}) {
 			t.Fatalf("HTTP actions = %#v, want no configure/start", got)
 		}
 		if attempted {
@@ -296,20 +287,32 @@ func TestRetryManagedRuntimeStartupLifecycle(t *testing.T) {
 	})
 
 	t.Run("remote and native launches are excluded", func(t *testing.T) {
-		t.Run("remote", func(t *testing.T) {
-			mgr, execution, mock, agentConfig, _ := newManagedRuntimeRetryFixture(t, false)
-			execution.RuntimeName = agentruntime.RuntimeSSH
+		t.Run("remote docker", func(t *testing.T) {
+			mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
+			execution.RuntimeName = agentruntime.RuntimeRemoteDocker
 			attempted, err := mgr.retryManagedRuntimeStartup(context.Background(), execution, initialErr, agentConfig, "", "", nil, nil)
 			if attempted || !errors.Is(err, initialErr) {
-				t.Fatalf("remote result = (%v, %v), want no retry and original error", attempted, err)
+				t.Fatalf("remote docker result = (%v, %v), want no retry and original error", attempted, err)
 			}
 			if got := mock.getHTTPActions(); len(got) != 0 {
-				t.Fatalf("remote HTTP actions = %#v", got)
+				t.Fatalf("remote docker HTTP actions = %#v", got)
+			}
+		})
+
+		t.Run("sprites", func(t *testing.T) {
+			mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
+			execution.RuntimeName = agentruntime.RuntimeSprites
+			attempted, err := mgr.retryManagedRuntimeStartup(context.Background(), execution, initialErr, agentConfig, "", "", nil, nil)
+			if attempted || !errors.Is(err, initialErr) {
+				t.Fatalf("sprites result = (%v, %v), want no retry and original error", attempted, err)
+			}
+			if got := mock.getHTTPActions(); len(got) != 0 {
+				t.Fatalf("sprites HTTP actions = %#v", got)
 			}
 		})
 
 		t.Run("native command", func(t *testing.T) {
-			mgr, execution, mock, _, _ := newManagedRuntimeRetryFixture(t, false)
+			mgr, execution, mock, _ := newManagedRuntimeRetryFixture(t, false)
 			agentConfig := agents.NewCopilotACP()
 			execution.AgentID = agentConfig.ID()
 			execution.AgentCommand = "copilot"

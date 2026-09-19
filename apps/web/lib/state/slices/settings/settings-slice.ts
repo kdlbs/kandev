@@ -1,3 +1,5 @@
+import { mapSidebarWorkspaces } from "../ui/sidebar-workspace-state";
+import type { UISliceState } from "../ui/types";
 import type { StateCreator } from "zustand";
 import { createDefaultUserSettings } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
@@ -8,6 +10,10 @@ import {
   type SettingsSlice,
   type SettingsSliceState,
 } from "./types";
+import {
+  mergeAgentProfileRecentUseState,
+  type AgentProfileRecentUseState,
+} from "@/lib/agent-profile-recent-use";
 
 export const defaultSettingsState: SettingsSliceState = {
   executors: { items: [] },
@@ -31,6 +37,7 @@ export const defaultSettingsState: SettingsSliceState = {
   settingsData: { executorsLoaded: false, agentsLoaded: false },
   sleepInhibition: { response: null, loaded: false, loading: false, error: false },
   userSettings: createDefaultUserSettings(),
+  agentProfileRecentUse: { records: {}, loaded: false },
 };
 
 type ImmerSet = Parameters<
@@ -173,6 +180,23 @@ function createAgentUpdateJobActions(
   };
 }
 
+function applyUserSettingsState(
+  draft: SettingsSlice,
+  settings: SettingsSliceState["userSettings"],
+) {
+  const order = compareUserSettingsRevisions(settings.revision, draft.userSettings.revision);
+  if (order !== null && order < 0) return;
+  draft.userSettings = settings;
+  if ("sidebarViewsByWorkspace" in draft) {
+    const sidebar = draft as SettingsSlice & Pick<UISliceState, "sidebarViewsByWorkspace">;
+    sidebar.sidebarViewsByWorkspace = mapSidebarWorkspaces(
+      settings.sidebarViewsByWorkspace,
+      sidebar.sidebarViewsByWorkspace,
+      settings.revision,
+    );
+  }
+}
+
 function createCoreActions(
   set: ImmerSet,
 ): Pick<
@@ -267,13 +291,37 @@ function createCoreActions(
       }),
     setUserSettings: (settings) =>
       set((draft) => {
-        const order = compareUserSettingsRevisions(settings.revision, draft.userSettings.revision);
-        if (order !== null && order < 0) return;
-        draft.userSettings = settings;
+        applyUserSettingsState(draft, settings);
       }),
     bumpAgentProfilesVersion: () =>
       set((draft) => {
         draft.agentProfiles.version += 1;
+      }),
+  };
+}
+
+function createAgentProfileRecentUseActions(
+  set: ImmerSet,
+): Pick<SettingsSlice, "setAgentProfileRecentUse" | "applyAgentProfileRecentUse"> {
+  return {
+    setAgentProfileRecentUse: (state) =>
+      set((draft) => {
+        draft.agentProfileRecentUse = mergeAgentProfileRecentUseState(
+          draft.agentProfileRecentUse as unknown as AgentProfileRecentUseState,
+          state,
+        ) as unknown as typeof draft.agentProfileRecentUse;
+      }),
+    applyAgentProfileRecentUse: (context, record) =>
+      set((draft) => {
+        const current = draft.agentProfileRecentUse.records[context];
+        if (!current || record.revision >= current.revision) {
+          draft.agentProfileRecentUse.records[context] = {
+            profileIds: [...record.profileIds],
+            revision: record.revision,
+            updatedAt: record.updatedAt,
+          };
+        }
+        draft.agentProfileRecentUse.loaded = true;
       }),
   };
 }
@@ -318,6 +366,7 @@ function createSecretAndSpriteActions(
   | "setSpritesLoading"
   | "removeSpritesInstance"
   | "setNotificationProviders"
+  | "setAppriseAvailable"
   | "setNotificationProvidersLoading"
 > {
   return {
@@ -368,9 +417,15 @@ function createSecretAndSpriteActions(
       set((draft) => {
         draft.notificationProviders.items = state.items;
         draft.notificationProviders.events = state.events;
-        draft.notificationProviders.appriseAvailable = state.appriseAvailable;
+        if (state.appriseAvailable !== undefined) {
+          draft.notificationProviders.appriseAvailable = state.appriseAvailable;
+        }
         draft.notificationProviders.loaded = state.loaded;
         draft.notificationProviders.loading = state.loading;
+      }),
+    setAppriseAvailable: (available) =>
+      set((draft) => {
+        draft.notificationProviders.appriseAvailable = available;
       }),
     setNotificationProvidersLoading: (loading) =>
       set((draft) => {
@@ -387,6 +442,7 @@ export const createSettingsSlice: StateCreator<
 > = (set) => ({
   ...defaultSettingsState,
   ...createCoreActions(set),
+  ...createAgentProfileRecentUseActions(set),
   ...createSleepInhibitionActions(set),
   ...createInstallJobActions(set),
   ...createAgentUpdateJobActions(set),

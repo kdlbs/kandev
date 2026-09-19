@@ -114,6 +114,56 @@ func TestLauncherBackendEnvironmentHandsOffSelectedConfigFile(t *testing.T) {
 	}
 }
 
+func TestBackendEnvDoesNotSynthesizeDefaultDatabasePath(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
+	unsetEnvForTest(t, "KANDEV_DATABASE_PATH")
+
+	cfg := &config.Config{
+		HomeDir: t.TempDir(),
+		Source: config.ConfigSource{Values: map[string]config.SettingSource{
+			"database.path": config.SourceDefault,
+		}},
+	}
+	env := backendEnvForConfig(
+		portConfig{BackendPort: 4321, AgentctlPort: 4322},
+		"info",
+		"warn",
+		false,
+		"health-token",
+		nil,
+		cfg,
+	)
+	for _, item := range env {
+		if strings.HasPrefix(item, "KANDEV_DATABASE_PATH=") {
+			t.Fatalf("default database path was synthesized into child environment: %q", item)
+		}
+	}
+}
+
+func TestBackendEnvPreservesExplicitEnvironmentDatabasePath(t *testing.T) {
+	clearLauncherConfigurationEnvironment(t)
+	explicitPath := filepath.Join(t.TempDir(), "custom.db")
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{Path: explicitPath},
+		Source: config.ConfigSource{Values: map[string]config.SettingSource{
+			"database.path": config.SourceEnvironment,
+		}},
+	}
+
+	env := backendEnvForConfig(
+		portConfig{BackendPort: 4321, AgentctlPort: 4322},
+		"info",
+		"warn",
+		false,
+		"health-token",
+		nil,
+		cfg,
+	)
+	if got := envValue(env, "KANDEV_DATABASE_PATH"); got != explicitPath {
+		t.Fatalf("explicit database path = %q, want %q", got, explicitPath)
+	}
+}
+
 func TestLauncherSelectedConfigHandoffSurvivesWorkingDirectoryChange(t *testing.T) {
 	clearLauncherConfigurationEnvironment(t)
 	sourceDir := t.TempDir()

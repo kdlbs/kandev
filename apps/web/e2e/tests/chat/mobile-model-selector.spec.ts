@@ -120,15 +120,27 @@ test.describe("Mobile chat model selector", () => {
     const trigger = leftActions.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toHaveText("Mock Fast", { timeout: 15_000 });
 
+    await expect(trigger.getByTestId("model-provider-icon")).toBeVisible();
+    expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await trigger.tap();
-    await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeVisible({
+    await expect(
+      testPage.locator("[cmdk-group-heading]").getByTestId("model-provider-icon"),
+    ).toBeVisible();
+    const modelListbox = testPage.getByRole("listbox");
+    await expect(modelListbox.getByRole("option", { name: /Mock Smart/ })).toBeVisible({
       timeout: 5_000,
     });
+    const modelOptions = modelListbox.getByRole("option");
+    await expect(modelOptions.first()).toContainText("Mock Fast");
+    await expect(modelOptions.first()).toHaveClass(/bg-card/);
+    await expect(modelOptions.first()).toHaveClass(/border-primary\/50/);
     await expect(
-      testPage.getByRole("option", { name: /Mock Fast/ }).getByTitle("Fast mock model for testing"),
+      modelListbox
+        .getByRole("option", { name: /Mock Fast/ })
+        .getByTitle("Fast mock model for testing"),
     ).toBeVisible();
     await expect(
-      testPage
+      modelListbox
         .getByRole("option", { name: /Mock Smart/ })
         .getByTitle("Smart mock model for testing"),
     ).toBeVisible();
@@ -205,5 +217,8 @@ test.describe("Mobile chat model selector", () => {
     expect(popoverBox).not.toBeNull();
     expect(popoverBox!.x).toBeGreaterThanOrEqual(0);
     expect(popoverBox!.x + popoverBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      viewport!.width,
+    );
   });
 });

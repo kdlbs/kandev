@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["02-tauri-desktop-scaffold", "03-desktop-runtime-resources"]
 plan: "plan.md"
-spec: "../../specs/desktop-tauri-app/spec.md"
+spec: "../../specs/desktop/requirements/desktop-tauri-app.md"
 ---
 
 # Task 06: Desktop E2E Smoke

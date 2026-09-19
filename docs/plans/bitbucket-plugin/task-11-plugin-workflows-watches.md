@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["03-protocol-manifest-actions", "05-dynamic-composer-reference-sources", "06-plugin-owned-task-lifecycle", "07-provider-neutral-git-credentials", "10-cloud-dc-domain-auth"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 11: Plugin task, Git, linking, and watch workflows

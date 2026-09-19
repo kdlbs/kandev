@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -133,6 +134,32 @@ func TestResolveNonExistentPath(t *testing.T) {
 	})
 }
 
+func TestReadFileContent_PermissionErrorIsNotMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0o000 does not block filesystem checks on Windows")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test: root bypasses filesystem permission checks")
+	}
+
+	restrictedDir := t.TempDir()
+	if err := os.Chmod(restrictedDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(restrictedDir, 0o755) })
+
+	_, _, _, err := readFileContent(filepath.Join(restrictedDir, "missing.txt"))
+	if err == nil {
+		t.Fatal("expected permission error, got nil")
+	}
+	if errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("error = %v, want permission error, not ErrFileNotFound", err)
+	}
+	if strings.Contains(err.Error(), "file not found") {
+		t.Fatalf("error = %v, want no missing-file classification", err)
+	}
+}
+
 func TestWorkspaceFileOperationsAllowRegisteredLinkedSource(t *testing.T) {
 	workspace := t.TempDir()
 	source := t.TempDir()
@@ -183,6 +210,43 @@ func TestWorkspaceFileOperationsAllowRegisteredLinkedSource(t *testing.T) {
 	}
 	if err := wt.CreateFile(filepath.Join("linked", "escape.txt")); err == nil {
 		t.Fatal("CreateFile through mutated link unexpectedly succeeded")
+	}
+}
+
+// TestWorkspaceFileOperationsWithNoAllowedSourceRootsFailClosed pins the
+// AC-EXECUTORS-SURVIVAL-002.14 recovery contract: when the adopted instance
+// reports zero workspace source roots (nil/empty), the tracker must reject
+// every durable-source symlink escape rather than treating "no roots
+// configured" as "no restriction". Ordinary in-workspace file operations are
+// unaffected, since they never need the allowlist.
+func TestWorkspaceFileOperationsWithNoAllowedSourceRootsFailClosed(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	if err := os.Symlink(source, filepath.Join(workspace, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt := &WorkspaceTracker{workDir: workspace, logger: log}
+	// Deliberately never call SetAllowedSourceRoots, reproducing the
+	// zero-value state a freshly recovered tracker has before any roots are
+	// (re)applied from the adopted instance.
+
+	if err := wt.CreateFile(filepath.Join("linked", "escape.txt")); err == nil {
+		t.Fatal("CreateFile through an unregistered symlink unexpectedly succeeded with no allowed source roots")
+	}
+	if _, err := os.Stat(filepath.Join(source, "escape.txt")); !os.IsNotExist(err) {
+		t.Fatalf("file leaked into the symlink target despite no allowed source roots: %v", err)
+	}
+
+	if err := wt.CreateFile("plain.txt"); err != nil {
+		t.Fatalf("CreateFile for an ordinary in-workspace path: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "plain.txt")); err != nil {
+		t.Fatalf("in-workspace file was not created: %v", err)
 	}
 }
 

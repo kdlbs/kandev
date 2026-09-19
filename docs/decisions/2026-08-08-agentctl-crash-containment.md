@@ -54,7 +54,7 @@ full supervised Kandev restart, which creates a fresh backend and authenticated
 child together. The general backend health endpoint remains unchanged.
 
 The observable behavior is specified in
-[`docs/specs/platform/agent-runtime-availability.md`](../specs/platform/agent-runtime-availability.md).
+[`docs/specs/platform/requirements/agent-runtime-availability.md`](../specs/platform/requirements/agent-runtime-availability.md).
 
 ## Consequences
 

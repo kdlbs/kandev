@@ -59,10 +59,17 @@ const (
 
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
-	Limit  int
-	Before string
-	After  string
-	Sort   string
+	Limit      int
+	Before     string
+	After      string
+	Sort       string
+	AuthorType string
+	// AuthorTypes narrows by any of the listed authors (IN); when non-empty
+	// it takes precedence over AuthorType. TaskID, when non-empty, narrows
+	// to rows for that task.
+	AuthorTypes []string
+	TaskID      string
+	Around      string
 }
 
 // SearchMessagesOptions defines options for searching a session's messages.
@@ -94,7 +101,18 @@ const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
-	MetaKeyDeferredLaunch    = "deferred_launch"
+	// Automation target metadata is written to continuation tasks so a
+	// change from hidden to visible ownership or from repository-backed to
+	// repository-free execution cannot silently reuse the old task.
+	MetaKeyAutomationTaskMode       = "automation_task_mode"
+	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
+	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
+	// the first session identity used by workflow session targeting.
+	MetaKeyWorkflowInitialSession = "workflow_initial_session"
+	// MetaKeyWorkflowSessionRoute stores the bounded prepared/committed route
+	// identity used to retry an explicit workflow session selection.
+	MetaKeyWorkflowSessionRoute = "workflow_session_route"
 	// MetaKeyQueuedMoveExitPending identifies a queued manual move whose
 	// source-step on_exit side effect is not yet complete. Its value records the
 	// source step so recovery can resume the work after a restart.
@@ -107,13 +125,22 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyWorkflowMovePending carries the one-shot entry options of a direct
+	// (immediately applied) workflow move whose target-step entry has not yet
+	// run. Its value records the source step, the move ID, and the encoded
+	// entry options. The public task.moved event carries only the move ID; the
+	// instructions and profile choice ride on this transient marker and are
+	// cleared once the target entry is dispatched.
+	MetaKeyWorkflowMovePending = "workflow_move_pending"
 	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
 	// task.moved lifecycle must finish before feeder reconciliation. Its value
 	// records the source step so stale deliveries cannot run the wrong exit.
 	MetaKeyManualMoveLifecyclePending = "manual_move_lifecycle_pending"
 	// MetaKeyManualMoveLifecycleCompleted records that the admitted manual move
-	// lifecycle finished. It remains as an idempotency marker until the next
-	// step-changing move replaces it.
+	// lifecycle finished. It is cleared once its continuation has run and no
+	// MetaKeyManualMoveLifecyclePending token remains, so it does not
+	// accumulate as permanent startup-recovery work; a fresh manual move
+	// replaces it with a new pending token before it would be cleared.
 	MetaKeyManualMoveLifecycleCompleted = "manual_move_lifecycle_completed"
 	// MetaKeyAppliedDeferredMoves stores deferred move IDs that have already
 	// been applied, preventing a stale queue rollback from replaying one.
@@ -124,6 +151,17 @@ const (
 	// its own intents and keeps a WIP-only intent from being read as a chain
 	// step (and vice versa).
 	DeferredLaunchStartWhenUnblockedKey = "start_when_unblocked"
+	// DeferredLaunchUserIDKey preserves the authenticated creator so a
+	// selector-backed deferred task-create launch can update that user's
+	// task_create history after the launch is promoted by the workflow engine.
+	// It is server-owned state inside the protected deferred launch record and
+	// must not be accepted from task metadata request surfaces.
+	DeferredLaunchUserIDKey = "user_id"
+	// DeferredLaunchRecordRecentUseKey marks a deferred launch that originated
+	// from a selector-backed task-create surface and is therefore eligible to
+	// update task_create profile history after promotion. It is server-owned
+	// state and is omitted from task DTOs.
+	DeferredLaunchRecordRecentUseKey = "record_recent_use"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.
@@ -154,8 +192,8 @@ const (
 	// key when a session of the task next enters STARTING/RUNNING (mirrors
 	// MetaKeyInterruptedAt).
 	MetaKeyAutoStartFailed = "auto_start_failed"
-	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
-	// provisional title still needs the first eligible agent session to replace it.
+	// MetaKeyAgentTitlePending marks tasks whose provisional title still needs
+	// the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
 	// MetaKeyAgentTitleOwnerSessionID records the one session that atomically
 	// claimed the first-turn title handoff for a pending task.
@@ -184,10 +222,123 @@ const (
 	// that produced the launch-only runtime seed. A seed is valid only for this
 	// profile, even if task profile selection changes before the first launch.
 	MetaKeyInitialSessionRuntimeConfigProfileID = "initial_session_runtime_config_profile_id"
+	// MetaKeyAutoStartOnCreate is a positive opt-in a task creator stamps when
+	// it wants task.created to evaluate the destination step's on_enter
+	// actions immediately, as if creation were itself a transition into that
+	// step. Absence is the default and preserves existing behavior for every
+	// other producer (REST/MCP/WS create with or without start_agent /
+	// prepare_session, CreateChildTask, etc.) — those already have their own
+	// launch decision, and task.created must not second-guess it. Set today
+	// only by CreateOfficeTaskInWorkflow for materialized heavy-routine runs,
+	// whose Routine workflow start step has no other transition to carry it
+	// into an auto_start_agent evaluation.
+	MetaKeyAutoStartOnCreate = "auto_start_on_create"
+	// MetaKeyAutoStartOnCreateInFlight is a durable hand-off marker for an
+	// auto-start-on-create launch. The original intent is consumed before the
+	// detached launch starts, but this marker remains until a session or run
+	// is durable. That lets startup recovery retry a process that exits in the
+	// gap instead of losing the last recovery signal.
+	MetaKeyAutoStartOnCreateInFlight = "auto_start_on_create_in_flight"
+	// MetaKeyStepHandoffCarry is a single-slot, task-scoped token carrying one
+	// consuming transition's completion handoff exactly one hop, to the next
+	// step's first dispatched prompt. Its value is a StepHandoffCarryToken.
+	// Recording it replaces any existing token (single-slot by construction);
+	// claiming it removes it. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
+	MetaKeyStepHandoffCarry = "step_handoff_carry"
 )
 
+// WorkflowInitialSessionSnapshot identifies the immutable task-initial
+// conversation and the logical profile selected when it was created.
+type WorkflowInitialSessionSnapshot struct {
+	SessionID      string `json:"session_id"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+}
+
+// WorkflowSessionRoute records one in-flight or committed explicit recipient
+// selection. It is replaced by the next route operation rather than growing a
+// task history.
+type WorkflowSessionRoute struct {
+	OperationID       string `json:"operation_id"`
+	DestinationStepID string `json:"destination_step_id"`
+	// EntryIdentity binds the route to the workflow entry that created it. It
+	// prevents a late replay from consuming a newer route for the same step.
+	EntryIdentity   string `json:"entry_identity,omitempty"`
+	TargetKind      string `json:"target_kind"`
+	TargetStepID    string `json:"target_step_id,omitempty"`
+	AgentProfileID  string `json:"agent_profile_id,omitempty"`
+	SourceSessionID string `json:"source_session_id,omitempty"`
+	DestinationID   string `json:"destination_session_id,omitempty"`
+	Phase           string `json:"phase"`
+}
+
+// LoadWorkflowSessionRoute decodes the bounded route record stored in task
+// metadata. Invalid or incomplete values are ignored so a stale record cannot
+// redirect a workflow entry to an unrelated session.
+func LoadWorkflowSessionRoute(metadata map[string]interface{}) (WorkflowSessionRoute, bool) {
+	value, ok := metadata[MetaKeyWorkflowSessionRoute]
+	if !ok {
+		return WorkflowSessionRoute{}, false
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return WorkflowSessionRoute{}, false
+	}
+	var route WorkflowSessionRoute
+	if err := json.Unmarshal(payload, &route); err != nil {
+		return WorkflowSessionRoute{}, false
+	}
+	if route.OperationID == "" || route.DestinationStepID == "" || route.TargetKind == "" || route.Phase == "" {
+		return WorkflowSessionRoute{}, false
+	}
+	return route, true
+}
+
+// WorkflowSessionBinding records the latest session selected when a direct
+// profile workflow step was entered. The session pointer is nullable because
+// deleting a session must preserve the logical profile for a later fresh
+// fallback.
+type WorkflowSessionBinding struct {
+	TaskID         string    `json:"task_id"`
+	TargetKey      string    `json:"target_key"`
+	WorkflowID     string    `json:"workflow_id"`
+	AgentProfileID string    `json:"agent_profile_id"`
+	SessionID      string    `json:"session_id,omitempty"`
+	OperationID    string    `json:"operation_id"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// LoadWorkflowInitialSessionSnapshot decodes the write-once task metadata
+// value. Invalid or incomplete values are treated as unavailable so callers
+// can apply the conservative legacy fallback.
+func LoadWorkflowInitialSessionSnapshot(metadata map[string]interface{}) (WorkflowInitialSessionSnapshot, bool) {
+	value, ok := metadata[MetaKeyWorkflowInitialSession]
+	if !ok {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	object, ok := value.(map[string]interface{})
+	if !ok {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	sessionID, _ := object["session_id"].(string)
+	profileID, _ := object["agent_profile_id"].(string)
+	if sessionID == "" {
+		return WorkflowInitialSessionSnapshot{}, false
+	}
+	return WorkflowInitialSessionSnapshot{SessionID: sessionID, AgentProfileID: profileID}, true
+}
+
+// StepHandoffCarryToken is the JSON shape stored under
+// tasks.metadata[MetaKeyStepHandoffCarry]. Stamp is a fresh unique value
+// (uuid.NewString()) minted on every write, compared by the claim's
+// compare-and-swap alongside StepID; it must never be content-derived.
+type StepHandoffCarryToken struct {
+	Handoff string `json:"handoff"`
+	StepID  string `json:"step_id"`
+	Stamp   string `json:"stamp"`
+}
+
 // IsAgentTitlePending reports whether task metadata contains the durable
-// prompt-first title marker. JSON rehydration produces bool values, while a
+// pending title marker. JSON rehydration produces bool values, while a
 // few in-process callers may provide typed metadata, so only an explicit true
 // value enables the capability.
 func IsAgentTitlePending(metadata map[string]interface{}) bool {
@@ -207,12 +358,38 @@ func IsAgentTitleOwner(metadata map[string]interface{}, sessionID string) bool {
 	return sessionID != "" && IsAgentTitlePending(metadata) && AgentTitleOwnerSessionID(metadata) == sessionID
 }
 
+// HasAutoStartOnCreateIntent reports whether task metadata carries the
+// positive MetaKeyAutoStartOnCreate opt-in. Only an explicit true value
+// counts — absence (the default for nearly every task producer) must never
+// be read as "please auto-start me".
+func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
+	intent, ok := metadata[MetaKeyAutoStartOnCreate].(bool)
+	return ok && intent
+}
+
+// HasAutoStartOnCreateInFlight reports whether a launch attempt still owns
+// the durable hand-off marker for a create-time auto-start. Only an explicit
+// true value counts; JSON rehydration and in-process callers use the same
+// representation as the other lifecycle markers.
+func HasAutoStartOnCreateInFlight(metadata map[string]interface{}) bool {
+	inFlight, ok := metadata[MetaKeyAutoStartOnCreateInFlight].(bool)
+	return ok && inFlight
+}
+
 // TaskSession.Metadata key that records how the session came into existence.
 // workflow_switch means the session profile was selected by workflow routing
 // rather than direct user selection.
 const (
 	SessionMetaKeyCreatedBy        = "created_by"
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
+	// SessionMetaKeyCompletionFollowUp marks a completed conversation that was
+	// explicitly resumed for conversational follow-up. It is not workflow
+	// ownership and must not be treated as a task-state transition.
+	SessionMetaKeyCompletionFollowUp = "completion_follow_up"
+	// SessionMetaKeyWorkflowProfileSwitchStopIntent identifies the transient
+	// coordination record used to suppress the lifecycle event caused by a
+	// parked workflow profile switch.
+	SessionMetaKeyWorkflowProfileSwitchStopIntent = "workflow_profile_switch_stop_intent"
 	// SessionMetaKeyOrigin identifies immutable task-session provenance. Unlike
 	// IsPrimary, it never changes when the user selects another conversation tab.
 	SessionMetaKeyOrigin                 = "origin"
@@ -224,6 +401,26 @@ const (
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
 )
+
+// IsCompletionFollowUpSession reports whether a session was explicitly
+// reopened only to continue its completed conversation. The marker remains
+// meaningful after the session settles back to WAITING_FOR_INPUT.
+func IsCompletionFollowUpSession(metadata map[string]interface{}) bool {
+	followUp, ok := metadata[SessionMetaKeyCompletionFollowUp].(bool)
+	return ok && followUp
+}
+
+// WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
+// one exact runtime execution. Stamp is compared before the metadata value is
+// marked consumed, so a delayed event cannot consume a newer switch intent.
+type WorkflowProfileSwitchStopIntent struct {
+	ExecutionID string `json:"execution_id"`
+	Stamp       string `json:"stamp"`
+	// Consumed is a durable tombstone for the matching terminal callback. It
+	// remains in session metadata so delayed callbacks after a restart cannot
+	// advance the workflow.
+	Consumed bool `json:"consumed,omitempty"`
+}
 
 // SessionMetaKeySessionMode records the agent's last-known session permission
 // mode (auto / default / accept-edits, etc.) so it survives a backend restart or
@@ -285,6 +482,20 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 // was in when the turn started. Absent when the task held no step.
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
 
+// TurnMetaKeyLifecycleOnly marks a turn created only to parent a lifecycle
+// message (for example the agent_boot script_execution message on resume).
+// A lifecycle turn never reflects real agent work and must never be current-
+// turn authority, so every current-turn resolution site excludes it.
+const TurnMetaKeyLifecycleOnly = "lifecycle_only"
+
+// TurnMetaKeyErrorTerminated marks a turn that ended in a recoverable agent
+// failure. The failure's recovery/error entry is the turn's outcome, so a turn
+// carrying this marker reports had_output=true at completion even though a
+// status/recovery message does not otherwise count as agent output — this
+// keeps the frontend from showing a spurious empty-turn notice for the failed
+// turn.
+const TurnMetaKeyErrorTerminated = "error_terminated"
+
 // TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
 // acknowledges its prompt. Empty marked turns are not current-turn authority
 // unless dispatch ambiguity was recorded; publication clears the marker, while
@@ -317,6 +528,41 @@ func ClearPromptDispatchMetadata(metadata map[string]interface{}) {
 	for _, key := range promptDispatchMetadataKeys {
 		delete(metadata, key)
 	}
+}
+
+// publicTurnMetadataKeys is the allowlist for first-party live turn
+// projections. Prompt-dispatch recovery state and arbitrary repository-owned
+// fields stay inside the service and are not sent through the shared event
+// bus. The REST turn DTO has its own compatibility contract; this narrower
+// projection is used only for the v2 Host conversation transport.
+var publicTurnMetadataKeys = [...]string{
+	TurnMetaKeyRuntimeConfigSnapshot,
+	TurnMetaKeyWorkflowStepIDAtStart,
+	TurnMetaKeyLifecycleOnly,
+	"prompt_usage",
+	"model",
+	"agent_id",
+	"agent_type",
+	"usage_multiplier",
+}
+
+// ProjectTurnMetadata returns the first-party-safe metadata needed by live
+// core conversation consumers without exposing arbitrary turn state.
+func ProjectTurnMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if len(metadata) == 0 {
+		return nil
+	}
+	projected := make(map[string]interface{}, len(publicTurnMetadataKeys))
+	for _, key := range publicTurnMetadataKeys {
+		if value, ok := metadata[key]; ok {
+			projected[key] = value
+		}
+	}
+	ClearPromptDispatchMetadata(projected)
+	if len(projected) == 0 {
+		return nil
+	}
+	return projected
 }
 
 // PromptDispatchRecovery identifies the exact clarification claim that an
@@ -538,16 +784,21 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 // RemediationURL is only ever set from an adapter-validated provider
 // diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
-	Message          string     `json:"message"`
-	OccurredAt       time.Time  `json:"occurred_at"`
-	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
-	RemediationURL   string     `json:"remediation_url,omitempty"`
-	Code             string     `json:"code,omitempty"`
-	Details          string     `json:"details,omitempty"`
-	RecoveryActions  []string   `json:"recovery_actions,omitempty"`
-	TaskRepositoryID string     `json:"task_repository_id,omitempty"`
-	StampValue       string     `json:"stamp,omitempty"`
-	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
+	Message          string            `json:"message"`
+	OccurredAt       time.Time         `json:"occurred_at"`
+	Scope            string            `json:"scope,omitempty"`
+	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
+	ExecutionID      string            `json:"execution_id,omitempty"`
+	Phase            string            `json:"phase,omitempty"`
+	AttemptID        string            `json:"attempt_id,omitempty"`
+	Causes           []AgentErrorCause `json:"causes,omitempty"`
+	RemediationURL   string            `json:"remediation_url,omitempty"`
+	Code             string            `json:"code,omitempty"`
+	Details          string            `json:"details,omitempty"`
+	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
+	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
+	StampValue       string            `json:"stamp,omitempty"`
+	DismissedAt      *time.Time        `json:"dismissed_at,omitempty"`
 }
 
 func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) {
@@ -570,7 +821,52 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, out)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	// Optional bootstrap fields are deliberately decoded independently. A
+	// malformed optional field must not hide a valid legacy session error.
+	optional := map[string]json.RawMessage{}
+	for _, key := range []string{"execution_id", "phase", "attempt_id", "causes"} {
+		if value, ok := fields[key]; ok {
+			optional[key] = value
+			delete(fields, key)
+		}
+	}
+	legacyData, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(legacyData, out); err != nil {
+		return err
+	}
+	if value, ok := optional["execution_id"]; ok {
+		var executionID string
+		if json.Unmarshal(value, &executionID) == nil {
+			out.ExecutionID = executionID
+		}
+	}
+	if value, ok := optional["phase"]; ok {
+		var phase string
+		if json.Unmarshal(value, &phase) == nil {
+			out.Phase = phase
+		}
+	}
+	if value, ok := optional["attempt_id"]; ok {
+		var attemptID string
+		if json.Unmarshal(value, &attemptID) == nil {
+			out.AttemptID = attemptID
+		}
+	}
+	if value, ok := optional["causes"]; ok {
+		var causes []AgentErrorCause
+		if json.Unmarshal(value, &causes) == nil {
+			out.Causes = causes
+		}
+	}
+	return nil
 }
 
 func (e LastAgentError) Stamp() string {
@@ -781,6 +1077,9 @@ const (
 	TaskOriginRoutine       = "routine"
 	TaskOriginOnboarding    = "onboarding"
 	TaskOriginAutomationRun = "automation_run"
+	// TaskOriginAutomationTask is a normal, user-visible task created by an
+	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
+	TaskOriginAutomationTask = "automation_task"
 )
 
 // Task represents a task in the database
@@ -815,6 +1114,20 @@ type Task struct {
 	ArchivedByCascadeID string    `json:"archived_by_cascade_id,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// WorkflowStepTransitionID is the immutable ledger row identifier for the
+	// latest workflow-step write. Repositories populate it after a transition;
+	// it is transient and is not stored in the tasks table.
+	WorkflowStepTransitionID int64 `json:"-"`
+	// FromStepID is the workflow_step_id the task left on the same write that
+	// set WorkflowStepTransitionID, read inside that write's own transaction
+	// (readTaskStepInTx) rather than from any earlier snapshot. Empty when no
+	// transition occurred (WorkflowStepTransitionID == 0) or on task creation.
+	// Transient and is not stored in the tasks table.
+	FromStepID string `json:"-"`
+	// FromWorkflowID is the workflow_id the task left on the same write that
+	// set WorkflowStepTransitionID, read inside that write's own transaction.
+	// It is transient and is not stored in the tasks table.
+	FromWorkflowID string `json:"-"`
 
 	// Office extensions.
 	//
@@ -828,13 +1141,18 @@ type Task struct {
 	// this field are routed to SetTaskRunner / ClearTaskRunner inside
 	// the task repository.
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
-	Origin                 string `json:"origin,omitempty"`     // manual, agent_created, routine
-	ProjectID              string `json:"project_id,omitempty"` // FK to office project
-	Labels                 string `json:"labels,omitempty"`     // JSON array string, default "[]"
-	Identifier             string `json:"identifier,omitempty"` // e.g. "KAN-42"
+	// AssigneeUserID is the HUMAN assignee, entirely independent of the agent
+	// assignee above: a task can carry both, and setting one never clears the
+	// other. It is advisory and gates nothing; taking a task over is a
+	// reassignment plus a prompt, not a lock.
+	AssigneeUserID string `json:"assignee_user_id,omitempty"`
+	Origin         string `json:"origin,omitempty"`     // manual, agent_created, routine
+	ProjectID      string `json:"project_id,omitempty"` // FK to office project
+	Labels         string `json:"labels,omitempty"`     // JSON array string, default "[]"
+	Identifier     string `json:"identifier,omitempty"` // e.g. "KAN-42"
 
 	// ExternalID is a caller-supplied identity used for create-idempotency
-	// (docs/specs/tasks/external-id-idempotency/spec.md). Empty when the task
+	// (docs/specs/tasks/requirements/external-id-idempotency.md). Empty when the task
 	// holds none. Unique per (workspace_id, external_id) when non-empty.
 	ExternalID string `json:"external_id,omitempty"`
 	// ExternalIDSettledAt is non-nil once the create that claimed ExternalID
@@ -859,15 +1177,35 @@ func (t *Task) IsOfficeOwnedAndAssigned() bool {
 	return t != nil && t.IsFromOffice && t.AssigneeAgentProfileID != ""
 }
 
+// OfficeDecisionWaitCandidate is the compact projection the Office
+// decision-waiting detector scans (REQ-OFFICE-STALL-VISIBILITY-002). It is a
+// candidate, not a finding: the repository query only establishes that the
+// task is Office-owned, sits at a step carrying a decision-required seat, and
+// has been quiet since UpdatedAt. Whether a decision was already recorded and
+// whether a run is still in flight are judged by the detector, so each
+// rejection has its own countable reason.
+type OfficeDecisionWaitCandidate struct {
+	TaskID    string    `db:"id"`
+	StepID    string    `db:"workflow_step_id"`
+	UpdatedAt time.Time `db:"updated_at"`
+}
+
+// OfficeDecisionWaitCursor identifies the last candidate in one ordered page.
+// The task repository uses it to continue a bounded scan without repeatedly
+// returning the same oldest rows.
+type OfficeDecisionWaitCursor struct {
+	UpdatedAt time.Time
+	TaskID    string
+}
+
 // ChildCompletionRow is the compact active-child projection used to decide
 // whether a parent task's on_children_completed trigger is ready to fire.
 type ChildCompletionRow struct {
-	ID                   string       `json:"id" db:"id"`
-	State                v1.TaskState `json:"state" db:"state"`
-	Title                string       `json:"title" db:"title"`
-	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
-	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
-	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
+	ID             string       `json:"id" db:"id"`
+	State          v1.TaskState `json:"state" db:"state"`
+	Title          string       `json:"title" db:"title"`
+	WorkflowStepID string       `json:"workflow_step_id" db:"workflow_step_id"`
+	UpdatedAt      time.Time    `json:"updated_at" db:"updated_at"`
 }
 
 // HasStartWhenUnblockedIntent reports whether a task's deferred launch intent
@@ -903,7 +1241,7 @@ func HasStartWhenUnblockedIntent(task *Task) bool {
 // every dependency chain, because admission happens at create time for any task
 // entering a step with room.
 func DropWIPDeferredLaunch(task *Task) {
-	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) {
+	if task == nil || task.Metadata == nil || HasStartWhenUnblockedIntent(task) || HasCeilingDeferredIntent(task) {
 		return
 	}
 	delete(task.Metadata, MetaKeyDeferredLaunch)
@@ -935,6 +1273,44 @@ const (
 	WorkflowStyleOffice = "office"
 	WorkflowStyleCustom = "custom"
 )
+
+// WorkflowProfileSessionStartPolicy controls how a fixed-profile workflow step
+// obtains a session when it starts after a profile switch.
+type WorkflowProfileSessionStartPolicy string
+
+const (
+	WorkflowProfileSessionStartPolicyReuse WorkflowProfileSessionStartPolicy = "reuse"
+	WorkflowProfileSessionStartPolicyNew   WorkflowProfileSessionStartPolicy = "new"
+)
+
+// NormalizeWorkflowProfileSessionStartPolicy returns the safe default for empty
+// and unknown workflow step session-start policy values.
+func NormalizeWorkflowProfileSessionStartPolicy(value string) WorkflowProfileSessionStartPolicy {
+	value = strings.TrimSpace(value)
+	if WorkflowProfileSessionStartPolicy(value) == WorkflowProfileSessionStartPolicyNew {
+		return WorkflowProfileSessionStartPolicyNew
+	}
+	return WorkflowProfileSessionStartPolicyReuse
+}
+
+// WorkflowProfileSessionEndPolicy controls what happens to a fixed-profile
+// workflow step's session when the workflow leaves it for another profile.
+type WorkflowProfileSessionEndPolicy string
+
+const (
+	WorkflowProfileSessionEndPolicyComplete WorkflowProfileSessionEndPolicy = "complete"
+	WorkflowProfileSessionEndPolicyPark     WorkflowProfileSessionEndPolicy = "park"
+)
+
+// NormalizeWorkflowProfileSessionEndPolicy returns the safe default for empty
+// and unknown workflow step session-end policy values.
+func NormalizeWorkflowProfileSessionEndPolicy(value string) WorkflowProfileSessionEndPolicy {
+	value = strings.TrimSpace(value)
+	if WorkflowProfileSessionEndPolicy(value) == WorkflowProfileSessionEndPolicyComplete {
+		return WorkflowProfileSessionEndPolicyComplete
+	}
+	return WorkflowProfileSessionEndPolicyPark
+}
 
 // WorkflowSource values are persisted in workflows.source and record where a
 // workflow definition came from. Manual workflows are user-managed; GitHub
@@ -989,10 +1365,17 @@ func (w *Workspace) IsImproveKandev() bool {
 
 // Workspace represents a workspace
 type Workspace struct {
-	ID                          string    `json:"id"`
-	Name                        string    `json:"name"`
-	Description                 string    `json:"description"`
-	OwnerID                     string    `json:"owner_id"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	OwnerID     string `json:"owner_id"`
+	// OrgID is the owning tenant. Empty means organizations are off or the
+	// tenancy migration has not run.
+	OrgID string `json:"org_id,omitempty"`
+	// UnitID places the workspace in the organization unit tree. Reach is
+	// resolved from this placement, so a workspace without one is reachable by
+	// nobody.
+	UnitID                      string    `json:"unit_id,omitempty"`
 	DefaultExecutorID           *string   `json:"default_executor_id,omitempty"`
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
@@ -1008,15 +1391,20 @@ type Workspace struct {
 
 // TaskRepository represents a repository associated with a task
 type TaskRepository struct {
-	ID             string                 `json:"id"`
-	TaskID         string                 `json:"task_id"`
-	RepositoryID   string                 `json:"repository_id"`
-	BaseBranch     string                 `json:"base_branch"`
-	CheckoutBranch string                 `json:"checkout_branch,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	ID                            string                 `json:"id"`
+	TaskID                        string                 `json:"task_id"`
+	RepositoryID                  string                 `json:"repository_id"`
+	BaseBranch                    string                 `json:"base_branch"`
+	CheckoutBranch                string                 `json:"checkout_branch,omitempty"`
+	BranchPolicyID                string                 `json:"branch_policy_id,omitempty"`
+	BranchPolicyName              string                 `json:"branch_policy_name,omitempty"`
+	BranchPolicyBaseBranch        string                 `json:"branch_policy_base_branch,omitempty"`
+	BranchPolicyBranchTemplate    string                 `json:"branch_policy_branch_template,omitempty"`
+	BranchPolicyPullRequestTarget string                 `json:"branch_policy_pull_request_target,omitempty"`
+	Position                      int                    `json:"position"`
+	Metadata                      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt                     time.Time              `json:"created_at"`
+	UpdatedAt                     time.Time              `json:"updated_at"`
 }
 
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
@@ -1035,9 +1423,11 @@ type TaskWorkspaceFolder struct {
 // attachment operation, so a later materialization failure can compensate
 // without touching pre-existing sources.
 type WorkspaceSourceBatch struct {
-	TaskID            string                            `json:"task_id"`
-	Sources           []WorkspaceSource                 `json:"sources,omitempty"`
-	RepositoryUpdates []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+	TaskID                    string                            `json:"task_id"`
+	Sources                   []WorkspaceSource                 `json:"sources,omitempty"`
+	RepositoryUpdates         []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+	ExpectedParentID          string                            `json:"-"`
+	ExpectedParentWorkspaceID string                            `json:"-"`
 }
 
 // WorkspaceSourceRepositoryUpdate records a legacy association branch derived
@@ -1080,6 +1470,8 @@ const (
 	MessageTypeToolEdit MessageType = "tool_edit"
 	// MessageTypeToolRead is for file read operations
 	MessageTypeToolRead MessageType = "tool_read"
+	// MessageTypeToolSearch is for code and file search operations
+	MessageTypeToolSearch MessageType = "tool_search"
 	// MessageTypeToolExecute is for command execution operations
 	MessageTypeToolExecute MessageType = "tool_execute"
 	// MessageTypeProgress is for progress updates
@@ -1130,6 +1522,100 @@ const (
 	// already gone. No ACP outcome ever reaches the wire in this state.
 	PermissionStatusExpired PermissionStatus = "expired"
 )
+
+type PermissionResolutionActorKind string
+
+const (
+	PermissionActorBrowser             PermissionResolutionActorKind = "browser"
+	PermissionActorPersonalAccessToken PermissionResolutionActorKind = "personal_access_token"
+	PermissionActorAutomation          PermissionResolutionActorKind = "automation"
+	PermissionActorSynthetic           PermissionResolutionActorKind = "synthetic"
+)
+
+type PermissionResolutionSource string
+
+const (
+	PermissionSourceWeb         PermissionResolutionSource = "web"
+	PermissionSourceExternalMCP PermissionResolutionSource = "external_mcp"
+	PermissionSourceAutomation  PermissionResolutionSource = "automation"
+	// PermissionSourceAutomationMCP identifies a resolution made by the
+	// fixed in-session coordinator surface. It is distinct from legacy
+	// backend automation and from the authenticated external MCP bridge.
+	PermissionSourceAutomationMCP PermissionResolutionSource = "automation_mcp"
+)
+
+type PermissionResolutionResult string
+
+const (
+	PermissionResolutionDispatching   PermissionResolutionResult = "dispatching"
+	PermissionResolutionAccepted      PermissionResolutionResult = "accepted"
+	PermissionResolutionStale         PermissionResolutionResult = "stale"
+	PermissionResolutionExpired       PermissionResolutionResult = "expired"
+	PermissionResolutionFailed        PermissionResolutionResult = "failed"
+	PermissionResolutionIndeterminate PermissionResolutionResult = "indeterminate"
+)
+
+// PermissionResolutionAudit is the durable, presentation-free record of one
+// exact resolution attempt. Credential-bearing action data is not part of this
+// type by design.
+type PermissionResolutionAudit struct {
+	ClaimID     string                        `json:"claim_id"`
+	ActorUserID string                        `json:"actor_user_id,omitempty"`
+	ActorKind   PermissionResolutionActorKind `json:"actor_kind"`
+	Source      PermissionResolutionSource    `json:"source"`
+	RequestID   string                        `json:"request_id"`
+	PendingID   string                        `json:"pending_id"`
+	OptionID    string                        `json:"option_id"`
+	OptionKind  string                        `json:"option_kind"`
+	SelectedAt  time.Time                     `json:"selected_at"`
+	FinalizedAt *time.Time                    `json:"finalized_at,omitempty"`
+	Result      PermissionResolutionResult    `json:"result"`
+}
+
+type PermissionResolutionClaimOutcome string
+
+const (
+	PermissionClaimed           PermissionResolutionClaimOutcome = "claimed"
+	PermissionClaimNotFound     PermissionResolutionClaimOutcome = "not_found"
+	PermissionClaimInProgress   PermissionResolutionClaimOutcome = "in_progress"
+	PermissionClaimAlreadyFinal PermissionResolutionClaimOutcome = "already_final"
+)
+
+type PermissionResolutionClaimRequest struct {
+	TaskID    string
+	SessionID string
+	Audit     PermissionResolutionAudit
+}
+
+type PermissionResolutionClaimResult struct {
+	Outcome PermissionResolutionClaimOutcome
+	Message *Message
+}
+
+type PermissionResolutionFinalizeOutcome string
+
+const (
+	PermissionFinalized             PermissionResolutionFinalizeOutcome = "finalized"
+	PermissionFinalizeNotFound      PermissionResolutionFinalizeOutcome = "not_found"
+	PermissionFinalizeClaimMismatch PermissionResolutionFinalizeOutcome = "claim_mismatch"
+	PermissionFinalizeAlreadyFinal  PermissionResolutionFinalizeOutcome = "already_final"
+)
+
+type PermissionResolutionFinalizeRequest struct {
+	TaskID      string
+	SessionID   string
+	RequestID   string
+	PendingID   string
+	ClaimID     string
+	Result      PermissionResolutionResult
+	Status      PermissionStatus
+	FinalizedAt time.Time
+}
+
+type PermissionResolutionFinalizeResult struct {
+	Outcome PermissionResolutionFinalizeOutcome
+	Message *Message
+}
 
 // TaskPendingAction is the compact task-list projection for a session blocked
 // on user input.
@@ -1296,6 +1782,25 @@ const (
 	TaskSessionStateCancelled TaskSessionState = "CANCELLED"
 )
 
+// AllTaskSessionStates is the canonical, exhaustive list of TaskSessionState
+// constants. Code that must cover every state (drift-guard tests, admin
+// tooling) should range over this slice instead of hand-writing its own
+// literal: Go does not enforce switch/slice exhaustiveness (the exhaustive
+// linter is not enabled in this repo), so a hand-written literal silently
+// stops covering new states the moment one is added here. Add a new
+// TaskSessionState constant to this slice in the same change that adds the
+// const.
+var AllTaskSessionStates = []TaskSessionState{
+	TaskSessionStateCreated,
+	TaskSessionStateStarting,
+	TaskSessionStateRunning,
+	TaskSessionStateIdle,
+	TaskSessionStateWaitingForInput,
+	TaskSessionStateCompleted,
+	TaskSessionStateFailed,
+	TaskSessionStateCancelled,
+}
+
 // SessionBranchInfo is a lightweight projection of a session with its worktree branch.
 // Used by the PR watch reconciler to find sessions that may need PR watches.
 type SessionBranchInfo struct {
@@ -1310,6 +1815,7 @@ type SessionBranchInfo struct {
 type TaskSession struct {
 	ID                     string                 `json:"id"`
 	TaskID                 string                 `json:"task_id"`
+	QueueIncarnationID     string                 `json:"queue_incarnation_id"`
 	Name                   string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
 	AgentExecutionID       string                 `json:"agent_execution_id"`   // Docker container/agent execution
 	ContainerID            string                 `json:"container_id"`         // Docker container ID for cleanup
@@ -1347,6 +1853,16 @@ type TaskSession struct {
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
 
+	// TaskRunnerResolvedFromTask marks a session whose executor profile came
+	// from task metadata rather than an explicit launch argument. It is
+	// transient and lets the persistence transaction reject a stale
+	// pre-lock resolution before inserting the session or environment.
+	TaskRunnerResolvedFromTask bool `json:"-"`
+	// TaskRunnerProfileAtResolution is the task metadata value observed when
+	// the session's runner was resolved. It is transient and paired with
+	// TaskRunnerResolvedFromTask for the persistence-time recheck.
+	TaskRunnerProfileAtResolution string `json:"-"`
+
 	// Workflow-related fields
 	IsPrimary     bool         `json:"is_primary"`              // Whether this is the primary session for the task
 	IsPassthrough bool         `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode
@@ -1358,6 +1874,15 @@ type TaskSession struct {
 	// panel; the frontend snapshots the PRIOR value at that moment to draw
 	// the divider before overwriting it.
 	LastReadMessageID string `json:"last_read_message_id,omitempty"`
+
+	// Usage/cost rollup columns (docs/specs/task-cost-ledger/spec.md AC-28,
+	// AC-29). task_usage_events is the source of truth; these are the
+	// running totals internal/task/usage's writer maintains transactionally
+	// alongside each ledger insert via IncrementTaskSessionUsageTx.
+	CostSubcents   int64 `json:"cost_subcents"`
+	TokensIn       int64 `json:"tokens_in"`
+	TokensCachedIn int64 `json:"tokens_cached_in"`
+	TokensOut      int64 `json:"tokens_out"`
 }
 
 // ToAPI converts internal TaskSession to API type
@@ -1366,6 +1891,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
 		"id":                   s.ID,
 		"task_id":              s.TaskID,
+		"queue_incarnation_id": s.QueueIncarnationID,
 		"agent_execution_id":   s.AgentExecutionID,
 		"container_id":         s.ContainerID,
 		"agent_profile_id":     s.AgentProfileID,
@@ -1539,12 +2065,57 @@ type Repository struct {
 	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
 }
 
+// DesktopDiscoveryRootState describes whether an install-wide discovery root
+// can currently be read by the backend process.
+type DesktopDiscoveryRootState string
+
+const (
+	DesktopDiscoveryRootConnected         DesktopDiscoveryRootState = "connected"
+	DesktopDiscoveryRootReconnectRequired DesktopDiscoveryRootState = "reconnect_required"
+)
+
+// DesktopDiscoveryRoot is an install-wide root selected for automatic local
+// repository discovery. It is deliberately separate from a workspace-owned
+// repository grant.
+type DesktopDiscoveryRoot struct {
+	ID              string                    `json:"id"`
+	Path            string                    `json:"path"`
+	DisplayPath     string                    `json:"display_path"`
+	State           DesktopDiscoveryRootState `json:"state"`
+	LastScanAt      *time.Time                `json:"last_scan_at,omitempty"`
+	LastFailureAt   *time.Time                `json:"last_failure_at,omitempty"`
+	LastFailureCode string                    `json:"last_failure_code,omitempty"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// DesktopDiscoveryMigration records upgrade-only state without turning the
+// old implicit Home fallback into a new automatic scan.
+type DesktopDiscoveryMigration struct {
+	HomeConfirmationRequired bool      `json:"home_confirmation_required"`
+	UpdatedAt                time.Time `json:"updated_at"`
+}
+
+// RepositoryBranchPolicy is a reusable branch workflow owned by one repository.
+// It is configuration, not task history: task repositories copy these fields
+// into their snapshot columns when a policy is selected.
+type RepositoryBranchPolicy struct {
+	ID                string    `json:"id"`
+	RepositoryID      string    `json:"repository_id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description,omitempty"`
+	BaseBranch        string    `json:"base_branch"`
+	BranchTemplate    string    `json:"branch_template"`
+	PullRequestTarget string    `json:"pull_request_target"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 // RepositorySet is a named, reusable group of workspace repositories that fills
 // the task-creation repository picker in one action.
 //
-// A set deliberately stores no branch. Branch choice belongs to a task and is
-// already modelled on TaskRepository; a branch cached here would go stale
-// against the repository's real refs.
+// A set stores an optional base branch for each member. The task draft copies
+// that preference when the set is applied; checkout state remains task-owned.
 type RepositorySet struct {
 	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
@@ -1563,6 +2134,7 @@ type RepositorySetItem struct {
 	RepositorySetID string    `json:"repository_set_id"`
 	RepositoryID    string    `json:"repository_id"`
 	Position        int       `json:"position"`
+	BaseBranch      string    `json:"base_branch"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -1620,6 +2192,7 @@ const (
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
 	ExecutorTypeSprites      ExecutorType = "sprites"
 	ExecutorTypeSSH          ExecutorType = "ssh"
+	ExecutorTypeKubernetes   ExecutorType = "k8s"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
 )
 
@@ -1628,7 +2201,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote:
 		return true
 	default:
 		return false
@@ -1652,6 +2225,8 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSprites
 	case ExecutorTypeSSH:
 		return agentruntime.RuntimeSSH
+	case ExecutorTypeKubernetes:
+		return agentruntime.RuntimeKubernetes
 	default:
 		return agentruntime.RuntimeStandalone
 	}
@@ -1669,7 +2244,7 @@ func IsContainerizedExecutorType(t ExecutorType) bool {
 // IsAlwaysResumableRuntime reports whether the given runtime represents
 // an executor that can always be resumed even without an explicit resume token.
 func IsAlwaysResumableRuntime(runtime agentruntime.Runtime) bool {
-	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH
+	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH || runtime == agentruntime.RuntimeKubernetes
 }
 
 const (
@@ -1799,23 +2374,37 @@ const (
 // It owns the workspace (worktree/container/sandbox) and the agentctl control server.
 // Multiple sessions can share the same TaskEnvironment.
 type TaskEnvironment struct {
-	ID                string `json:"id"`
-	TaskID            string `json:"task_id"`
-	ExecutorType      string `json:"executor_type"`
-	ExecutorID        string `json:"executor_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
+	ID                  string `json:"id"`
+	TaskID              string `json:"task_id"`
+	OwnershipGeneration int64  `json:"ownership_generation"`
+	ExecutorType        string `json:"executor_type"`
+	ExecutorID          string `json:"executor_id"`
+	ExecutorProfileID   string `json:"executor_profile_id"`
 	// AgentExecutionID was removed: executors_running owns the execution<->session
 	// mapping now. Read it via repo.GetExecutorRunningBySessionID(sessionID) when
 	// needed (the orchestrator does this in service_turns.go for WorkspaceInfo).
 	ControlPort int                   `json:"control_port"` // agentctl control port
 	Status      TaskEnvironmentStatus `json:"status"`
+	// MaterializationSessionID durably identifies the one session allowed to
+	// turn a creating environment into a physical workspace. It is empty once
+	// the environment is ready; sibling sessions must attach only.
+	MaterializationSessionID string `json:"-"`
 
 	// WorkspacePath points at the agent workspace root (the task root when
 	// TaskDirName is set, otherwise the single repo's worktree path).
 	// Physical worktree identity lives on Repos, never on the environment row.
 	WorkspacePath string `json:"workspace_path,omitempty"`
 	ContainerID   string `json:"container_id,omitempty"`
-	SandboxID     string `json:"sandbox_id,omitempty"`
+	// ContainerBootstrapNonceSecretID is an environment-scoped encrypted secret
+	// reference used only to establish a new agentctl control connection to an
+	// already-owned Docker container. It is deliberately not exposed in API
+	// responses and is distinct from session runtime/auth metadata.
+	ContainerBootstrapNonceSecretID string `json:"-"`
+	// ContainerControlAuthTokenSecretID is the environment-scoped encrypted
+	// agentctl control-token reference for a running Docker container. It is
+	// deliberately separate from a session's agent runtime/auth metadata.
+	ContainerControlAuthTokenSecretID string `json:"-"`
+	SandboxID                         string `json:"sandbox_id,omitempty"`
 
 	// TaskDirName is the semantic directory name for the task (e.g. "fix-bug_ab12").
 	// Set when the task uses the multi-repo task-directory layout
@@ -1847,20 +2436,48 @@ func (te *TaskEnvironment) RepoFor(repositoryID string) *TaskEnvironmentRepo {
 // physical-worktree truth — identity, path, branch, status, and lifecycle
 // timestamps.
 type TaskEnvironmentRepo struct {
-	ID                string     `json:"id"`
-	TaskEnvironmentID string     `json:"task_environment_id"`
-	RepositoryID      string     `json:"repository_id"`
-	BranchSlug        string     `json:"branch_slug,omitempty"`
-	WorktreeID        string     `json:"worktree_id,omitempty"`
-	WorktreePath      string     `json:"worktree_path,omitempty"`
-	WorktreeBranch    string     `json:"worktree_branch,omitempty"`
-	Position          int        `json:"position"`
-	ErrorMessage      string     `json:"error_message,omitempty"`
-	Status            string     `json:"status,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	MergedAt          *time.Time `json:"merged_at,omitempty"`
-	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
+	ID                        string     `json:"id"`
+	TaskEnvironmentID         string     `json:"task_environment_id"`
+	RepositoryID              string     `json:"repository_id"`
+	BranchSlug                string     `json:"branch_slug,omitempty"`
+	WorktreeID                string     `json:"worktree_id,omitempty"`
+	WorktreePath              string     `json:"worktree_path,omitempty"`
+	WorktreeBranch            string     `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string     `json:"-"`
+	WorktreeIntegrationRef    string     `json:"-"`
+	WorktreeRecoveryHeadSHA   string     `json:"-"`
+	WorktreeBranchCompactedAt *time.Time `json:"-"`
+	Position                  int        `json:"position"`
+	ErrorMessage              string     `json:"error_message,omitempty"`
+	Status                    string     `json:"status,omitempty"`
+	CreatedAt                 time.Time  `json:"created_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
+	MergedAt                  *time.Time `json:"merged_at,omitempty"`
+	DeletedAt                 *time.Time `json:"deleted_at,omitempty"`
+}
+
+// TaskEnvironmentRecoveryClaimRequest identifies the environment authority
+// required while an automatic host-worktree recovery is in progress.
+type TaskEnvironmentRecoveryClaimRequest struct {
+	TaskEnvironmentID   string
+	OwnerTaskID         string
+	OwnershipGeneration int64
+	SessionID           string
+	OperationID         string
+	ExecutorType        string
+}
+
+// TaskEnvironmentRecoveryClaim is the durable authority held from recovery
+// preflight through the external workspace-start boundary.
+type TaskEnvironmentRecoveryClaim struct {
+	TaskEnvironmentID   string    `json:"task_environment_id"`
+	OwnerTaskID         string    `json:"owner_task_id"`
+	OwnershipGeneration int64     `json:"ownership_generation"`
+	SessionID           string    `json:"session_id"`
+	OperationID         string    `json:"operation_id"`
+	ExecutorType        string    `json:"executor_type"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // ToAPI converts internal TaskEnvironment to API map.
@@ -1929,31 +2546,73 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 
 // TaskPlan represents a plan associated with a task
 type TaskPlan struct {
-	ID                             string     `json:"id"`
-	TaskID                         string     `json:"task_id"`
-	Title                          string     `json:"title"`
-	Content                        string     `json:"content"`
-	CreatedBy                      string     `json:"created_by"` // "agent" or "user"
+	ID        string `json:"id"`
+	TaskID    string `json:"task_id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	CreatedBy string `json:"created_by"` // "agent" or "user"
+	// WriteVersion changes on every committed title/content write. It is an
+	// internal optimistic-concurrency token and is not part of browser DTOs.
+	WriteVersion                   string     `json:"-"`
 	CreatedAt                      time.Time  `json:"created_at"`
 	UpdatedAt                      time.Time  `json:"updated_at"`
+	CommentsRevision               int64      `json:"comments_revision"`
 	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
 	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
 	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
 }
 
+// TaskPlanComment is pending user feedback attached to the current task plan.
+type TaskPlanComment struct {
+	ID           string    `json:"id"`
+	TaskID       string    `json:"task_id"`
+	PlanID       string    `json:"plan_id"`
+	Body         string    `json:"body"`
+	SelectedText string    `json:"selected_text"`
+	AnchorFrom   int       `json:"anchor_from"`
+	AnchorTo     int       `json:"anchor_to"`
+	Version      int64     `json:"version"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// TaskPlanCommentSnapshot is the authoritative pending-comment collection for a plan.
+type TaskPlanCommentSnapshot struct {
+	TaskID   string             `json:"task_id" db:"task_id"`
+	PlanID   string             `json:"plan_id" db:"plan_id"`
+	Revision int64              `json:"revision" db:"revision"`
+	Comments []*TaskPlanComment `json:"comments"`
+}
+
+// TaskPlanCommentRef identifies the exact pending-comment version a delivery includes.
+type TaskPlanCommentRef struct {
+	ID      string `json:"id"`
+	Version int64  `json:"version"`
+}
+
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.
 // Revisions are the source of truth for history; TaskPlan stores the latest revision's content as HEAD.
 type TaskPlanRevision struct {
-	ID                 string    `json:"id"`
-	TaskID             string    `json:"task_id"`
-	RevisionNumber     int       `json:"revision_number"`
-	Title              string    `json:"title"`
-	Content            string    `json:"content"`
-	AuthorKind         string    `json:"author_kind"` // "agent" | "user"
-	AuthorName         string    `json:"author_name"` // display snapshot (agent profile name or user identifier)
-	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
+	ID             string `json:"id"`
+	TaskID         string `json:"task_id"`
+	RevisionNumber int    `json:"revision_number"`
+	Title          string `json:"title"`
+	Content        string `json:"content"`
+	// ContentBytes is populated by bounded metadata reads. Full revision reads
+	// leave it zero because callers can derive the size from Content.
+	ContentBytes       int     `json:"-"`
+	AuthorKind         string  `json:"author_kind"` // "agent" | "user"
+	AuthorName         string  `json:"author_name"` // display snapshot (agent profile name or user identifier)
+	RevertOfRevisionID *string `json:"revert_of_revision_id,omitempty"`
+	// WorkflowStepID/Name/Color snapshot the task's workflow step at write
+	// time, same display-snapshot pattern as AuthorName. Empty for revisions
+	// written before this stamping existed, and preserved as-is (not
+	// re-stamped) when a later write coalesces into this row.
+	WorkflowStepID    string    `json:"workflow_step_id,omitempty"`
+	WorkflowStepName  string    `json:"workflow_step_name,omitempty"`
+	WorkflowStepColor string    `json:"workflow_step_color,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"` // bumps on coalesce merge
 }
 
 // TaskWalkthrough is an agent-authored guided code tour attached to a task.
@@ -2063,31 +2722,37 @@ const (
 // A task keeps a bounded history of runs; findings reference the run that
 // produced them so the UI can attribute and supersede them.
 type TaskReviewRun struct {
-	ID              string           `json:"id"`
-	TaskID          string           `json:"task_id"`
-	SessionID       string           `json:"session_id"`
-	Trigger         ReviewRunTrigger `json:"trigger"`
-	WorkflowStepID  string           `json:"workflow_step_id"`
-	AgentID         string           `json:"agent_id"`
-	Model           string           `json:"model"`
-	Status          ReviewRunStatus  `json:"status"`
-	ErrorCode       string           `json:"error_code"`
-	ErrorMessage    string           `json:"error_message"`
-	Summary         string           `json:"summary"`
-	FindingCount    int              `json:"finding_count"`
-	FileCount       int              `json:"file_count"`
-	RepositoryCount int              `json:"repository_count"`
-	PromptTokens    int              `json:"prompt_tokens"`
-	ResponseTokens  int              `json:"response_tokens"`
-	DurationMs      int              `json:"duration_ms"`
-	CreatedAt       time.Time        `json:"created_at"`
-	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
+	ID             string           `json:"id"`
+	TaskID         string           `json:"task_id"`
+	SessionID      string           `json:"session_id"`
+	Trigger        ReviewRunTrigger `json:"trigger"`
+	WorkflowStepID string           `json:"workflow_step_id"`
+	// EntryID is the step-transition ledger row identifier of the step entry
+	// that requested this run, when the run was requested by the
+	// run_code_review step-entry action. Empty for manual/MCP-triggered runs.
+	// Durable dedup key for AC-OFFICE-STEP-ENTRY-001.10: a redelivery of the
+	// same entry must rejoin this run rather than start a second one.
+	EntryID         string          `json:"entry_id,omitempty"`
+	AgentID         string          `json:"agent_id"`
+	Model           string          `json:"model"`
+	Status          ReviewRunStatus `json:"status"`
+	ErrorCode       string          `json:"error_code"`
+	ErrorMessage    string          `json:"error_message"`
+	Summary         string          `json:"summary"`
+	FindingCount    int             `json:"finding_count"`
+	FileCount       int             `json:"file_count"`
+	RepositoryCount int             `json:"repository_count"`
+	PromptTokens    int             `json:"prompt_tokens"`
+	ResponseTokens  int             `json:"response_tokens"`
+	DurationMs      int             `json:"duration_ms"`
+	CreatedAt       time.Time       `json:"created_at"`
+	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
 }
 
 // TaskReviewFinding is one anchored, advisory review comment produced by a
 // review run. It renders in the Changes/Review diff at File/StartLine..EndLine
 // of Repository, and carries FileDiffHash so a client can tell whether the
-// diff has moved under it (see ../../../../docs/specs/native-code-review/spec.md).
+// diff has moved under it (see ../../../../docs/specs/agents/requirements/native-code-review.md).
 type TaskReviewFinding struct {
 	ID             string              `json:"id"`
 	RunID          string              `json:"run_id"`
@@ -2228,22 +2893,23 @@ func (t *Task) ToAPI() *v1.Task {
 	}
 
 	result := &v1.Task{
-		ID:              t.ID,
-		WorkspaceID:     t.WorkspaceID,
-		WorkflowID:      t.WorkflowID,
-		Title:           t.Title,
-		Description:     t.Description,
-		State:           t.State,
-		Priority:        t.Priority,
-		Repositories:    repositories,
-		CreatedAt:       t.CreatedAt,
-		UpdatedAt:       t.UpdatedAt,
-		Metadata:        t.Metadata,
-		Interrupted:     t.Metadata[MetaKeyInterruptedAt] != nil,
-		AutoStartFailed: t.Metadata[MetaKeyAutoStartFailed] != nil,
-		IsEphemeral:     t.IsEphemeral,
-		ParentID:        t.ParentID,
-		Autopilot:       t.Autopilot,
+		ID:                t.ID,
+		WorkspaceID:       t.WorkspaceID,
+		WorkflowID:        t.WorkflowID,
+		Title:             t.Title,
+		Description:       t.Description,
+		State:             t.State,
+		Priority:          t.Priority,
+		Repositories:      repositories,
+		CreatedAt:         t.CreatedAt,
+		UpdatedAt:         t.UpdatedAt,
+		Metadata:          PublicTaskMetadata(t.Metadata),
+		Interrupted:       t.Metadata[MetaKeyInterruptedAt] != nil,
+		AutoStartFailed:   t.Metadata[MetaKeyAutoStartFailed] != nil,
+		WorkspaceOrphaned: WorkspaceOrphaned(t.Metadata),
+		IsEphemeral:       t.IsEphemeral,
+		ParentID:          t.ParentID,
+		Autopilot:         t.Autopilot,
 	}
 	if t.Identifier != "" {
 		result.Identifier = t.Identifier

@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-visibility-sync-hook"]
 plan: "plan.md"
-spec: "../../specs/ui/agent-todo-list-panel.md"
+spec: "../../specs/ui/requirements/agent-todo-list-panel.md"
 ---
 
 # Task 05: E2E coverage

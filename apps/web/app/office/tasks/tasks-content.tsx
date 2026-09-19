@@ -14,6 +14,7 @@ type IssuesContentProps = {
   expandedIds: Set<string>;
   onToggleExpand: (id: string) => void;
   agentMap: Map<string, string>;
+  onTaskPatch?: (taskId: string, patch: Partial<OfficeTask>) => void;
 };
 
 function IssueListView({
@@ -65,12 +66,13 @@ export function TasksContent({
   expandedIds,
   onToggleExpand,
   agentMap,
+  onTaskPatch,
 }: IssuesContentProps) {
   const { t } = useTranslation();
   if (isLoading) return <EmptyState message={t("office:loadingTasks")} />;
 
   if (viewMode === "board") {
-    return <TaskBoard tasks={flatNodes.map((n) => n.task)} />;
+    return <TaskBoard tasks={flatNodes.map((n) => n.task)} onTaskPatch={onTaskPatch} />;
   }
 
   return (

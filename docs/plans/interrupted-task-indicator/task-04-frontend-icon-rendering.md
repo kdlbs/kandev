@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-frontend-data-plumbing"]
 plan: "plan.md"
-spec: "../../specs/tasks/interrupted-task-indicator.md"
+spec: "../../specs/tasks/requirements/interrupted-task-indicator.md"
 ---
 
 # Task 04: Frontend interrupted icon rendering

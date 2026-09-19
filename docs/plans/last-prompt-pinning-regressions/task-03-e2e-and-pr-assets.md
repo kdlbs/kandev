@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-transcript-threshold-and-controls", "02-pinned-prompt-overflow"]
 plan: "plan.md"
-spec: "../../specs/last-prompt-pinning-regressions/spec.md"
+spec: "../../specs/ui/requirements/last-prompt-pinning-regressions.md"
 ---
 
 # Task 03: Verify browser behavior and attach screenshots

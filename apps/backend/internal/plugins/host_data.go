@@ -28,7 +28,9 @@ import (
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 
+	githubsvc "github.com/kandev/kandev/internal/github"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -44,6 +46,7 @@ const (
 	resourceExecutorProfiles = "executor_profiles"
 	resourceRepositories     = "repositories"
 	resourceMessages         = "messages"
+	resourceInteractions     = "interactions"
 )
 
 // apiReadCapability formats resource as the api_read:<resource> capability
@@ -140,6 +143,8 @@ type taskDataSource interface {
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*taskmodels.ExecutorRunning, error)
 	ListAllExecutorProfiles(ctx context.Context) ([]*taskmodels.ExecutorProfile, error)
 	GetExecutor(ctx context.Context, id string) (*taskmodels.Executor, error)
+	BuildDependencyViews(ctx context.Context, tasks []*taskmodels.Task) map[string]taskservice.DependencyView
+	BuildDependencyViewsBounded(ctx context.Context, tasks []*taskmodels.Task) (map[string]taskservice.DependencyView, error)
 }
 
 // workflowLister is the narrow slice of internal/task/service.Service the
@@ -161,6 +166,19 @@ type workflowStepLister interface {
 // (see filterGlobalProfiles), matching the resource's global-instance scope.
 type agentProfileDataSource interface {
 	ListAgents(ctx context.Context) (*agentsettingsdto.ListAgentsResponse, error)
+}
+
+// taskPRSource is the narrow slice of internal/github.Service the Tasks reader
+// needs to populate Task.PullRequests.
+//
+// SEPARATE FROM taskDataSource ON PURPOSE. A task's pull requests live in
+// github_task_prs, owned by internal/github, not on the task row — so the link
+// is not derivable from anything taskDataSource returns. It is wired separately
+// (SetTaskPRSource) because GitHub is optional and may be available after a
+// host is created; a nil source simply yields tasks with no PullRequests rather
+// than failing the read.
+type taskPRSource interface {
+	ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*githubsvc.TaskPR, error)
 }
 
 // sessionCodeStatsSource is the narrow slice of
@@ -327,6 +345,28 @@ const taskFetchPageSize = 1000
 
 type taskReader struct{ host *pluginHost }
 
+// fetchTaskPage resolves, filters, sorts, and paginates matching tasks,
+// returning the raw models backing exactly the returned page (not the whole
+// matching set). Both taskReader.List (gRPC ListTasks, which has no further
+// narrowing) and the canvas task-list route (which narrows further by
+// binding scope, and so must derive dependencies AFTER that narrowing
+// rather than trust this method's caller to have already bounded the set)
+// call this to fetch.
+func (h *pluginHost) fetchTaskPage(ctx context.Context, filter pluginsdk.TaskFilter, page pluginsdk.Page) ([]*taskmodels.Task, *pluginsdk.PageInfo, error) {
+	workspaceIDs, err := h.resolveWorkspaceIDs(ctx, filter.WorkspaceIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	tasks, err := h.fetchTasksForWorkspaces(ctx, workspaceIDs, filter.IncludeEphemeral, filter.IncludeArchived)
+	if err != nil {
+		return nil, nil, err
+	}
+	tasks = filterTasks(tasks, filter)
+	sortTasksNewestFirst(tasks)
+	models, info := paginate(tasks, page)
+	return models, info, nil
+}
+
 func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
 	if !r.host.capabilities.CanRead(resourceTasks) {
 		return nil, nil, permissionDenied(apiReadCapability(resourceTasks))
@@ -334,39 +374,103 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 	if r.host.taskData == nil {
 		return r.host.UnimplementedHostData.Tasks().List(ctx, filter, page)
 	}
-	workspaceIDs, err := r.host.resolveWorkspaceIDs(ctx, filter.WorkspaceIDs)
+	models, info, err := r.host.fetchTaskPage(ctx, filter, page)
 	if err != nil {
 		return nil, nil, err
 	}
-	tasks, err := r.host.fetchTasksForWorkspaces(ctx, workspaceIDs, filter.IncludeEphemeral, false)
-	if err != nil {
+	items := tasksToDTOs(models)
+	// Attached AFTER pagination so the PR lookup and dependency derivation
+	// cover one page, not the whole workspace: a campaign-sized read would
+	// otherwise fan out over every task kandev holds to fill a list the
+	// caller already bounded.
+	r.host.attachPullRequests(ctx, items)
+	if err := r.host.attachDependencies(ctx, items, models, true, "ListTasks"); err != nil {
 		return nil, nil, err
 	}
-	tasks = filterTasks(tasks, filter)
-	sortTasksNewestFirst(tasks)
-	items, info := paginate(tasksToDTOs(tasks), page)
 	return items, info, nil
+}
+
+// attachPullRequests fills Task.PullRequests in place. A missing source or a
+// failed lookup leaves them empty and logs nothing: pull requests are
+// supplementary to a task read, and refusing the whole list over them would
+// take away more than it protects.
+func (h *pluginHost) attachPullRequests(ctx context.Context, tasks []pluginsdk.Task) {
+	source := h.taskPRs
+	if h.taskPRsDep != nil {
+		source = h.taskPRsDep()
+	}
+	if source == nil || len(tasks) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(tasks))
+	for i := range tasks {
+		ids = append(ids, tasks[i].ID)
+	}
+	byTask, err := source.ListTaskPRsByTaskIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	for i := range tasks {
+		prs := byTask[tasks[i].ID]
+		if len(prs) == 0 {
+			continue
+		}
+		tasks[i].PullRequests = taskPRsToDTOs(prs)
+	}
+}
+
+// fetchTask resolves id to both wire and raw model forms without attaching
+// pull requests or the dependency projection. model is nil whenever h has no
+// task data source (dto then comes straight from UnimplementedHostData).
+// Callers that only need the task for a scope-match preflight — and discard
+// it immediately after — must use this (or fetchTaskForScopeCheck) rather
+// than taskReader.Get, so a caller that never serializes the task never pays
+// for its dependency derivation either.
+func (h *pluginHost) fetchTask(ctx context.Context, id string) (dto *pluginsdk.Task, model *taskmodels.Task, err error) {
+	if !h.capabilities.CanRead(resourceTasks) {
+		return nil, nil, permissionDenied(apiReadCapability(resourceTasks))
+	}
+	if h.taskData == nil {
+		dto, err = h.UnimplementedHostData.Tasks().Get(ctx, id)
+		return dto, nil, err
+	}
+	task, err := h.taskData.GetTask(ctx, id)
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return nil, nil, taskNotFound(id)
+		}
+		return nil, nil, err
+	}
+	converted := taskModelToDTO(task)
+	return &converted, task, nil
+}
+
+// fetchTaskForScopeCheck resolves id for a scope-match preflight only: the
+// caller discards the task immediately after deciding whether it may act on
+// it, so this must not pay for pull-request or dependency-projection
+// attachment the response will never serialize.
+func (h *pluginHost) fetchTaskForScopeCheck(ctx context.Context, id string) (*pluginsdk.Task, error) {
+	dto, _, err := h.fetchTask(ctx, id)
+	return dto, err
 }
 
 // Get returns a gRPC NotFound error (not a (nil, nil) success) when id
 // doesn't resolve to a task, so the in-process contract matches exactly what
 // a real plugin observes over the wire via grpcHostServer.GetTask.
 func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error) {
-	if !r.host.capabilities.CanRead(resourceTasks) {
-		return nil, permissionDenied(apiReadCapability(resourceTasks))
-	}
-	if r.host.taskData == nil {
-		return r.host.UnimplementedHostData.Tasks().Get(ctx, id)
-	}
-	task, err := r.host.taskData.GetTask(ctx, id)
+	dto, model, err := r.host.fetchTask(ctx, id)
 	if err != nil {
-		if errors.Is(err, repoerrors.ErrTaskNotFound) {
-			return nil, taskNotFound(id)
-		}
 		return nil, err
 	}
-	dto := taskModelToDTO(task)
-	return &dto, nil
+	if model == nil {
+		return dto, nil
+	}
+	items := []pluginsdk.Task{*dto}
+	r.host.attachPullRequests(ctx, items)
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{model}, false, "GetTask"); err != nil {
+		return nil, err
+	}
+	return &items[0], nil
 }
 
 type sessionReader struct{ host *pluginHost }

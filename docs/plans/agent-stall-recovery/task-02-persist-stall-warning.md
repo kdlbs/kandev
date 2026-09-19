@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-detect-stalled-prompt"]
 plan: "plan.md"
-spec: "../../specs/agent-stall-recovery/spec.md"
+spec: "../../specs/agents/requirements/agent-stall-recovery.md"
 ---
 
 # Task 02: Persist an actionable stall notice

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-release-workflow"]
 plan: "plan.md"
-spec: "../../specs/release-pr-queue-bypass/spec.md"
+spec: "../../specs/release/requirements/release-pr-queue-bypass.md"
 ---
 
 # Task 02: Document the Stable release bypass
@@ -22,7 +22,7 @@ spec: "../../specs/release-pr-queue-bypass/spec.md"
 - `node scripts/validate-public-docs.mjs`
 - `python3 scripts/lint-harness-files.test.py`
 - `python3 .github/scripts/lint-harness-files.py --all`
-- `git diff --check -- docs/public/release-process.md docs/ci-merge-queue.md .agents/skills/release/SKILL.md AGENTS.md docs/specs/release-pr-queue-bypass/spec.md docs/specs/INDEX.md docs/decisions/2026-08-17-release-pr-ruleset-bypass.md docs/decisions/INDEX.md`
+- `git diff --check -- docs/public/release-process.md docs/ci-merge-queue.md .agents/skills/release/SKILL.md AGENTS.md docs/specs/release/requirements/release-pr-queue-bypass.md docs/specs/INDEX.md docs/decisions/2026-08-17-release-pr-ruleset-bypass.md docs/decisions/INDEX.md`
 
 ## Files likely touched
 
@@ -30,7 +30,7 @@ spec: "../../specs/release-pr-queue-bypass/spec.md"
 - `docs/ci-merge-queue.md`
 - `.agents/skills/release/SKILL.md`
 - `AGENTS.md`
-- `docs/specs/release-pr-queue-bypass/spec.md`
+- `docs/specs/release/requirements/release-pr-queue-bypass.md`
 - `docs/specs/INDEX.md`
 - `docs/decisions/2026-08-17-release-pr-ruleset-bypass.md`
 - `docs/decisions/INDEX.md`
@@ -46,7 +46,7 @@ Sequential. The documents record the workflow contract from Task 01.
 ## Inputs
 
 - The implemented workflow and contract from Task 01.
-- `docs/specs/release-pr-queue-bypass/spec.md`.
+- `docs/specs/release/requirements/release-pr-queue-bypass.md`.
 - ADR `2026-08-17-release-pr-ruleset-bypass`.
 - The existing how-to structure of the release page.
 

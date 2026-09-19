@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/context-window-unmeasured-state.md"
+spec: "../../specs/ui/requirements/context-window-unmeasured-state.md"
 ---
 
 # Task 01: Render the unmeasured context state

@@ -147,6 +147,33 @@ func TestWorkspaceSourceMaterializer_PrelaunchReturnsExplicitDeferredResult(t *t
 	}
 }
 
+func TestWorkspaceSourceMaterializer_UnprovisionedEnvironmentDefers(t *testing.T) {
+	ctx := context.Background()
+	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)
+	repo := newMaterializerRepo(t)
+	seedMaterializerTask(t, ctx, repo, repoPath, taskRoot, primaryPath)
+	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.Status = models.TaskEnvironmentStatusCreating
+	env.TaskDirName = ""
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	materializer := &workspaceSourceMaterializer{
+		repo: repo, worktreeMgr: newMaterializerWorktreeMgr(t, taskRoot), logger: newTestLogger(),
+	}
+
+	result, err := materializer.MaterializeWorkspaceSources(ctx, "task-1", &models.WorkspaceSourceBatch{TaskID: "task-1"})
+	if err != nil {
+		t.Fatalf("MaterializeWorkspaceSources: %v", err)
+	}
+	if result == nil || result.WorkspacePath != "" || len(result.SessionIDs) != 0 {
+		t.Fatalf("unprovisioned result = %#v, want explicit deferred result", result)
+	}
+}
+
 func TestWorkspaceSourceMaterializer_RemoteMaterializesAdditionalRepositories(t *testing.T) {
 	for _, executorType := range []models.ExecutorType{models.ExecutorTypeLocalDocker, models.ExecutorTypeSSH, models.ExecutorTypeSprites} {
 		t.Run(string(executorType), func(t *testing.T) {
@@ -159,7 +186,11 @@ func TestWorkspaceSourceMaterializer_RemoteMaterializesAdditionalRepositories(t 
 				t.Fatal(err)
 			}
 			env.ExecutorType = string(executorType)
+			env.TaskDirName = ""
 			if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.DB().ExecContext(ctx, `UPDATE task_environments SET task_dir_name = '' WHERE id = 'env-1'`); err != nil {
 				t.Fatal(err)
 			}
 			remote := &remoteWorkspaceMaterializerStub{ids: []string{"session-1"}}
@@ -173,6 +204,20 @@ func TestWorkspaceSourceMaterializer_RemoteMaterializesAdditionalRepositories(t 
 			}
 			if len(remote.calls) != 1 || len(remote.calls[0]) != 1 || remote.calls[0][0].Destination != "added-main" {
 				t.Fatalf("remote projection=%+v; want only additional repository", remote.calls)
+			}
+			inventory, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+			if err != nil {
+				t.Fatalf("ListTaskEnvironmentRepos: %v", err)
+			}
+			found := false
+			for _, row := range inventory {
+				if row.RepositoryID == "repo-added" && row.BranchSlug == "main" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("environment inventory = %+v; want repo-added/main", inventory)
 			}
 		})
 	}

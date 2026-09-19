@@ -138,7 +138,7 @@ func (h *PortProxyHandler) HandlePortProxy(c *gin.Context) {
 
 	// Per-user scoping (opt-in auth): authorize session ownership before the
 	// bare execution lookup / per-session proxy cache (see vscode_proxy.go).
-	if err := h.lifecycleMgr.CheckSessionAccess(c.Request.Context(), sessionID); err != nil {
+	if err := h.lifecycleMgr.CheckSessionExecAccess(c.Request.Context(), sessionID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
@@ -236,7 +236,8 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 		return nil, fmt.Errorf("session not found")
 	}
 
-	agentctlClient := execution.GetAgentCtlClient()
+	agentctlClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if agentctlClient == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl client not available"})
 		return nil, fmt.Errorf("agentctl client not available")

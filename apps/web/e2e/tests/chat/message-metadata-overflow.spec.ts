@@ -45,7 +45,7 @@ async function openMetadataDialog(
   await session.waitForLoad();
 
   const chat = session.activeChat();
-  await expect(chat.getByText(SEEDED_MESSAGE)).toBeVisible({ timeout: 15_000 });
+  await expect(chat.getByText(SEEDED_MESSAGE, { exact: true })).toBeVisible({ timeout: 15_000 });
 
   // Scope to the seeded message's own action row (mirrors the favorite spec).
   const messageBody = chat

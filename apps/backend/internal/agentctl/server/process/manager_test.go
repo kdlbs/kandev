@@ -23,6 +23,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestManagerRefreshWorkspaceNormalizesTriggerForEveryTracker(t *testing.T) {
+	log := newTestLogger(t)
+	rootDir, cleanupRoot := setupTestRepo(t)
+	t.Cleanup(cleanupRoot)
+	repoDir, cleanupRepo := setupTestRepo(t)
+	t.Cleanup(cleanupRepo)
+	thirdDir, cleanupThird := setupTestRepo(t)
+	t.Cleanup(cleanupThird)
+
+	root := NewWorkspaceTracker(rootDir, log)
+	firstRepo := NewWorkspaceTrackerForRepo(repoDir, "first", log)
+	secondRepo := NewWorkspaceTrackerForRepo(thirdDir, "second", log)
+	t.Cleanup(root.Stop)
+	t.Cleanup(firstRepo.Stop)
+	t.Cleanup(secondRepo.Stop)
+
+	trackers := []*WorkspaceTracker{root, firstRepo, secondRepo}
+	for _, tracker := range trackers {
+		tracker.SetPollMode(PollModePaused)
+		tracker.accessDenied.Store(true)
+	}
+
+	mgr := &Manager{
+		logger:           log,
+		workspaceTracker: root,
+		repoTrackers:     []*WorkspaceTracker{firstRepo, secondRepo},
+	}
+	mgr.RefreshWorkspace(context.Background(), "unsupported_trigger")
+
+	for i, tracker := range trackers {
+		if got := tracker.GetPollMode(); got != PollModeFast {
+			t.Errorf("tracker %d poll mode = %q, want fast", i, got)
+		}
+		if tracker.accessDenied.Load() {
+			t.Errorf("tracker %d retained access denial after manual refresh", i)
+		}
+	}
+}
+
 func TestPublishMCPAttachmentPublishesWithoutBlocking(t *testing.T) {
 	m := &Manager{
 		updatesCh: make(chan adapter.AgentEvent, 1),
@@ -86,7 +125,7 @@ func TestManagerReadStderrDeliversCleanedLinesToOptionalConsumer(t *testing.T) {
 		logger:         newTestLogger(t),
 	}
 	m.wg.Add(1)
-	m.readStderr()
+	m.readStderr(make(chan struct{}))
 
 	got := []string{<-consumer.lines, <-consumer.lines}
 	want := []string{"quota", "plain"}
@@ -116,10 +155,11 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	log, observed := newObservedTestLogger(t)
 	cmd := exec.Command(os.Args[0], "-test.run=TestManagerProcessExitHelper")
 	cmd.Env = append(os.Environ(), "KANDEV_MANAGER_PROCESS_EXIT_HELPER=1")
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
 	}
+	cmd.Stderr = stderrWriter
 	m := &Manager{
 		cmd:       cmd,
 		stderr:    stderr,
@@ -132,12 +172,24 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 		groupAliveFn: func(int) bool { return false },
 	}
 	m.status.Store(StatusRunning)
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = stderrWriter.Close()
+		_ = stderr.Close()
+		m.wg.Wait()
+	})
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start process: %v", err)
 	}
+	if err := stderrWriter.Close(); err != nil {
+		t.Fatalf("close parent stderr pipe: %v", err)
+	}
+	stderrDone := make(chan struct{})
 	m.wg.Add(2)
-	go m.readStderr()
-	m.waitForExit()
+	go m.readStderr(stderrDone)
+	m.waitForExit(stderrDone)
 	m.wg.Wait()
 
 	event := <-m.updatesCh
@@ -272,8 +324,11 @@ func TestStartProcessPipes_CreatesAllPipes(t *testing.T) {
 	assert.NotNil(t, m.stdout, "stdout pipe should be created")
 	assert.NotNil(t, m.stderr, "stderr pipe should be created")
 
-	// Clean up
-	_ = m.stdin.Close()
+	t.Cleanup(func() {
+		_ = m.stdin.Close()
+		_ = m.stdout.Close()
+		_ = m.closeStderrPipe()
+	})
 }
 
 func TestStartProcessPipes_FailsAfterProcessStarted(t *testing.T) {

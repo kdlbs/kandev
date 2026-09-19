@@ -5,7 +5,7 @@ status: completed
 wave: 3b
 depends_on: ["12-plugin-ui-native-registrations"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 12b: Rebuild Bitbucket page with GitHub list parity

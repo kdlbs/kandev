@@ -143,6 +143,20 @@ func TestMergeMaskedSecretsDropsMaskWithNoStoredValue(t *testing.T) {
 	}
 }
 
+func TestMergeMaskedSecretsDoesNotPreserveLegacyUtilitySelector(t *testing.T) {
+	schema := map[string]any{"properties": map[string]any{
+		"agent_profile": map[string]any{"type": "string", "format": "agent-profile"},
+	}}
+	merged := mergeMaskedSecrets(
+		map[string]any{"agent_profile": "profile-1"},
+		map[string]any{"utility_agent": "utility-agent-1"},
+		schema,
+	)
+	if _, found := merged["utility_agent"]; found {
+		t.Fatalf("mergeMaskedSecrets() retained the legacy selector: %v", merged)
+	}
+}
+
 func TestValidateConfigSchema(t *testing.T) {
 	schema := testConfigSchema()
 	cases := []struct {
@@ -400,7 +414,7 @@ func TestGetConfigHandlerMissingReturns404(t *testing.T) {
 }
 
 func TestUpdateConfigHandlerInvalidSchemaReturns400(t *testing.T) {
-	router, svc := newTestRouter(t)
+	router, svc := newAdminTestRouter(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 
 	rec := doRequest(router, http.MethodPatch, "/api/plugins/kandev-plugin-github",

@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-backend-capacity-and-service-settings"]
 plan: "plan.md"
-spec: "../../specs/platform/startup-configuration-parity.md"
+spec: "../../specs/platform/requirements/startup-configuration-parity.md"
 ---
 
 # Task 05: Agentctl settings propagation

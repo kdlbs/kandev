@@ -30,6 +30,7 @@ type MobileColumnTabsProps = {
   taskCounts: Record<string, number>;
   onColumnChange: (index: number) => void;
   workflowNavigation?: MobileWorkflowNavigation;
+  allStepsAutoHidden?: boolean;
 };
 
 function StepCount({ step, count }: { step: WorkflowStep; count: number }) {
@@ -114,12 +115,14 @@ function StepOptions({
   taskCounts,
   onSelect,
   separated,
+  allStepsAutoHidden,
 }: {
   steps: WorkflowStep[];
   activeIndex: number;
   taskCounts: Record<string, number>;
   onSelect: (index: number) => void;
   separated: boolean;
+  allStepsAutoHidden?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -134,7 +137,9 @@ function StepOptions({
         {t("kanban:step")}
       </h3>
       {steps.length === 0 && (
-        <p className="px-3 py-3 text-sm text-muted-foreground">{t("kanban:noStepsConfigured")}</p>
+        <p className="px-3 py-3 text-sm text-muted-foreground">
+          {allStepsAutoHidden ? t("kanban:allEmptyStepsAutoHidden") : t("kanban:noStepsConfigured")}
+        </p>
       )}
       {steps.map((step, index) => {
         const isActive = index === activeIndex;
@@ -167,6 +172,7 @@ function NavigatorDrawerContent({
   activeIndex,
   taskCounts,
   workflowNavigation,
+  allStepsAutoHidden,
   onSelectStep,
   onSelectWorkflow,
 }: Omit<MobileColumnTabsProps, "onColumnChange"> & {
@@ -192,9 +198,163 @@ function NavigatorDrawerContent({
           taskCounts={taskCounts}
           onSelect={onSelectStep}
           separated={!!workflowNavigation}
+          allStepsAutoHidden={allStepsAutoHidden}
         />
       </div>
     </DrawerContent>
+  );
+}
+
+function getEmptyStepsLabel(allStepsAutoHidden: boolean, t: (key: string) => string): string {
+  return t(allStepsAutoHidden ? "kanban:allEmptyStepsAutoHidden" : "kanban:noStepsConfigured");
+}
+
+function PreviousStepButton({
+  activeStep,
+  activeIndex,
+  onColumnChange,
+  t,
+}: {
+  activeStep?: WorkflowStep;
+  activeIndex: number;
+  onColumnChange: (index: number) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      className="h-11 w-11 cursor-pointer rounded-xl transition-[background-color,color,border-color,transform] duration-150 ease-out active:scale-[0.96]"
+      disabled={!activeStep || activeIndex === 0}
+      onClick={() => onColumnChange(activeIndex - 1)}
+      aria-label={t("kanban:previousStep")}
+    >
+      <IconChevronLeft className="h-4 w-4" />
+    </Button>
+  );
+}
+
+function NextStepButton({
+  activeStep,
+  activeIndex,
+  stepCount,
+  onColumnChange,
+  t,
+}: {
+  activeStep?: WorkflowStep;
+  activeIndex: number;
+  stepCount: number;
+  onColumnChange: (index: number) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      className="h-11 w-11 cursor-pointer rounded-xl transition-[background-color,color,border-color,transform] duration-150 ease-out active:scale-[0.96]"
+      disabled={!activeStep || activeIndex === stepCount - 1}
+      onClick={() => onColumnChange(activeIndex + 1)}
+      aria-label={t("kanban:nextStep")}
+    >
+      <IconChevronRight className="h-4 w-4" />
+    </Button>
+  );
+}
+
+function NavigatorTrigger({
+  activeStep,
+  activeWorkflow,
+  stepLabel,
+  taskCounts,
+  t,
+}: {
+  activeStep?: WorkflowStep;
+  activeWorkflow?: MobileWorkflowNavigation["workflows"][number];
+  stepLabel: string;
+  taskCounts: Record<string, number>;
+  t: (key: string, options?: Record<string, string>) => string;
+}) {
+  const ariaLabel = activeWorkflow
+    ? t("kanban:chooseWorkflowOrStep", { name: activeWorkflow.name, stepLabel })
+    : t("kanban:chooseStep", { stepLabel });
+  return (
+    <DrawerTrigger asChild>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-14 min-w-0 cursor-pointer justify-between rounded-xl bg-muted/30 px-3 shadow-sm transition-[background-color,color,border-color,box-shadow,transform] duration-150 ease-out active:scale-[0.96]"
+        data-testid="mobile-board-navigator"
+        aria-label={ariaLabel}
+      >
+        <span className="flex min-w-0 items-center gap-2.5 text-left">
+          <IconLayoutKanban className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="flex min-w-0 flex-col">
+            {activeWorkflow && (
+              <span className="truncate text-[11px] font-medium leading-4 text-muted-foreground">
+                {activeWorkflow.name}
+              </span>
+            )}
+            <span className="flex min-w-0 items-center gap-1.5">
+              {activeStep && (
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", activeStep.color)} />
+              )}
+              <span className="truncate text-sm font-semibold leading-5">{stepLabel}</span>
+            </span>
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {activeStep && <StepCount step={activeStep} count={taskCounts[activeStep.id] ?? 0} />}
+          <IconChevronDown className="h-4 w-4 text-muted-foreground" />
+        </span>
+      </Button>
+    </DrawerTrigger>
+  );
+}
+
+function MobileColumnTabsHeader({
+  steps,
+  activeStep,
+  activeIndex,
+  activeWorkflow,
+  stepLabel,
+  taskCounts,
+  onColumnChange,
+  t,
+}: {
+  steps: WorkflowStep[];
+  activeStep?: WorkflowStep;
+  activeIndex: number;
+  activeWorkflow?: MobileWorkflowNavigation["workflows"][number];
+  stepLabel: string;
+  taskCounts: Record<string, number>;
+  onColumnChange: (index: number) => void;
+  t: (key: string, options?: Record<string, string>) => string;
+}) {
+  return (
+    <div className="grid shrink-0 grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2 border-b border-border/70 px-4 py-2">
+      <PreviousStepButton
+        activeStep={activeStep}
+        activeIndex={activeIndex}
+        onColumnChange={onColumnChange}
+        t={t}
+      />
+      <NavigatorTrigger
+        activeStep={activeStep}
+        activeWorkflow={activeWorkflow}
+        stepLabel={stepLabel}
+        taskCounts={taskCounts}
+        t={t}
+      />
+      <NextStepButton
+        activeStep={activeStep}
+        activeIndex={activeIndex}
+        stepCount={steps.length}
+        onColumnChange={onColumnChange}
+        t={t}
+      />
+    </div>
   );
 }
 
@@ -204,6 +364,7 @@ export function MobileColumnTabs({
   taskCounts,
   onColumnChange,
   workflowNavigation,
+  allStepsAutoHidden = false,
 }: MobileColumnTabsProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -212,7 +373,7 @@ export function MobileColumnTabs({
     workflowNavigation?.workflows.find(
       (workflow) => workflow.id === workflowNavigation.activeWorkflowId,
     ) ?? workflowNavigation?.workflows[0];
-  const stepLabel = activeStep?.title ?? t("task:noStepsConfigured");
+  const stepLabel = activeStep?.title ?? getEmptyStepsLabel(allStepsAutoHidden, t);
 
   const selectStep = (index: number) => {
     onColumnChange(index);
@@ -224,72 +385,23 @@ export function MobileColumnTabs({
 
   return (
     <Drawer open={open} onOpenChange={setOpen}>
-      <div className="grid shrink-0 grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2 border-b border-border/70 px-4 py-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-11 w-11 cursor-pointer rounded-xl transition-[background-color,color,border-color,transform] duration-150 ease-out active:scale-[0.96]"
-          disabled={!activeStep || activeIndex === 0}
-          onClick={() => onColumnChange(activeIndex - 1)}
-          aria-label={t("kanban:previousStep")}
-        >
-          <IconChevronLeft className="h-4 w-4" />
-        </Button>
-
-        <DrawerTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            className="h-14 min-w-0 cursor-pointer justify-between rounded-xl bg-muted/30 px-3 shadow-sm transition-[background-color,color,border-color,box-shadow,transform] duration-150 ease-out active:scale-[0.96]"
-            data-testid="mobile-board-navigator"
-            aria-label={
-              activeWorkflow
-                ? t("kanban:chooseWorkflowOrStep", { name: activeWorkflow.name, stepLabel })
-                : t("kanban:chooseStep", { stepLabel })
-            }
-          >
-            <span className="flex min-w-0 items-center gap-2.5 text-left">
-              <IconLayoutKanban className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="flex min-w-0 flex-col">
-                {activeWorkflow && (
-                  <span className="truncate text-[11px] font-medium leading-4 text-muted-foreground">
-                    {activeWorkflow.name}
-                  </span>
-                )}
-                <span className="flex min-w-0 items-center gap-1.5">
-                  {activeStep && (
-                    <span className={cn("h-2 w-2 shrink-0 rounded-full", activeStep.color)} />
-                  )}
-                  <span className="truncate text-sm font-semibold leading-5">{stepLabel}</span>
-                </span>
-              </span>
-            </span>
-            <span className="flex shrink-0 items-center gap-2">
-              {activeStep && <StepCount step={activeStep} count={taskCounts[activeStep.id] ?? 0} />}
-              <IconChevronDown className="h-4 w-4 text-muted-foreground" />
-            </span>
-          </Button>
-        </DrawerTrigger>
-
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-11 w-11 cursor-pointer rounded-xl transition-[background-color,color,border-color,transform] duration-150 ease-out active:scale-[0.96]"
-          disabled={!activeStep || activeIndex === steps.length - 1}
-          onClick={() => onColumnChange(activeIndex + 1)}
-          aria-label={t("kanban:nextStep")}
-        >
-          <IconChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
+      <MobileColumnTabsHeader
+        steps={steps}
+        activeStep={activeStep}
+        activeIndex={activeIndex}
+        activeWorkflow={activeWorkflow}
+        stepLabel={stepLabel}
+        taskCounts={taskCounts}
+        onColumnChange={onColumnChange}
+        t={t}
+      />
 
       <NavigatorDrawerContent
         steps={steps}
         activeIndex={activeIndex}
         taskCounts={taskCounts}
         workflowNavigation={workflowNavigation}
+        allStepsAutoHidden={allStepsAutoHidden}
         onSelectStep={selectStep}
         onSelectWorkflow={selectWorkflow}
       />

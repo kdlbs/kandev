@@ -14,6 +14,14 @@ Integrations let Kandev's backend read and update provider data. They power repo
 3. Test the connection before browsing or enabling watches.
 4. Keep provider API credentials, task Git credentials, and agent credentials separate.
 
+![Three separate integration credential paths from workspace and executor configuration to provider APIs, repository remotes, and the agent CLI.](../screenshots/integrations.svg)
+
+[Open full-size SVG diagram][integrations-diagram]
+
+[integrations-diagram]: ../../docs/screenshots/integrations.svg
+
+The path that fails identifies the configuration surface to inspect. A working provider connection does not prove that a task can push Git changes or that its agent CLI can authenticate.
+
 They do **not** provide every credential a task needs. Keep these paths distinct:
 
 - an integration credential lets the Kandev backend call a provider API;
@@ -29,6 +37,8 @@ A task can therefore display a pull or merge request while its worktree cannot p
 ## Open integration settings
 
 Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a provider. The direct routes are:
+
+![Settings > Workspaces > Default > Integrations showing Azure DevOps, GitHub, GitLab, Jira, Linear, and Sentry connections.](../screenshots/settings-integrations.png)
 
 - `/settings/workspace/{workspaceId}/integrations/github`
 - `/settings/workspace/{workspaceId}/integrations/gitlab`
@@ -88,6 +98,17 @@ connection leaves compatibility mode permanently.
 
 The status panel identifies the selected source, verified actor, connection state, and any missing App capabilities. When GitHub has reported quota data, use **Show GitHub API limits** to inspect the remaining API requests, GraphQL query points, Search requests, and reset times for that workspace connection. The disclosure appears as a tooltip on desktop and a tap-accessible drawer on touch devices. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.
 
+#### Troubleshoot PR discovery
+
+The **PR discovery failed** warning is separate from the quota values:
+
+- A full quota report does not prove that PR discovery works. Check the warning's reason and last failure time.
+- **Invalid query** means Kandev rejected the provider request. The warning remains until a newer discovery attempt succeeds.
+- **Rate limited** means the provider delayed discovery. Kandev waits for the reported or calculated retry time instead of repeating the same request.
+- A warning for one workspace or repository does not mark another workspace healthy or unhealthy. Replacing the workspace connection starts a new credential-scoped health state.
+
+When discovery succeeds, the warning clears and the status revision advances. If the warning remains after a quota refresh, wait for the retry time or verify the selected connection and repository scope.
+
 ### Automation and personal identity
 
 PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions. Settings show this shared identity inside **Workspace GitHub access** instead of repeating it as a separate **My GitHub identity** section.
@@ -123,13 +144,33 @@ select **Save changes** once. GitHub App creation, import, and installation rema
 GitHub workflows. The help control beside **Task Git access** explains the effective credential
 path on desktop hover or focus and in a touch-accessible drawer on mobile.
 
-- **Managed workspace credentials** (an opt-in policy) uses the selected workspace PAT, named GitHub
-  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. Kandev
-  configures `agentctl` as Git's credential helper so an attached repository can redeem its
-  matching lease on demand; the returned credential is not written to the repository or Git
-  configuration. A separate broker-aware shim handles `gh`. The task receives neither the stored
-  PAT nor an App private key. An executor-profile `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes
-  precedence for that task.
+- Existing workspaces keep their saved task-access policy during upgrades. A historical workspace
+  may still use managed mode. New workspaces default to **Inherit executor Git credentials**.
+- Select **Change connection** when the workspace has an automation connection. Select **Connect
+  GitHub** when it does not. Both entry points show **Task Git access**.
+- **Managed workspace credentials** use the selected PAT, named GitHub CLI account, or GitHub App
+  through Kandev's task/repository-scoped broker. Kandev provides a short-lived Git helper and `gh`
+  shim; stored PATs and App private keys are not exposed to the task. An executor-profile
+  `GH_TOKEN` or `GITHUB_TOKEN` takes precedence.
+- **Inherit executor Git credentials** does not install Kandev's helper or `gh` shim. Local and
+  Worktree tasks use host Git credentials. For GitHub HTTPS remotes, Kandev checks the host
+  account's `gh` login for each attached GitHub host. When `gh auth token` succeeds, Kandev adds a
+  temporary HTTPS helper to the task environment. The helper uses the GitHub CLI configuration
+  visible to the Kandev backend service account. Run `gh auth login` as the OS account that runs
+  the backend; a login in another desktop terminal is not enough. The host bridge does not write
+  global Git configuration or persist helper or token state. An explicit `GH_TOKEN` or
+  `GITHUB_TOKEN` takes precedence over stored CLI credentials. For GitHub Enterprise hosts,
+  `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` have the same effect. If `gh` is unavailable
+  or not authenticated for a host, the task keeps its other inherited Git and SSH credentials.
+  Docker, SSH, and cloud tasks use credentials configured in the executor. A CLI login authenticates
+  that account, but it does not grant repository permissions.
+- A disconnected workspace can select **Inherit executor Git credentials** and save only the
+  task-access setting. It does not need a PAT or GitHub App.
+- The policy applies to newly launched task processes. After a launch or resume, use **New
+  terminal** to create a fresh shell process. Reopening or reconnecting the same terminal does not
+  refresh its environment.
+- For Kandev-managed GitHub checkouts, Local and Worktree preparation follows the host's current
+  `gh` clone protocol. A user-managed checkout keeps its existing origin.
 
 For a managed **Improve Kandev** task, Kandev keeps the task attached to the canonical
 `kdlbs/kandev` repository. Before the first launch, the workspace automation connection resolves
@@ -139,15 +180,6 @@ exact fork. The canonical `origin` remains the pull, issue, and pull-request tar
 connection does not need a fork. An App connection without direct write access cannot own an
 automatic personal fork, so managed fork preparation fails closed; the Improve Kandev issue-only
 option remains available.
-
-- **Inherit executor Git credentials** is the default for newly created workspaces and does not
-  install Kandev's broker helper or `gh` shim. Local
-  and Worktree tasks use credentials already visible to the host Git process (including SSH).
-  Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
-  For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates `origin` to the
-  host's configured `gh` clone protocol. Selecting SSH therefore lets Git conditional includes that
-  match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS
-  origin. Repositories you registered from an existing local checkout are never rewritten.
 
 If Git rejects a managed checkout with **detected dubious ownership**, the Kandev service account
 and the checkout owner do not match. Repository preparation stops and the session error identifies
@@ -272,23 +304,6 @@ deletes only the encrypted catalog credential bundle, and does not delete or uni
 GitHub. Remove the provider-side App separately only after confirming that no other deployment uses
 it.
 
-### Upgrade and recovery
-
-Workspaces that existed when workspace authentication was introduced receive a **Legacy shared** connection so upgrades do not immediately lose GitHub access. It preserves the previous installation-wide resolution behavior while the workspace is migrated. Existing workspaces and their saved task-access policies are not rewritten by the new-workspace defaults. After a legacy workspace selects a PAT, named CLI account, or App installation, it cannot return to legacy mode. Copying a workspace never copies authentication or App installation bindings.
-
-Legacy shared resolution checks an authenticated host `gh` CLI first, then backend `GITHUB_TOKEN`, backend `GH_TOKEN`, and finally the old stored `GITHUB_TOKEN`/`github_token` secret. Those ambient sources are migration compatibility only; configure an explicit workspace connection to make identity and access deterministic.
-
-For recovery:
-
-- Replace an invalid PAT or select the exact CLI account again; validation must succeed before Kandev swaps the connection.
-- Run `gh auth status --hostname github.com` as the Kandev service user when a selected CLI login disappears, then sign in that account again if necessary.
-- Reconnect **My GitHub identity** after authorization expiry/revocation. App automation remains available while the personal connection is invalid.
-- Ask an organization owner to unsuspend or reinstall an App, restore its repository selection, or grant a reported missing permission. Refresh the workspace status afterward.
-- Disconnect and repeat **Install GitHub App** when the workspace is bound to the wrong installation. Removing the binding does not uninstall the provider-side App.
-- To replace compromised App root credentials, disconnect every binding, delete the catalog
-  registration, rotate the credentials in GitHub, and add the App again. Kandev does not rotate App
-  private keys, OAuth client secrets, or webhook secrets automatically.
-
 </details>
 
 ### Configure and use the workspace
@@ -299,6 +314,16 @@ For recovery:
 Workspace GitHub settings control repository scope, default/saved searches, quick-action prompts, pull-request analytics, review watches, and issue watches. At `/github`, search or browse pull requests and issues, save queries, apply prompt presets, and launch a Kandev task. A saved query can default to one repository; choose **All repos** for no repository default, and change the repository filter without rewriting the saved query. An associated pull request also appears in task review surfaces for feedback, checks, reviews, and merge actions.
 
 In the **Saved** list, use the star beside a query to set or clear it as the default view. Pull requests and issues keep separate saved defaults. Kandev applies the relevant saved default, including its repository filter, the next time you enter `/github` or switch to that result type; setting or clearing the star does not replace the view currently on screen. Without a saved default, Kandev uses the first configured default query for that result type.
+
+On a phone, tap **Views** beside the current query name to open the query drawer. Switch between **Pull requests** and **Issues**, then select a built-in or saved query. The drawer stays open when you switch result types; select a query or tap **Done** to return to results. **Save current query** stays at the bottom while the query list scrolls. Saved-query loading failures offer **Retry**; a failed save keeps your name and repository selection in the save dialog.
+
+Long query names shorten to one line in the **Views** button; open the drawer to read the full name. The result count, last-updated time, and **Refresh** appear in a separate row below the search input.
+
+Result rows provide touch-sized task actions and show a linked task's workflow step without hovering. Tap the page chooser between the previous/next buttons to open a bottom drawer with the current page marked. Select a page to jump directly to it, up to GitHub's first 1,000 search results, or tap **Done** to keep the current page.
+
+To use saved **task** filters from this page, open the app navigation menu and choose **Task views**. This opens the same task-view picker and filter editor as the task sidebar, for the active Kanban workspace. Task views are personal and saved separately for each workspace, including the selected view and draft filters. Switching workspaces restores that workspace's views. These task views are separate from GitHub saved queries and Threads views. Open a task from this drawer and use browser Back to return to the GitHub dashboard.
+
+When upgrading from global task views, your existing views are copied once into each workspace you can access at migration time. Later edits stay independent. New workspaces start with **All tasks**. Refresh older open browser tabs before editing views after the upgrade.
 
 A **Review Watch** polls a GitHub search and creates review work. It requires a workflow, starting step, prompt, and workspace. The default query is `type:pr state:open review-requested:@me -is:draft`; add repository filters or replace the query as needed. An optional agent or executor profile overrides the selected step's defaults. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds. The prompt field accepts `@name` references to saved prompts, resolved the same way as in a workflow step; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
@@ -312,9 +337,25 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 
 ### Automate a linked pull request
 
-For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
+For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls, **Auto-fix CI & address comments**, **Auto-merge or requeue when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**, are scoped to whichever linked PR's tab is selected. Enabling a control for one linked PR does not enable it for the task's other linked PRs; Kandev tracks delivery and deduplication separately for each linked PR. The saved auto-fix prompt override applies to every linked PR.
+
+If a current pull-request head has a GitHub Actions workflow that requires maintainer approval, the PR status control shows **Awaiting maintainer approval**, even when GitHub reports no checks. Detailed desktop and mobile views show the workflow name, the reason, and a link to GitHub. Approval-only workflow attention is not a failed check, does not start **Auto-fix CI & address comments**, and does not make the pull request ready for **Auto-merge or requeue when ready**. If GitHub does not provide enough evidence, Kandev keeps the workflow state unavailable or marks the last same-head observation as stale instead of claiming approval.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
+
+Auto-fix waits for the pull request checks to settle, then sends one repair round for newly failed checks, review comments, an ordinary merge conflict, or an actionable merge-queue removal. It snapshots each check, comment, conflict, and removal state, so repeated observations do not create duplicate rounds. An authoritative conflict resolution clears its checkpoint without using a round; an unknown mergeability state preserves the checkpoint. Updating an already queued auto-fix message does not use another round, and auto-fix pauses after 10 rounds unless the user disables and re-enables it.
+
+Kandev keeps a queued or running auto-fix attempt separate from its feedback checkpoint. If a turn ends without a recorded outcome, Kandev can send the same settled snapshot again, and that retry uses another round. After an `action_taken` outcome, Kandev waits for provider progress before retrying. A `non_actionable` or `blocked` outcome acknowledges unchanged feedback and does not retry it.
+
+When GitHub puts a linked pull request in a merge queue, the PR status control shows its queue state. It also shows the queue position and estimated merge time when GitHub provides them. The same status appears in the task summary, the mobile PR chip, and Review.
+
+The existing two automation switches also control merge-queue recovery. Auto-fix sends one actionable queue removal to the linked task agent and counts it as one auto-fix round when durable evidence from an attempted or adopted queue entry matches the current pull-request head. If Kandev sees only a retained removal and cannot prove its head, it fails closed and does not spend a repair round. Auto-merge submits an eligible pull request through GitHub's queue-aware merge action. If GitHub removes a queue attempt, Kandev records the reason and waits for a new pull-request head before it submits another attempt; it never retries the same head automatically. An active queue entry is adopted when auto-merge is enabled, so enabling the option does not submit a duplicate request. Unknown, manual, and branch-protection removals remain visible but do not start automatic repair.
+
+Each automatic merge request uses the pull-request head that passed the readiness checks. If GitHub reports a different head, Kandev stops the request. After a failed request, Kandev does not automatically repeat the same readiness state.
+
+Use **Retry** to request one new evaluation for the selected linked pull request. Kandev refreshes the pull request and applies all current readiness and GitHub policy rules. **Retry** accepts the evaluation request. It does not report a completed merge.
+
+Use **Refresh** for a state-loading error or another automation error. Refresh loads state only and does not authorize a merge. If GitHub shows an active queue entry or a merged pull request, Kandev marks the attempt accepted. It removes only the obsolete automatic-merge error.
 
 **Your review is requested** matches the GitHub account connected to the task's workspace. The first observation is a quiet baseline. Any later transition to a request for that account wakes the agent, including the first new request after baselining and a re-review request after changes. Clearing a request rearms the next transition. If the workspace's connected GitHub account changes, Kandev quietly rebinds the task and re-establishes every linked PR's baseline; switching accounts does not itself create a prompt.
 
@@ -372,7 +413,9 @@ These actions use the connected GitLab user's permissions and do not bypass prot
 
 ### Automate a linked merge request
 
-For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two task-level controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**. Enabling any control applies it to every MR linked to that task; Kandev tracks delivery and deduplication separately for each linked MR.
+For a task with a linked GitLab merge request, open the MR topbar control. The **Automation** group has the same two controls as GitHub's PRs: **Auto-fix CI and address comments** and **Auto-merge when ready**. Below it, expand **Review follow-up** for three lifecycle booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**.
+
+All five belong to a single merge request. A task with several linked MRs shows one **Automation** group per MR, each labelled with its MR number, so you can automate one MR and leave the rest untouched; Kandev tracks delivery and deduplication separately for each. The auto-fix prompt override is the one setting that stays task-level; editing it applies to every linked MR. An agent can call `update_task_change_request_automation_kandev` with an association target for one MR, or with a task target and `providers: ["gitlab"]` for every MR linked to the task.
 
 Kandev reuses the existing lightweight task MR poller, which checks linked MRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked MRs without waiting for the next poll.
 
@@ -547,16 +590,19 @@ Enter the site URL (a missing scheme is normalized to HTTPS), choose **Cloud** o
 | Deployment | Method | Required values |
 |---|---|---|
 | Jira Cloud | API token (recommended) | Atlassian account email and API token. |
+| Jira Cloud | OAuth 2.0 | Approval from the Atlassian account in a browser window. |
 | Jira Cloud | Browser session | Only the value of the `cloud.session.token` or `tenant.session.token` cookie. Do not include the cookie name or `=`. |
 | Server/Data Center | Personal access token | Bearer personal access token with the required read/write access. |
 
 Cloud API tokens are not accepted for Server/Data Center, and Server/Data Center PATs are not the Cloud token flow. Browser-session JWTs expire and are less reliable than an API token; Kandev surfaces the decoded expiry and warns as it approaches.
 
+For OAuth, select **Connect with Atlassian**. Then approve the connection in the browser window. Kandev completes the connection when Atlassian returns the result. If the automatic return fails, paste the full callback URL into Kandev.
+
 When editing, a blank secret preserves the saved credential only if the URL, account identity, and authentication method still match. Supply a new secret when changing those identity fields. Save, select **Test connection**, and check the background health result.
 
 ### Jira issue watches
 
-Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, a blank branch resolves to that repository's default branch. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
+Create a watch with JQL, test the query, then choose a workflow and starting step. A new watch starts with `project = PROJ AND status = "Open" ORDER BY created DESC`; replace `PROJ` before testing. Repository selection is optional: leaving it blank creates repo-less tasks. When a repository is selected, choose its default branch, a local branch such as `main`, or a qualified remote branch such as `origin/main`. Kandev saves the remote name with the selected branch. Before a watcher-created task worktree is made, branch freshness follows the repository's [worktree and branch lifecycle](git-operations.md#managed-worktree-and-branch-lifecycle) policy. **Always pull before creating a new worktree** controls that refresh; selecting `origin/main` does not enable a pull for this watcher. Blank agent and executor profile fields inherit the starting step's defaults. Customize the task prompt and set a poll interval, which defaults to 300 seconds and accepts 60–3,600 seconds.
 
 The maximum in-flight value defaults to 5. Leave it blank for no cap. A cap defers remaining matches rather than importing them all at once. Each poll fetches only the first 50 JQL matches and does not paginate. Already-seen issues still occupy that provider result window, so a stable broad query can leave later matches unseen indefinitely; narrow the JQL enough that every important issue can enter the first page. Pause the watch before changing a broad query. Jira task-preset prompts can use ticket key, URL, title, and description placeholders from the preset editor.
 

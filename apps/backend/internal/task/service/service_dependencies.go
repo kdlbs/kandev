@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -55,21 +56,29 @@ const (
 // exceeds it rejects the edge rather than accepting an unverified one.
 const dependencyCycleWalkLimit = 1000
 
+const (
+	maxTaskDependencyCount    = 512
+	maxTaskDependencyIDLength = 128
+)
+
 // DependencyRef is one end of a dependency edge, carrying enough detail for the
 // dependency chip to render without fetching each related task.
 type DependencyRef struct {
-	ID     string       `json:"id"`
-	Title  string       `json:"title"`
-	State  v1.TaskState `json:"state"`
-	Status string       `json:"status,omitempty"`
+	ID          string       `json:"id"`
+	Title       string       `json:"title"`
+	State       v1.TaskState `json:"state"`
+	Status      string       `json:"status,omitempty"`
+	WorkspaceID string       `json:"-"`
 }
 
 // DependencyView is the derived dependency state for one task.
 type DependencyView struct {
-	Blocked       bool
-	BlockedReason string
-	DependsOn     []DependencyRef
-	Blocks        []DependencyRef
+	Blocked            bool
+	BlockedReason      string
+	DependsOn          []DependencyRef
+	Blocks             []DependencyRef
+	DependsOnTruncated bool
+	BlocksTruncated    bool
 }
 
 // CycleError is returned when a proposed edge would close a cycle. Path lists
@@ -90,6 +99,13 @@ func (e *CycleError) Error() string {
 // ErrDependencyRepositoryUnavailable is returned when the dependency store is
 // not wired. Callers must treat it as "cannot determine", not "not blocked".
 var ErrDependencyRepositoryUnavailable = fmt.Errorf("dependency repository not configured")
+
+// ErrInvalidDependencySet identifies malformed full-set replacement input.
+// Authorization errors intentionally do not use this sentinel, so foreign
+// task IDs remain indistinguishable from missing IDs.
+var ErrInvalidDependencySet = errors.New("invalid dependency set")
+
+var errDependencyCrossWorkspace = errors.New("dependency tasks must share a workspace")
 
 // ResolveStartWhenUnblocked decides whether a create request's agent start
 // should become a start-when-unblocked intent instead of an immediate launch.
@@ -129,7 +145,7 @@ func (s *Service) validateDependencyPair(ctx context.Context, taskID, dependsOnT
 		return fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, dependsOnTaskID)
 	}
 	if task.WorkspaceID != "" && dep.WorkspaceID != "" && task.WorkspaceID != dep.WorkspaceID {
-		return fmt.Errorf("task %s belongs to a different workspace", dependsOnTaskID)
+		return fmt.Errorf("%w: task %s belongs to a different workspace", errDependencyCrossWorkspace, dependsOnTaskID)
 	}
 	return nil
 }
@@ -149,10 +165,10 @@ func (s *Service) authorizeDependencyPair(ctx context.Context, taskID, dependsOn
 
 // AddDependency records "taskID depends on dependsOnTaskID".
 //
-// This is the single validator for dependency edges. Self-edges,
-// cross-workspace edges, and cycles of any length are rejected here, and both
-// the task-scoped routes and the Office blocker routes go through it — a second
-// validator would let a cycle in through whichever path was weakest.
+// This is the task-service validator for dependency edges. Self-edges,
+// cross-workspace edges, and cycles of any length are rejected here. The task
+// and Office mutation surfaces share the same process-wide mutation lock while
+// they validate and write their respective repository adapters.
 func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID string) error {
 	if s.blockers == nil {
 		return ErrDependencyRepositoryUnavailable
@@ -162,6 +178,9 @@ func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID str
 	}
 	if taskID == dependsOnTaskID {
 		return fmt.Errorf("a task cannot depend on itself")
+	}
+	if len(dependsOnTaskID) > maxTaskDependencyIDLength {
+		return fmt.Errorf("dependency task IDs cannot exceed %d characters", maxTaskDependencyIDLength)
 	}
 	if err := s.authorizeDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
 		return err
@@ -184,11 +203,116 @@ func (s *Service) AddDependency(ctx context.Context, taskID, dependsOnTaskID str
 	return nil
 }
 
-// insertDependencyEdge holds dependencyEdgeMu across exactly the validate,
-// cycle-walk and insert, and nothing else.
+// ReplaceDependencies replaces every direct predecessor of taskID in one
+// validated operation. The complete desired set is checked before storage is
+// changed, and the repository applies its edge diff in one transaction.
+func (s *Service) ReplaceDependencies(ctx context.Context, taskID string, dependsOnTaskIDs []string) error {
+	if s.blockers == nil {
+		return ErrDependencyRepositoryUnavailable
+	}
+	if taskID == "" {
+		return fmt.Errorf("%w: task_id is required", ErrInvalidDependencySet)
+	}
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return err
+	}
+	if err := validateDependencyIDs(taskID, dependsOnTaskIDs); err != nil {
+		return err
+	}
+	for _, dependsOnTaskID := range dependsOnTaskIDs {
+		if err := s.authorizeTaskID(ctx, dependsOnTaskID); err != nil {
+			return err
+		}
+	}
+	replacer, ok := s.blockers.(taskDependencyReplacer)
+	if !ok {
+		return ErrDependencyRepositoryUnavailable
+	}
+	changed, err := s.replaceDependencyEdges(ctx, taskID, dependsOnTaskIDs, replacer)
+	if err != nil {
+		return err
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	s.publishDependencyChange(ctx, append([]string{taskID}, changed...)...)
+	return nil
+}
+
+func validateDependencyIDs(taskID string, dependsOnTaskIDs []string) error {
+	if len(dependsOnTaskIDs) > maxTaskDependencyCount {
+		return fmt.Errorf("%w: at most %d dependency task IDs are allowed", ErrInvalidDependencySet, maxTaskDependencyCount)
+	}
+	seen := make(map[string]struct{}, len(dependsOnTaskIDs))
+	for _, dependsOnTaskID := range dependsOnTaskIDs {
+		switch dependsOnTaskID {
+		case "":
+			return fmt.Errorf("%w: dependency task IDs cannot be empty", ErrInvalidDependencySet)
+		case taskID:
+			return fmt.Errorf("%w: a task cannot depend on itself", ErrInvalidDependencySet)
+		}
+		if len(dependsOnTaskID) > maxTaskDependencyIDLength {
+			return fmt.Errorf("%w: dependency task IDs cannot exceed %d characters", ErrInvalidDependencySet, maxTaskDependencyIDLength)
+		}
+		if _, duplicate := seen[dependsOnTaskID]; duplicate {
+			return fmt.Errorf("%w: dependency %s is listed more than once", ErrInvalidDependencySet, dependsOnTaskID)
+		}
+		seen[dependsOnTaskID] = struct{}{}
+	}
+	return nil
+}
+
+// replaceDependencyEdges holds the dependency lock across all reads that
+// validate the graph and the repository's atomic replacement.
+func (s *Service) replaceDependencyEdges(
+	ctx context.Context,
+	taskID string,
+	dependsOnTaskIDs []string,
+	replacer taskDependencyReplacer,
+) ([]string, error) {
+	unlock := taskdependencies.AcquireMutationLock()
+	defer unlock()
+
+	if err := s.validateReplacementSet(ctx, taskID, dependsOnTaskIDs); err != nil {
+		return nil, err
+	}
+	existing, err := s.blockers.ListTaskBlockers(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task dependencies: %w", err)
+	}
+	for _, dependsOnTaskID := range dependsOnTaskIDs {
+		cycle, err := s.checkDependencyCycle(ctx, taskID, dependsOnTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("check dependency cycle: %w", err)
+		}
+		if cycle != nil {
+			return nil, cycle
+		}
+	}
+	changed := changedDependencyIDs(existing, dependsOnTaskIDs)
+	if err := replacer.ReplaceTaskBlockers(ctx, taskID, dependsOnTaskIDs); err != nil {
+		return nil, err
+	}
+	return changed, nil
+}
+
+func (s *Service) validateReplacementSet(ctx context.Context, taskID string, dependsOnTaskIDs []string) error {
+	for _, dependsOnTaskID := range dependsOnTaskIDs {
+		if err := s.validateDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
+			if errors.Is(err, errDependencyCrossWorkspace) {
+				return fmt.Errorf("%w: %w", ErrInvalidDependencySet, err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// insertDependencyEdge holds the shared mutation lock across exactly the
+// validate, cycle-walk and insert, and nothing else.
 func (s *Service) insertDependencyEdge(ctx context.Context, taskID, dependsOnTaskID string) error {
-	s.dependencyEdgeMu.Lock()
-	defer s.dependencyEdgeMu.Unlock()
+	unlock := taskdependencies.AcquireMutationLock()
+	defer unlock()
 	if err := s.validateDependencyPair(ctx, taskID, dependsOnTaskID); err != nil {
 		return err
 	}
@@ -222,10 +346,10 @@ func (s *Service) RemoveDependency(ctx context.Context, taskID, dependsOnTaskID 
 	return nil
 }
 
-// deleteDependencyEdge holds the edge lock across the delete only.
+// deleteDependencyEdge holds the shared mutation lock across the delete only.
 func (s *Service) deleteDependencyEdge(ctx context.Context, taskID, dependsOnTaskID string) error {
-	s.dependencyEdgeMu.Lock()
-	defer s.dependencyEdgeMu.Unlock()
+	unlock := taskdependencies.AcquireMutationLock()
+	defer unlock()
 	return s.blockers.DeleteTaskBlocker(ctx, taskID, dependsOnTaskID)
 }
 
@@ -248,6 +372,12 @@ func (s *Service) publishDependencyChange(ctx context.Context, taskIDs ...string
 		// stale chip and badge until a full refetch.
 		s.publishTaskEventWithExtra(ctx, events.TaskUpdated, task, nil, s.dependencyEventFields(ctx, task))
 	}
+}
+
+// PublishDependencyChange refreshes surviving task projections after a
+// lifecycle deletion removes dependency edges.
+func (s *Service) PublishDependencyChange(ctx context.Context, taskIDs ...string) {
+	s.publishDependencyChange(ctx, taskIDs...)
 }
 
 // dependencyEventFields renders one task's derived projection in the wire shape
@@ -321,14 +451,48 @@ func buildCyclePath(parent map[string]string, taskID, dependsOnTaskID string) []
 	return path
 }
 
+// maxDependencyFanOut is the maximum number of distinct edge ends one
+// derivation batch may resolve. It bounds a paginated or preview flow's query
+// cost independently of the per-task display limit: many small predecessor or
+// dependent lists across a page can still name thousands of distinct tasks.
+const maxDependencyFanOut = 4096
+
+// ErrDependencyFanOutExceeded is returned by BuildDependencyViewsBounded when
+// a batch's distinct edge-end count exceeds maxDependencyFanOut. This is a
+// refusal, not a derivation failure: it must never produce the withheld
+// verdict, and callers report it as an oversized response
+// (response_too_large / ResourceExhausted) before serializing any task, not
+// as "blocked: true, blocked_reason: unknown".
+var ErrDependencyFanOutExceeded = errors.New("dependency fan-out exceeds maximum")
+
 // BuildDependencyViews returns derived dependency state for a batch of tasks.
 //
 // Batched deliberately: the Kanban board reads a whole workflow at once, so a
 // per-task query would add one round trip per card to every board load.
 func (s *Service) BuildDependencyViews(ctx context.Context, tasks []*models.Task) map[string]DependencyView {
+	// The fan-out maximum is never enforced here: this entry point backs flows
+	// that return exactly one task and the Kanban board, which paginates tasks
+	// rather than distinct edge ends. BuildDependencyViewsBounded is for
+	// callers that must enforce it.
+	views, _ := s.buildDependencyViews(ctx, tasks, false)
+	return views
+}
+
+// BuildDependencyViewsBounded is BuildDependencyViews for a paginated or
+// preview flow that can return more than one task: it refuses with
+// ErrDependencyFanOutExceeded when the batch's distinct edge-end count would
+// exceed maxDependencyFanOut, checked before the expensive edge-end
+// resolution read and before any task is serialized.
+func (s *Service) BuildDependencyViewsBounded(ctx context.Context, tasks []*models.Task) (map[string]DependencyView, error) {
+	return s.buildDependencyViews(ctx, tasks, true)
+}
+
+func (s *Service) buildDependencyViews(
+	ctx context.Context, tasks []*models.Task, enforceFanOut bool,
+) (map[string]DependencyView, error) {
 	out := make(map[string]DependencyView, len(tasks))
-	if s.blockers == nil || len(tasks) == 0 {
-		return out
+	if len(tasks) == 0 {
+		return out, nil
 	}
 	ids := make([]string, 0, len(tasks))
 	for _, t := range tasks {
@@ -336,33 +500,94 @@ func (s *Service) BuildDependencyViews(ctx context.Context, tasks []*models.Task
 			ids = append(ids, t.ID)
 		}
 	}
+	if s.blockers == nil {
+		// No dependency store wired: unlike DependencyGate (where this means no
+		// edges can exist), the projection reports the withheld verdict here,
+		// because an omitted map entry reads as the zero-value DependencyView
+		// (Blocked: false) — an indistinguishable, silent "not blocked".
+		return withheldDependencyViews(ids), nil
+	}
 	predecessors, err := s.blockers.ListBlockersForTasks(ctx, ids)
 	if err != nil {
 		s.logger.Warn("failed to load task dependencies", zap.Error(err))
-		// Fail closed: a task whose edges cannot be read reports blocked with
-		// an unknown reason rather than silently reporting "not blocked".
-		for _, id := range ids {
-			out[id] = DependencyView{Blocked: true, BlockedReason: BlockedReasonUnknown}
-		}
-		return out
+		return withheldDependencyViews(ids), nil
 	}
 	dependents, err := s.blockers.ListDependentsForTasks(ctx, ids)
 	if err != nil {
 		s.logger.Warn("failed to load task dependents", zap.Error(err))
-		dependents = map[string][]string{}
+		return withheldDependencyViews(ids), nil
 	}
-	refs := s.resolveDependencyRefs(ctx, predecessors, dependents)
+	// Cut the dependent direction to the display limit BEFORE resolution: no
+	// verdict reads a dependent's far row (dependent entries carry no
+	// resolution status), and the edge order is already decidable from the
+	// edge rows alone, so there is no reason to resolve title/state for an
+	// end that would only be truncated away afterward.
+	dependents, blocksTruncated := cutDependentsForResolution(dependents)
+	if enforceFanOut && distinctEdgeEndCount(predecessors, dependents) > maxDependencyFanOut {
+		return nil, ErrDependencyFanOutExceeded
+	}
+	refs, err := s.resolveDependencyRefs(ctx, predecessors, dependents)
+	if err != nil {
+		s.logger.Warn("failed to resolve dependency edge ends", zap.Error(err))
+		return withheldDependencyViews(ids), nil
+	}
 	for _, id := range ids {
-		out[id] = buildDependencyView(refs, predecessors[id], dependents[id])
+		out[id] = buildDependencyView(refs, predecessors[id], dependents[id], blocksTruncated[id])
+	}
+	return out, nil
+}
+
+// distinctEdgeEndCount returns the number of distinct task ids named on
+// either side of any edge in the batch, mirroring the union resolveDependencyRefs
+// resolves in one query.
+func distinctEdgeEndCount(predecessors, dependents map[string][]string) int {
+	seen := map[string]struct{}{}
+	for _, group := range []map[string][]string{predecessors, dependents} {
+		for _, ids := range group {
+			for _, id := range ids {
+				seen[id] = struct{}{}
+			}
+		}
+	}
+	return len(seen)
+}
+
+// cutDependentsForResolution caps each task's dependent id list to
+// maxTaskDependencyCount, preserving edge order, and reports which tasks were
+// cut so the truncation flag survives to the derived view.
+func cutDependentsForResolution(dependents map[string][]string) (map[string][]string, map[string]bool) {
+	truncated := make(map[string]bool, len(dependents))
+	cut := make(map[string][]string, len(dependents))
+	for id, depIDs := range dependents {
+		if len(depIDs) > maxTaskDependencyCount {
+			cut[id] = depIDs[:maxTaskDependencyCount]
+			truncated[id] = true
+		} else {
+			cut[id] = depIDs
+		}
+	}
+	return cut, truncated
+}
+
+// withheldDependencyViews reports the fail-closed verdict for every id: a
+// derivation step could not be completed, so every task in the batch is
+// blocked with an unknown reason rather than silently reporting "not
+// blocked" for the ones an empty map would otherwise omit.
+func withheldDependencyViews(ids []string) map[string]DependencyView {
+	out := make(map[string]DependencyView, len(ids))
+	for _, id := range ids {
+		out[id] = DependencyView{Blocked: true, BlockedReason: BlockedReasonUnknown}
 	}
 	return out
 }
 
 // resolveDependencyRefs loads title/state for every task named on either side
-// of any edge in the batch, in one query.
+// of any edge in the batch, in one query. A read failure here fails the whole
+// batch closed: a derivation step that cannot complete blocks every task in
+// the batch, not just the tasks whose edges could not resolve.
 func (s *Service) resolveDependencyRefs(
 	ctx context.Context, predecessors, dependents map[string][]string,
-) map[string]DependencyRef {
+) (map[string]DependencyRef, error) {
 	seen := map[string]struct{}{}
 	for _, group := range []map[string][]string{predecessors, dependents} {
 		for _, ids := range group {
@@ -378,7 +603,10 @@ func (s *Service) resolveDependencyRefs(
 	}
 	// One batched read: a board payload references every edge on every card, so
 	// a per-edge query turned one board load into N round trips.
-	found, batchErr := s.tasks.GetTasksByIDs(ctx, ids)
+	found, err := s.tasks.GetTasksByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	byID := make(map[string]*models.Task, len(found))
 	for _, task := range found {
 		if task != nil {
@@ -388,33 +616,33 @@ func (s *Service) resolveDependencyRefs(
 	for _, id := range ids {
 		task := byID[id]
 		if task == nil {
-			// Absent row (deleted predecessor, dangling edge) versus a failed
-			// read: the former must not block forever, the latter must not open
-			// the gate. Mark them differently so buildDependencyView can tell.
-			status := dependencyMissing
-			if batchErr != nil {
-				status = DependencyPending
-			}
-			refs[id] = DependencyRef{ID: id, Status: status}
+			// Absent row: a deleted predecessor/dependent, i.e. a dangling edge
+			// left behind by a failed cleanup. It must not block forever.
+			refs[id] = DependencyRef{ID: id, Status: dependencyMissing}
 			continue
 		}
 		refs[id] = DependencyRef{
-			ID:     id,
-			Title:  task.Title,
-			State:  task.State,
-			Status: DependencyStatusForTask(task),
+			ID:          id,
+			Title:       task.Title,
+			State:       task.State,
+			Status:      DependencyStatusForTask(task),
+			WorkspaceID: task.WorkspaceID,
 		}
 	}
-	return refs
+	return refs, nil
 }
 
-// buildDependencyView derives blocked/reason plus both edge lists for one task.
+// buildDependencyView derives blocked/reason plus both edge lists for one
+// task. dependentsTruncated carries forward the pre-resolution cut already
+// applied to dependentIDs, so the flag survives even when the dangling-edge
+// drop below leaves the displayed list shorter than the limit.
 func buildDependencyView(
-	refs map[string]DependencyRef, predecessorIDs, dependentIDs []string,
+	refs map[string]DependencyRef, predecessorIDs, dependentIDs []string, dependentsTruncated bool,
 ) DependencyView {
 	view := DependencyView{
-		DependsOn: make([]DependencyRef, 0, len(predecessorIDs)),
-		Blocks:    make([]DependencyRef, 0, len(dependentIDs)),
+		DependsOn:       make([]DependencyRef, 0, len(predecessorIDs)),
+		Blocks:          make([]DependencyRef, 0, len(dependentIDs)),
+		BlocksTruncated: dependentsTruncated,
 	}
 	tally := dependencyTally{}
 	for _, id := range predecessorIDs {
@@ -427,13 +655,27 @@ func buildDependencyView(
 			// failed cleanup cannot block a dependent forever.
 			continue
 		}
-		view.DependsOn = append(view.DependsOn, ref)
+		// The predecessor direction is resolved in full so the verdict can
+		// account for every predecessor, but the displayed list is cut to the
+		// same limit as the dependent direction, keeping the first entries in
+		// edge order.
+		if len(view.DependsOn) < maxTaskDependencyCount {
+			view.DependsOn = append(view.DependsOn, ref)
+		} else {
+			view.DependsOnTruncated = true
+		}
 		tally.add(ref.Status)
 	}
 	for _, id := range dependentIDs {
 		ref := refs[id]
 		if ref.ID == "" {
 			ref = DependencyRef{ID: id, Status: DependencyPending}
+		}
+		if ref.Status == dependencyMissing {
+			// Dangling edge to a deleted task: dropped from both directions, not
+			// just the predecessor side, so a removed dependent cannot leave a
+			// stale entry in the board's blocks list.
+			continue
 		}
 		view.Blocks = append(view.Blocks, ref)
 	}
@@ -600,6 +842,8 @@ func (s *Service) pruneDanglingEdge(ctx context.Context, taskID, missingTaskID s
 	if s.blockers == nil {
 		return
 	}
+	unlock := taskdependencies.AcquireMutationLock()
+	defer unlock()
 	if err := s.blockers.DeleteTaskBlocker(ctx, taskID, missingTaskID); err != nil {
 		s.logger.Warn("failed to prune dangling dependency edge",
 			zap.String("task_id", taskID),
@@ -626,18 +870,32 @@ func (s *Service) deleteDependencyEdgesForTask(ctx context.Context, taskID strin
 	if !ok {
 		return
 	}
-	dependents, err := s.blockers.ListTasksBlockedBy(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to list dependents before edge cleanup",
-			zap.String("task_id", taskID), zap.Error(err))
-	}
-	if err := cleaner.DeleteTaskBlockersForTask(ctx, taskID); err != nil {
+	var dependents, blockers []string
+	var cleanupErr error
+	func() {
+		unlock := taskdependencies.AcquireMutationLock()
+		defer unlock()
+		var err error
+		dependents, err = s.blockers.ListTasksBlockedBy(ctx, taskID)
+		if err != nil {
+			s.logger.Warn("failed to list dependents before edge cleanup",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+		predecessors, err := s.blockers.ListBlockersForTasks(ctx, []string{taskID})
+		if err != nil {
+			s.logger.Warn("failed to list blockers before edge cleanup",
+				zap.String("task_id", taskID), zap.Error(err))
+		} else {
+			blockers = append(blockers, predecessors[taskID]...)
+		}
+		cleanupErr = cleaner.DeleteTaskBlockersForTask(ctx, taskID)
+	}()
+	if cleanupErr != nil {
 		s.logger.Warn("failed to clean up dependency edges for deleted task",
-			zap.String("task_id", taskID), zap.Error(err))
+			zap.String("task_id", taskID), zap.Error(cleanupErr))
 		return
 	}
-	// Dependents may now be unblocked, so refresh them. Deliberately no
-	// auto-start: deletion is not success, and a chain must not advance
-	// because a predecessor was removed.
-	s.publishDependencyChange(ctx, dependents...)
+	// Dependents may now be unblocked, and blockers may have lost a
+	// dependent. Refresh both surviving sides without auto-starting anything.
+	s.publishDependencyChange(ctx, append(dependents, blockers...)...)
 }

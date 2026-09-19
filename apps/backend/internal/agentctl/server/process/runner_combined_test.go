@@ -60,3 +60,21 @@ func TestManagerCombinedOutputCapturesFastExitStdoutAndStderr(t *testing.T) {
 		t.Fatalf("CombinedOutput() output = %q, want both streams", output)
 	}
 }
+
+func TestManagerOutputCapturesOnlyStdout(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-1"}, newTestLogger(t))
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
+	command, env := fixtureExec("write-both stdout-only stderr-only")
+
+	output, err := mgr.Output(context.Background(), tools.CommandSpec{
+		Path: command[0],
+		Args: command[1:],
+		Env:  env,
+	})
+	if err != nil {
+		t.Fatalf("Output() error = %v", err)
+	}
+	if string(output) != "stdout-only" {
+		t.Fatalf("Output() = %q, want stdout only", output)
+	}
+}

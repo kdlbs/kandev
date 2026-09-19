@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/workspace-git-status.md
+spec: docs/specs/platform/requirements/workspace-git-status.md
 created: 2026-08-19
 status: implemented
 ---
@@ -20,8 +20,8 @@ This repairs the reported case where the fork's stale `origin/main` made Kandev 
 
 Related contracts:
 
-- [Workspace Git Status](../../specs/platform/workspace-git-status.md)
-- [Remote Contribution Tasks](../../specs/tasks/remote-contribution-tasks.md)
+- [Workspace Git Status](../../specs/platform/requirements/workspace-git-status.md)
+- [Remote Contribution Tasks](../../specs/tasks/system-design/remote-contribution-tasks.md)
 - [ADR: Qualify Git Comparison Targets by Repository](../../decisions/2026-08-19-repository-qualified-comparison-targets.md)
 - [ADR: Multi-branch task support](../../decisions/0013-multi-branch-tasks.md)
 - [ADR: Bind Fork Push Destinations to Tasks](../../decisions/2026-08-12-task-bound-fork-destinations.md)
@@ -204,3 +204,8 @@ git diff --check
 - Backfilling historical PR associations without complete head/base repository identity. They reconcile on
   the next authoritative provider read when an exact attachment match is available.
 - Plugin-provider implementation. The provider-neutral input remains available for a later adapter.
+
+## Shared execution follow-up (2026-09-13)
+
+The [noninteractive Git execution package](../noninteractive-git-execution/plan.md) owns final runner enforcement, helper cleanup, and authentication-failure recovery coverage.
+That package is complete. Existing results above remain historical evidence for this package's original implementation; its follow-up validation is recorded in the linked package.

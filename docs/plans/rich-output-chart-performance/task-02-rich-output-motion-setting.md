@@ -6,7 +6,7 @@ wave: 2
 parallelism: sequential
 depends_on: ["01-defer-and-stabilize-charts"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 02: Add rich-output motion setting
@@ -68,7 +68,7 @@ spec: "../../specs/agent-rich-output/spec.md"
 - `apps/web/e2e/tests/settings/mobile-general-settings.spec.ts`
 - `apps/web/e2e/tests/chat/rich-output.spec.ts`
 - `apps/web/e2e/tests/chat/mobile-rich-output.spec.ts`
-- `docs/specs/agent-rich-output/spec.md`
+- `docs/specs/agents/requirements/agent-rich-output.md`
 - `docs/plans/rich-output-chart-performance/plan.md`
 - `docs/plans/rich-output-chart-performance/task-02-rich-output-motion-setting.md`
 

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/plugins/agent-tools.md"
+spec: "../../specs/plugins/requirements/agent-tools.md"
 adr: "../../decisions/2026-08-11-plugin-tools-through-kandev-mcp.md"
 ---
 

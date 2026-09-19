@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 01: Runtime Terminal Environment Propagation
@@ -46,7 +46,7 @@ launch paths.
 
 ## Inputs
 
-- Spec: `docs/specs/integrations/github-authentication.md` — What, Failure Modes, Scenarios.
+- Spec: `docs/specs/integrations/requirements/github-authentication.md` — What, Failure Modes, Scenarios.
 - Plan: Runtime environment section.
 - Existing patterns: `buildEnvForExecution`, `ExecutorProfileEnvForSession`, and
   `StartUserShell`.

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-expose-workflow-export"]
 plan: "plan.md"
-spec: "../../specs/integrations/external-mcp.md"
+spec: "../../specs/integrations/requirements/external-mcp.md"
 ---
 
 # Task 02: Document MCP Workflow Export
@@ -41,7 +41,7 @@ Sequential. This task follows the backend contract and changes only public docum
 
 ## Inputs
 
-- `docs/specs/integrations/external-mcp.md`, API surface and scenarios.
+- `docs/specs/integrations/requirements/external-mcp.md`, API surface and scenarios.
 - `docs/plans/workflow-mcp-export/plan.md`, Public documentation section.
 - The final registered tool counts from Task 01.
 

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/submodule-review.md"
+spec: "../../specs/ui/requirements/submodule-review.md"
 ---
 
 # Task 01: Expand late Review directories
@@ -41,7 +41,7 @@ None.
 
 ## Inputs
 
-- `docs/specs/ui/submodule-review.md`, especially the nested-boundary and late-source scenarios.
+- `docs/specs/ui/requirements/submodule-review.md`, especially the nested-boundary and late-source scenarios.
 - `docs/plans/review-tree-late-expansion/plan.md`.
 - Existing first-seen directory reconciliation in `apps/web/components/task/changes-panel-tree.tsx`.
 - `/tdd`, `/e2e`, and `/mobile-parity` guidance.
@@ -61,7 +61,7 @@ Completed 2026-08-15.
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/review/mobile-submodule-review.spec.ts` passed (`1 passed`).
 - `cd apps && pnpm --filter @kandev/web typecheck` reported no errors.
 - `cd apps && pnpm --filter @kandev/web lint` passed with zero warnings.
-- Changed files: `apps/web/components/review/review-file-tree.tsx`, `apps/web/components/review/review-file-tree.test.tsx`, `docs/specs/ui/submodule-review.md`, `docs/plans/review-tree-late-expansion/plan.md`, and this task file.
+- Changed files: `apps/web/components/review/review-file-tree.tsx`, `apps/web/components/review/review-file-tree.test.tsx`, `docs/specs/ui/requirements/submodule-review.md`, `docs/plans/review-tree-late-expansion/plan.md`, and this task file.
 - Residual risk: the Review tree still rebuilds and walks its small directory model when `files` changes; no shared `useTree` behavior or mobile tree surface changed.
 - The disposable screenshot capture spec was removed after capture. The synthetic desktop screenshot manifest was non-empty, every manifest entry mapped to an existing file, and the PNG was compressed for PR publication.
 - Synchronization: this task is `done`, the parent plan is `implemented` with Task 01 checked, and the linked submodule Review spec records the late-source expansion contract.

@@ -84,12 +84,25 @@ func (p RoutineConcurrencyPolicy) Valid() bool {
 }
 
 // RoutineCatchUpPolicy controls what happens when a scheduled routine
-// missed fires (e.g. backend was down).
+// missed fires (e.g. backend was down). Whatever the policy, a claim
+// dispatches at most one routine run — the policy only decides whether
+// the gap crossed is reported to the woken agent. See
+// docs/specs/office/requirements/routine-catch-up.md.
 type RoutineCatchUpPolicy string
 
 // Routine catch-up policy values. The DB default is
-// `enqueue_missed_with_cap`; the alternative skips missed fires entirely.
+// `summarize_missed`; the alternative skips gap reporting entirely.
 const (
+	// CatchUpPolicySummarizeMissed is the canonical summarizing policy:
+	// the gap crossed by a claim is recorded and delivered to the woken
+	// agent. Named for what happens (one wake, gap summarized), not for
+	// the discarded enqueue-N-runs design the old name implied.
+	CatchUpPolicySummarizeMissed RoutineCatchUpPolicy = "summarize_missed"
+	// CatchUpPolicyEnqueueMissedWithCap is the deprecated alias for
+	// CatchUpPolicySummarizeMissed. Retained forever — never delete —
+	// so NormaliseCatchUpPolicy has a name to compare persisted rows
+	// and API requests against; installs that already stored it must
+	// keep reading and writing successfully.
 	CatchUpPolicyEnqueueMissedWithCap RoutineCatchUpPolicy = "enqueue_missed_with_cap"
 	CatchUpPolicySkipMissed           RoutineCatchUpPolicy = "skip_missed"
 )
@@ -97,13 +110,45 @@ const (
 // String implements fmt.Stringer.
 func (p RoutineCatchUpPolicy) String() string { return string(p) }
 
-// Valid reports whether p is one of the declared RoutineCatchUpPolicy values.
+// Valid reports whether p is one of the declared RoutineCatchUpPolicy
+// values, including the deprecated alias — a client sending the old
+// value on create/update gets 200, not 400; NormaliseCatchUpPolicy
+// normalizes the persisted value to the canonical one.
 func (p RoutineCatchUpPolicy) Valid() bool {
 	switch p {
-	case CatchUpPolicyEnqueueMissedWithCap, CatchUpPolicySkipMissed:
+	case CatchUpPolicySummarizeMissed, CatchUpPolicyEnqueueMissedWithCap, CatchUpPolicySkipMissed:
 		return true
 	}
 	return false
+}
+
+// RoutineStatus is the operator-set lifecycle state of a Routine. It gates
+// every fire path: a routine only dispatches while it holds a firing status.
+// See docs/specs/office/requirements/routine-status-gating.md.
+type RoutineStatus string
+
+// Routine status values. The `Routine.Status` struct field stays a bare
+// string (no migration, no write-side validation); these constants are for
+// comparison, not storage.
+const (
+	RoutineStatusActive   RoutineStatus = "active"
+	RoutineStatusPaused   RoutineStatus = "paused"
+	RoutineStatusArchived RoutineStatus = "archived"
+)
+
+// String implements fmt.Stringer.
+func (s RoutineStatus) String() string { return string(s) }
+
+// CanFire reports whether a routine holding this status may dispatch a run.
+// Allowlist, not denylist: only "active" and the empty string (the
+// NOT NULL DEFAULT 'active' column's "no writer set one" case) fire.
+// Comparison is byte-exact — no case folding, no trimming — so "Active" and
+// " active" do not fire, and any value outside the three declared constants
+// suppresses along with them. There is deliberately no Valid() counterpart:
+// nothing here validates a status on write, so a write-side predicate would
+// have no caller.
+func (s RoutineStatus) CanFire() bool {
+	return s == RoutineStatusActive || s == ""
 }
 
 // BudgetScopeType selects what a BudgetPolicy applies to.
@@ -135,7 +180,7 @@ func (s BudgetScopeType) Valid() bool {
 // before this field existed — never inferred.
 type CostSource string
 
-// Cost-source values. See docs/specs/office/costs.md.
+// Cost-source values. See docs/specs/office/requirements/costs.md.
 const (
 	// CostSourceProviderReported means the CLI forwarded an authoritative
 	// USD amount (claude-acp's usage_update.cost.amount); no rates apply.
@@ -164,11 +209,14 @@ func (s CostSource) Valid() bool {
 // BudgetPeriod is the time window a BudgetPolicy limit applies to.
 type BudgetPeriod string
 
-// Budget period values.
+// Budget period values. BudgetPeriodTotal (AC-OFFICE-BUDGET-002.8) selects
+// an unbounded-below window by name, rather than by falling through from an
+// unrecognized period value.
 const (
 	BudgetPeriodDaily   BudgetPeriod = "daily"
 	BudgetPeriodMonthly BudgetPeriod = "monthly"
 	BudgetPeriodYearly  BudgetPeriod = "yearly"
+	BudgetPeriodTotal   BudgetPeriod = "total"
 )
 
 // String implements fmt.Stringer.
@@ -177,7 +225,7 @@ func (p BudgetPeriod) String() string { return string(p) }
 // Valid reports whether p is one of the declared BudgetPeriod values.
 func (p BudgetPeriod) Valid() bool {
 	switch p {
-	case BudgetPeriodDaily, BudgetPeriodMonthly, BudgetPeriodYearly:
+	case BudgetPeriodDaily, BudgetPeriodMonthly, BudgetPeriodYearly, BudgetPeriodTotal:
 		return true
 	}
 	return false
@@ -416,13 +464,14 @@ type ActivityTargetType string
 
 // Known activity target types (subset; new domains add new values).
 const (
-	ActivityTargetAgent   ActivityTargetType = "agent"
-	ActivityTargetTask    ActivityTargetType = "task"
-	ActivityTargetProject ActivityTargetType = "project"
-	ActivityTargetBudget  ActivityTargetType = "budget"
-	ActivityTargetSkill   ActivityTargetType = "skill"
-	ActivityTargetChannel ActivityTargetType = "channel"
-	ActivityTargetRoutine ActivityTargetType = "routine"
+	ActivityTargetAgent     ActivityTargetType = "agent"
+	ActivityTargetTask      ActivityTargetType = "task"
+	ActivityTargetProject   ActivityTargetType = "project"
+	ActivityTargetBudget    ActivityTargetType = "budget"
+	ActivityTargetSkill     ActivityTargetType = "skill"
+	ActivityTargetChannel   ActivityTargetType = "channel"
+	ActivityTargetRoutine   ActivityTargetType = "routine"
+	ActivityTargetWorkspace ActivityTargetType = "workspace"
 )
 
 // String implements fmt.Stringer.
@@ -434,3 +483,13 @@ type ActivityAction string
 
 // String implements fmt.Stringer.
 func (a ActivityAction) String() string { return string(a) }
+
+// Workspace pause/resume activity actions (workspace-kill-switch). Noop
+// covers every request that committed neither a pause nor a release: a
+// repeat pause of an already-paused workspace, a resume of a workspace
+// that isn't paused, and a resume that loses a concurrent CAS race.
+const (
+	ActivityActionWorkspacePaused    ActivityAction = "workspace_paused"
+	ActivityActionWorkspaceResumed   ActivityAction = "workspace_resumed"
+	ActivityActionWorkspacePauseNoop ActivityAction = "workspace_pause_noop"
+)

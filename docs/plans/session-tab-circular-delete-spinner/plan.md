@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/session-tab-delete-feedback.md
+spec: docs/specs/ui/requirements/session-tab-delete-feedback.md
 created: 2026-08-08
 status: done
 ---

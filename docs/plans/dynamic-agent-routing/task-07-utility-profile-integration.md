@@ -5,7 +5,7 @@ status: in_progress
 wave: 7
 depends_on: ["06-logical-session-integration"]
 plan: "plan.md"
-spec: "../../specs/agents/dynamic-agent-routing.md"
+spec: "../../specs/agents/requirements/dynamic-agent-routing.md"
 ---
 
 # Task 07: Utility profile integration

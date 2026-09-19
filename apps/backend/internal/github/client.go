@@ -20,12 +20,43 @@ const (
 	MergeOutcomeMerged MergeOutcome = "merged"
 	MergeOutcomeQueued MergeOutcome = "queued"
 	mergeStatusFailed               = "failed"
+	mergePollInterval               = time.Second
 )
 
+// MergePRRequest defines the optional merge method and the pull-request head
+// that GitHub must still expose when it accepts the merge.
+type MergePRRequest struct {
+	MergeMethod     string
+	ExpectedHeadSHA string
+}
+
 type mergeAsyncResponse struct {
-	Status  string `json:"status"`
-	UUID    string `json:"uuid"`
-	Message string `json:"message"`
+	Status  string                    `json:"status"`
+	Details mergeAsyncResponseDetails `json:"details"`
+}
+
+type mergeAsyncResponseDetails struct {
+	UUID            string `json:"uuid"`
+	Message         string `json:"message"`
+	ExpectedHeadSHA string `json:"expected_head_sha"`
+}
+
+func waitForMergePoll(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func newMergeFailureError(details mergeAsyncResponseDetails) error {
+	if details.ExpectedHeadSHA != "" {
+		return fmt.Errorf("GitHub rejected merge for expected head %s: %s", details.ExpectedHeadSHA, details.Message)
+	}
+	return fmt.Errorf("GitHub rejected merge: %s", details.Message)
 }
 
 func normalizeMergeOutcome(status string) (MergeOutcome, error) {
@@ -96,6 +127,13 @@ type Client interface {
 	// ListCheckRuns lists CI check runs for a given git ref (branch or SHA).
 	ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]CheckRun, error)
 
+	// ListWorkflowRuns lists Actions runs associated with the supplied head
+	// SHA. Implementations must paginate the provider response.
+	ListWorkflowRuns(ctx context.Context, owner, repo, headSHA string) ([]WorkflowRun, error)
+
+	// ListWorkflowRunJobs lists jobs from one specific workflow-run attempt.
+	ListWorkflowRunJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error)
+
 	// GetPRFeedback fetches aggregated feedback (reviews, comments, checks) for a PR.
 	GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error)
 
@@ -120,7 +158,7 @@ type Client interface {
 	RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error
 
 	// MergePR merges a pull request immediately or queues it according to GitHub policy.
-	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) (MergeOutcome, error)
+	MergePR(ctx context.Context, owner, repo string, number int, request MergePRRequest) (MergeOutcome, error)
 
 	// ListRepoBranches lists branches for a repository.
 	ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error)

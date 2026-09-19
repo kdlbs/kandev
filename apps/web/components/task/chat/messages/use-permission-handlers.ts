@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "@/lib/i18n";
+import { toast } from "@/lib/toast/sonner";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
 import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
@@ -26,6 +28,7 @@ export type PermissionActionDetails = {
 };
 
 export type PermissionRequestMetadata = {
+  request_id?: string;
   pending_id: string;
   tool_call_id: string;
   options: PermissionOption[];
@@ -42,10 +45,33 @@ export type ParsedPermission = {
 
 export function parsePermission(permissionMessage: Message | undefined): ParsedPermission {
   const permissionMetadata = permissionMessage?.metadata as PermissionRequestMetadata | undefined;
-  const permissionStatus = permissionMetadata?.status;
+  const storedStatus = permissionMetadata?.status;
+  const missingRequestIdentity =
+    !!permissionMessage &&
+    (!storedStatus || storedStatus === "pending") &&
+    !permissionMetadata?.request_id;
+  const permissionStatus = missingRequestIdentity ? "expired" : storedStatus;
   const isPermissionPending =
-    !!permissionMessage && (!permissionStatus || permissionStatus === "pending");
+    !!permissionMessage &&
+    !!permissionMetadata?.request_id &&
+    (!storedStatus || storedStatus === "pending");
   return { permissionMetadata, permissionStatus, isPermissionPending };
+}
+
+export function resolvePermissionAvailability(
+  permissionStatus: PermissionRequestMetadata["status"],
+  isPermissionPending: boolean,
+  isUnavailable: boolean,
+): Pick<ParsedPermission, "permissionStatus" | "isPermissionPending"> {
+  if (!isUnavailable) return { permissionStatus, isPermissionPending };
+  return { permissionStatus: "expired", isPermissionPending: false };
+}
+
+function isStalePermissionResponse(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return ["permission_not_found", "permission_stale", "permission_already_resolved"].some((code) =>
+    error.message.includes(code),
+  );
 }
 
 type UsePermissionHandlersParams = {
@@ -58,10 +84,24 @@ export function usePermissionResponseHandlers({
   permissionMessage,
 }: UsePermissionHandlersParams) {
   const [isResponding, setIsResponding] = useState(false);
+  const [isUnavailable, setIsUnavailable] = useState(false);
+  const requestId = permissionMetadata?.request_id;
+  const currentRequestIdRef = useRef(requestId);
+
+  useEffect(() => {
+    currentRequestIdRef.current = requestId;
+    setIsResponding(false);
+    setIsUnavailable(false);
+  }, [requestId]);
 
   const handleRespond = useCallback(
     async (optionId: string, cancelled: boolean = false, rejected: boolean = false) => {
-      if (!permissionMetadata || !permissionMessage) return;
+      if (!permissionMessage) return;
+      if (!requestId) {
+        setIsUnavailable(true);
+        toast.warning(t("task:permissionRequestNoLongerAvailable"));
+        return;
+      }
       const client = getWebSocketClient();
       if (!client) {
         console.error("WebSocket client not available");
@@ -70,7 +110,9 @@ export function usePermissionResponseHandlers({
       setIsResponding(true);
       try {
         await client.request("permission.respond", {
+          task_id: permissionMessage.task_id,
           session_id: permissionMessage.session_id,
+          request_id: requestId,
           pending_id: permissionMetadata.pending_id,
           option_id: cancelled ? undefined : optionId,
           cancelled,
@@ -78,11 +120,20 @@ export function usePermissionResponseHandlers({
         });
       } catch (error) {
         console.error("Failed to respond to permission request:", error);
+        if (currentRequestIdRef.current !== requestId) return;
+        if (isStalePermissionResponse(error)) {
+          setIsUnavailable(true);
+          toast.warning(t("task:permissionRequestNoLongerAvailable"));
+        } else {
+          toast.error(t("task:permissionResponseFailed"));
+        }
       } finally {
-        setIsResponding(false);
+        if (currentRequestIdRef.current === requestId) {
+          setIsResponding(false);
+        }
       }
     },
-    [permissionMessage, permissionMetadata],
+    [permissionMessage, permissionMetadata, requestId],
   );
 
   // "Approve" is the one-shot allow. Prefer an explicit allow_once option and
@@ -122,5 +173,12 @@ export function usePermissionResponseHandlers({
     }
   }, [permissionMetadata, handleRespond]);
 
-  return { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject };
+  return {
+    isResponding,
+    isUnavailable,
+    handleApprove,
+    handleAllowAlways,
+    hasAllowAlways,
+    handleReject,
+  };
 }

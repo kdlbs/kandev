@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-storage-temp-artifact-ui"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 04: Temporary-artifact Storage E2E coverage

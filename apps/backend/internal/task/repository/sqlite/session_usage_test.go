@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"testing"
-	"time"
 )
 
 // TestIncrementTaskSessionUsage_AccumulatesCachedInAcrossCalls confirms
@@ -15,10 +14,10 @@ func TestIncrementTaskSessionUsage_AccumulatesCachedInAcrossCalls(t *testing.T) 
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-cached-usage", "sess-cached-usage", "turn-cached-usage")
 
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-cached-usage", 100, 50_000_000, 200, 50); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-cached-usage", 100, 50_000_000, 200, 50); err != nil {
 		t.Fatalf("first increment: %v", err)
 	}
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-cached-usage", 10, 2_000, 20, 5); err != nil {
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-cached-usage", 10, 2_000, 20, 5); err != nil {
 		t.Fatalf("second increment: %v", err)
 	}
 
@@ -35,201 +34,36 @@ func TestIncrementTaskSessionUsage_AccumulatesCachedInAcrossCalls(t *testing.T) 
 	}
 }
 
-// createOfficeCostEventsTable creates a minimal standalone copy of
-// office_cost_events (owned by internal/office/repository/sqlite) so this
-// package's migration tests can exercise the guarded backfill without
-// importing the office package (which would create an import cycle back
-// into internal/task). Column set mirrors office/repository/sqlite/base.go
-// createCostTables.
-func createOfficeCostEventsTable(t *testing.T, repo *Repository) {
-	t.Helper()
-	if _, err := repo.db.Exec(`
-		CREATE TABLE IF NOT EXISTS office_cost_events (
-			id TEXT PRIMARY KEY,
-			session_id TEXT DEFAULT '',
-			task_id TEXT DEFAULT '',
-			agent_profile_id TEXT DEFAULT '',
-			project_id TEXT DEFAULT '',
-			model TEXT DEFAULT '',
-			provider TEXT DEFAULT '',
-			tokens_in INTEGER DEFAULT 0,
-			tokens_cached_in INTEGER DEFAULT 0,
-			tokens_out INTEGER DEFAULT 0,
-			cost_subcents INTEGER NOT NULL DEFAULT 0,
-			estimated INTEGER NOT NULL DEFAULT 0,
-			occurred_at TIMESTAMP NOT NULL,
-			created_at TIMESTAMP NOT NULL
-		)`); err != nil {
-		t.Fatalf("create office_cost_events: %v", err)
-	}
-}
+// TestGetTaskSessionAndListTaskSessions_SurfaceRollupColumns pins
+// docs/specs/task-cost-ledger/spec.md AC-28/AC-29: both session read paths
+// (GetTaskSession's single-row scan and ListTaskSessions' multi-row scan)
+// must return the four usage/cost rollup columns IncrementTaskSessionUsageTx
+// maintains, not just the underlying SQL row.
+func TestGetTaskSessionAndListTaskSessions_SurfaceRollupColumns(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-rollup-surface", "sess-rollup-surface", "turn-rollup-surface")
 
-func insertOfficeCostEvent(t *testing.T, repo *Repository, id, sessionID string, tokensCachedIn int64) {
-	t.Helper()
-	now := time.Now().UTC()
-	_, err := repo.db.Exec(repo.db.Rebind(`
-		INSERT INTO office_cost_events (id, session_id, tokens_cached_in, occurred_at, created_at)
-		VALUES (?, ?, ?, ?, ?)
-	`), id, sessionID, tokensCachedIn, now, now)
+	if err := repo.IncrementTaskSessionUsageTx(ctx, nil, "sess-rollup-surface", 80, 8_203_943, 44979, 79118); err != nil {
+		t.Fatalf("increment: %v", err)
+	}
+
+	got, err := repo.GetTaskSession(ctx, "sess-rollup-surface")
 	if err != nil {
-		t.Fatalf("insert office_cost_event %s: %v", id, err)
+		t.Fatalf("GetTaskSession: %v", err)
 	}
-}
-
-// TestBackfillSessionTokensCachedIn_SumsLedger proves the backfill invariant
-// directly: task_sessions.tokens_cached_in must equal the sum of
-// office_cost_events.tokens_cached_in for that session. This is the
-// reconciliation the card asked for, exercised at the SQL layer.
-func TestBackfillSessionTokensCachedIn_SumsLedger(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedForMsgTest(t, repo, "task-backfill", "sess-backfill", "turn-backfill")
-	createOfficeCostEventsTable(t, repo)
-	insertOfficeCostEvent(t, repo, "cost-1", "sess-backfill", 98_805_109)
-	insertOfficeCostEvent(t, repo, "cost-2", "sess-backfill", 1_194_891)
-	// A row for a different session must not leak into this session's total.
-	insertOfficeCostEvent(t, repo, "cost-other", "sess-other", 555)
-
-	if _, err := repo.BackfillSessionTokensCachedIn(ctx); err != nil {
-		t.Fatalf("backfill: %v", err)
+	if got.TokensIn != 80 || got.TokensCachedIn != 8_203_943 || got.TokensOut != 44979 || got.CostSubcents != 79118 {
+		t.Errorf("GetTaskSession rollup = %+v, want (80, 8203943, 44979, 79118)", got)
 	}
 
-	var got int64
-	if err := repo.ro.QueryRowx(repo.ro.Rebind(
-		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-backfill",
-	).Scan(&got); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
-	if got != 100_000_000 {
-		t.Errorf("tokens_cached_in = %d, want 100000000 (sum of office_cost_events for this session)", got)
-	}
-
-	// Idempotent: re-running against an unchanged ledger must not
-	// double-count the already-correct total.
-	if _, err := repo.BackfillSessionTokensCachedIn(ctx); err != nil {
-		t.Fatalf("second backfill: %v", err)
-	}
-	if err := repo.ro.QueryRowx(repo.ro.Rebind(
-		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-backfill",
-	).Scan(&got); err != nil {
-		t.Fatalf("read row after second pass: %v", err)
-	}
-	if got != 100_000_000 {
-		t.Errorf("tokens_cached_in after second backfill pass = %d, want unchanged 100000000", got)
-	}
-}
-
-// TestBackfillSessionTokensCachedIn_CorrectsDriftedRollup covers the case an
-// unconditional recompute exists to repair: a session whose rollup went out
-// of sync with the ledger without ever erroring. IncrementTaskSessionUsage
-// is a best-effort `UPDATE ... WHERE id = ?` that silently matches zero rows
-// if the session row doesn't exist yet (see
-// TestIncrementTaskSessionUsage_UnknownSessionNoError), and the office
-// subscriber only logs a Warn when that write fails while the ledger insert
-// has already committed (event_subscribers.go handlePromptUsage). A backfill
-// gated on "already nonzero" would treat this drifted-but-nonzero row as
-// already correct and skip it forever; the unconditional recompute must
-// instead overwrite it with the true ledger sum.
-func TestBackfillSessionTokensCachedIn_CorrectsDriftedRollup(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedForMsgTest(t, repo, "task-drifted", "sess-drifted", "turn-drifted")
-	createOfficeCostEventsTable(t, repo)
-	insertOfficeCostEvent(t, repo, "cost-1", "sess-drifted", 98_805_109)
-	insertOfficeCostEvent(t, repo, "cost-2", "sess-drifted", 1_194_891)
-
-	// Simulate the drift directly: the rollup already holds a nonzero but
-	// wrong value, as it would after a missed increment.
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-drifted", 0, 2_000, 0, 0); err != nil {
-		t.Fatalf("seed drifted rollup: %v", err)
-	}
-
-	var before int64
-	if err := repo.ro.QueryRowx(repo.ro.Rebind(
-		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-drifted",
-	).Scan(&before); err != nil {
-		t.Fatalf("read row before backfill: %v", err)
-	}
-	if before != 2_000 {
-		t.Fatalf("test setup bug: rollup = %d, want the drifted seed value 2000", before)
-	}
-
-	if _, err := repo.BackfillSessionTokensCachedIn(ctx); err != nil {
-		t.Fatalf("backfill: %v", err)
-	}
-
-	var got int64
-	if err := repo.ro.QueryRowx(repo.ro.Rebind(
-		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-drifted",
-	).Scan(&got); err != nil {
-		t.Fatalf("read row after backfill: %v", err)
-	}
-	if got != 100_000_000 {
-		t.Errorf("tokens_cached_in after backfill = %d, want 100000000 (the drifted 2000 must be "+
-			"overwritten with the full ledger sum, not skipped as already-nonzero)", got)
-	}
-}
-
-// TestBackfillSessionTokensCachedIn_ZeroesRollupWithNoMatchingLedgerRows pins
-// the behaviour when the ledger table exists but has no rows for a session
-// whose rollup is already nonzero (e.g. the ledger rows for that session were
-// deleted separately from the session itself - see workspace_deletion.go,
-// which deletes office_cost_events before the task-side workspace in two
-// separate transactions). The unconditional recompute is a COALESCE(...,0),
-// so it deliberately zeroes tokens_cached_in in this case rather than leaving
-// the stale value: the rollup is supposed to always equal the ledger sum for
-// that session, and an empty ledger sums to zero.
-func TestBackfillSessionTokensCachedIn_ZeroesRollupWithNoMatchingLedgerRows(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedForMsgTest(t, repo, "task-orphaned", "sess-orphaned", "turn-orphaned")
-	createOfficeCostEventsTable(t, repo)
-
-	// Rollup already holds a nonzero value, but no office_cost_events rows
-	// exist for this session (simulates the ledger having been deleted).
-	if err := repo.IncrementTaskSessionUsage(ctx, "sess-orphaned", 0, 12_345, 0, 0); err != nil {
-		t.Fatalf("seed rollup: %v", err)
-	}
-
-	if _, err := repo.BackfillSessionTokensCachedIn(ctx); err != nil {
-		t.Fatalf("backfill: %v", err)
-	}
-
-	var got int64
-	if err := repo.ro.QueryRowx(repo.ro.Rebind(
-		`SELECT tokens_cached_in FROM task_sessions WHERE id = ?`), "sess-orphaned",
-	).Scan(&got); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
-	if got != 0 {
-		t.Errorf("tokens_cached_in = %d, want 0 (no matching ledger rows sums to zero)", got)
-	}
-}
-
-// TestBackfillSessionTokensCachedIn_SkipsAlreadyCorrectUntouchedSessions pins
-// the boot-cost optimization: a session with no office_cost_events rows and a
-// tokens_cached_in already at its default of 0 must be excluded by the
-// UPDATE's WHERE clause, not just happen to compute the same value. Proven
-// via the reported affected-row count (matches SQL UPDATE semantics on both
-// SQLite and Postgres: rows matched by WHERE, not rows whose value changed),
-// comparing a session the WHERE clause must match (has ledger rows) against
-// one it must not (no ledger rows, untouched default).
-func TestBackfillSessionTokensCachedIn_SkipsAlreadyCorrectUntouchedSessions(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-	seedForMsgTest(t, repo, "task-untouched", "sess-untouched", "turn-untouched")
-	seedForMsgTest(t, repo, "task-with-ledger", "sess-with-ledger", "turn-with-ledger")
-	createOfficeCostEventsTable(t, repo)
-	insertOfficeCostEvent(t, repo, "cost-1", "sess-with-ledger", 500)
-	// sess-untouched: no office_cost_events rows, tokens_cached_in stays at
-	// its untouched default of 0.
-
-	affected, err := repo.BackfillSessionTokensCachedIn(ctx)
+	list, err := repo.ListTaskSessions(ctx, "task-rollup-surface")
 	if err != nil {
-		t.Fatalf("backfill: %v", err)
+		t.Fatalf("ListTaskSessions: %v", err)
 	}
-	if affected != 1 {
-		t.Errorf("rows affected = %d, want 1 (only sess-with-ledger should match the WHERE clause; "+
-			"sess-untouched has no ledger rows and was already 0)", affected)
+	if len(list) != 1 {
+		t.Fatalf("ListTaskSessions returned %d sessions, want 1", len(list))
+	}
+	if list[0].TokensIn != 80 || list[0].TokensCachedIn != 8_203_943 || list[0].TokensOut != 44979 || list[0].CostSubcents != 79118 {
+		t.Errorf("ListTaskSessions rollup = %+v, want (80, 8203943, 44979, 79118)", list[0])
 	}
 }

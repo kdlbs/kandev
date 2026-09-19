@@ -92,20 +92,31 @@ func (s *Server) handleWorkspaceStreamWS(c *gin.Context) {
 	}
 	go s.handleWorkspaceStreamInput(stream, shellWriter, done)
 
-	s.forwardWorkspaceStream(stream, sub, shellOutputCh, done)
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: the invalidation channel comes
+	// from instanceAuth's context value, captured atomically with this
+	// request's own accept check -- not a fresh Invalidated() call here,
+	// which would be a second, independent lock acquisition racing a
+	// concurrent rotation.
+	s.forwardWorkspaceStream(stream, sub, shellOutputCh, done, credentialInvalidatedFromContext(c))
 }
 
 // forwardWorkspaceStream forwards workspace events and shell output to the
-// WebSocket until the client goes away or the handler shuts down.
+// WebSocket until the client goes away or the handler shuts down. invalidated
+// is nil when credentialSource is unset, which never fires in a select --
+// legacy behavior for every existing test constructing a Server without a
+// control server alongside it.
 func (s *Server) forwardWorkspaceStream(
 	stream *workspaceStreamConn,
 	sub types.WorkspaceStreamSubscriber,
 	shellOutputCh chan []byte,
 	done <-chan struct{},
+	invalidated <-chan struct{},
 ) {
 	for {
 		select {
 		case <-done:
+			return
+		case <-invalidated:
 			return
 		case msg, ok := <-sub:
 			if !ok {
@@ -168,7 +179,11 @@ func (s *Server) handleFileContent(c *gin.Context) {
 
 	content, size, isBinary, resolvedPath, err := s.procMgr.GetWorkspaceTracker().GetFileContent(scopedPath)
 	if err != nil {
-		c.JSON(400, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
+		status := http.StatusBadRequest
+		if errors.Is(err, process.ErrFileNotFound) {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, types.FileContentResponse{Path: path, Error: err.Error(), Size: size})
 		return
 	}
 

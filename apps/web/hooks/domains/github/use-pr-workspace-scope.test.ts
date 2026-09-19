@@ -37,6 +37,7 @@ afterEach(() => {
 function taskPR(): TaskPR {
   return {
     id: "pr-1",
+    workspace_id: "ws-1",
     task_id: "task-1",
     owner: "acme",
     repo: "site",

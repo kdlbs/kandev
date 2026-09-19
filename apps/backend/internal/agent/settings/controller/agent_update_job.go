@@ -19,31 +19,36 @@ import (
 )
 
 type AgentUpdateJob struct {
-	ID             string
-	AgentName      string
-	Status         dto.AgentUpdateJobStatus
-	Operation      managedruntime.Operation
-	CurrentVersion string
-	ActiveVersion  string
-	TargetVersion  string
-	Output         *ringBuffer
-	StartedAt      time.Time
-	FinishedAt     *time.Time
-	Error          string
-	RefreshError   string
+	ID               string
+	AgentName        string
+	Package          string
+	Status           dto.AgentUpdateJobStatus
+	Operation        managedruntime.Operation
+	CurrentVersion   string
+	DefaultVersion   string
+	ActiveVersion    string
+	EffectiveVersion string
+	TargetVersion    string
+	UseDefault       bool
+	Output           *ringBuffer
+	StartedAt        time.Time
+	FinishedAt       *time.Time
+	Error            string
+	RefreshError     string
 }
 
 type AgentUpdateJobStore struct {
-	mu             sync.Mutex
-	jobs           map[string]*AgentUpdateJob
-	activeByAgt    map[string]*AgentUpdateJob
-	semaphore      chan struct{}
-	hub            JobBroadcaster
-	log            *zap.Logger
-	updater        RuntimeUpdater
-	maintenance    *maintenanceCoordinator
-	onRefresh      func()
-	selectionStore managedruntime.SelectionStore
+	mu                  sync.Mutex
+	jobs                map[string]*AgentUpdateJob
+	activeByAgt         map[string]*AgentUpdateJob
+	semaphore           chan struct{}
+	hub                 JobBroadcaster
+	log                 *zap.Logger
+	updater             RuntimeUpdater
+	maintenance         *maintenanceCoordinator
+	onRefresh           func()
+	selectionStore      managedruntime.SelectionStore
+	onStatusInvalidated func(string)
 }
 
 func NewAgentUpdateJobStore(
@@ -79,17 +84,35 @@ func (s *AgentUpdateJobStore) Enqueue(
 	spec agents.ManagedNPMRuntimeSpec,
 	targetVersions ...string,
 ) (*AgentUpdateJob, error) {
+	return s.enqueue(agentName, spec, false, targetVersions...)
+}
+
+func (s *AgentUpdateJobStore) EnqueueDefault(
+	agentName string,
+	spec agents.ManagedNPMRuntimeSpec,
+) (*AgentUpdateJob, error) {
+	return s.enqueue(agentName, spec, true)
+}
+
+func (s *AgentUpdateJobStore) enqueue(
+	agentName string,
+	spec agents.ManagedNPMRuntimeSpec,
+	useDefault bool,
+	targetVersions ...string,
+) (*AgentUpdateJob, error) {
 	s.mu.Lock()
 	if existing, ok := s.activeByAgt[agentName]; ok {
 		s.mu.Unlock()
 		return existing, nil
 	}
 	job := &AgentUpdateJob{
-		ID:        uuid.NewString(),
-		AgentName: agentName,
-		Status:    dto.AgentUpdateJobStatusQueued,
-		Output:    newRingBuffer(jobOutputRingSize),
-		StartedAt: time.Now().UTC(),
+		ID:         uuid.NewString(),
+		AgentName:  agentName,
+		Package:    spec.Package,
+		Status:     dto.AgentUpdateJobStatusQueued,
+		Output:     newRingBuffer(jobOutputRingSize),
+		StartedAt:  time.Now().UTC(),
+		UseDefault: useDefault,
 	}
 	requestedTarget := ""
 	if len(targetVersions) > 0 {
@@ -113,6 +136,14 @@ func (s *AgentUpdateJobStore) Enqueue(
 	s.broadcast(ws.ActionAgentUpdateStarted, job.snapshot())
 	go s.run(job, spec, requestedTarget, ref)
 	return job, nil
+}
+
+// SetStatusInvalidator wires the process-local status cache invalidation used
+// after a successful runtime activation. It is optional for isolated stores.
+func (s *AgentUpdateJobStore) SetStatusInvalidator(invalidator func(string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onStatusInvalidated = invalidator
 }
 
 func (s *AgentUpdateJobStore) Get(jobID string) (*dto.AgentUpdateJobDTO, bool) {
@@ -161,7 +192,20 @@ func (s *AgentUpdateJobStore) run(
 	defer cancel()
 	s.setStatus(job, dto.AgentUpdateJobStatusResolving)
 
-	target, exactTarget, err := s.resolveTarget(ctx, spec.Package, requestedTarget)
+	var (
+		target      string
+		exactTarget bool
+		err         error
+	)
+	if job.UseDefault {
+		target = spec.DefaultVersionOrPinned()
+		if _, parseErr := managedruntime.ParseStableVersion(target); parseErr != nil {
+			err = fmt.Errorf("resolve default version: %w", parseErr)
+		}
+		exactTarget = true
+	} else {
+		target, exactTarget, err = s.resolveTarget(ctx, spec.Package, requestedTarget)
+	}
 	if err != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("resolve target version: %w", err), ref)
 		return
@@ -184,7 +228,14 @@ func (s *AgentUpdateJobStore) run(
 			activeVersion = selection.Version
 		}
 	}
-	operation, err := managedruntime.ClassifyOperation(activeVersion, currentVersion, target)
+	defaultVersion := spec.DefaultVersionOrPinned()
+	effectiveVersion := defaultVersion
+	if activeVersion != "" {
+		effectiveVersion = activeVersion
+	}
+	operation, err := managedruntime.ClassifyEffectiveOperation(
+		job.UseDefault, activeVersion, effectiveVersion, currentVersion, target, defaultVersion,
+	)
 	if err != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("classify runtime operation: %w", err), ref)
 		return
@@ -192,7 +243,9 @@ func (s *AgentUpdateJobStore) run(
 	s.mu.Lock()
 	job.TargetVersion = target
 	job.Operation = operation
+	job.DefaultVersion = defaultVersion
 	job.ActiveVersion = activeVersion
+	job.EffectiveVersion = effectiveVersion
 	s.mu.Unlock()
 	if operation == managedruntime.OperationUpToDate ||
 		(s.selectionStore == nil && currentVersion != "" && currentVersion == target) {
@@ -329,10 +382,27 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		s.finishFailed(job, ctx, errors.New(capabilityRefreshError(caps)), ref)
 		return
 	}
-	if err := s.selectionStore.Save(ctx, job.AgentName, spec.Package, target); err != nil {
+	s.mu.Lock()
+	job.CurrentVersion = caps.AgentVersion
+	s.mu.Unlock()
+	if job.UseDefault {
+		if err := s.selectionStore.Delete(ctx, job.AgentName, spec.Package); err != nil {
+			s.finishFailed(job, ctx, fmt.Errorf("clear active runtime version: %w", err), ref)
+			return
+		}
+	} else if err := s.selectionStore.Save(ctx, job.AgentName, spec.Package, target); err != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("persist active runtime version: %w", err), ref)
 		return
 	}
+	s.mu.Lock()
+	if job.UseDefault {
+		job.ActiveVersion = ""
+		job.EffectiveVersion = job.DefaultVersion
+	} else {
+		job.ActiveVersion = target
+		job.EffectiveVersion = target
+	}
+	s.mu.Unlock()
 	candidate.PublishCapabilities(job.AgentName, caps)
 	s.finishActivated(job, target, ref)
 }
@@ -386,11 +456,22 @@ func (s *AgentUpdateJobStore) finishActivated(
 ) {
 	s.mu.Lock()
 	job.Status = dto.AgentUpdateJobStatusSucceeded
-	job.ActiveVersion = target
+	if !job.UseDefault {
+		job.ActiveVersion = target
+		job.EffectiveVersion = target
+	} else {
+		job.ActiveVersion = ""
+		job.EffectiveVersion = job.DefaultVersion
+	}
 	s.maintenance.release(job.AgentName, ref)
 	s.finishLocked(job)
 	snapshot := job.snapshot()
+	statusInvalidator := s.onStatusInvalidated
+	packageName := job.Package
 	s.mu.Unlock()
+	if statusInvalidator != nil && packageName != "" {
+		statusInvalidator(packageName)
+	}
 	if s.onRefresh != nil {
 		s.onRefresh()
 	}
@@ -413,6 +494,7 @@ func (s *AgentUpdateJobStore) finishRefresh(
 		job.Error = formatUpdateJobError(ctx, fmt.Errorf("refresh capabilities: %w", err))
 	case caps.Status == hostutility.StatusOK:
 		job.Status = dto.AgentUpdateJobStatusSucceeded
+		job.CurrentVersion = caps.AgentVersion
 		refreshed = true
 	case caps.Status == hostutility.StatusAuthRequired:
 		job.Status = dto.AgentUpdateJobStatusSucceeded
@@ -429,7 +511,12 @@ func (s *AgentUpdateJobStore) finishRefresh(
 	s.maintenance.release(job.AgentName, ref)
 	s.finishLocked(job)
 	snapshot := job.snapshot()
+	statusInvalidator := s.onStatusInvalidated
+	packageName := job.Package
 	s.mu.Unlock()
+	if refreshed && statusInvalidator != nil && packageName != "" {
+		statusInvalidator(packageName)
+	}
 	if refreshed && s.onRefresh != nil {
 		s.onRefresh()
 	}
@@ -476,17 +563,19 @@ func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJo
 
 func (j *AgentUpdateJob) snapshot() dto.AgentUpdateJobDTO {
 	snapshot := dto.AgentUpdateJobDTO{
-		JobID:          j.ID,
-		AgentName:      j.AgentName,
-		Status:         j.Status,
-		Operation:      string(j.Operation),
-		CurrentVersion: j.CurrentVersion,
-		ActiveVersion:  j.ActiveVersion,
-		TargetVersion:  j.TargetVersion,
-		Output:         j.Output.String(),
-		Error:          j.Error,
-		RefreshError:   j.RefreshError,
-		StartedAt:      j.StartedAt,
+		JobID:            j.ID,
+		AgentName:        j.AgentName,
+		Status:           j.Status,
+		Operation:        string(j.Operation),
+		CurrentVersion:   j.CurrentVersion,
+		DefaultVersion:   j.DefaultVersion,
+		ActiveVersion:    j.ActiveVersion,
+		EffectiveVersion: j.EffectiveVersion,
+		TargetVersion:    j.TargetVersion,
+		Output:           j.Output.String(),
+		Error:            j.Error,
+		RefreshError:     j.RefreshError,
+		StartedAt:        j.StartedAt,
 	}
 	if j.FinishedAt != nil {
 		finished := *j.FinishedAt

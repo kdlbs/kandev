@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-prompt-index"]
 plan: "plan.md"
-spec: "../../specs/ui/prompt-history-panel.md"
+spec: "../../specs/ui/requirements/prompt-history-panel.md"
 ---
 
 # Task 02: Frontend prompt numbering

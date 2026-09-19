@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/message-queue-pin.md
+spec: docs/specs/ui/requirements/message-queue-pin.md
 created: 2026-08-12
 status: building
 ---

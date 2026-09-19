@@ -1,6 +1,26 @@
 package runtimeflags
 
-import "github.com/kandev/kandev/internal/common/config"
+import (
+	"runtime"
+
+	"github.com/kandev/kandev/internal/common/config"
+)
+
+// ReasonPlatformUnsupported is the stable, machine-readable reason code for a
+// flag that requires a host platform this install does not run on. The
+// frontend translates it; it is never shown to the operator as raw text.
+const ReasonPlatformUnsupported = "platform_unsupported"
+
+// agentSurvivalAvailability implements the platform scope decision in
+// system-design/agent-survival-across-restart-02.md: survival is supported on
+// macOS and Linux, and unavailable on Windows, where it would trade the
+// platform's kill-on-job-close safeguard for an untested adoption handshake.
+func agentSurvivalAvailability() (bool, string) {
+	if runtime.GOOS == "windows" {
+		return false, ReasonPlatformUnsupported
+	}
+	return true, ""
+}
 
 // runtimeFlagRegistration keeps the public metadata and the typed config
 // binding for a flag together. The function fields stay internal so the HTTP
@@ -50,6 +70,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.needsYouInbox",
+			EnvVar:      "KANDEV_FEATURES_NEEDS_YOU_INBOX",
+			Kind:        KindFeature,
+			Label:       "Inbox",
+			Description: "Enables a workspace-scoped sidebar destination listing exactly the answerable clarification bundles for the active workspace, independent of Office mode.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "The Inbox is a new read surface plus a per-user dismiss/snooze sidecar; it never mutates " +
+				"the underlying clarification record. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.NeedsYouInbox },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.NeedsYouInbox = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.auth",
 			EnvVar:      "KANDEV_FEATURES_AUTH",
 			Kind:        KindFeature,
@@ -66,6 +103,44 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.Auth },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.Auth = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.canvases",
+			EnvVar:      "KANDEV_FEATURES_CANVASES",
+			Kind:        KindFeature,
+			Label:       "Agent-authored canvases",
+			Description: "Enables isolated agent-authored web application canvases for tasks and workspaces.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Canvas applications execute arbitrary packaged browser code in a sandboxed runtime and " +
+				"can access only explicitly granted Kandev data. Enable this only while reviewing the isolation, " +
+				"storage, and permission behavior of the experimental feature.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Canvases },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Canvases = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.multiTenancy",
+			EnvVar:      "KANDEV_FEATURES_MULTI_TENANCY",
+			Kind:        KindFeature,
+			Label:       "Organizations",
+			Description: "Adds organizations above users: every account belongs to exactly one org, and orgs cannot see each other's workspaces, tasks, or secrets. Requires Authentication & users.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Turning this ON puts every existing user, workspace and secret into a single default " +
+				"organization after restart, and adds an instance operator tier that manages organizations. " +
+				"It requires Authentication & users: with authentication off the instance refuses to start. " +
+				"Filesystem paths and agent CLI credentials are still shared across organizations, so this is " +
+				"an application-layer boundary, not a sandbox.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.MultiTenancy },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.MultiTenancy = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -119,6 +194,44 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.ClaudeMidTurnSteering },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.ClaudeMidTurnSteering = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.officeSessionIdentity",
+			EnvVar:      "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY",
+			Kind:        KindFeature,
+			Label:       "Office per-agent session identity",
+			Description: "Keys an Office task's session identity on the run's own agent instead of the task's runner seat, and binds an agent's decision re-evaluation to its own calling session.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
+				"A live (task_id, agent_profile_id) pair is guarded in-transaction on the office session creation path, not by a table-level constraint; pre-existing duplicate rows are deliberately retained and resolved by selection rather than repaired. " +
+				"The guard relies on SQLite's process-local single-writer pool or PostgreSQL's database task-row lock. Two Kandev processes must not write the same SQLite file. " +
+				"Disabling this toggle and restarting reverts to runner-seat binding and task-active-session decision re-evaluation.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeSessionIdentity },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeSessionIdentity = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.agentSurvival",
+			EnvVar:      "KANDEV_FEATURES_AGENT_SURVIVAL",
+			Kind:        KindFeature,
+			Label:       "Agent survival across backend restart",
+			Description: "Lets a worktree or local-executor agent session survive a backend restart by adopting its still-running standalone control server instead of killing it.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Replaces the standalone control server's kill-on-restart safeguard with an adoption handshake. " +
+				"Enable it only after reviewing the recovery and ownership guarantees, since it changes what happens to an agent " +
+				"process when the backend restarts unexpectedly. Unavailable on Windows, where the removed safeguard is depended on.",
+			RestartRequired: true,
+			Mutable:         true,
+			Available:       agentSurvivalAvailability,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentSurvival },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentSurvival = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

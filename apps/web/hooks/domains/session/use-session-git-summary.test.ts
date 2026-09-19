@@ -79,6 +79,23 @@ describe("deriveMultiRepoSummary", () => {
     ]);
   });
 
+  it("reports both layers for one mixed file", () => {
+    const mixed = {
+      ...file("frontend"),
+      staged_change: { status: "modified" as const },
+      unstaged_change: { status: "modified" as const },
+    };
+    const result = deriveMultiRepoSummary([repoStatus("frontend")], [mixed], ["frontend"]);
+
+    expect(result.perRepoStatus).toEqual([
+      expect.objectContaining({
+        repository_name: "frontend",
+        hasStaged: true,
+        hasUnstaged: true,
+      }),
+    ]);
+  });
+
   it("keeps base divergence separate from upstream push and pull counts", () => {
     const result = deriveMultiRepoSummary(
       [

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
@@ -85,13 +86,24 @@ func applyTaskActivityEventLocked(state *projectionState, eventType string, data
 		}
 		candidate = timeValue(data["queued_at"])
 	case events.TurnStarted:
+		if isLifecycleOnlyTurn(data) {
+			return false
+		}
 		candidate = timeValue(data["started_at"])
 	case events.TurnCompleted:
+		if isLifecycleOnlyTurn(data) {
+			return false
+		}
 		candidate = timeValue(data["completed_at"])
 	default:
 		return false
 	}
 	return advanceTaskActivity(state, candidate)
+}
+
+func isLifecycleOnlyTurn(data map[string]interface{}) bool {
+	metadata, _ := data["metadata"].(map[string]interface{})
+	return boolValue(metadata[models.TurnMetaKeyLifecycleOnly])
 }
 
 func isUserQueuedPrompt(data map[string]interface{}) bool {
@@ -304,11 +316,16 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
 func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.queuedCount = summary.QueuedPromptCount
+	state.launchQueue = cloneLaunchQueue(summary.LaunchQueue)
+	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -318,12 +335,18 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 			isPrimary: true,
 		}
 	}
+	if summary.TaskError != nil {
+		copy := *summary.TaskError
+		copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
+		state.taskError = &copy
+	}
 	if summary.ActiveError != nil {
 		copy := *summary.ActiveError
-		copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
-		if copy.SessionID != "" {
+		copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
+		scope := activeErrorScope(&copy)
+		if scope == models.ErrorScopeSession && copy.SessionID != "" {
 			state.errors[copy.SessionID] = &copy
-		} else {
+		} else if scope == models.ErrorScopeTask && summary.TaskError == nil {
 			state.taskError = &copy
 		}
 	}
@@ -394,6 +417,22 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Projector) restoreLaunchQueue(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadLaunchQueue == nil {
+		return nil
+	}
+	queue, err := p.loadLaunchQueue(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load launch queue for task status summary %q: %w", taskID, err)
+	}
+	state.launchQueue = cloneLaunchQueue(queue)
+	state.launchQueueObserved = true
 	return nil
 }
 
@@ -771,10 +810,26 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		reviewState:           stringField(data, "review_state"),
 		checksState:           stringField(data, "checks_state"),
 		mergeableState:        stringField(data, "mergeable_state"),
+		mergeQueueState:       stringField(data, "merge_queue_state"),
 		unresolvedReviewCount: intValueOrZero(data["unresolved_review_threads"]),
 		pendingReviewCount:    intValueOrZero(data["pending_review_count"]),
 		checksTotal:           intValueOrZero(data["checks_total"]),
 		checksPassing:         intValueOrZero(data["checks_passing"]),
+	}
+	// PR refresh events do not carry the per-PR automation switches. Preserve
+	// the last authoritative values from the CI-options projection instead of
+	// treating an omitted field as an explicit disable. A future producer may
+	// include either field; in that case its bool is authoritative, including
+	// false.
+	if existing, ok := state.prs[key]; ok {
+		observation.autoFixEnabled = existing.autoFixEnabled
+		observation.autoMergeEnabled = existing.autoMergeEnabled
+	}
+	if value, ok := data["auto_fix_enabled"].(bool); ok {
+		observation.autoFixEnabled = value
+	}
+	if value, ok := data["auto_merge_enabled"].(bool); ok {
+		observation.autoMergeEnabled = value
 	}
 	if value, ok := intValue(data["required_reviews"]); ok {
 		observation.requiredReviews = maxInt(value, 0)

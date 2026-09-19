@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/settings-discovery.md
+spec: docs/specs/ui/requirements/settings-discovery.md
 created: 2026-08-05
 status: completed
 ---

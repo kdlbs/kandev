@@ -6,7 +6,7 @@ wave: 1
 parallelism: sequential
 depends_on: ["03-frontend-settings-plumbing"]
 plan: "plan.md"
-spec: "../../specs/prevent-agent-autostart-on-open/spec.md"
+spec: "../../specs/tasks/requirements/prevent-agent-autostart-on-open.md"
 ---
 
 # Task 05: Open-time gates in ensure and resume hooks

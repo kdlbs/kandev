@@ -79,6 +79,7 @@ export function buildPlaywrightArgs(
     "test",
     "--config",
     "e2e/playwright.config.ts",
+    "--workers=1",
     ...manifest.projects.map((project) => `--project=${project}`),
     ...shard.files,
     ...extraArgs,

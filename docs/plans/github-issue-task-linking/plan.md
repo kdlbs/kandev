@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/link-existing-task-github-issue.md
+spec: docs/specs/tasks/requirements/link-existing-task-github-issue.md
 created: 2026-07-13
 status: completed
 ---

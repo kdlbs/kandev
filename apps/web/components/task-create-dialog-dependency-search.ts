@@ -1,0 +1,39 @@
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
+export { changeRequestNumbers } from "@/lib/kanban/task-search-index";
+
+type Task = KanbanState["tasks"][number];
+
+/** cmdk search key: title, id, and both '#N' and bare 'N' for each change-request number. */
+export function dependencyOptionValue(task: Pick<Task, "id" | "title">, numbers: number[]): string {
+  const parts = [task.title, task.id, ...numbers.map((n) => `#${n} ${n}`)];
+  return parts.join(" ");
+}
+
+function timestampMs(task: Pick<Task, "updatedAt" | "createdAt">): number | undefined {
+  const updated = task.updatedAt ? Date.parse(task.updatedAt) : NaN;
+  if (Number.isFinite(updated)) return updated;
+  return createdAtMs(task);
+}
+
+function createdAtMs(task: Pick<Task, "createdAt">): number | undefined {
+  const created = task.createdAt ? Date.parse(task.createdAt) : NaN;
+  return Number.isFinite(created) ? created : undefined;
+}
+
+/** Most-recently-updated first, using createdAt and then title as tie-breakers. */
+export function compareDependencyCandidates(
+  a: Pick<Task, "title" | "updatedAt" | "createdAt">,
+  b: Pick<Task, "title" | "updatedAt" | "createdAt">,
+): number {
+  const aTime = timestampMs(a);
+  const bTime = timestampMs(b);
+  if (aTime !== undefined && bTime !== undefined && aTime !== bTime) return bTime - aTime;
+  if (aTime !== undefined && bTime === undefined) return -1;
+  if (aTime === undefined && bTime !== undefined) return 1;
+  const aCreated = createdAtMs(a);
+  const bCreated = createdAtMs(b);
+  if (aCreated !== undefined && bCreated !== undefined && aCreated !== bCreated) {
+    return bCreated - aCreated;
+  }
+  return a.title.localeCompare(b.title);
+}

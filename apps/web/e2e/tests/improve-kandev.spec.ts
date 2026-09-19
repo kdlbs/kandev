@@ -678,7 +678,7 @@ test.describe("Improve Kandev dialog", () => {
   }) => {
     const dedicated = await apiClient.createWorkspace("Improve Kandev");
 
-    await testPage.goto(`/settings/workspace/${dedicated.id}/workflows`);
+    await testPage.goto(`/settings/workspaces/${dedicated.id}/workflows`);
 
     await expect(testPage.getByText(/cannot be changed/i)).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("add-workflow-button")).toHaveCount(0);
@@ -697,7 +697,7 @@ test.describe("Improve Kandev dialog", () => {
     await apiClient.saveUserSettings({ agent_generated_task_titles: false });
     const dedicated = staging;
 
-    await testPage.goto(`/settings/workspace/${dedicated.id}/repositories`);
+    await testPage.goto(`/settings/workspaces/${dedicated.id}/repositories`);
 
     await expect(testPage.getByText(/cannot be changed/i)).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByRole("button", { name: /Add Local Repository/i })).toHaveCount(0);

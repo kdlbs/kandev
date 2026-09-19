@@ -34,7 +34,8 @@ test.describe("Tool completion on turn end", () => {
 
     // The composer can become idle before the final tool-state reconciliation
     // reaches the rendered message. Give that bounded update its own wait.
-    const spinners = session.chat.locator('[role="status"][aria-label="Loading"]');
+    const toolGroups = session.chat.getByRole("button", { name: /Terminal/ }).locator("..");
+    const spinners = toolGroups.locator('[role="status"][aria-label="Loading"]');
     await expect(spinners).toHaveCount(0, { timeout: 30_000 });
   });
 });

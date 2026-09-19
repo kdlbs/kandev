@@ -66,6 +66,10 @@ func TestWorkspaceTracker_MonitorExitsWhenNoGitRepo(t *testing.T) {
 	// The fix should make monitorLoop exit immediately (well under 500ms).
 	wt.filePollInterval = 500 * time.Millisecond
 	wt.gitPollInterval = 500 * time.Millisecond
+	// This test waits for the polling goroutines directly. Disable the
+	// lifecycle-owned startup-grace goroutine so that the wait isolates the
+	// no-git monitor behavior it is checking.
+	wt.pollModeGrace = 0
 
 	if wt.gitIndexPath != "" {
 		t.Fatalf("expected empty gitIndexPath for non-git directory, got %q", wt.gitIndexPath)
@@ -126,5 +130,63 @@ func TestWorkspaceTracker_StopsWhenGitBroken(t *testing.T) {
 		// Both goroutines exited — success
 	case <-time.After(5 * time.Second):
 		t.Fatal("workspace tracker goroutines did not stop after git was broken")
+	}
+}
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.15
+func TestGetUntrackedFilesID_ExcludesNodeModules(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(wt.Stop)
+	ctx := context.Background()
+
+	baseline, err := wt.getUntrackedFilesID(ctx)
+	if err != nil {
+		t.Fatalf("failed to get baseline untracked fingerprint: %v", err)
+	}
+
+	const dependencyPath = "node_modules/monitor-package/index.js"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(repoDir, dependencyPath)), 0o755); err != nil {
+		t.Fatalf("failed to create dependency directory: %v", err)
+	}
+	writeFile(t, repoDir, dependencyPath, "dependency version 1\n")
+	created, err := wt.getUntrackedFilesID(ctx)
+	if err != nil {
+		t.Fatalf("failed to fingerprint created dependency: %v", err)
+	}
+	if created != baseline {
+		t.Fatalf("fingerprint changed after creating dependency content: before %q, after %q", baseline, created)
+	}
+
+	writeFile(t, repoDir, dependencyPath, "dependency version 2\n")
+	modified, err := wt.getUntrackedFilesID(ctx)
+	if err != nil {
+		t.Fatalf("failed to fingerprint modified dependency: %v", err)
+	}
+	if modified != baseline {
+		t.Fatalf("fingerprint changed after modifying dependency content: before %q, after %q", baseline, modified)
+	}
+
+	if err := os.Remove(filepath.Join(repoDir, dependencyPath)); err != nil {
+		t.Fatalf("failed to remove dependency file: %v", err)
+	}
+	removed, err := wt.getUntrackedFilesID(ctx)
+	if err != nil {
+		t.Fatalf("failed to fingerprint removed dependency: %v", err)
+	}
+	if removed != baseline {
+		t.Fatalf("fingerprint changed after removing dependency content: before %q, after %q", baseline, removed)
+	}
+
+	const ordinaryPath = "monitor-source.ts"
+	writeFile(t, repoDir, ordinaryPath, "export const monitored = true;\n")
+	ordinary, err := wt.getUntrackedFilesID(ctx)
+	if err != nil {
+		t.Fatalf("failed to fingerprint ordinary untracked content: %v", err)
+	}
+	if ordinary == baseline {
+		t.Fatal("fingerprint did not change after creating ordinary untracked content")
 	}
 }

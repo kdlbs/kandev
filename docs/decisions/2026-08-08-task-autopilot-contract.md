@@ -4,7 +4,7 @@
 **Date:** 2026-08-08
 **Area:** backend, agentctl, frontend, protocol, workflow
 **Related issue:** [#2425](https://github.com/kdlbs/kandev/issues/2425)
-**Related spec:** [Task Autopilot Mode](../specs/tasks/autopilot-mode.md)
+**Related spec:** [Task Autopilot Mode](../specs/tasks/requirements/autopilot-mode.md)
 
 ## Context
 

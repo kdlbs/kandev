@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
+	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
 // newMatcherTestRepos opens an isolated SQLite-backed agent settings store for
@@ -108,7 +110,7 @@ func TestBuildAgentProfileMatcher_SkipsDisabledProfile(t *testing.T) {
 // TestBuildAgentProfileMatcher_PreservesDisabledExistingBinding is the
 // reconciliation regression: a workflow step already bound to a profile that
 // gets disabled after the fact must keep that binding on the next sync, per
-// docs/specs/agents/profile-disable.md ("existing sessions/workflows keep
+// docs/specs/agents/requirements/profile-disable.md ("existing sessions/workflows keep
 // their profile"). Excluding disabled profiles from *candidate selection*
 // must not also strip a binding that was already in place.
 func TestBuildAgentProfileMatcher_PreservesDisabledExistingBinding(t *testing.T) {
@@ -244,4 +246,39 @@ func TestBuildAgentProfileMatcher_MultipleCandidatesLogsDebugWithFields(t *testi
 	assert.Equal(t, "auto", fields["mode"])
 	assert.Equal(t, int64(2), fields["candidates"])
 	assert.Equal(t, a.ID, fields["selected_profile_id"])
+}
+
+func TestWorkflowImportProfileCatalog(t *testing.T) {
+	repos, db := newMatcherTestRepos(t)
+	agentID := createMatcherTestAgent(t, repos)
+
+	global := createMatcherTestProfile(t, repos, agentID, "Codex", "gpt-5", "full")
+	disabled := createMatcherTestProfile(t, repos, agentID, "Codex", "disabled", "full")
+	workspace := createMatcherTestProfile(t, repos, agentID, "Codex", "workspace", "full")
+	if _, err := repos.AgentSettings.UpdateAgentProfileEnabled(context.Background(), disabled.ID, false); err != nil {
+		t.Fatalf("disable profile: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE agent_profiles SET workspace_id = ? WHERE id = ?`, "workspace-1", workspace.ID); err != nil {
+		t.Fatalf("scope profile: %v", err)
+	}
+
+	catalog := newWorkflowImportProfileCatalog(repos)
+	profiles, err := catalog.ListEligibleProfiles(context.Background())
+	require.NoError(t, err)
+	require.Len(t, profiles, 1)
+	assert.Equal(t, global.ID, profiles[0].ID)
+	assert.Equal(t, global.Name, profiles[0].Name)
+	assert.Equal(t, global.UpdatedAt, profiles[0].UpdatedAt)
+
+	selected, err := catalog.GetEligibleProfile(context.Background(), global.ID)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, global.ID, selected.ID)
+
+	for _, id := range []string{disabled.ID, workspace.ID, "removed"} {
+		_, err := catalog.GetEligibleProfile(context.Background(), id)
+		if !errors.Is(err, workflowservice.ErrImportProfileNotFound) {
+			t.Fatalf("GetEligibleProfile(%q) error = %v, want ErrImportProfileNotFound", id, err)
+		}
+	}
 }

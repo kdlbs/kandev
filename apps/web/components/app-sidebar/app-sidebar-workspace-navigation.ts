@@ -44,7 +44,7 @@ export function rememberWorkspaceSelectionById(id: string, kind: "office" | "kan
  * that instance's LIVE selection cookie, and for upgraded ported instances it
  * is the validated migration fallback until each writes its own scoped value.
  * Scrubbing it from one instance would change the other instances' next boot
- * (see docs/specs/fix-multi-instance-cookie-isolation/spec.md: the upgraded
+ * (see docs/specs/auth/requirements/fix-multi-instance-cookie-isolation.md: the upgraded
  * instance does not proactively delete the legacy cookie).
  */
 function writeWorkspaceCookie(name: string, value: string): void {

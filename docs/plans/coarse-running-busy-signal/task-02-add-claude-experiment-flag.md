@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-restore-coarse-running-policy"]
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 02: Add Claude background prompt handoff experiment
@@ -38,7 +38,7 @@ spec: "../../specs/platform/background-work-liveness.md"
 - `apps/web/lib/state/slices/features/`
 - `apps/web/e2e/tests/chat/`
 - `docs/decisions/2026-07-28-coarse-running-busy-signal.md`
-- `docs/specs/platform/background-work-liveness.md`
+- `docs/specs/platform/requirements/background-work-liveness.md`
 - `docs/public/configuration.md`
 - `docs/public/tasks-and-workflows.md`
 - `docs/public/websocket-api.md`

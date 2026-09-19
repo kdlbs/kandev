@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-shared-error-catalogue", "02-versioned-policy-document"]
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 03: Durable policy evaluator

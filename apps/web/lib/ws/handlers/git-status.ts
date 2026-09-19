@@ -22,7 +22,7 @@ type GitEventHandlers = {
   branch_switched: (store: StoreApi<AppState>, event: GitBranchSwitchedEvent) => void;
 };
 
-/** Resolve sessionId → environmentId for cache keying. */
+/** Resolve sessionId → environmentId for non-status Git event cache keying. */
 function resolveEnvKey(store: StoreApi<AppState>, sessionId: string): string {
   return store.getState().environmentIdBySessionId[sessionId] ?? sessionId;
 }
@@ -46,7 +46,7 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
     remote_ahead: event.status.remote_ahead,
     remote_behind: event.status.remote_behind,
     remote_head_commit: event.status.remote_head_commit,
-    files: event.status.files,
+    files: event.status.files ?? {},
     timestamp: event.timestamp,
     branch_additions: event.status.branch_additions,
     branch_deletions: event.status.branch_deletions,
@@ -59,11 +59,15 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
 
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
+    const taskEnvironmentId = event.task_environment_id;
+    if (!taskEnvironmentId) {
+      return;
+    }
     const gitStatus = buildGitStatusEntry(event);
     // setGitStatus performs the deep change comparison once and reports back
     // whether anything changed; reuse that instead of comparing again here.
     // Under a massive rebase the comparison is the dominant CPU cost.
-    const changed = store.getState().setGitStatus(event.session_id, gitStatus);
+    const changed = store.getState().setGitStatus(taskEnvironmentId, gitStatus);
     if (isDebug()) {
       debug("status_update", {
         sessionId: event.session_id,
@@ -81,13 +85,13 @@ const gitEventHandlers: GitEventHandlers = {
         headCommit: event.status.head_commit,
         baseCommit: event.status.base_commit,
         remoteHeadCommit: event.status.remote_head_commit,
-        envKey: resolveEnvKey(store, event.session_id),
-        envMapped: event.session_id in store.getState().environmentIdBySessionId,
+        envKey: taskEnvironmentId,
+        envMapped: false,
         changed,
       });
     }
     if (changed) {
-      invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
+      invalidateCumulativeDiffCache(taskEnvironmentId);
     }
   },
 
@@ -121,22 +125,36 @@ const gitEventHandlers: GitEventHandlers = {
   },
 
   commits_reset: (store, event) => {
-    if (isDebug()) debug("commits_reset", { sessionId: event.session_id });
+    if (isDebug())
+      debug("commits_reset", {
+        sessionId: event.session_id,
+        repositoryName: event.reset.repository_name ?? null,
+      });
     // Trigger a refetch without clearing the visible commits — the Changes
     // panel would otherwise flicker through its empty state ("Your changed
     // files will appear here") while the refetch is in flight, because
     // useSessionCommits returns `commits ?? []` and the panel's hasAnything
     // gate flips to false the moment commits goes undefined.
     store.getState().bumpSessionCommitsRefetch(event.session_id);
+    store
+      .getState()
+      .bumpSessionGitCheckoutGeneration(event.session_id, event.reset.repository_name);
     // Invalidate cumulative diff cache when commits are reset
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
 
   branch_switched: (store, event) => {
-    if (isDebug()) debug("branch_switched", { sessionId: event.session_id });
+    if (isDebug())
+      debug("branch_switched", {
+        sessionId: event.session_id,
+        repositoryName: event.branch_switch.repository_name ?? null,
+      });
     // Stale-while-revalidate (see commits_reset above): refetch with the new
     // base commit but keep the old list visible until the new one arrives.
     store.getState().bumpSessionCommitsRefetch(event.session_id);
+    store
+      .getState()
+      .bumpSessionGitCheckoutGeneration(event.session_id, event.branch_switch.repository_name);
     // Invalidate cumulative diff cache when branch switches
     invalidateCumulativeDiffCache(resolveEnvKey(store, event.session_id));
   },
@@ -153,6 +171,9 @@ export function registerGitStatusHandlers(store: StoreApi<AppState>): WsHandlers
       // Use switch for proper type narrowing
       switch (payload.type) {
         case "status_update":
+          if (!payload.task_environment_id) {
+            return;
+          }
           gitEventHandlers.status_update(store, payload);
           break;
         case "commit_created":

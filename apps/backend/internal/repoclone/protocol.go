@@ -17,19 +17,62 @@ const ProtocolSSH = "ssh"
 // ProtocolHTTPS is the HTTPS git protocol.
 const ProtocolHTTPS = "https"
 
-// DetectGitProtocol returns the user's preferred git clone protocol.
-// It checks the gh CLI config (`gh config get git_protocol`). If gh reports
-// "https", it returns ProtocolHTTPS. Otherwise it defaults to ProtocolSSH.
-func DetectGitProtocol() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+const gitProtocolLookupTimeout = 5 * time.Second
+
+// GitProtocolResolver resolves the clone protocol for a provider host.
+type GitProtocolResolver interface {
+	ResolveGitProtocol(context.Context, string) string
+}
+
+type gitProtocolCommandRunner func(context.Context, ...string) ([]byte, error)
+
+type gitProtocolResolver struct {
+	run gitProtocolCommandRunner
+}
+
+// NewGitProtocolResolver creates a resolver backed by the host gh CLI.
+func NewGitProtocolResolver() GitProtocolResolver {
+	return &gitProtocolResolver{run: runGHConfigCommand}
+}
+
+func newGitProtocolResolver(run gitProtocolCommandRunner) GitProtocolResolver {
+	if run == nil {
+		run = runGHConfigCommand
+	}
+	return &gitProtocolResolver{run: run}
+}
+
+func runGHConfigCommand(ctx context.Context, args ...string) ([]byte, error) {
+	return subproc.RunGHOutput(ctx, exec.CommandContext(ctx, "gh", args...))
+}
+
+func (r *gitProtocolResolver) ResolveGitProtocol(ctx context.Context, providerHost string) string {
+	lookupCtx, cancel := context.WithTimeout(ctx, gitProtocolLookupTimeout)
 	defer cancel()
-	out, err := subproc.RunGHOutput(ctx, exec.CommandContext(ctx, "gh", "config", "get", "git_protocol"))
-	if err == nil {
-		if strings.TrimSpace(string(out)) == ProtocolHTTPS {
-			return ProtocolHTTPS
+	host, _, err := normalizeGitProviderHost(providerHost)
+	if err == nil && host != "" {
+		if protocol := r.lookup(lookupCtx, "-h", host, "git_protocol"); protocol != "" {
+			return protocol
+		}
+	}
+	if lookupCtx.Err() == nil {
+		if protocol := r.lookup(lookupCtx, "git_protocol"); protocol != "" {
+			return protocol
 		}
 	}
 	return ProtocolSSH
+}
+
+func (r *gitProtocolResolver) lookup(ctx context.Context, args ...string) string {
+	out, err := r.run(ctx, append([]string{"config", "get"}, args...)...)
+	if err != nil || ctx.Err() != nil {
+		return ""
+	}
+	protocol := strings.TrimSpace(string(out))
+	if protocol == ProtocolSSH || protocol == ProtocolHTTPS {
+		return protocol
+	}
+	return ""
 }
 
 // CloneURL builds a clone URL for the given provider, owner, name, and protocol.
@@ -45,18 +88,11 @@ func CloneURL(provider, owner, name, protocol string) (string, error) {
 // provider's default — used for self-managed GitLab. When host is empty,
 // behaves exactly like CloneURL.
 func CloneURLWithHost(provider, host, owner, name, protocol string) (string, error) {
-	resolvedHost := strings.TrimSpace(strings.TrimRight(host, "/"))
-	httpsScheme := "https"
-	if strings.Contains(resolvedHost, "://") {
-		parsed, err := url.Parse(resolvedHost)
-		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || (parsed.Path != "" && parsed.Path != "/") {
-			return "", fmt.Errorf("invalid git provider host: %q", host)
-		}
-		resolvedHost = parsed.Host
-		httpsScheme = parsed.Scheme
+	resolvedHost, httpsScheme, err := normalizeGitProviderHost(host)
+	if err != nil {
+		return "", err
 	}
 	if resolvedHost == "" {
-		var err error
 		resolvedHost, err = providerHost(provider)
 		if err != nil {
 			return "", err
@@ -72,6 +108,22 @@ func CloneURLWithHost(provider, host, owner, name, protocol string) (string, err
 		return fmt.Sprintf("git@%s:%s/%s.git", resolvedHost, owner, name), nil
 	}
 	return fmt.Sprintf("%s://%s/%s/%s.git", httpsScheme, resolvedHost, owner, name), nil
+}
+
+func normalizeGitProviderHost(host string) (string, string, error) {
+	resolvedHost := strings.TrimSpace(strings.TrimRight(host, "/"))
+	httpsScheme := "https"
+	if strings.Contains(resolvedHost, "://") {
+		parsed, err := url.Parse(resolvedHost)
+		if err != nil || parsed.Host == "" || parsed.User != nil ||
+			(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			(parsed.Path != "" && parsed.Path != "/") {
+			return "", "", fmt.Errorf("invalid git provider host: %q", host)
+		}
+		resolvedHost = parsed.Host
+		httpsScheme = parsed.Scheme
+	}
+	return resolvedHost, httpsScheme, nil
 }
 
 // providerHost maps a provider name to its git host.

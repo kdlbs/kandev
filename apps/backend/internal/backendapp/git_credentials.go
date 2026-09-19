@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/gitcredentials"
-	githubpkg "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -21,6 +20,13 @@ const (
 	gitCredentialGitHubHost       = "github.com"
 )
 
+type gitHubCredentialSource interface {
+	GitCredentialResolver() gitcredentials.Resolver
+	VerifyContributionDestinationForWorkspace(
+		context.Context, string, string, string, string, string, string, string,
+	) error
+}
+
 type gitCredentialTaskRepository interface {
 	GetTask(context.Context, string) (*taskmodels.Task, error)
 	GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error)
@@ -29,7 +35,7 @@ type gitCredentialTaskRepository interface {
 }
 
 func newGitCredentialBroker(
-	githubSvc *githubpkg.Service,
+	githubSvc gitHubCredentialSource,
 	pluginSvc *plugins.Service,
 	repo gitCredentialTaskRepository,
 	reissueSigningKey string,
@@ -41,7 +47,10 @@ func newGitCredentialBroker(
 	if pluginSvc != nil {
 		resolvers = append(resolvers, pluginGitCredentialResolver{service: pluginCredentialServiceAdapter{service: pluginSvc}})
 	}
-	broker := gitcredentials.NewBroker(gitcredentials.NewCompositeResolver(resolvers...), &githubBrokerScopeAuthorizer{repo: repo})
+	broker := gitcredentials.NewBroker(
+		gitcredentials.NewCompositeResolver(resolvers...),
+		&githubBrokerScopeAuthorizer{repo: repo, provider: githubSvc},
+	)
 	if signer, err := gitcredentials.NewReissueCapabilitySigner(reissueSigningKey); err == nil {
 		broker.SetReissueCapabilitySigner(signer)
 	}
@@ -231,7 +240,34 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitCredential(ctx context.Context
 	if _, err := a.authorizeTaskRepository(ctx, scope.TaskID, scope.RepositoryID); err != nil {
 		return err
 	}
-	return a.authorizeRepositoryIdentity(ctx, scope)
+	if !strings.EqualFold(scope.ProviderID, gitCredentialGitHubProviderID) ||
+		!strings.EqualFold(scope.Host, gitCredentialGitHubHost) {
+		return a.authorizeRepositoryIdentity(ctx, scope)
+	}
+	owner, repo, err := gitCredentialScopeOwnerRepo(scope.Path)
+	if err != nil {
+		return err
+	}
+	if err := a.AuthorizeGitHubRepositoryWithIdentity(
+		ctx, scope.WorkspaceID, scope.TaskID, scope.SessionID, scope.RepositoryID,
+		owner, repo, scope.IdentityProviderID, scope.ParentProviderID,
+	); err == nil {
+		return nil
+	}
+	// Legacy GitHub rows may omit ProviderHost while their persisted clone URL
+	// still proves github.com. This fallback is upstream-only. Preserve any
+	// provider identity carried by the lease before using that legacy proof;
+	// fork credentials must pass the destination check above.
+	return a.authorizeLegacyGitHubRepositoryIdentity(ctx, scope)
+}
+
+func gitCredentialScopeOwnerRepo(path string) (string, string, error) {
+	trimmed := strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	owner, repo, found := strings.Cut(trimmed, "/")
+	if !found || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		return "", "", fmt.Errorf("repository identity does not match lease scope")
+	}
+	return owner, repo, nil
 }
 
 func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(ctx context.Context, scope gitcredentials.Scope) error {
@@ -239,6 +275,27 @@ func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(ctx context.Co
 	if err != nil {
 		return err
 	}
+	return authorizeRepositoryIdentityRecord(repository, scope)
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeLegacyGitHubRepositoryIdentity(
+	ctx context.Context, scope gitcredentials.Scope,
+) error {
+	if strings.TrimSpace(scope.ParentProviderID) != "" {
+		return fmt.Errorf("repository parent identity does not match lease scope")
+	}
+	repository, err := a.repo.GetRepository(ctx, scope.RepositoryID)
+	if err != nil {
+		return err
+	}
+	if identity := strings.TrimSpace(scope.IdentityProviderID); identity != "" &&
+		(repository == nil || !strings.EqualFold(strings.TrimSpace(repository.ProviderRepoID), identity)) {
+		return fmt.Errorf("repository provider identity does not match lease scope")
+	}
+	return authorizeRepositoryIdentityRecord(repository, scope)
+}
+
+func authorizeRepositoryIdentityRecord(repository *taskmodels.Repository, scope gitcredentials.Scope) error {
 	if repository == nil {
 		return fmt.Errorf("repository identity does not match lease scope")
 	}

@@ -7,7 +7,7 @@ depends_on:
   - "03-ci-manifest-lifecycle"
   - "06-container-isolation"
 plan: "plan.md"
-spec: "../../specs/e2e-duration-aware-sharding/spec.md"
+spec: "../../specs/platform/requirements/e2e-duration-aware-sharding.md"
 ---
 
 # Task 08: Run concurrency and setup experiments

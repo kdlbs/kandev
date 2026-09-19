@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-configuration-transfer", "03-executor-config-controls"]
 plan: "plan.md"
-spec: "../../specs/portable-agent-configuration/spec.md"
+spec: "../../specs/agents/requirements/portable-agent-configuration.md"
 ---
 
 # Task 04: Prove executor configuration behavior

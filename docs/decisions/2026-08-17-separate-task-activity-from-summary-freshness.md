@@ -1,6 +1,6 @@
 # ADR-2026-08-17-separate-task-activity-from-summary-freshness: Separate Task Activity From Summary Freshness
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-29)
 **Date:** 2026-08-17
 **Area:** backend, frontend, protocol
 
@@ -24,7 +24,10 @@ rebuildable summary.
 
 - task creation or a persisted task mutation
 - a user-authored prompt, including a prompt that enters the queue
-- an agent turn start or completion
+- a conversational agent turn start or completion
+
+A turn with `metadata.lifecycle_only=true` is not conversational. The
+synthetic turn named `agent_boot` on resume does not advance task activity.
 
 The timestamp does not advance for task focus, session subscription, Git or
 pull-request polling, queue bookkeeping, status-summary repair, or session
@@ -47,9 +50,10 @@ Idle tasks stay stable when background provider status changes. Desktop and
 mobile saved views can sort by meaningful work without opening task sessions.
 
 The backend needs a batched activity query and more bounded projector inputs.
-Turn milestones prevent per-chunk agent output from producing task-list update
-traffic. A running turn becomes recent when it starts and advances again when
-it completes.
+Both paths must exclude lifecycle-only turns. Conversational-turn milestones
+prevent per-chunk agent output from producing task-list update traffic. A
+running conversational turn becomes recent when it starts and advances again
+when it completes.
 
 Older summaries need a one-time semantic repair. During partial rollout, the
 frontend falls back to the task update or creation time when
@@ -65,3 +69,5 @@ frontend falls back to the task update or creation time when
   history is not loaded and task switchers must not subscribe to it.
 - **Write every activity to the task row.** Rejected because message and turn
   domains gain extra task writes and mix activity with task edits.
+- **Count every persisted turn.** Rejected because lifecycle turns record
+  runtime maintenance, not user or agent work.

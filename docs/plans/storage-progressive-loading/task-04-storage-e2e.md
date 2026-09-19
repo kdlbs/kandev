@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-storage-totals"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 04: Storage Desktop and Mobile E2E

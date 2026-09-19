@@ -43,7 +43,7 @@ import { PluginPanelTab } from "./plugin-panel-tab";
 import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 
-import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
@@ -235,8 +235,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
 }
 
 /**
- * Force a fresh git-status push whenever the diff panel becomes the active
- * dockview tab.
+ * Force a fresh git-status push whenever the diff panel becomes visible.
  *
  * Background: the diff panel's content is derived from `gitStatus` (the
  * per-file `.diff` string), which only refreshes when a `session.git.event`
@@ -251,28 +250,20 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * signal, so we ask the backend for a fresh git-status snapshot via the
  * explicit `session.git.refresh` request. Focus itself remains an ACK-only
  * control signal, avoiding replay on ordinary task switching. No-op when the
- * session isn't focused.
+ * session isn't focused. Visibility is used instead of active state because
+ * a right-column group can remain visible while another dockview group owns
+ * global focus.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
+  const isVisible = usePanelActive(panelId);
+
   useEffect(() => {
-    if (!sessionId) return;
-    const entry = panelPortalManager.get(panelId);
-    if (!entry?.api) return;
-    /** Ask the WebSocket client for a fresh git-status snapshot for the
-     *  session. */
-    const refreshNow = () => {
-      const client = getWebSocketClient();
-      client?.refreshSessionData(sessionId);
-    };
-    // If the panel is already active when this effect first runs,
-    // onDidActiveChange won't fire (no transition) — refresh immediately so the
-    // initial open benefits from the same WS-event-miss recovery.
-    if (entry.api.isActive) refreshNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
-      if (event.isActive) refreshNow();
-    });
-    return () => disposable.dispose();
-  }, [panelId, sessionId]);
+    if (!sessionId || !isVisible) return;
+    // Visibility is synchronized by usePanelActive, including the initial
+    // portal-registration race. Ask for a fresh snapshot whenever the panel
+    // becomes visible or its session changes.
+    getWebSocketClient()?.refreshSessionData(sessionId);
+  }, [sessionId, isVisible]);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -294,6 +285,8 @@ function DiffViewerContent({
   const selectedRepositoryName =
     panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
   const selectedPRKey = panelKind === "file" ? (params?.prKey as string | undefined) : undefined;
+  const selectedChangeLayer =
+    panelKind === "file" ? (params?.changeLayer as OpenDiffOptions["changeLayer"]) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   useResyncGitStatusOnTabActivate(panelId, activeSessionId);
@@ -309,6 +302,7 @@ function DiffViewerContent({
       filePath={selectedPath}
       fileRepositoryName={selectedRepositoryName}
       prKey={selectedPRKey}
+      changeLayer={selectedChangeLayer}
       sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
@@ -331,6 +325,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
@@ -352,6 +347,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
         source: options?.source,
         repositoryName: options?.repositoryName,
         prKey: options?.prKey,
+        changeLayer: options?.changeLayer,
       }),
     [addFileDiffPanel],
   );

@@ -6,7 +6,7 @@ wave: 1
 depends_on: []
 parallelism: sequential
 plan: "plan.md"
-spec: "../../specs/ui/task-layout-profiles.md"
+spec: "../../specs/ui/requirements/task-layout-profiles.md"
 ---
 
 # Task 01: Preserve Session Focus During Chat Reconciliation
@@ -68,7 +68,7 @@ Red-Green-Refactor cycle.
 
 ## Inputs
 
-- `docs/specs/ui/task-layout-profiles.md`, especially the desktop session-focus
+- `docs/specs/ui/requirements/task-layout-profiles.md`, especially the desktop session-focus
   behavior, persistence guarantee, and reconciliation scenario.
 - `docs/plans/dockview-session-focus-preservation/plan.md`.
 - Dockview 4.13.1 `DockviewGroupPanelModel.openPanel`, `removePanel`, and

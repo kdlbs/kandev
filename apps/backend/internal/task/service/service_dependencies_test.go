@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +20,8 @@ import (
 // asserting the happy path.
 type errBlockerRepo struct {
 	*mockBlockerRepo
-	failList bool
+	failList       bool
+	failDependents bool
 }
 
 func (e *errBlockerRepo) ListTaskBlockers(ctx context.Context, taskID string) ([]*orchmodels.TaskBlocker, error) {
@@ -33,6 +36,24 @@ func (e *errBlockerRepo) ListBlockersForTasks(ctx context.Context, ids []string)
 		return nil, errors.New("boom")
 	}
 	return e.mockBlockerRepo.ListBlockersForTasks(ctx, ids)
+}
+
+func (e *errBlockerRepo) ListDependentsForTasks(ctx context.Context, ids []string) (map[string][]string, error) {
+	if e.failDependents {
+		return nil, errors.New("boom")
+	}
+	return e.mockBlockerRepo.ListDependentsForTasks(ctx, ids)
+}
+
+// errTaskRepoOnGetByIDs wraps a working task repository and fails only the
+// edge-end resolution read, so the derivation's fail-closed handling of that
+// path can be proven without breaking any other repository method it needs.
+type errTaskRepoOnGetByIDs struct {
+	taskrepo.TaskRepository
+}
+
+func (r *errTaskRepoOnGetByIDs) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	return nil, errors.New("boom")
 }
 
 func setDependencyState(t *testing.T, svc *Service, taskID string, state v1.TaskState) {
@@ -160,6 +181,14 @@ func TestBuildDependencyViews_ReportsBothDirections(t *testing.T) {
 	if !view.Blocked || view.BlockedReason != BlockedReasonPending {
 		t.Errorf("blocked=%v reason=%q; want true/pending", view.Blocked, view.BlockedReason)
 	}
+	// The far end's workspace id must survive resolution: canvas scope
+	// redaction decides admission from it without any extra read.
+	if view.DependsOn[0].WorkspaceID != a.WorkspaceID {
+		t.Errorf("depends_on[0].WorkspaceID = %q, want %q", view.DependsOn[0].WorkspaceID, a.WorkspaceID)
+	}
+	if view.Blocks[0].WorkspaceID != c.WorkspaceID {
+		t.Errorf("blocks[0].WorkspaceID = %q, want %q", view.Blocks[0].WorkspaceID, c.WorkspaceID)
+	}
 }
 
 // BuildDependencyViews must fail closed too: the board reads dependency state
@@ -173,6 +202,63 @@ func TestBuildDependencyViews_FailsClosedOnReadError(t *testing.T) {
 	view := views[task.ID]
 	if !view.Blocked || view.BlockedReason != BlockedReasonUnknown {
 		t.Errorf("read failure: blocked=%v reason=%q; want true/unknown", view.Blocked, view.BlockedReason)
+	}
+}
+
+// A nil blocker repository must fail closed too. Today's empty-map return
+// means a caller reading a missing key sees the zero-value DependencyView
+// (Blocked: false) — indistinguishable from "no edges" — which is exactly the
+// silent "not blocked" the fail-closed contract exists to rule out.
+func TestBuildDependencyViews_FailsClosedWhenRepositoryUnconfigured(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	task := mustSeedTask(t, svc, "A")
+
+	views := svc.BuildDependencyViews(context.Background(), []*models.Task{task})
+	view, ok := views[task.ID]
+	if !ok {
+		t.Fatalf("BuildDependencyViews omitted %s entirely; a missing key reads as unblocked", task.ID)
+	}
+	if !view.Blocked || view.BlockedReason != BlockedReasonUnknown {
+		t.Errorf("no repository configured: blocked=%v reason=%q; want true/unknown", view.Blocked, view.BlockedReason)
+	}
+}
+
+// A dependent-direction read failure must fail closed exactly like the
+// predecessor-direction failure already covered above.
+func TestBuildDependencyViews_FailsClosedOnDependentReadError(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	task := mustSeedTask(t, svc, "A")
+	svc.SetBlockerRepository(&errBlockerRepo{mockBlockerRepo: &mockBlockerRepo{}, failDependents: true})
+
+	views := svc.BuildDependencyViews(context.Background(), []*models.Task{task})
+	view := views[task.ID]
+	if !view.Blocked || view.BlockedReason != BlockedReasonUnknown {
+		t.Errorf("dependent read failure: blocked=%v reason=%q; want true/unknown", view.Blocked, view.BlockedReason)
+	}
+}
+
+// A failure resolving edge-end refs (title/state lookup) must fail the whole
+// batch closed too: it fails the derivation for every task in the batch, not
+// just the tasks with edges.
+func TestBuildDependencyViews_FailsClosedOnEdgeEndResolutionError(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	repo := &mockBlockerRepo{}
+	svc.SetBlockerRepository(repo)
+	ctx := context.Background()
+	a := mustSeedTask(t, svc, "A")
+	b := mustSeedTask(t, svc, "B")
+	if err := svc.AddDependency(ctx, b.ID, a.ID); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+	svc.tasks = &errTaskRepoOnGetByIDs{TaskRepository: svc.tasks}
+
+	views := svc.BuildDependencyViews(ctx, []*models.Task{b})
+	view := views[b.ID]
+	if !view.Blocked || view.BlockedReason != BlockedReasonUnknown {
+		t.Errorf("edge-end resolution failure: blocked=%v reason=%q; want true/unknown", view.Blocked, view.BlockedReason)
+	}
+	if len(view.DependsOn) != 0 || len(view.Blocks) != 0 {
+		t.Errorf("edge-end resolution failure: depends_on=%+v blocks=%+v; want both empty", view.DependsOn, view.Blocks)
 	}
 }
 
@@ -297,35 +383,11 @@ func TestDependencyMutationsAreScopedToTheCaller(t *testing.T) {
 	}
 }
 
-// gateBlockerRepo forces the interleaving the cycle race needs: each cycle walk
-// announces itself and then waits for the other walk to start. Two bare
-// goroutines practically never land inside the validate-then-insert window, so
-// a test without this barrier passes even with the serialization removed and
-// proves nothing.
-type gateBlockerRepo struct {
-	*mockBlockerRepo
-	arrived chan struct{}
-	once    sync.Once
-}
-
-func (g *gateBlockerRepo) ListTaskBlockers(ctx context.Context, taskID string) ([]*orchmodels.TaskBlocker, error) {
-	g.once.Do(func() { close(g.arrived) })
-	select {
-	case <-g.arrived:
-	case <-time.After(time.Second):
-	}
-	// Give the other goroutine room to finish its own walk before this one
-	// inserts. Serialization must make that impossible; without it both walks
-	// complete against a pre-insert view.
-	time.Sleep(20 * time.Millisecond)
-	return g.mockBlockerRepo.ListTaskBlockers(ctx, taskID)
-}
-
 // Two concurrent adds must not each pass a cycle walk that predates the other's
 // insert and commit a cycle between them.
 func TestAddDependencyConcurrentInsertsCannotCreateACycle(t *testing.T) {
 	svc, _ := setupOfficeTest(t)
-	repo := &gateBlockerRepo{mockBlockerRepo: &mockBlockerRepo{}, arrived: make(chan struct{})}
+	repo := &mockBlockerRepo{}
 	svc.SetBlockerRepository(repo)
 	ctx := context.Background()
 	a := mustSeedTask(t, svc, "A").ID
@@ -388,7 +450,9 @@ func TestDependencyGateIgnoresDanglingEdgeButFailsClosedOnError(t *testing.T) {
 }
 
 // The derived projection must drop a dangling edge too, so the board does not
-// render a blocked badge for a predecessor that no longer exists.
+// render a blocked badge for a predecessor that no longer exists. Coverage
+// spans both directions: a removed predecessor must vanish from depends_on,
+// and a removed dependent must vanish from blocks.
 func TestBuildDependencyViewsDropsDanglingEdges(t *testing.T) {
 	svc, _ := setupOfficeTest(t)
 	repo := &mockBlockerRepo{}
@@ -400,6 +464,13 @@ func TestBuildDependencyViewsDropsDanglingEdges(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed dangling edge: %v", err)
 	}
+	// The reverse direction: some other task that no longer exists once
+	// depended on "dependent", so "dependent" would list it under Blocks.
+	if err := repo.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{
+		TaskID: "deleted-dependent-id", BlockerTaskID: dependent.ID,
+	}); err != nil {
+		t.Fatalf("seed dangling dependent edge: %v", err)
+	}
 
 	view := svc.BuildDependencyViews(ctx, []*models.Task{dependent})[dependent.ID]
 	if view.Blocked {
@@ -407,6 +478,188 @@ func TestBuildDependencyViewsDropsDanglingEdges(t *testing.T) {
 	}
 	if len(view.DependsOn) != 0 {
 		t.Errorf("depends_on = %+v; a dangling edge must not be reported", view.DependsOn)
+	}
+	if len(view.Blocks) != 0 {
+		t.Errorf("blocks = %+v; a dangling dependent edge must not be reported", view.Blocks)
+	}
+}
+
+// seedIndexedTask creates a lightweight task directly through the repository,
+// bypassing the full CreateTask flow so a large fixture stays fast.
+func seedIndexedTask(t *testing.T, svc *Service, id string) {
+	t.Helper()
+	if err := svc.tasks.CreateTask(context.Background(), &models.Task{
+		ID: id, WorkspaceID: "ws-1", Title: id, State: v1.TaskStateCompleted,
+	}); err != nil {
+		t.Fatalf("seed task %s: %v", id, err)
+	}
+}
+
+// The predecessor direction is resolved in full so the verdict can account for
+// every predecessor, but the displayed list is cut to 512 with the truncation
+// flag set, keeping the first entries in edge order.
+func TestBuildDependencyViews_DependsOnListTruncatesAt512(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	repo := &mockBlockerRepo{}
+	svc.SetBlockerRepository(repo)
+	ctx := context.Background()
+	dependent := mustSeedTask(t, svc, "Dependent")
+
+	const total = maxTaskDependencyCount + 1
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("pred-%04d", i)
+		seedIndexedTask(t, svc, id)
+		if err := repo.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{
+			TaskID: dependent.ID, BlockerTaskID: id,
+		}); err != nil {
+			t.Fatalf("seed predecessor edge %s: %v", id, err)
+		}
+	}
+
+	view := svc.BuildDependencyViews(ctx, []*models.Task{dependent})[dependent.ID]
+	if len(view.DependsOn) != maxTaskDependencyCount {
+		t.Fatalf("depends_on length = %d, want %d", len(view.DependsOn), maxTaskDependencyCount)
+	}
+	if !view.DependsOnTruncated {
+		t.Error("depends_on_truncated = false, want true")
+	}
+	if view.BlocksTruncated {
+		t.Error("blocks_truncated = true, want false (no dependent edges seeded)")
+	}
+	for i, ref := range view.DependsOn {
+		want := fmt.Sprintf("pred-%04d", i)
+		if ref.ID != want {
+			t.Fatalf("depends_on[%d] = %s, want %s (first entries in edge order)", i, ref.ID, want)
+		}
+	}
+	// Every predecessor resolves (all completed), so the extra, un-shown
+	// predecessor still counts toward the verdict: none of them is pending or
+	// failed, so the task should not be blocked despite the truncation.
+	if view.Blocked {
+		t.Errorf("blocked=%v reason=%q; every predecessor (shown or not) resolved", view.Blocked, view.BlockedReason)
+	}
+
+	// The predecessor beyond the displayed limit still participates in the
+	// verdict. Changing only that omitted predecessor must make the task block,
+	// while the displayed list stays capped and unchanged.
+	omittedID := fmt.Sprintf("pred-%04d", total-1)
+	for _, tc := range []struct {
+		name   string
+		state  v1.TaskState
+		reason string
+	}{
+		{name: "pending", state: v1.TaskStateInProgress, reason: BlockedReasonPending},
+		{name: "failed", state: v1.TaskStateFailed, reason: BlockedReasonFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setDependencyState(t, svc, omittedID, tc.state)
+			got := svc.BuildDependencyViews(ctx, []*models.Task{dependent})[dependent.ID]
+			if len(got.DependsOn) != maxTaskDependencyCount {
+				t.Fatalf("depends_on length = %d, want %d", len(got.DependsOn), maxTaskDependencyCount)
+			}
+			if !got.DependsOnTruncated {
+				t.Error("depends_on_truncated = false, want true")
+			}
+			for i, ref := range got.DependsOn {
+				if ref.ID != view.DependsOn[i].ID {
+					t.Errorf("depends_on[%d] = %s, want %s", i, ref.ID, view.DependsOn[i].ID)
+				}
+			}
+			if !got.Blocked || got.BlockedReason != tc.reason {
+				t.Errorf("blocked=%v reason=%q; omitted %s predecessor should block with %q", got.Blocked, got.BlockedReason, tc.state, tc.reason)
+			}
+		})
+	}
+}
+
+// The dependent direction is cut to 512 BEFORE resolution: only the first 512
+// dependent ids, in edge order, are even looked up.
+func TestBuildDependencyViews_BlocksListTruncatesAt512(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	repo := &mockBlockerRepo{}
+	svc.SetBlockerRepository(repo)
+	ctx := context.Background()
+	predecessor := mustSeedTask(t, svc, "Predecessor")
+
+	const total = maxTaskDependencyCount + 1
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("dep-%04d", i)
+		seedIndexedTask(t, svc, id)
+		if err := repo.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{
+			TaskID: id, BlockerTaskID: predecessor.ID,
+		}); err != nil {
+			t.Fatalf("seed dependent edge %s: %v", id, err)
+		}
+	}
+
+	view := svc.BuildDependencyViews(ctx, []*models.Task{predecessor})[predecessor.ID]
+	if len(view.Blocks) != maxTaskDependencyCount {
+		t.Fatalf("blocks length = %d, want %d", len(view.Blocks), maxTaskDependencyCount)
+	}
+	if !view.BlocksTruncated {
+		t.Error("blocks_truncated = false, want true")
+	}
+	if view.DependsOnTruncated {
+		t.Error("depends_on_truncated = true, want false (no predecessor edges seeded)")
+	}
+	for i, ref := range view.Blocks {
+		want := fmt.Sprintf("dep-%04d", i)
+		if ref.ID != want {
+			t.Fatalf("blocks[%d] = %s, want %s (first entries in edge order)", i, ref.ID, want)
+		}
+	}
+}
+
+// The bounded entry point refuses before the expensive edge-end resolution
+// read when a batch's distinct edge-end count would exceed the maximum,
+// rather than degrading to the withheld verdict.
+func TestBuildDependencyViewsBounded_RefusesAboveFanOutMaximum(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	repo := &mockBlockerRepo{}
+	svc.SetBlockerRepository(repo)
+	ctx := context.Background()
+	dependent := mustSeedTask(t, svc, "Dependent")
+
+	const total = maxDependencyFanOut + 1
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("pred-fanout-%05d", i)
+		if err := repo.CreateTaskBlocker(ctx, &orchmodels.TaskBlocker{
+			TaskID: dependent.ID, BlockerTaskID: id,
+		}); err != nil {
+			t.Fatalf("seed predecessor edge %s: %v", id, err)
+		}
+	}
+	// Fail resolution if it is ever reached, proving the refusal happens
+	// before edge-end resolution and before any task is serialized.
+	svc.tasks = &errTaskRepoOnGetByIDs{TaskRepository: svc.tasks}
+
+	views, err := svc.BuildDependencyViewsBounded(ctx, []*models.Task{dependent})
+	if !errors.Is(err, ErrDependencyFanOutExceeded) {
+		t.Fatalf("err = %v, want ErrDependencyFanOutExceeded", err)
+	}
+	if views != nil {
+		t.Errorf("views = %+v, want nil on refusal", views)
+	}
+}
+
+// Under the fan-out maximum, the bounded entry point derives normally.
+func TestBuildDependencyViewsBounded_AllowsUnderFanOutMaximum(t *testing.T) {
+	svc, _ := setupOfficeTest(t)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+	ctx := context.Background()
+	a := mustSeedTask(t, svc, "A")
+	b := mustSeedTask(t, svc, "B")
+	if err := svc.AddDependency(ctx, b.ID, a.ID); err != nil {
+		t.Fatalf("AddDependency: %v", err)
+	}
+
+	views, err := svc.BuildDependencyViewsBounded(ctx, []*models.Task{b})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	view := views[b.ID]
+	if len(view.DependsOn) != 1 || view.DependsOn[0].ID != a.ID {
+		t.Errorf("depends_on = %+v; want [%s]", view.DependsOn, a.ID)
 	}
 }
 
@@ -438,5 +691,24 @@ func TestDependencyEventFieldsCarryTheProjection(t *testing.T) {
 	deps, _ := fields["depends_on"].([]DependencyRef)
 	if len(deps) != 1 || deps[0].ID != predecessor.ID {
 		t.Errorf("depends_on = %+v; want one entry for %s", deps, predecessor.ID)
+	}
+}
+
+func TestValidateDependencyIDsRejectsOversizedSets(t *testing.T) {
+	ids := make([]string, maxTaskDependencyCount+1)
+	for index := range ids {
+		ids[index] = "dependency"
+	}
+
+	err := validateDependencyIDs("task", ids)
+	if !errors.Is(err, ErrInvalidDependencySet) {
+		t.Fatalf("error = %v, want ErrInvalidDependencySet", err)
+	}
+}
+
+func TestValidateDependencyIDsRejectsOversizedID(t *testing.T) {
+	err := validateDependencyIDs("task", []string{strings.Repeat("x", maxTaskDependencyIDLength+1)})
+	if !errors.Is(err, ErrInvalidDependencySet) {
+		t.Fatalf("error = %v, want ErrInvalidDependencySet", err)
 	}
 }

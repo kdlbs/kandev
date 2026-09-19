@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-frontend-contract-dispatch"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 04: Native blocks and mobile parity

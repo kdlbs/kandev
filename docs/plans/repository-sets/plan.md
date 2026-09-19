@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/repository-sets/spec.md
+spec: docs/specs/workspaces/requirements/repository-sets.md
 created: 2026-08-17
 status: completed
 ---

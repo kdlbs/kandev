@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["09-backend-composition"]
 plan: "plan.md"
-spec: "../../specs/ui/entity-reference-composer.md"
+spec: "../../specs/ui/requirements/entity-reference-composer.md"
 ---
 
 # Task 10: Frontend Reference Search Client

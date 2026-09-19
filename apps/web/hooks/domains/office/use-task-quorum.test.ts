@@ -12,7 +12,7 @@ vi.mock("@/lib/api/domains/office-extended-api", () => ({
 
 const setTaskQuorum = vi.fn();
 let byTaskId: Record<string, unknown> = {};
-let refetchTriggers: Record<string, number> = {};
+let refetchTrigger: { types: string[]; timestamp: number } | null = null;
 const WORKSPACE_ID = "workspace-1";
 
 vi.mock("@/components/state-provider", () => ({
@@ -20,7 +20,7 @@ vi.mock("@/components/state-provider", () => ({
     sel({
       office: {
         taskQuorum: { byTaskId },
-        refetchTriggers,
+        refetchTrigger,
       },
       setTaskQuorum,
     }),
@@ -32,7 +32,7 @@ describe("useTaskQuorum", () => {
     mocks.getTaskQuorum.mockReset();
     mocks.getTaskQuorum.mockResolvedValue({ guards: [], reevaluation_blocked: false });
     byTaskId = {};
-    refetchTriggers = {};
+    refetchTrigger = null;
   });
 
   it("fetches once on mount for a given task", async () => {
@@ -69,7 +69,7 @@ describe("useTaskQuorum", () => {
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(1));
 
     rerender({ taskId: null });
-    refetchTriggers = { "task:task-1": 1 };
+    refetchTrigger = { types: ["task:task-1"], timestamp: 1 };
     rerender({ taskId: "task-1" });
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(2));
   });
@@ -78,13 +78,13 @@ describe("useTaskQuorum", () => {
     const { rerender } = renderHook(() => useTaskQuorum("task-1", WORKSPACE_ID));
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(1));
 
-    refetchTriggers = { "task:task-1": 1 };
+    refetchTrigger = { types: ["task:task-1"], timestamp: 1 };
     rerender();
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(2));
   });
 
-  it("does not refetch on mount just because the trigger map already has an unrelated entry", async () => {
-    refetchTriggers = { "task:task-other": 3 };
+  it("does not refetch on mount just because the trigger already has an unrelated type", async () => {
+    refetchTrigger = { types: ["task:task-other"], timestamp: 3 };
     renderHook(() => useTaskQuorum("task-1", WORKSPACE_ID));
     await waitFor(() => expect(mocks.getTaskQuorum).toHaveBeenCalledTimes(1));
     expect(mocks.getTaskQuorum).toHaveBeenCalledWith("task-1", WORKSPACE_ID);

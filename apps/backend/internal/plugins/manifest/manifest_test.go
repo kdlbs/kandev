@@ -3,6 +3,8 @@ package manifest
 import (
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const validManifestYAML = `
@@ -57,6 +59,68 @@ func TestParse_ValidManifestParsesID(t *testing.T) {
 	}
 }
 
+func TestValidate_StaticWebAppManifestPassesWithoutBackend(t *testing.T) {
+	m, err := Parse([]byte(`
+id: canvas-board
+api_version: 2
+version: 1.0.0
+display_name: Canvas Board
+description: A static board
+author: test
+ui:
+  web_apps:
+    - key: main
+      title: Task board
+      entry: ui/index.html
+      placements: [task-canvas, workspace-canvas]
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if !m.IsStaticWebAppOnly() {
+		t.Fatal("IsStaticWebAppOnly() = false, want true")
+	}
+}
+
+func TestValidate_WebAppRejectsUnsafeEntryAndUnknownPlacement(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{Key: "main", Title: "Board", Entry: "../index.html", Placements: []string{"admin"}}}
+	err := m.Validate()
+	if err == nil || !strings.Contains(err.Error(), "ui.web_apps") || !strings.Contains(err.Error(), "unsupported placement") {
+		t.Fatalf("Validate() error = %v, want web-app entry and placement errors", err)
+	}
+}
+
+func TestValidate_WebAppNormalizesNetworkOrigins(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{
+		Key: "main", Title: "Board", Entry: "ui/index.html",
+		Placements:     []string{WebAppPlacementTask},
+		NetworkOrigins: []string{"https://API.example.com"},
+	}}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if got := m.UI.WebApps[0].NetworkOrigins; len(got) != 1 || got[0] != "https://api.example.com" {
+		t.Fatalf("network origins = %#v, want canonical HTTPS origin", got)
+	}
+}
+
+func TestValidate_WebAppRejectsInvalidNetworkOrigin(t *testing.T) {
+	m := validManifest(t)
+	m.UI.WebApps = []WebApp{{
+		Key: "main", Title: "Board", Entry: "ui/index.html",
+		Placements:     []string{WebAppPlacementTask},
+		NetworkOrigins: []string{"https://api.example.com/v1"},
+	}}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "network_origins") {
+		t.Fatalf("Validate() error = %v, want network origin error", err)
+	}
+}
+
 // TestParse_UserStateCapabilityRoundTrips pins capabilities.user_state
 // (Approach D1 / AC17): a plugin declaring host-provided per-user storage
 // parses with Capabilities.UserState set.
@@ -78,6 +142,48 @@ func TestParse_UserStateCapabilityDefaultsFalse(t *testing.T) {
 	m := validManifest(t)
 	if m.Capabilities.UserState {
 		t.Fatalf("Capabilities.UserState = true, want false (not declared in fixture)")
+	}
+}
+
+// TestParse_WebhookAccessRoundTrips pins that webhooks[].access parses
+// (AC10): the auth gate reads this field to decide whether a webhook is
+// reachable without a caller identity.
+func TestParse_WebhookAccessRoundTrips(t *testing.T) {
+	input := strings.Replace(validManifestYAML, `method: "POST"`, "method: \"POST\"\n    access: public", 1)
+	m, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	encoded, err := yaml.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal() unexpected error: %v", err)
+	}
+	m, err = Parse(encoded)
+	if err != nil {
+		t.Fatalf("Parse(round trip) unexpected error: %v", err)
+	}
+	if len(m.Webhooks) != 1 || m.Webhooks[0].EffectiveAccess(m.APIVersion) != WebhookAccessPublic {
+		t.Fatalf("Webhooks[0].EffectiveAccess() = %+v, want a single public webhook", m.Webhooks)
+	}
+}
+
+func TestWebhookAccessDefaultIsVersioned(t *testing.T) {
+	webhook := Webhook{Key: "events"}
+	if got := webhook.EffectiveAccess(LegacyAPIVersion); got != WebhookAccessPublic {
+		t.Fatalf("v1 EffectiveAccess() = %q, want public", got)
+	}
+	if got := webhook.EffectiveAccess(CurrentAPIVersion); got != WebhookAccessAuthenticated {
+		t.Fatalf("v2 EffectiveAccess() = %q, want authenticated", got)
+	}
+}
+
+func TestValidateAcceptsSupportedAPIVersions(t *testing.T) {
+	for _, version := range []int{LegacyAPIVersion, CurrentAPIVersion} {
+		m := validManifest(t)
+		m.APIVersion = version
+		if err := m.Validate(); err != nil {
+			t.Fatalf("api_version %d: Validate() unexpected error: %v", version, err)
+		}
 	}
 }
 
@@ -529,7 +635,7 @@ func TestValidate_RejectsInvalidManifests(t *testing.T) {
 		},
 		{
 			name:    "unsupported api_version",
-			mutate:  func(m *Manifest) { m.APIVersion = 2 },
+			mutate:  func(m *Manifest) { m.APIVersion = CurrentAPIVersion + 1 },
 			wantErr: "api_version",
 		},
 		{

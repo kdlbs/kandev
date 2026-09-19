@@ -1,7 +1,8 @@
 // Package runtime defines the narrow execution contract used by Office agent runs.
 package runtime
 
-// Capabilities describes what an agent run may do through the runtime action surface.
+// Capabilities describes what an agent run may do through the runtime HTTP
+// action surface. These permissions are serialized into the run JWT.
 type Capabilities struct {
 	CanPostComments     bool     `json:"post_comment"`
 	CanUpdateTaskStatus bool     `json:"update_task_status"`
@@ -17,23 +18,46 @@ type Capabilities struct {
 	CanSpawnAgentRun    bool     `json:"spawn_agent_run"`
 	CanModifyAgents     bool     `json:"modify_agents"`
 	CanDeleteSkills     bool     `json:"delete_skills"`
+	CanListTasks        bool     `json:"list_tasks"`
 	AllowedTaskIDs      []string `json:"allowed_task_ids"`
+	// TaskScopeSource marks which source produced AllowedTaskIDs — "payload"
+	// or "runner_set" (both final), or "unavailable" (provisional). Empty for
+	// a snapshot persisted before this marker existed. See
+	// docs/specs/office/system-design/taskless-coordinator-authority-01.md#snapshot-semantics.
+	TaskScopeSource string `json:"task_scope_source,omitempty"`
 }
 
-// RunContext is the identity and capability envelope for one agent execution.
+// Task scope source markers. "payload" and "runner_set" are final: a build
+// reads a final marker back verbatim rather than re-deriving the scope.
+// "unavailable" is provisional and is retried on the next build.
+const (
+	TaskScopeSourcePayload     = "payload"
+	TaskScopeSourceRunnerSet   = "runner_set"
+	TaskScopeSourceUnavailable = "unavailable"
+)
+
+// RunContext is the identity, runtime-permission, and advertised-action
+// envelope for one agent execution. AvailableActions only describes tools the
+// prompt can advertise. The backend performs live authorization when a tool is
+// called.
 type RunContext struct {
-	WorkspaceID  string       `json:"workspace_id"`
-	AgentID      string       `json:"agent_id"`
-	TaskID       string       `json:"task_id"`
-	RunID        string       `json:"run_id"`
-	SessionID    string       `json:"session_id"`
-	Reason       string       `json:"reason"`
-	Capabilities Capabilities `json:"capabilities"`
+	WorkspaceID      string       `json:"workspace_id"`
+	AgentID          string       `json:"agent_id"`
+	TaskID           string       `json:"task_id"`
+	RunID            string       `json:"run_id"`
+	SessionID        string       `json:"session_id"`
+	Reason           string       `json:"reason"`
+	Capabilities     Capabilities `json:"capabilities"`
+	AvailableActions []string     `json:"available_actions,omitempty"`
 }
 
-// CanMutateTask reports whether the run may mutate the given task.
+// CanMutateTask reports whether the run may mutate the given task. The
+// wildcard sentinel is never a real task id, so a target of exactly
+// WildcardTaskScope is refused outright — otherwise a run whose own TaskID
+// is the sentinel (a payload that injected task_id="*" stays task-bound,
+// see context_builder.go#build) would self-match against it.
 func (c RunContext) CanMutateTask(taskID string) bool {
-	if taskID == "" {
+	if taskID == "" || taskID == WildcardTaskScope {
 		return false
 	}
 	if taskID == c.TaskID {

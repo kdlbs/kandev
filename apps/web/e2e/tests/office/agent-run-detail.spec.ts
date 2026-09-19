@@ -151,7 +151,25 @@ test.describe("Office agent run detail", () => {
     await expect(otherRow).not.toHaveAttribute("aria-current", "page");
 
     // The running row carries the animated icon testid.
-    await expect(testPage.getByTestId(`recent-run-row-running-icon-${runningId}`)).toBeVisible();
+    const runningIcon = testPage.getByTestId(`recent-run-row-running-icon-${runningId}`);
+    await expect(runningIcon).toBeVisible();
+    await expect
+      .poll(() =>
+        runningIcon.evaluate((element) => ({
+          tagName: element.tagName,
+          wrapperAnimated: element.classList.contains("animate-spin"),
+          promoted: element.classList.contains("will-change-transform"),
+          svgCount: element.querySelectorAll("svg").length,
+          svgAnimated: element.querySelector("svg")?.classList.contains("animate-spin") ?? false,
+        })),
+      )
+      .toEqual({
+        tagName: "SPAN",
+        wrapperAnimated: true,
+        promoted: true,
+        svgCount: 1,
+        svgAnimated: false,
+      });
   });
 
   test("run detail renders header, sidebar highlight, conversation, and events", async ({

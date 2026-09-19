@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["04-native-blocks-mobile"]
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 05: E2E and public documentation
@@ -41,7 +41,7 @@ spec: "../../specs/agent-rich-output/spec.md"
 - `apps/web/e2e/tests/chat/mobile-rich-output.spec.ts`
 - `docs/public/automation-and-mcp.md`
 - `docs/plans/agent-rich-output/*.md`
-- `docs/specs/agent-rich-output/spec.md`
+- `docs/specs/agents/requirements/agent-rich-output.md`
 
 ## Dependencies
 

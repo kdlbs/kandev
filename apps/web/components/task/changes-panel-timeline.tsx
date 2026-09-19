@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useMultiSelect } from "@/hooks/use-multi-select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -47,6 +47,8 @@ function TimelineSection({
   children,
   collapsible = true,
   defaultCollapsed = false,
+  expandOnRequestToken,
+  focusOnExpand,
   "data-testid": testId,
 }: {
   dotColor: string;
@@ -56,6 +58,8 @@ function TimelineSection({
   children?: React.ReactNode;
   collapsible?: boolean;
   defaultCollapsed?: boolean;
+  expandOnRequestToken?: number;
+  focusOnExpand?: boolean;
   "data-testid": string;
 }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
@@ -68,10 +72,25 @@ function TimelineSection({
   // rules.
   const [userToggled, setUserToggled] = useState(false);
   const [prevDefaultCollapsed, setPrevDefaultCollapsed] = useState(defaultCollapsed);
+  const [lastExpandOnRequestToken, setLastExpandOnRequestToken] = useState<number | undefined>();
+  const headingRef = useRef<HTMLButtonElement>(null);
   if (prevDefaultCollapsed !== defaultCollapsed) {
     setPrevDefaultCollapsed(defaultCollapsed);
     if (!userToggled) setCollapsed(defaultCollapsed);
   }
+  if (expandOnRequestToken !== undefined && expandOnRequestToken !== lastExpandOnRequestToken) {
+    setLastExpandOnRequestToken(expandOnRequestToken);
+    setCollapsed(false);
+    setUserToggled(false);
+  }
+  useEffect(() => {
+    if (!focusOnExpand || expandOnRequestToken === undefined) return;
+    // The request closes a Radix menu/drawer before this section expands. Defer
+    // one frame so the disclosure remains the final focus target after the
+    // primitive's close and focus-management callbacks have run.
+    const frame = requestAnimationFrame(() => headingRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [expandOnRequestToken, focusOnExpand]);
   const canCollapse = collapsible && !!label;
 
   return (
@@ -96,6 +115,7 @@ function TimelineSection({
                 }}
                 aria-expanded={!collapsed}
                 data-testid={`${testId}-collapse-toggle`}
+                ref={headingRef}
               >
                 {label}
                 {typeof count === "number" && (
@@ -151,6 +171,10 @@ type CommitsSectionProps = {
   prByRepo?: Record<string, string | undefined>;
   /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
   defaultCollapsed?: boolean;
+  /** Expands this section when a comparison request targets the Changes panel. */
+  expandOnRequestToken?: number;
+  /** Moves focus to this section heading after a comparison request. */
+  focusOnExpand?: boolean;
   label?: string;
   testId?: string;
   pushDisabled?: boolean;
@@ -172,6 +196,8 @@ export function CommitsSection({
   perRepoStatus,
   prByRepo,
   defaultCollapsed = true,
+  expandOnRequestToken,
+  focusOnExpand,
   label,
   testId = "commits-section",
   pushDisabled = false,
@@ -204,6 +230,8 @@ export function CommitsSection({
       label={label ?? t("task:commits")}
       count={commits.length}
       defaultCollapsed={defaultCollapsed}
+      expandOnRequestToken={expandOnRequestToken}
+      focusOnExpand={focusOnExpand}
       data-testid={testId}
       action={sectionAction}
     >
@@ -249,10 +277,10 @@ type FileListSectionProps = {
   // hits the right git repo. Same-named files across repos collide by path.
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
-  onBulkDiscard?: (paths: string[]) => void;
+  onBulkDiscard?: (paths: string[], anchor?: HTMLElement) => void;
   // Per-repo action handlers shown inline with each repo group header. Always
   // rendered, including single-repo (with one entry pre-selected) — the empty
   // `repo` argument routes ops to the workspace root in that case.
@@ -280,7 +308,7 @@ type FileListBodyProps = {
   onEditFile: (path: string, repo?: string) => void;
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
-  onDiscard: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string, anchor?: HTMLElement) => void;
   /** Per-repo group header actions; primary = Stage all (unstaged) / Commit (staged). */
   onRepoAction?: (repo: string) => void;
   onRepoSecondaryAction?: (repo: string) => void;

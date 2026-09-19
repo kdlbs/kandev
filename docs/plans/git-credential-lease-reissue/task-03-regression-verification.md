@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-capability-and-broker", "02-executor-and-helper"]
 plan: "plan.md"
-spec: "../../specs/git-credential-lease-reissue/spec.md"
+spec: "../../specs/platform/requirements/git-credential-lease-reissue.md"
 ---
 
 # Task 03: Verify lease recovery contracts

@@ -12,6 +12,7 @@ let websocketClient: { request: typeof requestMock } | null = { request: request
 const SHARED_COMMIT_SHA = "shared-sha";
 const RETRY_COMMIT_SHA = "retry-sha";
 const REFRESHED_COMMIT_SHA = "refreshed-sha";
+const STABLE_COMMIT_SHA = "stable-sha";
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => websocketClient,
 }));
@@ -115,7 +116,7 @@ describe("usePRCommits request ownership", () => {
         });
       const resource = createPRCommitsResource(requester, { retryDelayMs: 10 });
       const request = resourceRequest("final-error");
-      const unsubscribe = resource.subscribe(request.sourceKey, vi.fn());
+      const unsubscribe = resource.subscribe(request, vi.fn());
 
       const failed = resource.load(request);
       await Promise.resolve();
@@ -126,7 +127,7 @@ describe("usePRCommits request ownership", () => {
         providerCommitsComplete: false,
         error: "final provider failure",
       });
-      expect(resource.getSnapshot(request.sourceKey).error).toBe("final provider failure");
+      expect(resource.getSnapshot(request).error).toBe("final provider failure");
 
       const recovered = resource.load(request);
       await expect(recovered).resolves.toMatchObject({ providerHead: "recovered-sha" });
@@ -181,6 +182,137 @@ describe("usePRCommits manual refresh", () => {
   });
 });
 
+describe("usePRCommits retained evidence", () => {
+  // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.7
+  it("retains resolved display commits while a same-PR sync-version refresh is pending", async () => {
+    const refresh = deferred<{ commits: PRCommitInfo[]; head_sha: string; complete: boolean }>();
+    requestMock
+      .mockResolvedValueOnce({
+        commits: [commit(STABLE_COMMIT_SHA)],
+        head_sha: STABLE_COMMIT_SHA,
+        complete: true,
+      })
+      .mockReturnValueOnce(refresh.promise);
+
+    const { result, rerender } = renderHook(
+      ({ syncVersion }) => usePRCommits("acme", "app", 1, syncVersion),
+      { initialProps: { syncVersion: "retention-old-sync" }, wrapper },
+    );
+    await waitFor(() => expect(result.current.commits[0]?.sha).toBe(STABLE_COMMIT_SHA));
+
+    rerender({ syncVersion: "retention-new-sync" });
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
+
+    expect(result.current.commits[0]?.sha).toBe(STABLE_COMMIT_SHA);
+    expect(result.current.authoritativeCommits).toEqual([]);
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      refresh.resolve({
+        commits: [commit(STABLE_COMMIT_SHA)],
+        head_sha: STABLE_COMMIT_SHA,
+        complete: true,
+      });
+      await refresh.promise;
+    });
+  });
+
+  it("retains resolved display commits when a same-PR refresh fails", async () => {
+    const requester = vi
+      .fn()
+      .mockResolvedValueOnce({
+        commits: [commit(STABLE_COMMIT_SHA)],
+        head_sha: STABLE_COMMIT_SHA,
+        complete: true,
+      })
+      .mockRejectedValueOnce(new Error("temporary refresh failure"))
+      .mockRejectedValueOnce(new Error("final refresh failure"));
+    const resource = createPRCommitsResource(requester, { retryDelayMs: 0 });
+
+    await resource.load(resourceRequest("failure-old-version"));
+    const failed = await resource.load(resourceRequest("failure-new-version"));
+
+    expect(failed).toMatchObject({
+      commits: [commit(STABLE_COMMIT_SHA)],
+      authoritativeCommits: [],
+      providerHead: null,
+      providerCommitsComplete: false,
+      loading: false,
+      error: "final refresh failure",
+    });
+  });
+
+  it("replaces retained display commits after a same-PR refresh succeeds", async () => {
+    requestMock
+      .mockResolvedValueOnce({
+        commits: [commit(STABLE_COMMIT_SHA)],
+        head_sha: STABLE_COMMIT_SHA,
+        complete: true,
+      })
+      .mockResolvedValueOnce({
+        commits: [commit(REFRESHED_COMMIT_SHA)],
+        head_sha: REFRESHED_COMMIT_SHA,
+        complete: true,
+      });
+
+    const { result, rerender } = renderHook(
+      ({ syncVersion }) => usePRCommits("acme", "app", 1, syncVersion),
+      { initialProps: { syncVersion: "success-old-version" }, wrapper },
+    );
+    await waitFor(() => expect(result.current.commits[0]?.sha).toBe(STABLE_COMMIT_SHA));
+
+    rerender({ syncVersion: "success-new-version" });
+
+    await waitFor(() => expect(result.current.commits[0]?.sha).toBe(REFRESHED_COMMIT_SHA));
+    expect(result.current.authoritativeCommits[0]?.sha).toBe(REFRESHED_COMMIT_SHA);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("does not retain commits across different PR identities", async () => {
+    const pending = deferred<{ commits: PRCommitInfo[] }>();
+    const requester = vi
+      .fn()
+      .mockResolvedValueOnce({
+        commits: [commit("first-pr-sha")],
+        head_sha: "first-pr-sha",
+        complete: true,
+      })
+      .mockReturnValueOnce(pending.promise);
+    const resource = createPRCommitsResource(requester);
+    const secondPR = resourceRequest("second-pr-version", 2);
+
+    await resource.load(resourceRequest("first-pr-version", 1));
+    const secondLoad = resource.load(secondPR);
+
+    expect(resource.getSnapshot(secondPR).commits).toEqual([]);
+    pending.resolve({ commits: [] });
+    await secondLoad;
+  });
+});
+
+describe("usePRCommits unavailable client", () => {
+  it("retains resolved display commits when the WebSocket client is unavailable", async () => {
+    requestMock.mockResolvedValueOnce({
+      commits: [commit(STABLE_COMMIT_SHA)],
+      head_sha: STABLE_COMMIT_SHA,
+      complete: true,
+    });
+    const resource = createPRCommitsResource(undefined, { retryDelayMs: 0 });
+    const initialRequest = resourceRequest("null-old-version");
+    const refreshedRequest = resourceRequest("null-new-version");
+
+    await resource.load(initialRequest);
+    websocketClient = null;
+
+    const failed = await resource.load(refreshedRequest);
+
+    expect(failed.commits).toEqual([commit(STABLE_COMMIT_SHA)]);
+    expect(failed.authoritativeCommits).toEqual([]);
+    expect(failed.error).not.toBeNull();
+    expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("usePRCommits stale results and eviction", () => {
   it("does not let an older sync-version response replace the active result", async () => {
     const first = deferred<{ commits: PRCommitInfo[]; head_sha: string; complete: boolean }>();
@@ -206,6 +338,34 @@ describe("usePRCommits stale results and eviction", () => {
       await first.promise;
     });
     expect(result.current.providerHead).toBe("new-sha");
+  });
+
+  it("retains the latest selected version after an older request resolves last", async () => {
+    const first = deferred<{ commits: PRCommitInfo[]; head_sha: string; complete: boolean }>();
+    const second = deferred<{ commits: PRCommitInfo[]; head_sha: string; complete: boolean }>();
+    const third = deferred<{ commits: PRCommitInfo[]; head_sha: string; complete: boolean }>();
+    const requester = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+      .mockReturnValueOnce(third.promise);
+    const resource = createPRCommitsResource(requester);
+    const firstRequest = resourceRequest("retained-old-version");
+    const secondRequest = resourceRequest("retained-current-version");
+    const thirdRequest = resourceRequest("retained-next-version");
+
+    const firstLoad = resource.load(firstRequest);
+    const secondLoad = resource.load(secondRequest);
+    second.resolve({ commits: [commit("new-sha")], head_sha: "new-sha", complete: true });
+    await secondLoad;
+    first.resolve({ commits: [commit("old-sha")], head_sha: "old-sha", complete: true });
+    await firstLoad;
+
+    const thirdLoad = resource.load(thirdRequest);
+
+    expect(resource.getSnapshot(thirdRequest).commits[0]?.sha).toBe("new-sha");
+    third.resolve({ commits: [commit("third-sha")], head_sha: "third-sha", complete: true });
+    await thirdLoad;
   });
 
   it("evicts superseded and old cache entries", async () => {
@@ -235,6 +395,7 @@ describe("usePRCommits hook view", () => {
     const staleState: KeyedPRCommitsState = {
       sourceKey: "workspace-1/acme/app/1/old-refresh",
       commits: [commit("first-sha")],
+      authoritativeCommits: [commit("first-sha")],
       providerHead: "first-sha",
       providerCommitsComplete: true,
       loading: false,
@@ -243,6 +404,7 @@ describe("usePRCommits hook view", () => {
 
     expect(resolvePRCommitsView(staleState, "workspace-1/acme/other-app/2/new-refresh")).toEqual({
       commits: [],
+      authoritativeCommits: [],
       providerHead: null,
       providerCommitsComplete: false,
       loading: true,

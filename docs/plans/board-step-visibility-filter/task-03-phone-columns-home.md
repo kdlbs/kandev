@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-columns-menu-on-swimlane-header"]
 plan: "plan.md"
-spec: "../../specs/board-step-visibility-filter/spec.md"
+spec: "../../specs/ui/requirements/board-step-visibility-filter.md"
 ---
 
 # Task 03: Render the Columns menu in the phone drawer for the focused workflow

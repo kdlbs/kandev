@@ -21,6 +21,8 @@ vi.mock("@/components/state-provider", () => ({
 // mock separately.
 let mockPages: number[] = [];
 let mockLoadMoreCalls = 0;
+let mockLoadMoreRawCalls = 0;
+let mockRawHasMore = true;
 // When set, overrides the page-array-driven default: called with the same
 // `setState` the fake hook itself uses, so every path (page-array or custom)
 // updates `hasMore`/`isLoadingMore` identically and consistently.
@@ -39,7 +41,21 @@ function useLazyLoadMessagesFake() {
     setState({ hasMore, isLoadingMore: false });
     return fetched;
   }, []);
-  return { loadMore, hasMore: state.hasMore, isLoadingMore: state.isLoadingMore };
+  const loadMoreRaw = useCallback(async () => {
+    mockLoadMoreRawCalls++;
+    const index = mockLoadMoreRawCalls - 1;
+    const fetched = mockPages[index] ?? 0;
+    mockRawHasMore = index + 1 < mockPages.length;
+    setState((current) => ({ ...current, isLoadingMore: false }));
+    return fetched;
+  }, []);
+  return {
+    loadMore,
+    loadMoreRaw,
+    hasMore: state.hasMore,
+    rawHasMore: mockRawHasMore,
+    isLoadingMore: state.isLoadingMore,
+  };
 }
 
 vi.mock("@/hooks/use-lazy-load-messages", () => ({
@@ -56,6 +72,8 @@ afterEach(() => {
   cleanup();
   mockPages = [];
   mockLoadMoreCalls = 0;
+  mockLoadMoreRawCalls = 0;
+  mockRawHasMore = true;
   mockLoadMoreImpl = null;
   storeMock.messagesLoading = false;
 });
@@ -81,6 +99,14 @@ describe("useDrainOlderMessages", () => {
     expect(result.current.isDraining).toBe(true);
     await waitFor(() => expect(result.current.isDraining).toBe(false));
     expect(mockLoadMoreCalls).toBe(3);
+  });
+
+  it("uses raw pagination for reverse search backfill", async () => {
+    mockPages = [20, 0];
+    const { result } = renderHook(() => useDrainOlderMessages("s1", true, { rawPagination: true }));
+    await waitFor(() => expect(result.current.isDraining).toBe(false));
+    expect(mockLoadMoreCalls).toBe(0);
+    expect(mockLoadMoreRawCalls).toBe(2);
   });
 
   it("stops at the 1000-message budget when the session never reports exhaustion", async () => {

@@ -2,7 +2,19 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import {
+  cleanupDelayedResumeFixture,
+  countResumeBootMessages,
+  createFailOnResumeProfile,
+  readSessionMessageIdsContaining,
+  readSessionRuntimeIdentity,
+  seedDelayedResumeFixture,
+  waitForNewSessionMessage,
+  waitForSessionReady,
+  waitForQueuedCount,
+} from "../../helpers/session-resume-prompt-queue";
 
 type ContextWindowStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
@@ -74,28 +86,6 @@ async function seedStaleContextWindow(testPage: Page): Promise<void> {
   });
 }
 
-/**
- * Create an ACP profile for the mock agent that fails on resume. The
- * mock-agent's ACP LoadSession handler exits 1 when --fail-on-resume is set,
- * simulating an agent that can't restore a previous conversation — the
- * scenario that previously left the original recovery message's
- * "Resume session requested" button stuck on screen.
- */
-async function createACPProfileWithFailOnResume(apiClient: ApiClient, name: string) {
-  const { agents } = await apiClient.listAgents();
-  const mockAgent = agents.find((a) => a.name === "mock-agent");
-  if (!mockAgent) {
-    throw new Error(
-      `mock-agent not found in listAgents() (got ${agents.map((a) => `${a.id}=${a.name}`).join(", ")})`,
-    );
-  }
-  return apiClient.createAgentProfile(mockAgent.id, name, {
-    model: "mock-fast",
-    cli_passthrough: false,
-    cli_flags: [{ description: "fail on ACP resume", flag: "--fail-on-resume", enabled: true }],
-  });
-}
-
 // Worst-case wait for the manual-recovery banner after `/crash`. The mock
 // agent's crash is a real subprocess exit whose ACP-level error carries the
 // same "peer disconnected before response" text the routingerr classifier
@@ -111,6 +101,222 @@ const CRASH_RECOVERY_TIMEOUT = 170_000;
 
 test.describe("Session recovery", () => {
   test.describe.configure({ retries: 1 });
+
+  test("cancelling delayed resume fences the old work before a retry", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(150_000);
+
+    const fixture = await seedDelayedResumeFixture(
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      "Session cancel and retry recovery",
+    );
+
+    try {
+      // Cancel the actual STARTING session while the provider load is held by
+      // the delayed mock agent. This is the browser path that used to leave a
+      // resume continuation alive after cancellation.
+      await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
+      await fixture.session.cancelAgentButton().click();
+      await waitForSessionState(apiClient, {
+        taskId: fixture.task.id,
+        sessionId: fixture.identity.sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for delayed resume cancellation",
+        timeout: 30_000,
+      });
+      // Retry the same saved conversation through the normal composer. The
+      // old delayed callback must not publish a second response or consume
+      // this new attempt.
+      await waitForSessionReady(
+        testPage,
+        apiClient,
+        fixture.task.id,
+        fixture.identity.sessionId,
+        90_000,
+      );
+      await expect(fixture.session.activeChat().getByTestId("chat-input-editor")).toHaveAttribute(
+        "contenteditable",
+        "true",
+        { timeout: 30_000 },
+      );
+
+      await fixture.session.sendMessage("/e2e:simple-message");
+      await fixture.session.expectChatResponseVisible("simple mock response", 1, {
+        timeout: 60_000,
+      });
+      await expect(fixture.session.activeChat().getByText("simple mock response")).toHaveCount(2);
+    } finally {
+      await cleanupDelayedResumeFixture(apiClient, fixture);
+    }
+  });
+
+  test("pausing an accepted lazy resume preserves the runtime for later turns", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(150_000);
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Accepted lazy resume pause recovery",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      if (!task.session_id) throw new Error("accepted lazy resume task has no session_id");
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      await session.waitForChatIdle({ timeout: 30_000 });
+
+      await backend.restart();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
+        timeout: 60_000,
+      });
+
+      const resumeBootsBeforeMessage = await countResumeBootMessages(apiClient, task.session_id);
+
+      // The slow response is the acceptance witness: provider output can only
+      // arrive after the resumed prompt crossed the dispatch callback.
+      await session.sendMessage("/slow 8s");
+      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      const initialRuntimeIdentity = await readSessionRuntimeIdentity(
+        apiClient,
+        task.id,
+        task.session_id,
+      );
+      await session.cancelAgentButton().click();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for accepted lazy resume cancellation",
+        timeout: 30_000,
+      });
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      const resumeBootsAfterFirstPause = await countResumeBootMessages(apiClient, task.session_id);
+      expect(resumeBootsAfterFirstPause).toBe(resumeBootsBeforeMessage + 1);
+
+      // A second accepted pause must use the same process and conversation.
+      const slowResponseMessageIdsBeforeSecond = await readSessionMessageIdsContaining(
+        apiClient,
+        task.session_id,
+        "Running slow response",
+      );
+      expect(slowResponseMessageIdsBeforeSecond.size).toBeGreaterThan(0);
+      await session.sendMessage("/slow 8s");
+      await waitForNewSessionMessage(
+        apiClient,
+        task.session_id,
+        slowResponseMessageIdsBeforeSecond,
+        "Running slow response",
+      );
+      await session.cancelAgentButton().click();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for the later accepted pause",
+        timeout: 30_000,
+      });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+
+      await session.sendMessage("/e2e:simple-message");
+      await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+    } finally {
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
+    }
+  });
+
+  test("session startup keeps the composer editable and queues a submitted prompt", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const fixture = await seedDelayedResumeFixture(
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      "Session startup composer readiness test",
+    );
+
+    try {
+      const editor = fixture.session.activeChat().getByTestId("chat-input-editor");
+      const submit = fixture.session.submitButton();
+
+      // @covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      await editor.fill('e2e:message("startup queue marker")');
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.1
+      await expect(submit).toBeEnabled();
+      await submit.click();
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.2
+      await expect(editor).toHaveText("");
+      await waitForQueuedCount(apiClient, fixture.identity, 1);
+      await expect(fixture.session.activeChat().getByTestId("queue-chip")).toBeVisible();
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.8
+      await testPage.reload();
+      await fixture.session.waitForLoad();
+      await waitForQueuedCount(apiClient, fixture.identity, 1);
+
+      await waitForSessionReady(testPage, apiClient, fixture.task.id, fixture.identity.sessionId);
+
+      // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.3
+      const responses = fixture.session
+        .activeChat()
+        .locator("[data-agent-message-body][data-message-id]")
+        .filter({ hasText: "startup queue marker" });
+      await expect(responses).toHaveCount(1, { timeout: 60_000 });
+    } finally {
+      await cleanupDelayedResumeFixture(apiClient, fixture);
+    }
+  });
 
   test("reset context hides stale usage until a fresh report arrives", async ({
     testPage,
@@ -169,12 +375,9 @@ test.describe("Session recovery", () => {
     // Click "Start fresh session"
     await session.recoveryFreshButton().click();
 
-    // Recovery briefly exposes the idle placeholder before the replacement
-    // agent starts. Observe the starting phase before treating the composer as
-    // ready so that transient idle state cannot satisfy the assertion.
-    const freshStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
-    await expect(freshStarting).toBeVisible({ timeout: 30_000 });
-    await expect(freshStarting).not.toBeVisible({ timeout: 30_000 });
+    // Native session resume can move directly from recovery into an editable
+    // replacement session, so assert stable readiness instead of a transient
+    // placeholder that may be skipped.
     await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
       "contenteditable",
       "true",
@@ -208,20 +411,13 @@ test.describe("Session recovery", () => {
 
     // Click "Resume session"
     await session.recoveryResumeButton().click();
-
-    // Recovery briefly exposes the idle placeholder before the resumed agent
-    // starts. Observe the starting phase before treating the composer as ready
-    // so that transient idle state cannot satisfy the assertion.
-    const resumeStarting = testPage.locator('[data-placeholder="Preparing workspace..."]');
-    await expect(resumeStarting).toBeVisible({ timeout: 30_000 });
-    await expect(resumeStarting).not.toBeVisible({ timeout: 30_000 });
-    await expect(testPage.getByTestId("chat-input-editor")).toHaveAttribute(
-      "contenteditable",
-      "true",
-      {
-        timeout: 30_000,
-      },
-    );
+    const editor = session.activeChat().getByTestId("chat-input-editor");
+    // The recovery endpoint waits until the resumed agent is prompt-ready
+    // before it resolves. The startup-specific composer gate is exercised by
+    // the slow-preparation test above; this flow verifies the recovered
+    // composer is usable afterwards.
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+    await expect(session.submitButton()).toBeEnabled({ timeout: 30_000 });
 
     // The resume settles the session back to WAITING_FOR_INPUT (agent idle).
     // The recovery card must not reappear now that the resume is resolved —
@@ -247,7 +443,7 @@ test.describe("Session recovery", () => {
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
 
-    // Verify agent works after recovery
+    // Verify the resumed agent works after recovery.
     await session.sendMessage("/e2e:simple-message");
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
@@ -260,10 +456,7 @@ test.describe("Session recovery", () => {
     test.setTimeout(220_000);
 
     // Unique suffix so a swallowed cleanup from a prior run doesn't collide on name.
-    const profile = await createACPProfileWithFailOnResume(
-      apiClient,
-      `ACP Fail On Resume ${Date.now()}`,
-    );
+    const profile = await createFailOnResumeProfile(apiClient, `ACP Fail On Resume ${Date.now()}`);
 
     try {
       const session = await seedTaskWithSession(

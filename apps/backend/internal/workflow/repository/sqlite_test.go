@@ -92,6 +92,67 @@ func TestStepAgentProfileID_CreateAndGet(t *testing.T) {
 	}
 }
 
+// TestGetStepAndListStepsByWorkflow_IncludeOrderRevision covers the
+// Build-phase fix for missing order_revision on HTTP hydration: GetStep and
+// ListStepsByWorkflow must surface the step's current order_revision so the
+// frontend can seed its last-known revision before accepting a
+// task.reordered WS event. The reorder endpoint bumps order_revision from
+// the task repository package (a different package, same table), so this
+// test simulates that bump directly against the column rather than
+// depending on that package.
+func TestGetStepAndListStepsByWorkflow_IncludeOrderRevision(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	step := &models.WorkflowStep{
+		WorkflowID: "wf-test",
+		Name:       "Test Step",
+		Position:   0,
+		Color:      "#000000",
+	}
+	if err := repo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("failed to create step: %v", err)
+	}
+
+	fresh, err := repo.GetStep(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("GetStep: %v", err)
+	}
+	if fresh.OrderRevision != 0 {
+		t.Fatalf("OrderRevision = %d, want 0 for a freshly created step", fresh.OrderRevision)
+	}
+
+	if _, err := repo.db.Exec(`UPDATE workflow_steps SET order_revision = 3 WHERE id = ?`, step.ID); err != nil {
+		t.Fatalf("bump order_revision: %v", err)
+	}
+
+	bumped, err := repo.GetStep(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("GetStep after bump: %v", err)
+	}
+	if bumped.OrderRevision != 3 {
+		t.Fatalf("OrderRevision = %d, want 3", bumped.OrderRevision)
+	}
+
+	// "wf-test" also carries the default-template steps seedDefaultWorkflowSteps
+	// creates for any workflow with none, so find this test's step by ID
+	// rather than assuming it is the only row.
+	listed, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	var found *models.WorkflowStep
+	for _, s := range listed {
+		if s.ID == step.ID {
+			found = s
+			break
+		}
+	}
+	if found == nil || found.OrderRevision != 3 {
+		t.Fatalf("ListStepsByWorkflow step %s = %+v, want OrderRevision 3", step.ID, found)
+	}
+}
+
 func TestDeleteStep_ClearsQueuedTaskDestinationAndDeferredLaunch(t *testing.T) {
 	repo, db := setupTestRepoWithDB(t)
 	ctx := context.Background()
@@ -364,6 +425,84 @@ func TestClearStepReferencesClearsPullSource(t *testing.T) {
 	}
 	if got.PullFromStepID != "" {
 		t.Fatalf("PullFromStepID = %q, want empty", got.PullFromStepID)
+	}
+}
+
+func TestClearStepReferencesClearsAllTransitionTriggers(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	target := &models.WorkflowStep{
+		ID:         "target-step",
+		WorkflowID: "wf-test",
+		Name:       "Target",
+		Position:   0,
+	}
+	if err := repo.CreateStep(ctx, target); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+
+	moveToTarget := func() models.GenericAction {
+		return models.GenericAction{
+			Type:   models.GenericActionMoveToStep,
+			Config: map[string]interface{}{"step_id": target.ID},
+		}
+	}
+	genericActions := []models.GenericAction{moveToTarget(), {Type: models.GenericActionAutoStartAgent}}
+	source := &models.WorkflowStep{
+		ID:         "source-step",
+		WorkflowID: "wf-test",
+		Name:       "Source",
+		Position:   1,
+		Events: models.StepEvents{
+			OnTurnStart: []models.OnTurnStartAction{
+				{Type: models.OnTurnStartMoveToStep, Config: map[string]interface{}{"step_id": target.ID}},
+				{Type: models.OnTurnStartMoveToNext},
+			},
+			OnTurnComplete: []models.OnTurnCompleteAction{
+				{Type: models.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": target.ID}},
+				{Type: models.OnTurnCompleteMoveToNext},
+			},
+			OnComment:           genericActions,
+			OnBlockerResolved:   genericActions,
+			OnChildrenCompleted: genericActions,
+			OnApprovalResolved:  genericActions,
+			OnHeartbeat:         genericActions,
+			OnBudgetAlert:       genericActions,
+			OnAgentError:        genericActions,
+		},
+	}
+	if err := repo.CreateStep(ctx, source); err != nil {
+		t.Fatalf("failed to create source: %v", err)
+	}
+
+	if err := repo.ClearStepReferences(ctx, "wf-test", target.ID); err != nil {
+		t.Fatalf("clear references: %v", err)
+	}
+
+	got, err := repo.GetStep(ctx, source.ID)
+	if err != nil {
+		t.Fatalf("get source: %v", err)
+	}
+	if len(got.Events.OnTurnStart) != 1 || got.Events.OnTurnStart[0].Type != models.OnTurnStartMoveToNext {
+		t.Fatalf("OnTurnStart = %#v, want only move_to_next", got.Events.OnTurnStart)
+	}
+	if len(got.Events.OnTurnComplete) != 1 || got.Events.OnTurnComplete[0].Type != models.OnTurnCompleteMoveToNext {
+		t.Fatalf("OnTurnComplete = %#v, want only move_to_next", got.Events.OnTurnComplete)
+	}
+
+	for trigger, actions := range map[string][]models.GenericAction{
+		"on_comment":            got.Events.OnComment,
+		"on_blocker_resolved":   got.Events.OnBlockerResolved,
+		"on_children_completed": got.Events.OnChildrenCompleted,
+		"on_approval_resolved":  got.Events.OnApprovalResolved,
+		"on_heartbeat":          got.Events.OnHeartbeat,
+		"on_budget_alert":       got.Events.OnBudgetAlert,
+		"on_agent_error":        got.Events.OnAgentError,
+	} {
+		if len(actions) != 1 || actions[0].Type != models.GenericActionAutoStartAgent {
+			t.Errorf("%s = %#v, want only auto_start_agent", trigger, actions)
+		}
 	}
 }
 

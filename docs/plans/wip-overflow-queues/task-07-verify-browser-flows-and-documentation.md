@@ -6,7 +6,7 @@ wave: 7
 depends_on:
   - "06-expose-visible-queue-ux"
 plan: "plan.md"
-spec: "../../specs/tasks/wip-limit-pull-system.md"
+spec: "../../specs/tasks/system-design/wip-limit-pull-system.md"
 ---
 
 # Task 07: Verify Browser Flows and Documentation

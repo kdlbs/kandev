@@ -1,5 +1,17 @@
 import type { ExecutorType } from "@/lib/types/http";
 
+const KNOWN_EXECUTOR_TYPES = new Set<ExecutorType>([
+  "local",
+  "local_pc",
+  "local_docker",
+  "sprites",
+  "ssh",
+  "remote_docker",
+  "remote_vps",
+  "k8s",
+  "worktree",
+]);
+
 type SavedRepositoryIdentity = {
   remote_url?: string;
   provider?: string;
@@ -15,17 +27,25 @@ export function getWorkspaceSourceCapabilities(
   canAddFolders: boolean;
   canChooseCheckoutBranch: boolean;
   requiresCloneableLocalRepository: boolean;
+  /**
+   * False while the primary executor binding has not resolved yet or the type
+   * is unknown. Callers must not treat that the same as a known executor that
+   * cannot host folders — an unresolved capability means "not yet known," not "no."
+   */
+  executorCapabilitiesKnown: boolean;
 } {
   const usesLiveCheckout = executorType === "local" || executorType === "local_pc";
   const requiresClone =
     executorType === "local_docker" ||
     executorType === "remote_docker" ||
     executorType === "ssh" ||
-    executorType === "sprites";
+    executorType === "sprites" ||
+    executorType === "k8s";
   return {
     canAddFolders: usesLiveCheckout || executorType === "worktree",
     canChooseCheckoutBranch: !usesLiveCheckout,
     requiresCloneableLocalRepository: requiresClone,
+    executorCapabilitiesKnown: KNOWN_EXECUTOR_TYPES.has(executorType as ExecutorType),
   };
 }
 

@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/system-page/storage-overview-parallel-scan.md"
+spec: "../../specs/system-page/requirements/storage-overview-parallel-scan.md"
 ---
 
 # Task 03: Add disk capacity and progress card

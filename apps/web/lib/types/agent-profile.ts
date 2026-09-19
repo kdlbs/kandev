@@ -120,6 +120,8 @@ export type AgentProfile = {
    * on, the fallbackModel field is hidden/ignored.
    */
   autoFallback?: boolean;
+  /** Require the configured model to be advertised and applied before prompting. */
+  requireExactModel?: boolean;
   /** Optional ACP session mode applied via `session/set_mode`. */
   mode?: string;
   /** Dynamic ACP session config options applied via `session/set_config_option`. */
@@ -136,6 +138,22 @@ export type AgentProfile = {
    * Shell-tokenised; empty means the agent runs directly.
    */
   commandPrefix?: string;
+  /**
+   * Provider routing. "" / "native" keeps the agent CLI's own provider
+   * configuration; "openai_compatible" makes Kandev inject providerBaseUrl and
+   * the key behind providerApiKeySecretId into the agent (9router, LiteLLM,
+   * vLLM, self-hosted OpenRouter, ...).
+   */
+  providerKind?: string;
+  /** Absolute http(s) endpoint root of the OpenAI-compatible provider. */
+  providerBaseUrl?: string;
+  /** Kandev global secret ID holding the provider bearer key. Never returned. */
+  providerApiKeySecretId?: string;
+  /**
+   * Computed at read time: true when this profile's agent advertises
+   * OpenAI-compatible provider support. Not persisted; never sent back.
+   */
+  providerSupported?: boolean;
   /** Environment variables injected when this profile starts an agent session. */
   envVars?: ProfileEnvVar[];
   cliPassthrough: boolean;
@@ -211,12 +229,17 @@ export type AgentProfilePayload = {
   model: string;
   fallback_model?: string;
   auto_fallback?: boolean;
+  require_exact_model?: boolean;
   mode?: string;
   config_options?: Record<string, string>;
   allow_indexing: boolean;
   auto_approve: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  provider_kind?: string;
+  provider_base_url?: string;
+  provider_api_key_secret_id?: string;
+  provider_supported?: boolean;
   env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;
   enabled?: boolean;

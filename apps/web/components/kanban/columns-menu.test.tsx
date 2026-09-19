@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ColumnsMenu } from "./columns-menu";
 
@@ -19,6 +19,8 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof ColumnsMenu>> 
     ],
     hiddenStepIds: [] as string[],
     onToggle: vi.fn(),
+    autoHideEmpty: false,
+    onToggleAutoHide: vi.fn(),
     ...overrides,
   };
 }
@@ -75,6 +77,36 @@ describe("ColumnsMenu — one workflow's steps", () => {
     fireEvent.click(screen.getByTestId(STEP_Z_ITEM));
 
     expect(onToggle).toHaveBeenCalledExactlyOnceWith(WF.id, "step-z");
+  });
+
+  it("reports the workflow when automatic empty-column hiding is toggled", () => {
+    const onToggleAutoHide = vi.fn();
+    render(<ColumnsMenu {...baseProps({ onToggleAutoHide })} />);
+    openMenu();
+
+    fireEvent.click(screen.getByTestId(`columns-menu-auto-hide-empty-${WF.id}`));
+
+    expect(onToggleAutoHide).toHaveBeenCalledExactlyOnceWith(WF.id);
+  });
+
+  it("separates display behavior from individual column visibility", () => {
+    render(<ColumnsMenu {...baseProps()} />);
+    openMenu();
+
+    const toggle = screen.getByTestId(`columns-menu-auto-hide-empty-${WF.id}`);
+    const menu = toggle.closest<HTMLElement>('[role="menu"]');
+    expect(menu).not.toBeNull();
+    const menuQueries = within(menu!);
+    const label = menuQueries.getByText("Auto-hide empty columns");
+    expect(label.classList.contains("whitespace-normal")).toBe(true);
+    expect(label.classList.contains("truncate")).toBe(false);
+    expect(menuQueries.queryByText("Show empty steps again while moving tasks.")).toBeNull();
+    expect(
+      Array.from(menu!.querySelectorAll('[data-slot="dropdown-menu-label"]')).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["Display Options", "Columns"]);
+    expect(menu!.querySelectorAll('[data-slot="dropdown-menu-separator"]')).toHaveLength(1);
   });
 
   it("ignores a hidden id that no longer matches a live step", () => {

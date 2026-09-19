@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/tasks/task-create-workflow-memory.md
+spec: docs/specs/tasks/requirements/task-create-workflow-memory.md
 created: 2026-08-08
 status: done
 ---

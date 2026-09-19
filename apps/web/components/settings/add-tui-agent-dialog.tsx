@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
+import { isHandledApiError } from "@/lib/api/client";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -78,6 +79,11 @@ function useDialogHandlers({
       reset();
       onOpenChange(false);
     } catch (err) {
+      if (isHandledApiError(err)) {
+        reset();
+        onOpenChange(false);
+        return;
+      }
       setError(err instanceof Error ? err.message : translate("agents:failedToCreateAgent"));
     } finally {
       setLoading(false);

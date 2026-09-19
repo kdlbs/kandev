@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // TestAddBranchToTask_HappyPath attaches a second branch to a task that
@@ -182,6 +184,9 @@ func TestAddBranchToTask_RejectsNonWorktreeExecutor(t *testing.T) {
 		Status:       "ready",
 		CreatedAt:    now,
 		UpdatedAt:    now,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-1-repo-0", RepositoryID: "repo-1", CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -231,9 +236,16 @@ func TestAddBranchToTask_AllowsWorktreeExecutor(t *testing.T) {
 		Status:        "ready",
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-1-repo-0", RepositoryID: "repo-1", CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
+	svc.SetBranchMaterializer(&stubMaterializer{result: &BranchMaterializationResult{
+		WorktreePath:      "/tmp/task-env/frontend-feature-x",
+		TaskWorkspacePath: "/tmp/task-env",
+	}})
 
 	if _, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
 		TaskID:         task.ID,
@@ -591,6 +603,9 @@ func TestAddBranchToTask_RejectsNonWorktreeExecutor_NoOrphanRepo(t *testing.T) {
 		Status:       "ready",
 		CreatedAt:    now,
 		UpdatedAt:    now,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-1-repo-0", RepositoryID: "repo-primary", CreatedAt: now},
+		},
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -681,26 +696,50 @@ func (p *stubProber) ProbeDefaultBranch(_ context.Context, provider, owner, name
 // stubMaterializer implements BranchMaterializer for tests; the err field
 // controls whether the materialize step succeeds.
 type stubMaterializer struct {
-	err    error
-	result *BranchMaterializationResult
-	calls  int
+	err        error
+	result     *BranchMaterializationResult
+	calls      int
+	lastTarget BranchMaterializationTarget
 }
 
-func (m *stubMaterializer) MaterializeBranch(_ context.Context, _ string, _ string) (*BranchMaterializationResult, error) {
+func (m *stubMaterializer) MaterializeBranch(
+	_ context.Context,
+	_, _ string,
+	target BranchMaterializationTarget,
+) (*BranchMaterializationResult, error) {
 	m.calls++
+	m.lastTarget = target
 	return m.result, m.err
 }
 
 // seedWorktreeTaskEnv attaches a worktree-executor task_environments row so
-// requireWorktreeExecutorForBranchAdd permits the call and taskAlreadyLaunched
-// reports the task as live.
+// requireWorktreeExecutorForBranchAdd permits the call and the effective
+// environment resolver reports the task as live. The inventory rows mirror
+// the task's existing task_repositories, since CreateTaskEnvironment now
+// requires a ready environment to carry inventory for a repo-backed task.
 func seedWorktreeTaskEnv(t *testing.T, repo interface {
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 }, taskID, id string,
 ) {
 	t.Helper()
+	ctx := context.Background()
 	now := time.Now().UTC()
-	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+	taskRepos, err := repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskRepositories: %v", err)
+	}
+	envRepos := make([]*models.TaskEnvironmentRepo, len(taskRepos))
+	for i, tr := range taskRepos {
+		envRepos[i] = &models.TaskEnvironmentRepo{
+			ID:           fmt.Sprintf("%s-repo-%d", id, i),
+			WorktreeID:   fmt.Sprintf("%s-worktree-%d", id, i),
+			RepositoryID: tr.RepositoryID,
+			BranchSlug:   tr.CheckoutBranch,
+			CreatedAt:    now,
+		}
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID:            id,
 		TaskID:        taskID,
 		ExecutorType:  string(models.ExecutorTypeWorktree),
@@ -708,6 +747,7 @@ func seedWorktreeTaskEnv(t *testing.T, repo interface {
 		Status:        "ready",
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		Repos:         envRepos,
 	}); err != nil {
 		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
@@ -869,7 +909,7 @@ func TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 	seedWorktreeTaskEnv(t, repo, task.ID, "env-1")
-	mat := &stubMaterializer{err: fmt.Errorf("simulated git failure")}
+	mat := &stubMaterializer{err: fmt.Errorf("simulated git failure: %w", taskrepo.ErrTaskNotFound)}
 	svc.SetBranchMaterializer(mat)
 
 	beforeRows, _ := repo.ListTaskRepositories(ctx, task.ID)
@@ -885,6 +925,9 @@ func TestAddBranchToTask_MaterializeFailureRollsBackOnLiveTask(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "simulated git failure") {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if !errors.Is(err, taskrepo.ErrTaskNotFound) {
+		t.Errorf("materialization error lost ErrTaskNotFound classification: %v", err)
 	}
 	if mat.calls != 1 {
 		t.Errorf("expected materializer to be called once, got %d", mat.calls)
@@ -925,7 +968,7 @@ func TestAddBranchToTask_MaterializeSkippedPreLaunchStillSucceeds(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	// No task_environments row → taskAlreadyLaunched reports false.
+	// No task_environments row means the effective environment is pre-launch.
 	mat := &stubMaterializer{err: fmt.Errorf("ignored on pre-launch tasks")}
 	svc.SetBranchMaterializer(mat)
 

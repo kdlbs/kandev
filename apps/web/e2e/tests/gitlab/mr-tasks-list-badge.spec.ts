@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 import { GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -91,6 +92,7 @@ async function seedBoardTask(apiClient: ApiClient, seedData: SeedData, title: st
 
 async function showTaskDetails(testPage: import("@playwright/test").Page): Promise<void> {
   await testPage.getByTestId("display-button").click();
+  await expandDisplaySettingsGroup(testPage, "list-rows");
   await testPage.getByText("Show task details", { exact: true }).click();
 }
 

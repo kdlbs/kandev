@@ -664,7 +664,14 @@ test.describe("Branch refresh + filter", () => {
 
     // The enabled button and a rendered option together establish that both
     // the branch request and the popover's selected-repository state settled.
-    await expect(testPage.getByRole("option").first()).toBeVisible({ timeout: 10_000 });
+    const branchListbox = testPage.getByRole("listbox");
+    // Branch policies intentionally appear before branch options. Select the
+    // stable main value instead of relying on whichever policy rows exist in
+    // the shared worker workspace.
+    const mainBranchOption = branchListbox.locator('[data-value="main"]');
+    await expect(mainBranchOption).toBeVisible({ timeout: 10_000 });
+    await expect(mainBranchOption).toHaveClass(/bg-card/);
+    await expect(mainBranchOption).toHaveClass(/border-primary\/50/);
 
     await expect(testPage.getByTestId("repo-chip").first()).toHaveAttribute(
       "data-repository-id",

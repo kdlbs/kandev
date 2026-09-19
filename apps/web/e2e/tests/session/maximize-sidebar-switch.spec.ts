@@ -97,6 +97,9 @@ test.describe("Maximize survives sidebar task switch", () => {
     await sessionA.waitForLoad();
     await sessionA.waitForChatIdle({ timeout: 30_000 });
     // Task B starts with the default layout — sanity check before the bug.
+    // Git updates can focus Changes while the task settles. Select Files
+    // before asserting the default right-column panel.
+    await sessionA.clickTab("Files");
     await sessionA.expectDefaultLayout();
 
     // Switch back to Task A via the sidebar.

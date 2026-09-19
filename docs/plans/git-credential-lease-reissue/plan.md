@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/git-credential-lease-reissue/spec.md
+spec: docs/specs/platform/requirements/git-credential-lease-reissue.md
 created: 2026-08-20
 status: completed
 ---

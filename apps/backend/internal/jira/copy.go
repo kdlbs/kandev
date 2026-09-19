@@ -14,6 +14,10 @@ var ErrSameWorkspace = errors.New("jira: source and target workspaces are the sa
 // ErrNothingToCopy is returned when the source workspace has no Jira config.
 var ErrNothingToCopy = errors.New("jira: source workspace has no configuration to copy")
 
+// ErrOAuthConfigCopyUnsupported prevents two workspaces from sharing one
+// rotating refresh-token lineage. The target must complete its own OAuth flow.
+var ErrOAuthConfigCopyUnsupported = errors.New("jira: OAuth connections cannot be copied; reconnect the target workspace")
+
 // CopyConfigToWorkspace copies the Jira provider config and credential (token)
 // from sourceWorkspaceID to targetWorkspaceID. Watchers are intentionally out
 // of scope — only the connection settings and secret are duplicated.
@@ -40,6 +44,9 @@ func (s *Service) CopyConfigToWorkspace(ctx context.Context, sourceWorkspaceID, 
 	}
 	if cfg == nil {
 		return nil, ErrNothingToCopy
+	}
+	if cfg.AuthMethod == AuthMethodOAuth {
+		return nil, ErrOAuthConfigCopyUnsupported
 	}
 	secret, err := s.revealSecret(ctx, sourceWorkspaceID)
 	if err != nil {
