@@ -54,6 +54,8 @@ finish before the publication gate evaluates the result.
 python3 .github/scripts/release-workflow-contract_test.py
 python3 .github/scripts/lint-action-pinning_test.py
 python3 .github/scripts/lint-action-pinning.py
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
 zizmor .github/workflows
 git diff --check -- .github/workflows/release.yml .github/scripts/release-workflow-contract_test.py
 ```
@@ -95,6 +97,9 @@ Verification passed:
 - `python3 .github/scripts/release-workflow-contract_test.py`: 33 tests.
 - `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests.
 - `python3 .github/scripts/lint-action-pinning.py`: 24 workflows.
+- `python3 scripts/list-docs.py validate`: 291 decisions and 1034
+  specifications.
+- `python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - `git diff --check -- .github/workflows/release.yml .github/scripts/release-workflow-contract_test.py`.
 
 `zizmor .github/workflows` completed with its existing repository findings.
