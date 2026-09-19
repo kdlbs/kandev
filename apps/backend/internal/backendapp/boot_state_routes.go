@@ -712,6 +712,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"savedLayouts":                      settings.SavedLayouts,
 		"sidebarViews":                      mapSidebarViews(settings.SidebarViews),
 		"sidebarViewsByWorkspace":           settings.SidebarViewsByWorkspace,
+		"sidebarLayoutsByWorkspace":         settings.SidebarLayoutsByWorkspace,
 		"sidebarActiveViewId":               nullString(settings.SidebarActiveViewID),
 		"sidebarDraft":                      mapSidebarDraft(settings.SidebarDraft),
 		"threadViews":                       mapThreadViews(settings.ThreadViews),

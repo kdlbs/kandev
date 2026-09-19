@@ -32,6 +32,7 @@ import { readLastSettingsPath } from "@/lib/settings/last-settings-page";
 import { SettingsRedirect, useRememberSettingsPath } from "./settings-route-helpers";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
+import { SidebarLayoutEditor } from "@/components/settings/sidebar-layout-editor";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
@@ -137,6 +138,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/preferences/notifications": () => <NotificationsSettings />,
   "/settings/preferences/task-behavior": () => <TaskBehaviorSettings />,
   "/settings/preferences/terminal-editors": () => <TerminalEditorsSettings />,
+  "/settings/sidebar": () => <SidebarLayoutEditor />,
   // Legacy /settings/general paths, one redirect per page that lived there.
   "/settings/general": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,
   "/settings/general/appearance": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,

@@ -114,6 +114,10 @@ vi.mock("@/components/system-health/health-indicator", () => ({
   HealthIssuesDialog: () => <div data-testid="health-dialog" />,
 }));
 
+vi.mock("@/components/integrations/integrations-menu", () => ({
+  MobileIntegrationsSection: () => <div data-testid="mobile-integrations-section" />,
+}));
+
 vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme, setTheme: mocks.setTheme }),
 }));
@@ -262,6 +266,14 @@ describe("AppNavSections", () => {
     expect(screen.queryByTestId("app-nav-primary")).toBeNull();
     // The utility tail stays.
     expect(screen.getByTestId("mobile-improve-kandev-button")).not.toBeNull();
+  });
+
+  it("keeps the legacy integrations destination for an untouched Office workspace", () => {
+    state.workspaces.items[0].office_workflow_id = "office-workflow";
+
+    render(<SectionsHost />);
+
+    expect(screen.getByTestId("mobile-integrations-section")).not.toBeNull();
   });
 
   it("hides the health row while the system is healthy", () => {

@@ -105,6 +105,23 @@ settings appear only after typing, while **Go to Settings** remains in the comma
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
 configuration content.
 
+## Customize the sidebar
+
+Open **Settings > Preferences > Sidebar** to customize the optional navigation for the active
+workspace. You can hide or reorder Home, New Task, Automations, Canvases, Integrations, and
+available plugin links. The setting belongs to your account and workspace, so it follows you
+across clients without changing another user's layout.
+
+Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
+section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
+icons show running, idle, or paused activity. Tasks and required inbox entries remain available in
+their fixed navigation area, and hiding a shortcut does not disable the underlying feature.
+
+On a phone, open the menu and choose **Sidebar** to edit the same layout. Use the move controls to
+reorder entries or move a shortcut to another section. **Restore defaults** resets the draft for the
+active workspace; the shared **Save changes** action persists it. If another client saves first, the
+editor keeps your draft and reports the conflict so you can reconcile it.
+
 ## Switch workspace
 
 The workspace picker sits in the sidebar header, next to the Kandev brand. It lists every
