@@ -164,7 +164,7 @@ func (s *Service) launch(ctx context.Context, run *runmodels.Run) error {
 	if err != nil {
 		return err
 	}
-	prompt, err := s.prompt(ctx, a, taskID, payload)
+	prompt, err := s.promptForRun(ctx, a, taskID, payload, run)
 	if err != nil {
 		return err
 	}

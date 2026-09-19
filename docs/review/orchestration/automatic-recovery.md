@@ -6,7 +6,8 @@ recovery worked after the lock cleared, but required repeated intervention.
 The execution owner now delegates Orchestrator failures to its durable run queue
 before rendering a terminal error. Eligible failures automatically launch a new
 execution with current authority and fresh run/session credentials. The original
-request, account and run identity remain intact. Both workspace and private
+request, account and run identity remain intact. Retries use the stored original
+prompt; later messages cannot be absorbed into an earlier request. Both workspace and private
 Orchestrator conversations use this path; ordinary chats retain their existing
 recovery policy, with the added refresh-contention classification.
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestration/models"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -89,11 +90,13 @@ func TestAutomaticRecoveryRelaunchesWithFreshAuthority(t *testing.T) {
 	ctx := context.Background()
 	s.FailureHandlerInstalled = true
 	var tokens []string
+	var prompts []string
 	var cleared []string
 	s.RecoveryStarting = func(_ context.Context, session string) { cleared = append(cleared, session) }
 	s.Start = func(ctx context.Context, l Launch) error {
 		require.NoError(t, l.OnSessionPrepared(ctx, fmt.Sprintf("session-%d", len(tokens))))
 		tokens = append(tokens, l.Env["KANDEV_RUN_TOKEN"])
+		prompts = append(prompts, l.Prompt)
 		return nil
 	}
 	require.NoError(t, s.QueueTurn(ctx, "chief", task, "task_comment", "example", nil))
@@ -101,6 +104,7 @@ func TestAutomaticRecoveryRelaunchesWithFreshAuthority(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.Process(ctx, run)
 	require.NoError(t, err)
+	require.NoError(t, s.Repo.PutComment(ctx, &models.TaskComment{ID: "later-example", TaskID: task, AuthorID: "user", AuthorType: "user", Body: "A different generic request queued during recovery", Source: "user"}))
 	failure := watcher.AgentEventData{RunID: run.ID, TaskID: task, SessionID: "session-0", AgentID: "claude-acp", AgentExecutionID: "execution", PromptGeneration: 7, EvidenceKnown: true, ErrorMessage: refreshContention}
 	// Raw event delivery cannot finish/revoke the managed run before recovery.
 	require.NoError(t, s.onEvent(ctx, bus.NewEvent(events.AgentFailed, "test", failure)))
@@ -118,6 +122,7 @@ func TestAutomaticRecoveryRelaunchesWithFreshAuthority(t *testing.T) {
 	_, err = s.Process(ctx, retried)
 	require.NoError(t, err)
 	require.Equal(t, []string{"session-0"}, cleared)
+	require.Equal(t, prompts[0], prompts[1], "retry must preserve the original request without absorbing a later message")
 	require.Len(t, tokens, 2)
 	require.NotEmpty(t, tokens[0])
 	require.NotEqual(t, tokens[0], tokens[1])
@@ -164,4 +169,18 @@ func TestConversationLaterTurnCannotOvertakeRecovery(t *testing.T) {
 	require.NoError(t, s.QueueTurn(ctx, "chief", task, "task_comment", "second", nil))
 	_, err = s.Runs.ClaimNextEligibleRun(ctx)
 	require.ErrorIs(t, err, sql.ErrNoRows)
+}
+
+func TestAutomaticRetryRequiresOriginalPrompt(t *testing.T) {
+	s, _, task := newRuntime(t)
+	ctx := context.Background()
+	require.NoError(t, s.QueueTurn(ctx, "chief", task, "task_comment", "example", nil))
+	run, err := s.Runs.ClaimNextEligibleRun(ctx)
+	require.NoError(t, err)
+	run.RetryCount = 1
+	launched := false
+	s.Start = func(context.Context, Launch) error { launched = true; return nil }
+	_, err = s.Process(ctx, run)
+	require.Error(t, err)
+	require.False(t, launched)
 }
