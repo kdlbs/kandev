@@ -12,6 +12,11 @@ const { moveTaskMock, previewWorkflowMoveMock, appStoreState } = vi.hoisted(() =
     workspaceContextGeneration: 1,
     workflows: { items: [], activeId: null },
     tasks: { activeSessionId: null },
+    taskRemoval: { navigationRevision: 0 },
+    beginWorkflowSessionFocus: vi.fn(() => 1),
+    bindWorkflowSessionFocus: vi.fn(),
+    reconcileWorkflowSessionFocus: vi.fn(),
+    cancelWorkflowSessionFocus: vi.fn(),
     chatInput: { planModeBySessionId: {} },
     kanban: { tasks: [] },
     kanbanMulti: { snapshots: {} },
@@ -600,7 +605,7 @@ describe("WorkflowStepper fallback states", () => {
     // request must not paint a banner describing a move nobody is waiting on.
     let rejectFirst!: (error: unknown) => void;
     moveTaskMock.mockReturnValueOnce(new Promise((_res, rej) => (rejectFirst = rej)));
-    moveTaskMock.mockResolvedValueOnce(undefined);
+    moveTaskMock.mockResolvedValueOnce({});
     const onMoveError = vi.fn();
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const props = {
@@ -626,7 +631,7 @@ describe("WorkflowStepper fallback states", () => {
 
   it("notifies the owning surface when a move starts", () => {
     const onMoveStart = vi.fn();
-    moveTaskMock.mockResolvedValueOnce(undefined);
+    moveTaskMock.mockResolvedValueOnce({});
     const props = {
       steps: STEPS,
       currentStepId: "b",
