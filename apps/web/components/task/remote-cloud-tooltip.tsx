@@ -100,11 +100,18 @@ function StatusTrigger({
       onPointerLeave={onPointerLeave}
       onFocus={onFocus}
       onBlur={onBlur}
-      onClick={onTouchClick ?? triggerProps.onClick}
-      onKeyDown={onTouchKeyDown ?? triggerProps.onKeyDown}
+      onClick={(event) => {
+        onTouchClick?.(event);
+        triggerProps.onClick?.(event);
+      }}
+      onKeyDown={(event) => {
+        onTouchKeyDown?.(event);
+        triggerProps.onKeyDown?.(event);
+      }}
       className={cn(
         "relative inline-flex shrink-0 items-center justify-center",
         CLOUD_STATE_CLASSES[cloudState],
+        triggerProps.className,
         touch &&
           "cursor-pointer transition-transform duration-150 ease-out active:scale-[0.96] after:absolute after:left-1/2 after:top-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']",
       )}

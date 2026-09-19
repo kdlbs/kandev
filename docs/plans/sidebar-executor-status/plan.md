@@ -114,7 +114,7 @@ Implementation and targeted verification complete.
 - RED: no-interaction refresh, automatic retry, and visibility-return tests
   failed on stale/missing status. The real Tooltip regression failed because
   the DOM trigger had no `aria-describedby` linkage.
-- GREEN: the listed focused Vitest command passes 27 tests in 4 files.
+- GREEN: the listed focused Vitest command passes 29 tests in 4 files.
 - Changed-file ESLint with `--max-warnings=0` passes.
 - Fresh managed production build passes. Desktop Chromium E2E: 1/1, 4.3 seconds;
   mobile Chrome E2E: 1/1, 5.7 seconds; both with `--retries=0`. These verify
@@ -157,3 +157,11 @@ passed with zero offline reads and a healthy result after reconnect. All 27
 focused tests and changed-file ESLint pass. No UI, API or public-doc contract
 changed; the system design records the transport guard. Remote CI/review
 verification remains pending for the remediation commit.
+
+CodeRabbit summary findings: unavailable transport now immediately publishes the
+sanitized unavailable snapshot; primitive classes and touch handlers are
+composed. The unavailable-state assertion failed before the fix. Actual-drawer
+coverage now exercises click, Enter and Space, with no task selection. All 29
+focused tests and changed-file lint pass; mobile E2E passes 1/1 without retries
+after a fresh build. Desktop E2E also passes 1/1 without retries, and the
+focused TypeScript check passes.

@@ -30,25 +30,30 @@ it("links the actual tooltip to the focused DOM trigger and dismisses on Escape"
 });
 
 // @covers AC-EXECUTORS-TASK-STATUS-001.4
-it("opens and closes the real drawer without selecting its task", async () => {
-  pointer.touch = true;
-  const selectTask = vi.fn();
-  render(
-    <div onClick={selectTask}>
-      <RemoteCloudTooltip
-        taskId="task"
-        executorType="k8s"
-        status={{ remote_name: "touch-pod", remote_state: "running" }}
-      />
-    </div>,
-  );
-  const trigger = screen.getByTestId("remote-executor-status-trigger");
-  act(() => trigger.focus());
-  fireEvent.keyDown(trigger, { key: "Enter" });
-  const drawer = await screen.findByRole("dialog");
-  expect(trigger.getAttribute("aria-controls")).toBe(drawer.id);
-  expect(selectTask).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
-  expect(selectTask).not.toHaveBeenCalled();
-});
+// Reviewer-requested coverage of the existing click and keyboard activation contract.
+it.each(["click", "Enter", " "])(
+  "opens and closes the real drawer via %s without selecting its task",
+  async (activation) => {
+    pointer.touch = true;
+    const selectTask = vi.fn();
+    render(
+      <div onClick={selectTask}>
+        <RemoteCloudTooltip
+          taskId="task"
+          executorType="k8s"
+          status={{ remote_name: "touch-pod", remote_state: "running" }}
+        />
+      </div>,
+    );
+    const trigger = screen.getByTestId("remote-executor-status-trigger");
+    act(() => trigger.focus());
+    if (activation === "click") fireEvent.click(trigger);
+    else fireEvent.keyDown(trigger, { key: activation });
+    const drawer = await screen.findByRole("dialog");
+    expect(trigger.getAttribute("aria-controls")).toBe(drawer.id);
+    expect(selectTask).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+    expect(selectTask).not.toHaveBeenCalled();
+  },
+);

@@ -29,9 +29,12 @@ describe("remote executor status transport", () => {
     const unsubscribe = resource.subscribe(scope, () => undefined);
     try {
       resource.load(request);
+      expect(resource.getSnapshot(scope).status?.remote_status_error).toBe(
+        "Remote executor status is unavailable.",
+      );
       await vi.advanceTimersByTimeAsync(270_000);
       expect(mocks.request).not.toHaveBeenCalled();
-      expect(resource.getSnapshot(scope)).toEqual({ status: null, loading: false });
+      expect(resource.getSnapshot(scope).loading).toBe(false);
 
       mocks.getStatus.mockReturnValue("connected");
       await vi.advanceTimersByTimeAsync(90_000);

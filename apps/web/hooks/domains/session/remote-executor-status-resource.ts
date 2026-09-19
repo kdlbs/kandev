@@ -106,6 +106,13 @@ function notify(entry: Entry): void {
   entry.listeners.forEach((listener) => listener());
 }
 
+function publishUnavailable(entry: Entry): void {
+  entry.snapshot = { status: statusError(), loading: false };
+  entry.failed = true;
+  entry.completedAt = 0;
+  notify(entry);
+}
+
 function prune(entries: Map<string, Entry>, current: Entry): void {
   const candidates = [...entries.entries()]
     .filter(([, entry]) => entry !== current && !entry.promise && entry.listeners.size === 0)
@@ -164,6 +171,7 @@ export function createRemoteExecutorStatusResource(requester: Requester = reques
     }
     const pending = requester(request);
     if (!pending) {
+      publishUnavailable(entry);
       refresh.settled(scope);
       return null;
     }

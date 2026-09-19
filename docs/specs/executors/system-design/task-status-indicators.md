@@ -33,7 +33,8 @@ for the authoritative external-status path or an invalid scope.
 
 Retain `getKubernetesTaskSession` for Kubernetes and `task.session.status` for
 other remote executors. A disconnected WebSocket is unavailable transport: skip
-the read and retry on the existing schedule without queuing obsolete requests.
+the read, publish sanitized unavailable status immediately, and retry on the
+existing schedule without queuing obsolete requests.
 No backend schema or persistence change is required.
 
 ## Responsive disclosure
