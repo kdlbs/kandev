@@ -441,9 +441,10 @@ func (b bootStateBuilder) addEditorsState(ctx context.Context, state map[string]
 		return
 	}
 	state["editors"] = map[string]any{
-		"items":   response.Editors,
-		"loaded":  true,
-		"loading": false,
+		"folderOpeningAvailable": response.FolderOpeningAvailable,
+		"items":                  response.Editors,
+		"loaded":                 true,
+		"loading":                false,
 	}
 }
 

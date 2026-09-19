@@ -1,3 +1,4 @@
+import { mockFolderAvailability } from "../../helpers/open-task-folder";
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
@@ -85,6 +86,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     })
     .toBeTruthy();
 
+  await mockFolderAvailability(testPage, true);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -126,6 +128,9 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   expect(addSourcesBox.height).toBeGreaterThanOrEqual(44);
   expect(openFolderBox.height).toBeGreaterThanOrEqual(44);
   if (!task.session_id) throw new Error("task creation did not return a session id");
+  await testPage.route("**/api/v1/task-sessions/*/open-folder", (route) =>
+    route.fulfill({ json: { success: true } }),
+  );
   await Promise.all([
     testPage.waitForRequest(
       (request) =>
