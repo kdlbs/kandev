@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestration/models"
+	runmodels "github.com/kandev/kandev/internal/runs/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"time"
 )
@@ -69,6 +70,10 @@ func (s *Service) onEvent(ctx context.Context, event *bus.Event) error {
 		return s.bridgeReply(ctx, event, data, taskID, owner)
 	}
 
+	// The execution owner decides recovery before publishing terminal UI state.
+	if event.Type == events.AgentFailed && s.FailureHandlerInstalled {
+		return nil
+	}
 	return s.finishTurn(ctx, event, data, taskID, owner)
 }
 
@@ -82,19 +87,14 @@ func (s *Service) finishTurn(ctx context.Context, event *bus.Event, data map[str
 	if err != nil || run == nil {
 		return nil
 	}
-	sessionID, _ := data["session_id"].(string)
-	eventRun, _ := data["run_id"].(string)
-	if eventRun != run.ID {
-		return nil
-	}
-	if run.SessionID == "" || sessionID != run.SessionID {
-		return nil
-	}
-	if run.ClaimedAt != nil && !event.Timestamp.IsZero() && event.Timestamp.Before(*run.ClaimedAt) {
+	if !matchesClaimedTurn(event, data, run) {
 		return nil
 	}
 	status := "finished"
 	if event.Type == events.AgentFailed {
+		if retried, retryErr := s.retryTurn(ctx, run, data); retried || retryErr != nil {
+			return retryErr
+		}
 		status = statusFailed
 		message, _ := data["error_message"].(string)
 		if err := s.Runs.RecordFailure(ctx, run.ID, message); err != nil {
@@ -106,6 +106,15 @@ func (s *Service) finishTurn(ctx context.Context, event *bus.Event, data map[str
 	}
 	return s.Repo.SetRuntimeWorking(ctx, owner, false)
 }
+func matchesClaimedTurn(event *bus.Event, data map[string]any, run *runmodels.Run) bool {
+	sessionID, _ := data["session_id"].(string)
+	eventRun, _ := data["run_id"].(string)
+	if eventRun != run.ID || run.SessionID == "" || sessionID != run.SessionID {
+		return false
+	}
+	return run.ClaimedAt == nil || event.Timestamp.IsZero() || !event.Timestamp.Before(*run.ClaimedAt)
+}
+
 func (s *Service) taskCallback(ctx context.Context, taskID string) error {
 	task, err := s.Tasks.GetTask(ctx, taskID)
 	if err != nil {

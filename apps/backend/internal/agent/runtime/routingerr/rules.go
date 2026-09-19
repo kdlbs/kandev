@@ -11,6 +11,7 @@ type rule struct {
 
 var providerRules = map[string][]rule{
 	"claude-acp": {
+		mustRule("claude.stderr.refresh_contention.v1", `(?i)failed to refresh OAuth token: (?:another|\*\*\*) Claude Code process is refreshing it or exited mid-refresh`, CodeProviderUnavailable, ConfHigh),
 		mustRule("claude.stderr.quota.v1", `(?i)anthropic_quota_exceeded|credit balance|insufficient credits`, CodeQuotaLimited, ConfHigh),
 		mustRule("claude.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
 		mustRule("claude.stderr.auth.v1", `(?i)not authenticated|please log in|run `+"`"+`claude`+"`"+` to authenticate`, CodeAuthRequired, ConfHigh),

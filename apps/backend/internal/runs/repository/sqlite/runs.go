@@ -520,6 +520,14 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 			  ) = 0
 			  AND (w.scheduled_retry_at IS NULL OR w.scheduled_retry_at <= ?)
 			  AND w.routing_blocked_status IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM runs recovering
+                WHERE recovering.agent_profile_id = w.agent_profile_id
+                  AND recovering.id <> w.id AND recovering.status = 'queued'
+                  AND recovering.retry_count > 0 AND recovering.scheduled_retry_at IS NOT NULL
+                  AND recovering.capabilities IN ('workspace_coordinator', 'assistant_broker')
+                  AND recovering.requested_at <= w.requested_at
+              )
 			ORDER BY w.requested_at ASC
 			LIMIT 1
 		)
@@ -759,4 +767,32 @@ func (r *Repository) SetRunErrorMessageForTest(
 		UPDATE runs SET error_message = ? WHERE id = ?
 	`), errMsg, runID)
 	return err
+}
+
+// RetryClaimedSession fences delayed or duplicate failures against cancellation,
+// replacement sessions and the attempt that actually owned the failed execution.
+func (r *Repository) RetryClaimedSession(ctx context.Context, runID, sessionID string, count int, retryAt time.Time) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+ UPDATE runs SET status = 'queued', retry_count = retry_count + 1,
+ scheduled_retry_at = ?, claimed_at = NULL, finished_at = NULL,
+ error_message = '', failure_reason = ''
+ WHERE id = ? AND session_id = ? AND status = 'claimed' AND retry_count = ?
+ `), retryAt, runID, sessionID, count)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed == 1, err
+}
+
+// CancelScheduledSessionRetry never cancels a successor that has already launched.
+func (r *Repository) CancelScheduledSessionRetry(ctx context.Context, sessionID string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE runs SET status = 'cancelled',
+ finished_at = ?, cancel_reason = 'automatic recovery cancelled', scheduled_retry_at = NULL
+ WHERE session_id = ? AND status = 'queued' AND scheduled_retry_at IS NOT NULL AND retry_count > 0`), time.Now().UTC(), sessionID)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed > 0, err
 }

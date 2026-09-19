@@ -31,6 +31,7 @@ type TaskEventData struct {
 
 // AgentEventData contains data from agent events
 type AgentEventData struct {
+	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id"`
 	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`

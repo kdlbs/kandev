@@ -27,8 +27,10 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 	personasSvc := &personas.Service{Profiles: repos.AgentSettings, Repo: repos.Orchestration, Terminate: func(ctx context.Context, id string) error {
 		return orch.PersonaSessionTerminator().TerminateAllForAgent(ctx, id, "orchestrator_deleted")
 	}}
-	return &orchestrationruntime.Service{
-		Maintenance: maintenance.New(filepath.Join(cfg.ResolvedDataDir(), "orchestration-maintenance")),
+	runtime := &orchestrationruntime.Service{
+		FailureHandlerInstalled: true,
+		RecoveryStarting:        orch.ResolveManagedRecovery,
+		Maintenance:             maintenance.New(filepath.Join(cfg.ResolvedDataDir(), "orchestration-maintenance")),
 		// The Orchestrator is the single product boundary. Its assistant
 		// capabilities are enabled with the same flag as workspace coordination.
 		AssistantEnabled: cfg.Features.Orchestration,
@@ -46,6 +48,8 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 			return updateOrchestratedStatus(ctx, services.Task, repos, ws, id, status)
 		},
 	}
+	orch.SetManagedFailureRecovery(runtime.HandleFailure, runtime.CancelRecovery)
+	return runtime
 }
 func updateOrchestratedStatus(ctx context.Context, tasks *taskservice.Service, repos *Repositories, ws, id, status string) error {
 	task, err := tasks.GetTask(ctx, id)

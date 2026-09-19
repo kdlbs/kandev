@@ -3596,6 +3596,12 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		return err
 	}
 
+	if s.managedRetryCancel != nil {
+		if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil {
+			s.managedRetryCancel(ctx, session.TaskID, sessionID)
+		}
+	}
+
 	// A direct session stop is a true retry-ending transition. Retire the
 	// in-memory loop and its durable notice before stopping the execution.
 	s.resetTransientRetryWithContext(ctx, sessionID, true)

@@ -590,13 +590,15 @@ type passthroughDispatchToken struct {
 
 // Service is the main orchestrator service
 type Service struct {
-	config        ServiceConfig
-	logger        *logger.Logger
-	eventBus      bus.EventBus
-	taskRepo      scheduler.TaskRepository
-	repo          sessionExecutorStore
-	promptTargets taskPullRequestTargetStore
-	agentManager  executor.AgentManagerClient
+	managedFailure     func(context.Context, watcher.AgentEventData) (int, time.Time, error)
+	managedRetryCancel func(context.Context, string, string) bool
+	config             ServiceConfig
+	logger             *logger.Logger
+	eventBus           bus.EventBus
+	taskRepo           scheduler.TaskRepository
+	repo               sessionExecutorStore
+	promptTargets      taskPullRequestTargetStore
+	agentManager       executor.AgentManagerClient
 
 	// Components
 	queue     *queue.TaskQueue

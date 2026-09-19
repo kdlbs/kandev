@@ -1849,6 +1849,10 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		return nil
 	}
 
+	if s.handleManagedFailure(ctx, data) {
+		return nil
+	}
+
 	// Short transient provider errors get a paced, visible retry-with-backoff
 	// before any red banner. This is the ONLY non-terminal
 	// failure path, so it runs before automation finalization below — otherwise

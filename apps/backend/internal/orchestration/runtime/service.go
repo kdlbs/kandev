@@ -39,30 +39,32 @@ type Launch struct {
 	Env                                              map[string]string
 }
 type Service struct {
-	Maintenance      MaintenanceSandbox
-	maintenanceMu    sync.Mutex
-	Inputs           InputResolver
-	AssistantEnabled bool
-	Attention        AttentionReader
-	AttentionUpdated func(context.Context, string, time.Time)
-	Now              func() time.Time
-	attentionMu      sync.Mutex
-	attentionAfter   string
-	attentionNext    time.Time
-	Repo             *store.Repository
-	Personas         *personas.Service
-	Runs             *runstore.Repository
-	Queue            *runservice.Service
-	Auth             *runtimeauth.AgentAuth
-	Tasks            Tasks
-	Manager          Manager
-	Credentials      CredentialHealthReader
-	Capabilities     CapabilityReader
-	Authority        AssistantAuthorityReader
-	Start            func(context.Context, Launch) error
-	UpdateStatus     func(context.Context, string, string, string) error
-	APIURL, CLI      string
-	mu               sync.Mutex
+	RecoveryStarting        func(context.Context, string)
+	FailureHandlerInstalled bool
+	Maintenance             MaintenanceSandbox
+	maintenanceMu           sync.Mutex
+	Inputs                  InputResolver
+	AssistantEnabled        bool
+	Attention               AttentionReader
+	AttentionUpdated        func(context.Context, string, time.Time)
+	Now                     func() time.Time
+	attentionMu             sync.Mutex
+	attentionAfter          string
+	attentionNext           time.Time
+	Repo                    *store.Repository
+	Personas                *personas.Service
+	Runs                    *runstore.Repository
+	Queue                   *runservice.Service
+	Auth                    *runtimeauth.AgentAuth
+	Tasks                   Tasks
+	Manager                 Manager
+	Credentials             CredentialHealthReader
+	Capabilities            CapabilityReader
+	Authority               AssistantAuthorityReader
+	Start                   func(context.Context, Launch) error
+	UpdateStatus            func(context.Context, string, string, string) error
+	APIURL, CLI             string
+	mu                      sync.Mutex
 }
 
 func (s *Service) QueueTurn(ctx context.Context, id, taskID, reason, key string, payload map[string]any) error {
@@ -109,6 +111,9 @@ func (s *Service) Process(ctx context.Context, run *runmodels.Run) (bool, error)
 	role, err := s.Repo.OrchestratorRoleID(ctx, run.AgentProfileID)
 	if err != nil || role == "" {
 		return false, err
+	}
+	if run.RetryCount > 0 && s.RecoveryStarting != nil {
+		s.RecoveryStarting(ctx, run.SessionID)
 	}
 	err = s.launch(ctx, run)
 	if err != nil {

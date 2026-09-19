@@ -116,6 +116,24 @@ workspace task controls and its own memory; owner-scoped objectives, linked
 workspace grants and maintenance tools belong to a selected private conversation.
 They are not prerequisites for creating or managing a workspace task.
 
+## Automatic conversation recovery
+
+If a temporary provider failure occurs before the Orchestrator has produced a
+response or called a tool, Kandev automatically restarts the execution and retries
+the pending request. This includes Claude account-token refresh contention after
+an idle period. The conversation shows a retry notice; use **Cancel** or **Stop**
+to prevent the pending retry.
+
+Recovery tries up to five times, waiting 15 seconds, 30 seconds, then 60 seconds
+between the remaining attempts. Each attempt uses the same configured account
+and freshly scoped Kandev access. Later requests wait behind the recovering turn.
+You do not need to supply an API key for the Orchestrator's Kandev tools.
+
+If recovery is exhausted, the normal failure and manual recovery controls appear.
+Authentication that requires sign-in, turns with prior output or tool activity,
+and interrupted turns whose effects are unknown are not automatically replayed.
+Already scheduled safe retries survive a backend restart.
+
 ## Profiles and routing
 
 The coordinator's execution profile determines its provider and account. For example, a personal Claude coordinator can direct Jira work to your existing work Claude profile and personal development to a personal Claude or Codex profile. Describe these choices in its routing context, including when to use each profile and where account-specific setup instructions live.

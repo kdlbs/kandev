@@ -571,6 +571,9 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		return false
 	}
 	_, active := s.transientRetries.Load(sessionID)
+	if s.managedRetryCancel != nil && s.managedRetryCancel(ctx, taskID, sessionID) {
+		active = true
+	}
 	s.resetTransientRetryWithContext(ctx, sessionID, true)
 	if !active {
 		return false
