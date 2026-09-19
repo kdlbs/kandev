@@ -535,6 +535,13 @@ func (s *Service) clearInitialCreatePromptPassthroughForNewTurn(sessionID, turnI
 			s.hydrateInitialCreatePromptPassthrough(session)
 		}
 	}
+	s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turnID)
+}
+
+func (s *Service) clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turnID string) {
+	if sessionID == "" || turnID == "" {
+		return
+	}
 	s.initialCreatePromptMu.Lock()
 	defer s.initialCreatePromptMu.Unlock()
 	evidence, ok := s.initialCreatePromptPassthrough[sessionID]
@@ -542,6 +549,23 @@ func (s *Service) clearInitialCreatePromptPassthroughForNewTurn(sessionID, turnI
 		delete(s.initialCreatePromptPassthrough, sessionID)
 		s.clearInitialCreatePromptPassthroughLocked(context.Background(), sessionID)
 	}
+}
+
+func (s *Service) clearInitialCreatePromptPassthroughForAcceptedUserTurn(
+	ctx context.Context,
+	session *models.TaskSession,
+) {
+	if session == nil || session.ID == "" {
+		return
+	}
+	s.hydrateInitialCreatePromptPassthrough(session)
+	s.initialCreatePromptMu.Lock()
+	defer s.initialCreatePromptMu.Unlock()
+	if _, ok := s.initialCreatePromptPassthrough[session.ID]; !ok {
+		return
+	}
+	delete(s.initialCreatePromptPassthrough, session.ID)
+	s.clearInitialCreatePromptPassthroughLocked(ctx, session.ID)
 }
 
 func (s *Service) armQueuedInitialCreatePromptPassthrough(

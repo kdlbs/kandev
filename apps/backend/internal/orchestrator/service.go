@@ -2593,7 +2593,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 
 	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
 		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
-			s.clearInitialCreatePromptPassthroughForNewTurn(sessionID, turnID)
+			s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turnID)
 			s.bindAcceptedDispatchTurn(sessionID, turnID)
 			return turnID, false, nil, nil
 		}
@@ -2605,7 +2605,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	}
 	if turn != nil {
 		s.activeTurns.Store(sessionID, turn.ID)
-		s.clearInitialCreatePromptPassthroughForNewTurn(sessionID, turn.ID)
+		s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 		s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 		return turn.ID, false, nil, nil
 	}
@@ -2621,11 +2621,11 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 
 	if reserve {
 		s.reservedPromptTurns.Store(sessionID, newReservedPromptTurn(turn.ID))
-		s.clearInitialCreatePromptPassthroughForNewTurn(sessionID, turn.ID)
+		s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 		return turn.ID, true, turn, nil
 	}
 	s.activeTurns.Store(sessionID, turn.ID)
-	s.clearInitialCreatePromptPassthroughForNewTurn(sessionID, turn.ID)
+	s.clearInitialCreatePromptPassthroughForNewTurnInMemory(sessionID, turn.ID)
 	s.bindAcceptedDispatchTurn(sessionID, turn.ID)
 	return turn.ID, true, nil, nil
 }
