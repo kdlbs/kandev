@@ -15,6 +15,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useInOffice } from "@/hooks/use-in-office";
 import { usePathname } from "@/lib/routing/client-router";
+import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 import { AppNavSections, useAppNavDialogs } from "./app-nav-sections";
 import { MobileAutomationsSection } from "./mobile-automations-section";
 import { AppNavTrigger } from "./app-nav-trigger";
@@ -239,7 +240,8 @@ function NavigationAutomations({
   workspaceId?: string;
   close: () => void;
 }) {
-  if (!isMobile || !open || inOffice || !workspaceId) return null;
+  const hasSavedSidebarLayout = useHasSavedSidebarLayout();
+  if (!isMobile || !open || inOffice || !workspaceId || hasSavedSidebarLayout) return null;
   return (
     <MobileAutomationsSection key={workspaceId} workspaceId={workspaceId} onNavigate={close} />
   );

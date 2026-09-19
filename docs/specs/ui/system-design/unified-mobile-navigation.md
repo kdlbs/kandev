@@ -300,6 +300,13 @@ extension slots remain reachable without breaking the adjacency of Home/quick
 actions or the relative order of the named sections. Office retains its local
 navigation and suppression of the Kanban task and automation sections.
 
+A saved sidebar layout owns its configured section order and visibility instead
+of the default sequence. Keep phone quick actions immediately after its Home row,
+or at the top when Home is hidden. Home still covers all listing modes. Retain
+the embedded Tasks section and Utilities outside the configurable projection;
+do not duplicate default Automations, plugin groups, or Integrations when the
+saved layout renders those sections.
+
 Add an explicit phone disclosure option to `MobileIntegrationsSection`; leave
 its default/wider behavior unchanged. Use a local initially-false expanded state,
 semantic Button, aria-expanded/aria-controls and stable body ID, using existing

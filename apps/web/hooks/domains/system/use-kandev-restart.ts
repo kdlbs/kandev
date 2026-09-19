@@ -11,7 +11,6 @@ import { t } from "@/lib/i18n";
 export type KandevRestartPhase = "idle" | "starting" | "restarting" | "done" | "error";
 
 const POLL_INTERVAL_MS = 2000;
-const MAX_DURATION_MS = 3 * 60 * 1000;
 
 type UseKandevRestartArgs = {
   onComplete?: () => void;
@@ -32,7 +31,6 @@ export function useKandevRestart({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [previousBootID, setPreviousBootID] = useState<string | null>(null);
   const activeRef = useRef(false);
-  const startedAtRef = useRef<number | null>(null);
   const ownerReleaseRef = useRef<(() => void) | null>(null);
 
   const claimReloadOwnership = useCallback(() => {
@@ -63,7 +61,6 @@ export function useKandevRestart({
     try {
       const before = await fetchSystemInfo({ cache: "no-store" });
       setPreviousBootID(before.boot_id);
-      startedAtRef.current = Date.now();
       await requestRestart();
       setPhase("restarting");
     } catch (e) {
@@ -77,7 +74,6 @@ export function useKandevRestart({
     setPhase("idle");
     setErrorMessage(null);
     setPreviousBootID(null);
-    startedAtRef.current = null;
   }, [releaseReloadOwnership]);
 
   useEffect(() => releaseReloadOwnership, [releaseReloadOwnership]);
@@ -88,13 +84,6 @@ export function useKandevRestart({
     let cancelled = false;
 
     const tick = async () => {
-      const startedAt = startedAtRef.current ?? Date.now();
-      if (Date.now() - startedAt > MAX_DURATION_MS) {
-        if (!cancelled) {
-          fail(t("system:restartTimedOut"));
-        }
-        return;
-      }
       try {
         const info = await fetchSystemInfo({ cache: "no-store" });
         if (cancelled) return;

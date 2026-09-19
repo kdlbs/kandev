@@ -237,3 +237,20 @@ Quick Chat cases passed. Logs: `/tmp/pr3830-responsive-red.log`,
 `/tmp/pr3830-responsive-green.log`, and `/tmp/pr3830-quick-chat-green.log`.
 A temporary filename-anchored config avoided the worktree path's `mobile-`
 substring matching Playwright's desktop exclusion; it was removed after the run.
+
+### Sidebar customization merge reconciliation
+
+Merged main at `9e171c837` after GitHub reported a navigation composition conflict.
+Saved sidebar layouts retain their configured order and visibility; phone quick
+actions follow Home or remain at the top when Home is hidden. Embedded Tasks and
+Utilities remain reachable, Home covers listing modes, and custom layouts do not
+duplicate the default automation/integration sections. Added browser coverage for
+both Home visibility states and updated the paired system design.
+
+Validation: 37 focused unit tests and all 10 phone browser cases passed; typecheck,
+focused ESLint, documentation catalog and specification lint passed. The first
+backend build failed because the shared Go cache lost object files. Retrying with
+an isolated task cache completed the build and browser checks without retries.
+Evidence: `/tmp/pr3830-merge2-unit.log`, `/tmp/pr3830-merge2-types.log`,
+`/tmp/pr3830-merge2-lint.log`, `/tmp/pr3830-merge2-docs.log`, and
+`/tmp/pr3830-merge2-e2e-retry.log`.

@@ -32,6 +32,11 @@ func (m *Manager) stopPersistedKubernetesExecution(
 	reason string,
 	force bool,
 ) (bool, error) {
+	// Recoverable teardown only releases a tracked execution. Its retained
+	// inventory must not turn a duplicate stop into destructive remote cleanup.
+	if reason == StopReasonRecoverableAgentFailure {
+		return false, nil
+	}
 	if !force && !shouldRunExecutorCleanup(reason) {
 		return false, nil
 	}

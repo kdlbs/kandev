@@ -5,6 +5,8 @@ package requiredstores
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/startup"
 )
 
 // Capability identifies a SQL behavior that a store conformance adapter must
@@ -25,6 +27,19 @@ var validCapabilities = map[Capability]struct{}{
 	CapabilityTransaction: {},
 }
 
+// Store IDs referenced from multiple catalog entries, either as their own ID
+// or as another entry's DependsOn, kept as constants so the two never drift.
+const (
+	storeIDSchemaMeta      = "schema-meta"
+	storeIDTask            = "task"
+	storeIDWorkflow        = "workflow"
+	storeIDAgentSettings   = "agent-settings"
+	storeIDUser            = "user"
+	storeIDPluginInstances = "plugin-instances"
+
+	pkgPluginsState = "internal/plugins/state"
+)
+
 // Descriptor is the immutable metadata for one built-in SQL schema owner.
 // RequiredTables are the table names used by runtime persistence probes.
 type Descriptor struct {
@@ -33,53 +48,61 @@ type Descriptor struct {
 	RequiredTables []string
 	DependsOn      []string
 	Capabilities   []Capability
+
+	// Sweep names which store-admission startup step (stores.repositories or
+	// stores.services) claims this entry's `recordRequiredStore` call. Runtime
+	// admission order decides the owner, not file or definition line, so this
+	// is the single declared source both sweeps' totals read at BeginStep and
+	// what the catalog/registry completeness check asserts is total and
+	// non-overlapping.
+	Sweep startup.StepID
 }
 
 // catalog is ordered in the same dependency order used by backend startup.
 // Keep entries for stores whose feature is disabled: their schema remains part
 // of the database contract and must be initialized before readiness.
 var catalog = []Descriptor{
-	{ID: "schema-meta", OwnerPackage: "internal/persistence", RequiredTables: []string{"kandev_meta"}},
-	{ID: "task", OwnerPackage: "internal/task/repository/sqlite", RequiredTables: []string{"workspaces", "tasks", "task_workflow_session_bindings"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "workflow", OwnerPackage: "internal/workflow/repository", RequiredTables: []string{"workflow_templates", "workflow_steps"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "analytics", OwnerPackage: "internal/analytics/repository", RequiredTables: []string{"tasks"}, DependsOn: []string{"task", "workflow"}, Capabilities: []Capability{CapabilityTimestamp}},
-	{ID: "agent-settings", OwnerPackage: "internal/agent/settings/store", RequiredTables: []string{"agents", "agent_profiles"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "user", OwnerPackage: "internal/user/store", RequiredTables: []string{"users"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "notification", OwnerPackage: "internal/notifications/store", RequiredTables: []string{"notification_providers"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "editor", OwnerPackage: "internal/editors/store", RequiredTables: []string{"editors"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "prompts", OwnerPackage: "internal/prompts/store", RequiredTables: []string{"custom_prompts"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "utility", OwnerPackage: "internal/utility/store", RequiredTables: []string{"utility_agents"}, DependsOn: []string{"agent-settings"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "office", OwnerPackage: "internal/office/repository/sqlite", RequiredTables: []string{"office_projects", "runs"}, DependsOn: []string{"task", "agent-settings"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "terminal", OwnerPackage: "internal/terminal/repository", RequiredTables: []string{"user_terminals"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "quick-terminal", OwnerPackage: "internal/quickterminal/repository", RequiredTables: []string{"quick_terminal_tabs"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "runtime-flags", OwnerPackage: "internal/runtimeflags", RequiredTables: []string{"runtime_flag_overrides"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "auth", OwnerPackage: "internal/auth/store", RequiredTables: []string{"auth_identities", "auth_sessions"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "secrets", OwnerPackage: "internal/secrets", RequiredTables: []string{"secrets"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "system-settings", OwnerPackage: "internal/system/settings", RequiredTables: []string{"settings"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "auth-hostnames", OwnerPackage: "internal/auth/hostnames", RequiredTables: []string{"auth_hostname_cache"}, DependsOn: []string{"auth"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "organizations", OwnerPackage: "internal/org", RequiredTables: []string{"orgs"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "organization-units", OwnerPackage: "internal/orgunit", RequiredTables: []string{"org_units"}, DependsOn: []string{"organizations"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "message-queue", OwnerPackage: "internal/orchestrator/messagequeue", RequiredTables: []string{"queued_messages", "queue_admission_receipts"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "task-share", OwnerPackage: "internal/task/share", RequiredTables: []string{"task_shares"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "telemetry-contract", OwnerPackage: "internal/telemetrycontract", RequiredTables: []string{"telemetry_activations"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "delivery", OwnerPackage: "internal/delivery", RequiredTables: []string{"task_delivery_ledger"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "storage", OwnerPackage: "internal/system/storage", RequiredTables: []string{"storage_maintenance_runs", "storage_quarantine_entries"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "plugin-instances", OwnerPackage: "internal/plugins/instances", RequiredTables: []string{"plugin_instances"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "plugin-marketplace", OwnerPackage: "internal/plugins/marketplace", RequiredTables: []string{"plugin_marketplace_source"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "plugin-settings", OwnerPackage: "internal/plugins", RequiredTables: []string{"plugin_settings"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "plugin-state", OwnerPackage: "internal/plugins/state", RequiredTables: []string{"plugin_state"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "plugin-instance-state", OwnerPackage: "internal/plugins/state", RequiredTables: []string{"plugin_instance_state"}, DependsOn: []string{"plugin-instances"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "plugin-user-state", OwnerPackage: "internal/plugins/state", RequiredTables: []string{"plugin_user_state"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "canvas", OwnerPackage: "internal/canvas", RequiredTables: []string{"canvas_lifecycle_metadata", "canvas_creation_authority", "canvas_install_receipts"}, DependsOn: []string{"plugin-instances"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
-	{ID: "github", OwnerPackage: "internal/github", RequiredTables: []string{"github_pr_watches"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "gitlab", OwnerPackage: "internal/gitlab", RequiredTables: []string{"gitlab_configs"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "jira", OwnerPackage: "internal/jira", RequiredTables: []string{"jira_configs"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "linear", OwnerPackage: "internal/linear", RequiredTables: []string{"linear_configs"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "sentry", OwnerPackage: "internal/sentry", RequiredTables: []string{"sentry_configs"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "azure-devops", OwnerPackage: "internal/azuredevops", RequiredTables: []string{"azure_devops_configs"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "workflow-sync", OwnerPackage: "internal/workflowsync", RequiredTables: []string{"workflow_sync_configs"}, DependsOn: []string{"workflow"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "office-config-sync", OwnerPackage: "internal/office/configsync", RequiredTables: []string{"office_config_sync_configs"}, DependsOn: []string{"office"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "automation", OwnerPackage: "internal/automation", RequiredTables: []string{"automations", "automation_runs"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
+	{ID: storeIDSchemaMeta, OwnerPackage: "internal/persistence", RequiredTables: []string{"kandev_meta"}, Sweep: startup.StepStoresRepositories},
+	{ID: storeIDTask, OwnerPackage: "internal/task/repository/sqlite", RequiredTables: []string{"workspaces", "tasks", "task_workflow_session_bindings"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresRepositories},
+	{ID: storeIDWorkflow, OwnerPackage: "internal/workflow/repository", RequiredTables: []string{"workflow_templates", "workflow_steps"}, DependsOn: []string{storeIDTask}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresRepositories},
+	{ID: "analytics", OwnerPackage: "internal/analytics/repository", RequiredTables: []string{"tasks"}, DependsOn: []string{storeIDTask, storeIDWorkflow}, Capabilities: []Capability{CapabilityTimestamp}, Sweep: startup.StepStoresRepositories},
+	{ID: storeIDAgentSettings, OwnerPackage: "internal/agent/settings/store", RequiredTables: []string{"agents", "agent_profiles"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: storeIDUser, OwnerPackage: "internal/user/store", RequiredTables: []string{"users"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "notification", OwnerPackage: "internal/notifications/store", RequiredTables: []string{"notification_providers"}, DependsOn: []string{storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "editor", OwnerPackage: "internal/editors/store", RequiredTables: []string{"editors"}, DependsOn: []string{storeIDUser}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "prompts", OwnerPackage: "internal/prompts/store", RequiredTables: []string{"custom_prompts"}, DependsOn: []string{storeIDUser}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "utility", OwnerPackage: "internal/utility/store", RequiredTables: []string{"utility_agents"}, DependsOn: []string{storeIDAgentSettings}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "office", OwnerPackage: "internal/office/repository/sqlite", RequiredTables: []string{"office_projects", "runs"}, DependsOn: []string{storeIDTask, storeIDAgentSettings}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresRepositories},
+	{ID: "terminal", OwnerPackage: "internal/terminal/repository", RequiredTables: []string{"user_terminals"}, DependsOn: []string{storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "quick-terminal", OwnerPackage: "internal/quickterminal/repository", RequiredTables: []string{"quick_terminal_tabs"}, DependsOn: []string{storeIDUser}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "runtime-flags", OwnerPackage: "internal/runtimeflags", RequiredTables: []string{"runtime_flag_overrides"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "auth", OwnerPackage: "internal/auth/store", RequiredTables: []string{"auth_identities", "auth_sessions"}, DependsOn: []string{storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresRepositories},
+	{ID: "secrets", OwnerPackage: "internal/secrets", RequiredTables: []string{"secrets"}, DependsOn: []string{storeIDTask}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresRepositories},
+	{ID: "system-settings", OwnerPackage: "internal/system/settings", RequiredTables: []string{"settings"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "auth-hostnames", OwnerPackage: "internal/auth/hostnames", RequiredTables: []string{"auth_hostname_cache"}, DependsOn: []string{"auth"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "organizations", OwnerPackage: "internal/org", RequiredTables: []string{"orgs"}, DependsOn: []string{storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "organization-units", OwnerPackage: "internal/orgunit", RequiredTables: []string{"org_units"}, DependsOn: []string{"organizations"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "message-queue", OwnerPackage: "internal/orchestrator/messagequeue", RequiredTables: []string{"queued_messages", "queue_admission_receipts"}, DependsOn: []string{storeIDTask}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
+	{ID: "task-share", OwnerPackage: "internal/task/share", RequiredTables: []string{"task_shares"}, DependsOn: []string{storeIDTask}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "telemetry-contract", OwnerPackage: "internal/telemetrycontract", RequiredTables: []string{"telemetry_activations"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresRepositories},
+	{ID: "delivery", OwnerPackage: "internal/delivery", RequiredTables: []string{"task_delivery_ledger"}, DependsOn: []string{storeIDTask}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
+	{ID: "storage", OwnerPackage: "internal/system/storage", RequiredTables: []string{"storage_maintenance_runs", "storage_quarantine_entries"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
+	{ID: storeIDPluginInstances, OwnerPackage: "internal/plugins/instances", RequiredTables: []string{"plugin_instances"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "plugin-marketplace", OwnerPackage: "internal/plugins/marketplace", RequiredTables: []string{"plugin_marketplace_source"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "plugin-settings", OwnerPackage: "internal/plugins", RequiredTables: []string{"plugin_settings"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "plugin-state", OwnerPackage: pkgPluginsState, RequiredTables: []string{"plugin_state"}, DependsOn: []string{storeIDSchemaMeta}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "plugin-instance-state", OwnerPackage: pkgPluginsState, RequiredTables: []string{"plugin_instance_state"}, DependsOn: []string{storeIDPluginInstances}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "plugin-user-state", OwnerPackage: pkgPluginsState, RequiredTables: []string{"plugin_user_state"}, DependsOn: []string{storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "canvas", OwnerPackage: "internal/canvas", RequiredTables: []string{"canvas_lifecycle_metadata", "canvas_creation_authority", "canvas_install_receipts"}, DependsOn: []string{storeIDPluginInstances}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
+	{ID: "github", OwnerPackage: "internal/github", RequiredTables: []string{"github_pr_watches"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "gitlab", OwnerPackage: "internal/gitlab", RequiredTables: []string{"gitlab_configs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "jira", OwnerPackage: "internal/jira", RequiredTables: []string{"jira_configs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "linear", OwnerPackage: "internal/linear", RequiredTables: []string{"linear_configs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "sentry", OwnerPackage: "internal/sentry", RequiredTables: []string{"sentry_configs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "azure-devops", OwnerPackage: "internal/azuredevops", RequiredTables: []string{"azure_devops_configs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "workflow-sync", OwnerPackage: "internal/workflowsync", RequiredTables: []string{"workflow_sync_configs"}, DependsOn: []string{storeIDWorkflow}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "office-config-sync", OwnerPackage: "internal/office/configsync", RequiredTables: []string{"office_config_sync_configs"}, DependsOn: []string{"office"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
+	{ID: "automation", OwnerPackage: "internal/automation", RequiredTables: []string{"automations", "automation_runs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
 }
 
 // Catalog returns a deep copy of the authoritative store catalog.
@@ -112,6 +135,9 @@ func ValidateCatalog(descriptors []Descriptor) error {
 		}
 		if len(descriptor.RequiredTables) == 0 {
 			return fmt.Errorf("catalog entry %q has no required tables", descriptor.ID)
+		}
+		if descriptor.Sweep != startup.StepStoresRepositories && descriptor.Sweep != startup.StepStoresServices {
+			return fmt.Errorf("catalog entry %q has invalid sweep %q", descriptor.ID, descriptor.Sweep)
 		}
 		if err := validateNames(descriptor); err != nil {
 			return err

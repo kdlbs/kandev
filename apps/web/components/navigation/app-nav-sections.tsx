@@ -11,6 +11,7 @@ import {
   IconLayoutList,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import Link from "@/components/routing/app-link";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
@@ -29,6 +30,9 @@ import type { NavSection } from "@/lib/navigation/types";
 import { useRouter } from "@/lib/routing/client-router";
 import { cn } from "@/lib/utils";
 import { useTaskViewNavigation } from "./use-task-view-navigation";
+import { MobileSidebarLayoutNavigation } from "./mobile-sidebar-layout-navigation";
+import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
+import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 
 /**
  * Overlay-backed rows in the shared nav block (Task views, Improve Kandev, Health issues).
@@ -144,15 +148,26 @@ export function AppNavSections({
 }: AppNavSectionsProps) {
   const { t } = useTranslation();
   const omit = new Set(omitSections);
+  const hasSavedSidebarLayout = useHasSavedSidebarLayout();
   return (
     <>
-      {!omit.has("primary") && (
-        <PrimaryNavSection
+      {hasSavedSidebarLayout ? (
+        <MobileSidebarLayoutNavigation
           onNavigate={onNavigate}
+          omitSections={omit}
           omitDestinations={omitDestinations}
-          phoneNavigation={phoneNavigation}
           quickActions={quickActions}
+          homeCoversListings={phoneNavigation}
         />
+      ) : (
+        !omit.has("primary") && (
+          <PrimaryNavSection
+            onNavigate={onNavigate}
+            omitDestinations={omitDestinations}
+            phoneNavigation={phoneNavigation}
+            quickActions={quickActions}
+          />
+        )
       )}
       {controls.openTaskViews && (
         <Button
@@ -166,8 +181,10 @@ export function AppNavSections({
       )}
       {afterPrimary}
       {workspaceActions}
-      {!omit.has("plugins") && <MobilePluginNavSection onNavigate={onNavigate} />}
-      {!omit.has("integrations") && (
+      {!hasSavedSidebarLayout && !omit.has("plugins") && (
+        <MobilePluginNavSection onNavigate={onNavigate} />
+      )}
+      {!hasSavedSidebarLayout && !omit.has("integrations") && (
         <MobileIntegrationsSection
           onNavigate={onNavigate}
           showSetup={phoneNavigation}
@@ -243,6 +260,18 @@ function UtilityNavSection({
         onNavigate={onNavigate}
         className="gap-3 px-3 text-sm"
       />
+      <Button
+        asChild
+        type="button"
+        variant="outline"
+        className={utilityRowClass}
+        data-testid="mobile-customize-sidebar-button"
+      >
+        <Link href={SIDEBAR_LAYOUT_TAB_HREF} onClick={onNavigate}>
+          <IconLayoutList className="h-4 w-4 shrink-0" />
+          {t("settings:sidebar")}
+        </Link>
+      </Button>
       {/* #2514 put this on the kanban drawer's own utility rows; that surface
           now draws this shared block instead, so the toggle lives here and
           every mobile menu gets it rather than only the board's. */}
