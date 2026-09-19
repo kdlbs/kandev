@@ -185,33 +185,34 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
-	ID                          string                   `json:"id"`
-	WorkspaceID                 string                   `json:"workspace_id"`
-	WorkflowID                  string                   `json:"workflow_id"`
-	WorkflowStepID              string                   `json:"workflow_step_id"`
-	Title                       string                   `json:"title"`
-	Description                 string                   `json:"description"`
-	State                       v1.TaskState             `json:"state"`
-	Priority                    string                   `json:"priority"`
-	WIPAdmitted                 bool                     `json:"wip_admitted"`
-	QueuedForStepID             string                   `json:"queued_for_step_id,omitempty"`
-	QueuedAt                    *time.Time               `json:"queued_at,omitempty"`
-	Repositories                []TaskRepositoryDTO      `json:"repositories,omitempty"`
-	WorkspaceFolders            []TaskWorkspaceFolderDTO `json:"workspace_folders,omitempty"`
-	Position                    int                      `json:"position"`
-	PrimarySessionID            *string                  `json:"primary_session_id,omitempty"`
-	SessionCount                *int                     `json:"session_count,omitempty"`
-	ReviewStatus                models.ReviewStatus      `json:"review_status,omitempty"`
-	PrimaryExecutorID           *string                  `json:"primary_executor_id,omitempty"`
-	PrimaryExecutorProfileID    *string                  `json:"primary_executor_profile_id,omitempty"`
-	PrimaryExecutorType         *string                  `json:"primary_executor_type,omitempty"`
-	PrimaryExecutorName         *string                  `json:"primary_executor_name,omitempty"`
-	PrimaryAgentName            *string                  `json:"primary_agent_name,omitempty"`
-	PrimaryAgentProfileID       *string                  `json:"primary_agent_profile_id,omitempty"`
-	PrimaryWorkingDirectory     *string                  `json:"primary_working_directory,omitempty"`
-	PrimarySessionState         *string                  `json:"primary_session_state,omitempty"`
-	PrimarySessionPendingAction *string                  `json:"primary_session_pending_action"`
-	TaskPendingAction           *string                  `json:"task_pending_action"`
+	ID                          string                         `json:"id"`
+	WorkspaceID                 string                         `json:"workspace_id"`
+	WorkflowID                  string                         `json:"workflow_id"`
+	WorkflowStepID              string                         `json:"workflow_step_id"`
+	WorkflowAgentOverrides      *models.WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
+	Title                       string                         `json:"title"`
+	Description                 string                         `json:"description"`
+	State                       v1.TaskState                   `json:"state"`
+	Priority                    string                         `json:"priority"`
+	WIPAdmitted                 bool                           `json:"wip_admitted"`
+	QueuedForStepID             string                         `json:"queued_for_step_id,omitempty"`
+	QueuedAt                    *time.Time                     `json:"queued_at,omitempty"`
+	Repositories                []TaskRepositoryDTO            `json:"repositories,omitempty"`
+	WorkspaceFolders            []TaskWorkspaceFolderDTO       `json:"workspace_folders,omitempty"`
+	Position                    int                            `json:"position"`
+	PrimarySessionID            *string                        `json:"primary_session_id,omitempty"`
+	SessionCount                *int                           `json:"session_count,omitempty"`
+	ReviewStatus                models.ReviewStatus            `json:"review_status,omitempty"`
+	PrimaryExecutorID           *string                        `json:"primary_executor_id,omitempty"`
+	PrimaryExecutorProfileID    *string                        `json:"primary_executor_profile_id,omitempty"`
+	PrimaryExecutorType         *string                        `json:"primary_executor_type,omitempty"`
+	PrimaryExecutorName         *string                        `json:"primary_executor_name,omitempty"`
+	PrimaryAgentName            *string                        `json:"primary_agent_name,omitempty"`
+	PrimaryAgentProfileID       *string                        `json:"primary_agent_profile_id,omitempty"`
+	PrimaryWorkingDirectory     *string                        `json:"primary_working_directory,omitempty"`
+	PrimarySessionState         *string                        `json:"primary_session_state,omitempty"`
+	PrimarySessionPendingAction *string                        `json:"primary_session_pending_action"`
+	TaskPendingAction           *string                        `json:"task_pending_action"`
 	// ForegroundActivity is the task-level MOST-ACTIVE-WINS activity aggregate
 	// across the task's sessions: "generating" when
 	// any session is generating, "background" when none is generating but at
@@ -929,6 +930,10 @@ func FromTaskWithSessionInfo(
 	primarySessionState *string,
 	primarySessionPendingAction *string,
 ) TaskDTO {
+	var workflowAgentOverrides *models.WorkflowAgentOverrides
+	if task.WorkflowAgentOverrides != nil && task.WorkflowAgentOverrides.WorkflowID == task.WorkflowID {
+		workflowAgentOverrides = task.WorkflowAgentOverrides
+	}
 	if primaryExecutorProfileID == nil {
 		if value, ok := task.Metadata[models.MetaKeyExecutorProfileID].(string); ok && value != "" {
 			primaryExecutorProfileID = &value
@@ -972,6 +977,7 @@ func FromTaskWithSessionInfo(
 		WorkspaceID:                 task.WorkspaceID,
 		WorkflowID:                  task.WorkflowID,
 		WorkflowStepID:              task.WorkflowStepID,
+		WorkflowAgentOverrides:      workflowAgentOverrides,
 		Title:                       task.Title,
 		Description:                 task.Description,
 		State:                       task.State,

@@ -435,7 +435,7 @@ func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task
 		return v, step
 	}
 	if step != nil {
-		if id := s.resolveStepAgentProfile(ctx, step); id != "" {
+		if id := s.resolveStepAgentProfileForTask(ctx, task, step); id != "" {
 			return id, step
 		}
 	}

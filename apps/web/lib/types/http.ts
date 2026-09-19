@@ -235,6 +235,17 @@ export type WorkflowProfileSessionStartPolicy = "reuse" | "new";
 export type WorkflowProfileSessionEndPolicy = "complete" | "park";
 export type WorkflowSessionTarget = { kind: "initial" } | { kind: "step"; step_id: string };
 
+export type WorkflowAgentOverrideBinding = {
+  step_id: string;
+  source_profile_id: string;
+  replacement_profile_id: string;
+};
+
+export type WorkflowAgentOverrides = {
+  workflow_id: string;
+  steps: WorkflowAgentOverrideBinding[];
+};
+
 export function normalizeWorkflowProfileSessionStartPolicy(
   value: unknown,
 ): WorkflowProfileSessionStartPolicy {
@@ -422,6 +433,8 @@ export type Task = ActiveSubagentCountFields & {
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
   workflow_step_id: string;
+  /** Task-only replacements for fixed workflow step agent profiles. */
+  workflow_agent_overrides?: WorkflowAgentOverrides;
   position: number;
   title: string;
   description: string;

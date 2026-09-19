@@ -9,6 +9,7 @@ import type {
   WorkflowProfileSessionEndPolicy,
   WorkflowProfileSessionStartPolicy,
   WorkflowSessionTarget,
+  WorkflowAgentOverrides,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { BeginTaskRemovalInput, TaskRemovalState } from "@/lib/state/task-removal";
@@ -90,6 +91,7 @@ export type KanbanState = {
     // wrong workflow. Ephemeral tasks are filtered out before this point.
     workflowId: string;
     workflowStepId: string;
+    workflowAgentOverrides?: WorkflowAgentOverrides;
     title: string;
     description?: string;
     autopilot?: boolean;

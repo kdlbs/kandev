@@ -316,6 +316,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.validateTaskWorkflow(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.validateWorkflowAgentOverrides(ctx, req); err != nil {
+		return nil, err
+	}
 	if err := s.prepareContributionDestination(ctx, req); err != nil {
 		return nil, err
 	}
@@ -958,6 +961,7 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
 		WorkflowStepID:         workflowStepID,
+		WorkflowAgentOverrides: req.normalizedWorkflowAgentOverrides,
 		Title:                  req.Title,
 		Description:            req.Description,
 		State:                  state,

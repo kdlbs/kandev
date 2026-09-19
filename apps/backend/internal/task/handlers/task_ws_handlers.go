@@ -88,24 +88,25 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 }
 
 type wsCreateTaskRequest struct {
-	WorkspaceID       string                    `json:"workspace_id"`
-	WorkflowID        string                    `json:"workflow_id"`
-	WorkflowStepID    string                    `json:"workflow_step_id"`
-	Title             string                    `json:"title"`
-	Description       string                    `json:"description,omitempty"`
-	Autopilot         bool                      `json:"autopilot,omitempty"`
-	Priority          string                    `json:"priority,omitempty"`
-	State             *v1.TaskState             `json:"state,omitempty"`
-	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
-	Position          int                       `json:"position,omitempty"`
-	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
-	StartAgent        bool                      `json:"start_agent,omitempty"`
-	AgentProfileID    string                    `json:"agent_profile_id,omitempty"`
-	ExecutorID        string                    `json:"executor_id,omitempty"`
-	ExecutorProfileID string                    `json:"executor_profile_id,omitempty"`
-	PlanMode          bool                      `json:"plan_mode,omitempty"`
-	Attachments       []v1.MessageAttachment    `json:"attachments,omitempty"`
-	ParentID          string                    `json:"parent_id,omitempty"`
+	WorkspaceID            string                    `json:"workspace_id"`
+	WorkflowID             string                    `json:"workflow_id"`
+	WorkflowStepID         string                    `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string         `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                    `json:"title"`
+	Description            string                    `json:"description,omitempty"`
+	Autopilot              bool                      `json:"autopilot,omitempty"`
+	Priority               string                    `json:"priority,omitempty"`
+	State                  *v1.TaskState             `json:"state,omitempty"`
+	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
+	Position               int                       `json:"position,omitempty"`
+	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	StartAgent             bool                      `json:"start_agent,omitempty"`
+	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
+	ExecutorID             string                    `json:"executor_id,omitempty"`
+	ExecutorProfileID      string                    `json:"executor_profile_id,omitempty"`
+	PlanMode               bool                      `json:"plan_mode,omitempty"`
+	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
+	ParentID               string                    `json:"parent_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -182,6 +183,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkspaceID:                 req.WorkspaceID,
 		WorkflowID:                  req.WorkflowID,
 		WorkflowStepID:              req.WorkflowStepID,
+		WorkflowAgentOverrides:      req.WorkflowAgentOverrides,
+		ExecutorID:                  req.ExecutorID,
+		ExecutorProfileID:           req.ExecutorProfileID,
 		Title:                       title,
 		Description:                 description,
 		Autopilot:                   req.Autopilot,

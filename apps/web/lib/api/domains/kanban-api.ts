@@ -123,6 +123,8 @@ export async function createTask(
     default_child_ordering?: "sequential" | "parallel";
     /** Start the task in autopilot mode. Fixed at creation time. */
     autopilot?: boolean;
+    /** Task-only replacements for fixed workflow step agent profiles. */
+    workflow_agent_overrides?: Record<string, string>;
   },
   options?: ApiRequestOptions,
 ) {

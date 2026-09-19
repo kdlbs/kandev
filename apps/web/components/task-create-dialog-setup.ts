@@ -33,6 +33,10 @@ import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import { t } from "@/lib/i18n";
 import { listRepositoryBranchPolicies } from "@/lib/api";
 import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
+import {
+  buildWorkflowAgentOverrideValidation,
+  type WorkflowAgentOverrideValidation,
+} from "@/components/task-create-dialog-workflow-agent-override-validation";
 
 // Catalog key: module scope, so it is resolved at the call site.
 const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
@@ -140,6 +144,7 @@ type SubmitWiringArgs = {
   editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
+  workflowAgentOverridesBlockedReason?: string;
 };
 
 function useSubmitHandlersWiring({
@@ -154,6 +159,7 @@ function useSubmitHandlersWiring({
   editDependencies,
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
+  workflowAgentOverridesBlockedReason,
 }: SubmitWiringArgs) {
   const {
     workspaceId,
@@ -215,6 +221,8 @@ function useSubmitHandlersWiring({
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
     priority: fs.priority,
+    workflowAgentOverrides: fs.workflowAgentOverrides,
+    workflowAgentOverridesBlockedReason,
     blockedBy: fs.blockedBy,
     editDependencies,
   });
@@ -395,6 +403,24 @@ function useDialogSetupData(
   };
 }
 
+function resolveWorkflowAgentOverrideValidation(
+  mode: TaskCreateDialogProps["mode"],
+  workspaceId: string | null | undefined,
+  fs: ReturnType<typeof useDialogFormState>,
+  data: ReturnType<typeof useDialogSetupData>,
+): WorkflowAgentOverrideValidation {
+  return buildWorkflowAgentOverrideValidation({
+    effectiveWorkflowId: data.computed.effectiveWorkflowId,
+    snapshots: data.snapshots,
+    workspaceSnapshotRead: data.workspaceSnapshotRead,
+    workspaceId,
+    profiles: data.agentProfiles,
+    replacementOptions: data.computed.agentProfileOptions,
+    overrides: fs.workflowAgentOverrides,
+    isCreateMode: mode === "create",
+  });
+}
+
 export function useTaskCreateDialogSetup(
   props: TaskCreateDialogProps,
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
@@ -428,14 +454,14 @@ export function useTaskCreateDialogSetup(
   );
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
-  const {
-    repositories,
-    userSettingsLoaded,
-    computed,
-    repositoryLocalPath,
-    refreshBranchPolicies,
-    savedBaseSubmitBlockedReason,
-  } = data;
+  const { computed, repositoryLocalPath, refreshBranchPolicies, savedBaseSubmitBlockedReason } =
+    data;
+  const workflowAgentOverrideValidation = resolveWorkflowAgentOverrideValidation(
+    mode,
+    workspaceId,
+    fs,
+    data,
+  );
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
@@ -448,15 +474,15 @@ export function useTaskCreateDialogSetup(
     editDependencies,
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
+    workflowAgentOverridesBlockedReason: workflowAgentOverrideValidation.blockedReason,
   });
-  const guardedHandleSubmit = useGuardedSubmit(
+  const { guardedHandleSubmit, handleKeyDown } = useDialogSubmitShortcut(
     submitHandlers.handleSubmit,
-    resolvedProps.submitBlockedReason ?? savedBaseSubmitBlockedReason,
+    resolvedProps.submitBlockedReason ??
+      savedBaseSubmitBlockedReason ??
+      workflowAgentOverrideValidation.blockedReason,
     !isTaskStarted && computed.noCompatibleAgent,
   );
-  const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
-    guardedHandleSubmit(event as unknown as FormEvent);
-  });
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);
   const handleLinearImport = useLinearImportHandler(fs, data.handlers.handleTaskNameChange);
@@ -464,9 +490,9 @@ export function useTaskCreateDialogSetup(
   const repositorySets = useDialogRepositorySets(
     resolvedProps,
     fs,
-    repositories,
+    data.repositories,
     computed,
-    userSettingsLoaded,
+    data.userSettingsLoaded,
   );
   return {
     ...data,
@@ -488,6 +514,7 @@ export function useTaskCreateDialogSetup(
     handleLinearImport,
     editDependencies,
     savedBaseSubmitBlockedReason,
+    workflowAgentOverrideValidation,
   };
 }
 
@@ -585,4 +612,16 @@ function useGuardedSubmit(
     },
     [blocked, handleSubmit],
   );
+}
+
+function useDialogSubmitShortcut(
+  handleSubmit: ReturnType<typeof useSubmitHandlersWiring>["handleSubmit"],
+  blockedReason: string | null | undefined,
+  compatibilityBlocked: boolean,
+) {
+  const guardedHandleSubmit = useGuardedSubmit(handleSubmit, blockedReason, compatibilityBlocked);
+  const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
+    guardedHandleSubmit(event as unknown as FormEvent);
+  });
+  return { guardedHandleSubmit, handleKeyDown };
 }

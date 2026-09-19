@@ -315,6 +315,7 @@ function useFormStateValues(workflowId: string | null) {
   const [executorId, setExecutorId] = useState("");
   const [executorProfileId, setExecutorProfileId] = useState("");
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(workflowId);
+  const [workflowAgentOverrides, setWorkflowAgentOverrides] = useState<Record<string, string>>({});
   const [fetchedSteps, setFetchedSteps] = useState<StepType[] | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isCreatingTask, setIsCreatingTask] = useState(false);
@@ -346,6 +347,8 @@ function useFormStateValues(workflowId: string | null) {
     setExecutorProfileId,
     selectedWorkflowId,
     setSelectedWorkflowId,
+    workflowAgentOverrides,
+    setWorkflowAgentOverrides,
     fetchedSteps,
     setFetchedSteps,
     isCreatingSession,
@@ -429,6 +432,7 @@ export function useDialogFormState(
       setExecutorId: form.setExecutorId,
       setExecutorProfileId: form.setExecutorProfileId,
       setSelectedWorkflowId: form.setSelectedWorkflowId,
+      setWorkflowAgentOverrides: form.setWorkflowAgentOverrides,
       setFetchedSteps: form.setFetchedSteps,
       setDiscoveredRepositories: discovery.setDiscoveredRepositories,
       setDiscoverReposLoaded: discovery.setDiscoverReposLoaded,
@@ -654,6 +658,19 @@ export function useTaskCreateDialogData({
   const settingsData = useAppStore((state) => state.settingsData);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const workspaceSnapshotWorkspaceId = useAppStore(
+    (state) => state.workspaceContextRead.workspaceId,
+  );
+  const workspaceSnapshotPending = useAppStore(
+    (state) => state.workspaceContextRead.snapshotPending,
+  );
+  const workspaceSnapshotError = useAppStore((state) => state.workspaceContextRead.snapshotError);
+  const workspaceSnapshotRead = {
+    workspaceId: workspaceSnapshotWorkspaceId,
+    pending: workspaceSnapshotPending,
+    error: workspaceSnapshotError,
+  };
+  const refreshWorkspaceSnapshots = useAppStore((state) => state.requestWorkspaceContextRefresh);
   const taskCreateUserSettings = useEnsureUserSettings(open);
 
   useSettingsData(open);
@@ -695,6 +712,8 @@ export function useTaskCreateDialogData({
     agentProfiles,
     executors,
     snapshots,
+    workspaceSnapshotRead,
+    refreshWorkspaceSnapshots,
     repositories,
     repositoriesLoading,
     refreshRepositories,

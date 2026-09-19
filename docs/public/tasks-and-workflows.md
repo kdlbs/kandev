@@ -217,6 +217,27 @@ Select an option, then choose **Save changes**. Workflow-selected profiles alway
 
 External MCP calls have no verified creating session. With **Creating session profile**, those calls keep the compatibility fallback to the parent task when one exists, then workflow and target-workspace defaults. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. A resolved profile and runtime seed are stored even when `start_agent=false`, so a later manual start uses the same decision.
 
+### Choose task-specific workflow profiles
+
+When a workflow has fixed agent profiles on its steps, expand **Advanced
+settings** while creating a task to replace one or more of them for that task.
+Kandev groups steps that use the same fixed profile into one row and lists the
+affected steps. Select an enabled profile from the replacement picker, or
+choose **Use workflow profile** to keep the workflow choice.
+
+These replacements belong to the task only. They do not change the workflow,
+the profile definitions, or another task in the same workflow. Kandev also
+keeps the choices out of recently used task settings. Use **Reset** to remove
+all replacements. Closing and reopening **Advanced settings** keeps the current
+choices, while changing the workflow or starting a new task clears them.
+
+Explicit **Initial agent session** and earlier-step session targets keep their
+existing conversation selection. A replacement applies when a fixed step
+starts or reuses a session. If the session already exists, the workflow
+disclosure shows its actual model and session. Before a session exists, it
+shows the planned replacement model. A profile that becomes unavailable blocks
+creation until you choose another profile or reset the row.
+
 ### Navigate long chat transcripts
 
 When your latest prompt has fully left the transcript viewport, **Scroll to

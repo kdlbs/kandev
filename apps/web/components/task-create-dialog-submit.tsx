@@ -57,6 +57,22 @@ function shouldNavigateAfterTaskCreate(
   return (withAgent && isPassthroughProfile) || !!(planMode && sessionId);
 }
 
+function finishTaskCreateNavigation(args: {
+  planMode: boolean | undefined;
+  newSessionId: string | null;
+  autoFocusNewTasks: boolean;
+  withAgent: boolean;
+  isPassthroughProfile: boolean;
+  activatePlan: (sessionId: string) => void;
+  openPassthroughTask: () => void;
+}) {
+  if (args.planMode && args.newSessionId) {
+    args.activatePlan(args.newSessionId);
+  } else if (args.autoFocusNewTasks && args.withAgent && args.isPassthroughProfile) {
+    args.openPassthroughTask();
+  }
+}
+
 type NoAgentTaskRequirements = {
   description: string;
   workspaceId: string;
@@ -326,6 +342,8 @@ export function useTaskSubmitHandlers({
   noRepository,
   workspacePath,
   priority,
+  workflowAgentOverrides,
+  workflowAgentOverridesBlockedReason,
   blockedBy,
   editDependencies,
   transformDescriptionBeforeSubmit,
@@ -711,6 +729,7 @@ export function useTaskSubmitHandlers({
       planMode?: boolean;
       attachments?: ReturnType<typeof toMessageAttachments>;
     }) => {
+      if (!isSessionMode && !isEditMode && workflowAgentOverridesBlockedReason) return;
       if (!workspaceId || !effectiveWorkflowId) return;
       let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
       const buildPayload = (c: string[]) => {
@@ -735,6 +754,7 @@ export function useTaskSubmitHandlers({
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
           priority,
+          workflowAgentOverrides,
           blockedBy,
         });
         submittedPayload = payload;
@@ -761,18 +781,23 @@ export function useTaskSubmitHandlers({
       queueTaskCreateLastUsedFromPayload(submittedPayload);
       preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
-      if (opts.planMode && newSessionId) {
-        activatePlanMode({
-          sessionId: newSessionId,
-          taskId: taskResponse.id,
-          autoFocus: autoFocusNewTasks,
-          setActiveDocument,
-          setPlanMode,
-          router,
-        });
-      } else if (autoFocusNewTasks && opts.withAgent && isPassthroughProfile) {
-        router.push(linkToTask(taskResponse.id));
-      }
+      finishTaskCreateNavigation({
+        planMode: opts.planMode,
+        newSessionId,
+        autoFocusNewTasks,
+        withAgent: opts.withAgent,
+        isPassthroughProfile,
+        activatePlan: (sessionId) =>
+          activatePlanMode({
+            sessionId,
+            taskId: taskResponse.id,
+            autoFocus: autoFocusNewTasks,
+            setActiveDocument,
+            setPlanMode,
+            router,
+          }),
+        openPassthroughTask: () => router.push(linkToTask(taskResponse.id)),
+      });
     },
     [
       workspaceId,
@@ -798,6 +823,9 @@ export function useTaskSubmitHandlers({
       router,
       getRepositoriesPayload,
       createTaskWithFreshBranchRetry,
+      isSessionMode,
+      isEditMode,
+      workflowAgentOverridesBlockedReason,
     ],
   );
 
@@ -879,6 +907,7 @@ export function useTaskSubmitHandlers({
       }
       return;
     }
+    if (workflowAgentOverridesBlockedReason) return;
     const trimmedTitle = taskName.trim();
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
@@ -922,6 +951,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingTask,
     editDependencies,
+    workflowAgentOverridesBlockedReason,
   ]);
 
   const submitCreateTask = useCallback(
@@ -957,6 +987,7 @@ export function useTaskSubmitHandlers({
   );
 
   const handleCreateSubmit = useCallback(async () => {
+    if (workflowAgentOverridesBlockedReason) return;
     const trimmedTitle = taskName.trim();
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
@@ -990,9 +1021,11 @@ export function useTaskSubmitHandlers({
     toast,
     descriptionInputRef,
     setIsCreatingTask,
+    workflowAgentOverridesBlockedReason,
   ]);
 
   const handleCreateWithoutAgent = useCallback(async () => {
+    if (workflowAgentOverridesBlockedReason) return;
     const trimmedTitle = taskName.trim();
     const trimmedDescription = (descriptionInputRef.current?.getValue() ?? "").trim();
     const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
@@ -1028,6 +1061,7 @@ export function useTaskSubmitHandlers({
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
           priority,
+          workflowAgentOverrides,
           blockedBy,
         });
         submittedPayload = p;
@@ -1078,6 +1112,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingTask,
     blockedBy,
+    workflowAgentOverridesBlockedReason,
   ]);
 
   const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;
