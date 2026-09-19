@@ -640,6 +640,43 @@ func TestEnsureCrossWorkspaceSeparation(t *testing.T) {
 	}
 }
 
+func TestResolveManagedConversationRequiresCurrentOwnedPrimarySession(t *testing.T) {
+	svc, _ := newACTestService()
+	ctx := context.Background()
+	desc, _, err := svc.Ensure(ctx, "plugin-a", pluginsdk.AgentConversationSpec{WorkspaceID: "ws-1", ConversationKey: "coordinator"})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	got, err := svc.ResolveManagedConversation(ctx, "plugin-a", "ws-1", desc.SessionID)
+	if err != nil {
+		t.Fatalf("ResolveManagedConversation: %v", err)
+	}
+	if got != desc {
+		t.Fatalf("descriptor = %+v, want %+v", got, desc)
+	}
+
+	for _, tc := range []struct {
+		name, pluginID, workspaceID, sessionID string
+	}{
+		{"foreign plugin", "plugin-b", "ws-1", desc.SessionID},
+		{"foreign workspace", "plugin-a", "ws-2", desc.SessionID},
+		{"replaced session", "plugin-a", "ws-1", "session-replaced"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, resolveErr := svc.ResolveManagedConversation(ctx, tc.pluginID, tc.workspaceID, tc.sessionID)
+			if status.Code(resolveErr) != codes.NotFound {
+				t.Fatalf("ResolveManagedConversation error = %v, want NotFound", resolveErr)
+			}
+		})
+	}
+
+	_, err = svc.ResolveManagedConversation(ctx, "", "ws-1", desc.SessionID)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("empty plugin error = %v, want InvalidArgument", err)
+	}
+}
+
 func TestConcurrentEnsureIsIdempotent(t *testing.T) {
 	svc, _ := newACTestService()
 

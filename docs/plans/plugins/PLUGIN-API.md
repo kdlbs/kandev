@@ -709,6 +709,20 @@ Zustand state, first-party /api/v1 URLs, raw content, arbitrary metadata, cursor
 revision tokens, or WebSocket payloads. The Host binds every request and
 notification to the current plugin generation and task-panel session context.
 
+### `host.ui.WorkspaceAgentChat` managed conversations
+
+`host.ui.WorkspaceAgentChat` requires `capabilities.agent_conversation: true`.
+It renders only the managed descriptor named by `workspaceId` and
+`conversationId`; it does not make the ephemeral task visible in Kanban or
+grant ordinary prompt-history access. The Host resolves that descriptor under
+the authenticated user's workspace access and carries a short-lived managed
+grant through the private v2 source reads and subscription. The grant is bound
+to plugin, user, install generation, workspace, task, and session. A supplied
+task different from the descriptor task is rejected, and a replaced or deleted
+descriptor ends the surface with the public `deleted` status. Plugins using
+this surface need not declare `api_read: ["messages"]`; ordinary
+`host.conversation` remains governed by that capability.
+
     type PluginConversationErrorCode =
       | "unauthenticated"
       | "not_found"
@@ -820,15 +834,19 @@ session.conversation.unsubscribe. A request uses this shape:
       plugin_id?: string;
       generation?: number;
       binding_token?: string;
+      managed_conversation_token?: string;
       task_id?: string | null;
       authors?: string[];
       sort?: "asc" | "desc";
     };
 
-Plugin requests include plugin_id, generation, and binding_token. Core requests
-use consumer_kind: "core". The server validates the session through the normal
-user/workspace boundary and rejects stale legacy session.subscribe payloads with
-ordered fields. Unsubscribe uses the same scope and binding identity.
+Plugin requests include plugin_id, generation, and binding_token. A managed
+plugin request also includes managed_conversation_token and the exact task_id;
+ordinary plugin requests omit both. Core requests use consumer_kind: "core".
+The server validates the session through the normal user/workspace boundary and
+revalidates managed descriptor ownership and generation before live delivery.
+It rejects stale legacy session.subscribe payloads with ordered fields.
+Unsubscribe uses the same scope and binding identity.
 
     type ConversationSubscribeSuccess = {
       success: true;

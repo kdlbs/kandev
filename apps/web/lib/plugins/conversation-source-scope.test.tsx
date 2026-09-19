@@ -161,6 +161,28 @@ describe("source conversation scope", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("carries a managed grant and its exact task only on managed subscriptions", async () => {
+    const scope = new SourceConversationScope(
+      PLUGIN_ID,
+      "managed-task",
+      SESSION_ID,
+      new AbortController(),
+      "managed-grant",
+    );
+    try {
+      await scope.ready();
+      expect(transport.request).toHaveBeenCalledWith(
+        CONVERSATION_SUBSCRIBE_ACTION,
+        expect.objectContaining({
+          task_id: "managed-task",
+          managed_conversation_token: "managed-grant",
+        }),
+      );
+    } finally {
+      scope.close();
+    }
+  });
+
   it("delivers live updates from every task to a complete-session query", async () => {
     function CompleteSessionHarness() {
       const state = pluginConversationApi.useSessionMessages({

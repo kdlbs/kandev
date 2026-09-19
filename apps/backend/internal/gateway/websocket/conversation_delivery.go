@@ -31,18 +31,20 @@ type conversationSubscription struct {
 	Authors      []string
 	Sort         string
 	Epoch        string
+	Managed      *plugins.ManagedConversationIdentity
 }
 
 type conversationSubscribeRequest struct {
-	SessionID    string   `json:"session_id"`
-	ScopeID      string   `json:"scope_id"`
-	ConsumerKind string   `json:"consumer_kind"`
-	PluginID     string   `json:"plugin_id,omitempty"`
-	Generation   int64    `json:"generation,omitempty"`
-	BindingToken string   `json:"binding_token,omitempty"`
-	TaskID       *string  `json:"task_id,omitempty"`
-	Authors      []string `json:"authors,omitempty"`
-	Sort         string   `json:"sort,omitempty"`
+	SessionID                string   `json:"session_id"`
+	ScopeID                  string   `json:"scope_id"`
+	ConsumerKind             string   `json:"consumer_kind"`
+	PluginID                 string   `json:"plugin_id,omitempty"`
+	Generation               int64    `json:"generation,omitempty"`
+	BindingToken             string   `json:"binding_token,omitempty"`
+	ManagedConversationToken string   `json:"managed_conversation_token,omitempty"`
+	TaskID                   *string  `json:"task_id,omitempty"`
+	Authors                  []string `json:"authors,omitempty"`
+	Sort                     string   `json:"sort,omitempty"`
 }
 
 type conversationChangedPayload struct {
@@ -87,7 +89,8 @@ func (c *Client) handleConversationSubscribe(msg *ws.Message) {
 	service := c.hub.pluginConversationService
 	c.hub.mu.RUnlock()
 	userID := c.ownUserTopic()
-	if !c.authorizeConversationIdentity(msg, req, service, userID) {
+	managedIdentity, authorized := c.authorizeConversationIdentity(msg, req, service, userID)
+	if !authorized {
 		return
 	}
 	revision, ok := c.readConversationSubscription(msg, req)
@@ -114,6 +117,7 @@ func (c *Client) handleConversationSubscribe(msg *ws.Message) {
 		PluginID: req.PluginID, Generation: req.Generation, UserID: userID,
 		TaskID: cloneOptionalString(req.TaskID), Authors: append([]string(nil), req.Authors...),
 		Sort: sortOrder, Epoch: epoch,
+		Managed: managedIdentity,
 	}
 	c.mu.Lock()
 	c.conversationSubscriptions[req.ScopeID] = subscription
@@ -125,17 +129,20 @@ func (c *Client) handleConversationSubscribe(msg *ws.Message) {
 	c.sendMessage(response)
 }
 
-func (c *Client) authorizeConversationIdentity(msg *ws.Message, req conversationSubscribeRequest, service *plugins.Service, userID string) bool {
+func (c *Client) authorizeConversationIdentity(msg *ws.Message, req conversationSubscribeRequest, service *plugins.Service, userID string) (*plugins.ManagedConversationIdentity, bool) {
 	if req.ConsumerKind == conversationConsumerCore {
-		if req.PluginID != "" || req.Generation != 0 || req.BindingToken != "" {
+		if req.PluginID != "" || req.Generation != 0 || req.BindingToken != "" || req.ManagedConversationToken != "" {
 			c.sendConversationFailure(msg, req.SessionID, "invalid_request", "invalid core conversation identity", false)
-			return false
+			return nil, false
 		}
-		return true
+		return nil, true
 	}
 	if service == nil || req.PluginID == "" || req.Generation == 0 || req.BindingToken == "" {
 		c.sendConversationFailure(msg, req.SessionID, "invalid_request", "invalid plugin conversation identity", false)
-		return false
+		return nil, false
+	}
+	if req.ManagedConversationToken != "" {
+		return c.authorizeManagedConversationIdentity(msg, req, service, userID)
 	}
 	if err := service.AuthorizeConversationConsumer(req.PluginID, userID, req.Generation, req.BindingToken); err != nil {
 		code, retryable := "invalid_binding", false
@@ -143,9 +150,29 @@ func (c *Client) authorizeConversationIdentity(msg *ws.Message, req conversation
 			code, retryable = "generation_superseded", true
 		}
 		c.sendConversationFailure(msg, req.SessionID, code, "plugin conversation binding rejected", retryable)
-		return false
+		return nil, false
 	}
-	return true
+	return nil, true
+}
+
+func (c *Client) authorizeManagedConversationIdentity(msg *ws.Message, req conversationSubscribeRequest, service *plugins.Service, userID string) (*plugins.ManagedConversationIdentity, bool) {
+	if req.TaskID == nil || *req.TaskID == "" {
+		c.sendConversationFailure(msg, req.SessionID, "invalid_request", "managed conversation task_id is required", false)
+		return nil, false
+	}
+	identity, err := service.AuthorizeManagedConversationConsumer(
+		c.dispatchContext(), req.PluginID, userID, req.Generation, req.BindingToken,
+		req.ManagedConversationToken, *req.TaskID, req.SessionID,
+	)
+	if err != nil {
+		code, retryable := "invalid_binding", false
+		if errors.Is(err, plugins.ErrConversationGenerationSuperseded) {
+			code, retryable = "generation_superseded", true
+		}
+		c.sendConversationFailure(msg, req.SessionID, code, "managed conversation binding rejected", retryable)
+		return nil, false
+	}
+	return &identity, true
 }
 
 func (c *Client) readConversationSubscription(msg *ws.Message, req conversationSubscribeRequest) (models.ConversationRevision, bool) {

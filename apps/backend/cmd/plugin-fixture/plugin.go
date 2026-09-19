@@ -38,6 +38,8 @@ const (
 	utilityDefaultAction        = "utility-default"
 	utilityPreferenceAction     = "utility-preference"
 	utilityProfilePrompt        = "/e2e:utility-profile"
+	managedChatEnsureAction     = "managed-chat.ensure"
+	managedChatConversationKey  = "fixture-managed-chat"
 	repositoryInspectActionKey  = "repositories.inspect"
 	repositoryBranchesActionKey = "repositories.branches"
 	searchPurpose               = "search"
@@ -188,6 +190,8 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		return p.invokeUtilityAgent(ctx, false)
 	case utilityPreferenceAction:
 		return p.invokeUtilityAgent(ctx, true)
+	case managedChatEnsureAction:
+		return p.ensureManagedConversation(ctx, req.Context.WorkspaceID)
 	case "link-pull-request":
 		response["linked"] = true
 		response[fixtureTaskIDKey] = req.Context.TaskID
@@ -204,6 +208,32 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 	body, err := json.Marshal(response)
 	if err != nil {
 		return nil, fmt.Errorf("plugin-fixture: marshaling action response: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) ensureManagedConversation(ctx context.Context, workspaceID string) (*pluginsdk.PluginActionResponse, error) {
+	host := p.Host()
+	manager, ok := pluginsdk.AgentConversations(host)
+	if !ok {
+		return nil, fmt.Errorf("plugin-fixture: agent conversations unavailable")
+	}
+	descriptor, statusStr, err := manager.Ensure(ctx, pluginsdk.AgentConversationSpec{
+		WorkspaceID:     workspaceID,
+		ConversationKey: managedChatConversationKey,
+		BasePrompt:      "You are the Kandev E2E managed chat fixture.",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: ensure managed conversation: %w", err)
+	}
+	body, err := json.Marshal(map[string]string{
+		"workspaceId":     descriptor.WorkspaceID,
+		"conversationId":  descriptor.SessionID,
+		"resourceVersion": descriptor.SessionID,
+		"status":          statusStr,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshaling managed conversation: %w", err)
 	}
 	return &pluginsdk.PluginActionResponse{Body: body}, nil
 }

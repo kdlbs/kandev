@@ -10,6 +10,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const activationReasonSessionCapacity = "session_capacity"
+
 // EnsureSessionResponse describes the outcome of EnsureSession.
 type EnsureSessionResponse struct {
 	Success               bool   `json:"success"`
@@ -211,7 +213,7 @@ func (s *Service) queuedEnsureResponseForDeferral(
 
 	response := s.existingResponse(ctx, taskID, session, "existing_queued")
 	response.ActivationDisposition = activationDispositionQueued
-	response.ActivationReason = "session_capacity"
+	response.ActivationReason = activationReasonSessionCapacity
 	return response
 }
 
@@ -257,7 +259,7 @@ func queuedEnsureCapacityResponse(taskID, agentProfileID string) *EnsureSessionR
 		Source:                "queued",
 		NewlyCreated:          false,
 		ActivationDisposition: activationDispositionQueued,
-		ActivationReason:      "session_capacity",
+		ActivationReason:      activationReasonSessionCapacity,
 	}
 }
 

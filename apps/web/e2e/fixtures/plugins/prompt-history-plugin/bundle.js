@@ -202,6 +202,91 @@
         );
       }
 
+      function ManagedChatPage() {
+        var descriptorState = React.useState(null);
+        var descriptor = descriptorState[0];
+        var setDescriptor = descriptorState[1];
+        var statusState = React.useState("idle");
+        var publicStatus = statusState[0];
+        var setPublicStatus = statusState[1];
+
+        function ensureManagedChat() {
+          var workspaceId = host.store.getState().workspaces.activeId;
+          setPublicStatus("loading");
+          host.api
+            .invokeAction("managed-chat.ensure", { workspaceId: workspaceId || undefined })
+            .then(function (result) {
+              if (!result.workspaceId || !result.conversationId) {
+                throw new Error("Managed conversation is not configured");
+              }
+              setDescriptor({
+                workspaceId: result.workspaceId,
+                conversationId: result.conversationId,
+                resourceVersion: result.resourceVersion,
+              });
+            })
+            .catch(function () {
+              setPublicStatus("unavailable");
+            });
+        }
+
+        function showMissingConversation() {
+          var workspaceId = host.store.getState().workspaces.activeId;
+          setPublicStatus("loading");
+          setDescriptor({
+            workspaceId: workspaceId,
+            conversationId: "missing-managed-conversation",
+            resourceVersion: "missing-managed-conversation",
+          });
+        }
+
+        return jsx(
+          "div",
+          {
+            "data-testid": "managed-chat-page",
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              gap: "12px",
+              height: "calc(100dvh - 10rem)",
+              minHeight: "360px",
+              padding: "12px",
+            },
+          },
+          jsx(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" } },
+            jsx(
+              ui.Button,
+              { type: "button", "data-testid": "managed-chat-ensure", onClick: ensureManagedChat },
+              "Ensure managed conversation",
+            ),
+            jsx(
+              ui.Button,
+              {
+                type: "button",
+                "data-testid": "managed-chat-show-missing",
+                onClick: showMissingConversation,
+              },
+              "Show missing conversation",
+            ),
+            jsx("span", { "data-testid": "managed-chat-public-status" }, publicStatus),
+          ),
+          descriptor
+            ? jsx(
+                "div",
+                { style: { flex: "1 1 auto", minHeight: 0 } },
+                jsx(ui.WorkspaceAgentChat, {
+                  workspaceId: descriptor.workspaceId,
+                  conversationId: descriptor.conversationId,
+                  resourceVersion: descriptor.resourceVersion,
+                  onStatus: setPublicStatus,
+                }),
+              )
+            : null,
+        );
+      }
+
       function FixtureReviewPanel(props) {
         return jsx(
           "section",
@@ -773,6 +858,9 @@
         section: FIXTURE_SIDEBAR_SECTION,
       });
       registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
+      registry.registerRoute("/plugins/e2e-managed-chat", ManagedChatPage, {
+        topbar: { title: "Managed conversation chat" },
+      });
       registry.registerComponent("task-sidebar", SidebarSlot);
       registry.registerComponent("main-top-bar", MainTopBarSlot);
       registry.registerComponent("app-status-bar-left", StatusSlot);

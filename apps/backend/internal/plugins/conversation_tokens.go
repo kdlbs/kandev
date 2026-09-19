@@ -20,6 +20,7 @@ const (
 	tokenKindCursor      = "cursor"
 	tokenKindSnapshot    = "snapshot"
 	tokenKindResume      = "resume"
+	tokenKindManaged     = "managed_conversation"
 )
 
 // conversationGeneration remains exactly representable by JavaScript while
@@ -36,6 +37,7 @@ type conversationTokenClaims struct {
 	Generation  int64    `json:"generation"`
 	ExpiresAt   int64    `json:"expires_at"`
 	SessionID   string   `json:"session_id,omitempty"`
+	WorkspaceID string   `json:"workspace_id,omitempty"`
 	TaskID      *string  `json:"task_id,omitempty"`
 	Sort        string   `json:"sort,omitempty"`
 	Authors     []string `json:"authors,omitempty"`
@@ -48,6 +50,12 @@ type conversationTokenClaims struct {
 	Epoch       string   `json:"epoch,omitempty"`
 	PageSize    int      `json:"page_size,omitempty"`
 	Nonce       string   `json:"nonce"`
+}
+
+func (m *conversationTokenManager) mintManagedConversation(pluginID, userID string, generation int64, workspaceID, taskID, sessionID string) (string, error) {
+	return m.seal(conversationTokenClaims{Version: 1, Kind: tokenKindManaged, PluginID: pluginID, UserID: userID,
+		Generation: generation, ExpiresAt: m.now().UTC().Add(conversationTokenTTL).Unix(), WorkspaceID: workspaceID,
+		TaskID: &taskID, SessionID: sessionID})
 }
 
 type conversationTokenManager struct {

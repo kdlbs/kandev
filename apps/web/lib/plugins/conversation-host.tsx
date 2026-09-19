@@ -349,6 +349,9 @@ async function fetchMessagePage({
     "X-Kandev-Plugin-Binding": binding.bindingToken,
   };
   if (binding.snapshotToken) headers["X-Kandev-Snapshot-Token"] = binding.snapshotToken;
+  if (scope.managedConversationToken) {
+    headers["X-Kandev-Managed-Conversation"] = scope.managedConversationToken;
+  }
   const response = await fetch(pluginConversationUrl(scope.pluginId, path), {
     credentials: "include",
     cache: "no-store",
@@ -385,6 +388,9 @@ async function fetchTurnPage({
     "X-Kandev-Plugin-Binding": binding.bindingToken,
   };
   if (binding.snapshotToken) headers["X-Kandev-Snapshot-Token"] = binding.snapshotToken;
+  if (scope.managedConversationToken) {
+    headers["X-Kandev-Managed-Conversation"] = scope.managedConversationToken;
+  }
   const response = await fetch(pluginConversationUrl(scope.pluginId, path), {
     credentials: "include",
     cache: "no-store",

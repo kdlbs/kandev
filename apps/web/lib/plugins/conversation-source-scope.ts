@@ -170,6 +170,7 @@ export class SourceConversationScope implements ConversationScope {
     readonly taskId: string,
     readonly sessionId: string | null,
     private readonly controller: AbortController,
+    readonly managedConversationToken?: string,
   ) {
     this.signal = controller.signal;
   }
@@ -318,6 +319,12 @@ export class SourceConversationScope implements ConversationScope {
           consumer_kind: "plugin",
           plugin_id: this.pluginId,
           generation: current.generation,
+          ...(this.managedConversationToken
+            ? {
+                task_id: this.taskId,
+                managed_conversation_token: this.managedConversationToken,
+              }
+            : {}),
         }),
       )
       .catch(() => undefined);
@@ -393,6 +400,12 @@ export class SourceConversationScope implements ConversationScope {
         plugin_id: this.pluginId,
         generation: binding.generation,
         binding_token: binding.bindingToken,
+        ...(this.managedConversationToken
+          ? {
+              task_id: this.taskId,
+              managed_conversation_token: this.managedConversationToken,
+            }
+          : {}),
       },
     );
     if (!response.success) throw sourceError(response);
