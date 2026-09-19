@@ -80,7 +80,7 @@ export async function expectSendNowWorkflowRunning(
   expect(runningTask.workflow_step_id).toBe(working.id);
   await expect(session.cancelAgentButton()).toBeVisible();
 
-  if (mobile) await page.getByTestId("mobile-session-menu").tap();
+  if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
   const surface = mobile
     ? page.getByRole("dialog", { name: "Tasks", exact: true })
     : session.sidebar;

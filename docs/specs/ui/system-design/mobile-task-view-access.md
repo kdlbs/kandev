@@ -21,3 +21,19 @@ Only the navigation entry is gated by phone width. A controller already requeste
 ## Verification
 
 A phone E2E starts at /github, opens app navigation, selects Task views, chooses a saved sidebar view, opens a matching task, and returns with Back. Cover dismissal and a workspace without tasks. Existing task-workbench switching tests protect its navigation policy.
+
+## Navigation entry points
+
+The [unified phone navigation package](../../../plans/unified-mobile-navigation/plan.md)
+changes the hamburger to app navigation and the task-title button to the existing
+task picker. Its [design](../system-design/unified-mobile-navigation.md)
+owns that entry-point change; existing task actions, saved-view controller
+lifetime, history, and desktop/tablet guarantees here remain compatibility
+requirements. Historical hamburger descriptions above describe the preceding composition;
+the unified navigation design defines the current entry points.
+
+The September 2026 revision embeds the collapsible Tasks sidebar directly in
+the shared phone menu, replacing the Task views action and dedicated pinned
+shortcuts. Kanban/Threads/List title dropdowns open display options; Threads
+saved-view editing remains inside that surface. See REQ-UI-MOBILE-MENU-004/005
+in the unified navigation requirements for the current composition.

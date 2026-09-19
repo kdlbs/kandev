@@ -12,11 +12,16 @@ const mocks = vi.hoisted(() => ({
   setTheme: vi.fn(),
 }));
 
+let pathname = "/settings";
+let inOffice = false;
+
 let resolvedTheme: "light" | "dark" = "light";
 const THEME_TOGGLE_TEST_ID = "mobile-theme-toggle-button";
+const NAV_TRIGGER = "app-nav-trigger";
 const ARIA_LABEL = "aria-label";
 
 const state = {
+  ...defaultState,
   features: { canvases: false },
   workspaces: {
     activeId: "ws-1" as string | null,
@@ -26,6 +31,8 @@ const state = {
 };
 
 beforeEach(() => {
+  pathname = "/settings";
+  inOffice = false;
   state.userSettings = { ...defaultState.userSettings };
   state.workspaces.items[0].office_workflow_id = null;
 });
@@ -44,15 +51,22 @@ let workspaceActionsRegistrations: Array<{
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
-  usePathname: () => "/settings",
+  usePathname: () => pathname,
 }));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
 }));
 
+vi.mock("@/hooks/use-select-workspace", () => ({ useSelectWorkspace: () => vi.fn() }));
+vi.mock("@/hooks/use-quick-chat-launcher", () => ({ useQuickChatLauncher: () => vi.fn() }));
+vi.mock("@/hooks/use-quick-terminal-launcher", () => ({ useQuickTerminalLauncher: () => vi.fn() }));
+vi.mock("@/components/quick-chat/use-quick-chat-activity", () => ({
+  useQuickChatActivity: () => ({ activity: null, label: "Quick Chat" }),
+}));
+
 vi.mock("@/hooks/use-in-office", () => ({
-  useInOffice: () => false,
+  useInOffice: () => inOffice,
 }));
 
 type NavRegistration = {
@@ -141,7 +155,34 @@ function SectionsHost({
   );
 }
 
+function verifyMenuOrder() {
+  render(<AppNavSheet pageNav={<span data-testid="page-nav" />} />);
+  fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+  const precedes = (first: Element, second: Element) =>
+    Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(
+    precedes(
+      screen.getByRole("link", { name: "Home" }),
+      screen.getByTestId("mobile-quick-chat-button"),
+    ),
+  ).toBe(true);
+  expect(
+    precedes(screen.getByTestId("mobile-quick-terminal-button"), screen.getByTestId("page-nav")),
+  ).toBe(true);
+  expect(
+    precedes(
+      screen.getByRole("link", { name: "Settings" }),
+      screen.getByRole("link", { name: "Stats" }),
+    ),
+  ).toBe(true);
+}
+
 describe("AppNavSheet", () => {
+  // @covers AC-UI-MOBILE-MENU-007.1 AC-UI-MOBILE-MENU-007.2
+  it("puts quick actions before local navigation and Settings before Stats", () => {
+    verifyMenuOrder();
+  });
+
   it("offers task views for Kanban, not Office workspaces", () => {
     const host = render(<SectionsHost />);
     expect(screen.getByRole("button", { name: "Task views" })).not.toBeNull();
@@ -161,20 +202,56 @@ describe("AppNavSheet", () => {
   it("opens from the trigger and offers the manifest destinations plus pageNav", () => {
     render(<AppNavSheet pageNav={<span data-testid="page-nav" />} />);
 
-    fireEvent.click(screen.getByTestId("app-nav-trigger"));
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
 
     const sheet = screen.getByTestId("app-nav-sheet");
     expect(sheet).not.toBeNull();
     expect(screen.getByTestId("page-nav")).not.toBeNull();
-    for (const label of ["Home", "Tasks", "Stats", "Settings"]) {
+    for (const label of ["Home", "Stats", "Settings"]) {
       expect(screen.getByRole("link", { name: label })).not.toBeNull();
     }
-    // pageNav renders above the global sections.
-    const nav = sheet.querySelector("nav");
-    const pageNavIndex = [...(nav?.children ?? [])].findIndex((el) =>
-      el.matches('[data-testid="page-nav"]'),
+    // Global destinations have a stable position before local navigation.
+    expect(
+      screen
+        .getByTestId("app-nav-primary")
+        .compareDocumentPosition(screen.getByTestId("page-nav")) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  // @covers AC-UI-MOBILE-MENU-001.1, AC-UI-MOBILE-MENU-001.5
+  it("opens phone navigation in a bottom drawer", () => {
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+    expect(screen.getByTestId("app-nav-sheet").getAttribute("data-vaul-drawer-direction")).toBe(
+      "bottom",
     );
-    expect(pageNavIndex).toBe(0);
+  });
+
+  // @covers AC-UI-MOBILE-MENU-001.2
+  it("identifies the active destination", () => {
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+    expect(screen.getByRole("link", { name: "Settings" }).getAttribute("aria-current")).toBe(
+      "page",
+    );
+    expect(screen.queryByRole("link", { name: "Tasks" })).toBeNull();
+  });
+
+  it.each(["/", "/tasks", "/threads"])("marks Home current for %s", (path) => {
+    pathname = path;
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+    expect(screen.getByRole("link", { name: "Home" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("does not offer Kanban destinations from an Office workspace on a shared page", () => {
+    inOffice = true;
+    state.workspaces.items[0].office_workflow_id = "office-workflow";
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+    expect(screen.queryByRole("link", { name: "Tasks" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Threads" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Task views" })).toBeNull();
   });
 
   // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.4
@@ -185,7 +262,7 @@ describe("AppNavSheet", () => {
     state.userSettings.startupPage = startupPage;
     render(<AppNavSheet />);
 
-    fireEvent.click(screen.getByTestId("app-nav-trigger"));
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
 
     expect(screen.getByRole("link", { name: "Home" }).getAttribute("href")).toBe(href);
   });
@@ -204,7 +281,7 @@ describe("AppNavSheet", () => {
     ];
 
     render(<AppNavSheet />);
-    fireEvent.click(screen.getByTestId("app-nav-trigger"));
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
 
     expect(screen.getByTestId("mobile-workspace-action")).not.toBeNull();
     expect(captured).toEqual({ workspaceId: "ws-1", presentation: "mobile" });

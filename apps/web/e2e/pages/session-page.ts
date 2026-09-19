@@ -49,7 +49,7 @@ export class SessionPage {
     return this.page.getByTestId("port-forwarding-menu-item");
   }
   get mobileSessionMenu() {
-    return this.page.getByTestId("mobile-session-menu");
+    return this.page.getByTestId("mobile-task-picker-trigger");
   }
   get mobilePortForwardingToggle() {
     return this.page.getByTestId("mobile-port-forwarding-toggle");

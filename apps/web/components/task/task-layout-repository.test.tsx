@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import { StateProvider } from "@/components/state-provider";
 import { TaskLayout } from "./task-layout";
 
 afterEach(cleanup);
@@ -9,9 +11,22 @@ afterEach(cleanup);
 // repository label reaches the phone layout. `session-mobile-top-bar-repository`
 // covers what the header does with it.
 vi.mock("./mobile", () => ({
-  SessionMobileLayout: ({ repositoryLabel }: { repositoryLabel?: string | null }) => (
-    <div data-testid="mobile-layout" data-repository-label={repositoryLabel ?? ""} />
-  ),
+  SessionMobileLayout: function MobileLayout({
+    repositoryLabel,
+  }: {
+    repositoryLabel?: string | null;
+  }) {
+    const [draft, setDraft] = useState("");
+    return (
+      <div data-testid="mobile-layout" data-repository-label={repositoryLabel ?? ""}>
+        <input
+          aria-label="Layout draft"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </div>
+    );
+  },
   SessionTabletLayout: () => <div data-testid="tablet-layout" />,
 }));
 
@@ -28,8 +43,20 @@ vi.mock("./task-launch-error-context", () => ({
 }));
 
 describe("TaskLayout repository label", () => {
+  it("keeps layout state while task workspace metadata refreshes", () => {
+    const view = render(<TaskLayout workspaceId="ws-1" workflowId="wf-1" />, {
+      wrapper: StateProvider,
+    });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep this draft" } });
+    view.rerender(<TaskLayout workspaceId={null} workflowId={null} />);
+    view.rerender(<TaskLayout workspaceId="ws-1" workflowId="wf-1" />);
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("Keep this draft");
+  });
+
   it("hands the repository label to the phone layout", () => {
-    render(<TaskLayout workspaceId="ws-1" workflowId="wf-1" repositoryLabel="kdlbs/kandev" />);
+    render(<TaskLayout workspaceId="ws-1" workflowId="wf-1" repositoryLabel="kdlbs/kandev" />, {
+      wrapper: StateProvider,
+    });
 
     expect(screen.getByTestId("mobile-layout").getAttribute("data-repository-label")).toBe(
       "kdlbs/kandev",
@@ -37,7 +64,7 @@ describe("TaskLayout repository label", () => {
   });
 
   it("passes nothing along for a task with no repository", () => {
-    render(<TaskLayout workspaceId="ws-1" workflowId="wf-1" />);
+    render(<TaskLayout workspaceId="ws-1" workflowId="wf-1" />, { wrapper: StateProvider });
 
     expect(screen.getByTestId("mobile-layout").getAttribute("data-repository-label")).toBe("");
   });

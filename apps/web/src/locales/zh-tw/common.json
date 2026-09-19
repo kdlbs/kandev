@@ -540,5 +540,8 @@
   "sidebarWeeks_other": "{{count}}週",
   "sidebarYears_one": "{{count}}年",
   "sidebarYears_other": "{{count}}年",
-  "sidebarYearsMax": "99+年"
+  "sidebarYearsMax": "99+年",
+  "integrationSettings": "整合設定",
+  "pageNavigation": "本頁導覽",
+  "viewOptions": "檢視選項"
 }

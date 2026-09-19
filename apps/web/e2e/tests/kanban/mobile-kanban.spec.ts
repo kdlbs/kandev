@@ -82,7 +82,7 @@ test.describe("Mobile kanban view", () => {
     await mobile.goto();
 
     await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("app-nav-trigger").click();
     await testPage.getByTestId("mobile-home-status-button").click();
     await expect(testPage.getByTestId("app-status-drawer")).toBeVisible();
     await expect(testPage.getByTestId("app-status-metrics")).toBeVisible();
@@ -431,7 +431,7 @@ test.describe("Mobile kanban view", () => {
     await mobile.goto();
 
     await expect(mobile.mobileKanbanLayout()).toBeVisible();
-    await mobile.mobileMenuButton.click();
+    await mobile.viewOptionsButton.click();
     const menuCard = testPage.getByTestId("mobile-home-menu-card");
     await expect(menuCard).toBeVisible();
     await expect(menuCard.getByText("Pipeline", { exact: true })).toHaveCount(0);
@@ -467,7 +467,7 @@ test.describe("Mobile kanban view", () => {
       kanban_view_mode: "graph2",
     });
     await testPage.goto("/tasks");
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("mobile-topbar-page-context").click();
 
     const menuCard = testPage.getByTestId("mobile-home-menu-card");
     await menuCard.getByText("Kanban", { exact: true }).click();
@@ -505,7 +505,7 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.searchInput()).toBeFocused();
 
     // Toggling search in the menu again collapses the search bar.
-    await mobile.mobileMenuButton.click();
+    await mobile.viewOptionsButton.click();
     await mobile.mobileSearchToggle.click();
     await expect(mobile.mobileSearchBar).not.toBeVisible();
   });
@@ -528,7 +528,7 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.taskCardByTitle("Other Beta")).not.toBeVisible({ timeout: 5000 });
 
     // Collapsing clears the query so the full list is shown again
-    await mobile.mobileMenuButton.click();
+    await mobile.viewOptionsButton.click();
     await mobile.mobileSearchToggle.click();
     await expect(mobile.mobileSearchBar).not.toBeVisible();
     await expect(mobile.taskCardByTitle("Clearable Alpha")).toBeVisible({ timeout: 5000 });
@@ -542,9 +542,12 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.mobileMenuButton).toBeVisible();
     await mobile.mobileMenuButton.click();
 
-    // Menu sheet should open with display options
+    // App navigation has one meaning; listing options have a separate entry.
     await expect(testPage.getByRole("heading", { name: "Menu" })).toBeVisible();
-    await expect(testPage.getByText("Display Options")).toBeVisible();
+    await expect(
+      testPage.getByTestId("app-nav-sheet").getByRole("link", { name: "Home", exact: true }),
+    ).toBeVisible();
+    await expect(testPage.getByText("Display Options")).toHaveCount(0);
   });
 
   test("switches workspaces from the mobile menu", async ({ testPage, apiClient }) => {
@@ -575,7 +578,7 @@ test.describe("Mobile kanban view", () => {
     await mobile.goto();
 
     await mobile.mobileMenuButton.click();
-    await testPage.getByRole("link", { name: "Settings" }).click();
+    await testPage.getByRole("link", { name: "Settings", exact: true }).click();
 
     await expect(testPage).toHaveURL(/\/settings(?:\/general)?$/);
     await expect(testPage.getByRole("link", { name: /Appearance/ })).toBeVisible();
@@ -590,8 +593,7 @@ test.describe("Mobile kanban view", () => {
     const searchInput = dialog.getByPlaceholder("Search tasks...");
 
     await expect(searchInput).toHaveCount(0);
-    await expect(mobile.mobileSearchToggle).toBeVisible();
-    await expect(mobile.mobileSearchToggle).not.toBeFocused();
+    await expect(mobile.mobileSearchToggle).toHaveCount(0);
     await expect(mobile.mobileSearchBar).not.toBeVisible();
   });
 

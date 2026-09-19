@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import {
@@ -11,16 +11,21 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconPlugConnected } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconPlugConnected } from "@tabler/icons-react";
 import { DestinationRows } from "@/components/navigation/destination-rows";
 import { useAppDestinations } from "@/hooks/use-app-destinations";
+import { useAppStore } from "@/components/state-provider";
+import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import { useTranslation } from "react-i18next";
 
 type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
+  showSetup?: boolean;
+  collapsible?: boolean;
 };
 
 const HOVER_CLOSE_DELAY_MS = 180;
+const INTEGRATIONS_LABEL = "common:integrations";
 
 /**
  * Configured integration destinations, in manifest order. Ids, labels, hrefs and
@@ -73,7 +78,7 @@ export function IntegrationsMenu() {
           variant="ghost"
           size="icon-lg"
           className="cursor-pointer text-muted-foreground hover:text-foreground"
-          aria-label={t("common:integrations")}
+          aria-label={t(INTEGRATIONS_LABEL)}
           onPointerEnter={openOnHover}
           onPointerLeave={closeAfterHover}
         >
@@ -86,7 +91,7 @@ export function IntegrationsMenu() {
         onPointerEnter={openOnHover}
         onPointerLeave={closeAfterHover}
       >
-        <DropdownMenuLabel>{t("common:integrations")}</DropdownMenuLabel>
+        <DropdownMenuLabel>{t(INTEGRATIONS_LABEL)}</DropdownMenuLabel>
         {links.map((link) => {
           const Icon = link.icon;
           return (
@@ -136,20 +141,68 @@ export function IntegrationsTopbarLinks() {
  * `IntegrationsSection`. Both come from the navigation manifest, so the two
  * surfaces cannot drift apart.
  */
-export function MobileIntegrationsSection({ onNavigate }: MobileIntegrationsSectionProps) {
+export function MobileIntegrationsSection({
+  onNavigate,
+  showSetup = false,
+  collapsible = false,
+}: MobileIntegrationsSectionProps) {
   const { t } = useTranslation();
   const destinations = useAppDestinations("mobileMenu", "integrations");
+  const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
 
-  if (destinations.length === 0) return null;
+  if (destinations.length === 0 && !showSetup) return null;
 
   return (
-    <div className="space-y-3">
-      <div className="text-sm font-medium">{t("common:integrations")}</div>
-      <DestinationRows
-        destinations={destinations}
-        onNavigate={onNavigate}
-        pluginTestIdPrefix="plugin-nav-item-"
-      />
+    <div className={showSetup ? "space-y-3 border-t border-border pt-4" : "space-y-3"}>
+      {collapsible ? (
+        <Button
+          variant="ghost"
+          className="h-11 w-full justify-start gap-2 px-0 text-sm font-medium hover:bg-transparent aria-expanded:bg-transparent"
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {t(INTEGRATIONS_LABEL)}
+          {expanded ? (
+            <IconChevronDown className="size-3.5 text-muted-foreground" />
+          ) : (
+            <IconChevronRight className="size-3.5 text-muted-foreground" />
+          )}
+        </Button>
+      ) : (
+        <div className="text-sm font-medium">{t(INTEGRATIONS_LABEL)}</div>
+      )}
+      {(!collapsible || expanded) && (
+        <div id={bodyId} className="space-y-3">
+          <DestinationRows
+            destinations={destinations}
+            onNavigate={onNavigate}
+            pluginTestIdPrefix="plugin-nav-item-"
+          />
+          {showSetup && (
+            <Button
+              asChild
+              variant="outline"
+              className="h-11 w-full justify-start gap-3 px-3 text-sm"
+            >
+              <Link
+                href={
+                  workspaceId
+                    ? workspaceSettingsHref(workspaceId, "integrations")
+                    : "/settings/workspaces"
+                }
+                onClick={onNavigate}
+                data-testid="mobile-integration-settings"
+              >
+                <IconPlugConnected className="size-4" />
+                {t("common:integrationSettings")}
+              </Link>
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

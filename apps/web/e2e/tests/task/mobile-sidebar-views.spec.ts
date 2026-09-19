@@ -44,7 +44,7 @@ async function seedAndOpenSheet(
   await session.waitForLoad();
 
   // Open the task-switcher sheet from the mobile session top bar.
-  await testPage.getByTestId("mobile-session-menu").click();
+  await testPage.getByTestId("mobile-task-picker-trigger").click();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   await expect(sheet.getByTestId("sidebar-filter-bar")).toBeVisible({ timeout: 10_000 });
   return sheet;
@@ -231,7 +231,7 @@ test.describe("Mobile sidebar — view system", () => {
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       reloadedSheet
@@ -394,7 +394,9 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(testPage).toHaveURL((url) => url.pathname === `/t/${archivedTask.task_id}`);
     // The mobile detail header uses the session top bar; desktop renders the
     // unarchive button directly in its task top bar.
-    await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(
       testPage
         .getByTestId("mobile-task-layout")
@@ -520,7 +522,7 @@ test.describe("Mobile sidebar — view system", () => {
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       reloadedSheet.getByTestId("sidebar-view-chip").filter({ hasText: "Mobile last activity" }),
@@ -737,7 +739,7 @@ test.describe("Mobile sidebar — view system", () => {
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       reloadedSheet.getByTestId("sidebar-view-chip").filter({ hasText: "Mobile task rows" }),
@@ -775,7 +777,7 @@ test.describe("Mobile sidebar — view system", () => {
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog");
     const chipRow = sheet.getByTestId("sidebar-view-chip-row");
     await expect(chipRow).toBeVisible();

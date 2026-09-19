@@ -96,8 +96,8 @@ test.describe("mobile GitLab MR badge on the /tasks list rows", () => {
 
     // Mobile has no `display-button`; the display menu lives behind the
     // "Open menu" drawer (see mobile-task-listing-display.spec.ts).
-    await testPage.getByRole("button", { name: "Open menu" }).tap();
-    const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
+    const menu = testPage.getByRole("dialog", { name: "View options" });
     await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
     await menu.getByText("Show task details", { exact: true }).click();
     await testPage.keyboard.press("Escape");

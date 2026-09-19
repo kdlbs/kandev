@@ -302,7 +302,7 @@ test.describe("Mobile GitLab parity", () => {
     await session.waitForLoad();
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveCount(0);
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const taskDrawer = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = taskDrawer.getByTestId("sidebar-task-item").filter({ hasText: title });
     await expect(taskRow).toBeVisible({ timeout: 10_000 });

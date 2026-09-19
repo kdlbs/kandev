@@ -2182,5 +2182,6 @@
   "planCommentMigrationNeedsPlan": "請建立或恢復計劃，以恢復已儲存的評論。",
   "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。",
   "toolPayloadRemovedAt": "工具詳細資料已於 {{date}} 刪除。",
-  "toolPayloadRemoved": "工具詳細資料已刪除。"
+  "toolPayloadRemoved": "工具詳細資料已刪除。",
+  "openTaskSwitcherFor": "開啟任務切換器：{{title}}"
 }

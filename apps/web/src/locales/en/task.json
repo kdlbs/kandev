@@ -2182,5 +2182,6 @@
   "planCommentMigrationNeedsPlan": "Create or restore a plan to recover saved comments.",
   "planCommentMigrationPending": "Saved plan comments are still being restored. Your message is kept.",
   "toolPayloadRemovedAt": "Tool details removed on {{date}}.",
-  "toolPayloadRemoved": "Tool details removed."
+  "toolPayloadRemoved": "Tool details removed.",
+  "openTaskSwitcherFor": "Open task switcher: {{title}}"
 }
