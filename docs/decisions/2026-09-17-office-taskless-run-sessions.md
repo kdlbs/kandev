@@ -38,10 +38,17 @@ provider classification continue through the existing runtime implementation.
 ## Consequences
 
 A separate Office session table and lifecycle adapter are required, including
-pause, cleanup, restart reconciliation and usage attribution. Runtime interfaces
-must express owner identity without importing Office packages. The Office design
-owns the vertical behavior; shared runtime code implements the admission seam.
-Existing task tables, task-session foreign keys and task-only APIs stay strict.
+cleanup and usage attribution. Runtime interfaces must express owner identity
+without importing Office packages. The Office design owns the vertical
+behavior; shared runtime code implements the admission seam. Existing task
+tables, task-session foreign keys and task-only APIs stay strict.
+
+**Amended 2026-09-19.** Pause (operator stop controls) and restart
+reconciliation, both listed above as required, were cut from
+`REQ-OFFICE-TASKLESS-001` on 2026-09-19 after five rounds of spec review and
+deferred rather than delivered. See
+[Deferred: stop controls and restart recovery](../specs/office/requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery)
+for the accepted gap and the brief a follow-up would start from.
 
 A successful taskless turn ends that session. The next fire or retry starts a new
 session and consumes only the existing bounded continuation summary. Persisted
