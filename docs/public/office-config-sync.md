@@ -89,6 +89,12 @@ Office already has two other configuration surfaces: a filesystem-to-database di
 
 Raw-git **Push** is never refused; it remains the only way to write Office configuration back to a repository, using the backend's git credentials, and pushes only whatever you placed in the checkout by hand or by `git`. The read-only filesystem diff view and the read-only bundle export keep working unchanged regardless of whether config sync is active. The settings UI shows every refused control as unavailable, stating that config sync is the active source, instead of letting you hit the 409 the server would otherwise return.
 
+### Definition bundle export
+
+The read-only **Export** page under **Office workspace Settings > Export** obtains a server-owned manifest before offering a download. The manifest contains the exact `.kandev/...` file paths and serialized bytes that the backend will package. You can select individual files or download the complete bundle.
+
+The selected download submits the manifest revision with the selected paths. If the workspace changes after the manifest was loaded, the backend returns `409 Conflict` and the page reloads the manifest instead of producing a mixed-revision archive. The ZIP entries are the selected manifest paths, with no client-side YAML reconstruction.
+
 ## HTTP API
 
 The settings UI uses these backend routes:

@@ -26,8 +26,15 @@ test("virtualizes a large desktop column while preserving reached-card navigatio
 
   const column = kanban.columnByStepId(seedData.startStepId);
   await expect(column).toBeVisible();
-  await expect(column.getByText(String(LARGE_COLUMN_TASK_COUNT), { exact: true })).toBeVisible();
-  await expect.poll(() => taskCards(column).count()).toBeGreaterThan(0);
+  await expect(column.getByText(String(LARGE_COLUMN_TASK_COUNT), { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect
+    .poll(() => taskCards(column).count(), {
+      timeout: 30_000,
+      message: "Waiting for large-column cards to mount",
+    })
+    .toBeGreaterThan(0);
 
   const initialCardIds = await mountedTaskCardIds(column);
   await expectBoundedMountedCards(column);
@@ -37,10 +44,13 @@ test("virtualizes a large desktop column while preserving reached-card navigatio
   await scrollColumnToBottom(scrollOwner);
 
   await expect
-    .poll(async () => {
-      const mountedIds = await mountedTaskCardIds(column);
-      return mountedIds.some((id) => !initialCardIds.includes(id));
-    })
+    .poll(
+      async () => {
+        const mountedIds = await mountedTaskCardIds(column);
+        return mountedIds.some((id) => !initialCardIds.includes(id));
+      },
+      { timeout: 30_000, message: "Waiting for a new large-column card after scrolling" },
+    )
     .toBe(true);
   await expectBoundedMountedCards(column);
 

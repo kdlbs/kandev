@@ -6,7 +6,8 @@
       },
       "settings": {
         "preventAutoStartAgentOnOpen": "開啟任務時不自動啟動代理程式",
-        "preventAutoStartAgentOnOpenHelp": "重新啟動後，或從工作流程最後一步開啟任務時，不會自動啟動代理程式，改為顯示「啟動代理程式」按鈕。"
+        "preventAutoStartAgentOnOpenHelp": "重新啟動後，或從工作流程最後一步開啟任務時，不會自動啟動代理程式，改為顯示「啟動代理程式」按鈕。",
+        "chatAnimationsDescription": "在此裝置上為新文字、新聊天項目和滾動新增動畫。遵循減少動態效果的偏好設定。"
       },
       "common": {
         "nativeFolderPickerUnavailable": "原生資料夾選擇器無法使用。請重新載入 Kandev 後再試。",
@@ -21,7 +22,8 @@
       "task": {
         "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。",
         "proxy": "代理伺服器",
-        "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。"
+        "pathBasedProxyWorksForApis": "路徑型代理伺服器。適用於 API，但可能導致預期由 / 提供服務的 Web 應用程式無法正常運作。",
+        "checkoutOptions.providerUnsupported": "高階檢出選項目前適用於 GitHub 儲存庫。"
       },
       "workspaces": {
         "failedToSaveRepository": "無法儲存此儲存庫"

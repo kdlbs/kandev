@@ -118,6 +118,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		LspStatusLocation:                 req.LspStatusLocation,
 		SavedLayouts:                      req.SavedLayouts,
 		SidebarViews:                      req.SidebarViews,
+		SidebarViewState:                  req.SidebarViewState,
 		SidebarActiveViewID:               req.SidebarActiveViewID,
 		SidebarDraft:                      req.SidebarDraft.ServiceValue(),
 		ThreadViews:                       req.ThreadViews,

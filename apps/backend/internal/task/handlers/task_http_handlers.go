@@ -721,22 +721,23 @@ func (h *TaskHandlers) httpBulkMoveSelectedTasks(c *gin.Context, body httpBulkMo
 }
 
 type httpTaskRepositoryInput struct {
-	RepositoryID   string `json:"repository_id"`
-	BaseBranch     string `json:"base_branch"`
-	CheckoutBranch string `json:"checkout_branch"`
-	BranchPolicyID string `json:"branch_policy_id,omitempty"`
-	PRNumber       int    `json:"pr_number,omitempty"`
-	LocalPath      string `json:"local_path"`
-	Name           string `json:"name"`
-	DefaultBranch  string `json:"default_branch"`
-	GitHubURL      string `json:"github_url"`
-	RemoteURL      string `json:"remote_url"`
-	Provider       string `json:"provider"`
-	ProviderHost   string `json:"provider_host"`
-	ProviderScope  string `json:"provider_scope"`
-	ProviderRepoID string `json:"provider_repo_id"`
-	ProviderOwner  string `json:"provider_owner"`
-	ProviderName   string `json:"provider_name"`
+	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	RepositoryID    string                            `json:"repository_id"`
+	BaseBranch      string                            `json:"base_branch"`
+	CheckoutBranch  string                            `json:"checkout_branch"`
+	BranchPolicyID  string                            `json:"branch_policy_id,omitempty"`
+	PRNumber        int                               `json:"pr_number,omitempty"`
+	LocalPath       string                            `json:"local_path"`
+	Name            string                            `json:"name"`
+	DefaultBranch   string                            `json:"default_branch"`
+	GitHubURL       string                            `json:"github_url"`
+	RemoteURL       string                            `json:"remote_url"`
+	Provider        string                            `json:"provider"`
+	ProviderHost    string                            `json:"provider_host"`
+	ProviderScope   string                            `json:"provider_scope"`
+	ProviderRepoID  string                            `json:"provider_repo_id"`
+	ProviderOwner   string                            `json:"provider_owner"`
+	ProviderName    string                            `json:"provider_name"`
 
 	// Fresh-branch flow (local executor only): when FreshBranch is true the
 	// handler discards uncommitted changes in the local clone and creates
@@ -930,9 +931,12 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			body.Metadata = make(map[string]interface{})
 		}
 		body.Metadata[models.MetaKeyAgentProfileID] = body.AgentProfileID
-		if body.ExecutorProfileID != "" {
-			body.Metadata[models.MetaKeyExecutorProfileID] = body.ExecutorProfileID
+	}
+	if body.ExecutorProfileID != "" {
+		if body.Metadata == nil {
+			body.Metadata = make(map[string]interface{})
 		}
+		body.Metadata[models.MetaKeyExecutorProfileID] = body.ExecutorProfileID
 	}
 
 	title := strings.TrimSpace(body.Title)
@@ -1372,22 +1376,23 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			return nil, false
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
-			BranchPolicyID: r.BranchPolicyID,
-			PRNumber:       r.PRNumber,
-			LocalPath:      r.LocalPath,
-			Name:           r.Name,
-			DefaultBranch:  r.DefaultBranch,
-			GitHubURL:      r.GitHubURL,
-			RemoteURL:      r.RemoteURL,
-			Provider:       r.Provider,
-			ProviderHost:   r.ProviderHost,
-			ProviderScope:  r.ProviderScope,
-			ProviderRepoID: r.ProviderRepoID,
-			ProviderOwner:  r.ProviderOwner,
-			ProviderName:   r.ProviderName,
+			CheckoutOptions: r.CheckoutOptions,
+			RepositoryID:    r.RepositoryID,
+			BaseBranch:      r.BaseBranch,
+			CheckoutBranch:  r.CheckoutBranch,
+			BranchPolicyID:  r.BranchPolicyID,
+			PRNumber:        r.PRNumber,
+			LocalPath:       r.LocalPath,
+			Name:            r.Name,
+			DefaultBranch:   r.DefaultBranch,
+			GitHubURL:       r.GitHubURL,
+			RemoteURL:       r.RemoteURL,
+			Provider:        r.Provider,
+			ProviderHost:    r.ProviderHost,
+			ProviderScope:   r.ProviderScope,
+			ProviderRepoID:  r.ProviderRepoID,
+			ProviderOwner:   r.ProviderOwner,
+			ProviderName:    r.ProviderName,
 		})
 	}
 	return repos, true
@@ -1635,22 +1640,23 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	if body.Repositories != nil {
 		for _, r := range body.Repositories {
 			repos = append(repos, dto.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-				BranchPolicyID: r.BranchPolicyID,
-				PRNumber:       r.PRNumber,
-				LocalPath:      r.LocalPath,
-				Name:           r.Name,
-				DefaultBranch:  r.DefaultBranch,
-				GitHubURL:      r.GitHubURL,
-				RemoteURL:      r.RemoteURL,
-				Provider:       r.Provider,
-				ProviderHost:   r.ProviderHost,
-				ProviderScope:  r.ProviderScope,
-				ProviderRepoID: r.ProviderRepoID,
-				ProviderOwner:  r.ProviderOwner,
-				ProviderName:   r.ProviderName,
+				CheckoutOptions: r.CheckoutOptions,
+				RepositoryID:    r.RepositoryID,
+				BaseBranch:      r.BaseBranch,
+				CheckoutBranch:  r.CheckoutBranch,
+				BranchPolicyID:  r.BranchPolicyID,
+				PRNumber:        r.PRNumber,
+				LocalPath:       r.LocalPath,
+				Name:            r.Name,
+				DefaultBranch:   r.DefaultBranch,
+				GitHubURL:       r.GitHubURL,
+				RemoteURL:       r.RemoteURL,
+				Provider:        r.Provider,
+				ProviderHost:    r.ProviderHost,
+				ProviderScope:   r.ProviderScope,
+				ProviderRepoID:  r.ProviderRepoID,
+				ProviderOwner:   r.ProviderOwner,
+				ProviderName:    r.ProviderName,
 			})
 		}
 	}

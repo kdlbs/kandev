@@ -453,6 +453,7 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const state = useCodeMirrorEditorState({
     path,
+    repo,
     content,
     originalContent,
     isDirty,

@@ -122,16 +122,20 @@ const GROUP_ROOT_LEVEL = "__group_root__";
 /**
  * Computes the rows a drag may nest the active task under, mirroring the
  * context menu's candidate rules (computeNestCandidates) scoped to the
- * active task's workflow: same-workflow roots, excluding the task itself,
- * its current parent, and any subtask (which also excludes its descendants).
+ * active task's workflow. Every mode excludes the task, its current parent,
+ * and descendants; Kanban keeps the root-only depth limit while Office may
+ * target tasks at any depth.
  */
 export function computeNestTargets(
   activeTask: Pick<TaskSwitcherItem, "id" | "workflowId" | "parentTaskId"> | undefined,
   groupTasks: TaskSwitcherItem[],
+  hierarchyTasks: readonly TaskSwitcherItem[] = groupTasks,
 ): Set<string> {
   if (!activeTask) return new Set();
   const sameWorkflow = groupTasks.filter((t) => t.workflowId === activeTask.workflowId);
-  return new Set(computeNestCandidates(sameWorkflow, activeTask.id).map((t) => t.id));
+  return new Set(
+    computeNestCandidates(sameWorkflow, activeTask.id, hierarchyTasks).map((task) => task.id),
+  );
 }
 
 /**
@@ -328,6 +332,47 @@ export function SortableTaskLevel({
   );
 }
 
+function useActiveNestDrag(
+  groupTasks: TaskSwitcherItem[],
+  tasksById: ReadonlyMap<string, TaskSwitcherItem>,
+  getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined,
+) {
+  const [activeDrag, setActiveDrag] = useState<{
+    id: string;
+    hierarchyTasks?: TaskSwitcherItem[];
+  } | null>(null);
+  const activeDragId = activeDrag?.id ?? null;
+  const nestTargetIds = useMemo(
+    () =>
+      computeNestTargets(
+        activeDragId ? tasksById.get(activeDragId) : undefined,
+        groupTasks,
+        activeDrag?.hierarchyTasks ?? groupTasks,
+      ),
+    [activeDrag, activeDragId, tasksById, groupTasks],
+  );
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      setActiveDrag({
+        id: String(event.active.id),
+        hierarchyTasks: getNestHierarchyTasks?.(),
+      });
+    },
+    [getNestHierarchyTasks],
+  );
+  const clearActiveDrag = useCallback(() => setActiveDrag(null), []);
+  return { activeDragId, nestTargetIds, handleDragStart, clearActiveDrag };
+}
+
+type TaskTreeDndGroupProps = {
+  groupTasks: TaskSwitcherItem[];
+  getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined;
+  onReorderGroup?: (groupTaskIds: string[]) => void;
+  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
+  onNestTask?: (activeTaskId: string, parentTaskId: string) => void;
+  children: (nestTargetIds: Set<string>, activeDragId: string | null) => React.ReactNode;
+};
+
 /**
  * One group-spanning DndContext for the sidebar task tree. Replaces the
  * per-level contexts so a drag can target rows outside its own sibling level:
@@ -339,18 +384,12 @@ export function SortableTaskLevel({
  */
 export function TaskTreeDndGroup({
   groupTasks,
+  getNestHierarchyTasks,
   onReorderGroup,
   onReorderSubtasks,
   onNestTask,
   children,
-}: {
-  groupTasks: TaskSwitcherItem[];
-  onReorderGroup?: (groupTaskIds: string[]) => void;
-  onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
-  onNestTask?: (activeTaskId: string, parentTaskId: string) => void;
-  children: (nestTargetIds: Set<string>, activeDragId: string | null) => React.ReactNode;
-}) {
-  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+}: TaskTreeDndGroupProps) {
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: TASK_SWITCHER_DRAG_ACTIVATION_CONSTRAINTS.pointer,
@@ -378,18 +417,14 @@ export function TaskTreeDndGroup({
       childrenByParent: byParent,
     };
   }, [groupTasks]);
-  const nestTargetIds = useMemo(
-    () => computeNestTargets(activeDragId ? tasksById.get(activeDragId) : undefined, groupTasks),
-    [activeDragId, tasksById, groupTasks],
+  const { activeDragId, nestTargetIds, handleDragStart, clearActiveDrag } = useActiveNestDrag(
+    groupTasks,
+    tasksById,
+    getNestHierarchyTasks,
   );
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveDragId(String(event.active.id));
-  }, []);
-  const handleDragCancel = useCallback(() => setActiveDragId(null), []);
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
-      setActiveDragId(null);
+      clearActiveDrag();
       const { active, over } = event;
       if (!over) return;
       const decision = resolveSidebarDrop({
@@ -411,7 +446,14 @@ export function TaskTreeDndGroup({
           break;
       }
     },
-    [groupRootIds, childrenByParent, onReorderGroup, onReorderSubtasks, onNestTask],
+    [
+      clearActiveDrag,
+      groupRootIds,
+      childrenByParent,
+      onReorderGroup,
+      onReorderSubtasks,
+      onNestTask,
+    ],
   );
 
   const collisionDetection = useCallback<CollisionDetection>((args) => {
@@ -432,7 +474,7 @@ export function TaskTreeDndGroup({
       collisionDetection={collisionDetection}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      onDragCancel={handleDragCancel}
+      onDragCancel={clearActiveDrag}
     >
       {children(nestTargetIds, activeDragId)}
     </DndContext>

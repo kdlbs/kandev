@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/gitbootstrap"
+	"github.com/kandev/kandev/internal/gitcheckout"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
@@ -103,11 +104,21 @@ func classifyRemoteDefaultError(output string, runErr error) error {
 // then by WorktreeID if provided (for session resumption).
 // Only creates a new worktree if none exists for the session.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, error) {
+	var scopeErr error
+	ctx, scopeErr = withCheckoutOptions(ctx, req)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	req.CheckoutOptions = scopedCheckout(ctx).options
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
 	if req.ReuseRequired {
-		return m.reuseRequiredWorktree(ctx, req)
+		wt, err := m.reuseRequiredWorktree(ctx, req)
+		if err == nil {
+			err = gitcheckout.Check(wt.Path, req.CheckoutOptions)
+		}
+		return wt, err
 	}
 
 	// Reject invalid explicit slugs up-front. If either slug is non-empty but
@@ -122,6 +133,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 
 	if wt, handled, err := m.tryReuseExisting(ctx, req); handled {
 		if err == nil && wt != nil {
+			if err = gitcheckout.Check(wt.Path, req.CheckoutOptions); err != nil {
+				return nil, err
+			}
 			err = m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination)
 		}
 		return wt, err
@@ -852,6 +866,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	}
 
 	wt := m.buildWorktreeRecord(worktreeID, req, worktreePath, branchName)
+	wt.BranchOwner = createdBranchOwner(checkoutMode.CheckoutBranch, branchName)
 	if fetchResult != nil {
 		wt.FetchWarning = fetchResult.Warning
 		wt.FetchWarningDetail = fetchResult.WarningDetail
@@ -907,6 +922,7 @@ func (m *Manager) createContributionInTaskDir(
 		return nil, err
 	}
 	wt := m.buildWorktreeRecord(worktreeID, req, worktreePath, branchName)
+	wt.BranchOwner = BranchOwnerExternal
 	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
 		return nil, err
 	}
@@ -1385,14 +1401,14 @@ func (m *Manager) gitAddWorktreeExistingAtRef(ctx context.Context, repoPath, bra
 
 func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, branchName, worktreePath, startPoint string) (string, error) {
 	worktreeID := uuid.New().String()
-	usesGitCrypt := m.usesGitCrypt(repoPath)
+	usesGitCrypt := m.usesGitCryptContext(ctx, repoPath)
 
 	// Build worktree add command
 	args := []string{"worktree", "add"}
 	if startPoint != "" {
 		args = append(args, "-B", branchName)
 	}
-	if usesGitCrypt {
+	if usesGitCrypt || hasSparseCheckout(ctx) {
 		args = append(args, "--no-checkout")
 	}
 	args = append(args, worktreePath)
@@ -1406,13 +1422,8 @@ func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, br
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
-		if usesGitCrypt {
-			if unlockErr := m.unlockGitCryptAndCheckout(ctx, worktreePath); unlockErr != nil {
-				_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
-				return "", unlockErr
-			}
-		} else {
-			m.initSubmodules(ctx, worktreePath)
+		if err := m.finishWorktreeCheckout(ctx, repoPath, worktreePath, usesGitCrypt); err != nil {
+			return "", err
 		}
 		return worktreeID, nil
 	}
@@ -1450,7 +1461,7 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 	if startPoint != "" {
 		args = append(args, "-B", branchName)
 	}
-	if usesGitCrypt {
+	if usesGitCrypt || hasSparseCheckout(ctx) {
 		args = append(args, "--no-checkout")
 	}
 	args = append(args, worktreePath)
@@ -1473,13 +1484,8 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 		return "", ClassifyGitError(retryOutStr, retryErr)
 	}
 
-	if usesGitCrypt {
-		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
-			_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
-			return "", err
-		}
-	} else {
-		m.initSubmodules(ctx, worktreePath)
+	if err := m.finishWorktreeCheckout(ctx, repoPath, worktreePath, usesGitCrypt); err != nil {
+		return "", err
 	}
 
 	m.logger.Info("recovered from stale worktree checkout", zap.String("branch", branchName))
@@ -1743,14 +1749,14 @@ func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, work
 
 func (m *Manager) gitAddWorktreeLocked(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
 	worktreeID := uuid.New().String()
-	usesGitCrypt := m.usesGitCrypt(repoPath)
+	usesGitCrypt := m.usesGitCryptContext(ctx, repoPath)
 	addSnapshot, err := m.createNewBranchRef(ctx, repoPath, branchName, baseRef)
 	if err != nil {
 		return "", err
 	}
 
 	args := []string{"worktree", "add"}
-	if usesGitCrypt {
+	if usesGitCrypt || hasSparseCheckout(ctx) {
 		args = append(args, "--no-checkout")
 	}
 	args = append(args, worktreePath, branchName)
@@ -1774,13 +1780,9 @@ func (m *Manager) gitAddWorktreeLocked(ctx context.Context, repoPath, branchName
 	}
 
 	// If we used --no-checkout, we need to unlock git-crypt and checkout
-	if usesGitCrypt {
-		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
-			m.rollbackFailedNewBranchAdd(ctx, repoPath, branchName, worktreePath, addSnapshot)
-			return "", err
-		}
-	} else {
-		m.initSubmodules(ctx, worktreePath)
+	if err := m.finishWorktreeCheckout(ctx, repoPath, worktreePath, usesGitCrypt); err != nil {
+		m.rollbackFailedNewBranchAdd(ctx, repoPath, branchName, worktreePath, addSnapshot)
+		return "", err
 	}
 
 	return worktreeID, nil
@@ -1834,12 +1836,12 @@ func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branc
 }
 
 func (m *Manager) gitAddWorktreeForRecreateLocked(ctx context.Context, repoPath, branch, worktreePath, startPoint string) (bool, error) {
-	usesGitCrypt := m.usesGitCrypt(repoPath)
+	usesGitCrypt := m.usesGitCryptContext(ctx, repoPath)
 	args := []string{"worktree", "add"}
 	if startPoint != "" {
 		args = append(args, "-B", branch)
 	}
-	if usesGitCrypt {
+	if usesGitCrypt || hasSparseCheckout(ctx) {
 		args = append(args, "--no-checkout")
 	}
 	args = append(args, worktreePath)
@@ -2054,17 +2056,42 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		return nil, err
 	}
 
-	// Archive deletes the local branch (removeWorktree runs `git branch -D`),
-	// so a recreate after unarchive must restore it first. fetchBranchToLocal
-	// fetches origin <branch>:<branch> — or pull/<N>/head for fork PRs, whose
-	// head branch never exists on origin by name — and only errors when the
-	// branch exists neither locally nor on the remote.
-	exists, probeErr := m.branchExists(ctx, req.RepositoryPath, existing.Branch)
+	// Archive may safely compact an integrated managed local branch, so a
+	// recreate after unarchive must restore its persisted exact head first.
+	// fetchBranchToLocal fetches origin <branch>:<branch> — or pull/<N>/head
+	// for fork PRs, whose head branch never exists on origin by name — and only
+	// errors when the branch exists neither locally nor on the remote.
+	// Probe the managed local ref explicitly. A short branch name can resolve
+	// through Git's DWIM rules to a remote-tracking ref, which must not preempt
+	// exact persisted recovery.
+	exists, probeErr := m.branchExists(ctx, req.RepositoryPath, "refs/heads/"+existing.Branch)
 	if probeErr != nil {
 		// "Could not tell" (timeout / fs stall) is not "missing" — reporting
 		// ErrBranchUnrecoverable here would misclassify recoverable work as
 		// gone. Propagate so the caller can retry the recreate.
 		return nil, fmt.Errorf("cannot verify worktree branch %q: %w", existing.Branch, probeErr)
+	}
+	if exists && existing.RecoveryHeadSHA != "" {
+		currentHead, resolveErr := m.resolveCommit(ctx, req.RepositoryPath, "refs/heads/"+existing.Branch)
+		if resolveErr != nil || !strings.EqualFold(currentHead, existing.RecoveryHeadSHA) {
+			return nil, fmt.Errorf("existing worktree branch %q does not match its recovery head", existing.Branch)
+		}
+		if restoreErr := m.finalizeRestoredManagedBranch(ctx, existing, currentHead); restoreErr != nil {
+			return nil, fmt.Errorf("persist restored compacted worktree branch %q: %w", existing.Branch, restoreErr)
+		}
+	}
+	// Recovery metadata is authoritative once the local ref is confirmed
+	// missing. Restore it before any refreshed-origin or contribution
+	// materialization can select a different head.
+	recoveredFromHead := false
+	if !exists {
+		existing.RepositoryPath = req.RepositoryPath
+		if restoreErr := m.restoreManagedBranchFromRecoveryHeadLocked(ctx, existing); restoreErr == nil {
+			exists = true
+			recoveredFromHead = true
+		} else if existing.BranchCompactedAt != nil {
+			return nil, fmt.Errorf("restore compacted worktree branch %q: %w", existing.Branch, restoreErr)
+		}
 	}
 	contributionRemote := ""
 	contributionRef := ""
@@ -2076,11 +2103,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 	refreshedStartPoint := ""
-	if req.RemoteSyncHandled && req.RemoteContribution == nil && emptyRemoteBaseRef == "" {
-		sourceBranch := recreateSourceBranch(existing.Branch, req.CheckoutBranch)
-		selectedRef, prepareErr := m.prepareBranchFromRefreshedOrigin(
-			ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,
-		)
+	if shouldRefreshRecreatedBranch(req, recoveredFromHead, emptyRemoteBaseRef) {
+		sourceBranch, selectedRef, prepareErr := m.prepareRecreatedBranch(ctx, existing, req)
 		if prepareErr != nil {
 			return nil, prepareErr
 		}
@@ -2093,9 +2117,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 				ctx, existing, req, &BranchUnrecoverableError{Branch: sourceBranch},
 			)
 		}
-		if selectedRef != existing.Branch {
-			refreshedStartPoint = selectedRef
-		}
+		refreshedStartPoint = recreatedStartPoint(selectedRef, existing.Branch)
 		exists = true
 	}
 	if !exists {
@@ -2153,14 +2175,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		return nil, err
 	}
 
-	// If using git-crypt, unlock and checkout
-	if usesGitCrypt {
-		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
-			_ = m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath)
-			return nil, err
-		}
-	} else {
-		m.initSubmodules(ctx, worktreePath)
+	if err := m.finishWorktreeCheckout(ctx, req.RepositoryPath, worktreePath, usesGitCrypt); err != nil {
+		return nil, err
 	}
 	if contributionRemote != "" {
 		if err := m.setUpstreamIfExistsRemote(ctx, worktreePath, existing.Branch, contributionRemote, req.RemoteContribution.HeadBranch); err != nil {
@@ -2179,6 +2195,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	existing.Path = worktreePath
 	existing.Status = StatusActive
 	existing.DeletedAt = nil
+	existing.BranchCompactedAt = nil
 	existing.UpdatedAt = now
 	existing.BaseBranchFallbackWarning = fallbackWarning
 	existing.BaseBranchFallbackDetail = fallbackDetail
@@ -2202,4 +2219,28 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		zap.String("path", worktreePath))
 
 	return existing, nil
+}
+
+func (m *Manager) prepareRecreatedBranch(
+	ctx context.Context, existing *Worktree, req CreateRequest,
+) (string, string, error) {
+	sourceBranch := existing.Branch
+	if req.CheckoutBranch != "" {
+		sourceBranch = req.CheckoutBranch
+	}
+	selectedRef, err := m.prepareBranchFromRefreshedOrigin(
+		ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,
+	)
+	return sourceBranch, selectedRef, err
+}
+
+func recreatedStartPoint(selectedRef, existingBranch string) string {
+	if selectedRef == existingBranch {
+		return ""
+	}
+	return selectedRef
+}
+
+func shouldRefreshRecreatedBranch(req CreateRequest, recoveredFromHead bool, emptyRemoteBaseRef string) bool {
+	return !recoveredFromHead && req.RemoteSyncHandled && req.RemoteContribution == nil && emptyRemoteBaseRef == ""
 }

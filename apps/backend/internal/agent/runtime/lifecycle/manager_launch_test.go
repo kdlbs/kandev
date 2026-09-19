@@ -486,22 +486,36 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 	}
 }
 
-func TestBuildEnvForExecution_FailsClosedWhenProfileSecretIsUnavailable(t *testing.T) {
+// A broken secret reference on one profile env var must not blank the agent's
+// whole launch environment: the bad var is dropped, the rest are delivered
+// (AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-004.1).
+func TestBuildEnvForExecution_DropsOnlyTheUnresolvableProfileSecretVar(t *testing.T) {
 	mgr := newTestManager(t)
-	mgr.secretStore = newInMemorySecretStore()
+	store := newInMemorySecretStore()
+	_ = store.Create(context.Background(), &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "sec-ok", Name: "ok"},
+		Value:  "revealed",
+	})
+	mgr.secretStore = store
 
-	_, err := mgr.buildEnvForExecution(
+	env, err := mgr.buildEnvForExecution(
 		context.Background(),
 		"exec-1",
 		&LaunchRequest{AgentProfileID: "profile-1"},
 		nil,
-		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{{
-			Key:      "PROFILE_TOKEN",
-			SecretID: "missing-secret",
-		}}},
+		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{
+			{Key: "GOOD_TOKEN", SecretID: "sec-ok"},
+			{Key: "BROKEN_TOKEN", SecretID: "missing-secret"},
+		}},
 	)
-	if err == nil {
-		t.Fatal("buildEnvForExecution succeeded with an unavailable profile secret")
+	if err != nil {
+		t.Fatalf("buildEnvForExecution: %v", err)
+	}
+	if env["GOOD_TOKEN"] != "revealed" {
+		t.Errorf("GOOD_TOKEN = %q, want revealed", env["GOOD_TOKEN"])
+	}
+	if _, present := env["BROKEN_TOKEN"]; present {
+		t.Errorf("BROKEN_TOKEN should have been dropped, got %q", env["BROKEN_TOKEN"])
 	}
 }
 

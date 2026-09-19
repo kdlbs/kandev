@@ -222,7 +222,18 @@ type BranchMaterializer interface {
 	// task_repositories row. Best-effort: when no active session exists yet
 	// the implementation may choose to no-op and let the next session launch
 	// create the worktree via the standard multi-repo prepare path.
-	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error)
+	MaterializeBranch(
+		ctx context.Context,
+		taskID, taskRepositoryID string,
+		target BranchMaterializationTarget,
+	) (*BranchMaterializationResult, error)
+}
+
+// BranchMaterializationTarget pins the live session/environment identity
+// selected by the task service so the materializer can reject a racing rebind.
+type BranchMaterializationTarget struct {
+	SessionID         string
+	TaskEnvironmentID string
 }
 
 // BranchMaterializationResult describes the live worktree created for a
@@ -415,6 +426,7 @@ type Service struct {
 	taskLifecycleCoordinator        TaskLifecycleCoordinator
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
+	statusSummaryLaunchQueue        TaskStatusSummaryLaunchQueueReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
 	queuedPromptCounter             QueuedPromptCounter
 	eventBus                        bus.EventBus
@@ -422,9 +434,10 @@ type Service struct {
 	discoveryConfig                 RepositoryDiscoveryConfig
 	discoveryCacheMu                sync.Mutex
 	discoveryCache                  map[string]discoveryCacheEntry
+	discoveryRootCache              map[string]discoveryRootCacheEntry
 	discoveryFlights                map[string]*discoveryFlight
 	discoveryNow                    func() time.Time
-	discoveryScanRoot               func(context.Context, string, int) ([]LocalRepository, error)
+	discoveryScanRoot               func(context.Context, string, int) (repositoryDiscoveryScanResult, error)
 	filesystemWarnings              *fsdiagnostics.WarningLimiter
 	worktreeCleanup                 WorktreeCleanup
 	canvasCleanup                   CanvasCleanup
@@ -454,6 +467,7 @@ type Service struct {
 	envDestroyer                    EnvironmentDestroyer
 	wsGroupMembership               WorkspaceGroupMembershipReader
 	executorCapabilityProber        ExecutorCapabilityProber
+	checkoutCredentialPolicy        func(context.Context, string) (bool, error)
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
 	// host process detection. Nil selects the real platform implementation
@@ -698,6 +712,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
 		discoveryCache:        make(map[string]discoveryCacheEntry),
+		discoveryRootCache:    make(map[string]discoveryRootCacheEntry),
 		discoveryFlights:      make(map[string]*discoveryFlight),
 		discoveryNow:          time.Now,
 		discoveryScanRoot:     scanRootForRepos,
@@ -727,8 +742,8 @@ func (s *Service) setCleanupDoneForTestHook(ch chan struct{}) {
 }
 
 // SetBranchMaterializer wires the mid-session worktree materializer for
-// AddBranchToTask. Optional — when unset, MCP add_branch only inserts the
-// task_repositories row and the worktree appears on next session launch.
+// AddBranchToTask. It may be unset for pre-launch tasks, whose worktrees are
+// created on the next session launch; live tasks require the materializer.
 func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 	s.branchMaterializer = m
 }

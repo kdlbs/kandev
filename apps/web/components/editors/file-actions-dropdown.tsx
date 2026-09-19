@@ -96,6 +96,7 @@ function useFileActions({
   }, [openFolder]);
 
   return {
+    folderDisabled: !sessionId || !openFolder.available || openFolder.isLoading,
     defaultEditorId,
     enabledEditors,
     handleCopyPath,
@@ -106,8 +107,14 @@ function useFileActions({
 
 export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
   const { t } = useTranslation();
-  const { defaultEditorId, enabledEditors, handleCopyPath, handleOpenFolder, handleOpenInEditor } =
-    useFileActions(props);
+  const {
+    folderDisabled,
+    defaultEditorId,
+    enabledEditors,
+    handleCopyPath,
+    handleOpenFolder,
+    handleOpenInEditor,
+  } = useFileActions(props);
 
   return (
     <>
@@ -136,7 +143,11 @@ export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
         <IconCopy className="h-3.5 w-3.5" />
         {t("editors:copyPath")}
       </DropdownMenuItem>
-      <DropdownMenuItem className="cursor-pointer text-xs" onSelect={handleOpenFolder}>
+      <DropdownMenuItem
+        className="cursor-pointer text-xs"
+        disabled={folderDisabled}
+        onSelect={handleOpenFolder}
+      >
         <IconFolderShare className="h-3.5 w-3.5" />
         {t("editors:openFolder")}
       </DropdownMenuItem>

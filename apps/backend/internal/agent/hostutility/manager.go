@@ -23,6 +23,7 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
@@ -50,6 +51,7 @@ type Manager struct {
 	profileResolver interface {
 		Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
 	}
+	providerGatewayAuthResolver ProviderGatewayAuthResolver
 
 	parentTmpDir  string
 	tempArtifacts *tempartifacts.Registry
@@ -68,11 +70,25 @@ type Manager struct {
 	stopped                  bool
 }
 
+// ProviderGatewayAuthResolver resolves provider authentication for a saved
+// profile. The lifecycle manager owns profile and secret resolution; the host
+// utility only forwards the resulting ACP data to agentctl.
+type ProviderGatewayAuthResolver func(
+	context.Context,
+	string,
+	string,
+) (*acpprovider.GatewayAuth, string, string, error)
+
 // SetProfileResolver wires the profile eligibility and launch-policy reader.
 func (m *Manager) SetProfileResolver(resolver interface {
 	Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
 }) {
 	m.profileResolver = resolver
+}
+
+// SetProviderGatewayAuthResolver wires the lifecycle-owned provider resolver.
+func (m *Manager) SetProviderGatewayAuthResolver(resolver ProviderGatewayAuthResolver) {
+	m.providerGatewayAuthResolver = resolver
 }
 
 // instance is a single warm agentctl instance bound to an agent type.

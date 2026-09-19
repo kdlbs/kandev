@@ -20,6 +20,7 @@ export function buildMobileTaskSwitcherProps(
 ): TaskSwitcherProps {
   return {
     grouped: helpers.grouped,
+    nestHierarchyTasks: props.tasks,
     workflows: props.workflows,
     stepsByWorkflowId: props.stepsByWorkflowId,
     activeTaskId: props.activeTaskId,

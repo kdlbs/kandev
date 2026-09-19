@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  RepositoryOptions,
+  RepositoryOptionsSummary,
+} from "./task-create-dialog-repository-options";
+import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import Link from "@/components/routing/app-link";
 import { IconCheck, IconGitBranch, IconLink, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -42,6 +47,9 @@ import { t } from "@/lib/i18n";
 const TRUNCATE_THRESHOLD = 30;
 
 export type RemoteRepoChipProps = {
+  workspaceId?: string | null;
+  executorProfileId?: string;
+  onOptionsChange?: (options?: RepositoryCheckoutOptions) => void;
   row: TaskRemoteRepoRow;
   branches: Branch[];
   branchesLoading: boolean;
@@ -81,6 +89,9 @@ export type RemoteRepoChipProps = {
  * the parent loads via `branchesByUrl`.
  */
 export function RemoteRepoChip({
+  workspaceId,
+  executorProfileId,
+  onOptionsChange,
   row,
   branches,
   branchesLoading,
@@ -96,11 +107,11 @@ export function RemoteRepoChip({
   useRowBranchAutoSelect({ row, branches, prInfo, onBranchChange });
   return (
     <div
-      className="flex max-w-full flex-col items-start gap-1"
+      className="flex min-w-0 max-w-full flex-col items-start gap-1"
       data-testid="remote-repo-chip-wrapper"
     >
       <span
-        className="inline-flex max-w-full items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5"
+        className="grid max-w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5 md:inline-flex"
         data-testid="remote-repo-chip"
         data-remote-url={row.url}
       >
@@ -117,8 +128,18 @@ export function RemoteRepoChip({
           branchesLoading={branchesLoading}
           onBranchChange={onBranchChange}
         />
+        {onOptionsChange && row.url.trim() && (
+          <RepositoryOptions
+            key={row.url}
+            row={row}
+            workspaceId={workspaceId}
+            executorProfileId={executorProfileId}
+            onChange={onOptionsChange}
+          />
+        )}
         <RemoveButton onRemove={onRemove} />
       </span>
+      <RepositoryOptionsSummary options={row.checkoutOptions} />
       {resolutionError && onRetry ? (
         <RemoteResolutionError error={resolutionError} onRetry={onRetry} />
       ) : null}
@@ -243,7 +264,7 @@ function RemoteRepoPill({
           type="button"
           data-testid="remote-repo-chip-trigger"
           className={cn(
-            "h-7 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs bg-transparent",
+            "col-span-3 h-7 min-w-0 inline-flex items-center gap-1.5 rounded-md px-2.5 text-xs bg-transparent md:col-span-1 [@media(pointer:coarse)]:h-11",
             "hover:bg-muted/60 cursor-pointer",
             !hasValue && "text-muted-foreground",
           )}
@@ -631,7 +652,7 @@ function RemoveButton({ onRemove }: { onRemove: () => void }) {
           onClick={onRemove}
           aria-label={t("task:removeRepository")}
           data-testid="remote-chip-remove"
-          className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted/60 cursor-pointer"
+          className="h-6 w-6 shrink-0 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted/60 cursor-pointer [@media(pointer:coarse)]:size-11"
         >
           <IconX className="h-3 w-3" />
         </button>

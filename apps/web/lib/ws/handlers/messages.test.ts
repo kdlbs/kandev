@@ -11,6 +11,8 @@ const SESSION_ID = "session-1";
 const QUESTION_ID = "question-1";
 const QUESTION_CONTENT = "Choose";
 const ADD_ACTION = "session.message.added";
+const RETRY_MESSAGE_ID = "retry-message";
+const RETRY_CONTENT = "Model at capacity, retrying in 10s";
 
 function pendingRevision(sequence: number) {
   return { epoch: PROJECTION_EPOCH, sequence };
@@ -208,6 +210,43 @@ describe("session message frame scheduler", () => {
       expect.objectContaining({ content: "settled" }),
     ]);
     scheduler.dispose();
+  });
+});
+
+describe("session message retry notices", () => {
+  it("updates a retry notice in place when a later attempt arrives", () => {
+    const { store, addMessage, updateMessages } = makeStore({
+      [SESSION_ID]: [{ id: RETRY_MESSAGE_ID, updated_at: "2026-08-02T00:00:01.000Z" }],
+    });
+    const registration = createMessagesHandlerRegistration(store);
+
+    registration.handlers["session.message.updated"]!({
+      ...makeUpdated(SESSION_ID, RETRY_MESSAGE_ID, RETRY_CONTENT),
+      payload: makePayload(SESSION_ID, RETRY_MESSAGE_ID, RETRY_CONTENT, {
+        type: "status",
+        metadata: {
+          retrying: true,
+          attempt: 2,
+          max_attempts: 5,
+          retry_in_seconds: 10,
+          retry_at: "2026-08-02T00:00:12.000Z",
+          provider_name: "codex-acp",
+        },
+        updated_at: "2026-08-02T00:00:02.000Z",
+      }),
+    });
+    registration.scheduler.flush();
+
+    expect(addMessage).not.toHaveBeenCalled();
+    expect(updateMessages).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: RETRY_MESSAGE_ID,
+        type: "status",
+        content: RETRY_CONTENT,
+        metadata: expect.objectContaining({ attempt: 2, retry_at: "2026-08-02T00:00:12.000Z" }),
+      }),
+    ]);
+    registration.dispose();
   });
 });
 

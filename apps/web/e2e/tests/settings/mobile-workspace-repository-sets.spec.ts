@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { makeGitEnv } from "../../helpers/git-helper";
 
@@ -143,7 +144,11 @@ test.describe("Mobile workspace repository sets", () => {
     await search.fill("origin");
     await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
     await expect(dropdown.getByRole("option", { name: /^main local/ })).toHaveCount(0);
-    await dropdown.getByTestId("branch-refresh-button").tap();
+    const refreshButton = dropdown.getByTestId("branch-refresh-button");
+    await expect(refreshButton).toBeVisible();
+    await expect(refreshButton).toBeEnabled();
+    await waitForFiniteAnimations(dropdown);
+    await refreshButton.tap({ force: true });
     await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
 
     const dropdownBox = await dropdown.boundingBox();

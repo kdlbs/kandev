@@ -80,7 +80,7 @@ test.describe("Mobile system temporary folders", () => {
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);
     await cleanButton.tap();
-    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await expect(testPage.getByText("Clean inactive Kandev temporary files?")).toBeVisible();
     await prCapture.screenshot("mobile-system-temporary-cleanup-confirmation", {
       caption: "Mobile storage keeps explicit registered cleanup in a touch-sized flow",
     });

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
 import {
@@ -42,7 +43,36 @@ export type ProfileFormData = {
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  provider_kind?: string;
 } & Record<PermissionKey, boolean>;
+
+function CustomProviderModelInput({
+  profile,
+  onChange,
+  ariaLabel,
+  placeholder,
+  disabled,
+}: {
+  profile: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  ariaLabel: string;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <Input
+        data-testid="profile-model-input"
+        value={profile.model}
+        onChange={(event) => onChange({ model: event.target.value })}
+        placeholder={placeholder ?? t("settings:selectAModel")}
+        aria-label={ariaLabel}
+        disabled={disabled}
+      />
+    </div>
+  );
+}
 
 export function ModelPicker({
   profile,
@@ -70,9 +100,31 @@ export function ModelPicker({
   keepOpenOnModelChange?: boolean;
 }) {
   const { t } = useTranslation();
+  if (profile.provider_kind === "openai_compatible") {
+    return (
+      <CustomProviderModelInput
+        profile={profile}
+        onChange={onChange}
+        ariaLabel={ariaLabel}
+        placeholder={placeholder}
+        disabled={disabled}
+      />
+    );
+  }
   const modelConfig = configOptions.find(isModelConfigOption);
+  // The config_options model list drops the ACP `_meta`, so the usage
+  // multiplier (e.g. Copilot's "15x") only survives on `models`. Look it up by
+  // id to enrich the config-option-derived options.
+  const usageByModelId = new Map(
+    models
+      .filter((model) => typeof model.meta?.copilotUsage === "string")
+      .map((model) => [model.id, model.meta!.copilotUsage as string]),
+  );
   const modelOptions: ModelSelectorOption[] = modelConfig
-    ? configOptionToModelOptions(modelConfig)
+    ? configOptionToModelOptions(modelConfig).map((option) => ({
+        ...option,
+        usageMultiplier: option.usageMultiplier ?? usageByModelId.get(option.id),
+      }))
     : models.map((model) => ({
         id: model.id,
         name: model.name,

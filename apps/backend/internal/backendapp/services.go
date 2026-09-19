@@ -32,6 +32,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
@@ -40,6 +41,8 @@ import (
 	"github.com/kandev/kandev/internal/mcp/canvasskill"
 	"github.com/kandev/kandev/internal/mentions"
 	officeconfigsync "github.com/kandev/kandev/internal/office/configsync"
+	"github.com/kandev/kandev/internal/org"
+	"github.com/kandev/kandev/internal/orgunit"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
@@ -69,7 +72,7 @@ const (
 	canonicalKandevName  = "kandev"
 )
 
-func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
+func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
 	if repos == nil || repos.RequiredStores == nil {
 		return nil, nil, errors.New("required-store tracker is unavailable")
 	}
@@ -82,16 +85,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	// Load custom TUI agents from DB into registry before discovery
 	loadCustomTUIAgents(context.Background(), repos, agentRegistry, log)
 
-	managedRuntimeSettings := repos.SystemSettings
-	if managedRuntimeSettings == nil {
-		return nil, nil, fmt.Errorf("initialize managed runtime settings: required store is unavailable")
-	}
-	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
-	if err := reconcileManagedRuntimeDefaults(context.Background(), managedRuntimeSelections, agentRegistry, log); err != nil {
-		return nil, nil, fmt.Errorf("reconcile managed runtime defaults: %w", err)
-	}
-
-	discoveryRegistry, err := discovery.LoadRegistry(context.Background(), agentRegistry, log)
+	managedRuntimeSelections, discoveryRegistry, err := initManagedRuntimeAndDiscovery(context.Background(), repos, agentRegistry, log)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -101,6 +95,112 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	agentSettingsController.SetSecretStore(userSecretStore)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 
+	core, err := initCoreTaskServices(cfg, repos, dbPool, eventBus, agentRegistry, storeTracker, log)
+	if err != nil {
+		return nil, nil, err
+	}
+	taskSvc, workflowSvc, promptSvc := core.taskSvc, core.workflowSvc, core.promptSvc
+
+	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
+
+	providers, err := initThirdPartyProviders(cfg, dbPool, eventBus, repos, storeTracker, taskSvc, promptSvc, workflowSvc, log)
+	if err != nil {
+		return nil, nil, err
+	}
+	integrations, err := initIntegrationWiring(
+		ctx, cfg, dbPool, eventBus, repos, storeTracker, taskSvc, workflowSvc, agentSettingsController, providers.github, version, log,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	pluginsSvc := integrations.pluginsSvc
+
+	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
+	mentionProviders := builtinMentionProviders(services, repos.Task)
+	reserveBuiltinMentionIdentities(pluginsSvc, mentionProviders)
+	mentionComponents, err := newMentionComponents(
+		log,
+		taskSvc,
+		taskSvc,
+		mentionProviders...,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	services.Mentions = mentionComponents
+	return services, agentSettingsController, nil
+}
+
+// assembleServices collects the outputs of the earlier init* wiring steps
+// into the Services struct returned to the caller.
+func assembleServices(
+	managedRuntimeSelections *managedruntime.Store,
+	core *coreTaskServices,
+	providers *thirdPartyProviders,
+	integrations *integrationWiring,
+) *Services {
+	return &Services{
+		ManagedRuntimeSelections: managedRuntimeSelections,
+		DynamicProfileResolver:   core.dynamicResolver,
+		DynamicBindingResolver:   core.dynamicBindingResolver,
+		Task:                     core.taskSvc,
+		Org:                      core.orgSvc,
+		OrgUnits:                 core.unitSvc,
+		User:                     core.userSvc,
+		Editor:                   core.editorSvc,
+		Prompts:                  core.promptSvc,
+		Utility:                  core.utilitySvc,
+		Workflow:                 core.workflowSvc,
+		GitHub:                   providers.github,
+		GitLab:                   providers.gitlab,
+		GitLabCleanup:            providers.gitlabCleanup,
+		AzureDevOps:              providers.azureDevOps,
+		Jira:                     providers.jira,
+		Linear:                   providers.linear,
+		Sentry:                   providers.sentry,
+		WorkflowSync:             providers.workflowSync,
+		Share:                    integrations.shareHTTP,
+		Automation:               integrations.automationComponents,
+		Plugins:                  integrations.pluginsSvc,
+		AgentConversations:       integrations.agentConversationsSvc,
+		PluginsCleanup:           integrations.pluginsCleanup,
+		Canvas:                   integrations.canvasSvc,
+		CanvasDistribution:       integrations.canvasDistributionSvc,
+		GitCredentials:           integrations.gitCredentialBroker,
+		// Office is constructed later in initOfficeServices once all
+		// of its dependencies (config loader, task integrations, etc.) are available.
+		Office: nil,
+		// Notification service is initialized after gateway is available.
+		Notification: nil,
+	}
+}
+
+// coreTaskServices bundles the task-service dependency graph
+// initCoreTaskServices constructs: the smaller services the task service
+// depends on, the task service itself, and the org/unit services whose
+// tenancy migration must run against an already-constructed task service.
+type coreTaskServices struct {
+	userSvc                *userservice.Service
+	editorSvc              *editorservice.Service
+	promptSvc              *promptservice.Service
+	utilitySvc             *utilityservice.Service
+	dynamicResolver        *agentruntime.ProfileExecutionResolver
+	dynamicBindingResolver *dynamicruntime.CredentialBindingResolver
+	workflowSvc            *workflowservice.Service
+	taskSvc                *taskservice.Service
+	orgSvc                 *org.Service
+	unitSvc                *orgunit.Service
+}
+
+func initCoreTaskServices(
+	cfg *config.Config,
+	repos *Repositories,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	agentRegistry *registry.Registry,
+	storeTracker *requiredstores.Tracker,
+	log *logger.Logger,
+) (*coreTaskServices, error) {
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
 	promptSvc := promptservice.NewService(repos.Prompts)
@@ -112,35 +212,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
-	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
-		dynamicruntime.WithCircuitPersistence(repos.Task),
-		dynamicruntime.WithCircuitLogger(log.Zap()),
-	)
-	if err := dynamicCircuits.Restore(context.Background()); err != nil {
-		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
-	}
-	dynamicEngine := dynamicruntime.NewEngine(
-		dynamicruntime.WithPersistence(repos.Task),
-		dynamicruntime.WithStateLoader(repos.Task),
-		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
-	)
-	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(
-		context.Background(), repos.Task,
-	)
+	dynamicResolver, dynamicBindingResolver, err := initDynamicRuntimeResolver(context.Background(), repos, cfg, log)
 	if err != nil {
-		return nil, nil, fmt.Errorf("initialize dynamic routing installation key: %w", err)
+		return nil, err
 	}
-	dynamicResolver := agentruntime.NewProfileExecutionResolver(
-		repos.AgentSettings,
-		dynamicEngine,
-		cfg.Features.DynamicAgentRouting,
-	)
-	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
 	utilitySvc.SetExecutionProfileResolver(dynamicResolver)
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	pendingActionProjectionEpoch, err := repos.Task.NextPendingActionProjectionEpoch(context.Background())
 	if err != nil {
-		return nil, nil, fmt.Errorf("allocate pending-action projection epoch: %w", err)
+		return nil, fmt.Errorf("allocate pending-action projection epoch: %w", err)
 	}
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
@@ -178,10 +258,105 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
+	wireSidebarWorkspaceAccess(userSvc, taskSvc)
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
 	// Workspace membership needs to resolve colleague names and reject
 	// disabled or unknown accounts before writing a row.
 	taskSvc.SetUserDirectory(newUserDirectoryAdapter(repos.UserAccounts))
+	orgSvc, unitSvc, err := initOrgAndUnitServices(cfg, dbPool, repos, storeTracker, taskSvc, log)
+	if err != nil {
+		return nil, err
+	}
+	return &coreTaskServices{
+		userSvc: userSvc, editorSvc: editorSvc, promptSvc: promptSvc, utilitySvc: utilitySvc,
+		dynamicResolver: dynamicResolver, dynamicBindingResolver: dynamicBindingResolver,
+		workflowSvc: workflowSvc, taskSvc: taskSvc, orgSvc: orgSvc, unitSvc: unitSvc,
+	}, nil
+}
+
+func wireSidebarWorkspaceAccess(userSvc *userservice.Service, taskSvc *taskservice.Service) {
+	userSvc.SetSidebarWorkspaceAccess(func(ctx context.Context) ([]string, error) {
+		workspaces, err := taskSvc.ListWorkspaces(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ids := make([]string, 0, len(workspaces))
+		for _, workspace := range workspaces {
+			ids = append(ids, workspace.ID)
+		}
+		return ids, nil
+	})
+}
+
+// initManagedRuntimeAndDiscovery loads the managed-runtime default
+// selections and reconciles them against the agent registry, then loads the
+// discovery registry that depends on the reconciled defaults.
+func initManagedRuntimeAndDiscovery(
+	ctx context.Context,
+	repos *Repositories,
+	agentRegistry *registry.Registry,
+	log *logger.Logger,
+) (*managedruntime.Store, *discovery.Registry, error) {
+	managedRuntimeSettings := repos.SystemSettings
+	if managedRuntimeSettings == nil {
+		return nil, nil, fmt.Errorf("initialize managed runtime settings: required store is unavailable")
+	}
+	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
+	if err := reconcileManagedRuntimeDefaults(ctx, managedRuntimeSelections, agentRegistry, log); err != nil {
+		return nil, nil, fmt.Errorf("reconcile managed runtime defaults: %w", err)
+	}
+	discoveryRegistry, err := discovery.LoadRegistry(ctx, agentRegistry, log)
+	if err != nil {
+		return nil, nil, err
+	}
+	return managedRuntimeSelections, discoveryRegistry, nil
+}
+
+// initDynamicRuntimeResolver builds the dynamic-agent-routing circuit
+// registry, engine, and credential binding resolver, and returns the
+// execution-profile resolver that wraps them.
+func initDynamicRuntimeResolver(
+	ctx context.Context,
+	repos *Repositories,
+	cfg *config.Config,
+	log *logger.Logger,
+) (*agentruntime.ProfileExecutionResolver, *dynamicruntime.CredentialBindingResolver, error) {
+	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
+		dynamicruntime.WithCircuitPersistence(repos.Task),
+		dynamicruntime.WithCircuitLogger(log.Zap()),
+	)
+	if err := dynamicCircuits.Restore(ctx); err != nil {
+		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
+	}
+	dynamicEngine := dynamicruntime.NewEngine(
+		dynamicruntime.WithPersistence(repos.Task),
+		dynamicruntime.WithStateLoader(repos.Task),
+		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
+	)
+	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize dynamic routing installation key: %w", err)
+	}
+	dynamicResolver := agentruntime.NewProfileExecutionResolver(
+		repos.AgentSettings,
+		dynamicEngine,
+		cfg.Features.DynamicAgentRouting,
+	)
+	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
+	return dynamicResolver, dynamicBindingResolver, nil
+}
+
+// initOrgAndUnitServices builds the organization and organization-unit
+// services, runs the one-time tenancy migration that creates the default
+// organization, and wires the unit tree back into the task and org services.
+func initOrgAndUnitServices(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	repos *Repositories,
+	storeTracker *requiredstores.Tracker,
+	taskSvc *taskservice.Service,
+	log *logger.Logger,
+) (*org.Service, *orgunit.Service, error) {
 	// The default organization is named generically: an instance has no
 	// company name to borrow, and an operator renames it in one click.
 	const defaultOrgName = "Default organization"
@@ -205,7 +380,83 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	taskSvc.SetUnitReach(unitSvc)
 	// Deleting an organization must take its unit tree with it.
 	orgSvc.SetUnitDeleter(unitSvc)
+	return orgSvc, unitSvc, nil
+}
 
+// integrationWiring bundles the plugins, canvas, git-credential/share, and
+// automation stacks initIntegrationWiring constructs together, so
+// provideServices makes one call and one error check instead of four.
+type integrationWiring struct {
+	pluginsSvc            *plugins.Service
+	pluginsCleanup        func() error
+	agentConversationsSvc *taskservice.AgentConversationService
+	canvasSvc             *canvasservice.Service
+	canvasDistributionSvc *canvasservice.DistributionService
+	gitCredentialBroker   *gitcredentials.Broker
+	shareHTTP             *share.HTTPHandlers
+	automationComponents  *automation.Components
+}
+
+func initIntegrationWiring(
+	ctx context.Context,
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	repos *Repositories,
+	storeTracker *requiredstores.Tracker,
+	taskSvc *taskservice.Service,
+	workflowSvc *workflowservice.Service,
+	agentSettingsController *agentsettingscontroller.Controller,
+	githubSvc *github.Service,
+	version string,
+	log *logger.Logger,
+) (*integrationWiring, error) {
+	pluginsSvc, pluginsCleanup, agentConversationsSvc, err := initPluginsWiring(
+		ctx, cfg, dbPool, eventBus, repos, storeTracker, taskSvc, workflowSvc, agentSettingsController, githubSvc, version, log,
+	)
+	if err != nil {
+		return nil, err
+	}
+	cleanupTransferred := false
+	defer func() {
+		if !cleanupTransferred && pluginsCleanup != nil {
+			_ = pluginsCleanup()
+		}
+	}()
+	canvasSvc, canvasDistributionSvc, err := initCanvasWiring(cfg, dbPool, eventBus, storeTracker, taskSvc, pluginsSvc, version, log)
+	if err != nil {
+		return nil, err
+	}
+	gitCredentialBroker, shareHTTP, err := initGitCredentialAndRemoteWiring(
+		cfg, dbPool, repos, storeTracker, taskSvc, githubSvc, pluginsSvc, version, log,
+	)
+	if err != nil {
+		return nil, err
+	}
+	automationComponents, err := initAutomationWiring(dbPool, eventBus, githubSvc, storeTracker, taskSvc, workflowSvc, repos, log)
+	if err != nil {
+		return nil, err
+	}
+	wiring := &integrationWiring{
+		pluginsSvc: pluginsSvc, pluginsCleanup: pluginsCleanup, agentConversationsSvc: agentConversationsSvc,
+		canvasSvc: canvasSvc, canvasDistributionSvc: canvasDistributionSvc,
+		gitCredentialBroker: gitCredentialBroker, shareHTTP: shareHTTP,
+		automationComponents: automationComponents,
+	}
+	cleanupTransferred = true
+	return wiring, nil
+}
+
+// wireTaskWorkflowCrossReferences wires the task and workflow services'
+// mutual dependencies: each owns a slice of behavior the other needs to call
+// through an adapter, since neither package may import the other directly.
+func wireTaskWorkflowCrossReferences(
+	taskSvc *taskservice.Service,
+	workflowSvc *workflowservice.Service,
+	userSecretStore secrets.SecretStore,
+	repos *Repositories,
+	log *logger.Logger,
+) {
 	taskSvc.SetSecretStore(userSecretStore)
 	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
 		taskSvc.SetWorkspaceSecretDeleter(deleter)
@@ -250,10 +501,37 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		buildAgentProfileResolver(repos),
 		buildAgentProfileMatcher(repos, log),
 	)
+	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
+}
 
+// thirdPartyProviders holds the code-host and issue-tracker integrations
+// initThirdPartyProviders constructs, so provideServices can wire them
+// without repeating each one's init-and-record boilerplate inline.
+type thirdPartyProviders struct {
+	github        *github.Service
+	gitlab        *gitlab.Service
+	gitlabCleanup func() error
+	azureDevOps   *azuredevops.Service
+	jira          *jira.Service
+	linear        *linear.Service
+	sentry        *sentry.Service
+	workflowSync  *workflowsync.Service
+}
+
+func initThirdPartyProviders(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	repos *Repositories,
+	storeTracker *requiredstores.Tracker,
+	taskSvc *taskservice.Service,
+	promptSvc *promptservice.Service,
+	workflowSvc *workflowservice.Service,
+	log *logger.Logger,
+) (*thirdPartyProviders, error) {
 	githubSvc, _, githubErr := initGitHubServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(storeTracker, "github", githubErr); recordErr != nil {
-		return nil, nil, fmt.Errorf("initialize github: %w", recordErr)
+		return nil, fmt.Errorf("initialize github: %w", recordErr)
 	}
 	if githubSvc != nil {
 		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
@@ -266,7 +544,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	gitlabSvc, gitlabCleanup, gitlabErr := initGitLabServiceRequiredWithSettings(repos.SystemSettings, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(storeTracker, "gitlab", gitlabErr); recordErr != nil {
-		return nil, nil, fmt.Errorf("initialize gitlab: %w", recordErr)
+		return nil, fmt.Errorf("initialize gitlab: %w", recordErr)
 	}
 	if gitlabSvc != nil {
 		gitlabSvc.SetPromptResolver(promptSvc)
@@ -274,7 +552,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	azureDevOpsSvc, _, azureDevOpsErr := initAzureDevOpsServiceRequired(dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(storeTracker, "azure-devops", azureDevOpsErr); recordErr != nil {
-		return nil, nil, fmt.Errorf("initialize azure devops: %w", recordErr)
+		return nil, fmt.Errorf("initialize azure devops: %w", recordErr)
 	}
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
@@ -282,26 +560,50 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	jiraSvc, _, jiraErr := initJiraServiceRequired(dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(storeTracker, "jira", jiraErr); recordErr != nil {
-		return nil, nil, fmt.Errorf("initialize jira: %w", recordErr)
+		return nil, fmt.Errorf("initialize jira: %w", recordErr)
 	}
 	linearSvc, _, linearErr := initLinearServiceRequired(dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(storeTracker, "linear", linearErr); recordErr != nil {
-		return nil, nil, fmt.Errorf("initialize linear: %w", recordErr)
+		return nil, fmt.Errorf("initialize linear: %w", recordErr)
 	}
 	sentrySvc, _, sentryErr := initSentryServiceRequired(dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordRequiredStore(storeTracker, "sentry", sentryErr); recordErr != nil {
-		return nil, nil, fmt.Errorf("initialize sentry: %w", recordErr)
+		return nil, fmt.Errorf("initialize sentry: %w", recordErr)
 	}
 	workflowSyncSvc, _, workflowSyncErr := initWorkflowSyncServiceRequired(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
 	if recordErr := recordRequiredStore(storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
-		return nil, nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
+		return nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
-	pluginsSvc, pluginsCleanup, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	return &thirdPartyProviders{
+		github: githubSvc, gitlab: gitlabSvc, gitlabCleanup: gitlabCleanup,
+		azureDevOps: azureDevOpsSvc, jira: jiraSvc, linear: linearSvc,
+		sentry: sentrySvc, workflowSync: workflowSyncSvc,
+	}, nil
+}
+
+// initPluginsWiring constructs the plugins service and the agent-conversation
+// service that rides alongside it, and wires the two-way references between
+// plugins and the task service.
+func initPluginsWiring(
+	ctx context.Context,
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	repos *Repositories,
+	storeTracker *requiredstores.Tracker,
+	taskSvc *taskservice.Service,
+	workflowSvc *workflowservice.Service,
+	agentSettingsController *agentsettingscontroller.Controller,
+	githubSvc *github.Service,
+	version string,
+	log *logger.Logger,
+) (*plugins.Service, func() error, *taskservice.AgentConversationService, error) {
+	pluginsSvc, pluginsCleanup, pluginStoreErrors := initPluginsServiceRequired(ctx, cfg, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordPluginStores(storeTracker, pluginStoreErrors); recordErr != nil {
 		if pluginsCleanup != nil {
 			_ = pluginsCleanup()
 		}
-		return nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
+		return nil, nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
 	}
 	var agentConversationsSvc *taskservice.AgentConversationService
 	if pluginsSvc != nil {
@@ -328,6 +630,21 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 		taskSvc.SetRepositorySelectionResolver(pluginRepositorySelectionResolver{inspector: pluginsSvc})
 	}
+	return pluginsSvc, pluginsCleanup, agentConversationsSvc, nil
+}
+
+// initCanvasWiring constructs the canvas service and, when the canvases
+// feature is enabled, the canvas distribution service that depends on it.
+func initCanvasWiring(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	storeTracker *requiredstores.Tracker,
+	taskSvc *taskservice.Service,
+	pluginsSvc *plugins.Service,
+	version string,
+	log *logger.Logger,
+) (*canvasservice.Service, *canvasservice.DistributionService, error) {
 	canvasRepo, canvasErr := canvasservice.NewRepository(dbPool)
 	if recordErr := recordRequiredStore(storeTracker, "canvas", canvasErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize canvas: %w", recordErr)
@@ -356,6 +673,70 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			canvasDistributionSvc.SetCatalogResolver(pluginsSvc.Marketplace())
 		}
 	}
+	return canvasSvc, canvasDistributionSvc, nil
+}
+
+// initAutomationWiring constructs the automation service stack and wires its
+// cross-service lookups back into the task and workflow services.
+func initAutomationWiring(
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	githubSvc *github.Service,
+	storeTracker *requiredstores.Tracker,
+	taskSvc *taskservice.Service,
+	workflowSvc *workflowservice.Service,
+	repos *Repositories,
+	log *logger.Logger,
+) (*automation.Components, error) {
+	automationComponents, automationErr := automation.Provide(dbPool.Writer(), dbPool.Reader(), eventBus, githubSvc, log)
+	if recordErr := recordRequiredStore(storeTracker, "automation", automationErr); recordErr != nil {
+		return nil, fmt.Errorf("initialize automation: %w", recordErr)
+	}
+	if automationComponents == nil {
+		return nil, nil
+	}
+	automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
+	// Per-user workspace scoping for the automation HTTP/WS surface.
+	automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+	// A UI filter is not an authorization boundary: reject a workflow owned
+	// by another workspace even when a request names it directly.
+	automationWorkflowLocator := &automationWorkflowLocatorAdapter{svc: taskSvc, workflows: workflowSvc}
+	automationComponents.Service.SetWorkflowLocator(automationWorkflowLocator)
+	automationComponents.Service.SetWorkflowStepLocator(automationWorkflowLocator)
+	automationComponents.Service.SetTaskOriginLookup(&automationTaskOriginLookupAdapter{svc: taskSvc, log: log})
+	// Profile deletion disables the automations bound to a profile before
+	// the row goes, but nothing ever checked that the binding pointed at a
+	// real profile in the first place — so a create or rebind naming an id
+	// that never existed produced the same orphan without any delete
+	// involved.
+	automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
+	// YAML export descriptor resolution (AC-29): each Set* below is
+	// satisfied directly by an existing repository's Tx-accepting method,
+	// so the export's single read transaction can pass straight through
+	// without an adapter shim.
+	automationComponents.Service.SetExportAgentProfileLookup(repos.AgentSettings)
+	automationComponents.Service.SetExportExecutorProfileLookup(repos.Task)
+	automationComponents.Service.SetExportWorkflowLookup(repos.Task)
+	automationComponents.Service.SetExportWorkflowStepLookup(repos.Workflow)
+	automationComponents.Service.SetExportRepositoryLookup(repos.Task)
+	automationComponents.Service.SetExportWorkspaceLookup(&automationExportWorkspaceLookupAdapter{svc: taskSvc})
+	return automationComponents, nil
+}
+
+// initGitCredentialAndRemoteWiring builds the shared git-credential broker
+// and task-share HTTP handlers, then wires code-host branch listing, PR
+// resolution, and fresh-workspace defaults into the task service.
+func initGitCredentialAndRemoteWiring(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	repos *Repositories,
+	storeTracker *requiredstores.Tracker,
+	taskSvc *taskservice.Service,
+	githubSvc *github.Service,
+	pluginsSvc *plugins.Service,
+	version string,
+	log *logger.Logger,
+) (*gitcredentials.Broker, *share.HTTPHandlers, error) {
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
@@ -390,87 +771,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			log.Warn("GitHub fresh workspace defaults initialization failed", zap.Error(err))
 		}
 	}
-
-	// Initialize Automation service
-	automationComponents, automationErr := automation.Provide(dbPool.Writer(), dbPool.Reader(), eventBus, githubSvc, log)
-	if recordErr := recordRequiredStore(storeTracker, "automation", automationErr); recordErr != nil {
-		return nil, nil, fmt.Errorf("initialize automation: %w", recordErr)
-	}
-	if automationComponents != nil {
-		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
-		// Per-user workspace scoping for the automation HTTP/WS surface.
-		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
-		// A UI filter is not an authorization boundary: reject a workflow owned
-		// by another workspace even when a request names it directly.
-		automationWorkflowLocator := &automationWorkflowLocatorAdapter{svc: taskSvc, workflows: workflowSvc}
-		automationComponents.Service.SetWorkflowLocator(automationWorkflowLocator)
-		automationComponents.Service.SetWorkflowStepLocator(automationWorkflowLocator)
-		automationComponents.Service.SetTaskOriginLookup(&automationTaskOriginLookupAdapter{svc: taskSvc, log: log})
-		// Profile deletion disables the automations bound to a profile before
-		// the row goes, but nothing ever checked that the binding pointed at a
-		// real profile in the first place — so a create or rebind naming an id
-		// that never existed produced the same orphan without any delete
-		// involved.
-		automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
-		// YAML export descriptor resolution (AC-29): each Set* below is
-		// satisfied directly by an existing repository's Tx-accepting method,
-		// so the export's single read transaction can pass straight through
-		// without an adapter shim.
-		automationComponents.Service.SetExportAgentProfileLookup(repos.AgentSettings)
-		automationComponents.Service.SetExportExecutorProfileLookup(repos.Task)
-		automationComponents.Service.SetExportWorkflowLookup(repos.Task)
-		automationComponents.Service.SetExportWorkflowStepLookup(repos.Workflow)
-		automationComponents.Service.SetExportRepositoryLookup(repos.Task)
-		automationComponents.Service.SetExportWorkspaceLookup(&automationExportWorkspaceLookupAdapter{svc: taskSvc})
-	}
-
-	services := &Services{
-		ManagedRuntimeSelections: managedRuntimeSelections,
-		DynamicProfileResolver:   dynamicResolver,
-		DynamicBindingResolver:   dynamicBindingResolver,
-		Task:                     taskSvc,
-		Org:                      orgSvc,
-		OrgUnits:                 unitSvc,
-		User:                     userSvc,
-		Editor:                   editorSvc,
-		Prompts:                  promptSvc,
-		Utility:                  utilitySvc,
-		Workflow:                 workflowSvc,
-		GitHub:                   githubSvc,
-		GitLab:                   gitlabSvc,
-		GitLabCleanup:            gitlabCleanup,
-		AzureDevOps:              azureDevOpsSvc,
-		Jira:                     jiraSvc,
-		Linear:                   linearSvc,
-		Sentry:                   sentrySvc,
-		WorkflowSync:             workflowSyncSvc,
-		Share:                    shareHTTP,
-		Automation:               automationComponents,
-		Plugins:                  pluginsSvc,
-		AgentConversations:       agentConversationsSvc,
-		PluginsCleanup:           pluginsCleanup,
-		Canvas:                   canvasSvc,
-		CanvasDistribution:       canvasDistributionSvc,
-		GitCredentials:           gitCredentialBroker,
-		// Office is constructed later in initOfficeServices once all
-		// of its dependencies (config loader, task integrations, etc.) are available.
-		Office: nil,
-		// Notification service is initialized after gateway is available.
-		Notification: nil,
-	}
-	mentionProviders := builtinMentionProviders(services, repos.Task)
-	reserveBuiltinMentionIdentities(pluginsSvc, mentionProviders)
-	mentionComponents, err := newMentionComponents(
-		log,
-		taskSvc,
-		taskSvc,
-		mentionProviders...,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	services.Mentions = mentionComponents
-	return services, agentSettingsController, nil
+	return gitCredentialBroker, shareHTTP, nil
 }
 
 func initCanvasService(enabled bool, dbPool *db.Pool, eventBus bus.EventBus, pluginsSvc *plugins.Service, taskSvc *taskservice.Service, log *logger.Logger) (*canvasservice.Service, error) {
@@ -1395,7 +1696,7 @@ func initPluginsService(
 	secretsStore secrets.SecretStore,
 	log *logger.Logger,
 ) *plugins.Service {
-	svc, _, storeErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, secretsStore, log)
+	svc, _, storeErrors := initPluginsServiceRequired(context.Background(), cfg, dbPool, eventBus, secretsStore, log)
 	if err := storeErrors.CombinedError(); err != nil && log != nil {
 		log.Warn("Plugin SQL store initialization failed", zap.Error(err))
 		return nil
@@ -1408,6 +1709,7 @@ type pluginHostUtilityManager interface {
 }
 
 func initPluginsServiceRequired(
+	ctx context.Context,
 	cfg *config.Config,
 	dbPool *db.Pool,
 	eventBus bus.EventBus,
@@ -1861,6 +2163,11 @@ func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *
 		AgentProfileID: &workflow.AgentProfileID,
 	})
 	return err
+}
+
+// DeleteWorkflow implements the compensating cleanup used by workflow imports.
+func (a *workflowProviderAdapter) DeleteWorkflow(ctx context.Context, id string) error {
+	return a.svc.DeleteWorkflow(ctx, id)
 }
 
 // buildAgentProfileResolver creates a resolver that converts profile IDs to portable form for export.

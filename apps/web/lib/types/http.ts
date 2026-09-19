@@ -759,6 +759,7 @@ export type EditorOption = {
 };
 
 export type EditorsResponse = {
+  folder_opening_available?: boolean;
   editors: EditorOption[];
 };
 
@@ -1061,6 +1062,57 @@ export type StepPortable = {
 };
 
 export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
+
+export type WorkflowImportProfileCandidate = {
+  id: string;
+  name: string;
+  agent_name: string;
+  model: string;
+  mode: string;
+  updated_at: string;
+};
+
+export type WorkflowImportProfileMatch = {
+  id: string;
+  updated_at: string;
+};
+
+export type WorkflowImportProfileStep = {
+  workflow_index: number;
+  workflow_name: string;
+  step_position: number;
+  step_name: string;
+  requested_profile: AgentProfilePortable;
+  matched_profile?: WorkflowImportProfileMatch;
+};
+
+export type WorkflowImportPreview = {
+  skipped: string[];
+  profiles: WorkflowImportProfileCandidate[];
+  steps: WorkflowImportProfileStep[];
+};
+
+export type WorkflowImportProfileBinding = {
+  workflow_index: number;
+  step_position: number;
+  requested_profile: AgentProfilePortable;
+  profile_id: string;
+  profile_updated_at: string;
+};
+
+export type WorkflowImportProfileConflict = {
+  workflow_index: number;
+  step_position: number;
+  workflow_name: string;
+  step_name: string;
+  reason: "missing_selection" | "unavailable_profile" | "changed_profile" | string;
+};
+
+export type WorkflowImportProfilesRequiredResponse = {
+  code: "workflow_import_profiles_required";
+  error: string;
+  steps: WorkflowImportProfileConflict[];
+};
 
 // Helper function to check if a step has a specific on_enter action
 export function stepHasOnEnterAction(

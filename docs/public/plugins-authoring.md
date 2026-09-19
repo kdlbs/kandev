@@ -325,11 +325,10 @@ of truth and must be updated together when the contract changes:
   [explicit plugin utility selection](../decisions/2026-09-14-explicit-plugin-utility-selection.md), and
   [Browser conversation facade ADR](../decisions/2026-09-06-browser-plugin-conversation-facade.md).
 
-The browser conversation facade ADR is still proposed while this prerequisite
-package is under review. Until that ADR is accepted, normative authority is
-split deliberately: requirements define observable behavior, the system design
-defines Host architecture, and `PLUGIN-API.md` defines the Host-only wire
-contract.
+The [source reconciliation design](../specs/plugins/system-design/conversation-source-reconciliation.md)
+defines the current storage and transport behavior. Requirements define
+observable behavior, and `PLUGIN-API.md` defines the browser API and Host-only
+v2 wire contract.
 
 ## Frontend contract
 
@@ -401,7 +400,11 @@ Panel handles are independently scoped and become inert on unmount, identity
 change, disable, or reload. `host.conversation` is the equivalent nearest-scope
 accessor; outside a panel it returns stable empty state. Use the canonical
 [PLUGIN-API contract](../plans/plugins/PLUGIN-API.md) for DTOs, pagination,
-ordered updates, lifecycle, and retryable errors.
+revision-bound updates, lifecycle, recovery, and retryable errors. A complete
+source mutation sends a transient revision receipt after commit. An incomplete
+or uninstrumented mutation sends a reset marker, and the Host reads current
+source rows to repair the panel. The transport does not retain a payload
+journal or provide a replay guarantee.
 Browser route errors use `unauthenticated`/non-retryable for `401`,
 `not_found`/non-retryable for `404`, `invalid_query`/non-retryable for `400`,
 and `upstream_failure`/retryable for every authorized `5xx`.
@@ -418,7 +421,7 @@ closing future reads.
 | --- | --- | --- |
 | Surface | `host.conversation` or `conversation.history` | `host.Messages().List` |
 | Runtime | Native UI bundle | Plugin server process |
-| Data | Sanitized browser DTOs and ordered live updates | Typed paginated reader |
+| Data | Sanitized browser DTOs and revision-bound updates | Typed paginated reader |
 | Forbidden shortcut | `host.store`, raw WS, `/api/v1` | Private application imports |
 
 ### Frontend hook/API matrix
@@ -917,6 +920,99 @@ The data-reader accessors return typed, paginated readers, for example
 next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
 `Session`, `Message`, and filter/page types.
+
+#### Task dependencies
+
+Every `Task` returned by `host.Tasks().Get`/`.List` carries a read-only
+dependency projection: `Blocked`, `BlockedReason`, `DependsOn`, `Blocks`,
+`DependsOnTruncated`, `BlocksTruncated`, and `StartWhenUnblocked`. `DependsOn`
+and `Blocks` are `[]TaskDependencyRef` (`ID`, `Title`, `State`, `Status`;
+`Status` is only ever set on a `DependsOn` entry, since a task cannot be
+"pending" or "resolved" against a task it blocks). Each list is capped at 512
+entries; the matching `*Truncated` flag reports whether more edges exist than
+were returned. A gRPC plugin sees no redaction: every edge end's `Title` and
+`State` are populated regardless of which workspace it belongs to, unlike the
+canvas surface described in [`canvases.md`](canvases.md), which blanks both
+fields for an edge end the caller's canvas scope does not directly admit: a
+workspace-scoped canvas admits an end sharing its workspace, a repository- or
+session-scoped canvas admits an end only when it is also returned as a
+directly readable task in the same response, and a task-scoped canvas admits
+none.
+
+If dependency derivation cannot produce a verdict for a task that a call
+does return, the host substitutes the withheld verdict rather than failing
+that call: `Blocked: true`, `BlockedReason: "unknown"`, empty
+`DependsOn`/`Blocks`, both truncation flags `false`, and
+`StartWhenUnblocked: false`. Treat this shape as "no answer," not as "task is
+actually blocked." Two distinct causes reach it: an internal read failure
+during derivation, or a task reached through `CreateTask`/`UpdateTask`/
+`MoveTask` by a caller holding `api_write:tasks` but not `api_read:tasks` (an
+independent capability those RPCs gate on writing, not reading). `List` and
+`Get` themselves never produce this verdict for a missing read capability:
+each fails the call outright with `PermissionDenied` before any task is
+returned, so accessor denial and a withheld verdict on a returned task are
+never the same signal. This is also distinct from the fan-out limit below:
+that refuses the whole call with `ResourceExhausted` rather than substituting
+a withheld verdict onto any task.
+
+Canvas event payloads do not carry the dependency projection: `Blocked`,
+`BlockedReason`, `DependsOn`, `Blocks`, the truncation flags, and
+`StartWhenUnblocked` are refetch-on-signal fields for the canvas surface.
+Native plugin `OnEvent` deliveries can carry the four dependency fields
+(`blocked`, `blocked_reason`, `depends_on`, and `blocks`) on dependency-related
+`task.updated` events. The truncation flags and `start_when_unblocked` still
+come from `host.Tasks().Get`/`.List`, so an event is never a complete
+replacement for a task read. A plugin that caches a task's dependency fields
+refetches them when: a
+`task.updated` event names that task or either end of one of its edges; a
+`task.dependencies_resolved` or `task.dependency_failed` event names that
+task; or a `task.state_changed` event names any task ID present in that
+task's cached `DependsOn` or `Blocks` list, since a predecessor or dependent
+simply advancing state is not itself one of the first three signals. A single
+`Get`/`List` response is not a transactional snapshot: with no surrounding
+lock, an edge can change while the read is being derived, so one response can
+show an edge asymmetrically (for example, a predecessor still listed as
+pending after it has already resolved). Treat what a response returns as the
+union of independently-read facts, and resolve staleness by refetching on the
+next matching signal rather than trusting any single response as
+authoritative.
+
+Reading dependencies adds no extra query per task; the host derives them for
+the whole page in one batched pass. That batch is bounded by a fixed limit on
+the number of distinct task IDs it will read across all edges on the page:
+whether an edge is expressed once or shared by many tasks, each distinct ID
+only counts once toward the limit. `ListTasks` and the plugin-owned
+task-tree preview RPC (`PreviewPluginOwnedTaskTree`) are both bound by this
+limit and fail the call with a `ResourceExhausted` error when a page (or, for
+the preview RPC, the tree itself) would cross it; the preview RPC accepts no
+page `limit` at all, so the only remedy is asking for a smaller tree. Flows
+that always return exactly one task, `GetTask` and the task-write RPCs
+(`CreateTask`, `UpdateTask`, `MoveTask`), can never exceed the limit and are
+exempt. A `ResourceExhausted` response is about the cost of deriving the
+answer, not about the size of the reply; it is never folded into the withheld
+verdict.
+
+`ListTasks`'s `Page.Limit` clamps only its upper bound: a limit above the
+host's page ceiling is lowered to that ceiling, and a limit at or below zero
+(including an unset, proto3-default zero) falls back to the host's default
+page size. That default is the largest page the endpoint will return on its
+own, so retrying a rejected call with a smaller explicit `Limit` (not with a
+zero or negative one) is the way to shrink a page that tripped the fan-out
+limit above.
+
+Declare a `min_kandev_version` manifest floor for the first Kandev release
+your plugin expects to carry these seven fields; a host older than that floor
+omits them from the wire message entirely (the SDK reports them as their zero
+values, indistinguishable from "not blocked, no edges"). This floor is a
+single host-wide capability check performed once at install time: it does
+not name `task-dependencies` or any other capability, unlike the
+capability-keyed `min_kandev_version` requirement on `api_read:messages`
+described above, which the host re-validates per declared capability. A dev
+or otherwise non-release build of the host always satisfies the floor check
+regardless of its actual age, so a plugin installed on such a build can still
+receive the same ambiguous zero-value bytes; do not rely on the floor check
+alone as proof the fields are populated when running against a non-release
+host.
 
 `host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
 conversation content (capability `api_read:messages`). Filter by `SessionIDs`,

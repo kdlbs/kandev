@@ -19,16 +19,17 @@ export function RoutineDetailRoute({ routineId }: { routineId: string }) {
     setState({ status: "loading" });
 
     async function loadRoutineDetail(): Promise<RoutineDetailData> {
+      // A failed trigger list must not silently become "no trigger exists":
+      // save-time reconciliation (cron-reconcile.ts) trusts this initial list
+      // to detect an already-armed cron trigger, so swallowing a failure here
+      // would make a later Save create a duplicate schedule instead of
+      // replacing the one that failed to load. Let it fail the whole load
+      // instead, same as a `getRoutine` failure below.
       const [routineResponse, triggersResponse] = await Promise.all([
         getRoutine(routineId, { cache: "no-store" }),
-        listRoutineTriggers(routineId, { cache: "no-store" }).catch(() => ({
-          triggers: [] as RoutineTrigger[],
-        })),
+        listRoutineTriggers(routineId, { cache: "no-store" }),
       ]);
-      const routine =
-        (routineResponse as unknown as { routine?: Routine }).routine ??
-        (routineResponse as unknown as Routine);
-      return { routine, triggers: triggersResponse.triggers ?? [] };
+      return { routine: routineResponse, triggers: triggersResponse.triggers ?? [] };
     }
 
     loadRoutineDetail()

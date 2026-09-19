@@ -257,7 +257,9 @@ test.describe("mobile CLI mode: passthrough composer", () => {
       timeout: 5_000,
     });
 
-    await testPage.getByTestId("submit-message-button").tap();
+    const submitButton = composer.getByTestId("submit-message-button");
+    await expect(submitButton).toBeEnabled({ timeout: 10_000 });
+    await submitButton.tap();
     await expect(composer).toBeHidden({ timeout: 10_000 });
 
     await session.expectPassthroughHasText("mobile context e2e", 15_000);

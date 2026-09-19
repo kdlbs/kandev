@@ -545,10 +545,12 @@ type LaunchAgentRequest struct {
 	TaskRepositoryID        string // Exact task_repositories row for worktree recovery
 	RepositoryPath          string // Path to the main repository (for worktree creation)
 	BaseBranch              string // Base branch for the worktree (e.g., "main")
+	IntegrationRef          string // Verified terminal integration target for managed branch compaction
 	DefaultBranch           string // Repository's default_branch, used as a fallback when BaseBranch is missing
 	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
@@ -599,10 +601,12 @@ type RepoSpec struct {
 	RepositoryURL           string
 	RepoName                string
 	BaseBranch              string
+	IntegrationRef          string
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string
@@ -710,6 +714,8 @@ type LaunchAgentResponse struct {
 	WorktreeID                string
 	WorktreePath              string
 	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
 	RequestedBaseBranch       string
 	BaseBranch                string
 	BaseBranchFallbackWarning string
@@ -731,6 +737,8 @@ type RepoWorktreeResult struct {
 	BranchSlug                string
 	WorktreeID                string
 	WorktreeBranch            string
+	WorktreeBranchOwner       string
+	WorktreeIntegrationRef    string
 	WorktreePath              string
 	MainRepoGitDir            string
 	RequestedBaseBranch       string
