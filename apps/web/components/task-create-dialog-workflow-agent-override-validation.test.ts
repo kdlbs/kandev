@@ -38,6 +38,24 @@ const base = {
 };
 
 describe("workflow agent override submit validation", () => {
+  it("treats an omitted snapshot read as an in-flight read", () => {
+    const result = buildWorkflowAgentOverrideValidation({
+      ...base,
+      snapshots: {
+        [WORKFLOW_ID]: {
+          workflowId: WORKFLOW_ID,
+          workflowName: "Workflow",
+          steps: [],
+          tasks: [],
+          isPlaceholder: true,
+        },
+      },
+    });
+
+    expect(result.loading).toBe(true);
+    expect(result.blockedReason).toBeTruthy();
+  });
+
   it("blocks create while the workflow snapshot is loading or failed", () => {
     const loading = buildWorkflowAgentOverrideValidation({
       ...base,

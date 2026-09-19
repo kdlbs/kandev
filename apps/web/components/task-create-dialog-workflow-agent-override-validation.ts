@@ -19,17 +19,15 @@ export type WorkflowAgentOverrideValidation = {
 function resolveSnapshotState(args: {
   effectiveWorkflowId: string | null;
   snapshots: Record<string, WorkflowSnapshotData>;
-  workspaceSnapshotRead: { workspaceId?: string | null; error?: unknown };
+  workspaceSnapshotRead?: { workspaceId?: string | null; error?: unknown };
   workspaceId: string | null | undefined;
 }) {
   const snapshot = args.effectiveWorkflowId ? args.snapshots[args.effectiveWorkflowId] : undefined;
   const missingSnapshot = Boolean(args.effectiveWorkflowId && !snapshot);
+  const workspaceSnapshotRead = args.workspaceSnapshotRead ?? {};
   const readBelongsToWorkspace =
-    !args.workspaceSnapshotRead.workspaceId ||
-    args.workspaceSnapshotRead.workspaceId === args.workspaceId;
-  const error = Boolean(
-    missingSnapshot && args.workspaceSnapshotRead.error && readBelongsToWorkspace,
-  );
+    !workspaceSnapshotRead.workspaceId || workspaceSnapshotRead.workspaceId === args.workspaceId;
+  const error = Boolean(missingSnapshot && workspaceSnapshotRead.error && readBelongsToWorkspace);
   return {
     snapshot,
     error,
@@ -54,7 +52,7 @@ function blockedReasonForValidation(args: {
 export function buildWorkflowAgentOverrideValidation(args: {
   effectiveWorkflowId: string | null | undefined;
   snapshots: Record<string, WorkflowSnapshotData>;
-  workspaceSnapshotRead: {
+  workspaceSnapshotRead?: {
     workspaceId?: string | null;
     error?: unknown;
   };
