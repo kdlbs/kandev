@@ -24,6 +24,14 @@ func validateStartupSettings(cfg *Config) error {
 	errs = append(errs, validateRecoveryReadBudget(cfg)...)
 	errs = append(errs, configuredValidation(cfg, "planning.coalesceWindowMs", cfg.Planning.CoalesceWindowMs < 0, "planning.coalesceWindowMs must be zero or greater")...)
 	errs = append(errs, configuredValidation(cfg, "office.schedulerTickMs", cfg.Office.SchedulerTickMs <= 0, "office.schedulerTickMs must be positive")...)
+	// The 8 REQ-OFFICE-LAUNCH-SAFETY/REQ-OFFICE-BACKPRESSURE launch-safety
+	// keys (maxConcurrentInstance, maxConcurrentWorkspace,
+	// workspaceBudgetPerHour, routineBudgetPerHour, promotionAgeMinutes,
+	// maxCausationDepth, selfTriggerAllowance, gateFailureThreshold) are
+	// deliberately absent here: the spec requires a below-minimum value to
+	// clamp to its documented default and log a warning, not fail startup.
+	// See clampOfficeLaunchSafetyConfig, which runs earlier in Load and
+	// mutates cfg before this function ever sees these fields.
 	errs = append(errs, configuredValidation(cfg, "launcher.webPort", cfg.Launcher.WebPort < 1 || cfg.Launcher.WebPort > 65535, "launcher.webPort must be between 1 and 65535")...)
 	errs = append(errs, configuredValidation(cfg, "launcher.healthTimeoutMs", cfg.Launcher.HealthTimeoutMs <= 0, "launcher.healthTimeoutMs must be positive")...)
 	if len(errs) > 0 {

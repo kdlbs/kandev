@@ -34,6 +34,14 @@ planning:
   coalesceWindowMs: 2400
 office:
   schedulerTickMs: 7000
+  maxConcurrentInstance: 9
+  maxConcurrentWorkspace: 5
+  workspaceBudgetPerHour: 121
+  routineBudgetPerHour: 22
+  promotionAgeMinutes: 16
+  maxCausationDepth: 9
+  selfTriggerAllowance: 4
+  gateFailureThreshold: 5
 observability:
   otlpEndpoint: https://otel.example.test/v1/traces
 launcher:
@@ -85,6 +93,30 @@ launcher:
 	}
 	if got := nestedField(t, cfg, "Office", "SchedulerTickMs"); got.Int() != 7000 {
 		t.Fatalf("office.schedulerTickMs = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "MaxConcurrentInstance"); got.Int() != 9 {
+		t.Fatalf("office.maxConcurrentInstance = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "MaxConcurrentWorkspace"); got.Int() != 5 {
+		t.Fatalf("office.maxConcurrentWorkspace = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "WorkspaceBudgetPerHour"); got.Int() != 121 {
+		t.Fatalf("office.workspaceBudgetPerHour = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "RoutineBudgetPerHour"); got.Int() != 22 {
+		t.Fatalf("office.routineBudgetPerHour = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "PromotionAgeMinutes"); got.Int() != 16 {
+		t.Fatalf("office.promotionAgeMinutes = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "MaxCausationDepth"); got.Int() != 9 {
+		t.Fatalf("office.maxCausationDepth = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "SelfTriggerAllowance"); got.Int() != 4 {
+		t.Fatalf("office.selfTriggerAllowance = %d", got.Int())
+	}
+	if got := nestedField(t, cfg, "Office", "GateFailureThreshold"); got.Int() != 5 {
+		t.Fatalf("office.gateFailureThreshold = %d", got.Int())
 	}
 	if got := nestedField(t, cfg, "Observability", "OTLPEndpoint"); got.String() != "https://otel.example.test/v1/traces" {
 		t.Fatalf("observability.otlpEndpoint = %q", got.String())

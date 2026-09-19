@@ -40,6 +40,20 @@ type CatalogExclusion struct {
 	Reason string
 }
 
+// Office launch-safety catalog keys, shared with yamlOnlyStartupKeys
+// (source.go) and clampOfficeLaunchSafetyConfig (source.go).
+const (
+	officeMaxConcurrentInstanceKey     = "office.maxConcurrentInstance"
+	officeMaxConcurrentWorkspaceKey    = "office.maxConcurrentWorkspace"
+	officeWorkspaceBudgetPerHourKey    = "office.workspaceBudgetPerHour"
+	officeRoutineBudgetPerHourKey      = "office.routineBudgetPerHour"
+	officePromotionAgeMinutesKey       = "office.promotionAgeMinutes"
+	officeMaxCausationDepthKey         = "office.maxCausationDepth"
+	officeSelfTriggerAllowanceKey      = "office.selfTriggerAllowance"
+	officeSelfTriggerTotalAllowanceKey = "office.selfTriggerTotalAllowance"
+	officeGateFailureThresholdKey      = "office.gateFailureThreshold"
+)
+
 var startupCatalog = []CatalogEntry{
 	{Key: "homeDir", EnvVars: []string{"KANDEV_HOME_DIR"}, Owner: "common/config", Default: "~/.kandev"},
 	{Key: "server.host", EnvVars: []string{"KANDEV_SERVER_HOST"}, Owner: "backend", Default: "0.0.0.0"},
@@ -90,6 +104,15 @@ var startupCatalog = []CatalogEntry{
 	{Key: "debug.pprofEnabled", EnvVars: []string{"KANDEV_DEBUG_PPROF_ENABLED"}, Owner: "debug", Default: "false"},
 	{Key: "office.jwtSigningKey", EnvVars: []string{"KANDEV_OFFICE_JWTSIGNINGKEY"}, Owner: "office", Default: "random per start", Sensitive: true},
 	{Key: "office.schedulerTickMs", EnvVars: []string{"KANDEV_OFFICE_SCHEDULER_TICK_MS"}, Owner: "office", Default: "5000"},
+	{Key: officeMaxConcurrentInstanceKey, EnvVars: []string{"KANDEV_OFFICE_MAX_CONCURRENT_INSTANCE"}, Owner: "office", Default: "8"},
+	{Key: officeMaxConcurrentWorkspaceKey, EnvVars: []string{"KANDEV_OFFICE_MAX_CONCURRENT_WORKSPACE"}, Owner: "office", Default: "4"},
+	{Key: officeWorkspaceBudgetPerHourKey, EnvVars: []string{"KANDEV_OFFICE_WORKSPACE_BUDGET_PER_HOUR"}, Owner: "office", Default: "120"},
+	{Key: officeRoutineBudgetPerHourKey, EnvVars: []string{"KANDEV_OFFICE_ROUTINE_BUDGET_PER_HOUR"}, Owner: "office", Default: "20"},
+	{Key: officePromotionAgeMinutesKey, EnvVars: []string{"KANDEV_OFFICE_PROMOTION_AGE_MINUTES"}, Owner: "office", Default: "15"},
+	{Key: officeMaxCausationDepthKey, EnvVars: []string{"KANDEV_OFFICE_MAX_CAUSATION_DEPTH"}, Owner: "office", Default: "8"},
+	{Key: officeSelfTriggerAllowanceKey, EnvVars: []string{"KANDEV_OFFICE_SELF_TRIGGER_ALLOWANCE"}, Owner: "office", Default: "3"},
+	{Key: officeSelfTriggerTotalAllowanceKey, EnvVars: []string{"KANDEV_OFFICE_SELF_TRIGGER_TOTAL_ALLOWANCE"}, Owner: "office", Default: "8"},
+	{Key: officeGateFailureThresholdKey, EnvVars: []string{"KANDEV_OFFICE_GATE_FAILURE_THRESHOLD"}, Owner: "office", Default: "3"},
 	{Key: "githubCredentialBroker.publicBaseUrl", EnvVars: []string{"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL"}, Owner: "github credential broker", Default: ""},
 	{Key: "tasks.preparationTimeout", EnvVars: []string{"KANDEV_TASK_PREPARATION_TIMEOUT"}, Owner: "task lifecycle", Default: "10m"},
 	{Key: "credentials.file", EnvVars: []string{"KANDEV_CREDENTIALS_FILE"}, Owner: "credentials", Default: ""},

@@ -66,6 +66,7 @@ func (r *Repository) runMigrations() error {
 	r.migrateWakeWaveColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	r.migrateLaunchSafetyColumns()
 	r.migrateRoutineCatchUp()
 	r.migrateBudgetPolicyRevision()
 	r.migrateWorkspacePauseSkipAttribution()
@@ -151,6 +152,14 @@ func (r *Repository) migrateWorkspacePauseSkipAttribution() {
 // its own partial index (excluding "") so a backward correlation walk
 // from a run to its originating fire is a direct lookup on every
 // dialect, not a table scan — NFR-2 is symmetric with the forward walk.
+//
+// runs.causation_id here is REQ-OFFICE-LOOP-LIVENESS-002's column, copied
+// from the wakeup request that created the run — a distinct column and a
+// distinct concept from runs.chain_causation_id below
+// (REQ-OFFICE-RUN-CAUSATION-001's launch-safety causation chain). The two
+// features were built independently and both reached for the name
+// "causation id"; they do not describe the same lineage and must not share
+// a column. See docs/decisions/2026-09-17-separate-loop-liveness-and-launch-safety-causation-ids.md.
 func (r *Repository) migrateLoopLivenessCausationID() {
 	_ = r.migrate.Apply("office_routine_runs.causation_id",
 		`ALTER TABLE office_routine_runs ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
@@ -190,6 +199,116 @@ func (r *Repository) migrateRetentionIndexes() error {
 		`CREATE INDEX IF NOT EXISTS idx_runs_retention
 			ON runs(agent_profile_id, status, (COALESCE(finished_at, requested_at)) DESC, id DESC)`,
 	)
+}
+
+// migrateLaunchSafetyColumns adds the nine chain-causation/priority/actor/
+// workspace columns to runs (docs/specs/office/requirements/
+// run-causation-chain.md, launch-backpressure.md) for databases created
+// before this capability, plus the two new tables it introduces. Every
+// ALTER is NOT NULL with a default so existing rows converge in place: an
+// empty chain_causation_id is the legacy marker AC-OFFICE-RUN-CAUSATION-001.6
+// reads as "its own root at depth 0", and the fresh-install CREATE TABLE
+// in base.go carries the identical column set inline.
+//
+// This column is named chain_causation_id, not causation_id, to stay
+// distinct from runs.causation_id above (REQ-OFFICE-LOOP-LIVENESS-002),
+// which already occupies that name for an unrelated wakeup-request
+// correlation. See the doc comment on migrateLoopLivenessCausationID.
+func (r *Repository) migrateLaunchSafetyColumns() {
+	_ = r.migrate.Apply("runs.chain_causation_id",
+		`ALTER TABLE runs ADD COLUMN chain_causation_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("runs.parent_run_id",
+		`ALTER TABLE runs ADD COLUMN parent_run_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("runs.causation_depth",
+		`ALTER TABLE runs ADD COLUMN causation_depth INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("runs.priority_class",
+		`ALTER TABLE runs ADD COLUMN priority_class INTEGER NOT NULL DEFAULT 2`)
+	_ = r.migrate.Apply("runs.human_rooted",
+		`ALTER TABLE runs ADD COLUMN human_rooted INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("runs.routine_id",
+		`ALTER TABLE runs ADD COLUMN routine_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("runs.actor_kind",
+		`ALTER TABLE runs ADD COLUMN actor_kind TEXT NOT NULL DEFAULT 'system'`)
+	_ = r.migrate.Apply("runs.actor_id",
+		`ALTER TABLE runs ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("runs.workspace_id",
+		`ALTER TABLE runs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`)
+	r.backfillLaunchSafetyWorkspaceIDs()
+
+	// Indexes reference the new columns, so they run after the ADD
+	// COLUMN statements above rather than in schema init.
+	_ = r.migrate.Apply("idx_run_chain_causation_id",
+		`CREATE INDEX IF NOT EXISTS idx_run_chain_causation_id ON runs(chain_causation_id)`)
+	_ = r.migrate.Apply("idx_run_claim_order",
+		`CREATE INDEX IF NOT EXISTS idx_run_claim_order ON runs(status, priority_class, requested_at, id)`)
+	_ = r.migrate.Apply("idx_run_self_trigger_window",
+		`CREATE INDEX IF NOT EXISTS idx_run_self_trigger_window ON runs(agent_profile_id, reason, actor_id, requested_at)`)
+	_ = r.migrate.Apply("idx_run_self_trigger_total_window",
+		`CREATE INDEX IF NOT EXISTS idx_run_self_trigger_total_window ON runs(agent_profile_id, actor_id, requested_at)`)
+
+	_, _ = r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS office_launch_ledger (
+		id           TEXT      PRIMARY KEY,
+		run_id       TEXT      NOT NULL,
+		workspace_id TEXT      NOT NULL,
+		causation_id TEXT      NOT NULL DEFAULT '',
+		routine_id   TEXT      NOT NULL DEFAULT '',
+		human_rooted INTEGER   NOT NULL DEFAULT 0,
+		claimed_at   TIMESTAMP NOT NULL
+	)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_launch_ledger_ws_time ON office_launch_ledger(workspace_id, claimed_at)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_launch_ledger_routine_time ON office_launch_ledger(routine_id, claimed_at)`)
+
+	_, _ = r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS office_gate_failure_state (
+		workspace_id         TEXT      NOT NULL,
+		gate                 TEXT      NOT NULL,
+		consecutive_failures INTEGER   NOT NULL DEFAULT 0,
+		last_escalation_at   TIMESTAMP,
+		updated_at           TIMESTAMP NOT NULL,
+		PRIMARY KEY (workspace_id, gate)
+	)`)
+
+	_, _ = r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS office_causation_refusal (
+		id               TEXT      PRIMARY KEY,
+		workspace_id     TEXT      NOT NULL,
+		gate             TEXT      NOT NULL,
+		agent_profile_id TEXT      NOT NULL,
+		causation_id     TEXT      NOT NULL DEFAULT '',
+		causation_depth  INTEGER   NOT NULL DEFAULT 0,
+		reason           TEXT      NOT NULL DEFAULT '',
+		refused_at       TIMESTAMP NOT NULL
+	)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_causation_refusal_ws_time ON office_causation_refusal(workspace_id, refused_at)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_causation_refusal_agent_time ON office_causation_refusal(agent_profile_id, refused_at)`)
+}
+
+// backfillLaunchSafetyWorkspaceIDs repairs runs.workspace_id for runs still
+// active (queued/claimed) when the ADD COLUMN migration above ran: their
+// workspace_id starts as ” regardless of which workspace they belong to,
+// which pools every such legacy run into the shared empty-bucket for
+// per-workspace concurrency ceilings and budgets
+// (AC-OFFICE-RUN-CAUSATION-001.19) instead of scoping it correctly. Only
+// active rows are repaired; a finished run's workspace_id is historical and
+// not read by any ceiling or budget check. A database that has not yet run
+// the agent-settings migrations (agent_profiles missing) fails this step
+// exactly like every other statement in this file: logged and swallowed,
+// non-fatal to boot.
+func (r *Repository) backfillLaunchSafetyWorkspaceIDs() {
+	stmt := r.db.Rebind(`
+		UPDATE runs SET workspace_id = (
+			SELECT workspace_id FROM agent_profiles WHERE id = runs.agent_profile_id
+		)
+		WHERE workspace_id = ''
+		  AND status IN ('queued', 'claimed')
+		  AND EXISTS (SELECT 1 FROM agent_profiles WHERE id = runs.agent_profile_id)
+	`)
+	if _, err := r.db.Exec(stmt); err != nil {
+		if r.log != nil {
+			r.log.Warn("launch safety workspace_id backfill failed", zap.Error(err))
+		}
+	}
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases

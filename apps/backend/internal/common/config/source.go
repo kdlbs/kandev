@@ -82,6 +82,15 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"agentctl.detachedEventLimit":        {},
 	"planning.coalesceWindowMs":          {},
 	"office.schedulerTickMs":             {},
+	officeMaxConcurrentInstanceKey:       {},
+	officeMaxConcurrentWorkspaceKey:      {},
+	officeWorkspaceBudgetPerHourKey:      {},
+	officeRoutineBudgetPerHourKey:        {},
+	officePromotionAgeMinutesKey:         {},
+	officeMaxCausationDepthKey:           {},
+	officeSelfTriggerAllowanceKey:        {},
+	officeSelfTriggerTotalAllowanceKey:   {},
+	officeGateFailureThresholdKey:        {},
 	"observability.otlpEndpoint":         {},
 	"launcher.webPort":                   {},
 	"launcher.healthTimeoutMs":           {},
@@ -303,6 +312,15 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultInt("agentctl.detachedEventLimit", &cfg.Agentctl.DetachedEventLimit, 100)
 	setDefaultInt("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000)
 	setDefaultInt("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000)
+	setDefaultInt("office.maxConcurrentInstance", &cfg.Office.MaxConcurrentInstance, 8)
+	setDefaultInt("office.maxConcurrentWorkspace", &cfg.Office.MaxConcurrentWorkspace, 4)
+	setDefaultInt("office.workspaceBudgetPerHour", &cfg.Office.WorkspaceBudgetPerHour, 120)
+	setDefaultInt("office.routineBudgetPerHour", &cfg.Office.RoutineBudgetPerHour, 20)
+	setDefaultInt("office.promotionAgeMinutes", &cfg.Office.PromotionAgeMinutes, 15)
+	setDefaultInt("office.maxCausationDepth", &cfg.Office.MaxCausationDepth, 8)
+	setDefaultInt("office.selfTriggerAllowance", &cfg.Office.SelfTriggerAllowance, 3)
+	setDefaultInt("office.selfTriggerTotalAllowance", &cfg.Office.SelfTriggerTotalAllowance, 8)
+	setDefaultInt("office.gateFailureThreshold", &cfg.Office.GateFailureThreshold, 3)
 	if !yamlKeys["observability.otlpEndpoint"] {
 		cfg.Observability.OTLPEndpoint = ""
 	}
@@ -336,10 +354,71 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	// instead of silently substituting the built-in default.
 	applyNonNegativeIntEnv("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000, envSnapshot, sources)
 	applyPositiveIntEnv("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxConcurrentInstance", &cfg.Office.MaxConcurrentInstance, 8, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxConcurrentWorkspace", &cfg.Office.MaxConcurrentWorkspace, 4, envSnapshot, sources)
+	applyPositiveIntEnv("office.workspaceBudgetPerHour", &cfg.Office.WorkspaceBudgetPerHour, 120, envSnapshot, sources)
+	applyPositiveIntEnv("office.routineBudgetPerHour", &cfg.Office.RoutineBudgetPerHour, 20, envSnapshot, sources)
+	applyPositiveIntEnv("office.promotionAgeMinutes", &cfg.Office.PromotionAgeMinutes, 15, envSnapshot, sources)
+	applyPositiveIntEnv("office.maxCausationDepth", &cfg.Office.MaxCausationDepth, 8, envSnapshot, sources)
+	applyPositiveIntEnv("office.selfTriggerAllowance", &cfg.Office.SelfTriggerAllowance, 3, envSnapshot, sources)
+	applyPositiveIntEnv("office.selfTriggerTotalAllowance", &cfg.Office.SelfTriggerTotalAllowance, 8, envSnapshot, sources)
+	applyPositiveIntEnv("office.gateFailureThreshold", &cfg.Office.GateFailureThreshold, 3, envSnapshot, sources)
 	applyStringEnvAllowEmpty("observability.otlpEndpoint", &cfg.Observability.OTLPEndpoint, envSnapshot, sources)
 	applyBoundedIntEnv("launcher.webPort", &cfg.Launcher.WebPort, 0, 1, 65535, envSnapshot, sources)
 	applyPositiveIntEnv("launcher.healthTimeoutMs", &cfg.Launcher.HealthTimeoutMs, launcherHealthTimeoutDefault(), envSnapshot, sources)
 	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
+}
+
+// clampOfficeLaunchSafetyConfig clamps a below-minimum office.*
+// launch-safety value to its documented default and returns a warning
+// naming the key and the rejected value, per
+// AC-OFFICE-LAUNCH-SAFETY-001.5/003.1/004.3/004.8/005.1 and
+// AC-OFFICE-BACKPRESSURE-002.1/003.5: these values must degrade to their
+// default and let boot proceed, not fail startup. Defaults here must stay
+// in sync with applyStartupDefaults's and applyStartupEnvironment's
+// literals for the same keys. Only a YAML-sourced value can still be
+// invalid by the point this runs: applyStartupEnvironment's env path and
+// applyStartupDefaults's default path already resolve to a value >= 1.
+// This is also where the two self-trigger allowances are resolved
+// against each other: AC-OFFICE-LAUNCH-SAFETY-004.8 permits (and does
+// not clamp) a configured total below the per-reason value, but requires
+// a warn-level log naming that the total is now the binding limit.
+func clampOfficeLaunchSafetyConfig(cfg *Config) []string {
+	entries := []struct {
+		key   string
+		value *int
+		def   int
+	}{
+		{officeMaxConcurrentInstanceKey, &cfg.Office.MaxConcurrentInstance, 8},
+		{officeMaxConcurrentWorkspaceKey, &cfg.Office.MaxConcurrentWorkspace, 4},
+		{officeWorkspaceBudgetPerHourKey, &cfg.Office.WorkspaceBudgetPerHour, 120},
+		{officeRoutineBudgetPerHourKey, &cfg.Office.RoutineBudgetPerHour, 20},
+		{officePromotionAgeMinutesKey, &cfg.Office.PromotionAgeMinutes, 15},
+		{officeMaxCausationDepthKey, &cfg.Office.MaxCausationDepth, 8},
+		{officeSelfTriggerAllowanceKey, &cfg.Office.SelfTriggerAllowance, 3},
+		{officeSelfTriggerTotalAllowanceKey, &cfg.Office.SelfTriggerTotalAllowance, 8},
+		{officeGateFailureThresholdKey, &cfg.Office.GateFailureThreshold, 3},
+	}
+	var warnings []string
+	for _, e := range entries {
+		if *e.value >= 1 {
+			continue
+		}
+		warning := fmt.Sprintf("%s is configured as %d, which is below the minimum of 1; using the default %d instead", e.key, *e.value, e.def)
+		log.Print(warning)
+		warnings = append(warnings, warning)
+		*e.value = e.def
+	}
+	if cfg.Office.SelfTriggerTotalAllowance < cfg.Office.SelfTriggerAllowance {
+		warning := fmt.Sprintf(
+			"%s is configured as %d, below %s's %d; the total allowance is binding and the per-reason allowance is unreachable",
+			officeSelfTriggerTotalAllowanceKey, cfg.Office.SelfTriggerTotalAllowance,
+			officeSelfTriggerAllowanceKey, cfg.Office.SelfTriggerAllowance,
+		)
+		log.Print(warning)
+		warnings = append(warnings, warning)
+	}
+	return warnings
 }
 
 func launcherHealthTimeoutDefault() int {
@@ -446,7 +525,14 @@ func applyBoundedIntEnv(key string, target *int, fallback, minimum, maximum int,
 		return
 	}
 	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || parsed < minimum || parsed > maximum {
+	if err != nil {
+		log.Printf("environment override for %s (%q) is not a valid integer; using default %d", key, raw, fallback)
+		*target = fallback
+		sources[key] = SourceDefault
+		return
+	}
+	if parsed < minimum || parsed > maximum {
+		log.Printf("environment override for %s (%d) is out of range [%d,%d]; using default %d", key, parsed, minimum, maximum, fallback)
 		*target = fallback
 		sources[key] = SourceDefault
 		return

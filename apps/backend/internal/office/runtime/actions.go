@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -20,6 +21,9 @@ type CommentWriter interface {
 
 // TaskCreator is the task mutation dependency used by runtime actions.
 type TaskCreator interface {
+	// CreateOfficeTaskAsAgent's causingRunID is the run this task creation
+	// happened inside (AC-OFFICE-RUN-CAUSATION-001.5), empty when there is
+	// none.
 	CreateOfficeTaskAsAgent(
 		ctx context.Context,
 		callerAgentID string,
@@ -28,7 +32,11 @@ type TaskCreator interface {
 		assigneeAgentID string,
 		title string,
 		description string,
+		causingRunID string,
 	) (string, error)
+	// CreateOfficeSubtaskAsAgent's causingRunID is the run this subtask
+	// creation happened inside (AC-OFFICE-RUN-CAUSATION-001.5), empty when
+	// there is none.
 	CreateOfficeSubtaskAsAgent(
 		ctx context.Context,
 		callerAgentID string,
@@ -36,6 +44,7 @@ type TaskCreator interface {
 		assigneeAgentID string,
 		title string,
 		description string,
+		causingRunID string,
 	) (string, error)
 	GetTaskWorkspaceID(ctx context.Context, taskID string) (string, error)
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -79,6 +88,9 @@ func (i CreateTaskInput) unsupportedField() string {
 }
 
 // CreateTask creates a root Office task or a child of the requested parent.
+// Both are an Office trigger (AC-OFFICE-RUN-CAUSATION-001.5): runCtx.RunID
+// is threaded through as the causing run, so the task-boundary causation
+// carrier gets persisted on the new task either way.
 func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input CreateTaskInput) (string, error) {
 	if input.ParentTaskID != "" {
 		if !runCtx.Capabilities.Allows(CapabilityCreateSubtask) {
@@ -112,10 +124,12 @@ func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input Creat
 	if input.ParentTaskID != "" {
 		return a.deps.Tasks.CreateOfficeSubtaskAsAgent(
 			ctx, runCtx.AgentID, input.ParentTaskID, input.AssigneeAgentID, input.Title, input.Description,
+			runCtx.RunID,
 		)
 	}
 	return a.deps.Tasks.CreateOfficeTaskAsAgent(
 		ctx, runCtx.AgentID, runCtx.WorkspaceID, input.ProjectID, input.AssigneeAgentID, input.Title, input.Description,
+		runCtx.RunID,
 	)
 }
 
@@ -255,7 +269,12 @@ type ApprovalRequester interface {
 
 // RunSpawner is the run queue dependency used by runtime actions.
 type RunSpawner interface {
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
+	QueueRunWithActor(
+		ctx context.Context,
+		agentInstanceID, reason, payload, idempotencyKey string,
+		actorKind models.ActorKind, actorID string,
+		causingRunID string,
+	) (runsservice.QueueOutcome, error)
 }
 
 // AgentModifier is the agent update dependency used by runtime actions.
@@ -531,6 +550,7 @@ func (a *Actions) CreateSubtask(
 		input.AssigneeAgentID,
 		input.Title,
 		input.Description,
+		runCtx.RunID,
 	)
 }
 
@@ -632,7 +652,18 @@ type SpawnAgentRunInput struct {
 // evict, so an unbounded Reason would let a caller grow them without limit.
 const maxSpawnAgentRunReasonLength = 100
 
-// SpawnAgentRun queues a run for an agent in the same workspace.
+// SpawnAgentRun queues a run for an agent in the same workspace, attributed
+// to the invoking agent (runCtx.AgentID) as the actor
+// (AC-OFFICE-RUN-CAUSATION-001.15) and chained to the invoking run
+// (runCtx.RunID) as its causing run (AC-OFFICE-RUN-CAUSATION-001.3/.4): a
+// run queued by a runtime action is attributed to the run that performed
+// it, and inherits its causation depth plus one rather than rooting a new
+// chain. This is always a genuine agent actor and a genuine causing run:
+// this method only runs inside an already-executing agent's own tool-call
+// session, so runCtx.AgentID/RunID are never empty or unverified. When the
+// target agent is the invoking agent itself, this is exactly the
+// self-trigger case REQ-OFFICE-LAUNCH-SAFETY-004's refusal gate exists to
+// bound.
 //
 // A non-empty agent-supplied key is prefixed with the calling run's id
 // (agent:<callerRunID>:<key>) so a retry of the same run reuses the run id
@@ -655,6 +686,15 @@ func (a *Actions) SpawnAgentRun(
 	}
 	if len(input.Reason) > maxSpawnAgentRunReasonLength {
 		return ErrReasonTooLong
+	}
+	// AC-OFFICE-LAUNCH-SAFETY-004.3: an agent-requested enqueue must name a
+	// registry member, not free text of its own choosing (the empty string
+	// included). This runs before the authoritative enqueue and before any
+	// dependency lookup, so it is not one of the ordered refusal gates,
+	// records no idempotency key, and consumes neither self-trigger
+	// allowance.
+	if _, ok := shared.WakeReasonRegistry[input.Reason]; !ok {
+		return fmt.Errorf("%w: %q", ErrInvalidWakeReason, input.Reason)
 	}
 	target, err := a.deps.AgentModifier.GetAgentInstance(ctx, input.AgentID)
 	if err != nil {
@@ -680,7 +720,8 @@ func (a *Actions) SpawnAgentRun(
 	default:
 		runsservice.ReportKeylessEnqueue(input.Reason, runsservice.KeylessCauseUnresolved, "no_caller_run")
 	}
-	_, err = a.deps.Runs.QueueRun(ctx, target.ID, input.Reason, string(payload), key)
+	_, err = a.deps.Runs.QueueRunWithActor(ctx, target.ID, input.Reason, string(payload),
+		key, models.ActorKindAgent, runCtx.AgentID, runCtx.RunID)
 	return err
 }
 

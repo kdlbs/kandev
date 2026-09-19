@@ -18,14 +18,21 @@ func cloneTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
 }
 
 // protectedTaskMetadataUpdate applies a generic metadata replacement while
-// keeping server-managed deferred-launch and step-handoff records owned by the
-// server. The HTTP PATCH surface may replace ordinary metadata, but it cannot
-// create, replace, or remove either record.
+// keeping server-managed deferred-launch and step-handoff records, and the
+// task-boundary causation carrier (AC-OFFICE-RUN-CAUSATION-001.17/.18),
+// owned by the server. The HTTP PATCH surface may replace ordinary
+// metadata, but it cannot create, replace, or remove the deferred-launch or
+// step-handoff records, and it can never set, reset, or lower the causation
+// carrier — no update path writes that carrier, so any office_carrier_* key
+// in the request is always stripped, then the task's own existing carrier
+// (if any) is restored in its place.
 func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map[string]interface{} {
 	updated := cloneTaskMetadata(requested)
 	if updated == nil {
 		updated = make(map[string]interface{})
 	}
+	models.StripOfficeCarrierMetadata(updated)
+	models.RestoreOfficeCarrierMetadata(updated, existing)
 	if deferred, ok := existing[models.MetaKeyDeferredLaunch]; ok {
 		updated[models.MetaKeyDeferredLaunch] = deferred
 	} else {

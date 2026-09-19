@@ -105,6 +105,7 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 		log:        log,
 		migrate:    db.NewRequiredMigrateLogger(writer, log),
 	}
+	repo.SetLogger(log)
 	if err := repo.initSchema(); err != nil {
 		return nil, fmt.Errorf("failed to initialize office schema: %w", err)
 	}
@@ -468,10 +469,32 @@ func (r *Repository) createRunTables() error {
 		causation_id TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
-		finished_at TIMESTAMP
+		finished_at TIMESTAMP,
+		-- Causation chain identity, priority class, actor and workspace
+		-- (docs/specs/office/requirements/run-causation-chain.md,
+		-- launch-backpressure.md). Kept byte-identical to
+		-- migrateLaunchSafetyColumns's ADD COLUMN set so a fresh database
+		-- and a migrated one converge on the same shape. Named
+		-- chain_causation_id, not causation_id, to stay distinct from the
+		-- office-loop-liveness causation_id column above.
+		chain_causation_id TEXT NOT NULL DEFAULT '',
+		parent_run_id TEXT NOT NULL DEFAULT '',
+		causation_depth INTEGER NOT NULL DEFAULT 0,
+		priority_class INTEGER NOT NULL DEFAULT 2,
+		human_rooted INTEGER NOT NULL DEFAULT 0,
+		routine_id TEXT NOT NULL DEFAULT '',
+		actor_kind TEXT NOT NULL DEFAULT 'system',
+		actor_id TEXT NOT NULL DEFAULT '',
+		workspace_id TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
+	-- The causation_id/priority_class/actor_id indexes are declared in
+	-- migrateLaunchSafetyColumns, after the ADD COLUMN statements that
+	-- create those columns on an existing database, not here: this block
+	-- runs before runMigrations, so an index on a not-yet-added column
+	-- would fail the whole boot on any database that already has a runs
+	-- table.
 
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,

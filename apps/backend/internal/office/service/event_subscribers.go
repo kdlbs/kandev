@@ -1287,8 +1287,7 @@ func (s *Service) queueTaskAssignedRun(
 	} else {
 		key = dedupkeys.AssignmentKey(taskID, agentProfileID, *assignmentGeneration)
 	}
-	_, err = s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
-	return err
+	return s.QueueRunFromTaskBoundary(ctx, agentProfileID, RunReasonTaskAssigned, payload, key, taskID)
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues

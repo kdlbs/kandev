@@ -7049,6 +7049,7 @@ func assembleMachineState(task *models.Task, session *models.TaskSession, isPass
 	}
 	state.SessionID = session.ID
 	state.SessionState = string(session.State)
+	state.AgentProfileID = session.AgentProfileID
 	if session.Metadata != nil {
 		if wd, ok := session.Metadata["workflow_data"].(map[string]any); ok {
 			state.Data = wd

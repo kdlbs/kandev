@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
-	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -64,6 +63,30 @@ type AgentWriter interface {
 	UpdateAgentStatusFields(ctx context.Context, agentID, status, pauseReason string) error
 }
 
+// QueueOutcome reports what a RunQueuer.QueueRun call actually did. It
+// deliberately duplicates internal/runs/service.QueueOutcome (and
+// internal/workflow/engine.QueueOutcome) as its own independent string type
+// and constants rather than importing runs/service: that package already
+// imports office/shared (for the launch-safety counters and
+// ClassifyPriority causation.go depends on), so a shared->runsservice
+// import here would be an import cycle. TestQueueOutcomeMatchesRunsService
+// pins the two declarations to identical values.
+type QueueOutcome string
+
+const (
+	// QueueOutcomeQueued means a new runs row was inserted.
+	QueueOutcomeQueued QueueOutcome = "queued"
+	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
+	// already existed and no new row was inserted.
+	QueueOutcomeDeduped QueueOutcome = "deduped"
+	// QueueOutcomeCoalesced means the request was merged into an existing
+	// pending run rather than creating a new one.
+	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+	// QueueOutcomeNone means no enqueue was attempted, or the attempt
+	// returned an error before any outcome was determined.
+	QueueOutcomeNone QueueOutcome = ""
+)
+
 // RunQueuer enqueues run requests for agent instances.
 // Implemented by the run feature (and transitionally by office/service.Service).
 type RunQueuer interface {
@@ -72,7 +95,7 @@ type RunQueuer interface {
 	// returned QueueOutcome reports what actually happened (queued / deduped /
 	// coalesced / none-on-error) so callers that need to distinguish a fresh
 	// insert from a no-op don't have to infer it from side effects.
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
+	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (QueueOutcome, error)
 }
 
 // WorkflowEngineDispatcher routes typed office task events through the

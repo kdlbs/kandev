@@ -165,6 +165,7 @@ func TestActionsCreateSubtaskPreservesCallerIdentity(t *testing.T) {
 		AgentID:     "agent-1",
 		WorkspaceID: "ws-1",
 		TaskID:      "task-parent",
+		RunID:       "run-1",
 		Capabilities: Capabilities{
 			CanCreateSubtasks: true,
 		},
@@ -190,6 +191,12 @@ func TestActionsCreateSubtaskPreservesCallerIdentity(t *testing.T) {
 	}
 	if call.ParentTaskID != "task-parent" || call.AssigneeAgentID != "agent-2" {
 		t.Fatalf("unexpected task routing: %+v", call)
+	}
+	// AC-OFFICE-RUN-CAUSATION-001.5: a subtask creation is an Office
+	// trigger exactly like a root task creation, so the invoking run must
+	// reach the task creator as the causing run.
+	if call.CausingRunID != "run-1" {
+		t.Errorf("causingRunID = %q, want run-1 (the invoking run)", call.CausingRunID)
 	}
 }
 
@@ -276,7 +283,7 @@ func TestActionsCreateTaskWithParentUsesScopedSubtaskCapability(t *testing.T) {
 	}}
 	actions := NewActions(ActionDependencies{Tasks: creator})
 	runCtx := RunContext{
-		AgentID: "agent-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		AgentID: "agent-1", WorkspaceID: "ws-1", TaskID: "task-1", RunID: "run-1",
 		Capabilities: Capabilities{
 			CanCreateSubtasks: true,
 			AllowedTaskIDs:    []string{"parent-1"},
@@ -291,6 +298,12 @@ func TestActionsCreateTaskWithParentUsesScopedSubtaskCapability(t *testing.T) {
 	}
 	if taskID != "child-1" || len(creator.calls) != 1 || creator.calls[0].ParentTaskID != "parent-1" {
 		t.Fatalf("task id/calls = %q/%#v", taskID, creator.calls)
+	}
+	// AC-OFFICE-RUN-CAUSATION-001.5: CreateTask's parent-task branch is the
+	// same Office trigger as CreateSubtask; it must thread the invoking run
+	// through identically.
+	if creator.calls[0].CausingRunID != "run-1" {
+		t.Errorf("causingRunID = %q, want run-1 (the invoking run)", creator.calls[0].CausingRunID)
 	}
 }
 
@@ -1055,6 +1068,194 @@ func TestActionsSpawnAgentRunDeniesCrossWorkspaceTarget(t *testing.T) {
 	}
 }
 
+// TestActionsSpawnAgentRunThreadsInvokingAgentAsActor covers
+// AC-OFFICE-RUN-CAUSATION-001.15: SpawnAgentRun previously always called the
+// actor-blind QueueRun, so a run spawned by one agent for another was
+// silently attributed to the system actor even though the invoking agent's
+// identity (runCtx.AgentID) was already known. It must now reach
+// QueueRunWithActor as (ActorKindAgent, runCtx.AgentID), and additionally
+// carry runCtx.RunID as the causing run id (AC-OFFICE-RUN-CAUSATION-001.3/.4)
+// so the spawned run chains off the run that spawned it instead of rooting
+// its own causation chain.
+func TestActionsSpawnAgentRunThreadsInvokingAgentAsActor(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-2": {ID: "agent-2", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		RunID:       "run-1",
+		Capabilities: Capabilities{
+			CanSpawnAgentRun: true,
+		},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-2",
+		Reason:  "heartbeat",
+	})
+	if err != nil {
+		t.Fatalf("spawn agent run: %v", err)
+	}
+	if len(runs.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runs.calls))
+	}
+	call := runs.calls[0]
+	if call.AgentID != "agent-2" {
+		t.Errorf("agent_id = %q, want agent-2", call.AgentID)
+	}
+	if call.ActorKind != models.ActorKindAgent {
+		t.Errorf("actorKind = %q, want %q", call.ActorKind, models.ActorKindAgent)
+	}
+	if call.ActorID != "agent-1" {
+		t.Errorf("actorID = %q, want agent-1 (the invoking agent)", call.ActorID)
+	}
+	if call.CausingRunID != "run-1" {
+		t.Errorf("causingRunID = %q, want run-1 (the invoking run)", call.CausingRunID)
+	}
+}
+
+// TestActionsSpawnAgentRunSelfTargetThreadsMatchingActor pins the
+// self-trigger case: when an agent spawns a run for itself, the actor id
+// and the target agent id must be the same value, since that equality is
+// exactly what REQ-OFFICE-LAUNCH-SAFETY-004's self-trigger refusal gate
+// keys on downstream (runs/service.checkSelfTriggerAllowance).
+func TestActionsSpawnAgentRunSelfTargetThreadsMatchingActor(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-1": {ID: "agent-1", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		Capabilities: Capabilities{
+			CanSpawnAgentRun: true,
+		},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-1",
+		Reason:  shared.RunReasonHeartbeat,
+	})
+	if err != nil {
+		t.Fatalf("spawn agent run: %v", err)
+	}
+	if len(runs.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(runs.calls))
+	}
+	call := runs.calls[0]
+	if call.AgentID != call.ActorID {
+		t.Errorf("agent_id = %q, actorID = %q, want equal for a self-targeted spawn",
+			call.AgentID, call.ActorID)
+	}
+}
+
+// TestActionsSpawnAgentRunRejectsReasonOutsideRegistry pins
+// AC-OFFICE-LAUNCH-SAFETY-004.3: an agent-requested enqueue must name a
+// reason that is a member of the declared wake-reason registry, not free
+// text of its own choosing. Rejecting it here, before QueueRunWithActor is
+// ever called, is what closes the self-trigger allowance bypass: a free
+// reason lets an agent spread its wakes across arbitrarily many distinct
+// per-reason buckets.
+func TestActionsSpawnAgentRunRejectsReasonOutsideRegistry(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-1": {ID: "agent-1", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		Capabilities: Capabilities{
+			CanSpawnAgentRun: true,
+		},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-1",
+		Reason:  "whatever-reason-the-agent-invents",
+	})
+	if !errors.Is(err, ErrInvalidWakeReason) {
+		t.Fatalf("err = %v, want ErrInvalidWakeReason", err)
+	}
+	if len(runs.calls) != 0 {
+		t.Fatal("run spawner should not be called for a reason outside the registry")
+	}
+}
+
+// TestActionsSpawnAgentRunRejectsEmptyReason pins AC-OFFICE-LAUNCH-SAFETY-004.3's
+// explicit "the empty string included" clause.
+func TestActionsSpawnAgentRunRejectsEmptyReason(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-1": {ID: "agent-1", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		Capabilities: Capabilities{
+			CanSpawnAgentRun: true,
+		},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-1",
+		Reason:  "",
+	})
+	if !errors.Is(err, ErrInvalidWakeReason) {
+		t.Fatalf("err = %v, want ErrInvalidWakeReason", err)
+	}
+	if len(runs.calls) != 0 {
+		t.Fatal("run spawner should not be called for an empty reason")
+	}
+}
+
+// TestActionsSpawnAgentRunAcceptsEveryRegistryReason pins the positive
+// side of AC-OFFICE-LAUNCH-SAFETY-004.3: every reason actually declared in
+// shared.WakeReasonRegistry must still be accepted, so the new guard
+// narrows to exactly the registry rather than an accidental subset of it.
+func TestActionsSpawnAgentRunAcceptsEveryRegistryReason(t *testing.T) {
+	for reason := range shared.WakeReasonRegistry {
+		reason := reason
+		t.Run(reason, func(t *testing.T) {
+			agents := &recordingAgentModifier{
+				agents: map[string]*models.AgentInstance{
+					"agent-2": {ID: "agent-2", WorkspaceID: "ws-1"},
+				},
+			}
+			runs := &recordingRunSpawner{}
+			actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+			runCtx := RunContext{
+				AgentID:     "agent-1",
+				WorkspaceID: "ws-1",
+				Capabilities: Capabilities{
+					CanSpawnAgentRun: true,
+				},
+			}
+
+			err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+				AgentID: "agent-2",
+				Reason:  reason,
+			})
+			if err != nil {
+				t.Fatalf("spawn agent run with registry reason %q: %v", reason, err)
+			}
+		})
+	}
+}
+
 func TestActionsModifyAgentUpdatesSameWorkspaceAgent(t *testing.T) {
 	name := "Runtime QA"
 	agents := &recordingAgentModifier{
@@ -1133,10 +1334,12 @@ func (c *recordingTaskCreator) CreateOfficeTaskAsAgent(
 	assigneeAgentID string,
 	title string,
 	description string,
+	causingRunID string,
 ) (string, error) {
 	c.calls = append(c.calls, createTaskCall{
 		CallerAgentID: callerAgentID, WorkspaceID: workspaceID, ProjectID: projectID,
 		AssigneeAgentID: assigneeAgentID, Title: title, Description: description, Root: true,
+		CausingRunID: causingRunID,
 	})
 	if c.taskID != "" {
 		return c.taskID, nil
@@ -1153,6 +1356,7 @@ type createTaskCall struct {
 	Title           string
 	Description     string
 	Root            bool
+	CausingRunID    string
 }
 
 func (c *recordingTaskCreator) GetTaskWorkspaceID(_ context.Context, taskID string) (string, error) {
@@ -1182,6 +1386,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 	assigneeAgentID string,
 	title string,
 	description string,
+	causingRunID string,
 ) (string, error) {
 	c.calls = append(c.calls, createTaskCall{
 		CallerAgentID:   callerAgentID,
@@ -1189,6 +1394,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 		AssigneeAgentID: assigneeAgentID,
 		Title:           title,
 		Description:     description,
+		CausingRunID:    causingRunID,
 	})
 	if c.taskID != "" {
 		return c.taskID, nil
@@ -1267,6 +1473,7 @@ func (r *recordingApprovalRequester) CreateApprovalWithActivity(
 
 type recordingRunSpawner struct {
 	calls []spawnRunCall
+	err   error
 }
 
 type spawnRunCall struct {
@@ -1274,18 +1481,29 @@ type spawnRunCall struct {
 	Reason         string
 	Payload        string
 	IdempotencyKey string
+	ActorKind      models.ActorKind
+	ActorID        string
+	CausingRunID   string
 }
 
-func (r *recordingRunSpawner) QueueRun(
+func (r *recordingRunSpawner) QueueRunWithActor(
 	_ context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
+	actorKind models.ActorKind, actorID string,
+	causingRunID string,
 ) (runsservice.QueueOutcome, error) {
 	r.calls = append(r.calls, spawnRunCall{
 		AgentID:        agentInstanceID,
 		Reason:         reason,
 		Payload:        payload,
 		IdempotencyKey: idempotencyKey,
+		ActorKind:      actorKind,
+		ActorID:        actorID,
+		CausingRunID:   causingRunID,
 	})
+	if r.err != nil {
+		return runsservice.QueueOutcomeNone, r.err
+	}
 	return runsservice.QueueOutcomeQueued, nil
 }
 
