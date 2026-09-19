@@ -40,7 +40,7 @@ function ToolbarButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          className="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 cursor-pointer"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
           aria-label={label}
           onClick={onClick}
         >
@@ -81,7 +81,7 @@ function CopyWorkspacePathButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
-          className="relative shrink-0 cursor-pointer"
+          className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
           aria-label={t("task:copyWorkspacePath")}
           onClick={() => {
             if (fullPath) void onCopyPath(fullPath);
@@ -178,7 +178,7 @@ function CreateMenu({
               type="button"
               aria-label={t("task:addToWorkspace")}
               data-testid="files-create-menu"
-              className="inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:size-8"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer max-md:size-11 [@media(pointer:coarse)]:size-11"
             >
               <IconPlus className="h-3.5 w-3.5" />
             </button>
@@ -188,21 +188,21 @@ function CreateMenu({
       </Tooltip>
       <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={handleCloseAutoFocus}>
         <DropdownMenuItem
-          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
+          className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onSelect={handleCreateSelect}
         >
           <IconFilePlus className="h-3.5 w-3.5" />
           {t("task:newFile")}
         </DropdownMenuItem>
         <DropdownMenuItem
-          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
+          className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onSelect={() => onUploadFiles("files")}
         >
           <IconUpload className="h-3.5 w-3.5" />
           {t("task:uploadFiles")}
         </DropdownMenuItem>
         <DropdownMenuItem
-          className="min-h-[44px] cursor-pointer gap-2 sm:min-h-8"
+          className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onSelect={() => onUploadFiles("folder")}
         >
           <IconFolderUp className="h-3.5 w-3.5" />
@@ -225,7 +225,7 @@ function OpenWorkspaceFolderMenuItem({
   const { t } = useTranslation();
   return (
     <DropdownMenuItem
-      className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+      className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
       disabled={disabled || isOpening}
       aria-busy={isOpening}
       onSelect={onSelect}
@@ -286,7 +286,7 @@ function WorkspaceActionsMenu({
               type="button"
               aria-label={t("task:workspaceActions")}
               data-testid="files-workspace-actions"
-              className="inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:size-8"
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer max-md:size-11 [@media(pointer:coarse)]:size-11"
             >
               <IconDots className="h-4 w-4" />
             </button>
@@ -313,7 +313,7 @@ function WorkspaceActionsMenu({
       >
         <DropdownMenuItem
           disabled={Boolean(disabledReason)}
-          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+          className="min-h-8 cursor-pointer gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onSelect={() => {
             openSourcesAfterCloseRef.current = true;
             restoreMobileFocusAfterDrawerClose();

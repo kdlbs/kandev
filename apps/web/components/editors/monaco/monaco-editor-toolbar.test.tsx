@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -6,11 +6,13 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
   ExternalVcsFileLink: (props: Record<string, unknown>) => (
     <span data-testid="external-vcs-file-link-props" data-props={JSON.stringify(props)} />
   ),
+  ExternalVcsFileMenuItem: () => <span data-testid="external-vcs-file-menu-item" />,
   useExternalVcsFileStatus: () => ({ status: "renamed", old_path: "src/old-name.ts" }),
 }));
 
 vi.mock("@/components/editors/file-actions-dropdown", () => ({
   FileActionsDropdown: () => <span data-testid="file-actions-dropdown" />,
+  FileActionsMenuItems: () => <span data-testid="file-actions-menu-items" />,
 }));
 
 vi.mock("@/components/editors/lsp-status-button", () => ({
@@ -184,5 +186,114 @@ describe("MonacoEditorToolbar download action", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Download file" })).toBeNull();
+  });
+});
+
+describe("MonacoEditorToolbar narrow action overflow", () => {
+  it("keeps dirty Save visible while exposing secondary actions through overflow", async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    class ResizeObserverStub {
+      private readonly callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+
+      disconnect() {}
+
+      unobserve() {}
+    }
+
+    globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      if (this.getAttribute("data-panel-header") === "true") {
+        return {
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 480,
+          bottom: 30,
+          width: 480,
+          height: 30,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return originalRect.call(this);
+    };
+
+    try {
+      const onSave = vi.fn();
+      const onToggleWrap = vi.fn();
+      render(
+        <TooltipProvider>
+          <MonacoEditorToolbar
+            path="src/app.ts"
+            isDirty={true}
+            isSaving={false}
+            diffStats={{ additions: 2, deletions: 1 }}
+            wrapEnabled={false}
+            showDiffIndicators={false}
+            enableComments={false}
+            sessionId="session-1"
+            commentCount={0}
+            lspStatus={{ state: "disabled" }}
+            lspProgress={{
+              initializingSince: null,
+              active: [],
+              completed: null,
+              hasReportedProgress: false,
+            }}
+            lspLanguage={null}
+            onToggleLsp={vi.fn()}
+            onToggleWrap={onToggleWrap}
+            onToggleDiffIndicators={vi.fn()}
+            hasVcsDiff
+            onSave={onSave}
+            onTogglePreview={vi.fn()}
+            previewKind="markdown"
+            onDownload={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </TooltipProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Show more actions" })).toBeTruthy();
+      });
+      expect(screen.getAllByRole("button", { name: /Save/ })).toHaveLength(2);
+      expect(
+        screen
+          .getAllByRole("button", { name: /Save/ })
+          .every((button) => !button.hasAttribute("disabled")),
+      ).toBe(true);
+      expect(
+        document.querySelector("[data-panel-header]")?.getAttribute("data-panel-overflow"),
+      ).toBe("true");
+      fireEvent.pointerDown(screen.getByRole("button", { name: "Show more actions" }), {
+        button: 0,
+        ctrlKey: false,
+      });
+      await waitFor(() => {
+        expect(screen.getByRole("menuitem", { name: "Enable word wrap" })).toBeTruthy();
+      });
+      expect(screen.getByRole("menuitem", { name: "Download file" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Delete file" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("menuitem", { name: "Enable word wrap" }));
+      expect(onToggleWrap).toHaveBeenCalledOnce();
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = originalRect;
+      if (originalResizeObserver) {
+        globalThis.ResizeObserver = originalResizeObserver;
+      } else {
+        // @ts-expect-error jsdom may not define ResizeObserver
+        delete globalThis.ResizeObserver;
+      }
+    }
   });
 });

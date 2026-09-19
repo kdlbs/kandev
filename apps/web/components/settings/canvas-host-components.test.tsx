@@ -20,6 +20,10 @@ const COPY: Record<string, string> = {
   "canvases:shareCanvas": "Share canvas",
   "canvases:shareCanvasDescription":
     "Prepare a verified bundle or source archive for review and sharing.",
+  "canvases:ready": "Ready",
+  "canvases:unavailable": "Canvas unavailable",
+  "canvases:unavailableDescription": "The canvas runtime is unavailable.",
+  "canvases:retry": "Try again",
 };
 
 vi.mock("react-i18next", () => ({
@@ -42,7 +46,13 @@ vi.mock("./canvas-lifecycle-dialogs", () => ({
   CanvasReleaseDialog: () => null,
 }));
 
-import { CanvasDesktopActions, MobileCanvasActions } from "./canvas-host-components";
+import {
+  CanvasDesktopActions,
+  CanvasHostBody,
+  CanvasHostHeader,
+  CanvasHostStatePanel,
+  MobileCanvasActions,
+} from "./canvas-host-components";
 
 const canvas: Canvas = {
   id: "canvas-1",
@@ -105,5 +115,52 @@ describe("canvas host action guidance", () => {
     expect(screen.getByTestId("canvas-action-promote-help").textContent).toContain(
       "Promotion is available after a valid release.",
     );
+  });
+});
+
+describe("canvas host chrome", () => {
+  it("keeps state content in the body and leaves the shared header for title/actions", () => {
+    render(
+      <>
+        <CanvasHostHeader
+          title="Task canvas"
+          isMobile={false}
+          menuOpen={false}
+          onOpenActions={vi.fn()}
+          actions={<button type="button">Release actions</button>}
+        />
+        <CanvasHostStatePanel state="unavailable" error={null} onRetry={vi.fn()} />
+      </>,
+    );
+
+    expect(screen.getByTestId("canvas-host-header").textContent).toContain("Task canvas");
+    expect(screen.getByTestId("canvas-host-header").textContent).toContain("Release actions");
+    expect(screen.getByTestId("canvas-host-state").textContent).toContain("Canvas unavailable");
+    expect(
+      screen
+        .getByTestId("canvas-host-state-panel")
+        .contains(screen.getByTestId("canvas-host-state")),
+    ).toBe(true);
+  });
+
+  it("announces readiness politely without adding a visible status toolbar", () => {
+    render(
+      <CanvasHostBody
+        canvasId="canvas-1"
+        title="Task canvas"
+        state="ready"
+        runtimeUrl="/runtime/canvas"
+        error={null}
+        onRuntimeReady={vi.fn()}
+        onRuntimeError={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    const announcement = screen.getByTestId("canvas-host-ready-announcement");
+    expect(announcement.textContent).toContain("Ready");
+    expect(announcement.parentElement?.getAttribute("role")).toBe("status");
+    expect(announcement.parentElement?.getAttribute("aria-live")).toBe("polite");
+    expect(screen.getByTestId("canvas-host-route").textContent).not.toContain("Canvas unavailable");
   });
 });

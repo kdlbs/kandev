@@ -310,3 +310,10 @@ Tasks 03 and 04 implementation verification completed on 2026-09-11:
 - Review source labels need current authorization and graceful deletion fallback.
 - Concurrent branches may touch the shared canvas E2E fixture or spec pair;
   reconcile current base before implementation and final delivery.
+
+## Same-origin follow-up
+
+The [trusted same-origin package](../canvas-same-origin-auth/plan.md) supersedes
+this package's opaque-origin and cookie-isolation assumptions. Existing results
+record the earlier implementation. They do not verify the new runtime behavior.
+The follow-up work orders own the replacement tests and documentation.

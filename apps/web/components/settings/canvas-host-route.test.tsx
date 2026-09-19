@@ -33,7 +33,20 @@ vi.mock("@/lib/api/domains/canvas-api", () => ({
 }));
 
 vi.mock("@/components/page-shell", () => ({
-  PageShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  PageShell: ({
+    actions,
+    children,
+    topbarTestId,
+  }: {
+    actions?: ReactNode;
+    children: ReactNode;
+    topbarTestId?: string;
+  }) => (
+    <div>
+      <div data-testid={topbarTestId}>{mockIsMobile.value ? actions : null}</div>
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock("@/components/plugins/canvas-page", () => ({

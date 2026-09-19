@@ -1,4 +1,18 @@
-import { forwardRef, type ReactNode, type HTMLAttributes } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ForwardedRef,
+  type RefObject,
+  type ReactNode,
+  type HTMLAttributes,
+} from "react";
+import { IconDots } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { cn } from "@kandev/ui/lib/utils";
 
 /**
@@ -11,9 +25,46 @@ import { cn } from "@kandev/ui/lib/utils";
 
 const PANEL_ROOT_CLASS = "h-full min-h-0 flex flex-col bg-card text-card-foreground";
 const PANEL_BAR_CLASS =
-  "flex items-center gap-1.5 h-[30px] px-2.5 shrink-0 border-border/80 bg-card/95 text-xs text-foreground";
+  "box-border flex min-w-0 items-center gap-1.5 px-2.5 shrink-0 border-border/80 bg-card/95 text-xs text-foreground";
+const PANEL_HEADER_BAR_CLASS =
+  "h-[1.875rem] min-h-[1.875rem] [@media(max-width:47.999rem)]:h-12 [@media(max-width:47.999rem)]:min-h-12 [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:min-h-12";
 const PANEL_ACTION_CURSOR_CLASS =
   "[&_button:not(:disabled)]:cursor-pointer [&_[role=button]:not([aria-disabled=true])]:cursor-pointer";
+
+export function shouldUsePanelHeaderOverflow(panelWidth: number, overflowAt: number): boolean {
+  return panelWidth > 0 && panelWidth < overflowAt;
+}
+
+function usePanelHeaderOverflow(
+  ref: RefObject<HTMLDivElement | null>,
+  overflowAt: number | undefined,
+): boolean {
+  const [overflowed, setOverflowed] = useState(false);
+
+  useEffect(() => {
+    if (!overflowAt || typeof ResizeObserver === "undefined") return;
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => {
+      const next = shouldUsePanelHeaderOverflow(element.getBoundingClientRect().width, overflowAt);
+      setOverflowed((current) => (current === next ? current : next));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    measure();
+    return () => observer.disconnect();
+  }, [overflowAt, ref]);
+
+  return overflowed;
+}
+
+function assignRef<T>(ref: ForwardedRef<T>, value: T | null) {
+  if (typeof ref === "function") {
+    ref(value);
+  } else if (ref) {
+    ref.current = value;
+  }
+}
 
 type PanelRootProps = HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
@@ -62,66 +113,180 @@ export const PanelBody = forwardRef<HTMLDivElement, PanelBodyProps>(function Pan
   );
 });
 
-type PanelToolbarProps = {
-  children: ReactNode;
-  className?: string;
-};
+type PanelToolbarProps = HTMLAttributes<HTMLDivElement> & { children: ReactNode };
 
-type PanelBarProps = {
-  children?: ReactNode;
-  className?: string;
+type PanelBarProps = HTMLAttributes<HTMLDivElement> & {
   borderClassName: "border-b" | "border-t";
 };
 
-function PanelBar({ children, className, borderClassName }: PanelBarProps) {
+const PanelBar = forwardRef<HTMLDivElement, PanelBarProps>(function PanelBar(
+  { children, className, borderClassName, ...rest },
+  ref,
+) {
   return (
-    <div className={cn(PANEL_BAR_CLASS, PANEL_ACTION_CURSOR_CLASS, borderClassName, className)}>
+    <div
+      ref={ref}
+      data-panel-header={borderClassName === "border-b" ? "true" : undefined}
+      className={cn(PANEL_BAR_CLASS, PANEL_ACTION_CURSOR_CLASS, borderClassName, className)}
+      {...rest}
+    >
       {children}
     </div>
   );
-}
+});
 
 /** Fixed header toolbar strip. Doesn't scroll with content. */
-export function PanelToolbar({ children, className }: PanelToolbarProps) {
-  return <PanelHeaderBar className={className}>{children}</PanelHeaderBar>;
-}
+export const PanelToolbar = forwardRef<HTMLDivElement, PanelToolbarProps>(function PanelToolbar(
+  { children, className, ...rest },
+  ref,
+) {
+  return (
+    <PanelHeaderBar ref={ref} className={className} {...rest}>
+      {children}
+    </PanelHeaderBar>
+  );
+});
 
-type PanelHeaderBarProps = {
-  children?: ReactNode;
-  className?: string;
-};
+type PanelHeaderBarProps = HTMLAttributes<HTMLDivElement> & { children?: ReactNode };
 
 /** Fixed-height panel header bar. Renders children directly. */
-export function PanelHeaderBar({ children, className }: PanelHeaderBarProps) {
-  return (
-    <PanelBar borderClassName="border-b" className={className}>
-      {children}
-    </PanelBar>
-  );
-}
+export const PanelHeaderBar = forwardRef<HTMLDivElement, PanelHeaderBarProps>(
+  function PanelHeaderBar({ children, className, ...rest }, ref) {
+    return (
+      <PanelBar
+        ref={ref}
+        borderClassName="border-b"
+        className={cn(PANEL_HEADER_BAR_CLASS, className)}
+        {...rest}
+      >
+        {children}
+      </PanelBar>
+    );
+  },
+);
 
-type PanelHeaderBarSplitProps = {
+type PanelHeaderBarSplitProps = HTMLAttributes<HTMLDivElement> & {
   left?: ReactNode;
   right?: ReactNode;
-  className?: string;
+  /** Actions shown when the panel is too narrow for the full action cluster. */
+  overflow?: ReactNode;
+  /** Panel width in CSS pixels at which `overflow` replaces `right`. */
+  overflowAt?: number;
+  /** Hide the left slot when the overflow action menu is active. */
+  hideLeftWhenOverflow?: boolean;
+  /** Keep the right slot visible alongside the overflow menu. */
+  hideRightWhenOverflow?: boolean;
+  /** Primary action kept visible alongside the overflow menu. */
+  rightWhenOverflow?: ReactNode;
+  /** Left content replacement that keeps the primary left action visible when overflowed. */
+  leftWhenOverflow?: ReactNode;
+  leftClassName?: string;
+  rightClassName?: string;
 };
 
 /** Panel header bar with left/right slots separated by a spacer. */
-export function PanelHeaderBarSplit({ left, right, className }: PanelHeaderBarSplitProps) {
+export const PanelHeaderBarSplit = forwardRef<HTMLDivElement, PanelHeaderBarSplitProps>(
+  function PanelHeaderBarSplit(
+    {
+      left,
+      right,
+      overflow,
+      overflowAt,
+      hideLeftWhenOverflow = false,
+      hideRightWhenOverflow = true,
+      rightWhenOverflow,
+      leftWhenOverflow,
+      leftClassName,
+      rightClassName,
+      className,
+      ...rest
+    },
+    ref,
+  ) {
+    const headerRef = useRef<HTMLDivElement>(null);
+    const isOverflowed = usePanelHeaderOverflow(headerRef, overflow ? overflowAt : undefined);
+    const setHeaderRef = useCallback(
+      (node: HTMLDivElement | null) => {
+        headerRef.current = node;
+        assignRef(ref, node);
+      },
+      [ref],
+    );
+    return (
+      <PanelHeaderBar
+        ref={setHeaderRef}
+        className={className}
+        data-panel-overflow={isOverflowed ? "true" : undefined}
+        {...rest}
+      >
+        <div
+          className={cn(
+            "flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden",
+            hideLeftWhenOverflow && isOverflowed && !leftWhenOverflow && "hidden",
+            leftClassName,
+          )}
+        >
+          {isOverflowed && leftWhenOverflow ? leftWhenOverflow : left}
+        </div>
+        <div className="min-w-0 flex-1" />
+        <div
+          className={cn(
+            "flex min-w-0 max-w-full shrink-0 items-center gap-1.5 overflow-hidden",
+            hideRightWhenOverflow && isOverflowed && "hidden",
+            rightClassName,
+          )}
+        >
+          {right}
+        </div>
+        {isOverflowed && rightWhenOverflow ? (
+          <div className="flex shrink-0 items-center gap-1.5">{rightWhenOverflow}</div>
+        ) : null}
+        {isOverflowed && overflow}
+      </PanelHeaderBar>
+    );
+  },
+);
+
+export function PanelHeaderOverflowMenu({
+  label,
+  children,
+  testId = "panel-header-overflow",
+}: {
+  label: string;
+  children: ReactNode;
+  testId?: string;
+}) {
   return (
-    <PanelHeaderBar className={className}>
-      <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">{left}</div>
-      <div className="flex-1" />
-      <div className="flex items-center gap-1.5 shrink-0">{right}</div>
-    </PanelHeaderBar>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={controlSizingClassName(
+            "icon",
+            "shrink-0 cursor-pointer text-muted-foreground hover:text-foreground",
+          )}
+          aria-label={label}
+          data-testid={testId}
+        >
+          <IconDots className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-[min(70dvh,28rem)] overflow-y-auto">
+        {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
 /** Fixed-height panel footer bar with border-t. Mirrors PanelHeaderBar but anchors to the bottom. */
-export function PanelFooterBar({ children, className }: PanelHeaderBarProps) {
-  return (
-    <PanelBar borderClassName="border-t" className={className}>
-      {children}
-    </PanelBar>
-  );
-}
+export const PanelFooterBar = forwardRef<HTMLDivElement, PanelHeaderBarProps>(
+  function PanelFooterBar({ children, className, ...rest }, ref) {
+    return (
+      <PanelBar ref={ref} borderClassName="border-t" className={className} {...rest}>
+        {children}
+      </PanelBar>
+    );
+  },
+);
