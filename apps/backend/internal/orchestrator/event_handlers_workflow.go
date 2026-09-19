@@ -4287,6 +4287,14 @@ func (s *Service) launchAfterOnEnterDispatch(
 
 	switch {
 	case hasAutoStart && isPassthrough && session.State != models.TaskSessionStateCreated:
+		if s.initialCreatePromptPassthroughQueuePending(ctx, sessionID) {
+			// Queue promotion enters the destination step before its queued
+			// creation prompt is delivered. Let the guarded queue worker send
+			// that prompt once; the destination's automatic prompt must not
+			// create a competing passthrough turn.
+			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+			return
+		}
 		// Started passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
@@ -5636,12 +5644,17 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 	references []v1.EntityReference,
 	takenMsg *messagequeue.QueuedMessage,
 	handoffText string,
+	initialCreatePromptPassthrough bool,
 ) {
+	queueCtx := ctx
+	if initialCreatePromptPassthrough {
+		queueCtx = withInitialCreatePromptPassthroughQueue(ctx)
+	}
 	promptQueued := false
 	if shouldQueueIfBusy && (isAgentAlreadyRunningError(launchErr) ||
 		isSessionBusyError(launchErr) || isTransientPromptError(launchErr)) {
 		if queueErr := s.queueAutoStartPrompt(
-			ctx, taskID, sessionID, prompt, planMode,
+			queueCtx, taskID, sessionID, prompt, planMode,
 			attachments, origin, userMessageRecorded, references, handoffText,
 		); queueErr != nil {
 			s.logger.Warn("failed to queue auto-start prompt after launch failure",
@@ -5681,6 +5694,11 @@ func (s *Service) autoStartStepPrompt(
 	// Track the original message so terminal failure paths can restore it
 	// instead of dropping the user's prompt or attachments on the floor.
 	takenMsg, mergedPrompt, attachments, references, queuedHandoff := s.takeAndMergeHandoffMessage(ctx, sessionID, prompt)
+	initialCreatePromptPassthrough := takenMsg != nil && initialCreatePromptPassthroughQueued(takenMsg.Metadata)
+	queueCtx := ctx
+	if initialCreatePromptPassthrough {
+		queueCtx = withInitialCreatePromptPassthroughQueue(ctx)
+	}
 	prompt = mergedPrompt
 	agentPrompt := AppendEntityReferenceContext(prompt, references)
 	effectiveAgentPrompt := s.effectivePromptForSession(sessionID, agentPrompt, planMode, session)
@@ -5721,7 +5739,7 @@ func (s *Service) autoStartStepPrompt(
 		// userMessageRecorded=false: recordAutoStartMessage has not run yet —
 		// the drain side (executeQueuedMessage) is responsible for inserting
 		// the chat-history row.
-		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode, attachments, origin, false, references, handoffForQueue)
+		queued, err := s.queueAutoStartPromptIfRunning(queueCtx, taskID, session, prompt, planMode, attachments, origin, false, references, handoffForQueue)
 		if err != nil {
 			requeueTaken()
 			return err
@@ -5811,6 +5829,9 @@ func (s *Service) autoStartStepPrompt(
 	dispatchInputPresent := strings.TrimSpace(recordedPrompt) != "" ||
 		strings.TrimSpace(dispatchPrompt) != "" || len(attachments) > 0
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references, attachments)
+	if initialCreatePromptPassthrough && session.IsPassthrough && session.State != models.TaskSessionStateCreated {
+		s.armInitialCreatePromptPassthrough(ctx, session, s.initialCreatePromptCurrentTurnID(ctx, sessionID))
+	}
 
 	// If the session is in CREATED state, the agent was never started (e.g. workspace-only
 	// preparation from a blocked auto-start). PromptTask will reject CREATED sessions,
@@ -5867,7 +5888,7 @@ func (s *Service) autoStartStepPrompt(
 		launchCtx := withWorkflowStartPromptAttempt(ctx, workflowAttempt)
 		execution, err := s.startCreatedSessionWithComposedPrompt(
 			launchCtx, taskID, sessionID, session.AgentProfileID,
-			recordedPrompt, agentPrompt, true, planMode, true, attachments, references,
+			recordedPrompt, agentPrompt, true, planMode, true, initialCreatePromptPassthrough, attachments, references,
 		)
 		if execution == nil {
 			workflowAttempt.retire()
@@ -5881,6 +5902,7 @@ func (s *Service) autoStartStepPrompt(
 				ctx, taskID, sessionID, stepName, prompt, err,
 				planMode, shouldQueueIfBusy, userMsgRecorded,
 				attachments, origin, references, takenMsg, handoffForQueue,
+				initialCreatePromptPassthrough,
 			)
 		}
 		return err
@@ -5934,7 +5956,8 @@ func (s *Service) autoStartStepPrompt(
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
 			return s.fallbackFreshLaunchOnMissingExecution(
-				ctx, taskID, sessionID, recordedPrompt, true, dispatchPrompt, planMode, takenMsg, attachments, references,
+				ctx, taskID, sessionID, recordedPrompt, true, dispatchPrompt, planMode,
+				initialCreatePromptPassthrough, takenMsg, attachments, references,
 			)
 		}
 
@@ -5945,7 +5968,7 @@ func (s *Service) autoStartStepPrompt(
 		// chat row was successfully inserted above; a failed write passes false,
 		// letting the drain re-attempt insertion.
 		if isAgentAlreadyRunningError(err) && shouldQueueIfBusy {
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(queueCtx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -5960,7 +5983,7 @@ func (s *Service) autoStartStepPrompt(
 		if shouldQueueIfBusy {
 			// Pass userMsgRecorded so the drain skips CreateUserMessage only when
 			// the chat row was successfully inserted above by recordAutoStartMessage.
-			if queueErr := s.queueAutoStartPrompt(ctx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
+			if queueErr := s.queueAutoStartPrompt(queueCtx, taskID, sessionID, prompt, planMode, attachments, origin, userMsgRecorded, references, handoffForQueue); queueErr != nil {
 				requeueTaken()
 				return queueErr
 			}
@@ -6003,6 +6026,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	promptAlreadyComposed bool,
 	retryPrompt string,
 	planMode bool,
+	initialCreatePromptPassthrough bool,
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
@@ -6037,7 +6061,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	if promptAlreadyComposed {
 		_, launchErr = s.startCreatedSessionWithComposedPrompt(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
-			prompt, retryPrompt, true, planMode, true, attachments, references,
+			prompt, retryPrompt, true, planMode, true, initialCreatePromptPassthrough, attachments, references,
 		)
 	} else {
 		_, launchErr = s.StartCreatedSession(
@@ -6334,6 +6358,9 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 		return nil, fmt.Errorf("message queue is not configured")
 	}
 	meta := workflowMessageMetadata(planMode, origin, references)
+	if initialCreatePromptPassthroughQueueFromContext(ctx) {
+		meta[metaKeyInitialCreatePromptPassthrough] = true
+	}
 	if userMessageRecorded {
 		meta[metaKeyUserMessageRecorded] = true
 	}

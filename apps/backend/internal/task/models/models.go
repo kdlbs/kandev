@@ -400,6 +400,11 @@ const (
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
+	// SessionMetaKeyInitialCreatePromptPassthrough stores the durable
+	// execution and turn evidence for a creation prompt admitted before a
+	// passthrough agent.running event. It prevents recovery from evaluating
+	// the same on_turn_start transition a second time after restart.
+	SessionMetaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
 )
 
 // IsCompletionFollowUpSession reports whether a session was explicitly

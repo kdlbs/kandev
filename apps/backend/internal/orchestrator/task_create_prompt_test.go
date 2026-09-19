@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,7 +65,17 @@ func TestInitialCreatePrompt_TransitionsBeforeDispatch(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	var providerDispatches atomic.Int32
+	dispatchObserved := make(chan string, 1)
+	agentMgr.launchAgentFunc = func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-create-prompt-dispatch"}, nil
+	}
+	agentMgr.startAgentProcessFunc = func(_ context.Context, executionID string) error {
+		providerDispatches.Add(1)
+		dispatchObserved <- executionID
+		return nil
+	}
+	svc := createEngineServiceWithScheduler(t, repo, stepGetter, taskRepo, agentMgr)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -76,12 +88,20 @@ func TestInitialCreatePrompt_TransitionsBeforeDispatch(t *testing.T) {
 		InitialCreatePrompt: true,
 	})
 	require.NoError(t, err)
+	select {
+	case executionID := <-dispatchObserved:
+		require.Equal(t, "execution-create-prompt", executionID)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the initial provider dispatch")
+	}
 
 	task, err := repo.GetTask(ctx, "task-create-prompt")
 	require.NoError(t, err)
 	require.Equal(t, "step-spec", task.WorkflowStepID)
 	require.Len(t, messages.userMessages, 1)
 	require.Contains(t, messages.userMessages[0].content, "initial prompt")
+	require.Equal(t, int32(1), providerDispatches.Load(),
+		"the initial prompt must cross one provider dispatch boundary")
 }
 
 func TestInitialCreatePrompt_TransitionFailurePreventsLaunch(t *testing.T) {
@@ -99,7 +119,7 @@ func TestInitialCreatePrompt_TransitionFailurePreventsLaunch(t *testing.T) {
 	}
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "task-create-failure", v1.TaskStateInProgress)
-	svc := createEngineServiceWithTaskRepo(t, repo, stepGetter, taskRepo, &mockAgentManager{})
+	svc := createEngineServiceWithScheduler(t, repo, stepGetter, taskRepo, &mockAgentManager{})
 
 	_, err := svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:              "task-create-failure",
@@ -152,7 +172,7 @@ func TestInitialCreatePrompt_AdmissionFailureDoesNotFailSupersededSuccessor(t *t
 			return nil, errors.New("unexpected launch")
 		},
 	}
-	svc := createEngineServiceWithTaskRepo(t, repo, stepGetter, taskRepo, agentMgr)
+	svc := createEngineServiceWithScheduler(t, repo, stepGetter, taskRepo, agentMgr)
 
 	_, err = svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID: "task-create-superseded", SessionID: "session-create-superseded",
@@ -224,8 +244,7 @@ func TestInitialCreatePrompt_LaunchFailureUsesReplacementSession(t *testing.T) {
 			return nil, errors.New("destination launch failed")
 		},
 	}
-	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
-	svc.SetWorkflowStepGetter(stepGetter)
+	svc := createEngineServiceWithScheduler(t, repo, stepGetter, taskRepo, agentMgr)
 
 	_, err = svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID: "task-create-replacement-failure", SessionID: source.ID,
@@ -313,6 +332,74 @@ func TestInitialCreatePrompt_PassthroughRunningDoesNotRepeatTurnStart(t *testing
 	require.NoError(t, err)
 	require.Equal(t, "step-spec", task.WorkflowStepID,
 		"a real later passthrough turn must still evaluate on_turn_start")
+}
+
+func TestInitialCreatePrompt_PassthroughEvidenceSurvivesProcessRestart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-create-passthrough-restart", "session-create-passthrough-restart", "step-backlog")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "session-create-passthrough-restart", models.TaskSessionStateWaitingForInput, "",
+	))
+	seedExecutorRunning(t, repo, "session-create-passthrough-restart", "task-create-passthrough-restart", "execution-create-passthrough-restart")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-backlog"] = &wfmodels.WorkflowStep{
+		ID: "step-backlog", WorkflowID: "wf1", Name: "Backlog", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnTurnStart: []wfmodels.OnTurnStartAction{{Type: wfmodels.OnTurnStartMoveToNext}},
+		},
+	}
+	stepGetter.steps["step-spec"] = &wfmodels.WorkflowStep{
+		ID: "step-spec", WorkflowID: "wf1", Name: "Spec", Position: 1,
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-create-passthrough-restart", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{isPassthrough: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	session, err := repo.GetTaskSession(ctx, "session-create-passthrough-restart")
+	require.NoError(t, err)
+	svc.activeTurns.Store(session.ID, "turn-create-restart")
+	svc.armInitialCreatePromptPassthrough(ctx, session, "turn-create-restart")
+
+	persisted, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Contains(t, persisted.Metadata, models.SessionMetaKeyInitialCreatePromptPassthrough,
+		"the admission evidence must survive a process restart")
+
+	// A restarted service has no in-memory evidence map. Hydration from the
+	// session row must still suppress the exact initial running event.
+	svc.initialCreatePromptMu.Lock()
+	svc.initialCreatePromptPassthrough = nil
+	svc.initialCreatePromptMu.Unlock()
+	svc.handleAgentRunning(ctx, watcher.AgentEventData{
+		TaskID: "task-create-passthrough-restart", SessionID: session.ID,
+		AgentExecutionID: "execution-create-passthrough-restart",
+	})
+	task, err := repo.GetTask(ctx, "task-create-passthrough-restart")
+	require.NoError(t, err)
+	require.Equal(t, "step-backlog", task.WorkflowStepID,
+		"restart recovery must suppress the already-admitted turn")
+
+	// Duplicate running events remain suppressed, while an explicitly accepted
+	// later turn clears the durable evidence and restores ordinary behavior.
+	svc.handleAgentRunning(ctx, watcher.AgentEventData{
+		TaskID: "task-create-passthrough-restart", SessionID: session.ID,
+		AgentExecutionID: "execution-create-passthrough-restart",
+	})
+	task, err = repo.GetTask(ctx, "task-create-passthrough-restart")
+	require.NoError(t, err)
+	require.Equal(t, "step-backlog", task.WorkflowStepID)
+	svc.activeTurns.Store(session.ID, "turn-create-restart-later")
+	svc.clearInitialCreatePromptPassthroughForNewTurn(session.ID, "turn-create-restart-later")
+	svc.handleAgentRunning(ctx, watcher.AgentEventData{
+		TaskID: "task-create-passthrough-restart", SessionID: session.ID,
+		AgentExecutionID: "execution-create-passthrough-restart",
+	})
+	task, err = repo.GetTask(ctx, "task-create-passthrough-restart")
+	require.NoError(t, err)
+	require.Equal(t, "step-spec", task.WorkflowStepID,
+		"a later user turn must evaluate on_turn_start after restart recovery")
 }
 
 func TestInitialCreatePrompt_PassthroughEvidenceSurvivesPredecessorTerminalEvents(t *testing.T) {
@@ -417,6 +504,14 @@ func TestInitialCreatePrompt_QueueReplayTransfersPassthroughEvidence(t *testing.
 
 	// The predecessor event arrives after the successor's admission evidence
 	// is armed. It must be side-effect free.
+	svc.retireInitialCreatePromptPassthroughForQueueEvent(
+		ctx,
+		session.ID,
+		identity.SessionIncarnationID,
+		"execution-predecessor",
+		"turn-create-queue-initial",
+		0,
+	)
 	svc.handleAgentRunning(ctx, watcher.AgentEventData{
 		TaskID: "task-create-queue-passthrough", SessionID: session.ID,
 		AgentExecutionID: "execution-predecessor",
@@ -456,6 +551,10 @@ func TestInitialCreatePrompt_QueuesAfterTurnStartAdmission(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "task-create-queued", "session-create-queued", "step-backlog")
 	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-create-queued", models.TaskSessionStateCreated, ""))
+	queuedSession, err := repo.GetTaskSession(ctx, "session-create-queued")
+	require.NoError(t, err)
+	queuedSession.IsPassthrough = true
+	require.NoError(t, repo.UpdateTaskSession(ctx, queuedSession))
 	task, err := repo.GetTask(ctx, "task-create-queued")
 	require.NoError(t, err)
 	task.WIPAdmitted = true
@@ -475,12 +574,16 @@ func TestInitialCreatePrompt_QueuesAfterTurnStartAdmission(t *testing.T) {
 	}
 	stepGetter.steps["step-spec"] = &wfmodels.WorkflowStep{
 		ID: "step-spec", WorkflowID: "wf1", Name: "Spec", Position: 1, WIPLimit: 1,
+		Prompt: "destination automatic prompt",
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
 	}
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, "task-create-queued", v1.TaskStateInProgress)
 	seedExecutorRunning(t, repo, "session-create-queued", "task-create-queued", "execution-create-queued")
-	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createEngineServiceWithTaskRepo(t, repo, stepGetter, taskRepo, agentMgr)
+	agentMgr := &mockAgentManager{isAgentRunning: true, isPassthrough: true, repoForExecutionLookup: repo}
+	svc := createEngineServiceWithScheduler(t, repo, stepGetter, taskRepo, agentMgr)
 
 	response, err := svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID: "task-create-queued", SessionID: "session-create-queued",
@@ -507,16 +610,20 @@ func TestInitialCreatePrompt_QueuesAfterTurnStartAdmission(t *testing.T) {
 	require.NoError(t, repo.UpdateTask(ctx, occupant))
 	updatedTask.WIPAdmitted = true
 	updatedTask.QueuedForStepID = ""
+	updatedTask.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{"from_step_id": "step-backlog"}
 	require.NoError(t, repo.UpdateTask(ctx, updatedTask))
 	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-create-queued", models.TaskSessionStateWaitingForInput, ""))
-	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "task-create-queued", "session-create-queued")
-	require.NoError(t, err)
-	svc.CheckQueueAdmissionReadiness(ctx, identity)
+	svc.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: "task-create-queued"})
 	require.Eventually(t, func() bool {
 		agentMgr.mu.Lock()
 		defer agentMgr.mu.Unlock()
-		return len(agentMgr.capturedPromptCalls) == 1 && svc.messageQueue.GetStatus(ctx, "session-create-queued").Count == 0
+		return len(agentMgr.passthroughStdinCalls) == 1 && svc.messageQueue.GetStatus(ctx, "session-create-queued").Count == 0
 	}, time.Second, 10*time.Millisecond)
+	agentMgr.mu.Lock()
+	passthroughPrompt := agentMgr.passthroughStdinCalls[0].Data
+	agentMgr.mu.Unlock()
+	require.True(t, strings.Contains(passthroughPrompt, "initial queued prompt"))
+	require.NotContains(t, passthroughPrompt, "destination automatic prompt")
 	finalTask, err := repo.GetTask(ctx, "task-create-queued")
 	require.NoError(t, err)
 	require.Equal(t, "step-spec", finalTask.WorkflowStepID)
@@ -556,7 +663,7 @@ func TestInitialCreatePrompt_QueueAdmissionFailurePersistsLaunchError(t *testing
 			return nil, errors.New("unexpected launch")
 		},
 	}
-	svc := createEngineServiceWithTaskRepo(t, repo, stepGetter, taskRepo, agentMgr)
+	svc := createEngineServiceWithScheduler(t, repo, stepGetter, taskRepo, agentMgr)
 	baseQueue := messagequeue.NewMemoryRepositoryWithAuthority(func(context.Context, string, string) (messagequeue.QueueSessionIdentity, error) {
 		return messagequeue.QueueSessionIdentity{
 			TaskID:               "task-create-queue-failure",

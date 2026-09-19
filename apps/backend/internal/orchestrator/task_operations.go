@@ -588,13 +588,14 @@ func (s *Service) startCreatedSessionWithComposedPrompt(
 	ctx context.Context,
 	taskID, sessionID, agentProfileID, prompt string,
 	retryPrompt string,
-	skipMessageRecord, planMode, autoStart bool,
+	skipMessageRecord, planMode, autoStart, initialCreatePrompt bool,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 ) (*executor.TaskExecution, error) {
 	return s.startCreatedSession(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, "", startCreatedSessionOptions{
+			initialCreatePrompt:         initialCreatePrompt,
 			skipTaskDescriptionFallback: true,
 			promptAlreadyComposed:       true,
 			retryPrompt:                 retryPrompt,
@@ -909,7 +910,12 @@ func (s *Service) startCreatedSession(
 		s.armInitialCreatePromptPassthroughForLaunch(ctx, session, initialTurnID)
 		defer func() {
 			if err != nil {
-				s.retireInitialCreatePromptPassthroughForQueue(session.ID, session.QueueIncarnationID)
+				s.retireInitialCreatePromptPassthroughForQueue(
+					session.ID,
+					session.QueueIncarnationID,
+					initialTurnID,
+					s.promptGenerationForSession(ctx, session.ID),
+				)
 			}
 		}()
 	}
@@ -5681,6 +5687,10 @@ type promptTaskOptions struct {
 	// (e.g. appending a claimed step handoff) is not silently recomposed from
 	// the destination step's own template.
 	promptAlreadyComposed bool
+	// initialCreatePromptPassthrough keeps a creation-admission marker alive
+	// while a transient retry creates the next turn, then rebinds it to the
+	// execution admitted for that retry before provider dispatch.
+	initialCreatePromptPassthrough bool
 	// fallbackLaunchPrompt is the fully composed prompt for fresh-launch
 	// recovery. The normal dispatch still receives the raw prompt so it can
 	// apply session transforms exactly once.
@@ -6612,6 +6622,12 @@ func (s *Service) claimAndGuardDispatch(
 	if newDispatchGuard != nil {
 		releaseDispatchGuard = newDispatchGuard
 	}
+	if options.initialCreatePromptPassthrough && session != nil && session.IsPassthrough {
+		s.armInitialCreatePromptPassthrough(ctx, session, rollback.turnID)
+		if session.AgentExecutionID != "" {
+			s.bindInitialCreatePromptPassthroughExecution(ctx, session.ID, rollback.turnID, session.AgentExecutionID)
+		}
+	}
 	return session, rollback, releaseDispatchGuard, nil
 }
 
@@ -7312,7 +7328,7 @@ func (s *Service) handlePromptDispatchFailure(
 			fallbackPrompt = fallbackLaunchPrompt
 		}
 		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
-			ctx, taskID, sessionID, fallbackPrompt, promptAlreadyComposed, fallbackRetryPrompt, planMode, nil, attachments, nil,
+			ctx, taskID, sessionID, fallbackPrompt, promptAlreadyComposed, fallbackRetryPrompt, planMode, false, nil, attachments, nil,
 		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {

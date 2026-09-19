@@ -1363,10 +1363,13 @@ func (s *Service) executeQueuedPassthroughMessageWithReservation(
 }
 
 type queuedPassthroughExecutionState struct {
-	userMessageRecorded bool
-	deliveryAttempted   bool
-	dispatchErr         error
-	finishRunning       func()
+	userMessageRecorded            bool
+	deliveryAttempted              bool
+	dispatchErr                    error
+	finishRunning                  func()
+	initialCreatePromptExecutionID string
+	initialCreatePromptTurnID      string
+	initialCreatePromptGeneration  uint64
 }
 
 func (s *Service) finishQueuedPassthroughExecution(
@@ -1380,7 +1383,12 @@ func (s *Service) finishQueuedPassthroughExecution(
 		s.reconcileQueuedCIAutoFixDispatchFailure(ctx, queuedMsg)
 		if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
 			s.retireInitialCreatePromptPassthroughForQueueEvent(
-				ctx, queuedMsg.SessionID, identity.SessionIncarnationID,
+				ctx,
+				queuedMsg.SessionID,
+				identity.SessionIncarnationID,
+				state.initialCreatePromptExecutionID,
+				state.initialCreatePromptTurnID,
+				state.initialCreatePromptGeneration,
 			)
 		}
 	}
@@ -1464,6 +1472,13 @@ func (s *Service) deliverQueuedPassthroughPrompt(
 	// delayed predecessor cannot consume the marker during queue replay.
 	if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
 		s.armQueuedInitialCreatePromptPassthrough(ctx, queuedMsg, identity)
+		state.initialCreatePromptTurnID = s.initialCreatePromptCurrentTurnID(ctx, queuedMsg.SessionID)
+		state.initialCreatePromptGeneration = s.promptGenerationForSession(ctx, queuedMsg.SessionID)
+		if s.agentManager != nil {
+			state.initialCreatePromptExecutionID, _ = s.agentManager.GetExecutionIDForSession(
+				ctx, queuedMsg.SessionID,
+			)
+		}
 	}
 	if state.dispatchErr = s.markQueuedPassthroughDeliveryAttempt(
 		ctx, identity, queuedMsg, state,
@@ -1627,7 +1642,11 @@ func (s *Service) executeQueuedMessageWithReservation(
 		if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
 			s.retireInitialCreatePromptPassthroughForQueueEvent(
 				promptCtx,
-				queuedMsg.SessionID, dispatchIdentity.SessionIncarnationID,
+				queuedMsg.SessionID,
+				dispatchIdentity.SessionIncarnationID,
+				"",
+				"",
+				0,
 			)
 		}
 	}
@@ -2496,8 +2515,6 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		)
 		return nil
 	}
-	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
-
 	// Short transient provider errors get a paced, visible retry-with-backoff
 	// before any red banner. This is the ONLY non-terminal
 	// failure path, so it runs before automation finalization below — otherwise
@@ -2508,6 +2525,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
 		return nil
 	}
+	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
 	if data.SessionID != "" && s.routeDynamicAgentFailure(ctx, data, classifyKanbanFailure(data)) {
 		return nil
 	}

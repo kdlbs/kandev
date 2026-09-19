@@ -237,11 +237,7 @@ func TestWorkflowE2E_InitialCreatePrompt(t *testing.T) {
 		State: v1.TaskStateInProgress,
 	}
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
-	// Keep the scheduler/executor fixture from the launch path, but initialize
-	// the production workflow engine so this test observes strict transition
-	// error handling rather than the legacy getter fallback.
-	svc.SetWorkflowStepGetter(stepGetter)
+	svc := createEngineServiceWithScheduler(t, repo, stepGetter, taskRepo, agentMgr)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 	var launches []executor.LaunchAgentRequest
@@ -432,6 +428,23 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 // createEngineService creates a Service with the workflow engine initialized.
 func createEngineService(t *testing.T, repo *sqliterepo.Repository, sg *mockStepGetter, agentMgr *mockAgentManager) *Service {
 	return createEngineServiceWithTaskRepo(t, repo, sg, newMockTaskRepo(), agentMgr)
+}
+
+// createEngineServiceWithScheduler keeps the scheduler/executor fixture used by
+// launch tests while making the production workflow engine explicit. The
+// lower-level scheduler helper assigns the getter directly for legacy tests;
+// this helper is for tests that must observe strict engine admission.
+func createEngineServiceWithScheduler(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	sg *mockStepGetter,
+	taskRepo *mockTaskRepo,
+	agentMgr *mockAgentManager,
+) *Service {
+	t.Helper()
+	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
+	svc.SetWorkflowStepGetter(sg)
+	return svc
 }
 
 func createEngineServiceWithTaskRepo(t *testing.T, repo *sqliterepo.Repository, sg *mockStepGetter, taskRepo *mockTaskRepo, agentMgr *mockAgentManager) *Service {

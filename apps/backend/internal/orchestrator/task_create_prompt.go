@@ -2,15 +2,28 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
-const metaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
+const metaKeyInitialCreatePromptPassthrough = models.SessionMetaKeyInitialCreatePromptPassthrough
+
+type initialCreatePromptPassthroughQueueContextKey struct{}
+
+func withInitialCreatePromptPassthroughQueue(ctx context.Context) context.Context {
+	return context.WithValue(ctx, initialCreatePromptPassthroughQueueContextKey{}, true)
+}
+
+func initialCreatePromptPassthroughQueueFromContext(ctx context.Context) bool {
+	marked, _ := ctx.Value(initialCreatePromptPassthroughQueueContextKey{}).(bool)
+	return marked
+}
 
 func initialCreatePromptPassthroughQueued(metadata map[string]interface{}) bool {
 	marked, _ := metadata[metaKeyInitialCreatePromptPassthrough].(bool)
@@ -27,12 +40,12 @@ type initialCreatePromptAdmission struct {
 // insufficient because an execution can be replaced without replacing the
 // session.
 type initialCreatePromptPassthroughEvidence struct {
-	QueueIncarnationID string
-	ExecutionID        string
-	ExecutionBound     bool
-	TurnID             string
-	PromptGeneration   uint64
-	Consumed           bool
+	QueueIncarnationID string `json:"queue_incarnation_id,omitempty"`
+	ExecutionID        string `json:"execution_id,omitempty"`
+	ExecutionBound     bool   `json:"execution_bound"`
+	TurnID             string `json:"turn_id,omitempty"`
+	PromptGeneration   uint64 `json:"prompt_generation,omitempty"`
+	Consumed           bool   `json:"consumed,omitempty"`
 }
 
 type initialCreatePromptPassthroughDisposition uint8
@@ -109,13 +122,15 @@ func (s *Service) armInitialCreatePromptPassthroughWithExecution(
 	if s.initialCreatePromptPassthrough == nil {
 		s.initialCreatePromptPassthrough = make(map[string]initialCreatePromptPassthroughEvidence)
 	}
-	s.initialCreatePromptPassthrough[session.ID] = initialCreatePromptPassthroughEvidence{
+	evidence := initialCreatePromptPassthroughEvidence{
 		QueueIncarnationID: session.QueueIncarnationID,
 		ExecutionID:        executionID,
 		ExecutionBound:     bindExecution && executionID != "",
 		TurnID:             turnID,
 		PromptGeneration:   s.promptGenerationForSession(ctx, session.ID),
 	}
+	s.initialCreatePromptPassthrough[session.ID] = evidence
+	s.persistInitialCreatePromptPassthroughLocked(ctx, session.ID, &evidence)
 }
 
 func (s *Service) bindInitialCreatePromptPassthroughExecution(
@@ -127,6 +142,9 @@ func (s *Service) bindInitialCreatePromptPassthroughExecution(
 	}
 	s.initialCreatePromptMu.Lock()
 	defer s.initialCreatePromptMu.Unlock()
+	if s.initialCreatePromptPassthrough == nil {
+		s.initialCreatePromptPassthrough = make(map[string]initialCreatePromptPassthroughEvidence)
+	}
 	evidence, ok := s.initialCreatePromptPassthrough[sessionID]
 	if !ok {
 		return
@@ -152,6 +170,84 @@ func (s *Service) bindInitialCreatePromptPassthroughExecution(
 		evidence.PromptGeneration = s.promptGenerationForSession(ctx, sessionID)
 	}
 	s.initialCreatePromptPassthrough[sessionID] = evidence
+	s.persistInitialCreatePromptPassthroughLocked(ctx, sessionID, &evidence)
+}
+
+func (s *Service) persistInitialCreatePromptPassthroughLocked(
+	ctx context.Context,
+	sessionID string,
+	evidence *initialCreatePromptPassthroughEvidence,
+) {
+	if s.repo == nil || sessionID == "" {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(
+		context.WithoutCancel(ctx),
+		sessionID,
+		models.SessionMetaKeyInitialCreatePromptPassthrough,
+		evidence,
+	); err != nil && s.logger != nil {
+		s.logger.Warn("failed to persist initial creation prompt passthrough evidence",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func (s *Service) clearInitialCreatePromptPassthroughLocked(ctx context.Context, sessionID string) {
+	if s.repo == nil || sessionID == "" {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(
+		context.WithoutCancel(ctx),
+		sessionID,
+		models.SessionMetaKeyInitialCreatePromptPassthrough,
+		nil,
+	); err != nil && s.logger != nil {
+		s.logger.Warn("failed to clear initial creation prompt passthrough evidence",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func initialCreatePromptPassthroughEvidenceFromMetadata(
+	metadata map[string]interface{},
+) (initialCreatePromptPassthroughEvidence, bool) {
+	if metadata == nil {
+		return initialCreatePromptPassthroughEvidence{}, false
+	}
+	raw, ok := metadata[models.SessionMetaKeyInitialCreatePromptPassthrough]
+	if !ok || raw == nil {
+		return initialCreatePromptPassthroughEvidence{}, false
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return initialCreatePromptPassthroughEvidence{}, false
+	}
+	var evidence initialCreatePromptPassthroughEvidence
+	if err := json.Unmarshal(data, &evidence); err != nil {
+		return initialCreatePromptPassthroughEvidence{}, false
+	}
+	return evidence, true
+}
+
+func (s *Service) hydrateInitialCreatePromptPassthrough(
+	session *models.TaskSession,
+) (initialCreatePromptPassthroughEvidence, bool) {
+	if session == nil || session.ID == "" {
+		return initialCreatePromptPassthroughEvidence{}, false
+	}
+	s.initialCreatePromptMu.Lock()
+	defer s.initialCreatePromptMu.Unlock()
+	if evidence, ok := s.initialCreatePromptPassthrough[session.ID]; ok {
+		return evidence, true
+	}
+	evidence, ok := initialCreatePromptPassthroughEvidenceFromMetadata(session.Metadata)
+	if !ok {
+		return initialCreatePromptPassthroughEvidence{}, false
+	}
+	if s.initialCreatePromptPassthrough == nil {
+		s.initialCreatePromptPassthrough = make(map[string]initialCreatePromptPassthroughEvidence)
+	}
+	s.initialCreatePromptPassthrough[session.ID] = evidence
+	return evidence, true
 }
 
 // initialCreatePromptCurrentTurnID reads the current turn without creating a
@@ -190,9 +286,7 @@ func (s *Service) consumeInitialCreatePromptPassthrough(
 	currentTurnID := s.initialCreatePromptCurrentTurnID(ctx, session.ID)
 	currentGeneration := s.promptGenerationForSession(ctx, session.ID)
 
-	s.initialCreatePromptMu.Lock()
-	defer s.initialCreatePromptMu.Unlock()
-	evidence, ok := s.initialCreatePromptPassthrough[session.ID]
+	evidence, ok := s.hydrateInitialCreatePromptPassthrough(session)
 	if !ok {
 		return initialCreatePromptPassthroughAbsent
 	}
@@ -205,19 +299,27 @@ func (s *Service) consumeInitialCreatePromptPassthrough(
 		currentGeneration,
 	)
 	if disposition == initialCreatePromptPassthroughNewTurn {
+		s.initialCreatePromptMu.Lock()
 		delete(s.initialCreatePromptPassthrough, session.ID)
+		s.clearInitialCreatePromptPassthroughLocked(ctx, session.ID)
+		s.initialCreatePromptMu.Unlock()
 		return disposition
 	}
 	if disposition != initialCreatePromptPassthroughAbsent {
 		return disposition
 	}
 	bindInitialCreatePromptEventIdentity(&evidence, data, liveExecutionID, currentTurnID, currentGeneration)
+	s.initialCreatePromptMu.Lock()
 	if evidence.Consumed {
 		s.initialCreatePromptPassthrough[session.ID] = evidence
+		s.persistInitialCreatePromptPassthroughLocked(ctx, session.ID, &evidence)
+		s.initialCreatePromptMu.Unlock()
 		return initialCreatePromptPassthroughSuppressed
 	}
 	evidence.Consumed = true
 	s.initialCreatePromptPassthrough[session.ID] = evidence
+	s.persistInitialCreatePromptPassthroughLocked(ctx, session.ID, &evidence)
+	s.initialCreatePromptMu.Unlock()
 	return initialCreatePromptPassthroughSuppressed
 }
 
@@ -231,9 +333,17 @@ func initialCreatePromptEvidenceDisposition(
 	if evidence.QueueIncarnationID != "" && evidence.QueueIncarnationID != queueIncarnationID {
 		return initialCreatePromptPassthroughStale
 	}
-	if !evidence.ExecutionBound || !initialCreatePromptExecutionMatches(
-		evidence.ExecutionID, data.AgentExecutionID, liveExecutionID,
-	) {
+	if evidence.ExecutionBound {
+		if !initialCreatePromptExecutionMatches(
+			evidence.ExecutionID, data.AgentExecutionID, liveExecutionID,
+		) {
+			return initialCreatePromptPassthroughStale
+		}
+	} else if data.AgentExecutionID == "" || liveExecutionID == "" || data.AgentExecutionID != liveExecutionID {
+		// Queue admission can arm the marker before the passthrough runtime has
+		// claimed an execution. The first running event may race the callback
+		// that normally binds it, so accept only the event whose identity also
+		// matches the live execution lookup.
 		return initialCreatePromptPassthroughStale
 	}
 	if initialCreatePromptGenerationMatches(evidence.PromptGeneration, data.PromptGeneration, currentGeneration) {
@@ -265,6 +375,9 @@ func bindInitialCreatePromptEventIdentity(
 		if evidence.ExecutionID == "" {
 			evidence.ExecutionID = liveExecutionID
 		}
+	}
+	if evidence.ExecutionID != "" {
+		evidence.ExecutionBound = true
 	}
 	if evidence.PromptGeneration == 0 {
 		evidence.PromptGeneration = data.PromptGeneration
@@ -306,6 +419,7 @@ func (s *Service) retireInitialCreatePromptPassthroughForEvent(
 	if err != nil || session == nil {
 		return
 	}
+	s.hydrateInitialCreatePromptPassthrough(session)
 	liveExecutionID := ""
 	if s.agentManager != nil {
 		liveExecutionID, _ = s.agentManager.GetExecutionIDForSession(ctx, data.SessionID)
@@ -330,9 +444,13 @@ func (s *Service) retireInitialCreatePromptPassthroughForEvent(
 		return
 	}
 	delete(s.initialCreatePromptPassthrough, data.SessionID)
+	s.clearInitialCreatePromptPassthroughLocked(ctx, data.SessionID)
 }
 
-func (s *Service) retireInitialCreatePromptPassthroughForQueue(sessionID, queueIncarnationID string) {
+func (s *Service) retireInitialCreatePromptPassthroughForQueue(
+	sessionID, queueIncarnationID, turnID string,
+	promptGeneration uint64,
+) {
 	if sessionID == "" {
 		return
 	}
@@ -343,35 +461,86 @@ func (s *Service) retireInitialCreatePromptPassthroughForQueue(sessionID, queueI
 		(queueIncarnationID == "" || evidence.QueueIncarnationID != queueIncarnationID)) {
 		return
 	}
+	if evidence.ExecutionBound || (evidence.TurnID != "" &&
+		(turnID == "" || evidence.TurnID != turnID)) {
+		return
+	}
+	if evidence.PromptGeneration != 0 && promptGeneration != 0 &&
+		evidence.PromptGeneration != promptGeneration {
+		return
+	}
 	delete(s.initialCreatePromptPassthrough, sessionID)
+	s.clearInitialCreatePromptPassthroughLocked(context.Background(), sessionID)
 }
 
 func (s *Service) retireInitialCreatePromptPassthroughForQueueEvent(
 	ctx context.Context,
-	sessionID, queueIncarnationID string,
+	sessionID, queueIncarnationID, executionID, turnID string,
+	promptGeneration uint64,
 ) {
-	if sessionID == "" {
+	if sessionID == "" || executionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
 		return
 	}
 	if queueIncarnationID == "" {
-		session, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err != nil || session == nil {
-			return
-		}
 		queueIncarnationID = session.QueueIncarnationID
 	}
-	s.retireInitialCreatePromptPassthroughForQueue(sessionID, queueIncarnationID)
+	s.hydrateInitialCreatePromptPassthrough(session)
+	s.initialCreatePromptMu.Lock()
+	defer s.initialCreatePromptMu.Unlock()
+	evidence, ok := s.initialCreatePromptPassthrough[sessionID]
+	if !ok || !initialCreatePromptQueueEventMatchesEvidence(
+		evidence, queueIncarnationID, executionID, turnID, promptGeneration,
+	) {
+		return
+	}
+	delete(s.initialCreatePromptPassthrough, sessionID)
+	s.clearInitialCreatePromptPassthroughLocked(ctx, sessionID)
+}
+
+func initialCreatePromptQueueEventMatchesEvidence(
+	evidence initialCreatePromptPassthroughEvidence,
+	queueIncarnationID, executionID, turnID string,
+	promptGeneration uint64,
+) bool {
+	if evidence.QueueIncarnationID != "" &&
+		(evidence.QueueIncarnationID != queueIncarnationID || queueIncarnationID == "") {
+		return false
+	}
+	if !evidence.ExecutionBound || evidence.ExecutionID != executionID {
+		return false
+	}
+	if evidence.TurnID != "" && (turnID == "" || evidence.TurnID != turnID) {
+		return false
+	}
+	return evidence.PromptGeneration == 0 || promptGeneration == 0 ||
+		evidence.PromptGeneration == promptGeneration
 }
 
 func (s *Service) clearInitialCreatePromptPassthroughForNewTurn(sessionID, turnID string) {
 	if sessionID == "" || turnID == "" {
 		return
 	}
+	// A service restart can leave only the durable marker in the session row.
+	// Hydrate it before comparing turns so the first accepted later turn also
+	// clears evidence that was not present in the new process's memory.
+	s.initialCreatePromptMu.Lock()
+	_, inMemory := s.initialCreatePromptPassthrough[sessionID]
+	s.initialCreatePromptMu.Unlock()
+	if !inMemory && s.repo != nil {
+		if session, err := s.repo.GetTaskSession(context.Background(), sessionID); err == nil {
+			s.hydrateInitialCreatePromptPassthrough(session)
+		}
+	}
 	s.initialCreatePromptMu.Lock()
 	defer s.initialCreatePromptMu.Unlock()
 	evidence, ok := s.initialCreatePromptPassthrough[sessionID]
 	if ok && evidence.TurnID != "" && evidence.TurnID != turnID {
 		delete(s.initialCreatePromptPassthrough, sessionID)
+		s.clearInitialCreatePromptPassthroughLocked(context.Background(), sessionID)
 	}
 }
 
@@ -410,6 +579,34 @@ func (s *Service) armQueuedInitialCreatePromptPassthroughForLaunch(
 	s.armInitialCreatePromptPassthroughForLaunch(ctx, session, s.initialCreatePromptCurrentTurnID(ctx, session.ID))
 }
 
+// initialCreatePromptPassthroughQueuePending reports whether a destination
+// on_enter must wait for the admitted creation prompt. Queue promotion can run
+// on the passthrough path before the ordinary queue worker claims its row; an
+// automatic step prompt in that gap would otherwise become a second user turn.
+func (s *Service) initialCreatePromptPassthroughQueuePending(
+	ctx context.Context,
+	sessionID string,
+) bool {
+	if sessionID == "" || s.messageQueue == nil {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return false
+	}
+	_, ok := s.hydrateInitialCreatePromptPassthrough(session)
+	if !ok {
+		return false
+	}
+	status := s.messageQueue.GetStatus(ctx, sessionID)
+	for _, entry := range status.Entries {
+		if initialCreatePromptPassthroughQueued(entry.Metadata) {
+			return true
+		}
+	}
+	return s.isQueuedDispatchInFlight(sessionID)
+}
+
 // admitInitialCreatePrompt runs the explicit creation prompt through the same
 // turn-start boundary as an ordinary user message and resolves the session that
 // owns the resulting workflow step. The caller must pass the original prepared
@@ -422,21 +619,24 @@ func (s *Service) admitInitialCreatePrompt(
 	if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr == nil && task != nil {
 		initialWorkflowStepID = task.WorkflowStepID
 	}
-	result, err := s.processOnTurnStartAdmission(ctx, taskID, sessionID, true)
-	if err != nil {
+	failure := func(err error) (initialCreatePromptAdmission, error) {
 		return initialCreatePromptAdmission{
 			SessionID: s.resolveInitialCreatePromptFailureSession(
 				ctx, taskID, sessionID, initialWorkflowStepID,
 			),
-		}, fmt.Errorf("process initial creation prompt turn start: %w", err)
+		}, err
+	}
+	result, err := s.processOnTurnStartAdmission(ctx, taskID, sessionID, true)
+	if err != nil {
+		return failure(fmt.Errorf("process initial creation prompt turn start: %w", err))
 	}
 
 	activeSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return initialCreatePromptAdmission{}, fmt.Errorf("reload initial creation prompt session: %w", err)
+		return failure(fmt.Errorf("reload initial creation prompt session: %w", err))
 	}
 	if activeSession == nil {
-		return initialCreatePromptAdmission{}, fmt.Errorf("initial creation prompt session %q was not found", sessionID)
+		return failure(fmt.Errorf("initial creation prompt session %q was not found", sessionID))
 	}
 	// Profile routing can park the source instead of completing it. Resolve the
 	// task's newest active session whenever the prepared session is no longer the
@@ -444,14 +644,14 @@ func (s *Service) admitInitialCreatePrompt(
 	if activeSession.State == models.TaskSessionStateCompleted || !activeSession.IsPrimary {
 		activeSession, err = s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
 		if err != nil {
-			return initialCreatePromptAdmission{}, fmt.Errorf("resolve initial creation prompt replacement session: %w", err)
+			return failure(fmt.Errorf("resolve initial creation prompt replacement session: %w", err))
 		}
 		if activeSession == nil {
-			return initialCreatePromptAdmission{}, fmt.Errorf("initial creation prompt session %q was replaced without an active session", sessionID)
+			return failure(fmt.Errorf("initial creation prompt session %q was replaced without an active session", sessionID))
 		}
 	}
 	if activeSession.TaskID != taskID {
-		return initialCreatePromptAdmission{}, fmt.Errorf("initial creation prompt session does not belong to task")
+		return failure(fmt.Errorf("initial creation prompt session does not belong to task"))
 	}
 	return initialCreatePromptAdmission{
 		SessionID: activeSession.ID,
@@ -522,38 +722,7 @@ func (s *Service) launchInitialCreatePrompt(
 	}
 
 	if admission.Queued {
-		if err := s.QueueUserPrompt(
-			ctx,
-			req.TaskID,
-			admission.SessionID,
-			req.Prompt,
-			"",
-			req.PlanMode,
-			req.Attachments,
-			map[string]interface{}{
-				MetaKeyTurnStartAlreadyProcessed:      true,
-				metaKeyInitialCreatePromptPassthrough: true,
-			},
-			false,
-		); err != nil {
-			return nil, s.handleSessionLaunchFailure(
-				ctx, req.TaskID, admission.SessionID,
-				fmt.Errorf("queue initial creation prompt: %w", err),
-			)
-		}
-		session, sessionErr := s.repo.GetTaskSession(ctx, admission.SessionID)
-		if sessionErr != nil {
-			return nil, s.handleSessionLaunchFailure(
-				ctx, req.TaskID, admission.SessionID,
-				fmt.Errorf("reload queued initial creation prompt session: %w", sessionErr),
-			)
-		}
-		return &LaunchSessionResponse{
-			Success:   true,
-			TaskID:    req.TaskID,
-			SessionID: admission.SessionID,
-			State:     string(session.State),
-		}, nil
+		return s.queueInitialCreatePrompt(ctx, req, admission.SessionID)
 	}
 
 	initialReq := *req
@@ -587,4 +756,40 @@ func (s *Service) launchInitialCreatePrompt(
 		s.clearWorkflowParkingForSession(ctx, admission.SessionID, parkingStamp)
 	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
+}
+
+func (s *Service) queueInitialCreatePrompt(
+	ctx context.Context,
+	req *LaunchSessionRequest,
+	sessionID string,
+) (*LaunchSessionResponse, error) {
+	if err := s.QueueUserPrompt(
+		ctx, req.TaskID, sessionID, req.Prompt, "", req.PlanMode, req.Attachments,
+		map[string]interface{}{
+			MetaKeyTurnStartAlreadyProcessed:      true,
+			metaKeyInitialCreatePromptPassthrough: true,
+		}, false,
+	); err != nil {
+		return nil, s.handleSessionLaunchFailure(
+			ctx, req.TaskID, sessionID, fmt.Errorf("queue initial creation prompt: %w", err),
+		)
+	}
+	if session, sessionErr := s.repo.GetTaskSession(ctx, sessionID); sessionErr == nil && session != nil {
+		s.armInitialCreatePromptPassthroughForLaunch(
+			ctx, session, s.initialCreatePromptCurrentTurnID(ctx, sessionID),
+		)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, s.handleSessionLaunchFailure(
+			ctx, req.TaskID, sessionID,
+			fmt.Errorf("reload queued initial creation prompt session: %w", err),
+		)
+	}
+	return &LaunchSessionResponse{
+		Success:   true,
+		TaskID:    req.TaskID,
+		SessionID: sessionID,
+		State:     string(session.State),
+	}, nil
 }
