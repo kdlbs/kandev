@@ -173,6 +173,8 @@ func TestKubernetesRecoverableFailureShutdownOwnsCleanup(t *testing.T) {
 	require.Equal(t, 1, stops, "stopped service must reject detached recovery work")
 }
 
+// recoveryWorkflowFixture wires a real workflow whose Resume callback signals
+// completion after reacquiring the session guard.
 func recoveryWorkflowFixture(t *testing.T) (*Service, <-chan struct{}) {
 	t.Helper()
 	repo := setupTestRepo(t)
@@ -191,6 +193,8 @@ func recoveryWorkflowFixture(t *testing.T) (*Service, <-chan struct{}) {
 	return svc, callback.done
 }
 
+// waitForFailureRecovery drains recovery workers after the producer has
+// scheduled them, synchronizing subsequent reads of test spies and logs.
 func waitForFailureRecovery(t *testing.T, svc *Service) {
 	t.Helper()
 	done := make(chan struct{})
@@ -198,6 +202,8 @@ func waitForFailureRecovery(t *testing.T, svc *Service) {
 	awaitFailureSignal(t, done)
 }
 
+// awaitFailureSignal bounds real-time synchronization without simulated time
+// around SQLite-backed repository operations.
 func awaitFailureSignal(t *testing.T, done <-chan struct{}) {
 	t.Helper()
 	select {

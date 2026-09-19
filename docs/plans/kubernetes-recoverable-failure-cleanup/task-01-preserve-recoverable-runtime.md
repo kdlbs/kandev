@@ -164,3 +164,11 @@ and missing-execution checks now use the public runtime facade. After that
 adjustment, race tests for Kubernetes recovery, dynamic failure, all agent-error
 workflow routes, runtime missing-execution handling, and stop paths passed across
 orchestrator, runtime, and lifecycle. Architecture lint passed.
+
+A subsequent review exposed the same already-absent outcome in transient retry
+teardown. The R5 workflow-route regression failed for a missing execution, then
+passed after the transient path adopted the runtime facade's `IsNotFound` check.
+Success, already-absent, and real stop-error controls now run together. The race
+command `go test -race ./internal/orchestrator -run 'TestDispatchKanbanAgentErrorTrigger|TestKubernetesRecoverableFailure|Test.*TransientRetry' -count=1 -timeout=180s`
+passed. Cleanup ownership and synchronization helpers also received explanatory
+comments in response to the standalone documentation-coverage suggestion.

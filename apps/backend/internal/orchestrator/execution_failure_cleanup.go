@@ -8,6 +8,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// cleanupAgentExecutionWithReason reports whether teardown is complete and
+// workflow recovery may proceed, including a previously completed exact claim.
 func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, executionID, taskID, sessionID, reason string) bool {
 	if ctx.Err() != nil {
 		return false
@@ -74,6 +76,8 @@ func (s *Service) startAgentFailureRecovery(recoverFailure func(context.Context)
 	}()
 }
 
+// completeExecutionTeardownClaim records successful cleanup only while the
+// caller still owns the same claim, preserving any newer teardown owner.
 func (s *Service) completeExecutionTeardownClaim(sessionID, executionID string, claim executionTeardownClaim) {
 	completed := claim
 	completed.cleanupCompleted = true
