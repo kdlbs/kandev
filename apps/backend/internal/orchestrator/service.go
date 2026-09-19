@@ -1470,7 +1470,7 @@ type Service struct {
 	ciAutomationStopped bool
 	ciAutomationWorkers sync.WaitGroup
 
-	// dynamicSuccessorWorkers owns the detached dynamic fallback launches. The
+	// dynamicSuccessorWorkers owns detached dynamic launches and failure recovery. The
 	// launch has to leave the agent.failed dispatch to avoid the prompt
 	// lifecycle deadlock, but a detached goroutine must still stop mutating
 	// session state once Stop begins, so it runs under a service-owned context

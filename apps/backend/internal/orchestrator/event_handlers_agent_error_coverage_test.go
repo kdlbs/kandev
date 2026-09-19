@@ -73,6 +73,7 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentCancelDoesNotLeakMarker(t *te
 	if !svc.CancelTransientRetry(ctx, "t1", "s1") {
 		t.Fatal("CancelTransientRetry = false, want true (a loop was active)")
 	}
+	waitForFailureRecovery(t, svc)
 	if decisions.clearCalls != 0 {
 		t.Fatalf("cancel's own delivery clearCalls = %d, want 0 (AC-A8 suppression)", decisions.clearCalls)
 	}
@@ -80,6 +81,7 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentCancelDoesNotLeakMarker(t *te
 	// The claimed timer still reaches R4 on its own, unaffected context. Its
 	// event must not carry the cancel's UserInitiated marker.
 	svc.retryTransientPrompt(ctx, "t1", "s1", "exec-1")
+	waitForFailureRecovery(t, svc)
 
 	if decisions.clearCalls != 1 {
 		t.Fatalf("timer's own delivery clearCalls = %d, want 1 (AC-A8's marker must not leak into R4)", decisions.clearCalls)
@@ -126,6 +128,7 @@ func TestDispatchKanbanAgentErrorTrigger_ReadsPostReconciliationStep(t *testing.
 	svc.handleAgentFailed(ctx, watcher.AgentEventData{
 		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", ErrorMessage: "agent crashed",
 	})
+	waitForFailureRecovery(t, svc)
 
 	task, err := repo.GetTask(ctx, "t1")
 	if err != nil {

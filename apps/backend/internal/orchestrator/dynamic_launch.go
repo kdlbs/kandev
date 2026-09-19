@@ -974,8 +974,8 @@ func (s *Service) runDetachedDynamicSuccessorLaunch(
 		errMsg = "dynamic successor launch failed"
 	}
 	s.finalizeAutomationRun(failureCtx, data.TaskID, false, errMsg)
-	if dispatch := s.handleRecoverableFailureLockedState(failureCtx, data); dispatch != nil {
-		go dispatch()
+	if dispatch := s.handleRecoverableFailureLockedState(failureCtx, data, agentruntime.StopReasonRecoverableAgentFailure); dispatch != nil {
+		s.startAgentFailureRecovery(dispatch)
 	}
 }
 

@@ -37,7 +37,9 @@ existing force behavior. Explicit destructive reasons retain priority.
 
 The existing failed-resume-bootstrap retention path in
 `manager_kubernetes_resume_bootstrap_cleanup_test.go` provides the nearest
-pattern. Do not broaden it to failed fresh-launch rollback.
+pattern. Startup authentication and managed-NPM failures carry the bootstrap
+stop reason, so resumed startup retains resources while fresh-launch rollback
+remains destructive.
 
 ## Concurrency and failure handling
 
@@ -46,7 +48,7 @@ Failure cleanup and a subsequent resume must be ordered so predecessor cleanup
 cannot tear down the newly attached execution or its shared retained Pod. Cover
 this ordering with a blocked-stop test, including synchronous `on_agent_error`
 restart. Run cleanup and its subsequent workflow callback together after releasing
-the session guard, on a separate goroutine: lifecycle failure publication can
+the session guard, on a service-owned worker: lifecycle failure publication can
 hold the prompt lock until its subscribers return. Do not add a session-wide
 lock across callbacks that reacquire it. A repeated recoverable stop for an
 execution no longer tracked in memory must not enter destructive persisted
@@ -55,7 +57,16 @@ Kubernetes cleanup.
 Keep secret lookup failures fail-closed in `resolveLaunchAuthToken`.
 Regenerating a secret would not restore a deleted PVC or authenticate to an
 already-running agentctl. Do not silently migrate broken historical sessions.
-Cleanup errors must retain retryable ownership evidence.
+Cleanup errors release only the exact failed teardown claim so a later attempt
+can retry; they suppress workflow dispatch. A successful teardown records
+completion on its claim, allowing workflow redelivery without repeating cleanup.
+An in-flight duplicate cannot dispatch ahead of the owning cleanup. An already
+absent execution is a successful cleanup outcome.
+
+Recovery workers share the dynamic-successor cancellation context and wait group.
+Shutdown rejects new workers, cancels active work, and drains within the existing
+shutdown bound. Workflow recovery checks cancellation after cleanup and receives
+the worker context, so a stop finishing during shutdown cannot start Resume.
 
 ## Validation
 

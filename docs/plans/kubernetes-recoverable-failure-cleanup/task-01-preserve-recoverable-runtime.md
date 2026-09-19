@@ -132,3 +132,35 @@ not test assertions.
 Targeted Go lint passed with 0 issues. The E2E file passed ESLint and Prettier.
 Architecture and documentation validators passed. Final Docker inspection
 confirmed no owned test containers or runtime image tags remained.
+
+
+## PR review remediation
+
+- Cleanup failures now block workflow recovery and release their exact claim for
+  retry. Completed teardown claims allow deferred workflow redelivery without
+  repeating a stop; in-flight duplicates cannot bypass cleanup.
+- Recovery workers share service shutdown ownership with dynamic successors.
+  Cancellation suppresses workflow Resume, and shutdown drains tracked workers.
+- Authentication and managed-NPM startup failures use bootstrap cleanup, keeping
+  fresh-launch rollback destructive and resumed-bootstrap retention intact.
+- Async workflow route, cancellation, reconciliation, and panic tests now await
+  worker completion. SQLite-backed recovery tests use bounded real-time signals.
+- Full affected-package race suites passed:
+  `go test -race ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/orchestrator/executor -count=1 -timeout=15m`.
+  This includes every backend CI assertion that failed on the opening head.
+- Container CI reached the new test and exposed an invalid failure injection:
+  `/e2e:error` emits text but does not fail ACP. The test now uses the existing
+  `/transport-lost` prompt error in separate fresh-session cases with and without
+  backend restart. A retries-disabled local run used rebuilt backend, Linux
+  helpers, and plugin artifacts, but again hit the Kind image-load timeout before
+  entering either assertion path. The run was interrupted during fixture cleanup;
+  CI's Kubernetes runner remains the integration gate. Docker also reported that
+  it could not immediately kill the owned Kind node; it subsequently exited and
+  was removed explicitly. The owned image was already removed by fixture cleanup.
+  No recovery assertion is counted as passing from this local attempt.
+
+Architecture lint rejected direct lifecycle imports in new callers; stop reasons
+and missing-execution checks now use the public runtime facade. After that
+adjustment, race tests for Kubernetes recovery, dynamic failure, all agent-error
+workflow routes, runtime missing-execution handling, and stop paths passed across
+orchestrator, runtime, and lifecycle. Architecture lint passed.

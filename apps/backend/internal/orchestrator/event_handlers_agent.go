@@ -2403,7 +2403,7 @@ func (s *Service) finishAgentCompletedTurn(
 func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEventData) {
 	if data.SessionID == "" {
 		if dispatch := s.handleAgentFailedLocked(ctx, data); dispatch != nil {
-			go dispatch()
+			s.startAgentFailureRecovery(dispatch)
 		}
 		return
 	}
@@ -2442,11 +2442,11 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	lock.Unlock()
 	release()
 	if dispatch != nil {
-		go dispatch()
+		s.startAgentFailureRecovery(dispatch)
 	}
 }
 
-func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) func() {
+func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) func(context.Context) {
 	data = s.withPromptAttemptEvidence(data)
 	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
@@ -2499,7 +2499,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 
 	// Make all agent CLI failures recoverable — let the user choose to resume or start fresh.
 	if data.SessionID != "" {
-		return s.handleRecoverableFailureLockedState(ctx, data)
+		return s.handleRecoverableFailureLockedState(ctx, data, lifecycle.StopReasonRecoverableAgentFailure)
 	}
 
 	// No session — fall back to scheduler retry + task to REVIEW unless another
@@ -2568,8 +2568,9 @@ const (
 )
 
 type executionTeardownClaim struct {
-	intent    executionTeardownIntent
-	expiresAt time.Time
+	intent           executionTeardownIntent
+	expiresAt        time.Time
+	cleanupCompleted bool
 }
 
 // claimExecutionTeardown accepts the first teardown intent for one concrete
@@ -2790,8 +2791,8 @@ func (s *Service) clearResumeToken(ctx context.Context, sessionID string) error 
 // resume the agent session or start fresh.
 func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.AgentEventData) {
 	if data.SessionID == "" {
-		if dispatch := s.handleRecoverableFailureLockedState(ctx, data); dispatch != nil {
-			go dispatch()
+		if dispatch := s.handleRecoverableFailureLockedState(ctx, data, lifecycle.StopReasonRecoverableAgentFailure); dispatch != nil {
+			s.startAgentFailureRecovery(dispatch)
 		}
 		return
 	}
@@ -2813,11 +2814,11 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
 	}
-	dispatch := s.handleRecoverableFailureLockedState(ctx, data)
+	dispatch := s.handleRecoverableFailureLockedState(ctx, data, lifecycle.StopReasonRecoverableAgentFailure)
 	lock.Unlock()
 	release()
 	if dispatch != nil {
-		go dispatch()
+		s.startAgentFailureRecovery(dispatch)
 	}
 }
 
@@ -2825,7 +2826,7 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 // session's cancelInFlight guard is held and returns the workflow dispatch to
 // run after the guard is released. Deletion uses the same guard, so an active
 // error event cannot publish after the deleted-session inactive event.
-func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data watcher.AgentEventData) func() {
+func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data watcher.AgentEventData, stopReason string) func(context.Context) {
 	completionFollowUp := false
 	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil && session != nil {
 		completionFollowUp = models.IsCompletionFollowUpSession(session.Metadata)
@@ -2903,11 +2904,13 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// Callers run teardown and workflow dispatch asynchronously after releasing
 	// cancelInFlight: lifecycle publishers may still hold their prompt lock.
 	// A workflow restart must observe the failed execution's released slot.
-	return func() {
-		s.cleanupAgentExecutionWithReason(data.AgentExecutionID, data.TaskID, data.SessionID,
-			lifecycle.StopReasonRecoverableAgentFailure)
-		if !completionFollowUp {
-			s.dispatchKanbanAgentErrorTriggerRecovered(context.WithoutCancel(ctx), data)
+	return func(workerCtx context.Context) {
+		if !s.cleanupAgentExecutionWithReason(workerCtx, data.AgentExecutionID, data.TaskID, data.SessionID,
+			stopReason) {
+			return
+		}
+		if !completionFollowUp && workerCtx.Err() == nil {
+			s.dispatchKanbanAgentErrorTriggerRecovered(workerCtx, data)
 		}
 	}
 }
@@ -3451,14 +3454,14 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	}
 	var unlockGuard func()
 	var releaseGuard func()
-	var dispatch func()
+	var dispatch func(context.Context)
 	defer func() {
 		if unlockGuard != nil {
 			unlockGuard()
 			releaseGuard()
 		}
 		if dispatch != nil {
-			go dispatch()
+			s.startAgentFailureRecovery(dispatch)
 		}
 	}()
 	if sessionID != "" {
@@ -3507,7 +3510,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", agentExecutionID))
-		dispatch = s.handleRecoverableFailureLockedState(ctx, failureData)
+		dispatch = s.handleRecoverableFailureLockedState(ctx, failureData, lifecycle.StopReasonAgentBootstrapFailed)
 		return true
 	}
 
@@ -3528,7 +3531,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 	s.logger.Info("agent start failure is auth error, treating as recoverable",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID))
-	dispatch = s.handleRecoverableFailureLockedState(ctx, failureData)
+	dispatch = s.handleRecoverableFailureLockedState(ctx, failureData, lifecycle.StopReasonAgentBootstrapFailed)
 	return true
 }
 
@@ -3757,5 +3760,5 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 // the agent reaches a terminal state (completed/failed). This runs in a goroutine
 // so it doesn't block the event handler.
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
-	s.cleanupAgentExecutionWithReason(executionID, taskID, sessionID, "agent completed")
+	s.cleanupAgentExecutionWithReason(context.Background(), executionID, taskID, sessionID, "agent completed")
 }

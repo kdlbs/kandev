@@ -44,6 +44,7 @@ func newAgentErrorTestService(
 		configure(svc)
 	}
 	svc.initWorkflowEngine()
+	t.Cleanup(svc.stopDynamicSuccessorWorkers)
 	return svc, logs
 }
 
@@ -499,6 +500,7 @@ func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 		if !svc.CancelTransientRetry(ctx, "t1", "s1") {
 			t.Fatal("CancelTransientRetry = false, want true (a loop was active)")
 		}
+		waitForFailureRecovery(t, svc)
 		if decisions.clearCalls != 0 {
 			t.Errorf("clearCalls = %d, want 0 (a user cancel must not dispatch on_agent_error)", decisions.clearCalls)
 		}
@@ -516,6 +518,7 @@ func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 		svc, _ := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
 
 		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1"})
+		waitForFailureRecovery(t, svc)
 
 		if decisions.clearCalls != 1 {
 			t.Errorf("clearCalls = %d, want 1 (a non-user-initiated recoverable failure must dispatch)", decisions.clearCalls)

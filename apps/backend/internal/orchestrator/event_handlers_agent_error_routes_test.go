@@ -39,6 +39,7 @@ func TestDispatchKanbanAgentErrorTrigger_R1BusDrivenFailureDispatches(t *testing
 		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1", ErrorMessage: "agent crashed",
 	})
 
+	waitForFailureRecovery(t, svc)
 	if decisions.clearCalls != 1 {
 		t.Fatalf("clearCalls = %d, want 1 (R1's bus-driven entry point must reach the real dispatch)", decisions.clearCalls)
 	}
@@ -76,6 +77,7 @@ func TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches(t 
 	if !handled {
 		t.Fatal("expected handled=true for a managed npm runtime startup failure")
 	}
+	waitForFailureRecovery(t, svc)
 	if decisions.clearCalls != 1 {
 		t.Fatalf("clearCalls = %d, want 1 (R2's npm-resolution branch must reach the real dispatch)", decisions.clearCalls)
 	}
@@ -112,6 +114,7 @@ func TestDispatchKanbanAgentErrorTrigger_R3AuthErrorDispatches(t *testing.T) {
 	if !handled {
 		t.Fatal("expected handled=true for an auth-error start failure")
 	}
+	waitForFailureRecovery(t, svc)
 	if decisions.clearCalls != 1 {
 		t.Fatalf("clearCalls = %d, want 1 (R3's auth-error branch must reach the real dispatch)", decisions.clearCalls)
 	}
@@ -148,6 +151,7 @@ func TestDispatchKanbanAgentErrorTrigger_R4NoCachedPromptDispatches(t *testing.T
 	svc.scheduleTransientRetry("t1", "s1", "", 1, time.Hour)
 	svc.retryTransientPrompt(ctx, "t1", "s1", "")
 
+	waitForFailureRecovery(t, svc)
 	if decisions.clearCalls != 1 {
 		t.Fatalf("clearCalls = %d, want 1 (R4's no-cached-prompt path must reach the real dispatch)", decisions.clearCalls)
 	}
@@ -198,6 +202,7 @@ func TestDispatchKanbanAgentErrorTrigger_R5SynchronousPromptErrorDispatches(t *t
 
 	svc.retryTransientPrompt(ctx, "t1", "s1", "exec-1")
 
+	waitForFailureRecovery(t, svc)
 	if decisions.clearCalls != 1 {
 		t.Fatalf("clearCalls = %d, want 1 (R5's synchronous PromptTask failure must reach the real dispatch)", decisions.clearCalls)
 	}

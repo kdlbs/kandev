@@ -8,6 +8,13 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 )
 
+// Recovery stop reasons preserve runtime-specific teardown semantics through
+// the public runtime boundary.
+const (
+	StopReasonRecoverableAgentFailure = lifecycle.StopReasonRecoverableAgentFailure
+	StopReasonAgentBootstrapFailed    = lifecycle.StopReasonAgentBootstrapFailed
+)
+
 // New returns a Runtime backed by the supplied Backend (typically a
 // *lifecycle.Manager).
 func New(backend Backend) Runtime {
