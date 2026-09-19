@@ -152,6 +152,31 @@ export type AppStatusBarOrderApi = {
   right_item_ids?: string[];
 };
 
+export type SidebarShortcutTargetApi = {
+  kind: "destination" | "host_action" | "canvas" | "automation";
+  id: string;
+};
+
+export type SidebarShortcutApi = {
+  id: string;
+  target: SidebarShortcutTargetApi;
+};
+
+export type SidebarLayoutNodeApi = {
+  id: string;
+  kind: "builtin" | "plugin" | "shortcuts";
+  visible: boolean;
+  destination_id?: string;
+  name?: string;
+  shortcuts?: SidebarShortcutApi[];
+};
+
+export type SidebarLayoutApi = {
+  version: number;
+  revision: number;
+  nodes: SidebarLayoutNodeApi[];
+};
+
 export type UserSettings = {
   user_id: string;
   workspace_id: WorkspaceId;
@@ -188,6 +213,7 @@ export type UserSettings = {
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
   sidebar_views_by_workspace?: Record<string, SidebarWorkspaceStateApi>;
+  sidebar_layouts_by_workspace?: Record<string, SidebarLayoutApi>;
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
   sidebar_draft?: SidebarViewDraftApi | null;
@@ -266,6 +292,11 @@ export type UserSettingsUpdatePayload = {
   lsp_server_configs?: Record<string, Record<string, unknown>>;
   lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
+  sidebar_layout_state?: {
+    workspace_id: string;
+    expected_revision: number;
+    layout: SidebarLayoutApi | null;
+  };
   sidebar_view_state?: {
     workspace_id: string;
     views?: SidebarViewApi[];

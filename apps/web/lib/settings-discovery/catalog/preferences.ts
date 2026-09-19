@@ -6,6 +6,7 @@ export const TERMINAL_LINKS_TARGET = "setting-terminal-links";
 export const PREFERENCES_SETTINGS_HREF = "/settings/preferences";
 const APPEARANCE_ID = "preferences-appearance";
 export const APPEARANCE_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/appearance`;
+export const SIDEBAR_SETTINGS_HREF = "/settings/sidebar";
 export const LAYOUTS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/layouts`;
 const TERMINAL_EDITORS_ID = "preferences-terminal-editors";
 export const TERMINAL_EDITORS_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/terminal-editors`;
@@ -79,6 +80,14 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     order: 10,
+  },
+  {
+    id: "sidebar-customization",
+    kind: "page",
+    labelKey: "settings:sidebar",
+    groupId: "preferences",
+    href: SIDEBAR_SETTINGS_HREF,
+    order: 19,
   },
   {
     id: "appearance-color-theme",

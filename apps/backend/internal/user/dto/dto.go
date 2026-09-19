@@ -16,6 +16,7 @@ type UserDTO struct {
 
 type UserSettingsDTO struct {
 	SidebarViewsByWorkspace           map[string]models.SidebarWorkspaceState `json:"sidebar_views_by_workspace"`
+	SidebarLayoutsByWorkspace         map[string]models.SidebarLayout         `json:"sidebar_layouts_by_workspace"`
 	UserID                            string                                  `json:"user_id"`
 	WorkspaceID                       string                                  `json:"workspace_id"`
 	KanbanViewMode                    string                                  `json:"kanban_view_mode"`
@@ -132,6 +133,7 @@ type ShellOption struct {
 
 type UpdateUserSettingsRequest struct {
 	SidebarViewState                  *models.SidebarWorkspacePatch      `json:"sidebar_view_state,omitempty"`
+	SidebarLayoutState                *models.SidebarLayoutPatch         `json:"sidebar_layout_state,omitempty"`
 	WorkspaceID                       *string                            `json:"workspace_id,omitempty"`
 	KanbanViewMode                    *string                            `json:"kanban_view_mode,omitempty"`
 	StartupPage                       *string                            `json:"startup_page,omitempty"`
@@ -330,6 +332,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 	}
 	return UserSettingsDTO{
 		UserID:                            settings.UserID,
+		SidebarLayoutsByWorkspace:         settings.SidebarLayoutsByWorkspace,
 		WorkspaceID:                       settings.WorkspaceID,
 		KanbanViewMode:                    settings.KanbanViewMode,
 		StartupPage:                       models.NormalizeStartupPage(settings.StartupPage),

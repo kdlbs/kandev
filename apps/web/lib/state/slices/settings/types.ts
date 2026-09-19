@@ -17,6 +17,7 @@ import type {
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
+import type { SidebarLayoutApi } from "@/lib/types/http-user-settings";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
@@ -450,6 +451,7 @@ export type UserSettingsState = {
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
   sidebarViewsByWorkspace: Record<string, SidebarWorkspaceStateApi>;
+  sidebarLayoutsByWorkspace: Record<string, SidebarLayoutApi>;
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
   threadViews: ThreadView[];
