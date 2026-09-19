@@ -63,7 +63,7 @@ Both:    No parked-session row; genuine task queue status remains when needed.
 
 Keep the existing desktop tabs and phone task drawer/session picker.
 The chat remains the single conversation scroll owner. No new touch targets or
-hover-only behavior are introduced. Cover AC 001.9 and 003.8.
+hover-only behavior are introduced. Cover AC 001.9 and 003.10.
 
 ## Verification
 

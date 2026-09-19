@@ -63,6 +63,7 @@ var taskScanColumns = []taskScanColumn{
 	{name: "workspace_id"},
 	{name: "workflow_id"},
 	{name: "workflow_step_id"},
+	{name: "workflow_agent_overrides"},
 	{name: "title"},
 	{name: "description"},
 	{name: "state"},
@@ -408,10 +409,18 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	if task.ExternalID != "" {
 		externalID = task.ExternalID
 	}
+	workflowAgentOverrides, err := models.EncodeWorkflowAgentOverrides(task.WorkflowAgentOverrides)
+	if err != nil {
+		return "", err
+	}
+	var workflowAgentOverridesValue interface{}
+	if workflowAgentOverrides != "" {
+		workflowAgentOverridesValue = workflowAgentOverrides
+	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
+		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, workflow_agent_overrides, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, created_at, updated_at, origin, project_id, labels, identifier, external_id, assignee_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverridesValue, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, dialect.BoolToInt(task.Autopilot), task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, externalID, task.AssigneeUserID)
 	if err != nil {
 		if isExternalIDUniqueViolation(err) {
 			return "", fmt.Errorf("%w: %w", ErrExternalIDConflict, err)
@@ -1123,12 +1132,21 @@ func (r *Repository) applyPreservedPositionInTx(ctx context.Context, tx *sql.Tx,
 // meantime.
 func (r *Repository) buildTaskUpdateQuery(
 	task *models.Task, metadata []byte, protectDeferredLaunch bool,
-) (query string, finalMetadata []byte, err error) {
+) (query string, finalMetadata []byte, workflowAgentOverrides interface{}, err error) {
+	encodedWorkflowAgentOverrides, err := models.EncodeWorkflowAgentOverrides(task.WorkflowAgentOverrides)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if encodedWorkflowAgentOverrides == "" {
+		workflowAgentOverrides = nil
+	} else {
+		workflowAgentOverrides = encodedWorkflowAgentOverrides
+	}
 	metadataExpr := "?"
 	if protectDeferredLaunch {
 		stripped, marshalErr := json.Marshal(stripProtectedTaskMetadata(task.Metadata))
 		if marshalErr != nil {
-			return "", nil, marshalErr
+			return "", nil, nil, marshalErr
 		}
 		metadata = stripped
 		if !models.IsAgentTitlePending(task.Metadata) {
@@ -1136,14 +1154,14 @@ func (r *Repository) buildTaskUpdateQuery(
 		}
 	}
 	updateQuery := fmt.Sprintf(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
 		WHERE id = ?
 	`, metadataExpr)
 	if models.IsAgentTitlePending(task.Metadata) {
 		pending := agentTitlePendingPredicate(r.db.DriverName())
 		metadataMerge := pendingTaskMetadataMergeExpression(r.db.DriverName())
 		updateQuery = fmt.Sprintf(`
-			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?,
+			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?,
 				title = CASE WHEN %s THEN ? ELSE title END,
 				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
 				queued_for_step_id = ?, queued_at = ?,
@@ -1152,7 +1170,18 @@ func (r *Repository) buildTaskUpdateQuery(
 			WHERE id = ?
 		`, pending, metadataMerge)
 	}
-	return updateQuery, metadata, nil
+	return updateQuery, metadata, workflowAgentOverrides, nil
+}
+
+func encodeWorkflowAgentOverridesValue(overrides *models.WorkflowAgentOverrides) (interface{}, error) {
+	encoded, err := models.EncodeWorkflowAgentOverrides(overrides)
+	if err != nil {
+		return nil, err
+	}
+	if encoded == "" {
+		return nil, nil
+	}
+	return encoded, nil
 }
 
 // updateTaskTx writes the full task row. preservePosition, true for every
@@ -1202,11 +1231,11 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	// was invisible until exercised against Postgres with real concurrency.
 	task.UpdatedAt = r.nowUTC()
 
-	updateQuery, metadata, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch)
+	updateQuery, metadata, workflowAgentOverrides, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch)
 	if err != nil {
 		return "", 0, err
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID)
 	if err != nil {
 		return "", 0, err
 	}
@@ -2617,6 +2646,10 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	if err != nil {
 		metadata = []byte("{}")
 	}
+	workflowAgentOverrides, err := encodeWorkflowAgentOverridesValue(task.WorkflowAgentOverrides)
+	if err != nil {
+		return err
+	}
 
 	var unlock func()
 	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID)
@@ -2660,9 +2693,9 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	task.UpdatedAt = time.Now().UTC()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
 	if err != nil {
 		return err
 	}
@@ -2713,6 +2746,10 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
 		metadata = []byte("{}")
+	}
+	workflowAgentOverrides, err := encodeWorkflowAgentOverridesValue(task.WorkflowAgentOverrides)
+	if err != nil {
+		return false, err
 	}
 
 	var unlock func()
@@ -2781,13 +2818,13 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	task.UpdatedAt = time.Now().UTC()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
 		`+queuePredicate+`
 		  AND archived_at IS NULL
 		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), append([]interface{}{
-		task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID,
+		task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, workflowAgentOverrides, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID,
 	}, predicateArgs...)...)
 	if err != nil {
 		return false, err
@@ -3709,13 +3746,14 @@ func taskSearchSelectQuery(driver, tFilter, like, sort string) string {
 func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	task := &models.Task{}
 	var metadata string
+	var workflowAgentOverrides sql.NullString
 	var archivedAt sql.NullTime
 	var queuedAt sql.NullTime
 	var identifier sql.NullString
 	var externalID sql.NullString
 	var externalIDSettledAt sql.NullTime
 	err := row.Scan(
-		&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
+		&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
 		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
 		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
@@ -3725,6 +3763,12 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if workflowAgentOverrides.Valid {
+		task.WorkflowAgentOverrides, err = models.DecodeWorkflowAgentOverrides(workflowAgentOverrides.String)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if archivedAt.Valid {
 		task.ArchivedAt = &archivedAt.Time
@@ -3751,13 +3795,14 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	for rows.Next() {
 		task := &models.Task{}
 		var metadata string
+		var workflowAgentOverrides sql.NullString
 		var archivedAt sql.NullTime
 		var queuedAt sql.NullTime
 		var identifier sql.NullString
 		var externalID sql.NullString
 		var externalIDSettledAt sql.NullTime
 		err := rows.Scan(
-			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
+			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
 			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &task.Autopilot, &archivedAt, &task.ArchivedByCascadeID,
@@ -3767,6 +3812,12 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		)
 		if err != nil {
 			return nil, err
+		}
+		if workflowAgentOverrides.Valid {
+			task.WorkflowAgentOverrides, err = models.DecodeWorkflowAgentOverrides(workflowAgentOverrides.String)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if archivedAt.Valid {
 			task.ArchivedAt = &archivedAt.Time

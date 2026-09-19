@@ -363,6 +363,7 @@ export type AgentUpdateJobsState = {
 };
 
 export type EditorsState = {
+  folderOpeningAvailable?: boolean;
   items: EditorOption[];
   loaded: boolean;
   loading: boolean;
@@ -538,7 +539,7 @@ export type SettingsSliceActions = {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
-  setEditors: (editors: EditorsState["items"]) => void;
+  setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;

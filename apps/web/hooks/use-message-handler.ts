@@ -153,12 +153,16 @@ export interface UseMessageHandlerParams {
   activeModel: string | null;
   planModeEnabled?: boolean;
   hasPendingClarification?: boolean;
+  /** Resolves the source session's current clarification barrier at send time. */
+  getHasPendingClarification?: () => boolean;
   activeDocument?: ActiveDocument | null;
   planComments?: PlanComment[];
   previewFeedback?: TaskPreviewFeedback[];
   contextFiles?: ContextFile[];
   prompts?: CustomPrompt[];
 }
+
+export type MessageAdmissionOutcome = "sent" | "queued";
 
 const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
 
@@ -256,7 +260,7 @@ async function deliverComposedMessage({
   queue: ReturnType<typeof useQueue>["queue"];
   storeApi: ReturnType<typeof useAppStoreApi>;
   clientAdmissionId: string;
-}) {
+}): Promise<MessageAdmissionOutcome | false> {
   try {
     if (hasPendingClarification || inputMode === "queue") {
       const accepted = await queue({
@@ -276,7 +280,7 @@ async function deliverComposedMessage({
       }
       await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
       await refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi);
-      return;
+      return "queued";
     }
 
     const created = await sendMessageRequest({
@@ -296,6 +300,7 @@ async function deliverComposedMessage({
     if (created?.id && created.session_id) storeApi.getState().addMessage(created);
     await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
     await refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi);
+    return "sent";
   } catch (error) {
     throw normalizePreviewFeedbackSendError(
       normalizePlanCommentSendError(error, taskId, storeApi),
@@ -417,6 +422,7 @@ type ComposedMessageContext = {
   activeModel: string | null;
   planModeEnabled: boolean;
   hasPendingClarification: boolean;
+  getHasPendingClarification?: () => boolean;
   activeDocument: ActiveDocument | null;
   planComments: PlanComment[];
   previewFeedback: TaskPreviewFeedback[];
@@ -427,6 +433,7 @@ type ComposedMessageContext = {
   pendingAdmissionRef: { current: PendingMessageAdmission | null };
 };
 
+// eslint-disable-next-line complexity -- admission evaluates one ordered input-mode and recovery path.
 async function sendComposedMessage(payload: ChatSubmitPayload, context: ComposedMessageContext) {
   const { taskId, resolvedSessionId, storeApi, pendingAdmissionRef } = context;
   if (!taskId || !resolvedSessionId) {
@@ -470,7 +477,9 @@ async function sendComposedMessage(payload: ChatSubmitPayload, context: Composed
   });
   const previousAdmission =
     pendingAdmissionRef.current?.key === admissionKey ? pendingAdmissionRef.current : null;
-  const admission = previousAdmission ?? { key: admissionKey, id: generateUUID() };
+  const admission =
+    previousAdmission ??
+    ({ key: admissionKey, id: payload.clientMessageId ?? generateUUID() } as const);
   pendingAdmissionRef.current = admission;
   const recovered = await recoverPendingMessageAdmission({
     admission: previousAdmission,
@@ -482,7 +491,7 @@ async function sendComposedMessage(payload: ChatSubmitPayload, context: Composed
   });
   if (recovered) {
     if (pendingAdmissionRef.current === admission) pendingAdmissionRef.current = null;
-    return;
+    return "sent" as const;
   }
   const delivered = await deliverComposedMessage({
     payload,
@@ -491,7 +500,8 @@ async function sendComposedMessage(payload: ChatSubmitPayload, context: Composed
     finalMessage,
     modelToSend,
     planModeEnabled: context.planModeEnabled,
-    hasPendingClarification: context.hasPendingClarification,
+    hasPendingClarification:
+      context.getHasPendingClarification?.() ?? context.hasPendingClarification,
     planCommentRefs,
     previewFeedbackRefs,
     contextFilesMeta,
@@ -502,6 +512,7 @@ async function sendComposedMessage(payload: ChatSubmitPayload, context: Composed
   });
   if (delivered === false) return false;
   if (pendingAdmissionRef.current === admission) pendingAdmissionRef.current = null;
+  return delivered;
 }
 
 export function useMessageHandler({
@@ -511,6 +522,7 @@ export function useMessageHandler({
   activeModel,
   planModeEnabled = false,
   hasPendingClarification = false,
+  getHasPendingClarification,
   activeDocument = null,
   planComments = [],
   previewFeedback = [],
@@ -521,7 +533,7 @@ export function useMessageHandler({
   const storeApi = useAppStoreApi();
   const pendingAdmissionRef = useRef<PendingMessageAdmission | null>(null);
 
-  const handleSendMessage = useCallback(
+  const sendMessage = useCallback(
     (payload: ChatSubmitPayload) =>
       sendComposedMessage(payload, {
         taskId,
@@ -530,6 +542,7 @@ export function useMessageHandler({
         activeModel,
         planModeEnabled,
         hasPendingClarification,
+        getHasPendingClarification,
         activeDocument,
         planComments,
         previewFeedback,
@@ -546,6 +559,7 @@ export function useMessageHandler({
       sessionModel,
       planModeEnabled,
       hasPendingClarification,
+      getHasPendingClarification,
       queue,
       storeApi,
       planComments,
@@ -556,5 +570,13 @@ export function useMessageHandler({
     ],
   );
 
-  return { handleSendMessage };
+  const handleSendMessage = useCallback(
+    async (payload: ChatSubmitPayload) => {
+      const outcome = await sendMessage(payload);
+      if (outcome === false) return false;
+    },
+    [sendMessage],
+  );
+
+  return { handleSendMessage, handleSendMessageWithOutcome: sendMessage };
 }

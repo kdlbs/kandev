@@ -20,7 +20,7 @@ import {
   type WorkflowMoveOptionsSubmit,
 } from "./workflow-move-options";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
-import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import type { WorkflowMoveEntryOptions, WorkflowMoveResponse } from "@/lib/api/domains/kanban-api";
 import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
 import { StepProgressDetails } from "./workflow-step-progress-details";
 
@@ -45,11 +45,13 @@ export function useTaskMoveOptions({
   workflowId,
   steps,
   closeMenu,
+  onMoveCommitted,
 }: {
   taskId: string;
   workflowId?: string | null;
   steps?: TaskMoveStep[];
   closeMenu?: () => void;
+  onMoveCommitted?: (response: WorkflowMoveResponse) => void;
 }) {
   const [moveOptionsStep, setMoveOptionsStep] = useState<TaskMoveStep | null>(null);
   const { move, isMoving } = useWorkflowMove();
@@ -87,6 +89,7 @@ export function useTaskMoveOptions({
       });
       return false;
     }
+    onMoveCommitted?.(result.response);
     closeMenu?.();
     return true;
   };

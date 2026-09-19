@@ -1084,15 +1084,18 @@ const (
 
 // Task represents a task in the database
 type Task struct {
-	ID             string       `json:"id"`
-	WorkspaceID    string       `json:"workspace_id"`
-	WorkflowID     string       `json:"workflow_id"`
-	WorkflowStepID string       `json:"workflow_step_id"`
-	Title          string       `json:"title"`
-	Description    string       `json:"description"`
-	State          v1.TaskState `json:"state"`
-	Priority       string       `json:"priority"`
-	Position       int          `json:"position"` // Order within workflow step
+	ID             string `json:"id"`
+	WorkspaceID    string `json:"workspace_id"`
+	WorkflowID     string `json:"workflow_id"`
+	WorkflowStepID string `json:"workflow_step_id"`
+	// WorkflowAgentOverrides is scoped to WorkflowID and expands the grouped
+	// create choice into fixed step bindings. It is nil for ordinary tasks.
+	WorkflowAgentOverrides *WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                  `json:"title"`
+	Description            string                  `json:"description"`
+	State                  v1.TaskState            `json:"state"`
+	Priority               string                  `json:"priority"`
+	Position               int                     `json:"position"` // Order within workflow step
 	// WIPAdmitted indicates whether this task consumes an active slot in its
 	// current workflow step. Queued tasks remain visible but do not consume the
 	// destination step's WIP capacity.
@@ -2932,14 +2935,15 @@ func (t *Task) ToAPI() *v1.Task {
 	var repositories []v1.TaskRepository
 	for _, repo := range t.Repositories {
 		repositories = append(repositories, v1.TaskRepository{
-			ID:           repo.ID,
-			TaskID:       repo.TaskID,
-			RepositoryID: repo.RepositoryID,
-			BaseBranch:   repo.BaseBranch,
-			Position:     repo.Position,
-			Metadata:     repo.Metadata,
-			CreatedAt:    repo.CreatedAt,
-			UpdatedAt:    repo.UpdatedAt,
+			CheckoutOptions: PublicRepositoryCheckoutOptions(repo.Metadata),
+			ID:              repo.ID,
+			TaskID:          repo.TaskID,
+			RepositoryID:    repo.RepositoryID,
+			BaseBranch:      repo.BaseBranch,
+			Position:        repo.Position,
+			Metadata:        repo.Metadata,
+			CreatedAt:       repo.CreatedAt,
+			UpdatedAt:       repo.UpdatedAt,
 		})
 	}
 

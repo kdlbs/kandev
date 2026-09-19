@@ -11,6 +11,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -222,7 +223,18 @@ type BranchMaterializer interface {
 	// task_repositories row. Best-effort: when no active session exists yet
 	// the implementation may choose to no-op and let the next session launch
 	// create the worktree via the standard multi-repo prepare path.
-	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error)
+	MaterializeBranch(
+		ctx context.Context,
+		taskID, taskRepositoryID string,
+		target BranchMaterializationTarget,
+	) (*BranchMaterializationResult, error)
+}
+
+// BranchMaterializationTarget pins the live session/environment identity
+// selected by the task service so the materializer can reject a racing rebind.
+type BranchMaterializationTarget struct {
+	SessionID         string
+	TaskEnvironmentID string
 }
 
 // BranchMaterializationResult describes the live worktree created for a
@@ -265,6 +277,25 @@ type WorkflowStepGetter interface {
 	// GetNextStepByPosition returns the next step after the given position for a workflow.
 	// Returns nil if there is no next step (i.e., current step is the last one).
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
+}
+
+// AgentProfileReader provides the create-time eligibility check for a
+// task-local replacement profile without coupling task service to the full
+// settings repository contract.
+type AgentProfileReader interface {
+	GetAgentProfile(ctx context.Context, id string) (*settingsmodels.AgentProfile, error)
+}
+
+// AgentProfileExecutorValidator checks that a replacement profile can run on
+// the task's effective executor. It is injected by backend composition so the
+// task service does not depend on agent registry or runtime packages.
+type AgentProfileExecutorValidator interface {
+	ValidateAgentProfileForExecutor(
+		ctx context.Context,
+		profile *settingsmodels.AgentProfile,
+		executor *models.Executor,
+		executorProfile *models.ExecutorProfile,
+	) error
 }
 
 // WorkflowMovePreflight validates the destination lifecycle before a task
@@ -353,30 +384,32 @@ func validateExecutorConfig(config map[string]string) error {
 
 // Repos holds the repository sub-interfaces used by the task service.
 type Repos struct {
-	Workspaces        repository.WorkspaceRepository
-	Tasks             repository.TaskRepository
-	TaskRepos         repository.TaskRepoRepository
-	WorkspaceFolders  repository.TaskWorkspaceFolderRepository
-	Workflows         repository.WorkflowRepository
-	Messages          repository.MessageRepository
-	Attachments       repository.AttachmentRepository
-	Turns             repository.TurnRepository
-	Sessions          repository.SessionRepository
-	GitSnapshots      repository.GitSnapshotRepository
-	RepoEntities      repository.RepositoryEntityRepository
-	DiscoveryRoots    repository.DesktopDiscoveryRootRepository
-	RepositorySets    repository.RepositorySetRepository
-	BranchPolicies    repository.RepositoryBranchPolicyRepository
-	RepositoryCleanup repository.RepositoryCleanupRepository
-	Executors         repository.ExecutorRepository
-	Environments      repository.EnvironmentRepository
-	TaskEnvironments  repository.TaskEnvironmentRepository
-	Reviews           repository.ReviewRepository
-	ResourceCleanups  repository.TaskResourceCleanupRepository
-	StatusSummaries   repository.TaskStatusSummaryRepository
-	TaskActivity      repository.TaskActivityRepository
-	SubagentContexts  repository.SubagentContextRepository
-	Usage             repository.UsageRepository
+	Workspaces                    repository.WorkspaceRepository
+	Tasks                         repository.TaskRepository
+	TaskRepos                     repository.TaskRepoRepository
+	WorkspaceFolders              repository.TaskWorkspaceFolderRepository
+	Workflows                     repository.WorkflowRepository
+	Messages                      repository.MessageRepository
+	Attachments                   repository.AttachmentRepository
+	Turns                         repository.TurnRepository
+	Sessions                      repository.SessionRepository
+	GitSnapshots                  repository.GitSnapshotRepository
+	RepoEntities                  repository.RepositoryEntityRepository
+	DiscoveryRoots                repository.DesktopDiscoveryRootRepository
+	RepositorySets                repository.RepositorySetRepository
+	BranchPolicies                repository.RepositoryBranchPolicyRepository
+	RepositoryCleanup             repository.RepositoryCleanupRepository
+	Executors                     repository.ExecutorRepository
+	Environments                  repository.EnvironmentRepository
+	TaskEnvironments              repository.TaskEnvironmentRepository
+	Reviews                       repository.ReviewRepository
+	ResourceCleanups              repository.TaskResourceCleanupRepository
+	StatusSummaries               repository.TaskStatusSummaryRepository
+	TaskActivity                  repository.TaskActivityRepository
+	SubagentContexts              repository.SubagentContextRepository
+	Usage                         repository.UsageRepository
+	AgentProfiles                 AgentProfileReader
+	AgentProfileExecutorValidator AgentProfileExecutorValidator
 }
 
 // Service provides task business logic
@@ -409,6 +442,8 @@ type Service struct {
 	taskActivity                    repository.TaskActivityRepository
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
+	agentProfiles                   AgentProfileReader
+	agentProfileExecutorValidator   AgentProfileExecutorValidator
 	workspacePolicyAttacher         WorkspacePolicyAttacher
 	autoArchiveCoordinator          AutoArchiveCoordinator
 	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
@@ -456,6 +491,7 @@ type Service struct {
 	envDestroyer                    EnvironmentDestroyer
 	wsGroupMembership               WorkspaceGroupMembershipReader
 	executorCapabilityProber        ExecutorCapabilityProber
+	checkoutCredentialPolicy        func(context.Context, string) (bool, error)
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
 	// host process detection. Nil selects the real platform implementation
@@ -672,42 +708,44 @@ func (s *Service) SetWorkflowTaskArchiveCoordinator(coordinator WorkflowTaskArch
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
-		workspaces:            repos.Workspaces,
-		tasks:                 repos.Tasks,
-		taskRepos:             repos.TaskRepos,
-		workspaceFolders:      repos.WorkspaceFolders,
-		workflows:             repos.Workflows,
-		messages:              repos.Messages,
-		attachments:           repos.Attachments,
-		turns:                 repos.Turns,
-		sessions:              repos.Sessions,
-		gitSnapshots:          repos.GitSnapshots,
-		repoEntities:          repos.RepoEntities,
-		desktopRootStore:      repos.DiscoveryRoots,
-		repositorySets:        repos.RepositorySets,
-		branchPolicies:        repos.BranchPolicies,
-		repositoryCleanup:     repos.RepositoryCleanup,
-		executors:             repos.Executors,
-		environments:          repos.Environments,
-		taskEnvironments:      repos.TaskEnvironments,
-		reviews:               repos.Reviews,
-		resourceCleanups:      repos.ResourceCleanups,
-		statusSummaries:       repos.StatusSummaries,
-		taskActivity:          repos.TaskActivity,
-		subagentContexts:      repos.SubagentContexts,
-		usage:                 repos.Usage,
-		eventBus:              eventBus,
-		logger:                log,
-		discoveryConfig:       discoveryConfig,
-		discoveryCache:        make(map[string]discoveryCacheEntry),
-		discoveryRootCache:    make(map[string]discoveryRootCacheEntry),
-		discoveryFlights:      make(map[string]*discoveryFlight),
-		discoveryNow:          time.Now,
-		discoveryScanRoot:     scanRootForRepos,
-		filesystemWarnings:    fsdiagnostics.NewWarningLimiter(0),
-		branchFetcher:         newBranchFetcher(log.Zap()),
-		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
-		lastTaskSubagentCount: make(map[string]int),
+		workspaces:                    repos.Workspaces,
+		tasks:                         repos.Tasks,
+		taskRepos:                     repos.TaskRepos,
+		workspaceFolders:              repos.WorkspaceFolders,
+		workflows:                     repos.Workflows,
+		messages:                      repos.Messages,
+		attachments:                   repos.Attachments,
+		turns:                         repos.Turns,
+		sessions:                      repos.Sessions,
+		gitSnapshots:                  repos.GitSnapshots,
+		repoEntities:                  repos.RepoEntities,
+		desktopRootStore:              repos.DiscoveryRoots,
+		repositorySets:                repos.RepositorySets,
+		branchPolicies:                repos.BranchPolicies,
+		repositoryCleanup:             repos.RepositoryCleanup,
+		executors:                     repos.Executors,
+		environments:                  repos.Environments,
+		taskEnvironments:              repos.TaskEnvironments,
+		reviews:                       repos.Reviews,
+		resourceCleanups:              repos.ResourceCleanups,
+		statusSummaries:               repos.StatusSummaries,
+		taskActivity:                  repos.TaskActivity,
+		subagentContexts:              repos.SubagentContexts,
+		usage:                         repos.Usage,
+		agentProfiles:                 repos.AgentProfiles,
+		agentProfileExecutorValidator: repos.AgentProfileExecutorValidator,
+		eventBus:                      eventBus,
+		logger:                        log,
+		discoveryConfig:               discoveryConfig,
+		discoveryCache:                make(map[string]discoveryCacheEntry),
+		discoveryRootCache:            make(map[string]discoveryRootCacheEntry),
+		discoveryFlights:              make(map[string]*discoveryFlight),
+		discoveryNow:                  time.Now,
+		discoveryScanRoot:             scanRootForRepos,
+		filesystemWarnings:            fsdiagnostics.NewWarningLimiter(0),
+		branchFetcher:                 newBranchFetcher(log.Zap()),
+		lastTaskActivity:              make(map[string]v1.ForegroundActivity),
+		lastTaskSubagentCount:         make(map[string]int),
 		// Focused service tests do not run backend composition. Production
 		// replaces this fallback with a database-allocated generation.
 		pendingActionProjectionEpoch: "1",
@@ -730,8 +768,8 @@ func (s *Service) setCleanupDoneForTestHook(ch chan struct{}) {
 }
 
 // SetBranchMaterializer wires the mid-session worktree materializer for
-// AddBranchToTask. Optional — when unset, MCP add_branch only inserts the
-// task_repositories row and the worktree appears on next session launch.
+// AddBranchToTask. It may be unset for pre-launch tasks, whose worktrees are
+// created on the next session launch; live tasks require the materializer.
 func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 	s.branchMaterializer = m
 }

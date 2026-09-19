@@ -526,6 +526,17 @@ func TestPrepareWorkflowStepSession_PreservesMatchingProfileSession(t *testing.T
 	if !updated.IsPrimary {
 		t.Fatal("matching profile session must remain primary")
 	}
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !ok {
+		t.Fatal("profile-only keep-current path must record a workflow session route")
+	}
+	if route.Phase != "committed" || route.DestinationID != session.ID || route.TargetKind != workflowSessionRouteTargetProfile {
+		t.Fatalf("profile-only keep-current route = %+v", route)
+	}
 }
 
 func TestPrepareWorkflowStepSession_ClearsCompletionFollowUpWithoutProfile(t *testing.T) {
@@ -555,6 +566,14 @@ func TestPrepareWorkflowStepSession_ClearsCompletionFollowUpWithoutProfile(t *te
 	}
 	if models.IsCompletionFollowUpSession(updated.Metadata) {
 		t.Fatal("explicit workflow step entry retained completion follow-up ownership")
+	}
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !ok || route.Phase != "committed" || route.DestinationID != session.ID {
+		t.Fatalf("profile-only default route = %+v, present=%t", route, ok)
 	}
 }
 
@@ -587,6 +606,48 @@ func TestPrepareWorkflowStepSession_PreservesNewerCompletionFollowUpWithoutProfi
 	}
 	if !models.IsCompletionFollowUpSession(updated.Metadata) {
 		t.Fatal("stale workflow entry cleared a newer completion follow-up marker")
+	}
+}
+
+func TestPrepareWorkflowStepSession_ProfileOnlyReuseCommitsEntryCorrelatedRecipient(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	existing := &models.TaskSession{
+		ID: "session-b-existing", TaskID: "t1", AgentProfileID: "profile-b",
+		ExecutorID: "exec-local", ExecutorProfileID: "ep1", TaskEnvironmentID: "env-1",
+		State:     models.TaskSessionStateWaitingForInput,
+		StartedAt: time.Now().UTC().Add(-time.Minute), UpdatedAt: time.Now().UTC().Add(-time.Minute),
+	}
+	if err := fixture.repo.CreateTaskSession(ctx, existing); err != nil {
+		t.Fatalf("create reusable destination: %v", err)
+	}
+	target := &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", Position: 1, AgentProfileID: "profile-b",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+	}
+	source := &wfmodels.WorkflowStep{
+		ID: "step-a", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+
+	selected, switched, err := fixture.svc.prepareWorkflowStepSession(ctx, "t1", fixture.current, target, source, 42)
+	if err != nil {
+		t.Fatalf("prepare profile-only reuse: %v", err)
+	}
+	if !switched || selected.ID != existing.ID {
+		t.Fatalf("selected profile-only reuse = %v, switched=%t", selected.ID, switched)
+	}
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !ok {
+		t.Fatal("profile-only reuse must record a workflow session route")
+	}
+	if route.Phase != workflowSessionRouteCommitted || route.DestinationID != existing.ID ||
+		route.EntryIdentity != "entry:00000000000000000042" || route.DestinationStepID != target.ID {
+		t.Fatalf("profile-only reuse route = %+v", route)
 	}
 }
 

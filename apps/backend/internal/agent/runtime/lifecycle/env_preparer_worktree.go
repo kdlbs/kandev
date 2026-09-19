@@ -305,6 +305,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		CheckoutBranch:             req.CheckoutBranch,
 		PRNumber:                   req.PRNumber,
 		RemoteContribution:         req.RemoteContribution,
+		CheckoutOptions:            req.CheckoutOptions,
 		WorktreeBranchPrefix:       req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate:     req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       req.WorktreeBranchTicket,
@@ -324,7 +325,8 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		// Repository setup scripts receive profile and repository environment,
 		// but never the managed Git credential broker capabilities used to
 		// prepare the agent runtime.
-		ScriptEnv: setupScriptEnvironment(req.Env),
+		ScriptEnv:   setupScriptEnvironment(req.Env),
+		CheckoutEnv: checkoutCredentialEnvironment(req.Env),
 	}
 }
 
@@ -582,6 +584,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.CheckoutBranch = spec.CheckoutBranch
 	subReq.PRNumber = spec.PRNumber
 	subReq.RemoteContribution = spec.RemoteContribution
+	subReq.CheckoutOptions = spec.CheckoutOptions
 	subReq.ContributionDestination = spec.ContributionDestination
 	subReq.WorktreeID = spec.WorktreeID
 	subReq.WorkspaceReuseRequired = req.WorkspaceReuseRequired || spec.WorkspaceReuseRequired

@@ -67,6 +67,12 @@ The preview is advisory. **Move here** checks routing, permissions, WIP, and
 current session state again when the move runs. A preview can therefore change
 while a turn is running or while another session becomes available.
 
+After you move an open task with **Move here**, Kandev follows the conversation
+committed for the destination step on desktop and phone. It waits for that
+conversation to become available, so a pending or failed move keeps the
+conversation you selected. If you select another conversation while routing is
+in progress, that selection stays active.
+
 ## Move a task with one-time entry options
 
 The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
@@ -150,6 +156,35 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
    On mobile, the two non-primary actions are separate buttons labeled **Plan mode** and **Create only**; they have the same plan-mode and create-without-agent behavior.
 
+### Reduce downloads for a large remote repository
+
+In **New Task → Remote**, select a repository and open its gear (**Repository options**).
+These settings apply only to that repository row in this task.
+
+1. Choose **On demand** to download file contents as Git needs them while retaining
+   full commit history. **Standard** keeps the existing download behavior.
+2. Choose **Selected folders** and enter repository-relative directories, one per
+   line, for example `extensions/my-extension`. Include shared packages your work
+   needs. Up to 64 directories are supported; wildcards and parent paths are not.
+3. Select **Apply**. A summary below the repository shows the applied choices.
+   **Cancel** discards draft edits; **Reset** restores Standard and All folders.
+
+Advanced options are available for GitHub repositories using **Worktree** or
+**Local Docker** with the built-in preparation script and Kandev-managed Git
+credentials. Other preparation paths
+show an explanation and keep advanced controls disabled. On phones, the gear
+opens a drawer with the same settings.
+
+Selected folders use Git's directory-based sparse checkout: root and ancestor
+files remain available, and omitted files are not reported as deleted. Git can
+materialize additional files during conflict resolution. This is not an access
+restriction. Settings cannot change after the task environment is created;
+create a new task for a different scope. A new independent task starts with the
+default settings.
+
+These options reduce download and checkout work. They do not change the existing
+clone timeout or guarantee that every repository will finish within it.
+
 ### Branch policies
 
 Manage named branch policies in **Settings → Workspaces → _workspace_ → Repositories**. A policy
@@ -216,6 +251,27 @@ Open **Settings → General → Task Actions → Profile for Tasks Created by Ag
 Select an option, then choose **Save changes**. Workflow-selected profiles always win when the new task lands on a workflow step. Away from a workflow step, an explicit `agent_profile_id` wins and prevents creator-session runtime inheritance. The only affected Kandev MCP tool is `create_task_kandev`. `spawn_session_kandev` adds a session to the current task, so it does not use this preference. Tasks you create in the UI are not affected.
 
 External MCP calls have no verified creating session. With **Creating session profile**, those calls keep the compatibility fallback to the parent task when one exists, then workflow and target-workspace defaults. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. A resolved profile and runtime seed are stored even when `start_agent=false`, so a later manual start uses the same decision.
+
+### Choose task-specific workflow profiles
+
+When a workflow has fixed agent profiles on its steps, expand **Advanced
+settings** while creating a task to replace one or more of them for that task.
+Kandev groups steps that use the same fixed profile into one row and lists the
+affected steps. Select an enabled profile from the replacement picker, or
+choose **Use workflow profile** to keep the workflow choice.
+
+These replacements belong to the task only. They do not change the workflow,
+the profile definitions, or another task in the same workflow. Kandev also
+keeps the choices out of recently used task settings. Use **Reset** to remove
+all replacements. Closing and reopening **Advanced settings** keeps the current
+choices, while changing the workflow or starting a new task clears them.
+
+Explicit **Initial agent session** and earlier-step session targets keep their
+existing conversation selection. A replacement applies when a fixed step
+starts or reuses a session. If the session already exists, the workflow
+disclosure shows its actual model and session. Before a session exists, it
+shows the planned replacement model. A profile that becomes unavailable blocks
+creation until you choose another profile or reset the row.
 
 ### Navigate long chat transcripts
 
@@ -404,6 +460,20 @@ preference applies in two situations:
 The preference only gates opening a task. Choosing **Start agent** (or a
 workflow step transition) always starts the agent as usual, and a failed or
 interrupted session still shows its recovery actions.
+
+## Answer clarification questions
+
+When an agent asks a clarification question, answer it from the question panel
+while the session is waiting. If the question becomes inactive before you
+answer, its entry remains in the conversation with **Answer as new message**.
+That action includes the question and your answer in a normal conversation
+message. It does not reopen the old tool request.
+
+Normal message rules still apply. An idle session receives the message; a busy
+session sends or queues it according to its current input mode. If delivery
+fails, the form keeps your answer so you can retry. **Close question** removes
+the answer surface without sending anything, while the question stays in the
+conversation history.
 
 ## Task dependencies
 
