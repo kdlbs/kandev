@@ -464,6 +464,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "create_task_kandev")
 	assert.Contains(t, tools, "update_task_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
+	assert.NotContains(t, tools, "transfer_task_kandev")
 	assert.Contains(t, tools, "message_task_kandev")
 	assert.Contains(t, tools, "stop_task_kandev")
 	assert.Contains(t, tools, "get_task_conversation_kandev")
@@ -583,6 +584,7 @@ func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
 		"answer_question_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev",
 	}
 	assert.ElementsMatch(t, want, getRegisteredToolNames(s))
+	assert.NotContains(t, getRegisteredToolNames(s), "transfer_task_kandev")
 }
 
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
@@ -632,6 +634,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	// Config mode should have task tools
 	assert.Contains(t, tools, "list_tasks_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
+	assert.Contains(t, tools, "transfer_task_kandev")
 	assert.Contains(t, tools, "delete_task_kandev")
 	assert.Contains(t, tools, "archive_task_kandev")
 	assert.Contains(t, tools, "update_task_state_kandev")
@@ -1035,9 +1038,10 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// Existing configuration tools plus the five compact settings tools.
+	// Baseline 36 tools plus the five compact settings tools and the audited
+	// cross-workspace transfer tool.
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 41, len(tools))
+	assert.Equal(t, 42, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -1120,11 +1124,12 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
 	// 8 plan + 1 interaction + 1 related-tasks + 3 task-documents
-	// + 1 rich-output + 1 step_complete (ADR 0015) = 15.
+	// + 1 rich-output + 1 step_complete (ADR 0015) + 1 transfer = 16.
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	// (list_task_comments_kandev retired in favour of `agentctl kandev comment list …`).
 	assert.Contains(t, tools, "step_complete_kandev", "office mode must register the ADR 0015 completion signal")
-	assert.Equal(t, 15, len(tools))
+	assert.Contains(t, tools, "transfer_task_kandev")
+	assert.Equal(t, 16, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -1142,9 +1147,10 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
 	// 8 plan + 1 related-tasks + 3 task-documents + 1 rich-output
-	// + 1 step_complete (ADR 0015) = 14
+	// + 1 step_complete (ADR 0015) + 1 transfer = 15
 	// (no ask_user_question, no delegate, no list_task_comments)
-	assert.Equal(t, 14, len(tools))
+	assert.Contains(t, tools, "transfer_task_kandev")
+	assert.Equal(t, 15, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {
@@ -1174,6 +1180,7 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_mcp_config_kandev")
 	assert.Contains(t, tools, "list_executors_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
+	assert.Contains(t, tools, "transfer_task_kandev")
 
 	// External mode includes create_task_kandev so external agents can spawn tasks
 	assert.Contains(t, tools, "create_task_kandev")
@@ -1216,9 +1223,10 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// External configuration tools include the five compact settings tools.
+	// Baseline 42 tools plus the five compact settings tools and the audited
+	// cross-workspace transfer tool.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 47, len(tools))
+	assert.Equal(t, 48, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

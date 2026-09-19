@@ -387,6 +387,34 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 	h.broadcastToOwner(owner, msg)
 }
 
+// BroadcastToWorkspaceExcludingWorkspaceReaders delivers a source-only
+// notification to readers that cannot read the destination workspace.
+func (h *Hub) BroadcastToWorkspaceExcludingWorkspaceReaders(sourceWorkspaceID, destinationWorkspaceID string, msg *ws.Message) {
+	readers := h.authPolicy.WorkspaceReaders
+	if readers == nil || sourceWorkspaceID == "" || destinationWorkspaceID == "" {
+		return
+	}
+	sourceReaders, err := readers(h.DispatchContext(), sourceWorkspaceID)
+	if err != nil {
+		return
+	}
+	destinationReaders, err := readers(h.DispatchContext(), destinationWorkspaceID)
+	if err != nil {
+		return
+	}
+	destination := make(map[string]struct{}, len(destinationReaders))
+	for _, userID := range destinationReaders {
+		destination[userID] = struct{}{}
+	}
+	sourceOnly := make([]string, 0, len(sourceReaders))
+	for _, userID := range sourceReaders {
+		if _, ok := destination[userID]; !ok {
+			sourceOnly = append(sourceOnly, userID)
+		}
+	}
+	h.broadcastToUsers(sourceOnly, msg)
+}
+
 // broadcastToUsers delivers to exactly the given user IDs. An empty set
 // delivers to nobody: "no one may read this workspace" is a real answer, and
 // falling back to a global broadcast would invert it.

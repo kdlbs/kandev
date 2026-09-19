@@ -1,6 +1,9 @@
 package sqlguard
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -54,6 +57,34 @@ var schema = "CREATE TABLE items (enabled INTEGER DEFAULT 0, created_at {{timest
 	}
 	if len(findings) != 0 {
 		t.Fatalf("AnalyzeSource() findings = %#v, want none", findings)
+	}
+}
+
+func TestTaskTransferSourcesUsePortableSQL(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() failed")
+	}
+	backendRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../../.."))
+	exemptions, err := LoadExemptions(filepath.Join(backendRoot, "internal/db/sqlguard/exemptions.json"))
+	if err != nil {
+		t.Fatalf("LoadExemptions() error = %v", err)
+	}
+	for _, filename := range []string{
+		"internal/task/repository/sqlite/task_transfer_profiles.go",
+		"internal/task/repository/sqlite/task_transfer_relations.go",
+	} {
+		source, err := os.ReadFile(filepath.Join(backendRoot, filepath.FromSlash(filename)))
+		if err != nil {
+			t.Fatalf("ReadFile(%q) error = %v", filename, err)
+		}
+		findings, err := AnalyzeSource(filename, source, exemptions)
+		if err != nil {
+			t.Fatalf("AnalyzeSource(%q) error = %v", filename, err)
+		}
+		if len(findings) != 0 {
+			t.Fatalf("AnalyzeSource(%q) findings = %#v, want none", filename, findings)
+		}
 	}
 }
 

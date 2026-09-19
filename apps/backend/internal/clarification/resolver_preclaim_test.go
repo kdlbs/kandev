@@ -56,7 +56,7 @@ func (s *preClaimBlockingMessageCreator) CompleteActiveClarificationBundle(
 func shortenPreClaimTimeout(t *testing.T) {
 	t.Helper()
 	previous := clarificationPreClaimTimeout
-	clarificationPreClaimTimeout = time.Millisecond
+	clarificationPreClaimTimeout = 100 * time.Millisecond
 	t.Cleanup(func() { clarificationPreClaimTimeout = previous })
 }
 
