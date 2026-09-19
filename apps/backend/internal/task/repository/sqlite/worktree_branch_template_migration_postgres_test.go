@@ -28,7 +28,7 @@ func TestPostgresWorktreeBranchTemplateMigration(t *testing.T) {
 	if err := repo.CreateRepository(ctx, custom); err != nil {
 		t.Fatalf("create custom repository: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay custom template migration: %v", err)
 	}
 	assertPostgresWorktreeBranchTemplate(t, db, custom.ID, custom.WorktreeBranchTemplate)
@@ -56,10 +56,10 @@ func TestPostgresWorktreeBranchTemplateMigration(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE repositories DROP COLUMN worktree_branch_template`); err != nil {
 		t.Fatalf("remove template column from legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy postgres schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay legacy postgres migration: %v", err)
 	}
 
