@@ -1,7 +1,7 @@
 ---
 id: "05-cover-routed-taskless-launch"
 title: "Cover routed (provider fallback) taskless launch"
-status: pending
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"

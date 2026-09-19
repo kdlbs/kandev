@@ -240,9 +240,9 @@ those are withdrawn, so the conclusion holds more strongly rather than less.
 
 ## Work orders
 
-- [pending] [Task 01: Prove the lightweight cron fire reaches a session](task-01-prove-lightweight-cron-to-session.md)
-- [pending] [Task 05: Cover routed (provider fallback) taskless launch](task-05-cover-routed-taskless-launch.md)
-- [pending] [Task 06: Pin the taskless event-path guarantees no test asserts](task-06-pin-event-path-guarantees.md)
+- [completed] [Task 01: Prove the lightweight cron fire reaches a session](task-01-prove-lightweight-cron-to-session.md)
+- [completed] [Task 05: Cover routed (provider fallback) taskless launch](task-05-cover-routed-taskless-launch.md)
+- [completed] [Task 06: Pin the taskless event-path guarantees no test asserts](task-06-pin-event-path-guarantees.md)
 
 Withdrawn on 2026-09-19 with `AC-OFFICE-TASKLESS-001.5` and `.6`. Not to be
 built; kept for a follow-up:

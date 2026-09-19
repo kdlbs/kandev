@@ -1,7 +1,7 @@
 ---
 id: "06-pin-event-path-guarantees"
 title: "Pin the taskless event-path guarantees no test asserts"
-status: pending
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"

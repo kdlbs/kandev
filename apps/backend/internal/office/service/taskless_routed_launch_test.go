@@ -43,13 +43,8 @@ func (l *routedTestLauncher) StartRunSession(
 	l.mu.Lock()
 	l.calls = append(l.calls, launch)
 	l.mu.Unlock()
-	if err, ok := l.failFor[route.ProviderID]; ok {
-		return service.RunSessionLaunch{}, err
-	}
 	seq := run.CurrentRouteAttemptSeq
 	id := fmt.Sprintf("route-session-%d", seq)
-	execID := "execution-" + id
-	acpID := "acp-" + id
 	now := time.Now().UTC()
 	session := &models.RunSession{
 		ID: id, WorkspaceID: agent.WorkspaceID, AgentProfileID: agent.ID,
@@ -60,6 +55,18 @@ func (l *routedTestLauncher) StartRunSession(
 	if err != nil || !reserved {
 		return service.RunSessionLaunch{}, fmt.Errorf("reserve test run session: reserved=%v err=%w", reserved, err)
 	}
+	// Mirrors officeRunSessionLauncher.StartRunSession's real order: the
+	// session is always reserved before the runtime launch can fail, so a
+	// pre-launch-fallback candidate still leaves its own terminal session
+	// row rather than none at all.
+	if failErr, ok := l.failFor[route.ProviderID]; ok {
+		if _, err := l.svc.RepoForTest().FinishRunSession(ctx, id, models.RunSessionStateFailed, failErr.Error()); err != nil {
+			return service.RunSessionLaunch{}, err
+		}
+		return service.RunSessionLaunch{}, failErr
+	}
+	execID := "execution-" + id
+	acpID := "acp-" + id
 	if _, err := l.svc.RepoForTest().BindRunSessionExecution(
 		ctx, id, execID, route.ExecutionProfileID, route.ProviderID, route.Model, acpID,
 	); err != nil {
@@ -211,15 +218,16 @@ func TestRoutedTaskless_FirstCandidateSucceeds(t *testing.T) {
 	}
 }
 
-// TestRoutedTaskless_PreLaunchFallback_TwoAttemptsOneSession covers a
-// routed profile whose first candidate fails before any session exists
-// (classification failure inside tryCandidates, not a post-start event):
-// two office_run_route_attempts rows (seq 1 failed, seq 2 launched) but
-// exactly one office_run_sessions row, since a pre-launch failure never
-// reaches StartRunSession's reservation for the failed candidate. Also
-// covers usage attribution landing on the launched attempt's own session,
-// not a nonexistent "first attempt" session (AC-OFFICE-TASKLESS-001.4).
-func TestRoutedTaskless_PreLaunchFallback_TwoAttemptsOneSession(t *testing.T) {
+// TestRoutedTaskless_PreLaunchFallback_TwoAttemptsTwoSessions covers a
+// routed profile whose first candidate fails during the launch call itself
+// (a provider error returned from StartRunSession, not a post-start event):
+// two office_run_route_attempts rows (seq 1 failed, seq 2 launched) and two
+// office_run_sessions rows, since StartRunSession always reserves its
+// session before it can fail — the failed candidate's row lands Failed, the
+// winning candidate's row lands Running. Also covers usage attribution
+// landing on the launched attempt's own session, not the failed candidate's
+// (AC-OFFICE-TASKLESS-001.4).
+func TestRoutedTaskless_PreLaunchFallback_TwoAttemptsTwoSessions(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()
 	sched := buildRoutedScheduler(t, svc)
@@ -264,15 +272,33 @@ func TestRoutedTaskless_PreLaunchFallback_TwoAttemptsOneSession(t *testing.T) {
 		t.Fatalf("second attempt = %#v, want seq=2 codex-acp launched", attempts[1])
 	}
 
-	// No session was ever reserved for the failed claude-acp candidate:
-	// exactly one office_run_sessions row exists, for codex-acp.
+	// A session was reserved for BOTH candidates: StartRunSession always
+	// reserves before it can fail, so the failed claude-acp candidate still
+	// leaves its own terminal row rather than none at all.
 	sessions, err := svc.RepoForTest().ListRunSessions(ctx, run.ID)
-	if err != nil || len(sessions) != 1 {
-		t.Fatalf("run sessions = %#v, err=%v, want exactly one (no row for the failed candidate)", sessions, err)
+	if err != nil || len(sessions) != 2 {
+		t.Fatalf("run sessions = %#v, err=%v, want exactly two (one per candidate)", sessions, err)
 	}
-	session := sessions[0]
-	if session.Adapter != "codex-acp" || session.Attempt != 2 {
-		t.Fatalf("launched session = %#v, want codex-acp attempt=2", session)
+	var failedSession, session *models.RunSession
+	for i := range sessions {
+		switch sessions[i].Attempt {
+		case 1:
+			failedSession = &sessions[i]
+		case 2:
+			session = &sessions[i]
+		}
+	}
+	// Production's BindRunSessionExecution (which sets Adapter/Model) only
+	// runs after a successful runtime.Launch, so a candidate that fails
+	// inside StartRunSession is reserved but never adapter-bound — its
+	// identity is the run/attempt pair and the recorded error, not Adapter.
+	if failedSession == nil || failedSession.State != models.RunSessionStateFailed ||
+		failedSession.ErrorMessage == "" {
+		t.Fatalf("failed candidate's session = %#v, want attempt=1 failed with an error message", failedSession)
+	}
+	if session == nil || session.Adapter != "codex-acp" || session.Attempt != 2 ||
+		session.State != models.RunSessionStateRunning {
+		t.Fatalf("launched session = %#v, want codex-acp attempt=2 running", session)
 	}
 
 	runs, err = svc.ListRuns(ctx, agent.WorkspaceID)

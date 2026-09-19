@@ -1,7 +1,7 @@
 ---
 id: "01-prove-lightweight-cron-to-session"
 title: "Prove the lightweight cron fire reaches a taskless session"
-status: pending
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
