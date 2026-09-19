@@ -541,6 +541,65 @@ func TestHandleAskUserQuestion_ReusedTransportRequestIDWithDifferentQuestionsCre
 	assertWSError(t, result.response, ws.ErrorCodeInternalError)
 }
 
+func TestHandleAskUserQuestion_ReusedTransportRequestIDWhilePendingCreatesNewBundle(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	taskID, sessionID, _ := seedRetrySession(t, ctx, svc, repo, "retry-reused-pending-request-id")
+
+	store := clarification.NewStore(time.Minute)
+	t.Cleanup(func() { store.CancelSession(sessionID) })
+	creator := &countingMessageCreator{}
+	h := NewHandlers(svc, nil, store, nil, creator, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+
+	firstPayload := retryAskPayload(sessionID, taskID)
+	firstPayload["context"] = "original context"
+	firstDone := make(chan askUserQuestionResult, 1)
+	go func() {
+		resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, firstPayload))
+		firstDone <- askUserQuestionResult{response: resp, err: err}
+	}()
+	require.Eventually(t, func() bool { return len(store.ListPending()) == 1 }, time.Second, 5*time.Millisecond)
+	firstPendingID := store.ListPending()[0].PendingID
+
+	secondPayload := retryAskPayload(sessionID, taskID)
+	secondPayload["context"] = "reused context"
+	secondPayload["questions"] = []map[string]interface{}{{
+		"id": "q-reused", "title": "Reused", "prompt": "Which color?",
+		"options": []map[string]interface{}{
+			{"label": "Red", "description": "R"},
+			{"label": "Blue", "description": "B"},
+		},
+	}}
+	secondDone := make(chan askUserQuestionResult, 1)
+	go func() {
+		resp, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, secondPayload))
+		secondDone <- askUserQuestionResult{response: resp, err: err}
+	}()
+
+	require.Eventually(t, func() bool {
+		return len(store.ListPending()) == 2 && creator.calls.Load() == 2
+	}, time.Second, 5*time.Millisecond)
+	var reused *clarification.Request
+	for _, pending := range store.ListPending() {
+		if pending.Questions[0].ID == "q-reused" {
+			reused = pending
+			break
+		}
+	}
+	require.NotNil(t, reused, "the reused transport id must publish its own pending bundle")
+	assert.NotEqual(t, firstPendingID, reused.PendingID)
+	assert.Equal(t, "reused context", reused.Context)
+	assert.Equal(t, int32(2), creator.calls.Load())
+
+	store.CancelSession(sessionID)
+	for _, done := range []chan askUserQuestionResult{firstDone, secondDone} {
+		result := <-done
+		require.NoError(t, result.err)
+		assertWSError(t, result.response, ws.ErrorCodeInternalError)
+	}
+}
+
 func TestHandleAskUserQuestion_RetryReturnsDeliveryPendingRecordedOutcome(t *testing.T) {
 	tests := []struct {
 		name     string

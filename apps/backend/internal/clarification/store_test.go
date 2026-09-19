@@ -420,6 +420,51 @@ func TestCreateRequest_PresetID_NeverReplacesLiveEntry(t *testing.T) {
 	}
 }
 
+func TestCreateRetryRequest_DistinctPresetIDsDoNotDeduplicate(t *testing.T) {
+	s := NewStore(time.Minute)
+	questions := []Question{{
+		ID:     "q-original",
+		Title:  "Original",
+		Prompt: "Continue?",
+		Options: []Option{
+			{ID: "yes", Label: "Yes", Description: "Continue"},
+			{ID: "no", Label: "No", Description: "Stop"},
+		},
+	}}
+
+	firstID, firstCreated, firstMissed := s.CreateRetryRequest(&Request{
+		PendingID: "retry-original",
+		SessionID: "session-1",
+		Questions: questions,
+		Context:   "original context",
+	})
+	if firstID != "retry-original" || !firstCreated || firstMissed {
+		t.Fatalf("first retry create = (%q, %v, %v), want (retry-original, true, false)", firstID, firstCreated, firstMissed)
+	}
+
+	reusedQuestions := []Question{{
+		ID:     "q-reused",
+		Title:  "Reused",
+		Prompt: "Continue?",
+		Options: []Option{
+			{ID: "yes", Label: "Yes", Description: "Continue"},
+			{ID: "no", Label: "No", Description: "Stop"},
+		},
+	}}
+	secondID, secondCreated, secondMissed := s.CreateRetryRequest(&Request{
+		PendingID: "retry-reused",
+		SessionID: "session-1",
+		Questions: reusedQuestions,
+		Context:   "reused context",
+	})
+	if secondID != "retry-reused" || !secondCreated || secondMissed {
+		t.Fatalf("second retry create = (%q, %v, %v), want (retry-reused, true, false)", secondID, secondCreated, secondMissed)
+	}
+	if len(s.ListPending()) != 2 {
+		t.Fatalf("expected distinct preset retry identities to create 2 pending entries, got %d", len(s.ListPending()))
+	}
+}
+
 func TestRespondWithDeliveryConfirmation_CancelsRetryRegisteredAfterOriginalCancellation(t *testing.T) {
 	s := NewStore(time.Minute)
 	request := &Request{

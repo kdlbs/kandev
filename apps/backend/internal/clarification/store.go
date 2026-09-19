@@ -94,7 +94,7 @@ func (s *Store) SetOnRespondLoaded(fn func(pendingID string)) {
 func (s *Store) CreateRequest(req *Request) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.createRequestLocked(req)
+	return s.createRequestLocked(req, true)
 }
 
 // CreateRetryRequest registers a transport retry before its durable bundle is
@@ -111,7 +111,10 @@ func (s *Store) CreateRetryRequest(req *Request) (pendingID string, isNew, deliv
 			return req.PendingID, false, true
 		}
 	}
-	pendingID, isNew = s.createRequestLocked(req)
+	// A preset retry identity is already the complete idempotency key. Broad
+	// question-only deduplication would alias distinct transport calls whose
+	// context, question IDs, or titles differ.
+	pendingID, isNew = s.createRequestLocked(req, req.PendingID == "")
 	return pendingID, isNew, false
 }
 
@@ -124,29 +127,31 @@ func (s *Store) ClearDeliveryMiss(pendingID string) {
 	delete(s.deliveryMisses, pendingID)
 }
 
-func (s *Store) createRequestLocked(req *Request) (string, bool) {
+func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (string, bool) {
 
 	// Normalise in-place so dedup keys are stable even when the caller
 	// hasn't assigned IDs yet.
 	_ = NormalizeAndValidateQuestions(req.Questions)
 
-	// Deduplicate: if a pending entry for the same session with identical
-	// normalised questions already exists, return the existing pending ID.
-	for _, existing := range s.pending {
-		if existing.Request.SessionID == req.SessionID && questionsEqual(existing.Request.Questions, req.Questions) {
-			return existing.Request.PendingID, false
-		}
-	}
-
-	// A preset identity that is already live is joined, never replaced:
-	// overwriting the map entry would orphan its waiters on a done channel
-	// nobody closes. Exact retries carry identical questions and are caught
-	// above; this guards a client that reused a request id for another call.
+	// An exact preset identity always joins its live entry. Replacing the map
+	// entry would orphan waiters on a done channel nobody closes.
 	if req.PendingID != "" {
 		if existing, ok := s.pending[req.PendingID]; ok {
 			return existing.Request.PendingID, false
 		}
-	} else {
+	}
+
+	// Deduplicate: if a pending entry for the same session with identical
+	// normalised questions already exists, return the existing pending ID.
+	if deduplicateQuestions {
+		for _, existing := range s.pending {
+			if existing.Request.SessionID == req.SessionID && questionsEqual(existing.Request.Questions, req.Questions) {
+				return existing.Request.PendingID, false
+			}
+		}
+	}
+
+	if req.PendingID == "" {
 		req.PendingID = uuid.New().String()
 	}
 	req.CreatedAt = time.Now()
