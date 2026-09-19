@@ -671,6 +671,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"agent_tab_close_behavior":                 models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,

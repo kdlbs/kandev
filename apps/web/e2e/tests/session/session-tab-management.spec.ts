@@ -118,6 +118,9 @@ test.describe("Session tab management — close behavior", () => {
 
     try {
       await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
+      await expect
+        .poll(async () => (await apiClient.getUserSettings()).settings.agent_tab_close_behavior)
+        .toBe("hide_panel");
       await testPage.reload();
       await session.waitForLoad();
 
