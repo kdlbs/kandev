@@ -1,7 +1,7 @@
 ---
 id: "03-e2e-and-public-docs"
 title: "Verify close behavior and publish documentation"
-status: in_progress
+status: done
 wave: 3
 depends_on:
   - "02-gated-panel-hide"
