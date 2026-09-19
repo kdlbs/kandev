@@ -17,9 +17,10 @@ const (
 // Resource names, icons, and actions are resolved from the live catalog; only
 // stable identities and the user's ordering choices are persisted.
 type SidebarLayout struct {
-	Version  int                 `json:"version"`
-	Revision int64               `json:"revision"`
-	Nodes    []SidebarLayoutNode `json:"nodes"`
+	Version            int                 `json:"version"`
+	Revision           int64               `json:"revision"`
+	Nodes              []SidebarLayoutNode `json:"nodes"`
+	UnsupportedVersion bool                `json:"unsupported_version,omitempty"`
 }
 
 type SidebarLayoutNode struct {

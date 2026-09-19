@@ -109,6 +109,21 @@ describe("ShortcutSection", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Quick terminal" }));
     expect(onActivateShortcutMock).toHaveBeenCalledOnce();
   });
+
+  it("describes running activity on the mobile section trigger", () => {
+    render(
+      <ShortcutSection
+        node={node}
+        mobile
+        getActivity={(id) => (id === "automation-1" ? activity : undefined)}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Pinned" });
+    const descriptionId = trigger.getAttribute("aria-describedby");
+    expect(descriptionId).toBeTruthy();
+    expect(document.getElementById(descriptionId ?? "")?.textContent).toContain("Running");
+  });
 });
 
 const onActivateShortcutMock = vi.fn();

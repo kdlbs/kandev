@@ -53,17 +53,35 @@ type MobileLayoutNodeProps = {
 function resourceShortcuts(
   node: ProjectedSidebarNode,
   entries: ReturnType<typeof useSidebarLayoutNavigation>["catalog"]["catalog"],
+  omitDestinations: string[],
 ): ProjectedSidebarNode {
-  const shortcuts: ProjectedShortcut[] = entries.map((entry, index) => ({
-    id: `${node.id}:${entry.target.kind}:${entry.target.id}:${index}`,
-    target: entry.target,
-    label: entry.label,
-    icon: entry.icon ?? node.icon,
-    ...(entry.href ? { href: entry.href } : {}),
-    source: entry.source ?? "builtin",
-    available: entry.available,
-  }));
+  const shortcuts: ProjectedShortcut[] = entries
+    .filter(
+      (entry) => entry.target.kind !== "destination" || !omitDestinations.includes(entry.target.id),
+    )
+    .map((entry, index) => ({
+      id: `${node.id}:${entry.target.kind}:${entry.target.id}:${index}`,
+      target: entry.target,
+      label: entry.label,
+      icon: entry.icon ?? node.icon,
+      ...(entry.href ? { href: entry.href } : {}),
+      source: entry.source ?? "builtin",
+      available: entry.available,
+    }));
   return { ...node, shortcuts };
+}
+
+function filterNodeShortcuts(
+  node: ProjectedSidebarNode,
+  omitDestinations: string[],
+): ProjectedSidebarNode {
+  return {
+    ...node,
+    shortcuts: node.shortcuts.filter(
+      (shortcut) =>
+        shortcut.target.kind !== "destination" || !omitDestinations.includes(shortcut.target.id),
+    ),
+  };
 }
 
 function MobilePluginRow({
@@ -184,10 +202,9 @@ function MobileRequiredRows({
   );
 }
 
-function MobileLayoutNode({
+function MobileBuiltinNode({
   node,
   homeDestination,
-  destinationHrefs,
   integrationEntries,
   canvasEntries,
   automationEntries,
@@ -197,27 +214,6 @@ function MobileLayoutNode({
   onActivateShortcut,
   onNavigate,
 }: MobileLayoutNodeProps) {
-  if (node.kind === "plugin") {
-    if (omitSections.has(node.pluginSection ?? "plugins")) return null;
-    return (
-      <MobilePluginRow
-        node={node}
-        href={node.destinationId ? destinationHrefs.get(node.destinationId) : undefined}
-        onNavigate={onNavigate}
-      />
-    );
-  }
-  if (node.kind === "shortcuts") {
-    return (
-      <ShortcutSection
-        node={node}
-        mobile
-        getActivity={getActivity}
-        onActivateShortcut={onActivateShortcut}
-        onNavigate={onNavigate}
-      />
-    );
-  }
   switch (node.destinationId) {
     case "home":
       if (omitSections.has("primary") || omitDestinations.includes("home")) return null;
@@ -235,7 +231,7 @@ function MobileLayoutNode({
     case "automations":
       return (
         <ShortcutSection
-          node={resourceShortcuts(node, automationEntries)}
+          node={resourceShortcuts(node, automationEntries, omitDestinations)}
           mobile
           getActivity={getActivity}
           onActivateShortcut={onActivateShortcut}
@@ -245,7 +241,7 @@ function MobileLayoutNode({
     case "canvases":
       return (
         <ShortcutSection
-          node={resourceShortcuts(node, canvasEntries)}
+          node={resourceShortcuts(node, canvasEntries, omitDestinations)}
           mobile
           getActivity={getActivity}
           onActivateShortcut={onActivateShortcut}
@@ -253,9 +249,10 @@ function MobileLayoutNode({
         />
       );
     case "integrations":
+      if (omitSections.has("integrations")) return null;
       return (
         <ShortcutSection
-          node={resourceShortcuts(node, integrationEntries)}
+          node={resourceShortcuts(node, integrationEntries, omitDestinations)}
           mobile
           getActivity={getActivity}
           onActivateShortcut={onActivateShortcut}
@@ -265,6 +262,32 @@ function MobileLayoutNode({
     default:
       return null;
   }
+}
+
+function MobileLayoutNode(props: MobileLayoutNodeProps) {
+  const { node, omitSections, omitDestinations, destinationHrefs, onNavigate } = props;
+  if (node.kind === "plugin") {
+    if (omitSections.has(node.pluginSection ?? "plugins")) return null;
+    return (
+      <MobilePluginRow
+        node={node}
+        href={node.destinationId ? destinationHrefs.get(node.destinationId) : undefined}
+        onNavigate={onNavigate}
+      />
+    );
+  }
+  if (node.kind === "shortcuts") {
+    return (
+      <ShortcutSection
+        node={filterNodeShortcuts(node, omitDestinations)}
+        mobile
+        getActivity={props.getActivity}
+        onActivateShortcut={props.onActivateShortcut}
+        onNavigate={onNavigate}
+      />
+    );
+  }
+  return <MobileBuiltinNode {...props} />;
 }
 
 export function MobileSidebarLayoutNavigation({

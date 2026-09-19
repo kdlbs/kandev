@@ -34,6 +34,7 @@ export type SidebarLayout = {
   version: number;
   revision: number;
   nodes: SidebarLayoutNode[];
+  unsupportedVersion?: boolean;
 };
 
 export const DEFAULT_SIDEBAR_NODE_IDS = [
@@ -90,10 +91,18 @@ export function targetKey(target: SidebarShortcutTarget): string {
 }
 
 export function fromApiSidebarLayout(value: SidebarLayoutApi | null | undefined): SidebarLayout {
-  if (!value || value.version !== SIDEBAR_LAYOUT_VERSION) return defaultSidebarLayout();
+  if (!value) return defaultSidebarLayout();
+  if (value.version !== SIDEBAR_LAYOUT_VERSION) {
+    return {
+      ...defaultSidebarLayout(),
+      revision: Math.max(0, value.revision),
+      unsupportedVersion: true,
+    };
+  }
   return {
     version: value.version,
     revision: Math.max(0, value.revision),
+    ...(value.unsupported_version ? { unsupportedVersion: true } : {}),
     nodes: value.nodes.map((node) => ({
       id: node.id,
       kind: node.kind,

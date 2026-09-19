@@ -830,6 +830,7 @@
   "sidebarConflict": "此配置已在其他位置變更。你的草稿仍然保留。",
   "sidebarLoadLatest": "載入最新版本",
   "sidebarSaveError": "無法儲存側邊欄配置。請重試。",
+  "sidebarUnsupportedVersion": "此配置使用較新版本。在應用程式支援該版本前，編輯已暫停。",
   "sidebarNoWorkspace": "請選擇工作區來自訂其側邊欄。",
   "sidebarPreview": "草稿預覽",
   "addShortcut": "加入捷徑",

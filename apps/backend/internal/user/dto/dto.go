@@ -16,7 +16,7 @@ type UserDTO struct {
 
 type UserSettingsDTO struct {
 	SidebarViewsByWorkspace           map[string]models.SidebarWorkspaceState `json:"sidebar_views_by_workspace"`
-	SidebarLayoutsByWorkspace         map[string]models.SidebarLayout         `json:"sidebar_layouts_by_workspace"`
+	SidebarLayoutsByWorkspace         map[string]models.SidebarLayout         `json:"sidebar_layouts_by_workspace,omitempty"`
 	UserID                            string                                  `json:"user_id"`
 	WorkspaceID                       string                                  `json:"workspace_id"`
 	KanbanViewMode                    string                                  `json:"kanban_view_mode"`

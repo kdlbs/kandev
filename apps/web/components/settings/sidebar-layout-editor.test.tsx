@@ -176,6 +176,34 @@ describe("SidebarLayoutEditor", () => {
     expect(screen.getByDisplayValue("Second")).toBeTruthy();
   });
 
+  it("retains a dirty draft when the active workspace changes", () => {
+    const view = render(
+      <SettingsSaveProvider>
+        <SidebarLayoutEditor />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.change(screen.getAllByLabelText(SECTION_NAME_LABEL).at(-1)!, {
+      target: { value: "Workspace one draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: ADD_SECTION_LABEL }));
+
+    mocks.state.workspaces.activeId = "workspace-2";
+    view.rerender(
+      <SettingsSaveProvider>
+        <SidebarLayoutEditor />
+      </SettingsSaveProvider>,
+    );
+    mocks.state.workspaces.activeId = "workspace-1";
+    view.rerender(
+      <SettingsSaveProvider>
+        <SidebarLayoutEditor />
+      </SettingsSaveProvider>,
+    );
+
+    expect(screen.getByDisplayValue("Workspace one draft")).toBeTruthy();
+  });
+
   it("offers same-group move controls in the focused phone editor", () => {
     mocks.isMobile = true;
     mocks.catalog = [
@@ -220,6 +248,30 @@ describe("SidebarLayoutEditor", () => {
     );
     expect(screen.getAllByRole("button", { name: MOVE_UP_LABEL }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: MOVE_DOWN_LABEL }).length).toBeGreaterThan(0);
+  });
+
+  it("blocks editing when the server returns a newer layout version", () => {
+    mocks.state.userSettings = {
+      sidebarLayoutsByWorkspace: {
+        "workspace-1": {
+          version: 99,
+          revision: 4,
+          nodes: [],
+        },
+      },
+    };
+
+    render(
+      <SettingsSaveProvider>
+        <SidebarLayoutEditor />
+      </SettingsSaveProvider>,
+    );
+
+    expect(screen.getByText("settings:sidebarUnsupportedVersion")).toBeTruthy();
+    expect(screen.getByRole("button", { name: ADD_SECTION_LABEL })).toHaveProperty(
+      "disabled",
+      true,
+    );
   });
 
   it("loads the latest revision before retrying a same-workspace conflict", async () => {
@@ -293,5 +345,51 @@ describe("SidebarLayoutEditor", () => {
     expect(mocks.updateUserSettings.mock.calls[1]?.[0]).toMatchObject({
       sidebar_layout_state: { expected_revision: 7 },
     });
+  });
+
+  it("scopes save recovery status to the active workspace", async () => {
+    let resolveLatest: ((value: unknown) => void) | undefined;
+    const conflict = new ApiError("conflict", 409, {});
+    mocks.updateUserSettings.mockRejectedValueOnce(conflict).mockRejectedValueOnce(conflict);
+    mocks.fetchUserSettings.mockReturnValue(
+      new Promise((resolve) => {
+        resolveLatest = resolve;
+      }),
+    );
+    const view = render(
+      <SettingsSaveProvider>
+        <SidebarLayoutEditor />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.change(screen.getAllByLabelText(SECTION_NAME_LABEL).at(-1)!, {
+      target: { value: "Workspace one" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: ADD_SECTION_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: "settings:saveChanges" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: LOAD_LATEST_LABEL })).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: LOAD_LATEST_LABEL }));
+
+    await waitFor(() => expect(mocks.fetchUserSettings).toHaveBeenCalledTimes(1));
+    mocks.state.workspaces.activeId = "workspace-2";
+    view.rerender(
+      <SettingsSaveProvider>
+        <SidebarLayoutEditor />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.change(screen.getAllByLabelText(SECTION_NAME_LABEL).at(-1)!, {
+      target: { value: "Workspace two" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: ADD_SECTION_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: RETRY_SAVE_LABEL }));
+    await waitFor(() => expect(mocks.updateUserSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: LOAD_LATEST_LABEL })).toBeTruthy(),
+    );
+
+    resolveLatest?.({ settings: { sidebar_layouts_by_workspace: {} } });
   });
 });

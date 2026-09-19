@@ -35,8 +35,6 @@ export class SidebarLayoutOperationError extends Error {
 }
 
 const PROTECTED_NODE_IDS = new Set(["tasks", "inbox", "needs-you-inbox"]);
-const DEFAULT_NON_GROUP_COUNT = 5;
-
 function copyLayout(layout: SidebarLayout): SidebarLayout {
   return {
     ...layout,
@@ -95,7 +93,9 @@ function validateNode(node: SidebarLayoutNode, nodeIds: Set<string>): SidebarLay
 export function validateSidebarLayout(layout: SidebarLayout): SidebarLayoutValidation {
   const errors: SidebarLayoutErrorCode[] = [];
   if (layout.version !== SIDEBAR_LAYOUT_VERSION) errors.push("invalid_version");
-  if (layout.nodes.length > SIDEBAR_LAYOUT_LIMITS.groups + DEFAULT_NON_GROUP_COUNT) {
+  if (
+    layout.nodes.filter((node) => node.kind === "shortcuts").length > SIDEBAR_LAYOUT_LIMITS.groups
+  ) {
     errors.push("limit_reached");
   }
   const nodeIds = new Set<string>();

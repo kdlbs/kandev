@@ -175,6 +175,7 @@ export type SidebarLayoutApi = {
   version: number;
   revision: number;
   nodes: SidebarLayoutNodeApi[];
+  unsupported_version?: boolean;
 };
 
 export type UserSettings = {

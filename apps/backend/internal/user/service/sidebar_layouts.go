@@ -67,12 +67,19 @@ func validateSidebarLayout(layout models.SidebarLayout) error {
 	nodeIDs := make(map[string]struct{}, len(layout.Nodes))
 	shortcutIDs := make(map[string]struct{})
 	totalShortcuts := 0
+	shortcutGroups := 0
 	for _, node := range layout.Nodes {
+		if node.Kind == models.SidebarLayoutNodeShortcuts {
+			shortcutGroups++
+		}
 		shortcuts, err := validateSidebarLayoutNode(node, nodeIDs, shortcutIDs)
 		if err != nil {
 			return err
 		}
 		totalShortcuts += shortcuts
+	}
+	if shortcutGroups > maxSidebarLayoutShortcutsGroup {
+		return fmt.Errorf("sidebar layout has more than %d shortcut groups", maxSidebarLayoutShortcutsGroup)
 	}
 	if totalShortcuts > maxSidebarLayoutShortcutsTotal {
 		return fmt.Errorf("sidebar layout has more than %d shortcuts", maxSidebarLayoutShortcutsTotal)
@@ -113,7 +120,7 @@ func validateSidebarDestinationNode(node models.SidebarLayoutNode) error {
 	if strings.TrimSpace(node.DestinationID) == "" {
 		return fmt.Errorf("sidebar layout node %q needs a destination", node.ID)
 	}
-	if node.Kind == models.SidebarLayoutNodeBuiltin && isProtectedSidebarDestination(node.DestinationID) {
+	if isProtectedSidebarDestination(node.DestinationID) {
 		return fmt.Errorf("sidebar destination %q is fixed", node.DestinationID)
 	}
 	if node.Name != "" || len(node.Shortcuts) != 0 {
@@ -214,6 +221,7 @@ func applySidebarLayoutPatch(settings *models.UserSettings, req *UpdateUserSetti
 	}
 	next.Version = models.SidebarLayoutVersion
 	next.Revision = patch.ExpectedRevision + 1
+	next.UnsupportedVersion = false
 	if next.Nodes == nil {
 		next.Nodes = []models.SidebarLayoutNode{}
 	}
@@ -236,6 +244,7 @@ func projectSidebarLayouts(settings *models.UserSettings, ids []string) map[stri
 		case layout.Version != models.SidebarLayoutVersion:
 			fallback := models.DefaultSidebarLayout()
 			fallback.Revision = maxInt64(layout.Revision, 0)
+			fallback.UnsupportedVersion = true
 			layout = fallback
 		case layout.Nodes == nil:
 			layout.Nodes = []models.SidebarLayoutNode{}

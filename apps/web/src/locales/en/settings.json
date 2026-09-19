@@ -830,6 +830,7 @@
   "sidebarConflict": "This layout changed elsewhere. Your draft is still here.",
   "sidebarLoadLatest": "Load latest",
   "sidebarSaveError": "The sidebar layout could not be saved. Try again.",
+  "sidebarUnsupportedVersion": "This layout uses a newer version. Editing is paused until the app supports it.",
   "sidebarNoWorkspace": "Select a workspace to customize its sidebar.",
   "sidebarPreview": "Draft preview",
   "addShortcut": "Add shortcut",

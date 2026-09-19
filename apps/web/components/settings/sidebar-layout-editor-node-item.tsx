@@ -38,7 +38,12 @@ const BUILTIN_LABEL_KEYS: Record<string, string> = {
   integrations: "common:integrations",
 };
 
-function nodeTitle(node: SidebarLayoutNode, t: (key: string) => string): string {
+function nodeTitle(
+  node: SidebarLayoutNode,
+  projected: ProjectedSidebarNode | undefined,
+  t: (key: string) => string,
+): string {
+  if (projected?.available === false) return projected.label;
   if (node.name) return node.name;
   return node.destinationId && BUILTIN_LABEL_KEYS[node.destinationId]
     ? t(BUILTIN_LABEL_KEYS[node.destinationId])
@@ -61,6 +66,8 @@ type NodeEditorProps = {
   catalog: ShortcutCatalogEntry[];
   loading: boolean;
   catalogError: string | null;
+  canvasError?: string | null;
+  readOnly: boolean;
   pickerOpen: boolean;
   query: string;
   onQueryChange: (value: string) => void;
@@ -83,6 +90,7 @@ export function SidebarLayoutNodeEditor(props: NodeEditorProps) {
   const { node } = props;
   const sortable = useSortable({
     id: nodeDragId(node.id),
+    disabled: props.readOnly,
     data: { type: "node", nodeId: node.id } satisfies SidebarLayoutDragData,
   });
   const style = {
@@ -107,6 +115,7 @@ export function SidebarLayoutNodeEditor(props: NodeEditorProps) {
 
 function SidebarLayoutNodeHeader({
   node,
+  projected,
   index,
   total,
   onToggle,
@@ -115,6 +124,7 @@ function SidebarLayoutNodeHeader({
   onSetNameDraft,
   onCommitName,
   dragHandleProps,
+  readOnly,
   t,
 }: NodeEditorProps & { dragHandleProps: HTMLAttributes<HTMLSpanElement> }) {
   const isGroup = node.kind === "shortcuts";
@@ -134,14 +144,18 @@ function SidebarLayoutNodeHeader({
           value={node.name ?? ""}
           onChange={(event) => onSetNameDraft(node.id, event.target.value)}
           onBlur={() => onCommitName(node.id, node.name ?? "")}
+          disabled={readOnly}
           className="min-h-7 min-w-0 flex-1 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         />
       ) : (
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{nodeTitle(node, t)}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {nodeTitle(node, projected, t)}
+        </span>
       )}
       <Switch
         checked={node.visible}
         onCheckedChange={onToggle}
+        disabled={readOnly}
         aria-label={t("settings:sidebarToggleVisibility")}
       />
       <Button
@@ -150,7 +164,7 @@ function SidebarLayoutNodeHeader({
         size="icon"
         className="size-7 max-md:size-11 [@media(pointer:coarse)]:size-11"
         onClick={() => onMove(Math.max(0, index - 1))}
-        disabled={index === 0}
+        disabled={readOnly || index === 0}
         aria-label={t("settings:moveUp")}
       >
         <IconChevronUp className="h-4 w-4" />
@@ -161,7 +175,7 @@ function SidebarLayoutNodeHeader({
         size="icon"
         className="size-7 max-md:size-11 [@media(pointer:coarse)]:size-11"
         onClick={() => onMove(Math.min(total - 1, index + 1))}
-        disabled={index === total - 1}
+        disabled={readOnly || index === total - 1}
         aria-label={t("settings:moveDown")}
       >
         <IconChevronDown className="h-4 w-4" />
@@ -173,6 +187,7 @@ function SidebarLayoutNodeHeader({
           size="icon"
           className="size-7 max-md:size-11 [@media(pointer:coarse)]:size-11"
           onClick={onRemove}
+          disabled={readOnly}
           aria-label={t("settings:remove")}
         >
           <IconTrash className="h-4 w-4" />
@@ -189,6 +204,8 @@ function SidebarLayoutShortcutList({
   catalog,
   loading,
   catalogError,
+  canvasError,
+  readOnly,
   pickerOpen,
   query,
   onQueryChange,
@@ -203,6 +220,7 @@ function SidebarLayoutShortcutList({
 }: NodeEditorProps) {
   const { setNodeRef } = useDroppable({
     id: groupDropId(node.id),
+    disabled: readOnly,
     data: { type: "group", nodeId: node.id } satisfies SidebarLayoutDragData,
   });
   if (node.kind !== "shortcuts") return null;
@@ -221,6 +239,7 @@ function SidebarLayoutShortcutList({
             shortcutIndex={shortcutIndex}
             shortcutCount={shortcuts.length}
             sections={sections}
+            readOnly={readOnly}
             t={t}
             onMoveShortcut={onMoveShortcut}
             onRemoveShortcut={onRemoveShortcut}
@@ -234,19 +253,27 @@ function SidebarLayoutShortcutList({
           variant="outline"
           className="min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onClick={onOpenPicker}
+          disabled={readOnly}
         >
           <IconPlus className="mr-2 h-4 w-4" />
           {t("settings:addShortcut")}
         </Button>
-        <Button type="button" variant="ghost" className="min-h-11 md:hidden" onClick={onFocus}>
+        <Button
+          type="button"
+          variant="ghost"
+          className="min-h-11 md:hidden"
+          onClick={onFocus}
+          disabled={readOnly}
+        >
           {t("settings:editSection")}
         </Button>
       </div>
-      {pickerOpen && (
+      {pickerOpen && !readOnly && (
         <SidebarShortcutPicker
           catalog={catalog}
           loading={loading}
           error={catalogError}
+          canvasError={canvasError}
           query={query}
           onQueryChange={onQueryChange}
           onAdd={onAdd}
@@ -262,6 +289,7 @@ function SidebarLayoutShortcutList({
 function SortableSidebarShortcut({
   nodeId,
   shortcut,
+  readOnly,
   shortcutIndex,
   shortcutCount,
   sections,
@@ -272,6 +300,7 @@ function SortableSidebarShortcut({
 }: {
   nodeId: string;
   shortcut: ProjectedShortcut;
+  readOnly: boolean;
   shortcutIndex: number;
   shortcutCount: number;
   sections: SidebarLayoutNode[];
@@ -282,6 +311,7 @@ function SortableSidebarShortcut({
 }) {
   const sortable = useSortable({
     id: shortcutDragId(nodeId, shortcut.id),
+    disabled: readOnly,
     data: { type: "shortcut", nodeId, shortcutId: shortcut.id } satisfies SidebarLayoutDragData,
   });
   const Icon = shortcut.icon;
@@ -306,20 +336,22 @@ function SortableSidebarShortcut({
       {!shortcut.available && (
         <span className="text-xs text-muted-foreground">{t("common:unavailable")}</span>
       )}
-      <ShortcutSectionMoveMenu
-        shortcut={shortcut}
-        currentNodeId={nodeId}
-        sections={sections}
-        onMove={(destinationNodeId) => onMoveShortcutToSection(shortcut.id, destinationNodeId)}
-        t={t}
-      />
+      {!readOnly && (
+        <ShortcutSectionMoveMenu
+          shortcut={shortcut}
+          currentNodeId={nodeId}
+          sections={sections}
+          onMove={(destinationNodeId) => onMoveShortcutToSection(shortcut.id, destinationNodeId)}
+          t={t}
+        />
+      )}
       <Button
         type="button"
         variant="ghost"
         size="icon"
         className="size-7 max-md:size-11 [@media(pointer:coarse)]:size-11"
         onClick={() => onMoveShortcut(shortcut.id, Math.max(0, shortcutIndex - 1))}
-        disabled={shortcutIndex === 0}
+        disabled={readOnly || shortcutIndex === 0}
         aria-label={t("settings:moveUp")}
       >
         <IconChevronUp className="h-4 w-4" />
@@ -330,7 +362,7 @@ function SortableSidebarShortcut({
         size="icon"
         className="size-7 max-md:size-11 [@media(pointer:coarse)]:size-11"
         onClick={() => onMoveShortcut(shortcut.id, Math.min(shortcutCount - 1, shortcutIndex + 1))}
-        disabled={shortcutIndex === shortcutCount - 1}
+        disabled={readOnly || shortcutIndex === shortcutCount - 1}
         aria-label={t("settings:moveDown")}
       >
         <IconChevronDown className="h-4 w-4" />
@@ -341,6 +373,7 @@ function SortableSidebarShortcut({
         size="icon"
         className="size-7 max-md:size-11 [@media(pointer:coarse)]:size-11"
         onClick={() => onRemoveShortcut(shortcut.id)}
+        disabled={readOnly}
         aria-label={t("settings:remove")}
       >
         <IconX className="h-4 w-4" />

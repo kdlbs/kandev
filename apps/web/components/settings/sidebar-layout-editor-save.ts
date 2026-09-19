@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { ApiError } from "@/lib/api/client";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
@@ -25,6 +25,7 @@ type SaveContext = {
   savedRef: MutableRefObject<SidebarLayout>;
   workspaceRef: MutableRefObject<string | null>;
   generationsRef: MutableRefObject<Map<string, number>>;
+  requestGenerationsRef: MutableRefObject<Map<string, number>>;
   onOperationError: (value: string | null) => void;
 };
 
@@ -37,23 +38,31 @@ export async function submitSidebarLayout({
   savedRef,
   workspaceRef,
   generationsRef,
+  requestGenerationsRef,
   onOperationError,
 }: SaveContext) {
   const submittedWorkspaceId = workspaceRef.current;
   if (!submittedWorkspaceId) return;
   const submittedGeneration = generationsRef.current.get(submittedWorkspaceId) ?? 0;
-  const submitted = { ...draftRef.current, revision: savedRef.current.revision };
+  const submittedRequestGeneration =
+    (requestGenerationsRef.current.get(submittedWorkspaceId) ?? 0) + 1;
+  requestGenerationsRef.current.set(submittedWorkspaceId, submittedRequestGeneration);
+  const submittedRevision = savedRef.current.revision;
+  const submitted = { ...draftRef.current, revision: submittedRevision };
   const response = await updateUserSettings({
     sidebar_layout_state: {
       workspace_id: submittedWorkspaceId,
-      expected_revision: savedRef.current.revision,
+      expected_revision: submittedRevision,
       layout: toApiSidebarLayout(submitted),
     },
   });
   const latest = response.settings.sidebar_layouts_by_workspace?.[submittedWorkspaceId];
   const next = latest
     ? fromApiSidebarLayout(latest)
-    : { ...submitted, revision: savedRef.current.revision + 1 };
+    : { ...submitted, revision: submittedRevision + 1 };
+  if (requestGenerationsRef.current.get(submittedWorkspaceId) !== submittedRequestGeneration) {
+    return;
+  }
   const stillCurrent =
     workspaceRef.current === submittedWorkspaceId &&
     (generationsRef.current.get(submittedWorkspaceId) ?? 0) === submittedGeneration &&
@@ -65,10 +74,152 @@ export async function submitSidebarLayout({
       draftRef.current = savedRef.current;
     }
   }
-  const current = store.getState().userSettings;
-  setUserSettings(mapUserSettingsResponse(response, current));
+  if (workspaceRef.current === submittedWorkspaceId) {
+    const current = store.getState().userSettings;
+    setUserSettings(mapUserSettingsResponse(response, current));
+    onOperationError(null);
+  }
+}
+
+function useLatestSidebarLayout({
+  workspaceId,
+  catalog,
+  acknowledge,
+  setUserSettings,
+  store,
+  savedRef,
+  workspaceRef,
+  draftRef,
+  setStatus,
+}: {
+  workspaceId: string | null;
+  catalog: ShortcutCatalogEntry[];
+  acknowledge: (workspaceId: string, nextSaved: SidebarLayout, applyDraft: boolean) => void;
+  setUserSettings: (settings: UserSettingsState) => void;
+  store: { getState: () => { userSettings: UserSettingsState } };
+  savedRef: MutableRefObject<SidebarLayout>;
+  workspaceRef: MutableRefObject<string | null>;
+  draftRef: MutableRefObject<SidebarLayout>;
+  setStatus: (value: "error" | null) => void;
+}) {
+  const [latestLoading, setLatestLoading] = useState(false);
+  const latestAttemptRef = useRef(0);
+
+  useEffect(() => {
+    latestAttemptRef.current += 1;
+    setLatestLoading(false);
+  }, [workspaceId]);
+
+  const loadLatest = useCallback(async () => {
+    if (!workspaceId) return;
+    const requestedWorkspaceId = workspaceId;
+    const requestedAttempt = ++latestAttemptRef.current;
+    setLatestLoading(true);
+    try {
+      const response = await fetchUserSettings({ cache: "no-store" });
+      const latest = response.settings.sidebar_layouts_by_workspace?.[requestedWorkspaceId];
+      const next = latest ? fromApiSidebarLayout(latest) : defaultSidebarLayout();
+      if (latestAttemptRef.current !== requestedAttempt) return;
+      const recoverUnsupportedDraft =
+        draftRef.current.unsupportedVersion === true && next.unsupportedVersion !== true;
+      acknowledge(requestedWorkspaceId, next, recoverUnsupportedDraft);
+      if (
+        workspaceRef.current === requestedWorkspaceId &&
+        latestAttemptRef.current === requestedAttempt
+      ) {
+        savedRef.current = materializeSidebarPluginNodes(next, catalog);
+      }
+      if (
+        workspaceRef.current === requestedWorkspaceId &&
+        latestAttemptRef.current === requestedAttempt
+      ) {
+        const current = store.getState().userSettings;
+        setUserSettings(mapUserSettingsResponse(response, current));
+        setStatus(null);
+      }
+    } catch {
+      if (
+        workspaceRef.current === requestedWorkspaceId &&
+        latestAttemptRef.current === requestedAttempt
+      ) {
+        setStatus("error");
+      }
+    } finally {
+      if (
+        workspaceRef.current === requestedWorkspaceId &&
+        latestAttemptRef.current === requestedAttempt
+      ) {
+        setLatestLoading(false);
+      }
+    }
+  }, [
+    acknowledge,
+    catalog,
+    draftRef,
+    savedRef,
+    setStatus,
+    setUserSettings,
+    store,
+    workspaceId,
+    workspaceRef,
+  ]);
+
+  return { latestLoading, loadLatest };
+}
+
+function discardSidebarLayout({
+  draftRef,
+  savedRef,
+  setDraft,
+  workspaceRef,
+  generationsRef,
+  requestGenerationsRef,
+  setSaveError,
+  onOperationError,
+}: {
+  draftRef: MutableRefObject<SidebarLayout>;
+  savedRef: MutableRefObject<SidebarLayout>;
+  setDraft: (next: SidebarLayout) => void;
+  workspaceRef: MutableRefObject<string | null>;
+  generationsRef: MutableRefObject<Map<string, number>>;
+  requestGenerationsRef: MutableRefObject<Map<string, number>>;
+  setSaveError: (value: "conflict" | "error" | null) => void;
+  onOperationError: (value: string | null) => void;
+}) {
+  const currentWorkspaceId = workspaceRef.current;
+  if (!currentWorkspaceId) return;
+  generationsRef.current.set(
+    currentWorkspaceId,
+    (generationsRef.current.get(currentWorkspaceId) ?? 0) + 1,
+  );
+  requestGenerationsRef.current.set(
+    currentWorkspaceId,
+    (requestGenerationsRef.current.get(currentWorkspaceId) ?? 0) + 1,
+  );
+  draftRef.current = savedRef.current;
+  setDraft(savedRef.current);
+  setSaveError(null);
   onOperationError(null);
 }
+
+type SidebarLayoutSaveProps = {
+  workspaceId: string | null;
+  draft: SidebarLayout;
+  dirty: boolean;
+  validationValid: boolean;
+  invalidReason?: string;
+  catalog: ShortcutCatalogEntry[];
+  setDraft: (next: SidebarLayout | ((current: SidebarLayout) => SidebarLayout)) => void;
+  acknowledge: (workspaceId: string, nextSaved: SidebarLayout, applyDraft: boolean) => void;
+  setUserSettings: (settings: UserSettingsState) => void;
+  store: { getState: () => { userSettings: UserSettingsState } };
+  draftRef: MutableRefObject<SidebarLayout>;
+  savedRef: MutableRefObject<SidebarLayout>;
+  workspaceRef: MutableRefObject<string | null>;
+  generationsRef: MutableRefObject<Map<string, number>>;
+  requestGenerationsRef: MutableRefObject<Map<string, number>>;
+  onOperationError: (value: string | null) => void;
+};
 
 export function useSidebarLayoutSave({
   workspaceId,
@@ -85,57 +236,39 @@ export function useSidebarLayoutSave({
   savedRef,
   workspaceRef,
   generationsRef,
+  requestGenerationsRef,
   onOperationError,
-}: {
-  workspaceId: string | null;
-  draft: SidebarLayout;
-  dirty: boolean;
-  validationValid: boolean;
-  invalidReason?: string;
-  catalog: ShortcutCatalogEntry[];
-  setDraft: (next: SidebarLayout | ((current: SidebarLayout) => SidebarLayout)) => void;
-  acknowledge: (workspaceId: string, nextSaved: SidebarLayout, applyDraft: boolean) => void;
-  setUserSettings: (settings: UserSettingsState) => void;
-  store: { getState: () => { userSettings: UserSettingsState } };
-  draftRef: MutableRefObject<SidebarLayout>;
-  savedRef: MutableRefObject<SidebarLayout>;
-  workspaceRef: MutableRefObject<string | null>;
-  generationsRef: MutableRefObject<Map<string, number>>;
-  onOperationError: (value: string | null) => void;
-}) {
+}: SidebarLayoutSaveProps) {
   const [saveError, setSaveError] = useState<"conflict" | "error" | null>(null);
-  const [latestLoading, setLatestLoading] = useState(false);
-
-  const loadLatest = useCallback(async () => {
-    if (!workspaceId) return;
-    const requestedWorkspaceId = workspaceId;
-    setLatestLoading(true);
-    try {
-      const response = await fetchUserSettings({ cache: "no-store" });
-      const latest = response.settings.sidebar_layouts_by_workspace?.[requestedWorkspaceId];
-      const next = latest ? fromApiSidebarLayout(latest) : defaultSidebarLayout();
-      acknowledge(requestedWorkspaceId, next, false);
-      if (workspaceRef.current === requestedWorkspaceId) {
-        savedRef.current = materializeSidebarPluginNodes(next, catalog);
-      }
-      const current = store.getState().userSettings;
-      setUserSettings(mapUserSettingsResponse(response, current));
-      setSaveError(null);
-    } catch {
-      setSaveError("error");
-    } finally {
-      setLatestLoading(false);
-    }
-  }, [acknowledge, catalog, savedRef, setUserSettings, store, workspaceId, workspaceRef]);
-
+  const saveAttemptRef = useRef(0);
+  const saveWorkspaceRef = useRef(workspaceId);
+  useEffect(() => {
+    if (saveWorkspaceRef.current === workspaceId) return;
+    saveWorkspaceRef.current = workspaceId;
+    saveAttemptRef.current += 1;
+    setSaveError(null);
+  }, [workspaceId]);
+  const { latestLoading, loadLatest } = useLatestSidebarLayout({
+    workspaceId,
+    catalog,
+    acknowledge,
+    setUserSettings,
+    store,
+    savedRef,
+    workspaceRef,
+    draftRef,
+    setStatus: (value) => setSaveError(value),
+  });
   useSettingsSaveContributor({
     id: "sidebar-layout",
     order: 20,
     revision: `${workspaceId ?? "none"}:${layoutValue(draft)}`,
     isDirty: Boolean(workspaceId && dirty),
-    canSave: validationValid,
+    canSave: validationValid && !draft.unsupportedVersion,
     invalidReason,
     save: async () => {
+      const requestedWorkspaceId = workspaceRef.current;
+      const requestedAttempt = ++saveAttemptRef.current;
       try {
         await submitSidebarLayout({
           catalog,
@@ -146,26 +279,36 @@ export function useSidebarLayoutSave({
           savedRef,
           workspaceRef,
           generationsRef,
+          requestGenerationsRef,
           onOperationError,
         });
-        setSaveError(null);
+        if (
+          workspaceRef.current === requestedWorkspaceId &&
+          saveAttemptRef.current === requestedAttempt
+        ) {
+          setSaveError(null);
+        }
       } catch (error) {
-        setSaveError(error instanceof ApiError && error.status === 409 ? "conflict" : "error");
+        if (
+          workspaceRef.current === requestedWorkspaceId &&
+          saveAttemptRef.current === requestedAttempt
+        ) {
+          setSaveError(error instanceof ApiError && error.status === 409 ? "conflict" : "error");
+        }
         throw error;
       }
     },
-    discard: () => {
-      const currentWorkspaceId = workspaceRef.current;
-      if (!currentWorkspaceId) return;
-      generationsRef.current.set(
-        currentWorkspaceId,
-        (generationsRef.current.get(currentWorkspaceId) ?? 0) + 1,
-      );
-      draftRef.current = savedRef.current;
-      setDraft(savedRef.current);
-      setSaveError(null);
-      onOperationError(null);
-    },
+    discard: () =>
+      discardSidebarLayout({
+        draftRef,
+        savedRef,
+        setDraft,
+        workspaceRef,
+        generationsRef,
+        requestGenerationsRef,
+        setSaveError,
+        onOperationError,
+      }),
   });
 
   return { saveError, setSaveError, latestLoading, loadLatest };

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconDots } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
@@ -229,6 +229,7 @@ export function ShortcutOverflowMenu({
 }: ShortcutOverflowMenuProps) {
   const { t } = useTranslation();
   const label = triggerLabel ?? t("common:showMoreActions");
+  const activityDescriptionId = `sidebar-shortcut-aggregate-activity-${encodeURIComponent(useId())}`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -242,6 +243,7 @@ export function ShortcutOverflowMenu({
             triggerClassName,
           )}
           aria-label={label}
+          aria-describedby={aggregateActivity ? activityDescriptionId : undefined}
           data-testid={triggerTestId ?? "sidebar-shortcut-more"}
         >
           {triggerContent ?? (
@@ -252,6 +254,11 @@ export function ShortcutOverflowMenu({
           )}
         </Button>
       </DropdownMenuTrigger>
+      {aggregateActivity && (
+        <span id={activityDescriptionId} className="sr-only">
+          {shortcutActivityLabel(aggregateActivity, t)}
+        </span>
+      )}
       <DropdownMenuContent align="start" side={mobile ? "bottom" : "right"}>
         {menuLabel && <DropdownMenuLabel>{menuLabel}</DropdownMenuLabel>}
         {shortcuts.map((shortcut) => {

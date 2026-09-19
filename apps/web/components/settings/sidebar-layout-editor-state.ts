@@ -141,12 +141,14 @@ export function useSidebarLayoutActions({
   const draftRef = useRef(draft);
   const workspaceRef = useRef(workspaceId);
   const generationsRef = useRef(new Map<string, number>());
+  const requestGenerationsRef = useRef(new Map<string, number>());
   const scopeKey = workspaceId ?? "__none__";
   draftRef.current = draft;
   workspaceRef.current = workspaceId;
 
   const applyDraftOperation = useCallback(
     (operation: DraftOperation): boolean => {
+      if (draftRef.current.unsupportedVersion) return false;
       try {
         const next = operation(draftRef.current);
         draftRef.current = next;
@@ -182,6 +184,7 @@ export function useSidebarLayoutActions({
     draftRef,
     workspaceRef,
     generationsRef,
+    requestGenerationsRef,
     applyDraftOperation,
     setNameDraft,
     commitName,

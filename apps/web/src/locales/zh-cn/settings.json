@@ -830,6 +830,7 @@
   "sidebarConflict": "此布局已在其他位置更改。你的草稿仍然保留。",
   "sidebarLoadLatest": "加载最新版本",
   "sidebarSaveError": "无法保存侧边栏布局。请重试。",
+  "sidebarUnsupportedVersion": "此布局使用较新版本。在应用支持该版本前，编辑已暂停。",
   "sidebarNoWorkspace": "请选择一个工作区来自定义其侧边栏。",
   "sidebarPreview": "草稿预览",
   "addShortcut": "添加快捷方式",

@@ -45,6 +45,7 @@ function isEditableGroup(node: SidebarLayoutNode): boolean {
 }
 
 function SidebarLayoutFeedback({
+  readOnly,
   validation,
   validationMessage,
   operationError,
@@ -54,6 +55,7 @@ function SidebarLayoutFeedback({
   t,
 }: Pick<
   NodesCardProps,
+  | "readOnly"
   | "validation"
   | "validationMessage"
   | "operationError"
@@ -64,6 +66,20 @@ function SidebarLayoutFeedback({
 >) {
   return (
     <>
+      {readOnly && (
+        <div className="flex flex-wrap items-center gap-2" role="alert">
+          <p className="text-sm text-destructive">{t("settings:sidebarUnsupportedVersion")}</p>
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            onClick={onLoadLatest}
+            disabled={latestLoading}
+          >
+            {latestLoading ? t("common:loading") : t("settings:sidebarLoadLatest")}
+          </Button>
+        </div>
+      )}
       {!validation.valid && (
         <p className="text-sm text-destructive" role="alert">
           {validationMessage}
@@ -98,10 +114,12 @@ function SidebarLayoutFeedback({
 
 type NodesCardProps = {
   draft: SidebarLayout;
+  readOnly: boolean;
   projected: { nodes: ProjectedSidebarNode[] };
   catalog: ShortcutCatalogEntry[];
   catalogLoading: boolean;
   catalogError: string | null;
+  canvasError?: string | null;
   newSectionName: string;
   setNewSectionName: (value: string) => void;
   pickerNodeId: string | null;
@@ -121,6 +139,45 @@ type NodesCardProps = {
   t: (key: string, options?: Record<string, unknown>) => string;
 };
 
+function NewShortcutSectionForm({
+  readOnly,
+  name,
+  setName,
+  onApply,
+  t,
+}: {
+  readOnly: boolean;
+  name: string;
+  setName: (value: string) => void;
+  onApply: (operation: DraftOperation) => boolean;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-dashed p-3 sm:flex-row">
+      <Input
+        aria-label={t(SECTION_NAME_LABEL_KEY)}
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        disabled={readOnly}
+        placeholder={t(SECTION_NAME_LABEL_KEY)}
+        className="min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      />
+      <Button
+        type="button"
+        variant="outline"
+        className="min-h-7 shrink-0 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        onClick={() => {
+          if (onApply((current) => createShortcutSection(current, name))) setName("");
+        }}
+        disabled={readOnly || !name.trim()}
+      >
+        <IconPlus className="mr-2 h-4 w-4" />
+        {t("settings:addShortcutSection")}
+      </Button>
+    </div>
+  );
+}
+
 type NodeListProps = Pick<
   NodesCardProps,
   | "draft"
@@ -128,6 +185,8 @@ type NodeListProps = Pick<
   | "catalog"
   | "catalogLoading"
   | "catalogError"
+  | "canvasError"
+  | "readOnly"
   | "pickerNodeId"
   | "pickerQuery"
   | "setPickerNodeId"
@@ -145,6 +204,8 @@ function SidebarLayoutNodeList({
   catalog,
   catalogLoading,
   catalogError,
+  canvasError,
+  readOnly,
   pickerNodeId,
   pickerQuery,
   setPickerNodeId,
@@ -169,6 +230,8 @@ function SidebarLayoutNodeList({
           catalog={catalog}
           loading={catalogLoading}
           catalogError={catalogError}
+          canvasError={canvasError}
+          readOnly={readOnly}
           pickerOpen={pickerNodeId === node.id}
           query={pickerQuery}
           onQueryChange={setPickerQuery}
@@ -211,10 +274,12 @@ function SidebarLayoutNodeList({
 
 export function SidebarLayoutNodesCard({
   draft,
+  readOnly,
   projected,
   catalog,
   catalogLoading,
   catalogError,
+  canvasError,
   newSectionName,
   setNewSectionName,
   pickerNodeId,
@@ -245,9 +310,11 @@ export function SidebarLayoutNodesCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <DndContext
-          sensors={sensors}
+          sensors={readOnly ? [] : sensors}
           collisionDetection={closestCenter}
-          onDragEnd={(event) => handleSidebarLayoutDragEnd(event, draft, onApply)}
+          onDragEnd={(event) => {
+            if (!readOnly) handleSidebarLayoutDragEnd(event, draft, onApply);
+          }}
         >
           <SortableContext
             items={draft.nodes.map((node) => nodeDragId(node.id))}
@@ -259,6 +326,8 @@ export function SidebarLayoutNodesCard({
               catalog={catalog}
               catalogLoading={catalogLoading}
               catalogError={catalogError}
+              canvasError={canvasError}
+              readOnly={readOnly}
               pickerNodeId={pickerNodeId}
               pickerQuery={pickerQuery}
               setPickerNodeId={setPickerNodeId}
@@ -271,30 +340,15 @@ export function SidebarLayoutNodesCard({
             />
           </SortableContext>
         </DndContext>
-        <div className="flex flex-col gap-2 rounded-md border border-dashed p-3 sm:flex-row">
-          <Input
-            aria-label={t(SECTION_NAME_LABEL_KEY)}
-            value={newSectionName}
-            onChange={(event) => setNewSectionName(event.target.value)}
-            placeholder={t(SECTION_NAME_LABEL_KEY)}
-            className="min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-          />
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-7 shrink-0 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-            onClick={() => {
-              if (onApply((current) => createShortcutSection(current, newSectionName))) {
-                setNewSectionName("");
-              }
-            }}
-            disabled={!newSectionName.trim()}
-          >
-            <IconPlus className="mr-2 h-4 w-4" />
-            {t("settings:addShortcutSection")}
-          </Button>
-        </div>
+        <NewShortcutSectionForm
+          readOnly={readOnly}
+          name={newSectionName}
+          setName={setNewSectionName}
+          onApply={onApply}
+          t={t}
+        />
         <SidebarLayoutFeedback
+          readOnly={readOnly}
           validation={validation}
           validationMessage={validationMessage}
           operationError={operationError}

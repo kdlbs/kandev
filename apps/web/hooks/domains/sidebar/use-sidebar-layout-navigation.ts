@@ -49,17 +49,19 @@ export function useSidebarLayoutNavigation({ active = true }: { active?: boolean
       }),
     [catalog.catalog, layout, t],
   );
-  const automationIds = useMemo(
-    () =>
-      projection.nodes
-        .filter((node) => node.visible)
-        .flatMap((node) =>
-          node.shortcuts
-            .filter((shortcut) => shortcut.target.kind === "automation")
-            .map((shortcut) => shortcut.target.id),
-        ),
-    [projection.nodes],
-  );
+  const automationIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const node of projection.nodes) {
+      if (!node.visible) continue;
+      if (node.destinationId === "automations") {
+        for (const automation of catalog.automations) ids.add(automation.id);
+      }
+      for (const shortcut of node.shortcuts) {
+        if (shortcut.target.kind === "automation") ids.add(shortcut.target.id);
+      }
+    }
+    return [...ids];
+  }, [catalog.automations, projection.nodes]);
   const activity = useShortcutActivity({
     workspaceId,
     automations: catalog.automations,

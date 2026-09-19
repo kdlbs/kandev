@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import type { ProjectedSidebarNode, ProjectedShortcut } from "@/lib/sidebar/layout-projection";
@@ -15,7 +15,7 @@ import {
   ShortcutRows,
   type ShortcutActivation,
 } from "./shortcut-section-actions";
-import { ShortcutActivityIndicator } from "./shortcut-activity-indicator";
+import { ShortcutActivityIndicator, shortcutActivityLabel } from "./shortcut-activity-indicator";
 import { cn } from "@/lib/utils";
 
 export type ShortcutSectionProps = {
@@ -43,7 +43,9 @@ function MobileShortcutSection({
   onActivateShortcut,
   onNavigate,
 }: ShortcutSectionProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const activityDescriptionId = `mobile-shortcut-section-activity-${encodeURIComponent(useId())}`;
   const automationIds = shortcutAutomationIds(node.shortcuts);
   const running = automationIds.some((id) => isRunning(getActivity(id)));
 
@@ -56,6 +58,7 @@ function MobileShortcutSection({
               type="button"
               className="min-h-11 min-w-0 flex-1 cursor-pointer truncate rounded-md px-3 text-left text-sm font-medium hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={node.label}
+              aria-describedby={running ? activityDescriptionId : undefined}
               data-testid={`mobile-shortcut-section-toggle-${node.id}`}
             >
               <span className="flex items-center gap-2">
@@ -69,6 +72,11 @@ function MobileShortcutSection({
               </span>
             </button>
           </CollapsibleTrigger>
+          {running && (
+            <span id={activityDescriptionId} className="sr-only">
+              {shortcutActivityLabel({ state: "running", loading: false, error: false }, t)}
+            </span>
+          )}
         </div>
         <div className="min-w-0 overflow-x-auto">
           <ShortcutIconStrip
@@ -121,6 +129,7 @@ function DesktopRailShortcutSection({
           )}
         </span>
       }
+      aggregateActivity={running ? { state: "running", loading: false, error: false } : undefined}
     />
   );
 }

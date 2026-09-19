@@ -74,6 +74,7 @@ export function SidebarShortcutPicker({
   catalog,
   loading,
   error,
+  canvasError,
   query,
   onQueryChange,
   onAdd,
@@ -84,6 +85,7 @@ export function SidebarShortcutPicker({
   catalog: ShortcutCatalogEntry[];
   loading: boolean;
   error: string | null;
+  canvasError?: string | null;
   query: string;
   onQueryChange: (value: string) => void;
   onAdd: (entry: ShortcutCatalogEntry) => void;
@@ -124,13 +126,13 @@ export function SidebarShortcutPicker({
         </Button>
       </div>
       {loading && <p className="text-sm text-muted-foreground">{t("common:loading")}</p>}
-      {error && (
+      {(error || canvasError) && (
         <p className="text-sm text-destructive">{t("settings:sidebarShortcutLoadError")}</p>
       )}
       {!loading && !error && entries.length === 0 && (
         <p className="text-sm text-muted-foreground">{t("settings:noMatchingShortcuts")}</p>
       )}
-      {entries.length > 0 && (
+      {!error && entries.length > 0 && (
         <div className="grid gap-1">
           {entries.map((entry) => {
             const Icon = entry.icon ?? unavailableShortcutIcon;

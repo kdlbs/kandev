@@ -830,6 +830,7 @@
   "sidebarConflict": "Este esquema foi alterado noutro local. O seu rascunho foi mantido.",
   "sidebarLoadLatest": "Carregar a versão mais recente",
   "sidebarSaveError": "Não foi possível guardar o esquema da barra lateral. Tente novamente.",
+  "sidebarUnsupportedVersion": "Este esquema usa uma versão mais recente. A edição está pausada até a aplicação a suportar.",
   "sidebarNoWorkspace": "Selecione uma área de trabalho para personalizar a barra lateral.",
   "sidebarPreview": "Pré-visualização do rascunho",
   "addShortcut": "Adicionar atalho",

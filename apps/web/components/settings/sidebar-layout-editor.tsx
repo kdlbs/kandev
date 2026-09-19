@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useSidebarShortcutCatalog } from "@/hooks/domains/sidebar/use-sidebar-shortcut-catalog";
@@ -36,10 +36,12 @@ const BUILTIN_LABEL_KEYS: Record<string, string> = {
 
 type EditorSurfaceProps = {
   draft: SidebarLayout;
+  unsupportedVersion: boolean;
   projected: SidebarLayoutProjection;
   catalog: ShortcutCatalogEntry[];
   catalogLoading: boolean;
   catalogError: string | null;
+  canvasError?: string | null;
   validation: ReturnType<typeof validateSidebarLayout>;
   saveError: "conflict" | "error" | null;
   latestLoading: boolean;
@@ -63,10 +65,12 @@ type EditorSurfaceProps = {
 
 function SidebarLayoutEditorSurface({
   draft,
+  unsupportedVersion,
   projected,
   catalog,
   catalogLoading,
   catalogError,
+  canvasError,
   validation,
   saveError,
   latestLoading,
@@ -97,12 +101,16 @@ function SidebarLayoutEditorSurface({
       <FocusedSidebarGroup
         node={activeFocusedNode}
         draft={draft}
+        readOnly={unsupportedVersion}
         catalog={catalog}
         loading={catalogLoading}
         error={catalogError}
+        canvasError={canvasError}
         query={pickerQuery}
         onQueryChange={setPickerQuery}
         onBack={() => onSetFocusedNodeId(null)}
+        onLoadLatest={onLoadLatest}
+        latestLoading={latestLoading}
         onOpenPicker={() => setPickerNodeId(activeFocusedNode.id)}
         pickerOpen={pickerNodeId === activeFocusedNode.id}
         onClosePicker={() => setPickerNodeId(null)}
@@ -128,11 +136,13 @@ function SidebarLayoutEditorSurface({
   return (
     <SidebarLayoutContent
       draft={draft}
+      readOnly={unsupportedVersion}
       projected={projected}
       visibleNodes={visibleNodes}
       catalog={catalog}
       catalogLoading={catalogLoading}
       catalogError={catalogError}
+      canvasError={canvasError}
       newSectionName={newSectionName}
       setNewSectionName={setNewSectionName}
       pickerNodeId={pickerNodeId}
@@ -178,12 +188,19 @@ export function SidebarLayoutEditor() {
     savedRef: useRefValue(draftState.saved),
     workspaceRef: actions.workspaceRef,
     generationsRef: actions.generationsRef,
+    requestGenerationsRef: actions.requestGenerationsRef,
     onOperationError: actions.setOperationError,
   });
   const [newSectionName, setNewSectionName] = useState("");
   const [pickerNodeId, setPickerNodeId] = useState<string | null>(null);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [pickerQuery, setPickerQuery] = useState("");
+  useEffect(() => {
+    setNewSectionName("");
+    setPickerNodeId(null);
+    setFocusedNodeId(null);
+    setPickerQuery("");
+  }, [draftState.workspaceId]);
   const applyDraftOperation = useCallback(
     (operation: DraftOperation) => {
       const applied = actions.applyDraftOperation(operation);
@@ -220,10 +237,12 @@ export function SidebarLayoutEditor() {
   return (
     <SidebarLayoutEditorSurface
       draft={draftState.draft}
+      unsupportedVersion={Boolean(draftState.draft.unsupportedVersion)}
       projected={projected}
       catalog={catalogState.catalog}
       catalogLoading={catalogState.loading}
       catalogError={catalogState.error}
+      canvasError={catalogState.canvasError}
       validation={validation}
       saveError={save.saveError}
       latestLoading={save.latestLoading}

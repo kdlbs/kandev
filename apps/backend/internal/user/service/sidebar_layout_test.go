@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/user/models"
@@ -62,5 +63,37 @@ func TestSidebarLayoutPatchIsScopedAndRevisionChecked(t *testing.T) {
 	}`))
 	if !errors.Is(err, ErrUserSettingsConflict) || repo.snapshot().Revision != before {
 		t.Fatalf("stale sidebar layout write = %v, settings revision %d want unchanged %d", err, repo.snapshot().Revision, before)
+	}
+}
+
+func TestSidebarLayoutRejectsTooManyShortcutGroups(t *testing.T) {
+	layout := models.DefaultSidebarLayout()
+	for index := 0; index < maxSidebarLayoutShortcutsGroup+1; index++ {
+		layout.Nodes = append(layout.Nodes, models.SidebarLayoutNode{
+			ID:      fmt.Sprintf("group-%d", index),
+			Kind:    models.SidebarLayoutNodeShortcuts,
+			Visible: true,
+			Name:    fmt.Sprintf("Group %d", index),
+		})
+	}
+
+	if err := validateSidebarLayout(layout); err == nil {
+		t.Fatal("validateSidebarLayout accepted too many shortcut groups")
+	}
+}
+
+func TestProjectSidebarLayoutsMarksUnsupportedVersion(t *testing.T) {
+	settings := &models.UserSettings{
+		SidebarLayoutsByWorkspace: map[string]models.SidebarLayout{
+			"workspace-1": {Version: models.SidebarLayoutVersion + 1, Revision: 7},
+		},
+	}
+
+	projected := projectSidebarLayouts(settings, []string{"workspace-1"})["workspace-1"]
+	if !projected.UnsupportedVersion {
+		t.Fatal("unsupported layout was not marked for recovery")
+	}
+	if projected.Revision != 7 || projected.Version != models.SidebarLayoutVersion {
+		t.Fatalf("projected unsupported layout = %+v", projected)
 	}
 }

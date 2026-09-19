@@ -28,6 +28,7 @@ export type ProjectedSidebarNode = Omit<SidebarLayoutNode, "shortcuts"> & {
   label: string;
   icon: DestinationIcon;
   shortcuts: ProjectedShortcut[];
+  available?: boolean;
 };
 
 export type SidebarLayoutProjection = {
@@ -110,7 +111,7 @@ export function materializeSidebarPluginNodes(
       : node;
   });
 
-  for (const entry of pluginEntries) {
+  for (const entry of [...pluginEntries].reverse()) {
     if (nodes.some((node) => node.id === entry.target.id)) continue;
     const index = pluginInsertionIndex(nodes, entry.section);
     nodes.splice(index, 0, {
@@ -127,26 +128,43 @@ export function materializeSidebarPluginNodes(
     : { ...layout, nodes };
 }
 
-function projectNode(
+function projectNodePresentation(
   node: SidebarLayoutNode,
   catalog: Map<string, ShortcutCatalogEntry>,
   unavailableLabel: string,
   builtinLabels: Record<string, string>,
-): ProjectedSidebarNode {
+): Pick<ProjectedSidebarNode, "label" | "icon" | "available"> {
   const builtinIcon = node.destinationId ? BUILTIN_ICONS[node.destinationId] : undefined;
   const destination = node.destinationId
     ? catalog.get(`destination:${node.destinationId}`)
     : undefined;
+  if (node.kind === "plugin" && !destination) {
+    return { label: unavailableLabel, icon: unavailableShortcutIcon, available: false };
+  }
   const label =
     node.name ??
     destination?.label ??
     (node.destinationId ? builtinLabels[node.destinationId] : undefined) ??
     node.id;
   const icon = destination?.icon ?? builtinIcon ?? IconQuestionMark;
+  return { label, icon, available: true };
+}
+
+function projectNode(
+  node: SidebarLayoutNode,
+  catalog: Map<string, ShortcutCatalogEntry>,
+  unavailableLabel: string,
+  builtinLabels: Record<string, string>,
+): ProjectedSidebarNode {
+  const presentation = projectNodePresentation(node, catalog, unavailableLabel, builtinLabels);
   const shortcuts = (node.shortcuts ?? []).map((shortcut) =>
     projectShortcut(shortcut, catalog, unavailableLabel),
   );
-  return { ...node, label, icon, shortcuts };
+  return {
+    ...node,
+    ...presentation,
+    shortcuts,
+  };
 }
 
 export function projectSidebarLayout(

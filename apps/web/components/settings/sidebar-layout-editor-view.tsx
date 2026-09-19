@@ -19,11 +19,13 @@ const SIDEBAR_LABEL_KEY = "settings:sidebar";
 
 export type SidebarLayoutContentProps = {
   draft: SidebarLayout;
+  readOnly: boolean;
   projected: SidebarLayoutProjection;
   visibleNodes: ProjectedSidebarNode[];
   catalog: ShortcutCatalogEntry[];
   catalogLoading: boolean;
   catalogError: string | null;
+  canvasError?: string | null;
   newSectionName: string;
   setNewSectionName: (value: string) => void;
   pickerNodeId: string | null;
@@ -47,11 +49,13 @@ export type SidebarLayoutContentProps = {
 
 export function SidebarLayoutContent({
   draft,
+  readOnly,
   projected,
   visibleNodes,
   catalog,
   catalogLoading,
   catalogError,
+  canvasError,
   newSectionName,
   setNewSectionName,
   pickerNodeId,
@@ -82,10 +86,12 @@ export function SidebarLayoutContent({
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
         <SidebarLayoutNodesCard
           draft={draft}
+          readOnly={readOnly}
           projected={projected}
           catalog={catalog}
           catalogLoading={catalogLoading}
           catalogError={catalogError}
+          canvasError={canvasError}
           newSectionName={newSectionName}
           setNewSectionName={setNewSectionName}
           pickerNodeId={pickerNodeId}
@@ -111,6 +117,7 @@ export function SidebarLayoutContent({
         variant="outline"
         className="min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         onClick={onReset}
+        disabled={readOnly}
       >
         <IconRefresh className="mr-2 h-4 w-4" />
         {t("settings:sidebarRestoreDefaults")}

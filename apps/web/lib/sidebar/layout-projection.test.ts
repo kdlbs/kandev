@@ -101,4 +101,26 @@ describe("sidebar layout projection", () => {
       available: true,
     });
   });
+
+  it("marks a saved plugin destination unavailable while retaining its placement", () => {
+    const layout: SidebarLayout = {
+      ...defaultSidebarLayout(),
+      nodes: [
+        {
+          id: "plugin:removed:home",
+          kind: "plugin",
+          visible: true,
+          destinationId: "plugin:removed:home",
+        },
+      ],
+    };
+
+    const projected = projectSidebarLayout(layout, catalog, { unavailableLabel: "Unavailable" });
+
+    expect(projected.nodes[0]).toMatchObject({
+      id: "plugin:removed:home",
+      label: "Unavailable",
+      available: false,
+    });
+  });
 });
