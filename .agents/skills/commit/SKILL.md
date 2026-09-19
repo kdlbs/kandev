@@ -134,6 +134,11 @@ qualifies as a successful hook receipt.
    the shared validation in
    `.agents/skills/harness-improvement/references/validation.md` before
    committing.
+   If full-repository spec lint fails on a pre-existing duplicate acceptance ID
+   while the active hook requires a clean result, confirm it is baseline-only,
+   make the smallest unique-ID correction needed for that hook, rerun the full
+   lint, and record the baseline correction in the implementation record. Do
+   not bypass the hook or leave the repository-wide failure unexplained.
    If a JSX layout-only edit touches an element containing an existing
    hardcoded user-facing literal, `i18n-new-code` may classify that literal as
    changed copy and fail. Localize it and add matching `en`/`pseudo` catalog

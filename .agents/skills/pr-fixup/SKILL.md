@@ -286,6 +286,12 @@ Require local `HEAD`, `headRefOid`, and `checks_head_sha` to match; confirm
 If a remediation changes rendered UI, invalidate screenshots captured before
 fixup and recapture and re-publish every affected viewport after the final
 commit. Never leave pre-fixup screenshots in the PR.
+Anchor each recapture on the promised user-visible notice or download affordance
+and assert that affordance is visible before capture; a preview container alone
+is not evidence of the behavior. If the UI changes after publication, publish
+the replacement on a new immutable ref such as
+`media/pr-<PR_NUMBER>-screenshots-fixup` instead of rewriting the prior media
+ref, then repeat the live-body compare-and-swap procedure.
 
 Immediately before a remediation commit or push—and again after long-running
 remediation—refresh PR state. Require the PR to remain open and its head ref to
