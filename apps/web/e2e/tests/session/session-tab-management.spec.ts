@@ -125,6 +125,13 @@ test.describe("Session tab management — close behavior", () => {
       await expect(session.sessionTabCloseButton(session1Id)).toHaveAccessibleName("Hide panel");
       await session.sessionTabCloseButton(session1Id).click();
       await expect(session.alertDialog()).not.toBeVisible();
+      await expect
+        .poll(() =>
+          testPage.evaluate(
+            "window.__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? null",
+          ),
+        )
+        .toBe(session2Id);
       await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 5_000 });
       await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
 

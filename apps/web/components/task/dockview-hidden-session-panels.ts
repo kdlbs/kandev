@@ -9,6 +9,20 @@ import {
 import type { TaskId } from "@/lib/types/http";
 
 const hiddenByApi = new WeakMap<DockviewApi, Map<string | null, Set<string>>>();
+const hideListenersByApi = new WeakMap<DockviewApi, Set<(sessionId: string) => void>>();
+
+export function onDidHideSessionPanel(
+  api: DockviewApi,
+  listener: (sessionId: string) => void,
+): { dispose: () => void } {
+  let listeners = hideListenersByApi.get(api);
+  if (!listeners) {
+    listeners = new Set();
+    hideListenersByApi.set(api, listeners);
+  }
+  listeners.add(listener);
+  return { dispose: () => listeners.delete(listener) };
+}
 
 export function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
   const envId = useDockviewStore.getState().currentLayoutEnvId;
@@ -90,6 +104,7 @@ export function hideSessionPanel(api: DockviewApi, sessionId: string, taskId?: s
   const hidden = hiddenSessionIdsFor(api);
   hidden.add(sessionId);
   persist(api, hidden);
+  hideListenersByApi.get(api)?.forEach((listener) => listener(sessionId));
   const panel = api.getPanel(`session:${sessionId}`);
   if (panel) api.removePanel(panel);
 }

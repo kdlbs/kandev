@@ -4,7 +4,11 @@ import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { consumeSessionTabUserActivationIntent } from "./session-tab-activation-intent";
-import { clearHiddenSessionPanel } from "./dockview-hidden-session-panels";
+import {
+  clearHiddenSessionPanel,
+  hiddenSessionIdsFor,
+  onDidHideSessionPanel,
+} from "./dockview-hidden-session-panels";
 import { resolveSessionTabSyncTarget } from "./dockview-session-tabs";
 
 const debug = createDebugLogger("dockview:session-tabs");
@@ -14,11 +18,41 @@ function restoreActiveSessionPanel(
   activeSessionId: string | null,
 ): void {
   if (!activeSessionId) return;
+  if (hiddenSessionIdsFor(api).has(activeSessionId)) return;
   api.getPanel(`session:${activeSessionId}`)?.api.setActive();
 }
 
 function isDifferentSessionPanel(panelId: string, activeSessionId: string | null): boolean {
   return panelId.startsWith("session:") && panelId !== `session:${activeSessionId}`;
+}
+
+function adoptVisibleSuccessorForHiddenActiveSession(
+  api: DockviewReadyEvent["api"],
+  appStore: StoreApi<AppState>,
+): void {
+  const state = appStore.getState();
+  const activeTaskId = state.tasks.activeTaskId;
+  if (
+    !activeTaskId ||
+    !state.tasks.activeSessionId ||
+    !hiddenSessionIdsFor(api).has(state.tasks.activeSessionId)
+  ) {
+    return;
+  }
+
+  const successorId = api.panels
+    .map((panel) => panel.id)
+    .find((panelId) => {
+      const sessionId = panelId.startsWith("session:") ? panelId.slice("session:".length) : null;
+      return (
+        !!sessionId &&
+        sessionId !== state.tasks.activeSessionId &&
+        state.taskSessions.items[sessionId]?.task_id === activeTaskId
+      );
+    });
+  if (successorId) {
+    state.setActiveSessionAuto(activeTaskId, successorId.slice("session:".length));
+  }
 }
 
 function adoptRestoredSessionTabSelection(
@@ -97,6 +131,10 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
       if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state.tasks.activeSessionId);
       return;
     }
+    if (state.tasks.activeSessionId && hiddenSessionIdsFor(api).has(state.tasks.activeSessionId)) {
+      state.setActiveSessionAuto(target.taskId, target.sessionId);
+      return;
+    }
     if (!consumeSessionTabUserActivationIntent(target.sessionId)) {
       if (isDebug()) {
         debug("setupSessionTabSync: skip (no user activation intent)", {
@@ -116,10 +154,16 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
     clearHiddenSessionPanel(api, target.sessionId);
     state.setActiveSession(target.taskId, target.sessionId);
   });
+  const hiddenPanelDisposable = onDidHideSessionPanel(api, () => {
+    queueMicrotask(() => {
+      adoptVisibleSuccessorForHiddenActiveSession(api, appStore);
+    });
+  });
   return {
     dispose: () => {
       unsubscribeLayoutRestore();
       activePanelDisposable.dispose();
+      hiddenPanelDisposable.dispose();
     },
   };
 }

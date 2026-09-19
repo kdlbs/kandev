@@ -15,6 +15,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
 import { useAppStore } from "@/components/state-provider";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   useSessionActions,
   isSessionDeletable as isDeletable,
@@ -134,6 +135,7 @@ function useSessionTabActions(
   api: IDockviewPanelHeaderProps["api"],
   containerApi: IDockviewPanelHeaderProps["containerApi"],
 ) {
+  const dockviewApi = useDockviewStore((state) => state.api);
   const [visibleSessionCount, setVisibleSessionCount] = useState(0);
   useEffect(() => {
     const update = () =>
@@ -164,8 +166,8 @@ function useSessionTabActions(
     for (const panel of toClose) containerApi.removePanel(panel);
   }, [api, containerApi]);
   const handleHide = useCallback(() => {
-    if (sessionId) hideSessionPanel(containerApi, sessionId, taskId ?? undefined);
-  }, [containerApi, sessionId, taskId]);
+    if (sessionId) hideSessionPanel(dockviewApi ?? containerApi, sessionId, taskId ?? undefined);
+  }, [containerApi, dockviewApi, sessionId, taskId]);
   return {
     handleSetPrimary,
     handleStop,
