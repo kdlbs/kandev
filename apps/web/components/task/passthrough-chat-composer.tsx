@@ -13,7 +13,7 @@ import {
   type MessageAttachment,
 } from "./chat/chat-input-container";
 import type { useChatPanelState } from "./chat/use-chat-panel-state";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
@@ -123,15 +123,15 @@ export function PassthroughComposerPanel({
 
 type PassthroughFinalMessage = {
   content: string;
-  commentsToSend: Array<DiffComment | AgentMessageComment>;
+  commentsToSend: Array<ReviewComment | AgentMessageComment>;
   contextFilesMeta?: Array<{ path: string; name: string }>;
   planCommentRefs: TaskPlanCommentRef[];
 };
 
 export function formatPassthroughBaseMessage(
   content: string,
-  reviewComments: DiffComment[] | undefined,
-  pendingComments: DiffComment[],
+  reviewComments: ReviewComment[] | undefined,
+  pendingComments: ReviewComment[],
   panelState: ReturnType<typeof useChatPanelState>,
 ) {
   const commentsToSend = reviewComments ?? pendingComments;
@@ -213,8 +213,8 @@ export async function buildPassthroughFinalMessage({
 }: {
   taskId: string | null;
   content: string;
-  reviewComments?: DiffComment[];
-  pendingComments: DiffComment[];
+  reviewComments?: ReviewComment[];
+  pendingComments: ReviewComment[];
   panelState: ReturnType<typeof useChatPanelState>;
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
@@ -312,7 +312,7 @@ export function useSendPassthroughMessage({
 }: {
   taskId: string | null;
   sessionId: string | null | undefined;
-  pendingComments: DiffComment[];
+  pendingComments: ReviewComment[];
   panelState: ReturnType<typeof useChatPanelState>;
   onSent: () => void;
 }) {

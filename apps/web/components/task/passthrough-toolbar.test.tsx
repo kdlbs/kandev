@@ -38,7 +38,7 @@ let mockKeyboardShortcuts: Record<string, { key: string; modifiers?: Record<stri
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "desktop",
 }));
-let mockPendingByFile: Record<string, import("@/lib/state/slices/comments").DiffComment[]> = {};
+let mockPendingByFile: Record<string, import("@/lib/state/slices/comments").ReviewComment[]> = {};
 let mockPlanModeEnabled = false;
 let mockImplementPlanHandler: ((fresh: boolean) => void) | undefined;
 let mockIsFinePointer = true;
@@ -107,8 +107,8 @@ vi.mock("@/hooks/domains/kanban/use-plan-actions", () => ({
   }),
 }));
 
-vi.mock("@/hooks/domains/comments/use-diff-comments", () => ({
-  usePendingDiffCommentsByFile: () => mockPendingByFile,
+vi.mock("@/hooks/domains/comments/use-review-comments", () => ({
+  usePendingReviewCommentsByFile: () => mockPendingByFile,
 }));
 
 vi.mock("@/lib/state/slices/comments/comments-store", () => ({
@@ -836,4 +836,14 @@ describe("PassthroughToolbar – proceed button", () => {
     fireEvent.click(btn);
     await waitFor(() => expect(proceedFn).toHaveBeenCalledTimes(1));
   });
+});
+
+it("opens whole-file feedback in its named repository", () => {
+  mockPendingByFile = {
+    file: [{ ...makeDiffComment("whole"), source: "review-file", repositoryName: "api" }],
+  };
+  renderToolbar();
+  fireEvent.click(screen.getByTestId(TID_TOGGLE_COMMENTS));
+  fireEvent.click(screen.getByTestId(TID_COMMENT_FILE_REF));
+  expect(mockOpenFile).toHaveBeenCalledWith(SRC_FILE, "api");
 });

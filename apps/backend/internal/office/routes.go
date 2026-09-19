@@ -45,6 +45,7 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 		svcs.Workspaces,
 		newRuntimeDecisionRecorder(svcs.Dashboard),
 		log,
+		svcs.Dashboard,
 	))
 
 	skillsHandler := skills.NewHandler(svcs.Skills)

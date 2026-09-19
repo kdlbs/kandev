@@ -29,6 +29,7 @@ function isLineInChanges(
 interface UseDiffViewerCommentsOpts {
   data: { filePath: string; diff?: string; newContent?: string; oldContent?: string };
   sessionId?: string;
+  repositoryName?: string;
   compact: boolean;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
@@ -43,6 +44,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   const {
     data,
     sessionId,
+    repositoryName,
     compact,
     onCommentAdd,
     onCommentDelete,
@@ -73,6 +75,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   } = useDiffComments({
     sessionId: sessionId || "",
     filePath: data.filePath,
+    repositoryName,
     diff: data.diff,
     newContent: data.newContent,
     oldContent: data.oldContent,
@@ -167,6 +170,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
         onCommentAdd(
           buildDiffComment({
             filePath: data.filePath,
+            repositoryName,
             sessionId: sessionId || "",
             startLine: selectedLineRange.start,
             endLine: selectedLineRange.end,
@@ -193,6 +197,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
       selectedLineRange,
       sessionId,
       data.filePath,
+      repositoryName,
       addComment,
       onCommentAdd,
       externalComments,
@@ -206,6 +211,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
       if (!selectedLineRange || !onCommentRun) return;
       const comment = buildDiffComment({
         filePath: data.filePath,
+        repositoryName,
         sessionId: sessionId || "",
         startLine: selectedLineRange.start,
         endLine: selectedLineRange.end,
@@ -234,6 +240,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
       selectedLineRange,
       sessionId,
       data.filePath,
+      repositoryName,
       addComment,
       onCommentAdd,
       onCommentRun,

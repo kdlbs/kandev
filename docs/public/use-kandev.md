@@ -127,6 +127,14 @@ workspace there from the menu sheet instead.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
 
+If discovery cannot scan a root, the picker keeps repositories from successful
+roots available and retains its normal **Refresh repositories** action. Failed
+root paths stay in structured backend logs and are not shown in selectors. A
+missing or inaccessible root does not prevent you from validating an absolute
+repository path. On Desktop, a saved root that fails also offers **Reconnect**
+and **Remove**. Kandev does not retry failed roots in the background or create
+missing clone directories.
+
 New local repository records default to:
 
 - source type `local`;
@@ -188,6 +196,8 @@ The dialog also supports multiple repositories, remote GitHub rows, and a single
 5. Inspect commits and branch state. Create or associate a pull request only after provider credentials and the target base branch are correct.
 6. Move the task through the workflow's human review gate. Archive it only after deciding what should happen to its branch, worktree, and external issue or pull request.
 
+Large user messages keep their complete source for storage, agent input, copying, editing, and delivery. Kandev shortens the rendered transcript, raw text, workflow instructions, pinned prompt, and queued-message previews when they exceed the display limit. Select **Download full text** below a shortened preview to save the complete message.
+
 See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks and workflows](tasks-and-workflows.md) for transitions, plans, workflow automation, and the current document and label limitations.
 
 ## Credentials and security boundaries
@@ -229,3 +239,9 @@ Common corrections:
 For backup, update, log, database, and recovery details, see [Operations](operations.md). For release-specific disagreement, record the version from **Settings > System > About** and compare it with the matching GitHub tag.
 
 </details>
+
+## Use task actions by keyboard
+
+With a task open, press `Cmd/Ctrl+K` to find its sidebar actions. **Move to** lets you
+choose a step, add instructions, and submit with `Cmd/Ctrl+Enter`. See
+[task actions and move options](tasks-and-workflows.md#task-actions-from-the-command-palette).

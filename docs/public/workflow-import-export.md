@@ -22,7 +22,9 @@ Open **Settings → Workspaces → select a workspace → Workflows**.
 
 - **Export All** opens a YAML dialog for the saved Kanban workflows visible on that settings page. Unsaved drafts and Office-style workflows are excluded. Choose **Copy** to put the text on the clipboard.
 - A workflow card's **Export** button exports only that workflow.
-- **Import** accepts a `.yml` or `.yaml` file, or pasted YAML. The result reports created and skipped workflow names.
+- **Import** accepts a `.yml` or `.yaml` file, or pasted YAML. It previews the workflows that will be created and skipped. Exact direct step-profile matches are selected automatically; each unmatched direct step has a profile picker.
+- The browser import does not create workflows until every affected step has a valid profile selection. If no eligible profile exists, use **Retry** after creating or enabling a profile in **Settings > Agents**. Canceling the picker leaves the workspace unchanged.
+- The result reports created and skipped workflow names.
 
 Export does not download a file or change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
 
@@ -40,11 +42,12 @@ All routes are on the Kandev backend under `/api/v1`.
 | `GET` | `/workflows/:id/export` | Export one workflow as `application/x-yaml`. |
 | `GET` | `/workspaces/:id/workflows/export` | Export all non-hidden workflows in the workspace. |
 | `GET` | `/workspaces/:id/workflows/export?ids=id1,id2` | Export only the listed workflow IDs. Whitespace and empty comma elements are ignored. |
+| `POST` | `/workspaces/:id/workflows/import/preview` | Validate a portable YAML request and return skipped names, eligible global profiles, and direct step-profile matches. It does not write. |
 | `POST` | `/workspaces/:id/workflows/import` | Parse a portable YAML request and return `{"created": [...], "skipped": [...]}`. |
 
 The workspace export route treats an absent `ids` parameter as “all”; `ids=` is an explicit empty selection and returns an envelope with no workflows. Such an envelope cannot be imported because validation requires at least one workflow. The UI supplies IDs for its Kanban-only selection. A direct “all” HTTP export can include workflow styles the portable converter cannot completely represent, so prefer the UI for user-managed Kanban workflows.
 
-The import handler reads at most 1 MiB. It uses a limited reader rather than a dedicated `413` check, so an oversized document is truncated and normally fails YAML parsing or validation. The HTTP route always uses the YAML decoder. The same structs have JSON tags because GitHub workflow sync accepts `.json` files, but YAML is the import endpoint's documented request format.
+Import requests are limited to 1 MiB. A larger request returns `413 Request Entity Too Large` and does not write. The preview route accepts portable YAML. The browser's final import request uses `application/json` with the YAML text and explicit direct step-profile bindings; a raw `application/x-yaml` request remains available for scripts and unattended callers.
 
 Example with `curl`:
 
@@ -57,6 +60,35 @@ curl -fsS \
   -H 'Content-Type: application/x-yaml' \
   --data-binary @workflow.yml \
   "http://localhost:38429/api/v1/workspaces/WORKSPACE_ID/workflows/import"
+
+# Browser-style import with explicit profile bindings:
+curl -fsS \
+  -H 'Content-Type: application/json' \
+  --data-binary @import-request.json \
+  "http://localhost:38429/api/v1/workspaces/WORKSPACE_ID/workflows/import"
+```
+
+An explicit import request has this shape. `requested_profile` must repeat the
+portable descriptor for the referenced step. `profile_updated_at` is the
+candidate revision returned by the preview route.
+
+```json
+{
+  "yaml": "version: 2\ntype: kandev_workflow\nworkflows: [...]\n",
+  "step_profile_bindings": [
+    {
+      "workflow_index": 0,
+      "step_position": 1,
+      "requested_profile": {
+        "agent_name": "Claude Code",
+        "model": "optional-model-id",
+        "mode": "optional-mode-id"
+      },
+      "profile_id": "DESTINATION_PROFILE_ID",
+      "profile_updated_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}
 ```
 
 If Kandev is behind a reverse proxy, use its externally protected base URL rather than the loopback example.
@@ -219,20 +251,47 @@ agent_profile:
   mode: optional-mode-id
 ```
 
-`agent_name` is the agent display name, not an internal ID. On import Kandev searches for a profile whose display name, model, and mode all match exactly. Empty optional values also participate in the match.
+`agent_name` is the agent display name, not an internal ID. Kandev searches for a profile whose display name, model, and mode all match exactly. Empty optional values also participate in the match.
+
+In the browser import flow, the preview lists enabled global profiles from the
+destination workspace. An exact direct step-profile match is selected
+automatically. Each unmatched direct step must be assigned an eligible profile
+before the import can continue. The final request includes the selected profile
+ID and its preview revision, so Kandev detects a profile that was removed,
+disabled, or changed while the picker was open. A conflict returns `409` with
+`code: workflow_import_profiles_required`; choose a replacement and submit
+again. Use Retry to refresh candidate revisions after a stale-profile conflict;
+unchanged selections remain available. Profile selection and the complete
+validation pass happen before the browser flow creates any workflow.
+
+Workflow-level profile descriptors are still matched automatically. A missing
+workflow-level match remains unset. Raw YAML imports and GitHub workflow sync
+keep their existing exact-match behavior, including leaving an unmatched direct
+step profile unset. They do not use the browser picker.
 
 If there is no exact match, import still succeeds and silently leaves that workflow or step profile unset. Before moving a file between installs, compare the destination's agent display names and supported model/mode identifiers. Never assume an illustrative model name exists in another install.
 
 ## Import reconciliation and failure behavior
 
-Import follows these rules:
+Browser imports follow these rules:
 
-1. The complete envelope is decoded and validated before creation begins.
+1. The preview decodes and validates the complete envelope, applies name deduplication, and returns direct step-profile candidates without creating anything.
 2. Existing workflows are compared by exact name. Matches are reported under `skipped`; they are not updated or merged.
 3. Each new workflow and its steps receive fresh IDs. Step-position references are remapped to those IDs.
-4. Profile descriptors are matched by value.
+4. Exact profile matches are preselected. Unmatched direct step descriptors require explicit eligible profile selections.
+5. The final request validates every binding, profile ID, profile revision, and portable reference before creating any workflow.
 
-Validation failure writes nothing. Creation itself is not one transaction across the file, however. A database or profile-update failure after creation begins can leave earlier workflows, a workflow without all steps, or other partial state. Inspect the workspace after a runtime error and delete incomplete workflows before retrying.
+Browser preview, selection validation, and profile conflicts write nothing. After
+that validation pass, a database failure during creation is still not one
+transaction across the file. Inspect the workspace after a runtime error and
+delete incomplete workflows before retrying.
+
+The raw YAML endpoint retains its existing behavior. It validates before
+creation, but creation is not one transaction across the file. A database or
+profile-update failure after creation begins can leave earlier workflows, a
+workflow without all steps, or other partial state. Raw YAML callers should
+inspect the workspace after a runtime error and delete incomplete workflows
+before retrying.
 
 The validator currently does **not** require a step, contiguous or non-negative positions, unique step names, unique workflow names within the same document, a valid color, or exactly one start step. GitHub workflow sync adds a unique-step-name requirement because it reconciles by name. For predictable results, enforce all of those constraints in authored files even when the one-time importer accepts them.
 

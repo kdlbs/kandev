@@ -19,7 +19,42 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		PullRequest:         derivePullRequestSummary(state),
 		QueuedPromptCount:   state.queuedCount,
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
+		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
 	}
+}
+
+func cloneLaunchQueue(queue *LaunchQueueSummary) *LaunchQueueSummary {
+	if queue == nil {
+		return nil
+	}
+	copy := *queue
+	if queue.Capacity != nil {
+		capacity := *queue.Capacity
+		copy.Capacity = &capacity
+	}
+	return &copy
+}
+
+func equalLaunchQueue(left, right *LaunchQueueSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.SessionID != right.SessionID ||
+		left.AgentProfileID != right.AgentProfileID ||
+		left.WorkflowStepID != right.WorkflowStepID ||
+		!left.QueuedAt.Equal(right.QueuedAt) ||
+		left.Reason != right.Reason ||
+		left.Retrying != right.Retrying {
+		return false
+	}
+	if left.Capacity == nil || right.Capacity == nil {
+		return left.Capacity == right.Capacity
+	}
+	// ObservedAt describes when the controller sampled capacity. It is a
+	// response freshness detail, not queue identity, and must not create a new
+	// persisted projection on every refresh.
+	return left.Capacity.InUse == right.Capacity.InUse &&
+		left.Capacity.Limit == right.Capacity.Limit
 }
 
 func cloneActiveError(value *ActiveErrorSummary) *ActiveErrorSummary {

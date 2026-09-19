@@ -58,6 +58,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
@@ -136,6 +137,7 @@ import (
 
 	// System pages (status / database / backups / logs / updates / about)
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 
 	// Database
@@ -706,9 +708,10 @@ func startAgentInfrastructure(
 	// ============================================
 	log.Info("Initializing Orchestrator...")
 
+	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
-		repos.SystemSettings, repos.RequiredStores)
+		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -910,7 +913,8 @@ func startAgentInfrastructure(
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
-		func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers, restoreCleanups, databaseQuiesce)
+		sessionCapacityEnvironment, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
+		restoreCleanups, databaseQuiesce)
 }
 
 // startOrchestratorAndAutomationConsumers establishes the startup chain in
@@ -973,6 +977,7 @@ func startGatewayAndServe(
 	msgCreator *messageCreatorAdapter,
 	repoCloner *repoclone.Cloner,
 	agentctlBinaryPath string,
+	sessionCapacityEnvironment sessioncapacity.Environment,
 	addCleanup func(func() error),
 	runCleanups func(),
 	cancelWorkers context.CancelFunc,
@@ -1126,6 +1131,11 @@ func startGatewayAndServe(
 		closeBoundListeners(server, listeners, log)
 		return false
 	}
+	if err := runProcessorSvc.ReconcileRunSessions(ctx); err != nil {
+		log.Error("Failed to reconcile Office run sessions", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
 	scheduling := startSchedulingRuntime(
 		ctx, repos, services, eventBus, orchestratorSvc, runProcessorSvc, log,
 		runsscheduler.TickIntervalFromConfig(cfg.Office.SchedulerTickMs),
@@ -1174,15 +1184,17 @@ func startGatewayAndServe(
 		Commit:    Commit,
 		BuildTime: BuildTime,
 	}, systemsvc.Wiring{
-		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
-		DatabaseQuiesce:      databaseQuiesce,
-		RestoreQuiesce:       restoreQuiesce,
-		SystemSettings:       repos.SystemSettings,
-		RequiredStores:       repos.RequiredStores,
-		PersistenceHealth:    persistenceHealth,
-		MessageQueue:         orchestratorSvc.GetMessageQueue(),
-		MessageQueueConfig:   queueConfiguration(cfg),
-		TaskSessions:         repos.Task,
+		OrchestratorShutdown:       func() { _ = orchestratorSvc.Stop() },
+		DatabaseQuiesce:            databaseQuiesce,
+		RestoreQuiesce:             restoreQuiesce,
+		SystemSettings:             repos.SystemSettings,
+		RequiredStores:             repos.RequiredStores,
+		PersistenceHealth:          persistenceHealth,
+		MessageQueue:               orchestratorSvc.GetMessageQueue(),
+		MessageQueueConfig:         queueConfiguration(cfg),
+		SessionCapacity:            orchestratorSvc,
+		SessionCapacityEnvironment: sessionCapacityEnvironment,
+		TaskSessions:               repos.Task,
 		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
 			for _, id := range ids {
 				message, err := services.Task.GetMessage(eventCtx, id)
@@ -1401,7 +1413,7 @@ func initOfficeServices(
 
 	runProcessorSvc := newRunProcessorService(
 		cfg, repos, services, orchestratorSvc, eventBus,
-		agentctlBinaryPath, cfgLoader, cfgWriter, log,
+		agentctlBinaryPath, cfgLoader, cfgWriter, lifecycleMgr, log,
 	)
 
 	// Task dependencies are a core Kanban relationship, not an Office feature.
@@ -1461,15 +1473,22 @@ func initOfficeServices(
 	// Build feature-package services and wire all inter-service dependencies.
 	services.OfficeSvcs = buildOfficeFeatureServices(
 		repos.Office, repos.Task, repos.AgentSettings, cfgLoader, cfgWriter, configBasePath,
-		agentRegistry, log, services, cfg.Office.JWTSigningKey,
+		agentRegistry, log, services, lifecycleMgr, cfg.Office.JWTSigningKey,
 	)
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
 	services.OfficeSvcs.Dashboard.SetOfficeSessionIdentity(cfg.Features.OfficeSessionIdentity)
 
 	// Reconcile using the new infra package.
 	reconciler := officeinfra.NewReconciler(repos.Office, log)
-	reconciler.ReconcileAll(ctx)
+	reconcileSignal := reconciler.ReconcileAll(ctx)
 	log.Info("Office reconciliation complete")
+
+	// Startup scan (REQ-OFFICE-ROUTINE-ARMING-003): a read-only pass over
+	// every routine's schedule state, logged and counted for an unattended
+	// install. Launched after reconciliation so a trigger-less routine
+	// reconciliation would have fixed is not reported prematurely; does not
+	// block startup and cannot affect its result.
+	go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC())
 
 	// System skill sync. Upserts every embedded SKILL.md (the ones written
 	// to disk by EnsureBundledSkills above) into office_skills as
@@ -1503,13 +1522,14 @@ func newRunProcessorService(
 	agentctlBinaryPath string,
 	cfgLoader *configloader.ConfigLoader,
 	cfgWriter *configloader.FileWriter,
+	lifecycleMgr *lifecycle.Manager,
 	log *logger.Logger,
 ) *officeservice.Service {
 	apiPort := cfg.Server.Port
 	if apiPort == 0 {
 		apiPort = ports.Backend
 	}
-	return officeservice.NewService(officeservice.ServiceOptions{
+	svc := officeservice.NewService(officeservice.ServiceOptions{
 		Repo:               repos.Office,
 		Logger:             log,
 		CfgLoader:          cfgLoader,
@@ -1524,6 +1544,8 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, log))
+	return svc
 }
 
 // wireOfficeSvcsDependencies wires inter-service dependencies into the
@@ -1624,6 +1646,7 @@ func wireOfficeProviderRouting(
 	resolver.SetExecutionProfileStore(repos.AgentSettings, agentRegistry)
 	scheduler.SetResolver(resolver)
 	scheduler.SetTaskStarter(&schedulerTaskStarterAdapter{orch: orchestratorSvc})
+	scheduler.SetRunSessionLauncher(services.Office.RunSessionLauncherHandle())
 	scheduler.SetEventBus(eventBus)
 	services.Office.SetRoutingDispatcher(scheduler)
 
@@ -2337,6 +2360,7 @@ func buildOfficeFeatureServices(
 	agentRegistry *registry.Registry,
 	log *logger.Logger,
 	services *Services,
+	lifecycleMgr *lifecycle.Manager,
 	jwtSigningKey string,
 ) *office.Services {
 	activity := officeshared.NewActivityLogger(repo, log)
@@ -2406,6 +2430,10 @@ func buildOfficeFeatureServices(
 	// (it already delegates to the orchestrator via SetTaskCanceller);
 	// services.Task satisfies WorkspaceChecker.
 	pauseSvc := officepause.NewService(repo, services.Office, services.Task, log)
+	pauseSvc.SetRunExecutionStopper(runtimeapi.New(lifecycleMgr))
+	if services.Office != nil {
+		services.Office.SetRunExecutionStopper(runtimeapi.New(lifecycleMgr))
+	}
 	routineSvc.SetPauseGate(pauseSvc)
 	routineWakeupDispatcher.SetPauseGate(pauseSvc)
 	schedulerSvc.SetPauseGate(pauseSvc)

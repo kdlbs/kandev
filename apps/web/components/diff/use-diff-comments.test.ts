@@ -46,3 +46,22 @@ describe("useDiffComments", () => {
     });
   });
 });
+
+it("preserves scope for new line feedback and isolates same-path annotations", () => {
+  sessionStorage.clear();
+  useCommentsStore.setState({
+    byId: {},
+    bySession: {},
+    pendingForChat: [],
+    editingCommentId: null,
+  });
+  const { result } = renderHook(() => ({
+    api: useDiffComments({ sessionId: "s", filePath: "README.md", repositoryName: "api" }),
+    root: useDiffComments({ sessionId: "s", filePath: "README.md", repositoryName: "" }),
+  }));
+  act(() => {
+    result.current.api.addComment({ start: 1, end: 1 }, "API feedback");
+  });
+  expect(result.current.api.comments[0]).toHaveProperty("repositoryName", "api");
+  expect(result.current.root.comments).toHaveLength(0);
+});

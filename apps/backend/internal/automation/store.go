@@ -94,6 +94,8 @@ const createTablesSQL = `
 		thread_action TEXT DEFAULT '',
 		thread_reason TEXT DEFAULT '',
 		display_title TEXT DEFAULT '',
+		dedup_reason TEXT DEFAULT '',
+		repository_reason TEXT DEFAULT '',
 		created_at DATETIME NOT NULL
 	);
 
@@ -152,20 +154,34 @@ const createTablesSQL = `
 // automationColumns needs the column to exist on every DB it queries,
 // including one initialised before the column was ever added.
 const (
-	migrateTaskTitleSQL          = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
-	migrateExecutionModeSQL      = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
-	migrateRepositoryIDSQL       = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
-	migrateContinuationPolicySQL = `ALTER TABLE automations ADD COLUMN continuation_policy TEXT NOT NULL DEFAULT 'new_task'`
-	migrateContinuationTaskSQL   = `ALTER TABLE automations ADD COLUMN continuation_task_id TEXT DEFAULT ''`
-	migrateTaskModeSQL           = `ALTER TABLE automations ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'automation_run'`
-	migrateRepositoryModeSQL     = `ALTER TABLE automations ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'none'`
-	migrateRepositoryBranchSQL   = `ALTER TABLE automation_repositories ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`
-	migrateRunSessionSQL         = `ALTER TABLE automation_runs ADD COLUMN session_id TEXT DEFAULT ''`
-	migrateRunTurnSQL            = `ALTER TABLE automation_runs ADD COLUMN turn_id TEXT DEFAULT ''`
-	migrateRunThreadActionSQL    = `ALTER TABLE automation_runs ADD COLUMN thread_action TEXT DEFAULT ''`
-	migrateRunThreadReasonSQL    = `ALTER TABLE automation_runs ADD COLUMN thread_reason TEXT DEFAULT ''`
-	migrateRunDisplayTitleSQL    = `ALTER TABLE automation_runs ADD COLUMN display_title TEXT DEFAULT ''`
+	migrateTaskTitleSQL           = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
+	migrateExecutionModeSQL       = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
+	migrateRepositoryIDSQL        = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
+	migrateContinuationPolicySQL  = `ALTER TABLE automations ADD COLUMN continuation_policy TEXT NOT NULL DEFAULT 'new_task'`
+	migrateContinuationTaskSQL    = `ALTER TABLE automations ADD COLUMN continuation_task_id TEXT DEFAULT ''`
+	migrateTaskModeSQL            = `ALTER TABLE automations ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'automation_run'`
+	migrateRepositoryModeSQL      = `ALTER TABLE automations ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'none'`
+	migrateRepositoryBranchSQL    = `ALTER TABLE automation_repositories ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`
+	migrateRunSessionSQL          = `ALTER TABLE automation_runs ADD COLUMN session_id TEXT DEFAULT ''`
+	migrateRunTurnSQL             = `ALTER TABLE automation_runs ADD COLUMN turn_id TEXT DEFAULT ''`
+	migrateRunThreadActionSQL     = `ALTER TABLE automation_runs ADD COLUMN thread_action TEXT DEFAULT ''`
+	migrateRunThreadReasonSQL     = `ALTER TABLE automation_runs ADD COLUMN thread_reason TEXT DEFAULT ''`
+	migrateRunDisplayTitleSQL     = `ALTER TABLE automation_runs ADD COLUMN display_title TEXT DEFAULT ''`
+	migrateRunDedupReasonSQL      = `ALTER TABLE automation_runs ADD COLUMN dedup_reason TEXT DEFAULT ''`
+	migrateRunRepositoryReasonSQL = `ALTER TABLE automation_runs ADD COLUMN repository_reason TEXT DEFAULT ''`
 )
+
+// migrateRunDedupUniqueIndexSQL backstops admitTriggerLocked's check-then-insert
+// admission with a real constraint: idx_automation_runs_dedup (above) is a
+// plain index, so two instances racing the same dedup key can both pass
+// HasRunWithDedupKey and both CreateRun. CREATE INDEX IF NOT EXISTS is
+// idempotent on its own, so this runs as a plain statement rather than
+// through the ADD COLUMN migration list. It must run after
+// dedupeAutomationRunDuplicateKeys, which clears any duplicate the
+// unconstrained window already produced — otherwise this statement itself
+// fails on exactly the database it exists to protect.
+const migrateRunDedupUniqueIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_dedup_unique
+	ON automation_runs(automation_id, dedup_key) WHERE dedup_key != ''`
 
 // automationColumns is the explicit column list for every query that scans a
 // full Automation row. Spelled out rather than `SELECT *` because the table
@@ -212,6 +228,8 @@ func (s *Store) initSchema() error {
 		{"automation_runs.thread_action", schemaSQLForDriver(migrateRunThreadActionSQL, s.db.DriverName())},
 		{"automation_runs.thread_reason", schemaSQLForDriver(migrateRunThreadReasonSQL, s.db.DriverName())},
 		{"automation_runs.display_title", schemaSQLForDriver(migrateRunDisplayTitleSQL, s.db.DriverName())},
+		{"automation_runs.dedup_reason", schemaSQLForDriver(migrateRunDedupReasonSQL, s.db.DriverName())},
+		{"automation_runs.repository_reason", schemaSQLForDriver(migrateRunRepositoryReasonSQL, s.db.DriverName())},
 	}
 	for _, migration := range migrations {
 		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
@@ -227,7 +245,84 @@ func (s *Store) initSchema() error {
 	if err := s.backfillLegacyRepositoryIDs(); err != nil {
 		return err
 	}
-	return s.backfillRepositoryModes()
+	if err := s.backfillRepositoryModes(); err != nil {
+		return err
+	}
+	if err := s.releaseStaleFailedWebhookDedupKeys(); err != nil {
+		return err
+	}
+	if err := s.dedupeAutomationRunDuplicateKeys(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(schemaSQLForDriver(migrateRunDedupUniqueIndexSQL, s.db.DriverName())); err != nil {
+		return fmt.Errorf("create automation_runs dedup unique index: %w", err)
+	}
+	return nil
+}
+
+// releaseStaleFailedWebhookDedupKeys blanks the dedup_key of any webhook run
+// that failed before ever creating a task. MarkRunTerminal only performs this
+// release for a run transitioning to failed through that code path; a run
+// that reached "failed" on a database predating that release logic (or
+// predating the webhook trigger's dedup feature entirely) keeps its key
+// forever, since MarkRunTerminal's WHERE clause only matches rows still in
+// ("triggered", "task_created"). Left unfixed, migrateRunDedupUniqueIndexSQL
+// would let HasRunWithDedupKey treat that stale key as permanently taken,
+// silently skipping every future retry of an alert that never produced a
+// task. Runs a single time before the unique index exists to enforce it;
+// idempotent since a row with dedup_key already ” matches nothing further.
+func (s *Store) releaseStaleFailedWebhookDedupKeys() error {
+	_, err := s.db.Exec(s.db.Rebind(`
+		UPDATE automation_runs
+		SET dedup_key = ''
+		WHERE status = ?
+		  AND trigger_type = ?
+		  AND COALESCE(task_id, '') = ''
+		  AND dedup_key != ''`),
+		string(RunStatusFailed), string(TriggerTypeWebhook),
+	)
+	if err != nil {
+		return fmt.Errorf("release stale failed webhook dedup keys: %w", err)
+	}
+	return nil
+}
+
+// dedupeAutomationRunDuplicateKeys blanks dedup_key on every row but one for
+// each (automation_id, dedup_key) pair, so migrateRunDedupUniqueIndexSQL can
+// be created even on a database where the race it backstops already produced
+// a duplicate. Which row keeps the key is arbitrary — both already fired, so
+// nothing downstream depends on which survives — only that at most one does.
+// Idempotent: once no pair has more than one row, the select returns nothing.
+func (s *Store) dedupeAutomationRunDuplicateKeys() error {
+	type dupRow struct {
+		ID string `db:"id"`
+	}
+	var rows []dupRow
+	err := s.db.Select(&rows, `
+		SELECT id FROM automation_runs
+		WHERE dedup_key != ''
+		AND id NOT IN (
+			SELECT MIN(id) FROM automation_runs
+			WHERE dedup_key != ''
+			GROUP BY automation_id, dedup_key
+		)`)
+	if err != nil {
+		return fmt.Errorf("select duplicate dedup_key rows: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin dedup_key cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, row := range rows {
+		if _, err := tx.Exec(tx.Rebind(`UPDATE automation_runs SET dedup_key = '' WHERE id = ?`), row.ID); err != nil {
+			return fmt.Errorf("clear duplicate dedup_key for run %s: %w", row.ID, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // backfillLegacyRepositoryIDs copies every non-empty legacy
@@ -1027,7 +1122,7 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*AutomationTrigger, 
 func (s *Store) ListTriggers(ctx context.Context, automationID string) ([]AutomationTrigger, error) {
 	var triggers []AutomationTrigger
 	err := s.ro.SelectContext(ctx, &triggers, s.ro.Rebind(
-		`SELECT * FROM automation_triggers WHERE automation_id = ? ORDER BY created_at`), automationID)
+		`SELECT * FROM automation_triggers WHERE automation_id = ? ORDER BY created_at, id`), automationID)
 	hydrateTriggers(triggers)
 	return triggers, err
 }
@@ -1044,7 +1139,7 @@ func (s *Store) listTriggersForAutomations(ctx context.Context, automationIDs []
 		return make(map[string][]AutomationTrigger), nil
 	}
 	query, args, err := sqlx.In(
-		`SELECT * FROM automation_triggers WHERE automation_id IN (?) ORDER BY created_at`, automationIDs)
+		`SELECT * FROM automation_triggers WHERE automation_id IN (?) ORDER BY created_at, id`, automationIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1125,11 +1220,11 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO automation_runs (id, automation_id, trigger_id, trigger_type, task_id, status,
 			dedup_key, trigger_data, error_message, session_id, turn_id, thread_action, thread_reason,
-			display_title, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			display_title, dedup_reason, repository_reason, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
 		r.DedupKey, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
-		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.CreatedAt)
+		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.DedupReason, r.RepositoryReason, r.CreatedAt)
 	return err
 }
 
@@ -1143,14 +1238,15 @@ func (s *Store) AdoptTriggeredRun(ctx context.Context, r *AutomationRun) (bool, 
 	}
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs SET task_id = ?, status = ?, trigger_data = ?, error_message = ?,
-			session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, display_title = ?
+			session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, display_title = ?,
+			repository_reason = ?
 		WHERE id = (
 			SELECT id FROM automation_runs
 			WHERE automation_id = ? AND dedup_key = ? AND status = ?
 			ORDER BY created_at DESC, id DESC LIMIT 1
 		) AND status = ?`),
 		r.TaskID, r.Status, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
-		r.ThreadAction, r.ThreadReason, r.DisplayTitle,
+		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.RepositoryReason,
 		r.AutomationID, r.DedupKey, string(RunStatusTriggered), string(RunStatusTriggered))
 	if err != nil {
 		return false, err
@@ -1162,10 +1258,13 @@ func (s *Store) AdoptTriggeredRun(ctx context.Context, r *AutomationRun) (bool, 
 // BindRunTask records the task created for an admitted run while leaving the
 // run in triggered state. This closes the task ownership gap before the agent
 // session is ready, so a failed launch can still settle the exact run.
-func (s *Store) BindRunTask(ctx context.Context, runID, taskID string) error {
+// repositoryReason is the webhook repository-selector disposition token (see
+// event_handlers_automation.go's token catalog); empty when a repository was
+// bound or none was declared.
+func (s *Store) BindRunTask(ctx context.Context, runID, taskID, repositoryReason string) error {
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		UPDATE automation_runs SET task_id = ?
-		WHERE id = ? AND status = ?`), taskID, runID, string(RunStatusTriggered))
+		UPDATE automation_runs SET task_id = ?, repository_reason = ?
+		WHERE id = ? AND status = ?`), taskID, repositoryReason, runID, string(RunStatusTriggered))
 	if err != nil {
 		return err
 	}
@@ -1204,9 +1303,30 @@ func (s *Store) BindRun(ctx context.Context, runID, taskID, sessionID, turnID st
 // MarkRunTerminal settles one exact run. Empty session/turn arguments are
 // allowed only for a pre-dispatch failure; once both are known they must match
 // the persisted binding.
+//
+// A webhook run that settles as failed without ever having created a task
+// releases its dedup key in the same statement (dedup_key = ” under a bound
+// CASE), so a retried delivery isn't permanently blocked by a firing that
+// never produced anything. The predicate is the task, not the status: a run
+// that DID create a task (BindRunTask leaves it "triggered" until the task
+// exists) keeps its key even if the task's own run later fails. The CASE's
+// right-hand-side column references (status, trigger_type, task_id) read the
+// pre-update row, so this is race-free without a second round trip. Scoped
+// to trigger_type = 'webhook' only — github_pr_merged's blanking stays in
+// its own separate code path (recordSkippedTrigger, recordFailedRun) and is
+// untouched here.
 func (s *Store) MarkRunTerminal(ctx context.Context, runID, sessionID, turnID string, status RunStatus, errMsg string) error {
-	query := `UPDATE automation_runs SET status = ?, error_message = ? WHERE id = ? AND status IN (?, ?)`
-	args := []any{string(status), errMsg, runID, string(RunStatusTriggered), string(RunStatusTaskCreated)}
+	query := `UPDATE automation_runs SET status = ?, error_message = ?,
+		dedup_key = CASE
+			WHEN ? = ? AND trigger_type = ? AND COALESCE(task_id, '') = ''
+			THEN '' ELSE dedup_key
+		END
+		WHERE id = ? AND status IN (?, ?)`
+	args := []any{
+		string(status), errMsg,
+		string(status), string(RunStatusFailed), string(TriggerTypeWebhook),
+		runID, string(RunStatusTriggered), string(RunStatusTaskCreated),
+	}
 	if sessionID != "" {
 		query += ` AND session_id = ?`
 		args = append(args, sessionID)
@@ -1431,6 +1551,7 @@ const runTaskStateColumnsSQL = `
 		END AS status,
 		ar.dedup_key, ar.trigger_data, ar.error_message,
 		ar.session_id, ar.turn_id, ar.thread_action, ar.thread_reason, ar.display_title,
+		ar.dedup_reason, ar.repository_reason,
 		ar.created_at,
 		COALESCE((
 			SELECT substr(m.content, 1, 280) FROM task_session_messages m

@@ -135,6 +135,23 @@ function baseMessage(overrides: Partial<Message>): Message {
   } as Message;
 }
 
+const PLAN_TURN_ID = "turn-1";
+const AGENT_PLAN_TYPE = "agent_plan";
+const FIRST_PLAN_CONTENT = "# Plan\n\n1. Read";
+const LATEST_PLAN_CONTENT = `${FIRST_PLAN_CONTENT}\n2. Write`;
+const LEGACY_PLAN_1_ID = "legacy-plan-1";
+const LEGACY_PLAN_2_ID = "legacy-plan-2";
+
+function planMessage(id: string, content: string, overrides: Partial<Message> = {}): Message {
+  return baseMessage({
+    id,
+    turn_id: PLAN_TURN_ID,
+    type: AGENT_PLAN_TYPE,
+    content,
+    ...overrides,
+  });
+}
+
 function emptyTurnNotice(turnId: string): Message {
   return baseMessage({
     id: `empty-turn-${turnId}`,
@@ -238,6 +255,89 @@ describe("filterVisibleMessages empty-turn notice supersession", () => {
         new Set<string>(),
       ).map((message) => message.id),
     ).toEqual([]);
+  });
+});
+
+const filterPlanMessages = (messages: Message[]) =>
+  filterVisibleMessages(messages, new Set<string>(), new Set<string>());
+
+describe("filterVisibleMessages correlated agent plans", () => {
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.1
+  it("keeps only the latest snapshot for a correlated plan stream", () => {
+    const correlation = { tool_call_id: "agent-plan:correlation-1" };
+    const first = planMessage("plan-1", FIRST_PLAN_CONTENT, { metadata: correlation });
+    const latest = planMessage("plan-2", LATEST_PLAN_CONTENT, { metadata: correlation });
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.id)).toEqual(["plan-2"]);
+  });
+
+  it("keeps only the final delivery when repeated snapshots share a message id", () => {
+    const correlation = { tool_call_id: "agent-plan:correlation-1" };
+    const first = planMessage("plan-1", FIRST_PLAN_CONTENT, { metadata: correlation });
+    const latest = planMessage("plan-1", LATEST_PLAN_CONTENT, { metadata: correlation });
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.content)).toEqual([
+      LATEST_PLAN_CONTENT,
+    ]);
+  });
+
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.2
+  it("keeps separate correlated plan streams in one turn", () => {
+    const first = planMessage("plan-1", "# First plan", {
+      metadata: { tool_call_id: "agent-plan:correlation-1" },
+    });
+    const second = planMessage("plan-2", "# Second plan", {
+      metadata: { tool_call_id: "agent-plan:correlation-2" },
+    });
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      "plan-1",
+      "plan-2",
+    ]);
+  });
+});
+
+describe("filterVisibleMessages legacy agent plans", () => {
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.4
+  it("collapses a contiguous same-turn legacy prefix chain", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, FIRST_PLAN_CONTENT);
+    const latest = planMessage(LEGACY_PLAN_2_ID, LATEST_PLAN_CONTENT);
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps legacy plans separated by another conversation item", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, FIRST_PLAN_CONTENT);
+    const message = baseMessage({ id: "message-1", turn_id: PLAN_TURN_ID, content: "Working" });
+    const latest = planMessage(LEGACY_PLAN_2_ID, LATEST_PLAN_CONTENT);
+
+    expect(filterPlanMessages([first, message, latest]).map((item) => item.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      "message-1",
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps legacy prefix plans from different turns", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, "# Plan");
+    const second = planMessage(LEGACY_PLAN_2_ID, FIRST_PLAN_CONTENT, { turn_id: "turn-2" });
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps same-turn legacy plans when the content is not a prefix", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, "# First plan");
+    const second = planMessage(LEGACY_PLAN_2_ID, "# Different plan");
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      LEGACY_PLAN_2_ID,
+    ]);
   });
 });
 

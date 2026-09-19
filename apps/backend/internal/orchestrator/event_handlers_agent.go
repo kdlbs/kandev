@@ -1153,6 +1153,42 @@ func queuedMessagePromptContent(queuedMsg *messagequeue.QueuedMessage) string {
 	return appendStepHandoffToPrompt(content, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
 }
 
+func (s *Service) queuedMessageHasDispatchInput(ctx context.Context, queuedMsg *messagequeue.QueuedMessage) (bool, error) {
+	if queuedMsg == nil {
+		return false, nil
+	}
+	if present, ok := queuedMsg.Metadata[metaKeyWorkflowDispatchInputPresent].(bool); ok {
+		return present, nil
+	}
+	if strings.TrimSpace(queuedMessagePromptContent(queuedMsg)) != "" ||
+		len(queuedMsg.Attachments) > 0 || queuedMsg.PlanMode {
+		return true, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) || errors.Is(err, context.Canceled) {
+			return false, nil
+		}
+		return false, err
+	}
+	if session == nil {
+		return false, nil
+	}
+	configMode, _ := session.Metadata["config_mode"].(bool)
+	return configMode, nil
+}
+
+func workflowQueuedConfigModeOverride(queuedMsg *messagequeue.QueuedMessage) *bool {
+	if queuedMsg == nil {
+		return nil
+	}
+	configMode, ok := queuedMsg.Metadata[metaKeyWorkflowConfigMode].(bool)
+	if !ok {
+		return nil
+	}
+	return &configMode
+}
+
 // prepareQueuedCIAutoFixOutcomeProtocol selects the protocol name from the
 // current session execution. It rewrites only the server-owned protocol block;
 // task prompt text and historical transcript content remain untouched.
@@ -1558,6 +1594,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			afterDispatch:        afterDispatch,
 			beforeDispatch:       beforeDispatch,
 			disableDispatchRetry: queuedMsg.IsDurablePlanComment(),
+			configModeOverride:   workflowQueuedConfigModeOverride(queuedMsg),
 			onAccepted: func(turnID string) {
 				s.bindQueuedCIAutoFixAttempt(promptCtx, queuedMsg, turnID)
 			},
@@ -3477,6 +3514,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			}
 			return true
 		}
+		s.preserveWorkflowStartPromptAfterFailure(ctx, taskID, sessionID, agentExecutionID)
 	}
 	if failureData.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution) {
 		s.logger.Info("managed npm runtime startup failure is recoverable",

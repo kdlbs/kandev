@@ -501,6 +501,7 @@ func wireTaskWorkflowCrossReferences(
 		buildAgentProfileResolver(repos),
 		buildAgentProfileMatcher(repos, log),
 	)
+	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
 }
 
 // thirdPartyProviders holds the code-host and issue-tracker integrations
@@ -2162,6 +2163,11 @@ func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *
 		AgentProfileID: &workflow.AgentProfileID,
 	})
 	return err
+}
+
+// DeleteWorkflow implements the compensating cleanup used by workflow imports.
+func (a *workflowProviderAdapter) DeleteWorkflow(ctx context.Context, id string) error {
+	return a.svc.DeleteWorkflow(ctx, id)
 }
 
 // buildAgentProfileResolver creates a resolver that converts profile IDs to portable form for export.

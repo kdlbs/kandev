@@ -222,16 +222,27 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if in.StartAgent {
 		r.host.startTaskBestEffort(ctx, created.ID, launch)
 	}
-	dto := taskModelToDTO(created)
-	return &dto, nil
+	items := []pluginsdk.Task{taskModelToDTO(created)}
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{created}, false, "CreateTask"); err != nil {
+		return nil, err
+	}
+	return &items[0], nil
 }
 
-func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
-	if !r.host.capabilities.CanWrite(resourceTasks) {
+// writeTaskUpdate performs UpdateTask's validation and mutation without
+// attaching pull requests or the dependency projection, returning the raw
+// model. A caller that folds this write into a larger response alongside
+// another write (the canvas PATCH route's Update+Move body) must derive once
+// on whichever result is actually serialized, not once per write it makes;
+// taskReader.Update wraps this for the ordinary single-write callers (gRPC,
+// and every other webapp route), attaching immediately after.
+func (h *pluginHost) writeTaskUpdate(ctx context.Context, in pluginsdk.UpdateTaskInput) (*taskmodels.Task, error) {
+	if !h.capabilities.CanWrite(resourceTasks) {
 		return nil, permissionDenied(apiWriteCapability(resourceTasks))
 	}
-	if r.host.taskWriter == nil {
-		return r.host.UnimplementedHostData.Tasks().Update(ctx, in)
+	if h.taskWriter == nil {
+		_, err := h.UnimplementedHostData.Tasks().Update(ctx, in)
+		return nil, err
 	}
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
@@ -244,7 +255,7 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	if in.Priority != nil && taskmodels.ValidateTaskPriority(*in.Priority) != nil {
 		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
 	}
-	updated, err := r.host.taskWriter.UpdateTask(ctx, TaskUpdateInput{
+	updated, err := h.taskWriter.UpdateTask(ctx, TaskUpdateInput{
 		ID:             in.ID,
 		Title:          in.Title,
 		Description:    in.Description,
@@ -258,8 +269,19 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 		}
 		return nil, err
 	}
+	return updated, nil
+}
+
+func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
+	updated, err := r.host.writeTaskUpdate(ctx, in)
+	if err != nil {
+		return nil, err
+	}
 	items := []pluginsdk.Task{taskModelToDTO(updated)}
 	r.host.attachPullRequests(ctx, items)
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{updated}, false, "UpdateTask"); err != nil {
+		return nil, err
+	}
 	return &items[0], nil
 }
 
@@ -302,6 +324,9 @@ func (r taskReader) Move(ctx context.Context, in pluginsdk.MoveTaskInput) (*plug
 	}
 	items := []pluginsdk.Task{taskModelToDTO(result.Task)}
 	r.host.attachPullRequests(ctx, items)
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{result.Task}, false, "MoveTask"); err != nil {
+		return nil, err
+	}
 	return &pluginsdk.MoveTaskOutcome{
 		Task:            &items[0],
 		Transitioned:    result.Transitioned,
@@ -541,6 +566,9 @@ func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID stri
 	}
 	dtos := tasksToDTOs(tasks)
 	m.host.attachPullRequests(ctx, dtos)
+	if err := m.host.attachDependencies(ctx, dtos, tasks, true, "PreviewPluginOwnedTaskTree"); err != nil {
+		return nil, err
+	}
 	return dtos, nil
 }
 

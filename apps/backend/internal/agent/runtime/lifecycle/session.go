@@ -952,6 +952,19 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				zap.Int("effective_length", len(effectivePrompt)))
 		}
 		acpAttachments := convertAttachments(attachments)
+		onDispatched, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+		var failureHandler func(InitialPromptFailure)
+		if onInitialPromptFailure != nil {
+			initialPromptFailure := sm.initialPromptFailure
+			failureHandler = func(failure InitialPromptFailure) {
+				onInitialPromptFailure()
+				if initialPromptFailure != nil {
+					initialPromptFailure(failure)
+				}
+			}
+		} else {
+			failureHandler = sm.initialPromptFailure
+		}
 		go func() {
 			promptCtx, cancel := appctx.Detached(ctx, sm.stopCh, 0)
 			defer cancel()
@@ -962,7 +975,7 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				false,
 				acpAttachments,
 				false,
-				sendPromptCallbacks{onFailure: sm.initialPromptFailure},
+				sendPromptCallbacks{onDispatched: onDispatched, onFailure: failureHandler},
 				false,
 			)
 			if err != nil {

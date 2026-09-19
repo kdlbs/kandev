@@ -1016,7 +1016,7 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 		if len(a.Triggers) > 0 {
 			triggerID = a.Triggers[0].ID
 		}
-		result, fireErr := svc.FireTrigger(ctx, automationID, triggerID, "manual", data, "")
+		result, fireErr := svc.FireTrigger(ctx, automationID, triggerID, "manual", data, automation.DedupNotConfigured())
 		if fireErr != nil {
 			log.Error("e2e: manual trigger failed", zap.String("automation_id", automationID), zap.Error(fireErr))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: fireErr.Error()})
