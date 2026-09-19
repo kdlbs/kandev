@@ -20,6 +20,7 @@ import {
   type WorkflowSessionFocusCancelScope,
   type WorkflowSessionFocusStart,
 } from "@/lib/state/workflow-session-focus";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import {
   WORKSPACE_CONTEXT_COLLECTIONS,
   type WorkspaceContextCollection,
@@ -344,7 +345,9 @@ function createWorkflowSessionFocusActions(
     return [...ids];
   };
 
-  const taskProjectionForTask = (taskId: string): { metadata: unknown; updatedAt?: string } => {
+  const taskProjectionForTask = (
+    taskId: string,
+  ): { metadata: unknown; updatedAt?: string; workflowStepId?: string } => {
     const state = get();
     const tasks = [
       ...state.kanban.tasks,
@@ -352,17 +355,21 @@ function createWorkflowSessionFocusActions(
     ].filter((candidate) => candidate.id === taskId);
     let task = tasks[0];
     for (const candidate of tasks.slice(1)) {
-      const selectedTime = task?.updatedAt ? Date.parse(task.updatedAt) : Number.NaN;
-      const candidateTime = candidate.updatedAt ? Date.parse(candidate.updatedAt) : Number.NaN;
+      const selectedTime = parseTurnTimestamp(task?.updatedAt);
+      const candidateTime = parseTurnTimestamp(candidate.updatedAt);
       if (
         task === undefined ||
-        (!Number.isFinite(selectedTime) && Number.isFinite(candidateTime)) ||
-        (Number.isFinite(candidateTime) && candidateTime > selectedTime)
+        (selectedTime === null && candidateTime !== null) ||
+        (candidateTime !== null && selectedTime !== null && candidateTime > selectedTime)
       ) {
         task = candidate;
       }
     }
-    return { metadata: task?.metadata, updatedAt: task?.updatedAt };
+    return {
+      metadata: task?.metadata,
+      updatedAt: task?.updatedAt,
+      workflowStepId: task?.workflowStepId,
+    };
   };
 
   return {
@@ -387,6 +394,7 @@ function createWorkflowSessionFocusActions(
           navigationRevision: draft.taskRemoval.navigationRevision,
           routeMetadata: liveProjection.metadata,
           routeUpdatedAt: liveProjection.updatedAt,
+          workflowStepId: liveProjection.workflowStepId,
           responseProjection,
           knownSessionIds: knownSessionIdsForTask(taskId),
         });

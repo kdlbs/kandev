@@ -93,6 +93,7 @@ function useMobileWorkflowSessionFocus(activeTaskId: string | null) {
       reconcileWorkflowSessionFocus(focusRequest.taskId, {
         metadata: response.task?.metadata,
         updatedAt: response.task?.updated_at,
+        workflowStepId: response.task?.workflow_step_id,
         entryIdentity: response.workflow_entry_identity,
       });
     },

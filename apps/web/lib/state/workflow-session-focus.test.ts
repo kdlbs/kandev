@@ -19,6 +19,7 @@ const START = {
 const SOURCE_SESSION_ID = "session-astra";
 const DESTINATION_SESSION_ID = "session-luna";
 const NEWER_SESSION_ID = "session-newer";
+const LATER_STEP_ID = "step-review";
 const LIVE_UPDATED_AT = "2026-09-19T10:00:02Z";
 const RESPONSE_UPDATED_AT = "2026-09-19T10:00:01Z";
 const FOCUS_INTENT_ERROR = "test focus intent did not start";
@@ -52,6 +53,7 @@ describe("workflow session focus state", () => {
       state.kanban.tasks = [
         {
           id: START.taskId,
+          workflowStepId: START.destinationStepId,
           metadata: { workflow_session_route: COMMITTED_ROUTE },
         },
       ] as never;
@@ -93,6 +95,7 @@ describe("workflow session focus state", () => {
       state.kanban.tasks = [
         {
           id: START.taskId,
+          workflowStepId: START.destinationStepId,
           updatedAt: LIVE_UPDATED_AT,
           metadata: { workflow_session_route: COMMITTED_ROUTE },
         },
@@ -120,6 +123,32 @@ describe("workflow session focus state", () => {
     expect(store.getState().workflowSessionFocus.request?.sessionId).toBe(DESTINATION_SESSION_ID);
   });
 
+  it("accepts the response projection when the live task is still on the source step", () => {
+    const startedState = started();
+    const bound = bindWorkflowSessionFocus(startedState.state, {
+      requestId: startedState.requestId,
+      presentationToken: START.presentationToken,
+      entryIdentity: COMMITTED_ROUTE.entry_identity,
+    });
+
+    const result = reconcileWorkflowSessionFocus(bound, {
+      activeTaskId: START.taskId,
+      navigationRevision: START.navigationRevision,
+      workflowStepId: "step-plan",
+      routeMetadata: undefined,
+      routeUpdatedAt: "2026-09-19T10:00:00Z",
+      responseProjection: {
+        metadata: { workflow_session_route: COMMITTED_ROUTE },
+        updatedAt: RESPONSE_UPDATED_AT,
+        workflowStepId: START.destinationStepId,
+        entryIdentity: COMMITTED_ROUTE.entry_identity,
+      },
+      knownSessionIds: [DESTINATION_SESSION_ID],
+    });
+
+    expect(result.sessionId).toBe(DESTINATION_SESSION_ID);
+  });
+
   it("keeps an intent pending when its response route is older than a newer live entry", () => {
     const store = createAppStore();
     const newerLiveRoute = {
@@ -134,6 +163,7 @@ describe("workflow session focus state", () => {
       state.kanban.tasks = [
         {
           id: START.taskId,
+          workflowStepId: START.destinationStepId,
           updatedAt: LIVE_UPDATED_AT,
           metadata: { workflow_session_route: newerLiveRoute },
         },
@@ -175,6 +205,7 @@ describe("workflow session focus state", () => {
     const unresolved = reconcileWorkflowSessionFocus(bound, {
       activeTaskId: START.taskId,
       navigationRevision: START.navigationRevision,
+      workflowStepId: START.destinationStepId,
       routeMetadata: { workflow_session_route: COMMITTED_ROUTE },
       knownSessionIds: [SOURCE_SESSION_ID],
     });
@@ -185,6 +216,7 @@ describe("workflow session focus state", () => {
     const resolved = reconcileWorkflowSessionFocus(bound, {
       activeTaskId: START.taskId,
       navigationRevision: START.navigationRevision,
+      workflowStepId: START.destinationStepId,
       routeMetadata: { workflow_session_route: COMMITTED_ROUTE },
       knownSessionIds: [SOURCE_SESSION_ID, DESTINATION_SESSION_ID],
     });
@@ -217,6 +249,7 @@ describe("workflow session focus state", () => {
       const result = reconcileWorkflowSessionFocus(bound, {
         activeTaskId: START.taskId,
         navigationRevision: START.navigationRevision,
+        workflowStepId: START.destinationStepId,
         routeMetadata,
         knownSessionIds: [DESTINATION_SESSION_ID],
       });
@@ -236,10 +269,10 @@ describe("workflow session focus state", () => {
     const second = beginWorkflowSessionFocus(canceled, { ...START, presentationToken: 8 });
     const newer = beginWorkflowSessionFocus(second.state, {
       ...START,
-      destinationStepId: "step-review",
+      destinationStepId: LATER_STEP_ID,
     });
     expect(newer.requestId).toBe(3);
-    expect(newer.state.intent?.destinationStepId).toBe("step-review");
+    expect(newer.state.intent?.destinationStepId).toBe(LATER_STEP_ID);
     if (newer.requestId === null) throw new Error("test focus intent did not restart");
 
     const missingIdentity = bindWorkflowSessionFocus(newer.state, {
@@ -261,6 +294,7 @@ describe("workflow session focus state", () => {
     const resolved = reconcileWorkflowSessionFocus(bound, {
       activeTaskId: START.taskId,
       navigationRevision: START.navigationRevision,
+      workflowStepId: START.destinationStepId,
       routeMetadata: { workflow_session_route: COMMITTED_ROUTE },
       knownSessionIds: [DESTINATION_SESSION_ID],
     });
@@ -280,6 +314,7 @@ describe("workflow session focus state", () => {
     const resolved = reconcileWorkflowSessionFocus(bound, {
       activeTaskId: START.taskId,
       navigationRevision: START.navigationRevision,
+      workflowStepId: START.destinationStepId,
       routeMetadata: { workflow_session_route: COMMITTED_ROUTE },
       routeUpdatedAt: LIVE_UPDATED_AT,
       responseProjection: {
@@ -311,6 +346,7 @@ describe("workflow session focus state", () => {
     const result = reconcileWorkflowSessionFocus(bound, {
       activeTaskId: START.taskId,
       navigationRevision: START.navigationRevision,
+      workflowStepId: START.destinationStepId,
       routeMetadata: { workflow_session_route: newerLiveRoute },
       routeUpdatedAt: LIVE_UPDATED_AT,
       responseProjection: {
@@ -336,6 +372,7 @@ describe("workflow session focus state", () => {
     const result = reconcileWorkflowSessionFocus(bound, {
       activeTaskId: START.taskId,
       navigationRevision: START.navigationRevision,
+      workflowStepId: START.destinationStepId,
       routeMetadata: undefined,
       responseProjection: {
         metadata: { workflow_session_route: COMMITTED_ROUTE },
@@ -347,5 +384,107 @@ describe("workflow session focus state", () => {
 
     expect(result.sessionId).toBeNull();
     expect(result.state.intent).not.toBeNull();
+  });
+
+  it("rejects a committed route after the task reaches a later workflow step", () => {
+    const startedState = started();
+    const bound = bindWorkflowSessionFocus(startedState.state, {
+      requestId: startedState.requestId,
+      presentationToken: START.presentationToken,
+      entryIdentity: COMMITTED_ROUTE.entry_identity,
+    });
+
+    const result = reconcileWorkflowSessionFocus(bound, {
+      activeTaskId: START.taskId,
+      navigationRevision: START.navigationRevision,
+      workflowStepId: LATER_STEP_ID,
+      routeMetadata: { workflow_session_route: COMMITTED_ROUTE },
+      knownSessionIds: [DESTINATION_SESSION_ID],
+    });
+
+    expect(result.sessionId).toBeNull();
+    expect(result.state.intent).toBeNull();
+  });
+
+  it.each(["0", "2026-02-30T10:00:00Z"])(
+    "ignores malformed response timestamp %s when choosing a live route",
+    (updatedAt) => {
+      const startedState = started();
+      const bound = bindWorkflowSessionFocus(startedState.state, {
+        requestId: startedState.requestId,
+        presentationToken: START.presentationToken,
+        entryIdentity: COMMITTED_ROUTE.entry_identity,
+      });
+
+      const result = reconcileWorkflowSessionFocus(bound, {
+        activeTaskId: START.taskId,
+        navigationRevision: START.navigationRevision,
+        workflowStepId: START.destinationStepId,
+        routeMetadata: { workflow_session_route: COMMITTED_ROUTE },
+        routeUpdatedAt: LIVE_UPDATED_AT,
+        responseProjection: {
+          metadata: {
+            workflow_session_route: { ...COMMITTED_ROUTE, phase: "prepared" },
+          },
+          updatedAt,
+          entryIdentity: COMMITTED_ROUTE.entry_identity,
+        },
+        knownSessionIds: [DESTINATION_SESSION_ID],
+      });
+
+      expect(result.sessionId).toBe(DESTINATION_SESSION_ID);
+    },
+  );
+
+  it("selects a valid snapshot over a normalized-invalid task timestamp", () => {
+    const store = createAppStore();
+    const wrongRoute = {
+      ...COMMITTED_ROUTE,
+      destination_session_id: NEWER_SESSION_ID,
+    };
+    store.setState((state) => {
+      state.tasks.activeTaskId = START.taskId;
+      state.tasks.activeSessionId = SOURCE_SESSION_ID;
+      state.taskRemoval.navigationRevision = START.navigationRevision;
+      state.kanban.tasks = [
+        {
+          id: START.taskId,
+          workflowStepId: START.destinationStepId,
+          updatedAt: "2026-02-30T10:00:00Z",
+          metadata: { workflow_session_route: wrongRoute },
+        },
+      ] as never;
+      state.kanbanMulti.snapshots = {
+        [START.workflowId]: {
+          workflowId: START.workflowId,
+          workflowName: "Workflow",
+          steps: [],
+          tasks: [
+            {
+              id: START.taskId,
+              workflowStepId: START.destinationStepId,
+              updatedAt: "2026-03-01T10:00:00Z",
+              metadata: { workflow_session_route: COMMITTED_ROUTE },
+            },
+          ],
+        },
+      } as never;
+      state.taskSessionsByTask.itemsByTaskId[START.taskId] = [
+        { id: SOURCE_SESSION_ID },
+        { id: DESTINATION_SESSION_ID },
+        { id: NEWER_SESSION_ID },
+      ] as never;
+    });
+
+    const requestId = store.getState().beginWorkflowSessionFocus(START);
+    if (requestId === null) throw new Error(FOCUS_INTENT_ERROR);
+    store.getState().bindWorkflowSessionFocus({
+      requestId,
+      presentationToken: START.presentationToken,
+      entryIdentity: COMMITTED_ROUTE.entry_identity,
+    });
+    store.getState().reconcileWorkflowSessionFocus(START.taskId);
+
+    expect(store.getState().tasks.activeSessionId).toBe(DESTINATION_SESSION_ID);
   });
 });

@@ -1,3 +1,5 @@
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+
 export type WorkflowSessionFocusStart = {
   taskId: string;
   workflowId: string;
@@ -46,6 +48,7 @@ export type WorkflowSessionFocusTaskProjection = {
   metadata: unknown;
   updatedAt?: string | null;
   entryIdentity?: string | null;
+  workflowStepId?: string | null;
 };
 
 export type WorkflowSessionFocusReconcileInput = {
@@ -53,6 +56,7 @@ export type WorkflowSessionFocusReconcileInput = {
   navigationRevision: number;
   routeMetadata: unknown;
   routeUpdatedAt?: string | null;
+  workflowStepId?: string | null;
   responseProjection?: WorkflowSessionFocusTaskProjection;
   knownSessionIds: readonly string[];
 };
@@ -84,33 +88,36 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function timestampMillis(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : null;
+function timestampValue(value: string | null | undefined): bigint | null {
+  return parseTurnTimestamp(value ?? undefined);
 }
 
-function acceptedRouteMetadata(
+function acceptedTaskProjection(
   intent: WorkflowSessionFocusIntent,
   input: WorkflowSessionFocusReconcileInput,
-): unknown {
+): WorkflowSessionFocusTaskProjection {
+  const liveProjection: WorkflowSessionFocusTaskProjection = {
+    metadata: input.routeMetadata,
+    updatedAt: input.routeUpdatedAt,
+    workflowStepId: input.workflowStepId,
+  };
   const liveRoute = readCommittedWorkflowSessionRoute(input.routeMetadata);
-  if (liveRoute?.entryIdentity === intent.entryIdentity) return input.routeMetadata;
+  if (liveRoute?.entryIdentity === intent.entryIdentity) return liveProjection;
 
   const response = input.responseProjection;
-  if (!response) return input.routeMetadata;
+  if (!response) return liveProjection;
 
   const responseRoute = readCommittedWorkflowSessionRoute(response.metadata);
   const responseEntryIdentity = nonEmptyString(response.entryIdentity);
-  const liveUpdatedAt = timestampMillis(input.routeUpdatedAt);
-  const responseUpdatedAt = timestampMillis(response.updatedAt);
+  const liveUpdatedAt = timestampValue(input.routeUpdatedAt);
+  const responseUpdatedAt = timestampValue(response.updatedAt);
   const responseIsEntryCorrelated =
     responseEntryIdentity === intent.entryIdentity &&
     responseRoute?.entryIdentity === intent.entryIdentity;
   const responseIsFreshEnough =
     responseIsEntryCorrelated &&
     (liveUpdatedAt === null || (responseUpdatedAt !== null && responseUpdatedAt >= liveUpdatedAt));
-  if (!responseIsFreshEnough) return input.routeMetadata;
+  if (!responseIsFreshEnough) return liveProjection;
 
   // When timestamps tie, retain a different live committed entry. Equal
   // timestamps are common for grouped task writes, and the live entry is
@@ -118,8 +125,8 @@ function acceptedRouteMetadata(
   const liveHasDifferentCommittedEntry =
     liveRoute !== null && liveRoute.entryIdentity !== intent.entryIdentity;
   return liveHasDifferentCommittedEntry && responseUpdatedAt === liveUpdatedAt
-    ? input.routeMetadata
-    : response.metadata;
+    ? liveProjection
+    : response;
 }
 
 export function readCommittedWorkflowSessionRoute(
@@ -236,8 +243,8 @@ export function reconcileWorkflowSessionFocus(
     return { state: clearWorkflowSessionFocusState(state), sessionId: null };
   }
 
-  const routeMetadata = acceptedRouteMetadata(intent, input);
-  const route = readCommittedWorkflowSessionRoute(routeMetadata);
+  const projection = acceptedTaskProjection(intent, input);
+  const route = readCommittedWorkflowSessionRoute(projection.metadata);
   if (
     !route ||
     route.destinationStepId !== intent.destinationStepId ||
@@ -245,6 +252,9 @@ export function reconcileWorkflowSessionFocus(
     !input.knownSessionIds.includes(route.destinationSessionId)
   ) {
     return { state, sessionId: null };
+  }
+  if (projection.workflowStepId !== intent.destinationStepId) {
+    return { state: clearWorkflowSessionFocusState(state), sessionId: null };
   }
 
   return {

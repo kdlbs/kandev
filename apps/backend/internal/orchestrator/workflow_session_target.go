@@ -271,15 +271,10 @@ func (s *Service) promoteWorkflowSessionRoute(
 			promoted, promoteErr = promoter.SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(admissionCtx, destination.ID, committed)
 			return
 		}
-		if route != nil {
-			// Legacy repository adapters do not expose the atomic route promoter.
-			// Keep their existing promotion/error contract and persist the route
-			// only after the selected destination has been promoted.
-			promoteErr = s.repo.SetSessionPrimary(admissionCtx, destination.ID)
-			promoted = promoteErr == nil
-		} else {
-			promoted, promoteErr = s.setNonterminalSessionPrimary(admissionCtx, destination.ID)
-		}
+		// Legacy repository adapters do not expose the atomic route promoter.
+		// Keep the nonterminal promotion guard and persist a route only after
+		// the selected destination has been promoted.
+		promoted, promoteErr = s.setNonterminalSessionPrimary(admissionCtx, destination.ID)
 		if promoteErr != nil || !promoted || route == nil {
 			return
 		}

@@ -111,38 +111,48 @@ function useWorkflowStepMoveFocus({
   const bindWorkflowSessionFocus = useAppStore((s) => s.bindWorkflowSessionFocus);
   const reconcileWorkflowSessionFocus = useAppStore((s) => s.reconcileWorkflowSessionFocus);
   const cancelWorkflowSessionFocus = useAppStore((s) => s.cancelWorkflowSessionFocus);
+  const activeFocusRequestIdRef = useRef<number | null>(null);
 
   const beginFocus = useCallback(
     (destinationStepId: string) => {
       if (!taskId || !workflowId) return null;
-      return beginWorkflowSessionFocus({
+      const requestId = beginWorkflowSessionFocus({
         taskId,
         workflowId,
         destinationStepId,
         presentationToken,
         navigationRevision,
       });
+      activeFocusRequestIdRef.current = requestId;
+      return requestId;
     },
     [beginWorkflowSessionFocus, navigationRevision, presentationToken, taskId, workflowId],
   );
   const commitFocus = useCallback(
     (requestId: number | null, response: WorkflowMoveResponse) => {
       if (requestId === null) return;
-      if (!response.workflow_entry_identity) {
-        cancelWorkflowSessionFocus({ requestId, presentationToken });
-        return;
+      try {
+        if (!response.workflow_entry_identity) {
+          cancelWorkflowSessionFocus({ requestId, presentationToken });
+          return;
+        }
+        bindWorkflowSessionFocus({
+          requestId,
+          presentationToken,
+          entryIdentity: response.workflow_entry_identity,
+        });
+        if (!taskId) return;
+        reconcileWorkflowSessionFocus(taskId, {
+          metadata: response.task?.metadata,
+          updatedAt: response.task?.updated_at,
+          workflowStepId: response.task?.workflow_step_id,
+          entryIdentity: response.workflow_entry_identity,
+        });
+      } finally {
+        if (activeFocusRequestIdRef.current === requestId) {
+          activeFocusRequestIdRef.current = null;
+        }
       }
-      bindWorkflowSessionFocus({
-        requestId,
-        presentationToken,
-        entryIdentity: response.workflow_entry_identity,
-      });
-      if (!taskId) return;
-      reconcileWorkflowSessionFocus(taskId, {
-        metadata: response.task?.metadata,
-        updatedAt: response.task?.updated_at,
-        entryIdentity: response.workflow_entry_identity,
-      });
     },
     [
       bindWorkflowSessionFocus,
@@ -156,15 +166,19 @@ function useWorkflowStepMoveFocus({
     (requestId: number | null) => {
       if (requestId === null) return;
       cancelWorkflowSessionFocus({ requestId, presentationToken });
+      if (activeFocusRequestIdRef.current === requestId) {
+        activeFocusRequestIdRef.current = null;
+      }
     },
     [cancelWorkflowSessionFocus, presentationToken],
   );
 
   useEffect(
     () => () => {
-      if (taskId) cancelWorkflowSessionFocus({ taskId, presentationToken });
+      const requestId = activeFocusRequestIdRef.current;
+      if (requestId !== null) cancelWorkflowSessionFocus({ requestId });
     },
-    [cancelWorkflowSessionFocus, presentationToken, taskId],
+    [cancelWorkflowSessionFocus],
   );
 
   return { beginFocus, cancelFocus, commitFocus };
