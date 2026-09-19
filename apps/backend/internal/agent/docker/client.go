@@ -100,6 +100,10 @@ type Client struct {
 	config   config.DockerConfig
 	activity *activity.Coordinator
 	mu       sync.RWMutex
+	// remoteCause reports the transport-level cause of a failure the Engine
+	// API client discarded. Nil for a client on a local socket, which has no
+	// transport of its own to ask.
+	remoteCause func() error
 }
 
 // NewClient creates a new Docker client.
@@ -759,6 +763,7 @@ func (c *Client) Ping(ctx context.Context) error {
 
 	_, err := c.cli.Ping(ctx, client.PingOptions{})
 	if err != nil {
+		err = c.ExplainRemoteFailure(err)
 		c.logger.Debug("Docker ping failed", zap.Error(err))
 		return fmt.Errorf("docker ping failed: %w", err)
 	}

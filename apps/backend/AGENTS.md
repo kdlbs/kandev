@@ -172,7 +172,7 @@ Standalone agentctl is launched in its own process group so terminal Ctrl+C is h
 - `sprites` - Sprites cloud environment
 - `ssh` - Remote SSH host
 - `k8s` - Namespaced Kubernetes Pod with optional PVC workspace
-- `remote_docker`, `remote_vps` - Planned
+- `remote_docker` - Container on a Docker daemon reached over SSH; `remote_vps` - Planned
 
 **Kubernetes lifecycle:** `executors_running` is the authoritative resource inventory. Persist the exact Pod/PVC names, UIDs, full `kandev.ai/*` identity, workload snapshot, and internal runtime-secret references before reporting a launch as durable. Ordinary stop and backend shutdown preserve resources; terminal cleanup deletes the Pod and only a Kandev-created PVC after exact identity checks and confirmed absence. Reconnect uses the current executor connection config but the recorded workload/resource snapshot, and any ambiguity fails closed. Keep agentctl reachable only through a process-local loopback port-forward; never add a Service or place resolved credentials in a Pod spec.
 

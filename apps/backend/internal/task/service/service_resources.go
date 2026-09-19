@@ -1755,10 +1755,41 @@ func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []stri
 
 var ErrKubernetesAdminRequired = errors.New("administrator identity required for Kubernetes settings")
 
+// ErrRemoteDockerAdminRequired gates remote Docker executor mutation. A saved
+// profile grants effective root on the remote host, so it is not an ordinary
+// member operation.
+var ErrRemoteDockerAdminRequired = errors.New("administrator identity required for remote Docker settings")
+
 func requireKubernetesAdmin(ctx context.Context) error {
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || !identity.IsAdmin() {
 		return ErrKubernetesAdminRequired
+	}
+	return nil
+}
+
+func requireRemoteDockerAdmin(ctx context.Context) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || !identity.IsAdmin() {
+		return ErrRemoteDockerAdminRequired
+	}
+	return nil
+}
+
+// requireExecutorTypeAdmin applies the admin gate for executor types whose
+// configuration is an administrative grant over a machine.
+func requireExecutorTypeAdmin(ctx context.Context, types ...models.ExecutorType) error {
+	for _, t := range types {
+		switch t {
+		case models.ExecutorTypeKubernetes:
+			if err := requireKubernetesAdmin(ctx); err != nil {
+				return err
+			}
+		case models.ExecutorTypeRemoteDocker:
+			if err := requireRemoteDockerAdmin(ctx); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1784,10 +1815,8 @@ func validateKubernetesProfileConfig(config map[string]string) error {
 }
 
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
-	if req.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
+	if err := requireExecutorTypeAdmin(ctx, req.Type); err != nil {
+		return nil, err
 	}
 	if err := validateExecutorForType(req.Type, req.Config); err != nil {
 		return nil, err
@@ -1822,10 +1851,8 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if req.Type != nil {
 		targetType = *req.Type
 	}
-	if executor.Type == models.ExecutorTypeKubernetes || targetType == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type, targetType); err != nil {
+		return nil, err
 	}
 	if err := validateExecutorUpdateRequest(executor, req); err != nil {
 		return nil, err
@@ -1841,6 +1868,9 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 		if retained {
 			return nil, ErrActiveTaskSessions
 		}
+	}
+	if err := s.guardRetainedRemoteDockerConnection(ctx, executor, req); err != nil {
+		return nil, err
 	}
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
@@ -1908,10 +1938,8 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return err
-		}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return err
 	}
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
@@ -1924,11 +1952,16 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
-	if executor.Type == models.ExecutorTypeKubernetes {
+	// Both types retain compute past an ordinary stop, and both are reached
+	// again through this row: deleting it soft-deletes the only record that
+	// says where the Pod or container lives.
+	if executor.Type == models.ExecutorTypeKubernetes || executor.Type == models.ExecutorTypeRemoteDocker {
 		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
 		if inventoryErr != nil {
-			s.logger.Error("failed to check retained Kubernetes inventory for executor",
-				zap.String("executor_id", id), zap.Error(inventoryErr))
+			s.logger.Error("failed to check retained inventory for executor",
+				zap.String("executor_id", id),
+				zap.String("executor_type", string(executor.Type)),
+				zap.Error(inventoryErr))
 			return inventoryErr
 		}
 		if retained {
@@ -1940,6 +1973,59 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
 	return nil
+}
+
+// remoteDockerConnectionKeys are the config fields that decide which daemon a
+// remote Docker profile reaches.
+// The keys are spelled locally, as this package already does for the SSH
+// executor, rather than importing the runtime tier.
+var remoteDockerConnectionKeys = []string{
+	sshMetaHost,
+	sshMetaHostAlias,
+	sshMetaPort,
+	sshMetaUser,
+	sshMetaIdentitySource,
+	sshMetaIdentityFile,
+	sshMetaProxyJump,
+	sshMetaHostFingerprint,
+}
+
+// guardRetainedRemoteDockerConnection refuses to repoint a remote Docker
+// executor while a container it created is still retained.
+//
+// An ordinary stop preserves the container, and every later inspect, resume,
+// and teardown reaches it through this row's current connection. Changing the
+// connection leaves that container on the original host with nothing pointing
+// at it. Fields that do not select a daemon, a rename for instance, stay
+// editable: the guard protects reachability, not the row.
+func (s *Service) guardRetainedRemoteDockerConnection(
+	ctx context.Context, executor *models.Executor, req *UpdateExecutorRequest,
+) error {
+	if executor.Type != models.ExecutorTypeRemoteDocker || req.Config == nil {
+		return nil
+	}
+	if !remoteDockerConnectionChanged(executor.Config, req.Config) {
+		return nil
+	}
+	retained, err := s.hasExecutorRunningInventory(ctx, executor.ID)
+	if err != nil {
+		s.logger.Error("failed to check retained remote Docker inventory before a connection change",
+			zap.String("executor_id", executor.ID), zap.Error(err))
+		return err
+	}
+	if retained {
+		return ErrActiveTaskSessions
+	}
+	return nil
+}
+
+func remoteDockerConnectionChanged(current, next map[string]string) bool {
+	for _, key := range remoteDockerConnectionKeys {
+		if strings.TrimSpace(current[key]) != strings.TrimSpace(next[key]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
@@ -1988,10 +2074,10 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
 	}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return nil, err
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
 		if err := validateKubernetesProfileConfig(req.Config); err != nil {
 			return nil, err
 		}
@@ -2031,10 +2117,10 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if err != nil {
 		return nil, err
 	}
+	if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
+		return nil, err
+	}
 	if executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
-			return nil, err
-		}
 		config := profile.Config
 		if req.Config != nil {
 			config = req.Config
@@ -2154,8 +2240,8 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
 		return err
 	}
-	if executor != nil && executor.Type == models.ExecutorTypeKubernetes {
-		if err := requireKubernetesAdmin(ctx); err != nil {
+	if executor != nil {
+		if err := requireExecutorTypeAdmin(ctx, executor.Type); err != nil {
 			return err
 		}
 	}

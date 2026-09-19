@@ -24,11 +24,17 @@ An executor determines where Kandev creates a task environment and runs `agentct
 | Kubernetes    | Dependency-bound on cluster access, namespaced RBAC, admission, storage, and streaming support | `/workspace` in one Pod per task session | You need sessions scheduled inside an administrator-managed cluster boundary |
 | Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
 | SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
-| Remote Docker | **Not implemented**                                                             | None                                                                    | Do not select or create this type                                        |
+| Remote Docker | Supported over SSH; local Git sources are not yet rejected (see below) | `/workspace` in a container on a remote Docker daemon | You want a container boundary on one remote machine and do not run Kubernetes |
 
 `mock_remote` also exists in backend models for tests. It is not a product executor.
 
-Remote Docker deserves explicit treatment: the backend registers the runtime type, but its create and stop methods return `remote_docker runtime is not yet implemented`. The current **Settings > Executors** hub does not offer it. Older routes and stored fields such as `docker_host`, `docker_tls_verify`, and `docker_cert_path` do not make it operational.
+Only administrators can create, edit, or test a Remote Docker executor, and only administrators can build its image. A saved profile grants effective root on the remote host, and a build runs Dockerfile instructions with that daemon's authority.
+
+Remote Docker reaches its daemon over SSH, not over a daemon URL. The profile stores an SSH target, and Kandev rejects any value carrying a scheme, so `tcp://` is excluded by construction. An unsecured daemon port is remote root; `ssh://` needs no extra setup because Docker's SSH transport runs `docker system dial-stdio` over the connection you already have. The older stored fields `docker_host`, `docker_tls_verify`, and `docker_cert_path` are not used by this runtime.
+
+The connection test's **Docker daemon** step reports which of three different problems it hit, because each needs a different fix on the remote host. The SSH user cannot use the Docker socket: add that user to the `docker` group there, then test again over a new connection, since group membership applies from the next login. The host has no `docker` command: install the Docker CLI, which the SSH transport needs in addition to the daemon. The CLI ran but no daemon answered: start Docker on that host. Each failure shows the remote's own error alongside the fix.
+
+Choose Remote Docker over a single-node Kubernetes cluster when you want a container per task on one machine and do not otherwise run Kubernetes. Kubernetes covers the same ground and adds resource limits, admission control, and scheduling, but it asks for a storage provisioner, a namespace, RBAC, and a worker image built and pushed to a registry by digest. Remote Docker keeps the Docker executor's Dockerfile-and-build loop, with no registry in the basic case.
 
 ## Embedded VS Code availability
 
@@ -41,11 +47,11 @@ download requirements.
 
 ## Create and select a profile
 
-Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Kubernetes**, **Sprites.dev**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
+Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Kubernetes**, **Sprites.dev**, **Remote Docker**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.
 
 Open a saved profile from the Executors hub, the Settings tree, an executor profile list, Settings search, or a task's executor disclosure to use the same complete profile editor.
 
-![Settings > Executors showing existing Local, Worktree, and Sprites profiles plus Local, Worktree, Docker, Sprites.dev, and SSH profile creation options.](../screenshots/settings-executors.png)
+![Settings > Executors showing existing Local and Worktree profiles plus Local, Worktree, Docker, Sprites.dev, Remote Docker, SSH, and Kubernetes profile creation options.](../screenshots/settings-executors.png)
 
 <DocsVideo
   webm="./media/feature-guides/profile-executor-selection.webm"
@@ -245,7 +251,7 @@ An idle, non-archived repository-backed task can add sources from its **Files** 
 
 Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
 
-Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker remains unavailable because its runtime is not implemented.
+Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker rejects folders for the same reason as the other remote executors: the daemon cannot read the Kandev host's filesystem. It does **not** yet reject a local Git repository source. The host checkout is never sent to the remote daemon, so nothing wrong is mounted, but the task is created and then fails while running its prepare script. Give the repository a reachable origin, or choose a local executor. The same gap applies to SSH, Kubernetes, and Sprites; see [kdlbs/kandev#3778](https://github.com/kdlbs/kandev/issues/3778).
 
 Source batches are atomic: if validation, cloning, or runtime adoption fails, Kandev removes the new records and Kandev-owned entries while preserving existing task contents. Persisted attachments are reapplied after reload, relaunch, or **Reset Environment**; a previously attached folder that later disappears is reported instead of silently skipped. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 

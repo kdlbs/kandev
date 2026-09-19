@@ -42,6 +42,7 @@ import (
 	"github.com/kandev/kandev/internal/common/ports"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
+	dockerremote "github.com/kandev/kandev/internal/dockerremote"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -1477,6 +1478,11 @@ func registerSecondaryRoutes(
 			p.log,
 		)
 		p.log.Debug("Registered SSH handlers (HTTP + WebSocket)")
+
+		// The remote Docker connection test rides the same SSH transport, so
+		// it is mounted alongside the SSH routes.
+		dockerremote.RegisterRoutes(p.router, p.taskRepo, p.log)
+		p.log.Debug("Registered remote Docker handlers (HTTP)")
 	}
 
 	if p.services.GitHub != nil {

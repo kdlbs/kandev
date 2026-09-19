@@ -17,6 +17,8 @@ import { NetworkPoliciesCard } from "@/components/settings/profile-edit/sprites-
 import { SpritesInstancesCard } from "@/components/settings/sprites-settings";
 
 type DockerSectionsProps = {
+  // Present for a remote Docker profile: the daemon the build targets.
+  remoteExecutorId?: string;
   profile: ExecutorProfile;
   dockerfile: string;
   onDockerfileChange: (v: string) => void;
@@ -36,6 +38,7 @@ export function DockerSections({
   allowsUserNamespaces,
   allowUserNamespaces,
   onAllowUserNamespacesChange,
+  remoteExecutorId,
 }: DockerSectionsProps) {
   return (
     <>
@@ -46,6 +49,7 @@ export function DockerSections({
         imageTag={imageTag}
         baselineImageTag={profile.config?.image_tag ?? ""}
         onImageTagChange={onImageTagChange}
+        remoteExecutorId={remoteExecutorId}
       />
       {allowsUserNamespaces && (
         <UserNamespacesCard

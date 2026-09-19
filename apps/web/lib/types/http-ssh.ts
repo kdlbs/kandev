@@ -17,6 +17,12 @@ export interface SSHTestStep {
   success: boolean;
   output?: string;
   error?: string;
+  /**
+   * Stable identifier for the remediation this failure needs, not copy. The
+   * backend picks it from the typed cause; the card maps it to translated
+   * text and ignores an identifier it does not know.
+   */
+  hint?: string;
 }
 
 export interface SSHTestResult {
@@ -69,4 +75,18 @@ export interface SSHProbeShellsResponse {
   default_shell: string;
   duration_ms: number;
   available: string[];
+}
+
+/** One private key file the backend host could use as a `file` identity. */
+export interface SSHIdentity {
+  path: string;
+  display_path: string;
+  key_type?: string;
+  encrypted: boolean;
+  source: "ssh_dir" | "ssh_config";
+}
+
+export interface SSHIdentitiesResponse {
+  home_dir: string;
+  identities: SSHIdentity[];
 }

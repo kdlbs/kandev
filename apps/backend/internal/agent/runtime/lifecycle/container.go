@@ -158,6 +158,14 @@ type ContainerManager struct {
 	// binary. When it returns "" without error, no mock-agent mount is added
 	// (production case). Used by Docker E2E tests.
 	resolveMockAgentBinary func() (string, error)
+	// containerHostFiles resolves mount sources that live outside the image.
+	// Nil means the local provider built from the resolvers above; a remote
+	// daemon installs one that resolves on the remote host instead.
+	containerHostFiles ContainerHostFiles
+	// endpointResolver turns a container port into an address the backend can
+	// dial. Nil means the local resolver; a remote daemon installs one that
+	// forwards the remote host's published ports back to backend loopback.
+	endpointResolver containerEndpointResolver
 }
 
 // NewContainerManager creates a new ContainerManager. kandevHomeDir is the
@@ -282,7 +290,11 @@ func (cm *ContainerManager) createAndStartContainer(
 		containerIP = "127.0.0.1"
 	}
 
-	controlHost, controlPort := cm.resolveContainerEndpoint(ctx, containerID, AgentCtlPort, containerIP)
+	controlHost, controlPort, err := cm.resolveContainerEndpoint(ctx, containerID, AgentCtlPort, containerIP)
+	if err != nil {
+		cm.removeContainerBestEffort(containerID)
+		return "", "", "", 0, fmt.Errorf("failed to resolve agentctl control endpoint: %w", err)
+	}
 	return containerID, containerIP, controlHost, controlPort, nil
 }
 
@@ -321,7 +333,11 @@ func (cm *ContainerManager) createInstanceAndClient(
 		return nil, fmt.Errorf("failed to create instance in container: %w", err)
 	}
 
-	instanceHost, instancePort := cm.resolveContainerEndpoint(ctx, containerID, resp.Port, containerIP)
+	instanceHost, instancePort, err := cm.resolveContainerEndpoint(ctx, containerID, resp.Port, containerIP)
+	if err != nil {
+		cm.removeContainerBestEffort(containerID)
+		return nil, fmt.Errorf("failed to resolve agent instance endpoint: %w", err)
+	}
 
 	// ControlClient already has the auth token set via Handshake —
 	// read it back for the per-instance Client.
@@ -333,17 +349,41 @@ func (cm *ContainerManager) createInstanceAndClient(
 	return client, nil
 }
 
-func (cm *ContainerManager) resolveContainerEndpoint(ctx context.Context, containerID string, containerPort int, fallbackHost string) (string, int) {
-	host, port, err := cm.dockerClient.GetContainerHostPort(ctx, containerID, containerPort)
-	if err == nil {
-		return host, port
+// resolveContainerEndpoint returns an address the backend can dial for a
+// container port.
+//
+// The error is propagated rather than absorbed into the fallback. The local
+// resolver owns its own container-IP fallback and does not fail, so an error
+// here means a remote endpoint that genuinely cannot be reached; substituting
+// a container IP in that case hands back an address that hangs on first use.
+func (cm *ContainerManager) resolveContainerEndpoint(ctx context.Context, containerID string, containerPort int, fallbackHost string) (string, int, error) {
+	host, port, err := cm.endpoints().Resolve(ctx, containerID, containerPort, fallbackHost)
+	if err != nil {
+		cm.logger.Warn("failed to resolve container endpoint",
+			zap.String("container_id", containerID),
+			zap.Int("container_port", containerPort),
+			zap.Error(err))
+		return "", 0, err
 	}
-	cm.logger.Warn("failed to resolve published Docker port, falling back to container IP",
-		zap.String("container_id", containerID),
-		zap.Int("container_port", containerPort),
-		zap.String("fallback_host", fallbackHost),
-		zap.Error(err))
-	return fallbackHost, containerPort
+	return host, port, nil
+}
+
+// endpoints returns the manager's resolver, defaulting to the local one built
+// over its own Docker client.
+func (cm *ContainerManager) endpoints() containerEndpointResolver {
+	if cm.endpointResolver != nil {
+		return cm.endpointResolver
+	}
+	return newLocalEndpointResolver(dockerPublishedPorts{client: cm.dockerClient})
+}
+
+// dockerPublishedPorts adapts the Docker client to containerPublishedPorts.
+type dockerPublishedPorts struct {
+	client *docker.Client
+}
+
+func (d dockerPublishedPorts) PublishedPort(ctx context.Context, containerID string, containerPort int) (string, int, error) {
+	return d.client.GetContainerHostPort(ctx, containerID, containerPort)
 }
 
 func (cm *ContainerManager) removeContainerBestEffort(containerID string) {
@@ -451,7 +491,10 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 
 	// Expand mounts using the host path so {workspace} substitutions in mount
 	// sources resolve to a real on-disk location.
-	mounts := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag, config.InstanceID)
+	mounts, err := cm.expandMounts(rt.Mounts, config.WorkspacePath, ag, config.InstanceID)
+	if err != nil {
+		return docker.ContainerConfig{}, err
+	}
 
 	// Add main repo .git directory mount for worktrees
 	if config.MainRepoGitDir != "" {
@@ -477,11 +520,11 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// Mount the host agentctl linux binary into the container so user-built
 	// images don't have to bake it in. Resolved via AgentctlResolver — same path
 	// the Sprites executor uses.
-	if cm.resolveAgentctlBinary != nil {
-		agentctlPath, err := cm.resolveAgentctlBinary()
-		if err != nil {
-			return docker.ContainerConfig{}, fmt.Errorf("agentctl linux binary not found: %w", err)
-		}
+	agentctlPath, err := cm.hostFiles().AgentctlBinary()
+	if err != nil {
+		return docker.ContainerConfig{}, err
+	}
+	if agentctlPath != "" {
 		mounts = append(mounts, docker.MountConfig{
 			Source:   agentctlPath,
 			Target:   "/usr/local/bin/agentctl",
@@ -492,18 +535,16 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	// Optionally mount a host mock-agent binary for Docker E2E tests. Production
 	// builds run real agents installed in the image; this mount only fires when
 	// KANDEV_MOCK_AGENT_LINUX_BINARY is set or the binary is sitting in build/.
-	if cm.resolveMockAgentBinary != nil {
-		mockPath, err := cm.resolveMockAgentBinary()
-		if err != nil {
-			return docker.ContainerConfig{}, fmt.Errorf("mock-agent binary lookup: %w", err)
-		}
-		if mockPath != "" {
-			mounts = append(mounts, docker.MountConfig{
-				Source:   mockPath,
-				Target:   "/usr/local/bin/mock-agent",
-				ReadOnly: true,
-			})
-		}
+	mockPath, err := cm.hostFiles().MockAgentBinary()
+	if err != nil {
+		return docker.ContainerConfig{}, err
+	}
+	if mockPath != "" {
+		mounts = append(mounts, docker.MountConfig{
+			Source:   mockPath,
+			Target:   "/usr/local/bin/mock-agent",
+			ReadOnly: true,
+		})
 	}
 
 	// Build environment variables
@@ -666,7 +707,7 @@ func newDockerPortBinding(containerPort int) docker.PortBindingConfig {
 // auth files from the host beforehand, so every agent gets a fresh, isolated
 // session dir per launch — host state DBs and session caches that contain
 // absolute host paths (e.g. codex's state.db) stay out of the container.
-func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, workspacePath string, ag agents.Agent, instanceID string) []docker.MountConfig {
+func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, workspacePath string, ag agents.Agent, instanceID string) ([]docker.MountConfig, error) {
 	mounts := make([]docker.MountConfig, 0, len(templates)+1) // +1 for potential session dir
 
 	for _, mt := range templates {
@@ -686,8 +727,10 @@ func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, works
 	}
 
 	// Add session directory mount from SessionConfig
-	sessionDirSource := cm.commandBuilder.ExpandSessionDir(ag, cm.kandevHomeDir, instanceID)
-	sessionDirTarget := cm.commandBuilder.GetSessionDirTarget(ag)
+	sessionDirSource, sessionDirTarget, err := cm.hostFiles().SessionDir(ag, instanceID)
+	if err != nil {
+		return nil, err
+	}
 	if sessionDirSource != "" && sessionDirTarget != "" {
 		mounts = append(mounts, docker.MountConfig{
 			Source:   sessionDirSource,
@@ -699,7 +742,7 @@ func (cm *ContainerManager) expandMounts(templates []agents.MountTemplate, works
 			zap.String("target", sessionDirTarget))
 	}
 
-	return mounts
+	return mounts, nil
 }
 
 // expandMountSource expands template variables in mount source paths.
