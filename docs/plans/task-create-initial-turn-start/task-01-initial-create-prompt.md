@@ -1,7 +1,7 @@
 ---
 id: "01-initial-create-prompt"
 title: "Admit the initial creation prompt through turn-start"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -47,7 +47,7 @@ Do not change the original context-reset or asynchronous prompt-preservation pac
 ## Acceptance
 
 1. Both creation adapters select the corrected path only for eligible original requests, after existing settlement and admission gates.
-2. The first dispatch observes the destination step/session/settings and one message; queue replay and running notifications do not trigger another transition.
+2. The first prompt-bearing dispatch observes the destination step/session/settings and one message; queue replay and running notifications do not trigger another transition.
 3. All negative controls retain their behavior, failures prevent stale dispatch, and the documented verification commands pass.
 
 ## Implementation sequence
@@ -123,4 +123,30 @@ Retain existing step-prompt composition; do not introduce a new prompt concatena
 
 ## Results
 
-Pending. The temporary diagnostic is recorded in the plan; it does not satisfy permanent regression acceptance.
+Completed on 2026-09-19.
+
+- Added server-side eligibility provenance for explicit, prompt-bearing immediate creation in the REST and MCP adapters.
+- Routed marked creation starts through the shared turn-start admission boundary before prompt composition and provider dispatch.
+- Preserved destination session/profile resolution, WIP queueing, attachment and prompt handling, and one-message ownership.
+- Added scoped passthrough evidence for direct and queued initial turns. Running, completion, failure, stop, replacement, and dispatch-failure paths retire the evidence.
+- Persisted strict-admission and queue-insertion failures through guarded launch-error ownership. Superseded sources and unrelated successors are left unchanged, while a replacement that owns the changed workflow step receives the error.
+- Updated the public `on_turn_start` workflow guidance.
+
+Verification passed:
+
+```text
+go test -tags fts5 ./internal/orchestrator -count=1
+go test -tags fts5 ./internal/task/handlers ./internal/mcp/handlers -count=1
+go test -tags fts5 -race ./internal/orchestrator -run '^(TestInitialCreatePrompt_|TestWorkflowE2E_InitialCreatePrompt$)' -count=1
+go test -tags fts5 -race ./internal/orchestrator ./internal/task/handlers ./internal/mcp/handlers -count=1
+make -C apps/backend build
+make -C apps/backend lint
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.test.py
+python3 scripts/lint-spec-files.py --all
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+git diff --check
+```
+
+The temporary diagnostic reproduction was removed. No schema, provider protocol, or UI changes were required.

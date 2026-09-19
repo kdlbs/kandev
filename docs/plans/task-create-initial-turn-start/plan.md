@@ -1,6 +1,6 @@
 ---
 created: 2026-09-18
-status: draft
+status: complete
 requirements:
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006
@@ -15,7 +15,7 @@ legacy_specs: []
 
 Process the explicit starting step's `on_turn_start` before an immediate REST or MCP creation prompt reaches the agent.
 One sequential work order owns the transport wiring, orchestration, regression tests, and public documentation.
-Implementation remains pending.
+Implementation is complete.
 
 ## Evidence and root cause
 
@@ -87,13 +87,13 @@ Passthrough duplicate suppression belongs to the initial execution/turn, not the
 
 ## Tests
 
-| Criteria | Permanent regression evidence to add |
+| Criteria | Permanent regression evidence |
 | --- | --- |
-| `006.1`, `006.2` | `task_create_prompt_test.go`: `TestInitialCreatePrompt_TransitionsBeforeDispatch`, both launch intents, destination settings/profile and one prompt |
-| `006.3` | `TestInitialCreatePrompt_NoDuplicateTrigger`, queue drain and passthrough running notification; later user turn still transitions |
-| `006.4` | `TestInitialCreatePrompt_WIPAdmission`, full destination then release; no early dispatch and one eventual message |
-| `006.5`, `004.1` through `004.3` | `TestInitialCreatePrompt_UnmarkedLaunches`, inferred destinations, workflow starts, ordinary messages, no-start and empty-text controls |
-| `006.6` | `TestInitialCreatePrompt_FailureStopsDispatch`, resolution failure, cancellation, terminal-session and replacement races |
+| `006.1`, `006.2` | `task_create_prompt_test.go` and `workflow_e2e_test.go`: transition before dispatch, resulting step, one prompt, and completion transition |
+| `006.3` | `TestInitialCreatePrompt_PassthroughRunningDoesNotRepeatTurnStart`, `TestInitialCreatePrompt_PassthroughEvidenceSurvivesPredecessorTerminalEvents`, and `TestInitialCreatePrompt_QueueReplayTransfersPassthroughEvidence`; later passthrough input still transitions |
+| `006.4` | `TestInitialCreatePrompt_QueuesAfterTurnStartAdmission`; the initial prompt remains queued with processed-trigger metadata, then releases through the admission-gated queue path with one delivery and no second transition |
+| `006.5`, `004.1` through `004.3` | REST provenance and MCP prepared-start tests cover explicit versus inferred destinations; existing unmarked launch and workflow suites remain unchanged |
+| `006.6` | `TestInitialCreatePrompt_TransitionFailurePreventsLaunch`, `TestInitialCreatePrompt_AdmissionFailureDoesNotFailSupersededSuccessor`, `TestInitialCreatePrompt_LaunchFailureUsesReplacementSession`, and `TestInitialCreatePrompt_QueueAdmissionFailurePersistsLaunchError` cover durable errors, correct replacement ownership, and zero prompt dispatch on admission failure |
 | `006.1`, `006.5`, `006.6` | REST and MCP handler tests prove original explicit-step provenance and no dispatch before settlement or while blocked |
 
 The primary regression must fail against the current implementation because the step remains Backlog at dispatch.
@@ -103,19 +103,23 @@ The temporary diagnosis asserted the defective behavior; it is not the permanent
 
 Use Go orchestration integration tests with the real workflow engine and SQLite plus an executor dispatch observer.
 Extend `workflow_e2e_test.go` with `TestWorkflowE2E_InitialCreatePrompt` for Backlog -> Spec -> Spec Review.
-Assert Spec before initial dispatch, exactly one prompt, and Spec Review after eligible completion (`006.1` through `006.3`).
+Assert the destination step, replacement session profile, inherited executor settings, and one prompt-bearing process dispatch at provider launch, then Spec Review after eligible completion (`006.1` through `006.3`).
 Adapter tests must connect both REST and MCP creation to the marked launch request.
 An engine-only trigger table row is insufficient because it bypasses the missing creation call site.
 No Playwright case is required: no rendered interface or browser interaction changes.
 
 ## Work orders
 
-- [ ] [Task 01: Admit the initial creation prompt through turn-start](task-01-initial-create-prompt.md)
+- [x] [Task 01: Admit the initial creation prompt through turn-start](task-01-initial-create-prompt.md)
 
 ## Verification results
 
 - Diagnostic reproduction: passed, with the defective behavior and positive control recorded above.
-- Permanent regression and implementation checks: pending, owned by Task 01.
+- Permanent regression and implementation checks: passed. REST and MCP adapters, initial admission, WIP queueing, passthrough replay, transition failure containment, and workflow E2E coverage are implemented.
+- A first combined race run exposed a transient suite failure; the isolated full orchestrator race run and the exact combined race command both passed on rerun.
+- Backend build: passed with `make -C apps/backend build`.
+- Backend lint: passed with `make -C apps/backend lint`.
+- Public documentation checks: passed with the work order's Node validators.
 - `python3 scripts/list-docs.py validate`: passed, 291 decisions and 1032 specifications.
 - `python3 scripts/lint-spec-files.test.py`: passed, 36 tests.
 - `python3 scripts/lint-spec-files.py --all`: passed.

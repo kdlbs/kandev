@@ -1415,7 +1415,12 @@ func (h *TaskHandlers) associatePRFromRepoInputs(taskID, sessionID string, repos
 // succeeded. A nil *startAgentDispatch means there is nothing to dispatch —
 // prepare-only, start_agent not requested, or prepare itself failed.
 type startAgentDispatch struct {
-	sessionID string
+	sessionID           string
+	initialCreatePrompt bool
+}
+
+func eligibleInitialCreatePrompt(body httpCreateTaskRequest) bool {
+	return body.StartAgent && body.WorkflowStepID != "" && strings.TrimSpace(body.Description) != ""
 }
 
 // prepareTaskSession runs the create sequence's synchronous session-setup
@@ -1520,7 +1525,14 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	} else {
 		response.State = updatedTask.State
 	}
-	return &startAgentDispatch{sessionID: sessionID}
+	return &startAgentDispatch{
+		sessionID: sessionID,
+		// body.WorkflowStepID is the caller's original explicit selection.
+		// resolvedStepID may have been inferred or normalized before this
+		// helper runs, so it cannot establish the provenance required for the
+		// initial creation-prompt path.
+		initialCreatePrompt: eligibleInitialCreatePrompt(body),
+	}
 }
 
 // dispatchTaskSession launches the agent asynchronously (create-sequence
@@ -1542,14 +1554,15 @@ func (h *TaskHandlers) dispatchTaskSession(
 		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.AgentLaunchTimeout)
 		defer cancel()
 		launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
-			TaskID:            taskID,
-			Intent:            orchestrator.IntentStartCreated,
-			SessionID:         sessionID,
-			AgentProfileID:    body.AgentProfileID,
-			Prompt:            description,
-			SkipMessageRecord: false,
-			PlanMode:          body.PlanMode,
-			Attachments:       body.Attachments,
+			TaskID:              taskID,
+			Intent:              orchestrator.IntentStartCreated,
+			SessionID:           sessionID,
+			AgentProfileID:      body.AgentProfileID,
+			Prompt:              description,
+			SkipMessageRecord:   false,
+			PlanMode:            body.PlanMode,
+			Attachments:         body.Attachments,
+			InitialCreatePrompt: dispatch.initialCreatePrompt,
 		})
 		if err != nil {
 			h.logger.Error("failed to start agent for task (async)", zap.Error(err), zap.String("task_id", taskID), zap.String("session_id", sessionID))

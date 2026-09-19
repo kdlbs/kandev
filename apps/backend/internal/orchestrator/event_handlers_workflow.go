@@ -381,6 +381,14 @@ type ProcessOnTurnStartResult struct {
 // ProcessOnTurnStart is the public API for triggering on_turn_start events.
 // Called by message handlers before sending a prompt to the agent.
 func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (ProcessOnTurnStartResult, error) {
+	return s.processOnTurnStartAdmission(ctx, taskID, sessionID, false)
+}
+
+func (s *Service) processOnTurnStartAdmission(
+	ctx context.Context,
+	taskID, sessionID string,
+	strict bool,
+) (ProcessOnTurnStartResult, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -417,7 +425,13 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	// transition has fired cancels the signal (re-open semantics). The
 	// user is continuing the conversation; this step is no longer "done".
 	s.clearPendingStepSignal(ctx, session)
-	s.processOnTurnStartViaEngine(ctx, taskID, session)
+	if strict {
+		if _, err := s.processOnTurnStartViaEngineResult(ctx, taskID, session); err != nil {
+			return ProcessOnTurnStartResult{}, fmt.Errorf("evaluate on_turn_start: %w", err)
+		}
+	} else {
+		s.processOnTurnStartViaEngine(ctx, taskID, session)
+	}
 	task, err = s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		// Do not let a read race turn an unknown admission state into an
@@ -7462,6 +7476,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("target step not found, skipping transition",
 			zap.String("step_id", result.ToStepID),
 			zap.Error(err))
@@ -7472,6 +7487,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	}
 	if sessionLifecycle {
 		if err := s.preflightWorkflowStepCredentials(ctx, taskID, session, targetStep); err != nil {
+			recordWorkflowTransitionError(ctx, err)
 			s.logger.Warn("target profile credential preflight failed, skipping transition",
 				zap.String("task_id", taskID),
 				zap.String("step_id", result.ToStepID),
@@ -7484,6 +7500,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 
 	fromStep, err := s.loadWorkflowStepForLifecycle(ctx, result.FromStepID, "transition source")
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),
 			zap.Error(err))
@@ -7508,6 +7525,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	}
 	applied, err := commit(applyCtx)
 	if err != nil {
+		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -7518,6 +7536,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		return false
 	}
 	if !applied {
+		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}
 
@@ -7581,6 +7600,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		// to the correct agent.
 		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, session, targetStep, fromStep)
 		if !ok {
+			recordWorkflowTransitionError(ctx, errors.New("workflow on_turn_start session preparation failed"))
 			return false
 		}
 		// A queued prompt has already claimed RUNNING before its turn-start
@@ -7656,31 +7676,40 @@ func (s *Service) launchProcessOnEnter(
 // actions. Falls back to the legacy method when the engine is not initialized.
 // Returns true if a step transition occurred.
 func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string, session *models.TaskSession) bool {
+	transitioned, _ := s.processOnTurnStartViaEngineResult(ctx, taskID, session)
+	return transitioned
+}
+
+func (s *Service) processOnTurnStartViaEngineResult(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (bool, error) {
 	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
-		return false
+		return false, nil
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to load task for on_turn_start",
 			zap.String("task_id", taskID), zap.Error(err))
-		return false
+		return false, err
 	}
 
 	if s.workflowEngine == nil {
-		return s.processOnTurnStart(ctx, task, session)
+		return s.processOnTurnStart(ctx, task, session), nil
 	}
 
 	if session.ID == "" || s.workflowStepGetter == nil {
-		return false
+		return false, nil
 	}
 
 	if task.WorkflowStepID == "" {
-		return false
+		return false, nil
 	}
 
 	// Skip workflow step actions for ephemeral tasks (quick chat) - they have no workflow
 	if task.IsEphemeral {
-		return false
+		return false, nil
 	}
 
 	state := s.buildMachineState(ctx, task, session)
@@ -7696,11 +7725,11 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
-		return false
+		return false, err
 	}
 
 	if !result.Transitioned {
-		return false
+		return false, nil
 	}
 
 	s.logger.Info("engine: on_turn_start transition",
@@ -7710,5 +7739,14 @@ func (s *Service) processOnTurnStartViaEngine(ctx context.Context, taskID string
 		zap.String("to_step_id", result.ToStepID))
 
 	// on_turn_start does NOT trigger on_enter (user's message is the next prompt).
-	return s.applyEngineTransitionWithMode(ctx, taskID, session, result, engine.TriggerOnTurnStart, "", transitionLifecycleOnTurnStart)
+	transitionCapture := &workflowTransitionErrorCapture{}
+	transitionCtx := withWorkflowTransitionErrorCapture(ctx, transitionCapture)
+	transitioned := s.applyEngineTransitionWithMode(transitionCtx, taskID, session, result, engine.TriggerOnTurnStart, "", transitionLifecycleOnTurnStart)
+	if transitionCapture.err != nil {
+		return false, transitionCapture.err
+	}
+	if !transitioned {
+		return false, errors.New("workflow on_turn_start transition was not applied")
+	}
+	return true, nil
 }
