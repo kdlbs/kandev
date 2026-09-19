@@ -95,33 +95,38 @@ async function expectNoDocumentOverflow(page: Page, surface: string) {
 }
 
 async function expectHeaderControlsContained(panel: Locator, surface: string) {
-  const violations = await panel.locator("[data-panel-header]:visible").evaluateAll((headers) => {
-    const failures: string[] = [];
-    for (const header of headers) {
-      const headerRect = header.getBoundingClientRect();
-      const controls = header.querySelectorAll<HTMLElement>(
-        "button, a, input, select, textarea, [role='button']",
-      );
-      for (const control of controls) {
-        const style = window.getComputedStyle(control);
-        if (style.display === "none" || style.visibility === "hidden") continue;
-        const rect = control.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) continue;
-        if (
-          rect.left < headerRect.left - 1 ||
-          rect.right > headerRect.right + 1 ||
-          rect.top < headerRect.top - 1 ||
-          rect.bottom > headerRect.bottom + 1
-        ) {
-          failures.push(
-            `${control.getAttribute("aria-label") ?? control.textContent ?? "control"}`,
-          );
-        }
-      }
-    }
-    return failures;
-  });
-  expect(violations, `${surface} has controls outside its header row`).toEqual([]);
+  await expect
+    .poll(
+      () =>
+        panel.locator("[data-panel-header]:visible").evaluateAll((headers) => {
+          const failures: string[] = [];
+          for (const header of headers) {
+            const headerRect = header.getBoundingClientRect();
+            const controls = header.querySelectorAll<HTMLElement>(
+              "button, a, input, select, textarea, [role='button']",
+            );
+            for (const control of controls) {
+              const style = window.getComputedStyle(control);
+              if (style.display === "none" || style.visibility === "hidden") continue;
+              const rect = control.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0) continue;
+              if (
+                rect.left < headerRect.left - 1 ||
+                rect.right > headerRect.right + 1 ||
+                rect.top < headerRect.top - 1 ||
+                rect.bottom > headerRect.bottom + 1
+              ) {
+                failures.push(
+                  control.getAttribute("aria-label") ?? control.textContent ?? "control",
+                );
+              }
+            }
+          }
+          return failures;
+        }),
+      { timeout: 5_000, message: `${surface} has controls outside its header row` },
+    )
+    .toEqual([]);
 }
 
 async function constrainDockviewPanel(panel: import("@playwright/test").Locator, width: number) {

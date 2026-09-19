@@ -426,6 +426,41 @@ function MonacoToolbarActions({
   );
 }
 
+function MonacoToolbarOverflowPrimaryActions({
+  showLspStatus,
+  lspStatus,
+  lspProgress,
+  lspLanguage,
+  onToggleLsp,
+  isDirty,
+  isSaving,
+  onSave,
+}: Pick<
+  MonacoEditorToolbarProps,
+  | "showLspStatus"
+  | "lspStatus"
+  | "lspProgress"
+  | "lspLanguage"
+  | "onToggleLsp"
+  | "isDirty"
+  | "isSaving"
+  | "onSave"
+>) {
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {showLspStatus !== false ? (
+        <LspStatusButton
+          status={lspStatus}
+          progress={lspProgress}
+          lspLanguage={lspLanguage}
+          onToggle={onToggleLsp}
+        />
+      ) : null}
+      <SaveButton isDirty={isDirty} isSaving={isSaving} onSave={onSave} />
+    </div>
+  );
+}
+
 export function MonacoEditorToolbar(props: MonacoEditorToolbarProps) {
   const { path, sessionId, repositoryName } = props;
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
@@ -469,7 +504,16 @@ export function MonacoEditorToolbar(props: MonacoEditorToolbarProps) {
       }
       right={<MonacoToolbarActions {...props} fileStatus={fileStatus} />}
       rightWhenOverflow={
-        <SaveButton isDirty={props.isDirty} isSaving={props.isSaving} onSave={props.onSave} />
+        <MonacoToolbarOverflowPrimaryActions
+          showLspStatus={props.showLspStatus}
+          lspStatus={props.lspStatus}
+          lspProgress={props.lspProgress}
+          lspLanguage={props.lspLanguage}
+          onToggleLsp={props.onToggleLsp}
+          isDirty={props.isDirty}
+          isSaving={props.isSaving}
+          onSave={props.onSave}
+        />
       }
       overflow={overflowActions}
       overflowAt={520}

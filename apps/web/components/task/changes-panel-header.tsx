@@ -71,30 +71,19 @@ type ChangesPanelHeaderProps = {
   remoteContributionNumber?: number;
 };
 
-export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
+function ChangesPanelHeaderRight({
+  props,
+  branchRows,
+}: {
+  props: ChangesPanelHeaderProps;
+  branchRows: ReturnType<typeof buildHeaderBranchRows>;
+}) {
   const {
-    hasChanges,
-    hasCommits,
-    hasPRFiles,
     displayBranch,
     baseBranchDisplay,
-    behindCount,
-    pullDisabled,
-    pullDisabledReason,
-    isLoading,
-    loadingOperation,
-    onOpenDiffAll,
-    onOpenReview,
-    onRequestWalkthrough,
-    requestWalkthroughDisabled,
-    repoNames,
-    perRepoStatus,
-    onRepoPull,
-    onRepoRebase,
-    onRepoMerge,
-    repoDisplayName,
     taskId,
     onRenameBranch,
+    loadingOperation,
     credentialDisplay,
     comparisonTargets,
     relation,
@@ -103,59 +92,92 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
     resolutionTarget,
     remoteContributionUrl,
     remoteContributionNumber,
+    behindCount,
+    pullDisabled,
+    pullDisabledReason,
+    isLoading,
+    repoNames,
+    perRepoStatus,
+    onRepoPull,
+    onRepoRebase,
+    onRepoMerge,
+    repoDisplayName,
+  } = props;
+  return (
+    <>
+      {(displayBranch || branchRows.length > 0) && (
+        <BranchHoverCard
+          displayBranch={displayBranch ?? ""}
+          baseBranchDisplay={baseBranchDisplay}
+          rows={branchRows}
+          taskId={taskId}
+          onRenameBranch={onRenameBranch}
+          isRenaming={loadingOperation === "rename_branch"}
+          credentialDisplay={credentialDisplay}
+          comparisonTargets={comparisonTargets}
+        />
+      )}
+      <RemoteContributionHeaderActions
+        relation={relation}
+        contributionHistoryTarget={contributionHistoryTarget}
+        resolution={resolution}
+        resolutionTarget={resolutionTarget}
+        prUrl={remoteContributionUrl}
+        prNumber={remoteContributionNumber}
+      />
+      <PullDropdown
+        behindCount={behindCount}
+        pullDisabled={pullDisabled}
+        pullDisabledReason={pullDisabledReason}
+        isLoading={isLoading}
+        loadingOperation={loadingOperation}
+        repoNames={repoNames}
+        perRepoStatus={perRepoStatus}
+        onRepoPull={onRepoPull}
+        onRepoRebase={onRepoRebase}
+        onRepoMerge={onRepoMerge}
+        repoDisplayName={repoDisplayName}
+      />
+    </>
+  );
+}
+
+export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
+  const {
+    hasChanges,
+    hasCommits,
+    hasPRFiles,
+    onOpenDiffAll,
+    onOpenReview,
+    onRequestWalkthrough,
+    requestWalkthroughDisabled,
   } = props;
   const branchRows = buildHeaderBranchRows(props);
+  const showDiffReview = hasChanges || hasCommits || !!hasPRFiles;
   return (
     <PanelHeaderBarSplit
       left={
         <ChangesPanelHeaderLeft
-          showDiffReview={hasChanges || hasCommits || !!hasPRFiles}
+          showDiffReview={showDiffReview}
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
           onRequestWalkthrough={onRequestWalkthrough}
           requestWalkthroughDisabled={requestWalkthroughDisabled}
         />
       }
-      right={
-        <>
-          {(displayBranch || branchRows.length > 0) && (
-            <BranchHoverCard
-              displayBranch={displayBranch ?? ""}
-              baseBranchDisplay={baseBranchDisplay}
-              rows={branchRows}
-              taskId={taskId}
-              onRenameBranch={onRenameBranch}
-              isRenaming={loadingOperation === "rename_branch"}
-              credentialDisplay={credentialDisplay}
-              comparisonTargets={comparisonTargets}
-            />
-          )}
-          <RemoteContributionHeaderActions
-            relation={relation}
-            contributionHistoryTarget={contributionHistoryTarget}
-            resolution={resolution}
-            resolutionTarget={resolutionTarget}
-            prUrl={remoteContributionUrl}
-            prNumber={remoteContributionNumber}
-          />
-          <PullDropdown
-            behindCount={behindCount}
-            pullDisabled={pullDisabled}
-            pullDisabledReason={pullDisabledReason}
-            isLoading={isLoading}
-            loadingOperation={loadingOperation}
-            repoNames={repoNames}
-            perRepoStatus={perRepoStatus}
-            onRepoPull={onRepoPull}
-            onRepoRebase={onRepoRebase}
-            onRepoMerge={onRepoMerge}
-            repoDisplayName={repoDisplayName}
-          />
-        </>
+      leftWhenOverflow={
+        <ChangesPanelHeaderLeft
+          showDiffReview={showDiffReview}
+          primaryOnly
+          onOpenReview={onOpenReview}
+          onRequestWalkthrough={onRequestWalkthrough}
+          requestWalkthroughDisabled={requestWalkthroughDisabled}
+        />
       }
+      right={<ChangesPanelHeaderRight props={props} branchRows={branchRows} />}
       overflow={
         <ChangesPanelHeaderOverflowActions
-          showDiffReview={hasChanges || hasCommits || !!hasPRFiles}
+          showDiffReview={showDiffReview}
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
           onRequestWalkthrough={onRequestWalkthrough}

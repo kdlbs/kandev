@@ -131,6 +131,26 @@ function ReviewWalkthroughRequestButton({
   );
 }
 
+function ExpandReviewButton() {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 min-w-6 px-1.5 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-w-11"
+          aria-label={t("task:expandReview")}
+          onClick={() => window.dispatchEvent(new CustomEvent("open-review-dialog"))}
+        >
+          <IconArrowsMaximize className="h-3.5 w-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t("task:expandReview")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ChangesTopBarRight({
   splitView,
   wordWrap,
@@ -158,20 +178,7 @@ function ChangesTopBarRight({
         handleRequestWalkthrough={handleRequestWalkthrough}
         requestWalkthroughDisabled={requestWalkthroughDisabled}
       />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 min-w-6 px-1.5 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-w-11"
-            aria-label={t("task:expandReview")}
-            onClick={() => window.dispatchEvent(new CustomEvent("open-review-dialog"))}
-          >
-            <IconArrowsMaximize className="h-3.5 w-3.5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{t("task:expandReview")}</TooltipContent>
-      </Tooltip>
+      <ExpandReviewButton />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -351,6 +358,7 @@ function MultiPRChangesTopBar({
           requestWalkthroughDisabled={requestWalkthroughDisabled}
         />
       }
+      rightWhenOverflow={<ExpandReviewButton />}
       overflow={
         <ChangesTopBarOverflowActions
           splitView={splitView}
@@ -406,6 +414,7 @@ function SinglePRChangesTopBar({
           requestWalkthroughDisabled={requestWalkthroughDisabled}
         />
       }
+      rightWhenOverflow={<ExpandReviewButton />}
       overflow={
         <ChangesTopBarOverflowActions
           splitView={splitView}

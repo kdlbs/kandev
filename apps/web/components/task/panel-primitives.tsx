@@ -187,6 +187,45 @@ type PanelHeaderBarSplitProps = HTMLAttributes<HTMLDivElement> & {
   rightClassName?: string;
 };
 
+function shouldRenderPanelHeaderSlot(
+  isOverflowed: boolean,
+  hideWhenOverflow: boolean,
+  replacement: ReactNode,
+): boolean {
+  if (!isOverflowed) return true;
+  return !hideWhenOverflow || replacement !== undefined;
+}
+
+function PanelHeaderSplitSlot({
+  visible,
+  isOverflowed,
+  replacement,
+  children,
+  className,
+  shrinkWhenReplaced = false,
+}: {
+  visible: boolean;
+  isOverflowed: boolean;
+  replacement?: ReactNode;
+  children?: ReactNode;
+  className?: string;
+  shrinkWhenReplaced?: boolean;
+}) {
+  if (!visible) return null;
+  const content = isOverflowed && replacement !== undefined ? replacement : children;
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden",
+        shrinkWhenReplaced && isOverflowed && replacement !== undefined && "shrink-0",
+        className,
+      )}
+    >
+      {content}
+    </div>
+  );
+}
+
 /** Panel header bar with left/right slots separated by a spacer. */
 export const PanelHeaderBarSplit = forwardRef<HTMLDivElement, PanelHeaderBarSplitProps>(
   function PanelHeaderBarSplit(
@@ -215,6 +254,12 @@ export const PanelHeaderBarSplit = forwardRef<HTMLDivElement, PanelHeaderBarSpli
       },
       [ref],
     );
+    const showLeft = shouldRenderPanelHeaderSlot(
+      isOverflowed,
+      hideLeftWhenOverflow,
+      leftWhenOverflow,
+    );
+    const showRight = shouldRenderPanelHeaderSlot(isOverflowed, hideRightWhenOverflow, undefined);
     return (
       <PanelHeaderBar
         ref={setHeaderRef}
@@ -222,25 +267,23 @@ export const PanelHeaderBarSplit = forwardRef<HTMLDivElement, PanelHeaderBarSpli
         data-panel-overflow={isOverflowed ? "true" : undefined}
         {...rest}
       >
-        <div
-          className={cn(
-            "flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden",
-            hideLeftWhenOverflow && isOverflowed && !leftWhenOverflow && "hidden",
-            leftClassName,
-          )}
+        <PanelHeaderSplitSlot
+          visible={showLeft}
+          isOverflowed={isOverflowed}
+          replacement={leftWhenOverflow}
+          className={leftClassName}
+          shrinkWhenReplaced
         >
-          {isOverflowed && leftWhenOverflow ? leftWhenOverflow : left}
-        </div>
+          {left}
+        </PanelHeaderSplitSlot>
         <div className="min-w-0 flex-1" />
-        <div
-          className={cn(
-            "flex min-w-0 max-w-full shrink-0 items-center gap-1.5 overflow-hidden",
-            hideRightWhenOverflow && isOverflowed && "hidden",
-            rightClassName,
-          )}
+        <PanelHeaderSplitSlot
+          visible={showRight}
+          isOverflowed={isOverflowed}
+          className={cn("shrink-0", rightClassName)}
         >
           {right}
-        </div>
+        </PanelHeaderSplitSlot>
         {isOverflowed && rightWhenOverflow ? (
           <div className="flex shrink-0 items-center gap-1.5">{rightWhenOverflow}</div>
         ) : null}

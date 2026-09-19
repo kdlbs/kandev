@@ -45,6 +45,7 @@ const ACTION_MENU_ITEM_CLASS = "cursor-pointer gap-2";
 const PANEL_ACTION_BUTTON_CLASS =
   "h-6 min-h-6 text-[11px] px-1.5 gap-1 cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
 const WALKTHROUGH_LABEL_KEY = "task:walkMeThroughTheseChanges";
+const REVIEW_LABEL_KEY = "task:filterStateReview";
 
 export type RenameBranchResult = {
   success: boolean;
@@ -391,21 +392,47 @@ export function ChangesPanelHeaderLeft({
   onOpenReview,
   onRequestWalkthrough,
   requestWalkthroughDisabled,
+  primaryOnly = false,
 }: {
   showDiffReview: boolean;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
   onRequestWalkthrough?: () => void;
   requestWalkthroughDisabled?: boolean;
+  /** Keep the primary Review action available beside the overflow menu. */
+  primaryOnly?: boolean;
 }) {
   const { t } = useTranslation();
   if (!showDiffReview) return null;
+  if (primaryOnly) {
+    return (
+      <>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={PANEL_ACTION_BUTTON_CLASS}
+          aria-label={t(REVIEW_LABEL_KEY)}
+          onClick={onOpenReview}
+        >
+          <IconEye className="h-3 w-3" />
+          <span className="hidden @[420px]/changes-panel:inline">{t(REVIEW_LABEL_KEY)}</span>
+        </Button>
+        {onRequestWalkthrough ? (
+          <ChangesPanelWalkthroughButton
+            onRequestWalkthrough={onRequestWalkthrough}
+            requestWalkthroughDisabled={requestWalkthroughDisabled}
+          />
+        ) : null}
+      </>
+    );
+  }
   return (
     <>
       <Button
         size="sm"
         variant="ghost"
         className={PANEL_ACTION_BUTTON_CLASS}
+        aria-label={t("task:diff")}
         onClick={onOpenDiffAll}
       >
         <IconGitMerge className="h-3 w-3" />
@@ -415,10 +442,11 @@ export function ChangesPanelHeaderLeft({
         size="sm"
         variant="ghost"
         className={PANEL_ACTION_BUTTON_CLASS}
+        aria-label={t(REVIEW_LABEL_KEY)}
         onClick={onOpenReview}
       >
         <IconEye className="h-3 w-3" />
-        {t("task:filterStateReview")}
+        {t(REVIEW_LABEL_KEY)}
       </Button>
       {onRequestWalkthrough ? (
         <ChangesPanelWalkthroughButton
@@ -501,7 +529,7 @@ export function ChangesPanelHeaderOverflowActions({
             onSelect={() => onOpenReview?.()}
           >
             <IconEye className="size-4" />
-            {t("task:filterStateReview")}
+            {t(REVIEW_LABEL_KEY)}
           </DropdownMenuItem>
         </>
       )}

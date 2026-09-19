@@ -249,7 +249,7 @@ describe("MonacoEditorToolbar narrow action overflow", () => {
               completed: null,
               hasReportedProgress: false,
             }}
-            lspLanguage={null}
+            lspLanguage="typescript"
             onToggleLsp={vi.fn()}
             onToggleWrap={onToggleWrap}
             onToggleDiffIndicators={vi.fn()}
@@ -266,7 +266,7 @@ describe("MonacoEditorToolbar narrow action overflow", () => {
       await waitFor(() => {
         expect(screen.getByRole("button", { name: "Show more actions" })).toBeTruthy();
       });
-      expect(screen.getAllByRole("button", { name: /Save/ })).toHaveLength(2);
+      expect(screen.getAllByRole("button", { name: /Save/ })).toHaveLength(1);
       expect(
         screen
           .getAllByRole("button", { name: /Save/ })
