@@ -20,6 +20,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -27,6 +28,7 @@ import type { FileInfo } from "@/lib/state/store";
 import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import type { FileBrowserRow } from "./file-browser-hooks";
 import { areTreeNodeRowPropsEqual, type TreeNodeRowProps } from "./file-tree-row-props";
+import { measureFileTreeElement } from "./file-tree-measurement";
 import { InlineFileInput } from "./inline-file-input";
 import {
   FileContextMenu,
@@ -90,6 +92,7 @@ function TreeNodeFileIcon({
   isExpanded: boolean;
   isActive: boolean;
 }) {
+  if (node.is_symlink) return <SymlinkIndicator isSymlink />;
   if (node.is_dir) {
     return isExpanded ? (
       <IconFolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
@@ -543,6 +546,7 @@ function VirtualizedFileTreeView(props: FileBrowserContentAreaProps) {
       const row = virtualRows[index];
       return row?.type === "create" ? `create:${row.parentPath}` : (row?.row.path ?? index);
     },
+    measureElement: measureFileTreeElement,
     overscan: 5,
   });
 

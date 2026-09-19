@@ -9,6 +9,7 @@ import (
 // Repository contains repository information needed for script execution.
 type Repository struct {
 	ID            string
+	DefaultBranch string
 	SetupScript   string
 	CleanupScript string
 	CopyFiles     string
@@ -45,6 +46,7 @@ func (a *RepositoryAdapter) GetRepository(ctx context.Context, repositoryID stri
 
 	return &Repository{
 		ID:            repo.ID,
+		DefaultBranch: repo.DefaultBranch,
 		SetupScript:   repo.SetupScript,
 		CleanupScript: repo.CleanupScript,
 		CopyFiles:     repo.CopyFiles,

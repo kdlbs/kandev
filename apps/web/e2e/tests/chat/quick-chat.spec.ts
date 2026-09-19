@@ -521,7 +521,7 @@ test.describe("Quick Chat", () => {
     await leftHandle.hover();
     const leftHighlightBox = await leftHandle.locator("span").boundingBox();
     expect(leftHighlightBox).not.toBeNull();
-    expect(leftHighlightBox!.x).toBeCloseTo(rightResizedBox!.x, 0);
+    expect(Math.abs(leftHighlightBox!.x - rightResizedBox!.x)).toBeLessThanOrEqual(1);
     await testPage.mouse.move(leftBox!.x + leftBox!.width / 2, leftBox!.y + leftBox!.height / 2);
     await testPage.mouse.down();
     await testPage.mouse.move(

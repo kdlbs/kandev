@@ -4,6 +4,15 @@ import { arePermissionsDirty } from "@/lib/agent-permissions";
 import { areEnvVarsEqual } from "@/components/settings/profile-edit/profile-env-vars-section";
 import type { AgentProfile, PermissionSetting } from "@/lib/types/http";
 
+/** True when any OpenAI-compatible provider field of the draft differs. */
+export function isProviderConfigDirty(draft: AgentProfile, savedProfile: AgentProfile): boolean {
+  return (
+    (draft.providerKind ?? "") !== (savedProfile.providerKind ?? "") ||
+    (draft.providerBaseUrl ?? "") !== (savedProfile.providerBaseUrl ?? "") ||
+    (draft.providerApiKeySecretId ?? "") !== (savedProfile.providerApiKeySecretId ?? "")
+  );
+}
+
 /**
  * True when any editable field of the profile editor draft differs from the
  * last-saved profile. Drives the settings save bar's dirty state.
@@ -18,6 +27,7 @@ export function isProfileDirty(
     draft.model !== savedProfile.model,
     (draft.fallbackModel ?? "") !== (savedProfile.fallbackModel ?? ""),
     (draft.autoFallback ?? false) !== (savedProfile.autoFallback ?? false),
+    (draft.requireExactModel ?? false) !== (savedProfile.requireExactModel ?? false),
     (draft.mode ?? "") !== (savedProfile.mode ?? ""),
     !areConfigOptionsEqual(draft.configOptions, savedProfile.configOptions),
     arePermissionsDirty(draft, savedProfile, permissionSettings),
@@ -25,6 +35,7 @@ export function isProfileDirty(
     (draft.enabled ?? true) !== (savedProfile.enabled ?? true),
     !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []),
     (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? ""),
+    isProviderConfigDirty(draft, savedProfile),
     !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
   ];
   return changed.some(Boolean);

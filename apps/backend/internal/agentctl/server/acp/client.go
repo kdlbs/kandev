@@ -202,10 +202,18 @@ func (c *Client) forwardPermissionRequest(ctx context.Context, handler Permissio
 		actionDetails["description"] = description
 	}
 
+	var toolName *string
+	if p.ToolCall.Name != nil {
+		name := *p.ToolCall.Name
+		toolName = &name
+	}
+
 	req := &types.PermissionRequest{
 		SessionID:     string(p.SessionId),
 		ToolCallID:    string(p.ToolCall.ToolCallId),
 		Title:         title,
+		ToolName:      toolName,
+		ToolMeta:      p.ToolCall.Meta,
 		ActionType:    actionType,
 		ActionDetails: actionDetails,
 		Options:       options,

@@ -37,10 +37,12 @@ import (
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/system/queuesettings"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	userservice "github.com/kandev/kandev/internal/user/service"
 	utilitymodels "github.com/kandev/kandev/internal/utility/models"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
@@ -72,6 +74,7 @@ func provideOrchestrator(
 	githubSvc *githubpkg.Service,
 	gitCredentialBroker *gitcredentials.Broker,
 	settingsStore *systemsettings.Store,
+	sessionCapacityEnvironment sessioncapacity.Environment,
 	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
@@ -88,6 +91,17 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.OfficeSessionIdentity =
 		cfg != nil && cfg.Features.OfficeSessionIdentity
+	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
+		settingsStore, sessionCapacityEnvironment, log,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve session capacity settings: %w", err)
+	}
+	serviceCfg.SessionCapacity = effectiveSessionCapacity(sessionCapacityResolution)
+	log.Info("Session capacity initialized",
+		zap.Int("ceiling", serviceCfg.SessionCapacity),
+		zap.String("source", string(sessionCapacityResolution.Effective.Source)),
+		zap.Bool("enabled", sessionCapacityResolution.Effective.Enabled))
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -166,6 +180,7 @@ func provideOrchestrator(
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
 	orchestratorSvc.SetTransientRetryMessageService(taskSvc)
+	orchestratorSvc.SetStreamingMessageRetractionService(taskSvc)
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
@@ -198,6 +213,26 @@ func provideOrchestrator(
 	// list/snapshot payloads (initial-load backstop for the sidebar badge; the
 	// status-summary projector keeps the field live between loads).
 	taskSvc.SetQueuedPromptCounter(orchestratorSvc.GetMessageQueue())
+	// Rebuild task summaries with one current ceiling observation for the whole
+	// batch. A failed population read retains queue ownership but leaves the
+	// displayed count unavailable.
+	taskSvc.SetTaskStatusSummaryLaunchQueueReader(func(ctx context.Context, tasks []*taskmodels.Task) map[string]*statussummary.LaunchQueueSummary {
+		observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
+		capacity := &statussummary.LaunchQueueCapacityObservation{
+			InUse:      observation.InUse,
+			Limit:      observation.Limit,
+			ObservedAt: observation.ObservedAt,
+			Known:      observationErr == nil && observation.Known,
+		}
+		queues := make(map[string]*statussummary.LaunchQueueSummary, len(tasks))
+		for _, task := range tasks {
+			if task == nil || task.ID == "" {
+				continue
+			}
+			queues[task.ID] = statussummary.LaunchQueueSummaryFromTaskWithCapacity(task, capacity)
+		}
+		return queues
+	})
 
 	// Per-user scoping for the session-keyed WS actions. The orchestrator
 	// resolves sessions through its own repo handle, so it does not inherit the
@@ -413,6 +448,37 @@ func queueConfiguration(cfg *config.Config) queuesettings.Configuration {
 		return queuesettings.Configuration{}
 	}
 	return queuesettings.Configuration{Value: cfg.MessageQueue.MaxPerSession, Present: true}
+}
+
+func resolveSessionCapacityWithStore(
+	settingsStore *systemsettings.Store,
+	environment sessioncapacity.Environment,
+	log *logger.Logger,
+) (sessioncapacity.Resolution, error) {
+	var configured *sessioncapacity.Settings
+	if settingsStore != nil {
+		loaded, err := sessioncapacity.NewStore(settingsStore).Load(context.Background())
+		if err != nil {
+			return sessioncapacity.Resolution{}, err
+		}
+		configured = loaded
+	}
+	resolution, err := sessioncapacity.Resolve(configured, environment)
+	if err != nil {
+		return sessioncapacity.Resolution{}, err
+	}
+	if resolution.InvalidEnvironment && log != nil {
+		log.Warn("Ignoring invalid session capacity environment value",
+			zap.String("environment_variable", sessioncapacity.EnvironmentVariable))
+	}
+	return resolution, nil
+}
+
+func effectiveSessionCapacity(resolution sessioncapacity.Resolution) int {
+	if !resolution.Effective.Enabled {
+		return 0
+	}
+	return resolution.Effective.MaxSessions
 }
 
 func resolveEventNamespace(cfg *config.Config) string {

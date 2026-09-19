@@ -1,6 +1,9 @@
 package models
 
 import (
+	"encoding/json"
+	"strconv"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 )
@@ -67,6 +70,9 @@ func shellOutputFromMetadata(metadata map[string]any) (ShellExecOutputSnapshot, 
 		if !shellOK {
 			return ShellExecOutputSnapshot{}, false
 		}
+		if output, outputOK := shell["output"].(map[string]any); outputOK && isProjectedShellOutput(output) {
+			return ShellExecOutputSnapshot{}, false
+		}
 		return shellOutputFromMap(shell["output"]), true
 	default:
 		return ShellExecOutputSnapshot{}, false
@@ -99,6 +105,19 @@ func shellOutputFromMap(raw any) ShellExecOutputSnapshot {
 		result.ExitCode = &exitCode
 	}
 	return result
+}
+
+func isProjectedShellOutput(output map[string]any) bool {
+	if _, hasStdout := output["stdout"]; hasStdout {
+		return false
+	}
+	if _, hasStderr := output["stderr"]; hasStderr {
+		return false
+	}
+	_, hasOutput := output["has_output"]
+	_, hasStdoutBytes := output["stdout_bytes"]
+	_, hasStderrBytes := output["stderr_bytes"]
+	return hasOutput || hasStdoutBytes || hasStderrBytes
 }
 
 func shellOutputSummary(output ShellExecOutputSnapshot) map[string]any {
@@ -169,6 +188,9 @@ func intFromAny(raw any) (int, bool) {
 		return int(value), true
 	case float64:
 		return int(value), value == float64(int(value))
+	case json.Number:
+		parsed, err := strconv.ParseInt(string(value), 10, strconv.IntSize)
+		return int(parsed), err == nil
 	default:
 		return 0, false
 	}

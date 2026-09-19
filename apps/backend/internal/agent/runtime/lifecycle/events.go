@@ -137,7 +137,11 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 	payload := AgentEventPayload{
 		AgentExecutionID:   execution.ID,
 		AttemptID:          execution.currentStartupAttemptID(),
+		OwnerKind:          executionOwnerKind(execution),
+		WorkspaceID:        execution.WorkspaceID,
 		RunID:              execution.RunID,
+		RunSessionID:       execution.RunSessionID,
+		RunAttempt:         execution.RunAttempt,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
 		TaskEnvironmentID:  execution.TaskEnvironmentID,
@@ -182,6 +186,11 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 	}
 
 	payload := AgentctlEventPayload{
+		OwnerKind:         executionOwnerKind(execution),
+		WorkspaceID:       execution.WorkspaceID,
+		RunID:             execution.RunID,
+		RunSessionID:      execution.RunSessionID,
+		RunAttempt:        execution.RunAttempt,
 		TaskID:            execution.TaskID,
 		SessionID:         execution.SessionID,
 		TaskEnvironmentID: execution.TaskEnvironmentID,
@@ -275,14 +284,22 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		AgentID:        execution.ID,
 		ExecutionID:    execution.ID,
 		AttemptID:      attemptID,
+		OwnerKind:      executionOwnerKind(execution),
+		WorkspaceID:    execution.WorkspaceID,
+		RunID:          execution.RunID,
+		RunSessionID:   execution.RunSessionID,
+		RunAttempt:     execution.RunAttempt,
 		AgentProfileID: execution.officeProfileID(),
+		AgentType:      execution.AgentID,
 		TaskID:         execution.TaskID,
 		SessionID:      execution.SessionID,
 		Data:           eventData,
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
-	subject := events.BuildAgentStreamSubject(execution.SessionID)
+	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
+		executionOwnerKind(execution), execution.SessionID, execution.RunSessionID,
+	))
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
 		p.logger.Error("failed to publish agent stream event",
@@ -310,6 +327,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		ProviderError:               event.ProviderError,
 		SessionStatus:               event.SessionStatus,
 		PromptGeneration:            event.PromptGeneration,
+		RetractedMessageIDs:         append([]string(nil), event.RetractedMessageIDs...),
 		TurnID:                      event.TurnID,
 		Data:                        event.Data,
 		Normalized:                  event.NormalizedPayload,
@@ -350,7 +368,9 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", *payload)
-	subject := events.BuildAgentStreamSubject(payload.SessionID)
+	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
+		payload.OwnerKind, payload.SessionID, payload.RunSessionID,
+	))
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
 		p.logger.Error("failed to publish agent stream event payload",
@@ -358,6 +378,13 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 			zap.String("session_id", payload.SessionID),
 			zap.Error(err))
 	}
+}
+
+func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID string) string {
+	if ownerKind == ExecutionOwnerRun && runSessionID != "" {
+		return runSessionID
+	}
+	return sessionID
 }
 
 // PublishGitEvent publishes a unified git event to the event bus.

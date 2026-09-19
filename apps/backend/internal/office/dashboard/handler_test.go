@@ -254,7 +254,10 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 
 // stubAgentReader returns nil/nil by default; tests that need agent
 // resolution (e.g. pending_approvers name lookup) populate `names`.
-type stubAgentReader struct{ names map[string]string }
+type stubAgentReader struct {
+	names     map[string]string
+	instances []*models.AgentInstance
+}
 
 func (s *stubAgentReader) GetAgentInstance(_ context.Context, id string) (*models.AgentInstance, error) {
 	if name, ok := s.names[id]; ok {
@@ -263,8 +266,14 @@ func (s *stubAgentReader) GetAgentInstance(_ context.Context, id string) (*model
 	return nil, nil
 }
 
-func (s *stubAgentReader) ListAgentInstances(_ context.Context, _ string) ([]*models.AgentInstance, error) {
-	return nil, nil
+func (s *stubAgentReader) ListAgentInstances(_ context.Context, workspaceID string) ([]*models.AgentInstance, error) {
+	var out []*models.AgentInstance
+	for _, instance := range s.instances {
+		if instance != nil && instance.WorkspaceID == workspaceID {
+			out = append(out, instance)
+		}
+	}
+	return out, nil
 }
 
 func (s *stubAgentReader) ListAgentInstancesByIDs(_ context.Context, ids []string) ([]*models.AgentInstance, error) {

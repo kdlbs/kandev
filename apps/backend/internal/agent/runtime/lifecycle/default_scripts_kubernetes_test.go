@@ -40,6 +40,11 @@ func TestDefaultPrepareScriptKubernetesReusesRetainedPVCWorkspace(t *testing.T) 
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installMetadataRestrictedCopy(t, bin)
 	cloneTmp := filepath.Join(root, "runtime", "workspace-clone")
 	if err := os.MkdirAll(filepath.Dir(cloneTmp), 0o700); err != nil {
 		t.Fatal(err)
@@ -58,7 +63,7 @@ func TestDefaultPrepareScriptKubernetesReusesRetainedPVCWorkspace(t *testing.T) 
 	run := func() {
 		t.Helper()
 		cmd := exec.Command("sh", "-eu", "-c", script)
-		cmd.Env = append(os.Environ(), "HOME="+home)
+		cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"))
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("Kubernetes prepare failed: %v\n%s", err, output)
 		}

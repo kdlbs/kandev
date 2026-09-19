@@ -135,6 +135,38 @@ func (r *Repository) SetRunSessionID(
 	return n > 0, nil
 }
 
+// UpdateRunRuntimeSnapshotCAS is UpdateRunRuntimeSnapshot's compare-and-swap
+// sibling: the write only takes effect while the run's current
+// capabilities still equal prevCapabilities. Used to decide first-write-
+// wins when two processors build runtime context for the same run
+// concurrently (docs/specs/office/system-design/
+// taskless-coordinator-authority-01.md#first-write-wins-and-how). The
+// comparison is a value compare rather than a SQL JSON extraction so it
+// stays dialect-neutral across SQLite and Postgres. The bool reports
+// whether this call's write took effect.
+func (r *Repository) UpdateRunRuntimeSnapshotCAS(
+	ctx context.Context,
+	id string,
+	prevCapabilities string,
+	capabilities string,
+	inputSnapshot string,
+	sessionID string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET capabilities = ?, input_snapshot = ?, session_id = ?
+		WHERE id = ? AND COALESCE(capabilities, '') = ?
+	`), capabilities, inputSnapshot, sessionID, id, prevCapabilities)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // UpdateRunPromptArtifacts persists the assembled prompt the agent
 // received and the continuation-summary content prepended at dispatch.
 // Called from the scheduler-integration after BuildAgentPrompt completes
@@ -611,15 +643,47 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 }
 
 // ScheduleRetry resets a run to queued with an incremented retry count
-// and a scheduled retry time.
+// and a scheduled retry time. session_id is cleared: every caller either
+// runs pre-launch (the run never had one) or post-start (the session it
+// had belongs to the failed attempt), and a relaunch must mint its
+// runtime credentials against the session the new attempt actually gets,
+// not a stale one from a previous attempt. error_message is cleared for
+// the same reason: a requeued run is not yet failed, so it must not carry
+// the previous attempt's error into a later successful finish.
 func (r *Repository) ScheduleRetry(ctx context.Context, runID string, retryAt time.Time, retryCount int) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
 		SET status = 'queued', retry_count = ?, scheduled_retry_at = ?,
-		    claimed_at = NULL, finished_at = NULL
+		    claimed_at = NULL, finished_at = NULL, session_id = '', error_message = ''
 		WHERE id = ?
 	`), retryCount, retryAt, runID)
 	return err
+}
+
+// ScheduleRetryIfClaimed behaves like ScheduleRetry but only when the run
+// is still status='claimed', mirroring the same guard MarkRunFailed uses.
+// A caller that wants to requeue a run it has not itself moved off
+// 'claimed' must not resurrect a row a concurrent writer already
+// terminalized (a task-tree cancel, workspace pause, or participant
+// eviction) out from under it — every one of those writers targets
+// exactly the 'claimed' status this guard checks. wrote=false means a
+// concurrent writer already changed the row's status; the caller must
+// not retry again or treat the run as requeued.
+func (r *Repository) ScheduleRetryIfClaimed(ctx context.Context, runID string, retryAt time.Time, retryCount int) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET status = 'queued', retry_count = ?, scheduled_retry_at = ?,
+		    claimed_at = NULL, finished_at = NULL, session_id = '', error_message = ''
+		WHERE id = ? AND status = 'claimed'
+	`), retryCount, retryAt, runID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // CleanExpired deletes finished/failed runs older than the given time.
@@ -769,9 +833,9 @@ func (r *Repository) GetRunWithCosts(
 			COALESCE(SUM(tokens_cached_in), 0) AS cached_tokens,
 			COALESCE(SUM(cost_subcents), 0)    AS cost_subcents
 		FROM office_cost_events
-		WHERE task_id != ''
-		  AND task_id = COALESCE(json_extract(?, '$.task_id'), '')
-	`), run.Payload).StructScan(&rollup)
+		WHERE (task_id != '' AND task_id = COALESCE(json_extract(?, '$.task_id'), ''))
+          OR (task_id = '' AND session_id IN (SELECT id FROM office_run_sessions WHERE run_id = ?))
+	`), run.Payload, run.ID).StructScan(&rollup)
 	if err != nil {
 		return &run, &RunCostRollup{}, nil
 	}

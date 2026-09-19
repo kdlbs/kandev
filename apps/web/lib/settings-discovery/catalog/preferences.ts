@@ -16,10 +16,13 @@ const TASK_BEHAVIOR_ID = "preferences-task-behavior";
 export const TASK_BEHAVIOR_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/task-behavior`;
 export const GENERAL_SETTINGS_TARGETS = {
   colorTheme: "setting-color-theme",
+  chatMotion: "setting-chat-motion",
   richOutputMotion: "setting-rich-output-motion",
   settingsMenuMode: "setting-settings-menu-mode",
   startupPage: "setting-startup-page",
   displayLanguage: "setting-display-language",
+  sidebarHover: "setting-sidebar-hover",
+  sidebarHoverDelay: "setting-sidebar-hover-delay",
   appStatusBar: "setting-status-bar",
   changesPanelLayout: "setting-changes-panel-layout",
   resourceMetrics: "setting-resource-metrics",
@@ -40,11 +43,35 @@ export const GENERAL_SETTINGS_TARGETS = {
   unreadMessages: "setting-unread-messages",
   transcriptNavigation: "setting-transcript-navigation",
   messageQueue: "setting-message-queue",
+  sessionCapacity: "setting-session-capacity",
   spritesConnection: "setting-sprites-connection",
   spritesInstances: "setting-sprites-instances",
 } as const;
 
 export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
+  {
+    id: "appearance-sidebar-hover-enabled",
+    kind: "control",
+    labelKey: "settings:sidebarHoverEnabled",
+    aliasesKey: "settings:discoveryAliasesSidebarHover",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sidebarHover,
+    order: 24,
+  },
+  {
+    id: "appearance-sidebar-hover-delay",
+    kind: "control",
+    labelKey: "settings:sidebarHoverDelay",
+    aliasesKey: "settings:discoveryAliasesSidebarHover",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sidebarHoverDelay,
+    order: 25,
+  },
+
   {
     id: APPEARANCE_ID,
     kind: "page",
@@ -73,6 +100,17 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.richOutputMotion,
+    order: 12,
+  },
+  {
+    id: "appearance-chat-motion",
+    kind: "control",
+    labelKey: "settings:chatAnimations",
+    aliasesKey: "settings:discoveryAliasesChatMotion",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.chatMotion,
     order: 12,
   },
   {
@@ -392,5 +430,15 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     href: TASK_BEHAVIOR_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.messageQueue,
     order: 66,
+  },
+  {
+    id: "task-behavior-session-capacity",
+    kind: "section",
+    labelKey: "system:sessionCapacityTitle",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sessionCapacity,
+    order: 67,
   },
 ];

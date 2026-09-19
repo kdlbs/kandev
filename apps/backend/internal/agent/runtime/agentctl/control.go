@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -72,6 +73,12 @@ type CreateInstanceRequest struct {
 	// process environment entirely (not just set to empty). Propagated from
 	// RuntimeConfig.StripEnv by the lifecycle executors.
 	StripEnv []string `json:"strip_env,omitempty"`
+
+	// ProviderGatewayAuth, when set, makes the ACP adapter authenticate the
+	// agent against an OpenAI-compatible gateway (base URL + bearer key) right
+	// after initialize. Resolved by the backend from the launching agent
+	// profile's OpenAI-compatible provider fields.
+	ProviderGatewayAuth *acpprovider.GatewayAuth `json:"provider_gateway_auth,omitempty"`
 
 	// NamespacesMCPToolsByServer tells the per-instance MCP server to adapt
 	// built-in tool names for an agent that appends the server name itself.

@@ -2,13 +2,20 @@ import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/http";
+import {
+  buildGroupedRenderItems,
+  insertLastAgentErrorItem,
+  type RenderItem,
+} from "@/hooks/use-processed-messages";
 
 const launchError = {
   stamp: "task-wide-launch-error",
+  scope: "task" as const,
   occurred_at: "2026-08-20T10:00:00Z",
   preview: "The workspace could not be prepared.",
   category: "workspace_checkout_failed",
 };
+const SESSION_ID = "prior-session";
 
 const messageListRecoveryRevealKeys = vi.hoisted(() => [] as Array<string | null | undefined>);
 
@@ -21,6 +28,10 @@ const priorTranscriptMessage = {
 } as unknown as Message;
 
 const appStoreState = {
+  connection: { status: "connected" },
+  kanbanMulti: { snapshots: {} },
+  kanban: { workflowId: null, tasks: [], steps: [] },
+  workflows: { items: [] },
   userSettings: {
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: false,
@@ -28,15 +39,15 @@ const appStoreState = {
   },
   taskSessions: {
     items: {
-      "prior-session": { name: null, agent_profile_id: null, last_read_message_id: null },
+      [SESSION_ID]: { name: null, agent_profile_id: null, last_read_message_id: null },
     },
   },
   agentProfiles: { items: [] },
-  messages: { bySession: { "prior-session": [priorTranscriptMessage] } },
+  messages: { bySession: { [SESSION_ID]: [priorTranscriptMessage] } },
 };
 
 const panelState = {
-  resolvedSessionId: "prior-session",
+  resolvedSessionId: SESSION_ID,
   session: {
     state: "FAILED",
     error_message: "The prior session stopped.",
@@ -47,7 +58,7 @@ const panelState = {
   messagesLoading: false,
   historyRefreshPending: false,
   isInitialMessagesLoading: false,
-  groupedItems: [],
+  groupedItems: [] as RenderItem[],
   allMessages: [priorTranscriptMessage],
   footerActionMessages: [],
   permissionsByToolCallId: new Map(),
@@ -64,6 +75,8 @@ vi.mock("./panel-primitives", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof appStoreState) => unknown) => selector(appStoreState),
+  useOptionalAppStore: (selector: (state: typeof appStoreState) => unknown, fallback: unknown) =>
+    selector(appStoreState) ?? fallback,
   useAppStoreApi: () => ({
     getState: () => appStoreState,
   }),
@@ -118,22 +131,37 @@ vi.mock("./chat/chat-input-area", () => ({
 
 vi.mock("@/components/task/chat/message-list", () => ({
   MessageList: ({
+    items,
     messages,
-    launchErrorOwned,
-    prependContent,
     recoveryRevealKey,
   }: {
+    items: RenderItem[];
     messages: Message[];
-    launchErrorOwned?: boolean;
-    prependContent?: ReactNode;
     recoveryRevealKey?: string | null;
   }) => {
     messageListRecoveryRevealKeys.push(recoveryRevealKey);
     return (
       <div data-testid="message-list">
-        {prependContent}
-        {!launchErrorOwned &&
-          messages.map((message) => <div key={message.id}>{message.content}</div>)}
+        {messages.map((message) => {
+          const metadata = message.metadata as Record<string, unknown> | undefined;
+          return (
+            <div
+              key={message.id}
+              data-testid={
+                metadata?.recovery_actions === true ? "persisted-recovery-message" : undefined
+              }
+            >
+              {message.content}
+            </div>
+          );
+        })}
+        {items.map((item) =>
+          item.type === "agent_error_notice" ? (
+            <div key={item.id} data-testid="agent-error-notice">
+              provisional recovery notice
+            </div>
+          ) : null,
+        )}
       </div>
     );
   },
@@ -218,18 +246,16 @@ afterEach(() => {
 });
 
 describe("TaskChatPanel launch-error ownership", () => {
-  it("keeps a task-wide card and prior failed-session surfaces together", () => {
-    render(<TaskChatPanel sessionId="prior-session" taskId="task-1" />);
+  it("leaves the task-wide card to the task shell and preserves session history", () => {
+    render(<TaskChatPanel sessionId={SESSION_ID} taskId="task-1" />);
 
-    expect(screen.getByTestId("task-launch-error-entry").textContent).toContain(
-      launchError.preview,
-    );
-    expect(screen.getByTestId("session-stopped-banner")).toBeTruthy();
+    expect(screen.queryByTestId("task-launch-error-entry")).toBeNull();
+    expect(screen.queryByTestId("session-stopped-banner")).toBeNull();
     expect(screen.getByText(priorTranscriptMessage.content)).toBeTruthy();
-    expect(messageListRecoveryRevealKeys.at(-1)).toBe("prior-session:task-wide-launch-error");
+    expect(messageListRecoveryRevealKeys.at(-1)).toBeUndefined();
   });
 
-  it("reveals a persisted bootstrap fallback for the selected session", () => {
+  it("does not reveal a persisted session failure through scroll coupling", () => {
     const previousMetadata = panelState.session.metadata;
     panelState.session.metadata = {
       last_agent_error: {
@@ -241,11 +267,49 @@ describe("TaskChatPanel launch-error ownership", () => {
     };
 
     try {
-      render(<TaskChatPanel sessionId="prior-session" taskId="task-1" />);
+      render(<TaskChatPanel sessionId={SESSION_ID} taskId="task-1" />);
 
-      expect(messageListRecoveryRevealKeys.at(-1)).toBe("prior-session:persisted-bootstrap-error");
+      expect(messageListRecoveryRevealKeys.at(-1)).toBeUndefined();
     } finally {
       panelState.session.metadata = previousMetadata;
+    }
+  });
+
+  it("counts one recovery representation across persisted messages and provisional notices", () => {
+    const persistedRecoveryMessage = {
+      ...priorTranscriptMessage,
+      id: "persisted-recovery",
+      session_id: SESSION_ID as Message["session_id"],
+      content: "Agent encountered an error: saved session failed.",
+      metadata: { recovery_actions: true, error_stamp: "session-failure-1" },
+      created_at: "2026-08-20T11:00:00Z",
+    } as Message;
+    const previousMessages = panelState.allMessages;
+    const previousItems = panelState.groupedItems;
+    panelState.allMessages = [priorTranscriptMessage, persistedRecoveryMessage];
+    panelState.groupedItems = insertLastAgentErrorItem(
+      buildGroupedRenderItems(panelState.allMessages, SESSION_ID, {
+        canAnchorPrepareProgress: false,
+      }),
+      SESSION_ID,
+      {
+        message: "saved session failed",
+        occurredAt: "2026-08-20T11:00:00Z",
+        stamp: "session-failure-1",
+      },
+      panelState.allMessages,
+    );
+
+    try {
+      render(<TaskChatPanel sessionId={SESSION_ID} taskId="task-1" />);
+
+      const persisted = screen.queryAllByTestId("persisted-recovery-message");
+      const provisional = screen.queryAllByTestId("agent-error-notice");
+      expect([...persisted, ...provisional]).toHaveLength(1);
+      expect(provisional).toHaveLength(0);
+    } finally {
+      panelState.allMessages = previousMessages;
+      panelState.groupedItems = previousItems;
     }
   });
 });

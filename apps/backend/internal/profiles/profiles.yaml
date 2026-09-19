@@ -229,7 +229,7 @@ e2eTuning:
   KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT:
     prod: ""
     dev:  ""
-    e2e:  "12s"
+    e2e:  "3s"
 
   # Auto-approve every permission request in agentctl so e2e specs
   # don't have to script the approval UI. Read by the agentctl child

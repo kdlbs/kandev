@@ -166,6 +166,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_MCP_LOG_FILE", class: "exclusion"},
 		{envVar: "KANDEV_DEBUG_LOG_DIR", class: "exclusion"},
 		{envVar: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", class: "exclusion"},
+		{envVar: "KANDEV_MAX_CONCURRENT_SESSIONS", class: "exclusion"},
 	}
 }
 

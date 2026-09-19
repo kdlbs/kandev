@@ -43,6 +43,7 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
         initialDelay: 1000,
         maxDelay: 30000,
         backoffMultiplier: 1.5,
+        conversationProtocol: "v2",
       },
     );
     client.subscribeUser();

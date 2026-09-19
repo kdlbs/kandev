@@ -175,6 +175,11 @@ type CreatePlanRequest struct {
 	// is true, so this field is inert on the CreatePlan path regardless of
 	// what a caller sets it to.
 	Mode PlanWriteMode
+	// AgentWrite enables conditional admission for the MCP plan surface. It
+	// is set by the trusted handler, not decoded from browser payloads.
+	AgentWrite      bool
+	ExpectedVersion string
+	AllowTruncation bool
 }
 
 // PlanWriteResult is returned by CreatePlan/UpdatePlan. Plan is always
@@ -230,14 +235,8 @@ const (
 )
 
 func (s *PlanService) readLatestRevision(ctx context.Context, taskID string) (*models.TaskPlanRevision, planRevisionState) {
-	rev, err := s.repo.GetLatestTaskPlanRevision(ctx, taskID)
-	if err != nil {
-		return nil, planRevisionUnknown
-	}
-	if rev == nil {
-		return nil, planRevisionAbsent
-	}
-	return rev, planRevisionFound
+	rev, state, _ := s.readLatestRevisionDetailed(ctx, taskID)
+	return rev, state
 }
 
 // CreatePlan upserts a plan and appends or coalesces a revision.
@@ -247,6 +246,9 @@ func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (Pl
 	}
 	if err := s.validatePlanWrite(ctx, req.TaskID, req.Content); err != nil {
 		return PlanWriteResult{}, err
+	}
+	if req.AgentWrite && req.Content == "" {
+		return PlanWriteResult{}, s.emptyAgentPlanError(req.TaskID)
 	}
 	release := s.locks.acquire(req.TaskID)
 	defer release()
@@ -271,6 +273,9 @@ type UpdatePlanRequest struct {
 	ForceNewRevision   bool
 	EvaluateTruncation bool
 	Mode               PlanWriteMode
+	AgentWrite         bool
+	ExpectedVersion    string
+	AllowTruncation    bool
 }
 
 // UpdatePlan updates an existing plan (errors if missing).
@@ -299,6 +304,9 @@ func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (Pl
 		}
 	} else {
 		if req.Mode == PlanWriteModeReplace && req.Content == "" {
+			if req.AgentWrite {
+				return PlanWriteResult{}, s.emptyAgentPlanError(req.TaskID)
+			}
 			return PlanWriteResult{}, ErrContentRequired
 		}
 		if err := s.checkContentSize(ctx, req.TaskID, req.Content); err != nil {
@@ -365,6 +373,13 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 		req.EvaluateTruncation = false
 	}
 
+	latest, latestState, latestErr := s.readLatestRevisionDetailed(readCtx, req.TaskID)
+	var err error
+	req, err = s.guardAgentPlanWrite(req, headPlan, headState, headErr, latest, latestState, latestErr)
+	if err != nil {
+		return planWriteOutcome{}, err
+	}
+
 	req, preserveTitle, preserveCreatedBy := s.resolveHeadFallbacks(ctx, req, headPlan, headState, requireExistingHead)
 
 	title := req.Title
@@ -390,7 +405,6 @@ func (s *PlanService) upsertPlan(ctx context.Context, req CreatePlanRequest, req
 		plan.CommentsRevision = headPlan.CommentsRevision
 	}
 
-	latest, latestState := s.readLatestRevision(readCtx, req.TaskID)
 	rb := s.buildRevision(readCtx, req, headPlan, headState, latest, authorKind, authorName, title)
 
 	if err := s.repo.WritePlanRevision(ctx, plan, rb.rev, rb.coalesceID, preserveTitle, preserveCreatedBy); err != nil {
@@ -654,6 +668,21 @@ func (s *PlanService) GetPlan(ctx context.Context, taskID string) (*models.TaskP
 	if err := s.authorize(ctx, taskID); err != nil {
 		return nil, err
 	}
+	return s.repo.GetTaskPlan(ctx, taskID)
+}
+
+// GetPlanSnapshot reads one task-plan row while holding the same per-task
+// lock used by plan writers. The repository query returns title, content, and
+// write version from that row, so agent callers receive one coherent snapshot.
+func (s *PlanService) GetPlanSnapshot(ctx context.Context, taskID string) (*models.TaskPlan, error) {
+	if taskID == "" {
+		return nil, ErrTaskIDRequired
+	}
+	if err := s.authorize(ctx, taskID); err != nil {
+		return nil, err
+	}
+	release := s.locks.acquire(taskID)
+	defer release()
 	return s.repo.GetTaskPlan(ctx, taskID)
 }
 

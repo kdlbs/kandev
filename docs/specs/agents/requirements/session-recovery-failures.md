@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-11
-updated: 2026-09-12
+updated: 2026-09-18
 owners:
   - Kandev
 ---
@@ -42,20 +42,31 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.1:** When the same failure appears in automatic recovery, session state, and the transcript, the selected session shall show one active recovery card. An equivalent top banner, stopped-session warning, or synthetic agent error shall not repeat it.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.2:** The card shall show a localized cause summary, valid actions, and one initially collapsed details disclosure. Resume and restore causes shall have separate labels and bounded, sanitized details.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.3:** A failure before agent startup shall be described as startup or recovery failure. It shall not state that the agent encountered an error while working.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Retry shall update the existing card and disable equivalent actions while pending. Successful resume shall clear the active failure; workspace-only success shall show a nonblocking notice that the agent remains stopped.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Retry shall show pending state on the error entry and disable equivalent actions. Successful resume shall retire its actions without removing history. Workspace-only success shall retain the stopped-agent notice.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.5:** Reload, reconnect, and reversed event order shall converge on the current failure. A stale attempt or unrelated historical error shall neither replace nor be hidden by that failure.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.6:** Desktop and phone shall expose the same recovery choices and details. Phone actions shall have at least 44-pixel touch targets, with no horizontal page overflow or extra details scroller.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.7:** Chat shall use one vertical scroll area for the recovery card, expanded details, and transcript. Opening a session with an active failure, or receiving a new failure, shall reveal the card. Later user scrolling shall remain under user control. Recovery actions and the composer shall remain reachable on desktop and phone.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.7:** Chat shall show the session error at its chronological position in the transcript. Normal message scrolling shall govern initial placement, pagination, and new entries. Errors shall not force a separate scroll position. Recovery actions and the composer shall remain reachable on desktop and phone.
 
 
-## Proposed recovery scrolling amendment
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.8:** After manual or automatic recovery, the session error shall remain readable before later messages. It shall retain its original cause and occurrence time after reload.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.9:** Only the current unresolved failure shall offer recovery actions. Pending recovery shall not imply success. A later failure shall not reactivate controls on an older entry.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.10:** A recoverable failure that occurs after agent startup, such as a model provider rejecting a dispatched prompt, shall carry the same bounded, sanitized failure detail in its initially collapsed details disclosure as bootstrap and managed-runtime failures do. The detail shall be sanitized of URLs, credentials, and identifiers, and shall be omitted when sanitization leaves nothing usable, in which case the generic recovery card remains. This lets a user expand a short provider error, such as an invalid tool definition, without the raw detail appearing in the summary line.
 
-This amendment is draft. The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) owns implementation of criterion 006.7.
+## Session error history amendment
 
-## Proposed recovery attempt amendment
+The September 14 amendment changes criteria 006.4 and 006.7 and adds 006.8 and 006.9.
+Implementation is complete in the [error scope package](../../../plans/error-scope-and-history/plan.md).
+This supersedes the reveal-at-top behavior from the completed startup recovery scrolling package.
+The task system owns durable history and shared error scope through
+[task error ownership](../../tasks/requirements/task-launch-failure-recovery.md).
 
-The following requirement is draft. The existing requirements remain active.
-Implementation belongs to the [resume cancellation package](../../../plans/resume-cancellation/plan.md).
+## Recovery attempt isolation
+
+Criteria 007.1 through 007.6 are implemented in the
+[resume cancellation package](../../../plans/resume-cancellation/plan.md).
+The accepted-turn amendment adds criteria 007.7 through 007.9. Its
+implementation and verification are recorded in the
+[resumed turn cancellation package](../../../plans/resumed-turn-cancellation/plan.md).
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007: Isolated recovery attempts
 
@@ -69,6 +80,10 @@ Implementation belongs to the [resume cancellation package](../../../plans/resum
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.4:** A browser disconnect shall not cancel an accepted recovery attempt. Explicit cancellation shall interrupt startup waits and end with success or a visible bounded failure.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.5:** A failed resume before prompt dispatch shall show the existing recovery card with the resume cause. It shall not claim that the agent is busy with a complex task. Reload shall preserve the applicable recovery action and failure details.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.6:** On desktop and phone, users shall be able to cancel startup and retry after cancellation settles. Existing recovery actions, touch targets, keyboard access, and transcript scrolling shall remain available.
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.7:** After the provider accepts a resumed prompt, successful turn cancellation shall preserve the healthy agent process and saved conversation identity. The next message shall use that process without another startup, resume, or recovery error.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.8:** Cancellation concurrent with prompt acceptance shall have one outcome. Before acceptance, cancelled startup shall not dispatch. After acceptance, normal turn cancellation shall own the outcome. An accepted prompt shall not be replayed or reported as cancelled startup because its turn was paused.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-007.9:** Desktop and phone shall support pause followed by another message during the first resumed turn and later turns. Valid responses and session updates shall continue after each pause. A further resume shall require an independently established loss or stop of the runtime.
 
 ## Out of scope
 

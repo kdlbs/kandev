@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -49,6 +50,20 @@ type fakeTaskDataSource struct {
 	// can prove a workspace with more tasks than a single page issues
 	// multiple calls instead of returning a truncated first page.
 	listTasksByWorkspaceCalls int
+
+	// dependencyViews, keyed by task ID, is returned by both
+	// BuildDependencyViews and BuildDependencyViewsBounded. A nil map
+	// yields an empty map (every task unblocked), matching the zero value a
+	// test that never sets it should observe. dependencyViewsErr, when set,
+	// is returned only by the bounded variant, simulating a fan-out refusal.
+	dependencyViews             map[string]taskservice.DependencyView
+	dependencyViewsErr          error
+	dependencyViewsCalls        int
+	dependencyViewsBoundedCalls int
+	// dependencyViewsTasks records the task IDs passed to the most recent
+	// BuildDependencyViews/Bounded call, so tests can prove attachment
+	// derives over the right (e.g. post-filter) slice.
+	dependencyViewsTasks []string
 }
 
 func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error) {
@@ -114,6 +129,35 @@ func (f *fakeTaskDataSource) GetExecutor(_ context.Context, id string) (*taskmod
 	return f.executors[id], nil
 }
 
+func (f *fakeTaskDataSource) recordDependencyViewsTasks(tasks []*taskmodels.Task) {
+	ids := make([]string, len(tasks))
+	for i, t := range tasks {
+		ids[i] = t.ID
+	}
+	f.dependencyViewsTasks = ids
+}
+
+func (f *fakeTaskDataSource) BuildDependencyViews(_ context.Context, tasks []*taskmodels.Task) map[string]taskservice.DependencyView {
+	f.dependencyViewsCalls++
+	f.recordDependencyViewsTasks(tasks)
+	if f.dependencyViews == nil {
+		return map[string]taskservice.DependencyView{}
+	}
+	return f.dependencyViews
+}
+
+func (f *fakeTaskDataSource) BuildDependencyViewsBounded(_ context.Context, tasks []*taskmodels.Task) (map[string]taskservice.DependencyView, error) {
+	f.dependencyViewsBoundedCalls++
+	f.recordDependencyViewsTasks(tasks)
+	if f.dependencyViewsErr != nil {
+		return nil, f.dependencyViewsErr
+	}
+	if f.dependencyViews == nil {
+		return map[string]taskservice.DependencyView{}, nil
+	}
+	return f.dependencyViews, nil
+}
+
 type fakeWorkflowLister struct {
 	workflows map[string][]*taskmodels.Workflow
 }
@@ -131,11 +175,25 @@ func (f *fakeWorkflowStepLister) ListStepsByWorkflow(_ context.Context, workflow
 }
 
 type fakeAgentProfileDataSource struct {
-	resp *agentsettingsdto.ListAgentsResponse
+	resp         *agentsettingsdto.ListAgentsResponse
+	profilesByID map[string]*AgentProfile
+	profileErr   error
+	profileCalls int
 }
 
 func (f *fakeAgentProfileDataSource) ListAgents(context.Context) (*agentsettingsdto.ListAgentsResponse, error) {
 	return f.resp, nil
+}
+
+func (f *fakeAgentProfileDataSource) GetProfileByID(_ context.Context, id string) (*AgentProfile, error) {
+	f.profileCalls++
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	if profile, ok := f.profilesByID[id]; ok {
+		return profile, nil
+	}
+	return nil, ErrAgentProfileNotFound
 }
 
 type fakeSessionCodeStatsSource struct {
@@ -284,18 +342,18 @@ func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string, launch Tas
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
 type testDataHost struct {
-	host       *pluginHost
-	tasks      *fakeTaskDataSource
-	workflows  *fakeWorkflowLister
-	steps      *fakeWorkflowStepLister
-	profiles   *fakeAgentProfileDataSource
-	codeStats  *fakeSessionCodeStatsSource
-	messages   *fakeMessageDataSource
-	utilAgents *fakeUtilityAgentSource
-	utilRun    *fakeUtilityRunner
-	taskWriter *fakeTaskWriter
-	messenger  *fakeMessenger
-	starter    *fakeTaskStarter
+	host           *pluginHost
+	tasks          *fakeTaskDataSource
+	workflows      *fakeWorkflowLister
+	steps          *fakeWorkflowStepLister
+	profiles       *fakeAgentProfileDataSource
+	codeStats      *fakeSessionCodeStatsSource
+	messages       *fakeMessageDataSource
+	defaultProfile *fakeDefaultUtilityProfileSource
+	utilRun        *fakeUtilityRunner
+	taskWriter     *fakeTaskWriter
+	messenger      *fakeMessenger
+	starter        *fakeTaskStarter
 
 	interactions *fakeInteractionDataSource
 	responder    *fakeInteractionResponder
@@ -306,17 +364,17 @@ type testDataHost struct {
 // resource) so each test only needs to vary caps.
 func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 	d := &testDataHost{
-		tasks:      &fakeTaskDataSource{},
-		workflows:  &fakeWorkflowLister{},
-		steps:      &fakeWorkflowStepLister{},
-		profiles:   &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
-		codeStats:  &fakeSessionCodeStatsSource{},
-		messages:   &fakeMessageDataSource{},
-		utilAgents: &fakeUtilityAgentSource{},
-		utilRun:    &fakeUtilityRunner{text: "ok"},
-		taskWriter: &fakeTaskWriter{},
-		messenger:  &fakeMessenger{},
-		starter:    &fakeTaskStarter{},
+		tasks:          &fakeTaskDataSource{},
+		workflows:      &fakeWorkflowLister{},
+		steps:          &fakeWorkflowStepLister{},
+		profiles:       &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
+		codeStats:      &fakeSessionCodeStatsSource{},
+		messages:       &fakeMessageDataSource{},
+		defaultProfile: &fakeDefaultUtilityProfileSource{},
+		utilRun:        &fakeUtilityRunner{text: "ok"},
+		taskWriter:     &fakeTaskWriter{},
+		messenger:      &fakeMessenger{},
+		starter:        &fakeTaskStarter{},
 
 		interactions: &fakeInteractionDataSource{},
 		responder:    &fakeInteractionResponder{},
@@ -332,9 +390,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		messageData:      d.messages,
 		interactionData:  d.interactions,
 		taskWriter:       d.taskWriter,
-		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
-		utilityDeps: func() (utilityAgentSource, utilityRunner) {
-			return d.utilAgents, d.utilRun
+		configs:          &fakeConfigReader{configs: map[string]any{"utility_agent": "utility-agent-42"}},
+		utilityDeps: func() (utilityDefaultProfileSource, agentProfileSource, utilityRunner) {
+			return d.defaultProfile, d.profiles, d.utilRun
 		},
 		writeDeps: func() (taskMessenger, taskStarter) {
 			return d.messenger, d.starter

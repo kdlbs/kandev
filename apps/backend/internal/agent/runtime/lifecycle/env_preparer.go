@@ -73,10 +73,12 @@ type RepoPrepareSpec struct {
 	RepositoryPath     string
 	RepoName           string
 	BaseBranch         string
+	IntegrationRef     string
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution *models.RemoteContribution
+	CheckoutOptions    *models.RepositoryCheckoutOptions
 	WorktreeID         string
 	// WorkspaceReuseRequired makes preparation attach to the exact canonical
 	// environment. It forbids worktree creation/recreation and all repository
@@ -125,10 +127,12 @@ type EnvPrepareRequest struct {
 	SetupScript             string
 	RepoSetupScript         string // Repository-level setup script (e.g. "make install")
 	BaseBranch              string
+	IntegrationRef          string
 	DefaultBranch           string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	WorktreeID              string
 	WorktreeBranch          string
@@ -185,10 +189,12 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
 		RemoteContribution:         r.RemoteContribution,
+		CheckoutOptions:            r.CheckoutOptions,
 		WorktreeID:                 r.WorktreeID,
 		WorkspaceReuseRequired:     r.WorkspaceReuseRequired,
 		AllowBranchReplacement:     r.AllowBranchReplacement,
@@ -230,6 +236,8 @@ type RepoWorktreeResult struct {
 	BranchSlug                string `json:"branch_slug,omitempty"`
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string `json:"-"`
+	WorktreeIntegrationRef    string `json:"-"`
 	WorktreePath              string `json:"worktree_path,omitempty"`
 	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
 	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
@@ -250,6 +258,8 @@ type EnvPrepareResult struct {
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
 	WorktreeID                string `json:"worktree_id,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
+	WorktreeBranchOwner       string `json:"-"`
+	WorktreeIntegrationRef    string `json:"-"`
 	MainRepoGitDir            string `json:"main_repo_git_dir,omitempty"`
 	RequestedBaseBranch       string `json:"requested_base_branch,omitempty"`
 	BaseBranch                string `json:"base_branch,omitempty"`

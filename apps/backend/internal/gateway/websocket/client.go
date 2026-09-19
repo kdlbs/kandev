@@ -32,7 +32,12 @@ const (
 	// Control frames (RPC responses and errors) use a separate bounded queue so
 	// high-volume session notifications cannot fill the queue and make a user
 	// action appear to time out.
-	controlSendBufferSize = 256
+	controlSendBufferSize   = 256
+	responseErrorKey        = "error"
+	sessionIDPayloadKey     = "session_id"
+	eventTypePayloadKey     = "type"
+	eventSequencePayloadKey = "sequence"
+	taskIDPayloadKey        = "task_id"
 )
 
 // Client represents a single WebSocket connection
@@ -42,20 +47,21 @@ type Client struct {
 	// anonymous connections (auth disabled and no synthetic identity set by
 	// the HTTP middleware — e.g. direct hub tests); synthetic in disabled
 	// mode; a real user when auth is enabled.
-	identity                authn.Identity
-	conn                    *websocket.Conn
-	hub                     *Hub
-	send                    chan []byte
-	controlSend             chan []byte
-	subscriptions           map[string]bool // Task IDs this client is subscribed to
-	sessionSubscriptions    map[string]bool // Session IDs this client is subscribed to
-	sessionFocus            map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
-	userSubscriptions       map[string]bool // User IDs this client is subscribed to
-	runSubscriptions        map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
-	systemMetricsSubscribed bool
-	mu                      sync.RWMutex
-	closed                  bool
-	logger                  *logger.Logger
+	identity                  authn.Identity
+	conn                      *websocket.Conn
+	hub                       *Hub
+	send                      chan []byte
+	controlSend               chan []byte
+	subscriptions             map[string]bool // Task IDs this client is subscribed to
+	sessionSubscriptions      map[string]bool // Session IDs this client is subscribed to
+	sessionFocus              map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
+	conversationSubscriptions map[string]conversationSubscription
+	userSubscriptions         map[string]bool // User IDs this client is subscribed to
+	runSubscriptions          map[string]bool // Office run IDs this client is subscribed to (for run.event.appended)
+	systemMetricsSubscribed   bool
+	mu                        sync.RWMutex
+	closed                    bool
+	logger                    *logger.Logger
 
 	// Replaceable session.message.updated traffic is scheduled separately from
 	// semantic notifications so one noisy session cannot fill the shared FIFO.
@@ -81,22 +87,23 @@ type Client struct {
 // NewClient creates a new WebSocket client
 func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hub, log *logger.Logger) *Client {
 	return &Client{
-		ID:                      id,
-		identity:                identity,
-		conn:                    conn,
-		hub:                     hub,
-		send:                    make(chan []byte, 256),
-		controlSend:             make(chan []byte, controlSendBufferSize),
-		subscriptions:           make(map[string]bool),
-		sessionSubscriptions:    make(map[string]bool),
-		sessionFocus:            make(map[string]bool),
-		userSubscriptions:       make(map[string]bool),
-		runSubscriptions:        make(map[string]bool),
-		replaceableByKey:        make(map[queuedReplaceableKey]outboundNotification),
-		replaceableBySession:    make(map[string][]sessionNotificationQueueItem),
-		replaceableCurrentByKey: make(map[replaceableNotificationKey]queuedReplaceableKey),
-		notificationWake:        make(chan struct{}, 1),
-		logger:                  log.WithFields(zap.String("client_id", id)),
+		ID:                        id,
+		identity:                  identity,
+		conn:                      conn,
+		hub:                       hub,
+		send:                      make(chan []byte, 256),
+		controlSend:               make(chan []byte, controlSendBufferSize),
+		subscriptions:             make(map[string]bool),
+		sessionSubscriptions:      make(map[string]bool),
+		sessionFocus:              make(map[string]bool),
+		conversationSubscriptions: make(map[string]conversationSubscription),
+		userSubscriptions:         make(map[string]bool),
+		runSubscriptions:          make(map[string]bool),
+		replaceableByKey:          make(map[queuedReplaceableKey]outboundNotification),
+		replaceableBySession:      make(map[string][]sessionNotificationQueueItem),
+		replaceableCurrentByKey:   make(map[replaceableNotificationKey]queuedReplaceableKey),
+		notificationWake:          make(chan struct{}, 1),
+		logger:                    log.WithFields(zap.String("client_id", id)),
 	}
 }
 
@@ -192,6 +199,12 @@ func (c *Client) handleMessage(msg *ws.Message) {
 		return
 	case ws.ActionSessionUnsubscribe:
 		c.handleSessionUnsubscribe(msg)
+		return
+	case ws.ActionSessionConversationSubscribe:
+		c.handleConversationSubscribe(msg)
+		return
+	case ws.ActionSessionConversationUnsubscribe:
+		c.handleConversationUnsubscribe(msg)
 		return
 	case ws.ActionSessionFocus:
 		c.handleSessionFocus(msg)
@@ -303,7 +316,16 @@ type UserSubscribeRequest struct {
 }
 
 type SessionSubscribeRequest struct {
-	SessionID string `json:"session_id"`
+	SessionID        string  `json:"session_id"`
+	ConsumerKind     string  `json:"consumer_kind,omitempty"`
+	PluginID         string  `json:"plugin_id,omitempty"`
+	Generation       int64   `json:"generation,omitempty"`
+	BindingToken     string  `json:"binding_token,omitempty"`
+	LastSeenSequence *uint64 `json:"last_seen_sequence,omitempty"`
+	ResumeToken      string  `json:"resume_token,omitempty"`
+	ReplaceCursor    bool    `json:"replace_cursor,omitempty"`
+	ConsumerID       string  `json:"consumer_id,omitempty"`
+	WireID           string  `json:"wire_id,omitempty"`
 }
 
 // ownUserTopic resolves the user-topic this client may subscribe to: its own
@@ -349,6 +371,10 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 
 	if req.SessionID == "" {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return
+	}
+	if req.ConsumerKind != "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "legacy session stream subscriptions are no longer supported", nil)
 		return
 	}
 
@@ -550,7 +576,6 @@ func (c *Client) handleSystemMetricsSubscribe(msg *ws.Message) {
 	})
 	c.sendMessage(resp)
 }
-
 func (c *Client) handleSystemMetricsUnsubscribe(msg *ws.Message) {
 	c.hub.UnsubscribeFromSystemMetrics(c)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
@@ -566,14 +591,15 @@ func (c *Client) handleSessionUnsubscribe(msg *ws.Message) {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 		return
 	}
-
 	if req.SessionID == "" {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 		return
 	}
-
+	if req.ConsumerKind != "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "legacy session stream subscriptions are no longer supported", nil)
+		return
+	}
 	c.hub.UnsubscribeFromSession(c, req.SessionID)
-
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success":    true,
 		"session_id": req.SessionID,

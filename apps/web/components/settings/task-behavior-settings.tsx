@@ -1,12 +1,13 @@
 "use client";
 
-import { IconMessage } from "@tabler/icons-react";
+import { IconGauge, IconMessage } from "@tabler/icons-react";
 import { Separator } from "@kandev/ui/separator";
 import { useTranslation } from "react-i18next";
 import { TaskActionsSettings } from "@/components/settings/general-settings";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { MessageQueueSettings } from "@/components/settings/system/message-queue-settings";
+import { SessionCapacitySettings } from "@/components/settings/system/session-capacity-settings";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 /** Task behavior: the former Task Actions and Message Queue pages as one page. */
@@ -26,6 +27,15 @@ export function TaskBehaviorSettings() {
         </SettingsSection>
       </SettingsTarget>
       <Separator />
+      <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.sessionCapacity}>
+        <SettingsSection
+          icon={<IconGauge className="h-5 w-5" />}
+          title={t("system:sessionCapacityTitle")}
+          description={t("system:sessionCapacityDescription")}
+        >
+          <SessionCapacitySettings />
+        </SettingsSection>
+      </SettingsTarget>
     </div>
   );
 }

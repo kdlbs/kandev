@@ -399,6 +399,8 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const reference = dialog.getByTestId("task-prompt-reference").first();
     const remove = reference.getByTestId("task-prompt-reference-remove");
+    await expect(reference.getByTestId("custom-prompt-mention")).toBeVisible();
+    await expect(remove).toBeVisible();
     const metrics = await readPromptReferenceMetrics(reference);
     expect(metrics.shell.height).toBeCloseTo(24, 0);
     expect(metrics.labelFontSize).toBe("12px");
@@ -490,6 +492,8 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
       const mention = reference.getByTestId("custom-prompt-mention");
       const remove = reference.getByTestId("task-prompt-reference-remove");
       await expect(mention).toHaveAttribute("aria-label", `Custom prompt: ${promptName}`);
+      await expect(mention).toBeVisible();
+      await expect(remove).toBeVisible();
       const metrics = await readPromptReferenceMetrics(reference);
       expect(metrics.labelText).toBe(`@${promptName}`);
       expect(metrics.labelScrollWidth).toBeGreaterThan(metrics.labelClientWidth);

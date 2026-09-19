@@ -441,9 +441,10 @@ func (b bootStateBuilder) addEditorsState(ctx context.Context, state map[string]
 		return
 	}
 	state["editors"] = map[string]any{
-		"items":   response.Editors,
-		"loaded":  true,
-		"loading": false,
+		"folderOpeningAvailable": response.FolderOpeningAvailable,
+		"items":                  response.Editors,
+		"loaded":                 true,
+		"loading":                false,
 	}
 }
 
@@ -710,6 +711,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"lspStatusLocation":                 usermodels.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"savedLayouts":                      settings.SavedLayouts,
 		"sidebarViews":                      mapSidebarViews(settings.SidebarViews),
+		"sidebarViewsByWorkspace":           settings.SidebarViewsByWorkspace,
 		"sidebarActiveViewId":               nullString(settings.SidebarActiveViewID),
 		"sidebarDraft":                      mapSidebarDraft(settings.SidebarDraft),
 		"threadViews":                       mapThreadViews(settings.ThreadViews),
@@ -733,6 +735,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
 		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"sidebarHoverEnabled":               settings.SidebarHoverEnabled,
+		"sidebarHoverDelayMs":               settings.SidebarHoverDelayMs,
 		"resolveSessionHostnames":           settings.ResolveSessionHostnames,
 		"appStatusBarOrder":                 mapAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quickChatTabOrderByWorkspace":      settings.QuickChatTabOrderByWorkspace,

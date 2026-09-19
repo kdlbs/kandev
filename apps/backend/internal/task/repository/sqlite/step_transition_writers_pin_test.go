@@ -47,7 +47,7 @@ import (
 // registering it.
 var registeredStepMutators = []string{
 	"task/repository/sqlite/Repository.insertTaskTx",
-	"task/repository/sqlite/Repository.updateTaskTx",
+	"task/repository/sqlite/Repository.buildTaskUpdateQuery",
 	"task/repository/sqlite/Repository.UpdateTaskIfWorkflowStepHasCapacity",
 	"task/repository/sqlite/Repository.PromoteQueuedTaskIfWorkflowStepHasCapacity",
 	"task/repository/sqlite/Repository.RestoreTaskMessageRollbackIfSessionState",

@@ -171,9 +171,10 @@ func (m *Manager) resolveProfileSessionConfigAndPolicy(ctx context.Context, prof
 		return "", "", nil, StartModelPolicy{}
 	}
 	return info.Model, info.Mode, info.ConfigOptions, StartModelPolicy{
-		Model:         info.Model,
-		FallbackModel: info.FallbackModel,
-		AutoFallback:  info.AutoFallback,
+		Model:             info.Model,
+		FallbackModel:     info.FallbackModel,
+		AutoFallback:      info.AutoFallback,
+		RequireExactModel: info.RequireExactModel,
 	}
 }
 
@@ -190,9 +191,10 @@ func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string)
 		return StartModelPolicy{}
 	}
 	return StartModelPolicy{
-		Model:         info.Model,
-		FallbackModel: info.FallbackModel,
-		AutoFallback:  info.AutoFallback,
+		Model:             info.Model,
+		FallbackModel:     info.FallbackModel,
+		AutoFallback:      info.AutoFallback,
+		RequireExactModel: info.RequireExactModel,
 	}
 }
 

@@ -143,6 +143,11 @@ type ReviewTaskRepository struct {
 	BaseBranch     string
 	CheckoutBranch string
 	PRNumber       int // GitHub PR number; carried so worktree creation can use refs/pull/<N>/head for fork PRs.
+	// Name is the repository's configured Name, populated only by
+	// resolveExplicitRepositories for use by the webhook repository-selector
+	// match in resolveAutomationRepository (see S1 in the alert-ingest spec).
+	// Task creation itself does not read it.
+	Name string
 }
 
 // SetGitHubService sets the GitHub service for PR auto-detection.
@@ -669,6 +674,13 @@ func (s *Service) autoStartReviewTask(
 		true,
 		nil,
 	)
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		s.logger.Info("review auto-start deferred by session ceiling; will replay once capacity frees up",
+			zap.String("task_id", task.ID),
+			zap.Int("pr_number", evt.PR.Number))
+		s.completeAutoStartOnCreate(ctx, task.ID, "review.auto_start")
+		return
+	}
 	if err != nil {
 		s.logger.Error("failed to auto-start review task",
 			zap.String("task_id", task.ID),
@@ -1721,6 +1733,12 @@ func (s *Service) autoStartIssueTask(
 		true,
 		nil,
 	)
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		s.logger.Info("issue auto-start deferred by session ceiling; will replay once capacity frees up",
+			zap.String("task_id", task.ID),
+			zap.Int(issueNumberKey, evt.Issue.Number))
+		return
+	}
 	if err != nil {
 		s.logger.Error("failed to auto-start issue task",
 			zap.String("task_id", task.ID),

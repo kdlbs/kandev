@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -12,11 +13,25 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/pause"
+	"github.com/kandev/kandev/internal/office/routing"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/office/wakeup"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// ErrLaunchDeferredByCapacity is the TaskStarter-side sentinel a
+// TaskStarter*ReturningSession implementation returns when the underlying
+// launch was deferred rather than started or failed — the orchestrator's
+// session ceiling admitted no reservation but persisted a replay record of
+// its own, so the launch will complete later without this caller's
+// involvement. A caller that only distinguishes "session created" from
+// "error" cannot tell a deferred launch apart from an ordinary success
+// that forgot to report its session id; recognizing this sentinel lets it
+// stop short of recording the launch as started (counters, health,
+// persisted session id) while also not treating it as a failure worth
+// retrying through provider fallback or restoring a one-shot claim over.
+var ErrLaunchDeferredByCapacity = errors.New("office: launch deferred by capacity, not started")
 
 // DefaultTickInterval is the default run processing interval.
 const DefaultTickInterval = 5 * time.Second
@@ -43,8 +58,8 @@ func TickIntervalFromEnv() time.Duration {
 
 // SchedulerIntegration runs the run processing tick loop.
 // Each tick claims the next eligible run, validates guards,
-// resolves executor config, builds the prompt, and marks the
-// run finished. Agent launch is not yet wired.
+// resolves executor config, builds the prompt, and either launches the agent
+// or finishes the run with a terminal scheduler outcome.
 // TaskContextProvider supplies the office task-handoffs prompt context
 // (related tasks, available document keys, workspace group). Optional —
 // when nil the prompt builder omits the handoff section. The
@@ -336,9 +351,11 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 	agent *models.AgentInstance, taskID string, execCfg *ExecutorConfig,
 ) {
 	runCtx, err := (&officeruntime.ContextBuilder{
-		Agents: si.svc,
-		Runs:   si.svc.repo,
-		Seats:  si.svc,
+		Agents:       si.svc,
+		Runs:         si.svc.repo,
+		Seats:        si.svc,
+		RunnerLister: si.svc.repo,
+		ScopeEvents:  si.svc,
 	}).BuildAndPersist(ctx, run)
 	if err != nil {
 		si.logger.Warn("runtime context build failed; retrying run",
@@ -389,6 +406,7 @@ func (si *SchedulerIntegration) prepareAndLaunch(
 		zap.Int("env_count", len(env)))
 
 	launchCtx := LaunchContext{
+		ExecutorID:           execCfg.Type,
 		Prompt:               prompt,
 		Env:                  env,
 		ProfileID:            profileID,
@@ -495,9 +513,8 @@ func (si *SchedulerIntegration) assembleAgentPrompt(
 // wakeup/dispatcher.go's createFreshRun passes taskID=="" on every
 // lightweight-routine fire (the pre-installed coordinator heartbeat,
 // among others), so this branch runs on a real cadence today. The
-// assembled prompt is still built for these runs even though
-// launchAgent cannot currently launch one (WO-35) — see that function's
-// doc comment.
+// assembled prompt is still built for these runs before the run-owned runtime
+// launch is admitted.
 //
 // The scope read here is run.ContinuationScope — the same key
 // models.ContinuationScopeForRun computed once, at run-creation time, and
@@ -549,6 +566,9 @@ func (si *SchedulerIntegration) snapshotRunSkills(ctx context.Context, runID str
 		snapshots = append(snapshots, models.RunSkillSnapshot{
 			RunID:            runID,
 			SkillID:          skill.ID,
+			DisplayName:      skill.DisplayName,
+			Slug:             skill.Slug,
+			LabelSource:      "captured",
 			Version:          skill.Version,
 			ContentHash:      skill.ContentHash,
 			MaterializedPath: instructionsDir,
@@ -626,11 +646,9 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 	return true
 }
 
-// launchAgent starts the agent via the orchestrator. Returns false if the
-// run could not be launched — either because it is structurally
-// unlaunchable (no task_id, no task starter wired) or because the adapter
-// invocation itself errored — and the caller should abort; the failure is
-// already handled (run marked failed, checkout released, WO-35).
+// launchAgent starts the agent through the task starter or the run-owned
+// runtime launcher. Returns false if the run could not be launched; the
+// failure is already handled by the selected launch path.
 func (si *SchedulerIntegration) launchAgent(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, taskID, executorType string,
@@ -639,15 +657,33 @@ func (si *SchedulerIntegration) launchAgent(
 	runID := run.ID
 
 	if taskID == "" {
-		si.logger.Error("cannot launch taskless run",
-			zap.String("run_id", runID),
-			zap.String("agent", agent.Name),
-			zap.String("reason", run.Reason),
+		if handled, launched := si.tryRoutingDispatch(ctx, run, agent, taskID, launch); handled {
+			return launched
+		}
+		if si.svc.runSessionLauncher == nil {
+			si.logger.Error("cannot launch taskless run: no run-session launcher configured",
+				zap.String("run_id", runID), zap.String("agent", agent.Name))
+			si.failTasklessRun(ctx, run, agent,
+				"scheduler cannot launch a taskless run: no run-session launcher is configured")
+			return false
+		}
+		si.logger.Info("launching taskless agent for run",
+			zap.String("run_id", runID), zap.String("agent", agent.Name),
 			zap.String("executor_type", executorType),
-		)
-		si.failTasklessRun(ctx, run, agent,
-			"scheduler cannot launch a taskless run: run payload carries no task_id")
-		return false
+			zap.Int("prompt_len", len(launch.Prompt)))
+		var route *RouteOverride
+		result, err := si.svc.runSessionLauncher.StartRunSession(ctx, run, agent, launch, route)
+		if err != nil {
+			si.logger.Error("taskless agent launch failed", zap.String("run_id", runID), zap.Error(err))
+			si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{
+				"phase": "adapter.invoke", "error_message": err.Error(),
+			})
+			si.failTasklessRun(ctx, run, agent, err.Error())
+			return false
+		}
+		IncLoopLaunch(agent.WorkspaceID)
+		si.persistLaunchedSession(ctx, runID, agent.WorkspaceID, result.SessionID)
+		return true
 	}
 	if si.svc.taskStarter == nil {
 		si.logger.Error("cannot launch run: no task starter configured",
@@ -697,6 +733,10 @@ func (si *SchedulerIntegration) launchAgent(
 		err = si.svc.taskStarter.StartTask(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil)
 	}
+	if errors.Is(err, ErrLaunchDeferredByCapacity) {
+		si.handleLaunchDeferred(ctx, run)
+		return false
+	}
 	if err != nil {
 		si.logger.Error("agent launch failed",
 			zap.String("run_id", runID), zap.Error(err))
@@ -711,6 +751,34 @@ func (si *SchedulerIntegration) launchAgent(
 	IncLoopLaunch(agent.WorkspaceID)
 	si.persistLaunchedSession(ctx, runID, agent.WorkspaceID, sessionID)
 	return true
+}
+
+// handleLaunchDeferred is launchAgent's disposition when the task starter
+// reports ErrLaunchDeferredByCapacity: the orchestrator's own session
+// ceiling already persisted a replay record for this exact launch and owns
+// retrying it, so this run must not be counted as launched (no session was
+// created) and must not go through HandleRunFailure's backoff-retry path —
+// a second automatic attempt from there would race the ceiling's own
+// replay into a double launch. Parking under blocked_provider_action_required
+// (the same status the routed dispatch path uses for the identical
+// disposition, see scheduler.SchedulerService.handleLaunchDeferred) keeps
+// the scheduler's own wake-up loop from ever picking the run back up on
+// its own; an operator notices via "Retry now" once capacity is known to
+// be free.
+func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *models.Run) {
+	si.releaseCheckoutIfNeeded(ctx, run)
+	si.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
+		"phase":  "deferred",
+		"reason": "session_ceiling",
+	})
+	if err := si.svc.repo.ParkRunForProviderCapacity(ctx,
+		run.ID, routing.StatusBlockedActionRequired, time.Time{}); err != nil {
+		si.logger.Error("failed to park run deferred by session ceiling",
+			zap.String("run_id", run.ID), zap.Error(err))
+		return
+	}
+	si.logger.Info("run parked: launch deferred by session ceiling",
+		zap.String("run_id", run.ID))
 }
 
 // persistLaunchedSession stores the session id a successful direct
@@ -740,7 +808,8 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 }
 
 // failTasklessRun terminally fails a run that launchAgent determined has
-// no task_id. This is a scheduler capability gap, not an agent failure, so
+// no task_id and no run-session launcher. This is a scheduler wiring failure,
+// not an agent failure, so
 // it must NOT go through HandleAgentFailure's consecutive-failure/
 // auto-pause accounting. The pre-installed "Coordinator heartbeat" routine
 // is taskless by design and fires every 5 minutes, so counting these toward
@@ -749,15 +818,9 @@ func (si *SchedulerIntegration) persistLaunchedSession(
 // event-driven ones that work today — was silently finished with no
 // launch (WO-35 Review round 1, Finding 1).
 //
-// SCOPE-1 decision: docs/specs/office/requirements/scheduler.md and
-// docs/specs/office/system-design/scheduler-01.md say a
-// lightweight (taskless) routine fire is meant to produce a real agent
-// run. This card does not implement that launch: doing so requires a
-// taskless session seam (task_sessions.task_id is currently NOT NULL),
-// which is a schema/contract change — New Feature Dev work, not a small
-// contained fix. What this card ships instead is the honest interim
-// state: fail loud and visible rather than silently reporting success
-// with no agent ever launched (the card's original SYMPTOM).
+// The production composition wires the run-session launcher. This fallback
+// remains for incomplete compositions and tests so a taskless run still fails
+// loud and visible rather than silently reporting success with no agent.
 //
 // A bare MarkRunFailed still leaves a visible failed row (surfaces via
 // ListFailedRunsForInbox, since the agent is never auto-paused here), so
@@ -847,7 +910,10 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 		"error_message": msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
-	wrote, err := si.svc.HandleAgentFailure(ctx, run, msg)
+	// No lifecycle event backs a wiring fault, so there is no agent id to
+	// thread — the message classifies unclassified from text alone either
+	// way (TestHandleAgentFailure_UnlaunchableMessageNotRetried).
+	wrote, err := si.svc.HandleAgentFailure(ctx, run, msg, "", nil)
 	if err != nil {
 		si.logger.Error("failed to handle agent failure for unlaunchable run",
 			zap.String("run_id", run.ID), zap.Error(err))
@@ -982,9 +1048,13 @@ func (si *SchedulerIntegration) releaseCheckoutIfNeeded(ctx context.Context, run
 	si.svc.releaseTaskCheckoutForRun(ctx, run)
 }
 
-// extractTaskID parses the task_id from a run payload.
+// extractTaskID parses the task_id from a run payload, trimmed so a
+// whitespace-only value is treated as absent — the same "taskless" test
+// officeruntime.ContextBuilder applies, so checkoutTask's task-bound/
+// taskless branch and the runtime's scope-derivation branch never disagree
+// on which run has a task.
 func (si *SchedulerIntegration) extractTaskID(payload string) string {
-	return ParseRunPayload(payload)["task_id"]
+	return strings.TrimSpace(ParseRunPayload(payload)["task_id"])
 }
 
 // extractProjectID looks up the project ID for a task in the payload.

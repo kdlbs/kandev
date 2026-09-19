@@ -644,7 +644,10 @@ test.describe("Task creation from GitHub URL", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const launchError = session.activeChat().getByTestId("task-launch-error-entry");
+    const sharedError = testPage.getByTestId("task-shared-error");
+    await expect(sharedError).toBeVisible({ timeout: 30_000 });
+    await sharedError.getByTestId("task-shared-error-details").click();
+    const launchError = testPage.getByTestId("task-launch-error-entry");
     await expect(launchError).toBeVisible({ timeout: 30_000 });
     await expect(launchError).toContainText(/launch needs attention/i);
 

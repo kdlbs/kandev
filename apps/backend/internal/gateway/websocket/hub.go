@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -53,6 +56,9 @@ type Hub struct {
 	sessionDataProvider       SessionDataProvider
 	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
+	pluginConversationService *plugins.Service
+	conversationSourceReader  ConversationSourceReader
+	conversationEpoch         string
 
 	// clientDisconnectListener releases connection-bound resources after a
 	// client is removed from the hub. It runs asynchronously so durable cleanup
@@ -95,7 +101,27 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		dispatcher:               dispatcher,
 		sessionMode:              newSessionModeTracker(),
 		logger:                   log.WithFields(zap.String("component", "ws_hub")),
+		conversationEpoch:        uuid.NewString(),
 	}
+}
+
+func (h *Hub) SetPluginConversationService(service *plugins.Service) {
+	h.mu.Lock()
+	h.pluginConversationService = service
+	h.mu.Unlock()
+}
+
+// SetConversationSourceReader wires the authorized task source used to
+// establish the initial revision for Host-only conversation subscriptions.
+func (h *Hub) SetConversationSourceReader(reader ConversationSourceReader) {
+	h.mu.Lock()
+	h.conversationSourceReader = reader
+	h.mu.Unlock()
+}
+
+type ConversationSourceReader interface {
+	GetTaskSession(context.Context, string) (*models.TaskSession, error)
+	ReadConversationRevision(context.Context, string) (models.ConversationRevision, error)
 }
 
 type SystemMetricsInterestTracker interface {
@@ -114,6 +140,9 @@ func (h *Hub) Run(ctx context.Context) {
 	h.mu.Lock()
 	h.dispatchCtx = ctx
 	h.mu.Unlock()
+	checksDone := make(chan struct{})
+	go func() { defer close(checksDone); h.runConversationChecks(ctx) }()
+	defer func() { <-checksDone }()
 
 	for {
 		select {

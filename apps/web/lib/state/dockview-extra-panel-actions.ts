@@ -27,9 +27,9 @@ let scrollTargetToken = 0;
  */
 function buildTranscriptActions(set: StoreSet, get: StoreGet) {
   return {
-    scrollTranscriptToMessage: (sessionId: string, messageId: string, title: string) => {
+    scrollTranscriptToMessage: (sessionId: string, messageId: string, title: string): boolean => {
       const { api: dockviewApi, centerGroupId } = get();
-      if (!dockviewApi) return;
+      if (!dockviewApi) return false;
       const sessionPanelId = `session:${sessionId}`;
       const targetPanel = dockviewApi.getPanel(sessionPanelId) ?? dockviewApi.getPanel("chat");
       if (targetPanel) {
@@ -46,6 +46,7 @@ function buildTranscriptActions(set: StoreSet, get: StoreGet) {
           hostPanelId: targetPanel?.id ?? sessionPanelId,
         },
       });
+      return true;
     },
     clearScrollTarget: (token: number) => {
       if (get().scrollTarget?.token === token) set({ scrollTarget: null });

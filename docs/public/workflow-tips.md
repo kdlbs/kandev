@@ -251,7 +251,8 @@ A task may contain several repositories, but a workflow step is not bound to one
 - **Agent does not start:** verify the effective workflow/step agent profile, its health, executor profile, repository access, and the `auto_start_agent` entry action.
 - **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a queued WIP card waiting for capacity, or an invalid target left by an older definition.
 - **Task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.
-- **Task cannot be dragged:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.
+- **Moving tasks on a phone:** open the task card menu and choose **Move to**. Swiping a card scrolls the column; phone cards do not support drag-to-move or drag reordering.
+- **Task cannot be dragged on desktop or tablet:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.
 - **Auto-archive looks late:** the sweep cadence is five minutes and task updates extend the age check.
 - **Synced workflow is read-only:** edit its repository definition and run Sync now, or remove the sync configuration to release all synced workflows as editable manual workflows.
 

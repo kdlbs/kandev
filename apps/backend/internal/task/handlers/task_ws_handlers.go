@@ -133,22 +133,23 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "repository_id, local_path, or remote_url is required", nil)
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
-			BranchPolicyID: r.BranchPolicyID,
-			PRNumber:       r.PRNumber,
-			LocalPath:      r.LocalPath,
-			Name:           r.Name,
-			DefaultBranch:  r.DefaultBranch,
-			GitHubURL:      r.GitHubURL,
-			RemoteURL:      r.RemoteURL,
-			Provider:       r.Provider,
-			ProviderHost:   r.ProviderHost,
-			ProviderScope:  r.ProviderScope,
-			ProviderRepoID: r.ProviderRepoID,
-			ProviderOwner:  r.ProviderOwner,
-			ProviderName:   r.ProviderName,
+			CheckoutOptions: r.CheckoutOptions,
+			RepositoryID:    r.RepositoryID,
+			BaseBranch:      r.BaseBranch,
+			CheckoutBranch:  r.CheckoutBranch,
+			BranchPolicyID:  r.BranchPolicyID,
+			PRNumber:        r.PRNumber,
+			LocalPath:       r.LocalPath,
+			Name:            r.Name,
+			DefaultBranch:   r.DefaultBranch,
+			GitHubURL:       r.GitHubURL,
+			RemoteURL:       r.RemoteURL,
+			Provider:        r.Provider,
+			ProviderHost:    r.ProviderHost,
+			ProviderScope:   r.ProviderScope,
+			ProviderRepoID:  r.ProviderRepoID,
+			ProviderOwner:   r.ProviderOwner,
+			ProviderName:    r.ProviderName,
 		})
 	}
 
@@ -161,9 +162,12 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			req.Metadata = make(map[string]interface{})
 		}
 		req.Metadata[models.MetaKeyAgentProfileID] = req.AgentProfileID
-		if req.ExecutorProfileID != "" {
-			req.Metadata[models.MetaKeyExecutorProfileID] = req.ExecutorProfileID
+	}
+	if req.ExecutorProfileID != "" {
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
 		}
+		req.Metadata[models.MetaKeyExecutorProfileID] = req.ExecutorProfileID
 	}
 
 	title := strings.TrimSpace(req.Title)
@@ -319,22 +323,23 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.Repositories != nil {
 		for _, r := range req.Repositories {
 			repos = append(repos, dto.TaskRepositoryInput{
-				RepositoryID:   r.RepositoryID,
-				BaseBranch:     r.BaseBranch,
-				CheckoutBranch: r.CheckoutBranch,
-				BranchPolicyID: r.BranchPolicyID,
-				PRNumber:       r.PRNumber,
-				LocalPath:      r.LocalPath,
-				Name:           r.Name,
-				DefaultBranch:  r.DefaultBranch,
-				GitHubURL:      r.GitHubURL,
-				RemoteURL:      r.RemoteURL,
-				Provider:       r.Provider,
-				ProviderHost:   r.ProviderHost,
-				ProviderScope:  r.ProviderScope,
-				ProviderRepoID: r.ProviderRepoID,
-				ProviderOwner:  r.ProviderOwner,
-				ProviderName:   r.ProviderName,
+				CheckoutOptions: r.CheckoutOptions,
+				RepositoryID:    r.RepositoryID,
+				BaseBranch:      r.BaseBranch,
+				CheckoutBranch:  r.CheckoutBranch,
+				BranchPolicyID:  r.BranchPolicyID,
+				PRNumber:        r.PRNumber,
+				LocalPath:       r.LocalPath,
+				Name:            r.Name,
+				DefaultBranch:   r.DefaultBranch,
+				GitHubURL:       r.GitHubURL,
+				RemoteURL:       r.RemoteURL,
+				Provider:        r.Provider,
+				ProviderHost:    r.ProviderHost,
+				ProviderScope:   r.ProviderScope,
+				ProviderRepoID:  r.ProviderRepoID,
+				ProviderOwner:   r.ProviderOwner,
+				ProviderName:    r.ProviderName,
 			})
 		}
 	}

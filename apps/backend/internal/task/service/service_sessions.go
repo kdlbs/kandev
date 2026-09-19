@@ -90,6 +90,27 @@ func (s *Service) GetTaskSession(ctx context.Context, sessionID string) (*models
 	return session, nil
 }
 
+// DeleteSessionAndPublishRemoval removes a session inside the repository's
+// transaction and publishes the terminal event only after that commit.
+// Internal rollback callers use this to keep the ordered stream authoritative.
+func (s *Service) DeleteSessionAndPublishRemoval(ctx context.Context, sessionID string) error {
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := s.sessions.DeleteTaskSession(ctx, session); err != nil {
+		return err
+	}
+	if s.eventBus == nil {
+		return nil
+	}
+	return s.eventBus.Publish(ctx, events.SessionRemoved, bus.NewEvent(
+		events.SessionRemoved,
+		"task-service",
+		map[string]interface{}{sessionEventFieldSessionID: session.ID, sessionEventFieldTaskID: session.TaskID},
+	))
+}
+
 // GetExecutorRunningBySessionID returns the live executor row for sessionID,
 // or models.ErrExecutorRunningNotFound if the session has none (e.g. it
 // never started, or has since completed and been cleaned up). Exposed at

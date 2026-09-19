@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
@@ -115,6 +117,59 @@ func TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability(t *testin
 	})
 	if !cfg.NamespacesMCPToolsByServer {
 		t.Fatal("InstanceConfig did not retain NamespacesMCPToolsByServer")
+	}
+}
+
+func TestInjectedKandevMCPProvenance(t *testing.T) {
+	workDir := t.TempDir()
+	base := &Config{Defaults: InstanceDefaults{
+		Protocol:     agent.ProtocolACP,
+		AgentCommand: "agent --acp",
+		WorkDir:      workDir,
+	}}
+	input := []McpServerConfig{
+		{Name: "kandev", Type: "stdio", Command: "spoofed-kandev"},
+		{Name: "third-party", Type: "http", URL: "https://mcp.example.test/mcp"},
+	}
+
+	cfg := base.NewInstanceConfig(43210, &InstanceOverrides{
+		Env:        []string{},
+		McpServers: input,
+	})
+	if !cfg.InjectedKandevMCP {
+		t.Fatal("positive-port instance must retain injected Kandev provenance")
+	}
+	if len(cfg.McpServers) != 3 {
+		t.Fatalf("McpServers = %+v, want injected HTTP/SSE plus third-party", cfg.McpServers)
+	}
+	if cfg.McpServers[0].Name != "kandev" || cfg.McpServers[0].Type != "http" || cfg.McpServers[0].URL != "http://localhost:43210/mcp" {
+		t.Fatalf("HTTP injection = %+v", cfg.McpServers[0])
+	}
+	if cfg.McpServers[1].Name != "kandev" || cfg.McpServers[1].Type != "sse" || cfg.McpServers[1].URL != "http://localhost:43210/sse" {
+		t.Fatalf("SSE injection = %+v", cfg.McpServers[1])
+	}
+	if cfg.McpServers[2].Name != "third-party" {
+		t.Fatalf("unrelated MCP server was not preserved: %+v", cfg.McpServers)
+	}
+
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal InstanceConfig: %v", err)
+	}
+	var serialized map[string]any
+	if err := json.Unmarshal(encoded, &serialized); err != nil {
+		t.Fatalf("unmarshal InstanceConfig: %v", err)
+	}
+	if _, present := serialized["InjectedKandevMCP"]; present {
+		t.Fatalf("provenance marker leaked into serialized config: %s", encoded)
+	}
+
+	withoutPort := base.NewInstanceConfig(0, &InstanceOverrides{
+		Env:        []string{},
+		McpServers: input,
+	})
+	if withoutPort.InjectedKandevMCP {
+		t.Fatal("zero-port instance must not claim injected Kandev provenance")
 	}
 }
 

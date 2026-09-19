@@ -20,9 +20,10 @@ import (
 func TestMCPUpdateTaskPlanModeValidation(t *testing.T) {
 	h := newMCPPlanTestHandlers(t)
 	ctx := context.Background()
-	if _, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
+	created, err := h.planService.CreatePlan(ctx, service.CreatePlanRequest{
 		TaskID: mcpPlanTaskID, Content: "base", CreatedBy: "agent",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("seed CreatePlan: %v", err)
 	}
 
@@ -65,7 +66,10 @@ func TestMCPUpdateTaskPlanModeValidation(t *testing.T) {
 
 	t.Run("empty mode defaults to replace", func(t *testing.T) {
 		out, err := h.handleUpdateTaskPlan(ctx, mcpPlanMsg(t, ws.ActionMCPUpdateTaskPlan,
-			`{"task_id":"`+mcpPlanTaskID+`","content":"whole new document"}`))
+			mustMarshalPlanPayload(t, map[string]any{
+				"task_id": mcpPlanTaskID, "content": "whole new document",
+				"expected_version": created.Plan.WriteVersion,
+			})))
 		if err != nil {
 			t.Fatalf("handleUpdateTaskPlan: %v", err)
 		}

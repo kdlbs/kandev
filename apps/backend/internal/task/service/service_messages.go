@@ -30,6 +30,8 @@ const (
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
 
+var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
 		context.Context,
@@ -82,6 +84,19 @@ type initialTaskBriefQueuedPlanCommentMessageWriter interface {
 		*messagequeue.QueueAttachmentClaim,
 		int,
 	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type conversationMessageReceiptWriter interface {
+	CreateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
+	UpdateMessageWithConversationReceipt(context.Context, *models.Message) (*models.ConversationMutationReceipt, error)
+	DeleteMessageWithConversationReceipt(context.Context, string) (*models.ConversationMutationReceipt, error)
+}
+
+type agentPlanMessageWriter interface {
+	UpsertAgentPlanMessageWithConversationReceipt(
+		context.Context,
+		*models.Message,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
 }
 
 type planCommentAdmissionLocker interface {
@@ -246,14 +261,14 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		// as an explicit import and reject same-microsecond creates.
 	}
 
-	snapshot, err := s.persistMessage(ctx, message, req)
+	snapshot, receipt, err := s.persistMessage(ctx, message, req)
 	if err != nil {
 		s.logger.Error("failed to create message", zap.Error(err))
 		return nil, err
 	}
 
 	// Publish message.added event
-	s.publishMessageEvent(ctx, events.MessageAdded, message)
+	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, receipt)
 	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
 
 	s.logger.Info("message created",
@@ -504,7 +519,7 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		return nil, err
 	}
 
-	snapshot, err := s.createMessageWithRequestRetry(
+	snapshot, receipt, err := s.createMessageWithRequestRetry(
 		ctx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
 	)
 	if err != nil {
@@ -512,7 +527,7 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	}
 
 	// Publish message.added event
-	s.publishMessageEvent(ctx, events.MessageAdded, message)
+	_ = s.publishMessageEvent(ctx, events.MessageAdded, message, receipt)
 	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
 
 	s.logger.Info("message created with ID",
@@ -645,19 +660,20 @@ func (s *Service) createMessageWithRequestRetry(
 	req *CreateMessageRequest,
 	maxRetries int,
 	retryDelay time.Duration,
-) (*models.TaskPlanCommentSnapshot, error) {
+) (*models.TaskPlanCommentSnapshot, *models.ConversationMutationReceipt, error) {
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		var snapshot *models.TaskPlanCommentSnapshot
-		snapshot, err = s.persistMessage(ctx, message, req)
+		var receipt *models.ConversationMutationReceipt
+		snapshot, receipt, err = s.persistMessage(ctx, message, req)
 		if err == nil {
-			return snapshot, nil
+			return snapshot, receipt, nil
 		}
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 		if errors.Is(err, repoerrors.ErrInitialTaskBriefStale) {
-			return nil, err
+			return nil, nil, err
 		}
 		if attempt < maxRetries-1 {
 			s.logger.Debug("failed to create message, retrying",
@@ -672,41 +688,47 @@ func (s *Service) createMessageWithRequestRetry(
 		zap.String("id", message.ID),
 		zap.Int("retries", maxRetries),
 		zap.Error(err))
-	return nil, err
+	return nil, nil, err
 }
 
 func (s *Service) persistMessage(
 	ctx context.Context,
 	message *models.Message,
 	req *CreateMessageRequest,
-) (*models.TaskPlanCommentSnapshot, error) {
+) (*models.TaskPlanCommentSnapshot, *models.ConversationMutationReceipt, error) {
 	if len(req.PlanCommentRefs) == 0 {
 		if req.InitialTaskBrief != nil {
 			writer, ok := s.messages.(initialTaskBriefMessageWriter)
 			if !ok {
-				return nil, errors.New("initial task brief admission is unavailable")
+				return nil, nil, errors.New("initial task brief admission is unavailable")
 			}
-			return nil, writer.CreateMessageWithInitialTaskBrief(ctx, message, req.InitialTaskBrief)
+			return nil, nil, writer.CreateMessageWithInitialTaskBrief(ctx, message, req.InitialTaskBrief)
 		}
-		return nil, s.messages.CreateMessage(ctx, message)
+		if writer, ok := s.messages.(conversationMessageReceiptWriter); ok {
+			receipt, err := writer.CreateMessageWithConversationReceipt(ctx, message)
+			return nil, receipt, err
+		}
+		return nil, nil, s.messages.CreateMessage(ctx, message)
 	}
 	if req.InitialTaskBrief != nil {
 		writer, ok := s.messages.(initialTaskBriefPlanCommentMessageWriter)
 		if !ok {
-			return nil, errors.New("plan comment initial task brief admission is unavailable")
+			return nil, nil, errors.New("plan comment initial task brief admission is unavailable")
 		}
-		return writer.CreateMessageWithPlanCommentsWithInitialTaskBrief(
+		snapshot, err := writer.CreateMessageWithPlanCommentsWithInitialTaskBrief(
 			ctx, message, req.InitialTaskBrief, req.PlanCommentRefs, req.RequirePrimarySession,
 			req.ExpectedSessionState, req.AttachmentClaim,
 		)
+		return snapshot, nil, err
 	}
 	writer, ok := s.messages.(planCommentMessageWriter)
 	if !ok {
-		return nil, errors.New("plan comment message admission is unavailable")
+		return nil, nil, errors.New("plan comment message admission is unavailable")
 	}
-	return writer.CreateMessageWithPlanComments(
+	snapshot, err := writer.CreateMessageWithPlanComments(
 		ctx, message, req.PlanCommentRefs, req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim,
 	)
+	return snapshot, nil, err
 }
 
 type planCommentMessageReplayIdentity struct {
@@ -825,19 +847,22 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		return nil, false, err
 	}
 	limit := req.Limit
-	if limit <= 0 && (req.Before != "" || req.After != "" || req.Around != "" || req.AuthorType != "") {
+	if limit <= 0 && (req.Before != "" || req.After != "" || req.Around != "" ||
+		req.AuthorType != "" || len(req.AuthorTypes) > 0 || req.TaskID != "") {
 		limit = DefaultMessagesPageSize
 	}
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
 	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
-		Limit:      limit,
-		Before:     req.Before,
-		After:      req.After,
-		Sort:       req.Sort,
-		AuthorType: req.AuthorType,
-		Around:     req.Around,
+		Limit:       limit,
+		Before:      req.Before,
+		After:       req.After,
+		Sort:        req.Sort,
+		AuthorType:  req.AuthorType,
+		AuthorTypes: req.AuthorTypes,
+		TaskID:      req.TaskID,
+		Around:      req.Around,
 	})
 }
 
@@ -863,13 +888,20 @@ func (s *Service) SearchMessages(ctx context.Context, sessionID, query string, l
 // DeleteMessage deletes a message
 func (s *Service) DeleteMessage(ctx context.Context, id string) error {
 	message, getErr := s.messages.GetMessage(ctx, id)
-	if err := s.messages.DeleteMessage(ctx, id); err != nil {
+	var receipt *models.ConversationMutationReceipt
+	var err error
+	if writer, ok := s.messages.(conversationMessageReceiptWriter); ok {
+		receipt, err = writer.DeleteMessageWithConversationReceipt(ctx, id)
+	} else {
+		err = s.messages.DeleteMessage(ctx, id)
+	}
+	if err != nil {
 		s.logger.Error("failed to delete message", zap.String("message_id", id), zap.Error(err))
 		return err
 	}
 
 	if getErr == nil && message != nil {
-		s.publishMessageEvent(ctx, events.MessageDeleted, message)
+		_ = s.publishMessageEvent(ctx, events.MessageDeleted, message, receipt)
 	}
 	s.logger.Info("message deleted", zap.String("message_id", id))
 	return nil
@@ -877,7 +909,8 @@ func (s *Service) DeleteMessage(ctx context.Context, id string) error {
 
 // UpdateMessage updates an existing message and publishes an event.
 func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) error {
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to update message",
 			zap.String("message_id", message.ID),
 			zap.Error(err))
@@ -901,9 +934,16 @@ func (s *Service) UpdateMessage(ctx context.Context, message *models.Message) er
 
 	// Publish message.updated event for real-time streaming. Delivery is best
 	// effort after the durable write succeeded (see publishMessageEvent).
-	_ = s.publishMessageEvent(ctx, events.MessageUpdated, published)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, published, receipt)
 
 	return nil
+}
+
+func (s *Service) updateMessageWithReceipt(ctx context.Context, message *models.Message) (*models.ConversationMutationReceipt, error) {
+	if writer, ok := s.messages.(conversationMessageReceiptWriter); ok {
+		return writer.UpdateMessageWithConversationReceipt(ctx, message)
+	}
+	return nil, s.messages.UpdateMessage(ctx, message)
 }
 
 // AppendMessageContent appends additional content to an existing message.
@@ -920,7 +960,8 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 	// Append the new content
 	message.Content += additionalContent
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to append message content",
 			zap.String("message_id", messageID),
 			zap.Error(err))
@@ -928,7 +969,7 @@ func (s *Service) AppendMessageContent(ctx context.Context, messageID, additiona
 	}
 
 	// Publish message.updated event for real-time streaming
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	s.logger.Debug("message content appended",
 		zap.String("message_id", messageID),
@@ -961,7 +1002,8 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 	}
 	message.Metadata["thinking"] = existingThinking + additionalContent
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to append thinking content",
 			zap.String("message_id", messageID),
 			zap.Error(err))
@@ -969,7 +1011,7 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 	}
 
 	// Publish message.updated event for real-time streaming
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	s.logger.Debug("thinking content appended",
 		zap.String("message_id", messageID),
@@ -985,6 +1027,130 @@ func (s *Service) AppendThinkingContent(ctx context.Context, messageID, addition
 // The normalized parameter contains typed tool payload data that gets added to metadata.
 func (s *Service) UpdateToolCallMessage(ctx context.Context, sessionID, toolCallID, status, result, title string, normalized *streams.NormalizedPayload) error {
 	return s.UpdateToolCallMessageWithCreate(ctx, sessionID, toolCallID, "", status, result, title, normalized, "", "", "")
+}
+
+// UpsertAgentPlanMessage persists the latest snapshot for one plan-producing
+// tool call. Its deterministic identity makes first delivery and retries use
+// the same row without the missing-tool retry delay.
+func (s *Service) UpsertAgentPlanMessage(
+	ctx context.Context,
+	taskID, sourceToolCallID, sessionID, content, turnID string,
+) error {
+	name := fmt.Sprintf("%s\x00%s\x00%s", sessionID, turnID, sourceToolCallID)
+	messageID := uuid.NewSHA1(agentPlanMessageIDNamespace, []byte(name)).String()
+	correlationID := "agent-plan:" + messageID
+	req := &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          string(models.MessageTypeAgentPlan),
+		Metadata: map[string]interface{}{
+			"tool_call_id":            correlationID,
+			"agent_plan_tool_call_id": sourceToolCallID,
+		},
+	}
+	if err := s.authorizeMessageCreate(ctx, req); err != nil {
+		return err
+	}
+	session, err := s.getSessionWithRetry(
+		ctx, sessionID, messageID, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return err
+	}
+	message, err := s.buildMessage(ctx, messageID, req, session)
+	if err != nil {
+		return err
+	}
+	if writer, ok := s.messages.(agentPlanMessageWriter); ok {
+		persisted, receipt, created, err := writer.UpsertAgentPlanMessageWithConversationReceipt(ctx, message)
+		if errors.Is(err, repoerrors.ErrMessageIdentityConflict) {
+			return ErrMessageIDConflict
+		}
+		if err != nil || receipt == nil {
+			return err
+		}
+		return s.publishAgentPlanMessage(ctx, persisted, receipt, created)
+	}
+	return s.upsertAgentPlanMessageFallback(ctx, message, req)
+}
+
+func (s *Service) upsertAgentPlanMessageFallback(
+	ctx context.Context,
+	message *models.Message,
+	req *CreateMessageRequest,
+) error {
+	admissionCtx, releaseAdmission, err := s.AcquireMessageAdmission(ctx, message.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseAdmission()
+
+	existing, err := s.messages.GetMessageWithPromptIndex(admissionCtx, message.ID)
+	if err == nil && existing != nil {
+		if !sameAgentPlanMessageIdentity(existing, message) {
+			return ErrMessageIDConflict
+		}
+		if existing.Content == message.Content {
+			return nil
+		}
+		existing.Content = message.Content
+		receipt, err := s.updateMessageWithReceipt(admissionCtx, existing)
+		if err != nil {
+			return err
+		}
+		return s.publishAgentPlanMessage(admissionCtx, existing, receipt, false)
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check existing agent plan message: %w", err)
+	}
+	_, receipt, err := s.createMessageWithRequestRetry(
+		admissionCtx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
+	)
+	if err != nil {
+		return err
+	}
+	return s.publishAgentPlanMessage(admissionCtx, message, receipt, true)
+}
+
+func (s *Service) publishAgentPlanMessage(
+	ctx context.Context,
+	message *models.Message,
+	receipt *models.ConversationMutationReceipt,
+	created bool,
+) error {
+	eventType := events.MessageUpdated
+	if created {
+		eventType = events.MessageAdded
+	}
+	err := s.publishMessageEvent(ctx, eventType, message, receipt)
+	if created {
+		return nil
+	}
+	return err
+}
+
+func sameAgentPlanMessageIdentity(existing, incoming *models.Message) bool {
+	if existing.ID != incoming.ID ||
+		existing.TaskSessionID != incoming.TaskSessionID ||
+		existing.TaskID != incoming.TaskID ||
+		existing.TurnID != incoming.TurnID ||
+		existing.AuthorType != incoming.AuthorType ||
+		existing.AuthorID != incoming.AuthorID ||
+		existing.Type != incoming.Type ||
+		existing.RequestsInput != incoming.RequestsInput {
+		return false
+	}
+	for _, key := range []string{"tool_call_id", "agent_plan_tool_call_id"} {
+		existingValue, existingOK := existing.Metadata[key].(string)
+		incomingValue, incomingOK := incoming.Metadata[key].(string)
+		if !existingOK || !incomingOK || existingValue != incomingValue {
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateToolCallMessageWithCreate is like UpdateToolCallMessage but can create the message if not found.
@@ -1012,7 +1178,8 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 
 	s.applyToolCallMessageUpdate(message, status, result, title, normalized)
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to update tool call message",
 			zap.String("message_id", message.ID),
 			zap.String("tool_call_id", toolCallID),
@@ -1021,7 +1188,7 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 	}
 
 	// Publish message.updated event
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	s.logger.Info("tool call message updated",
 		zap.String("message_id", message.ID),
@@ -1120,11 +1287,11 @@ func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, re
 		message.Metadata = make(map[string]interface{})
 	}
 	message.Metadata["status"] = status
-	if result != "" {
+	if result != "" && !models.ToolPayloadRemoved(message.Metadata) {
 		message.Metadata["result"] = result
 	}
 
-	if normalized != nil {
+	if normalized != nil && !models.ToolPayloadRemoved(message.Metadata) {
 		message.Metadata["normalized"] = normalized
 		// Update message type if the normalized kind changed
 		// This handles cases like Read on a directory converting to code_search
@@ -1197,7 +1364,8 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID
 	}
 	message.Metadata["status"] = string(status)
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to update permission message",
 			zap.String("message_id", message.ID),
 			zap.String("pending_id", pendingID),
@@ -1206,7 +1374,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, taskID, sessionID
 	}
 
 	// Publish message.updated event
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	// When a permission expires, also mark the related tool call as cancelled
 	// so the UI no longer shows a loading spinner on the tool call.
@@ -1322,7 +1490,8 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		message.Metadata["response"] = answer
 	}
 
-	if err := s.messages.UpdateMessage(ctx, message); err != nil {
+	receipt, err := s.updateMessageWithReceipt(ctx, message)
+	if err != nil {
 		s.logger.Error("failed to update clarification message",
 			zap.String("message_id", message.ID),
 			zap.String("pending_id", pendingID),
@@ -1331,7 +1500,7 @@ func (s *Service) UpdateClarificationMessageForQuestion(ctx context.Context, ses
 		return err
 	}
 
-	s.publishMessageEvent(ctx, events.MessageUpdated, message)
+	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
 	s.logger.Info("clarification message updated",
 		zap.String("message_id", message.ID),

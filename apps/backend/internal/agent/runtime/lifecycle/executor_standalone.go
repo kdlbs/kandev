@@ -222,6 +222,7 @@ func buildStandaloneCreateInstanceRequest(
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
+		ProviderGatewayAuth:        req.ProviderGatewayAuth,
 		BaseBranches:               getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,

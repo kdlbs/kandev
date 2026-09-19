@@ -158,6 +158,9 @@ var (
 	// ErrSessionIdentityMismatch means the supplied immutable session identity
 	// no longer names the authoritative task-session row.
 	ErrSessionIdentityMismatch = errors.New("queue session identity mismatch")
+	// ErrWorkflowEntryMismatch means a workflow prompt was admitted after its
+	// captured task-step entry had been superseded.
+	ErrWorkflowEntryMismatch = errors.New("queue workflow entry identity mismatch")
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
 	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
@@ -211,6 +214,17 @@ type QueueSessionIdentity struct {
 	TaskID               string `json:"task_id"`
 	SessionID            string `json:"session_id"`
 	SessionIncarnationID string `json:"session_incarnation_id"`
+}
+
+// WorkflowEntryIdentity is the immutable task workflow entry captured when a
+// workflow auto-start is launched. TransitionID fences leave-and-return
+// re-entry to the same step; LifecycleGeneration fences archive/delete purge
+// work that was captured before the destructive mutation.
+type WorkflowEntryIdentity struct {
+	WorkflowID          string
+	WorkflowStepID      string
+	TransitionID        int64
+	LifecycleGeneration int64
 }
 
 // QueueAttachmentClaim carries authenticated staged-attachment ownership into

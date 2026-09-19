@@ -1,3 +1,4 @@
+import type { RepositoryCheckoutOptions } from "@/lib/types/repository-checkout-options";
 import type React from "react";
 import type { RefObject } from "react";
 import type {
@@ -160,6 +161,7 @@ export type TaskRepositorySnapshot = {
  * single `url` field, with `source` only used for UI affordance.
  */
 export type TaskRemoteRepoRow = {
+  checkoutOptions?: RepositoryCheckoutOptions;
   key: string; // stable client-side React key
   url: string; // canonical https://… or paste-as-typed
   /** Exact credential-free clone URL returned by provider URL inspection. */

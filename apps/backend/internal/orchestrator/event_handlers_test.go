@@ -301,6 +301,8 @@ type mockAgentManager struct {
 	promptAcceptedOnError           bool
 	promptAgentFunc                 func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
 	launchAgentFunc                 func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	initialPromptDispatchCallback   func()
+	initialPromptFailureCallback    func()
 	startAgentProcessCalls          []string
 	startAgentProcessErr            error
 	startAgentProcessFunc           func(context.Context, string) error
@@ -469,6 +471,15 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID stri
 	}
 	return err
 }
+
+func (m *mockAgentManager) RegisterInitialPromptDispatchCallbacks(_ string, onDispatched, onFailure func()) error {
+	m.mu.Lock()
+	m.initialPromptDispatchCallback = onDispatched
+	m.initialPromptFailureCallback = onFailure
+	m.mu.Unlock()
+	return nil
+}
+
 func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool { return true }
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
 	m.mu.Lock()

@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -280,6 +281,10 @@ type InstanceConfig struct {
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
+	// InjectedKandevMCP records that this instance configuration was created
+	// with the host-owned Kandev MCP server injected into McpServers.
+	InjectedKandevMCP bool `json:"-"`
+
 	// ProcessBufferMaxBytes caps per-process output buffer size
 	ProcessBufferMaxBytes int64
 
@@ -350,6 +355,10 @@ type InstanceConfig struct {
 	// StripEnv lists environment variables to strip from the agent's child
 	// process environment entirely (not just set to empty).
 	StripEnv []string
+
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
 
 	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
 	// stats. The empty key "" applies to the root / single-repo tracker.
@@ -639,6 +648,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	// to forward tool calls to the backend.
 	if port > 0 {
 		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
+		cfg.InjectedKandevMCP = true
 	}
 
 	// Parse agent command into args
@@ -713,6 +723,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.StripEnv) > 0 {
 		cfg.StripEnv = overrides.StripEnv
 	}
+	if overrides.ProviderGatewayAuth != nil {
+		cfg.ProviderGatewayAuth = overrides.ProviderGatewayAuth
+	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
@@ -770,6 +783,7 @@ type InstanceOverrides struct {
 	NamespacesMCPToolsByServer bool
 	RequiresProcessKill        bool
 	StripEnv                   []string
+	ProviderGatewayAuth        *acpprovider.GatewayAuth
 	BaseBranches               map[string]string
 	ComparisonTargets          map[string]models.ComparisonTarget
 	RemoteContributions        map[string]models.RemoteContribution

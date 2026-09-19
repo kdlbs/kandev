@@ -14,22 +14,23 @@ import (
 
 // TaskRepositoryInput for creating/updating task repositories
 type TaskRepositoryInput struct {
-	RepositoryID   string `json:"repository_id"`
-	BaseBranch     string `json:"base_branch"`
-	CheckoutBranch string `json:"checkout_branch,omitempty"`
-	BranchPolicyID string `json:"branch_policy_id,omitempty"`
-	PRNumber       int    `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
-	LocalPath      string `json:"local_path,omitempty"`
-	Name           string `json:"name,omitempty"`
-	DefaultBranch  string `json:"default_branch,omitempty"`
-	GitHubURL      string `json:"github_url,omitempty"`
-	RemoteURL      string `json:"remote_url,omitempty"`
-	Provider       string `json:"provider,omitempty"`
-	ProviderHost   string `json:"provider_host,omitempty"`
-	ProviderScope  string `json:"provider_scope,omitempty"`
-	ProviderRepoID string `json:"provider_repo_id,omitempty"`
-	ProviderOwner  string `json:"provider_owner,omitempty"`
-	ProviderName   string `json:"provider_name,omitempty"`
+	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	RepositoryID    string                            `json:"repository_id"`
+	BaseBranch      string                            `json:"base_branch"`
+	CheckoutBranch  string                            `json:"checkout_branch,omitempty"`
+	BranchPolicyID  string                            `json:"branch_policy_id,omitempty"`
+	PRNumber        int                               `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
+	LocalPath       string                            `json:"local_path,omitempty"`
+	Name            string                            `json:"name,omitempty"`
+	DefaultBranch   string                            `json:"default_branch,omitempty"`
+	GitHubURL       string                            `json:"github_url,omitempty"`
+	RemoteURL       string                            `json:"remote_url,omitempty"`
+	Provider        string                            `json:"provider,omitempty"`
+	ProviderHost    string                            `json:"provider_host,omitempty"`
+	ProviderScope   string                            `json:"provider_scope,omitempty"`
+	ProviderRepoID  string                            `json:"provider_repo_id,omitempty"`
+	ProviderOwner   string                            `json:"provider_owner,omitempty"`
+	ProviderName    string                            `json:"provider_name,omitempty"`
 
 	// PreserveBaseBranch keeps an effective branch produced after policy
 	// resolution (for example, the branch created by the local fresh-branch
@@ -338,7 +339,11 @@ type ListMessagesRequest struct {
 	After         string
 	Sort          string
 	AuthorType    string
-	Around        string
+	// AuthorTypes narrows by any listed author; when non-empty it takes
+	// precedence over AuthorType. TaskID narrows the page to one task.
+	AuthorTypes []string
+	TaskID      string
+	Around      string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script

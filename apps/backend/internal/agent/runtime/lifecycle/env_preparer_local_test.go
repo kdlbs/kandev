@@ -192,7 +192,7 @@ func isolateGitEnv(t *testing.T) {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	// Unset vars set by git hooks that would redirect commands to the host repo.
 	// Cannot use t.Setenv("", "") because GIT_DIR="" makes git fail differently.
-	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"} {
+	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"} {
 		if val, ok := os.LookupEnv(key); ok {
 			_ = os.Unsetenv(key)
 			t.Cleanup(func() { _ = os.Setenv(key, val) })
