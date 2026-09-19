@@ -30,10 +30,8 @@ func newAgentErrorTestService(
 	t *testing.T, repo *sqliterepo.Repository, stepGetter *mockStepGetter, configure func(*Service),
 ) (*Service, *observer.ObservedLogs) {
 	t.Helper()
-	// handleRecoverableFailureLocked's last-but-one step (before this card's
-	// dispatch) fires a background cleanupAgentExecution that dereferences
-	// svc.executor — createTestServiceWithScheduler is the fixture that wires
-	// one, unlike the bare createTestService used elsewhere in this package.
+	// Recovery stops the failed execution before dispatching workflow actions.
+	// Use the fixture that wires svc.executor for that cleanup boundary.
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
 	core, logs := observer.New(zapcore.DebugLevel)

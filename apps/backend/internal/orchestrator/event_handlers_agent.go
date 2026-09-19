@@ -2403,7 +2403,7 @@ func (s *Service) finishAgentCompletedTurn(
 func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEventData) {
 	if data.SessionID == "" {
 		if dispatch := s.handleAgentFailedLocked(ctx, data); dispatch != nil {
-			dispatch()
+			go dispatch()
 		}
 		return
 	}
@@ -2442,7 +2442,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	lock.Unlock()
 	release()
 	if dispatch != nil {
-		dispatch()
+		go dispatch()
 	}
 }
 
@@ -2791,7 +2791,7 @@ func (s *Service) clearResumeToken(ctx context.Context, sessionID string) error 
 func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.AgentEventData) {
 	if data.SessionID == "" {
 		if dispatch := s.handleRecoverableFailureLockedState(ctx, data); dispatch != nil {
-			dispatch()
+			go dispatch()
 		}
 		return
 	}
@@ -2817,17 +2817,7 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 	lock.Unlock()
 	release()
 	if dispatch != nil {
-		dispatch()
-	}
-}
-
-// handleRecoverableFailureLocked performs recovery side effects and dispatches
-// the workflow trigger synchronously. Production callers that already hold the
-// session guard must use handleRecoverableFailureLockedState and invoke the
-// returned dispatch after releasing that guard.
-func (s *Service) handleRecoverableFailureLocked(ctx context.Context, data watcher.AgentEventData) {
-	if dispatch := s.handleRecoverableFailureLockedState(ctx, data); dispatch != nil {
-		dispatch()
+		go dispatch()
 	}
 }
 
@@ -2910,19 +2900,15 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 		}
 	}
 
-	// Clean up the agent execution.
-	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
-
-	// The caller runs this after releasing cancelInFlight. A direct
-	// auto_start_agent callback can start the same session and reacquire that
-	// guard, so dispatching while it is held would deadlock. Panic recovery is
-	// the recovered wrapper's job, not this one's — routes R2-R5 reach this
-	// closure with no recover above them on the stack.
-	if completionFollowUp {
-		return func() {}
-	}
+	// Callers run teardown and workflow dispatch asynchronously after releasing
+	// cancelInFlight: lifecycle publishers may still hold their prompt lock.
+	// A workflow restart must observe the failed execution's released slot.
 	return func() {
-		s.dispatchKanbanAgentErrorTriggerRecovered(context.WithoutCancel(ctx), data)
+		s.cleanupAgentExecutionWithReason(data.AgentExecutionID, data.TaskID, data.SessionID,
+			lifecycle.StopReasonRecoverableAgentFailure)
+		if !completionFollowUp {
+			s.dispatchKanbanAgentErrorTriggerRecovered(context.WithoutCancel(ctx), data)
+		}
 	}
 }
 
@@ -3472,7 +3458,7 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			releaseGuard()
 		}
 		if dispatch != nil {
-			dispatch()
+			go dispatch()
 		}
 	}()
 	if sessionID != "" {
@@ -3771,30 +3757,5 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 // the agent reaches a terminal state (completed/failed). This runs in a goroutine
 // so it doesn't block the event handler.
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
-	if executionID == "" {
-		return
-	}
-	if !s.claimForcedExecutionCleanup(sessionID, executionID) {
-		s.logger.Debug("skipping duplicate execution teardown",
-			zap.String("execution_id", executionID),
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
-		return
-	}
-	ctx := context.Background()
-	if !s.isExecutionCompleted(sessionID, executionID) {
-		// Direct crash/forced-cleanup callers may reach this boundary without a
-		// preceding lifecycle event. Preserve an existing completed marker (and
-		// its allowed terminal stream), otherwise tombstone trailing frames.
-		s.markExecutionFailed(sessionID, executionID)
-	}
-	// Defensive terminal-boundary retirement. Normal lifecycle events run this
-	// first; the repeated forced-cleanup call is idempotent.
-	s.retireExecutionActivityAndPublish(ctx, taskID, sessionID, executionID)
-	if err := s.executor.StopExecution(ctx, executionID, "agent completed", true); err != nil {
-		s.logger.Debug("agent execution cleanup after terminal state",
-			zap.String("execution_id", executionID),
-			zap.String("task_id", taskID),
-			zap.Error(err))
-	}
+	s.cleanupAgentExecutionWithReason(executionID, taskID, sessionID, "agent completed")
 }
