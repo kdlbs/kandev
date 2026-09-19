@@ -32,11 +32,9 @@ What it does **not** reach, and what this design therefore has to plumb:
   `persistenceHealth` but no reporter, and `readyHandler` (`:1013`) builds its
   503 and 200 bodies without a snapshot. A reporter field is added to
   `routeParams` and populated where the other params are.
-- **The desktop client.** It reads no response body today: `request_ready`
-  (`desktop/src-tauri/src/backend.rs:628`) calls `read_http_response_head`
-  (`:651`), which stops at the first blank line, and tests the status line alone.
-  It gains an 8192-byte-capped body read and a JSON decode inside its existing 250 ms socket
-  read timeout. This is new work, not an existing parse being reused.
+- **The desktop client.** Its progress display is deferred to follow-up card
+  `c99c6111-e982-4313-b165-5c9b8aa03e46`. The existing readiness wait remains
+  unchanged in this initiative.
 
 Adjacent contracts used but not owned here: the bootstrap listener and handler
 switch ([startup lifecycle](startup-lifecycle.md)), the required-store catalog in
@@ -69,7 +67,8 @@ switch ([startup lifecycle](startup-lifecycle.md)), the required-store catalog i
   server-rendered startup page from the bootstrap handler.
 - **`internal/launcher`** reads the snapshot in its readiness wait.
 - **`apps/web`** renders startup state inside the application document.
-- **`apps/desktop`** forwards the snapshot into its existing startup window.
+- **`apps/desktop`** keeps its existing readiness behavior; progress integration
+  is deferred to follow-up card `c99c6111-e982-4313-b165-5c9b8aa03e46`.
 
 ## Data and contracts
 
@@ -363,8 +362,8 @@ degraded" (AC-PLATFORM-STARTUP-PROGRESS-002.3). `/health` is untouched.
 by the launcher's child-exit message (`launcher/health.go:370`). It stays as it
 is: it is diagnostic output, which `docs/i18n.md` keeps in English.
 
-Step names are a different thing and must not reuse it. The snapshot carries the step's `LabelKey` as `label_key`, because the web application and the desktop shell read the wire, not the Go registry, and AC-PLATFORM-STARTUP-PROGRESS-005.4 forbids building a name from the identifier. The backend-rendered page resolves it through `i18n.T`/`i18n.Tf` with
-the locale from `i18n.FromRequest` (cookie, then accepted languages, then default). That chain is the one AC-PLATFORM-STARTUP-PROGRESS-003.9 names, but `parseAcceptLanguage` (`i18n/i18n.go:124`) does not yet fall through as the criterion requires: it coerces an unparseable `q` to 1.0, promoting a malformed entry to first place, and it accepts `q=0`. Both are corrected there, not worked around here, so every caller gets the same rule. The web application resolves the same key through i18next. Counts
+Step names are a different thing and must not reuse it. The snapshot carries the step's `LabelKey` as `label_key`, because the web application reads the wire, not the Go registry, and AC-PLATFORM-STARTUP-PROGRESS-005.4 forbids building a name from the identifier. The backend-rendered page resolves it through `i18n.T`/`i18n.Tf` with
+the locale from `i18n.FromRequest` (cookie, then accepted languages, then default). That chain is the one AC-PLATFORM-STARTUP-PROGRESS-003.9 names, and `parseAcceptLanguage` (`i18n/i18n.go:124`) applies its fallback and quality rules. The web application resolves the same key through i18next. Counts
 beside a unit noun use `Tf` with a `count` argument so `_one`/`_other` selection
 happens in the catalog, never by assembling an ending in Go or TypeScript.
 
@@ -421,17 +420,9 @@ false for `opaque` steps.
   on a stall-state transition. The
   8192-byte `io.LimitReader` at `:427` stays sufficient: the snapshot adds
   bounded enum and integer fields.
-- **Desktop.** `wait_for_ready` (`src-tauri/src/backend.rs:550`) polls `/ready` already but reads no body; with the body read named above it decodes the snapshot and calls the existing `set_status` bridge
-  (`:215`, `window.__KANDEV_DESKTOP_SET_STATUS`), so the existing startup window
-  shows the step without a new window or a new IPC surface. Its per-request bound is
-  the 250 ms connect and read timeout `request_ready` already sets (`:634`, `:637`),
-  so a hung connection cannot stall the refresh; the wait itself never gives up. The desktop shell is
-  a separate bundle with no translation pipeline, so its strings stay in the
-  default locale; it formats the estimate with the same rounding rule. A response it
-  cannot parse, or one carrying no snapshot, is resolved by
-  AC-PLATFORM-STARTUP-PROGRESS-002.6 and rendered by
-  AC-PLATFORM-STARTUP-PROGRESS-003.13: it keeps the last snapshot it read and labels
-  it as last known, or shows the waiting state if it has never read one. Neither case is a startup failure.
+- **Desktop (deferred).** The shell keeps its existing readiness wait and startup
+  window behavior. Progress body parsing and status display are deferred to
+  follow-up card `c99c6111-e982-4313-b165-5c9b8aa03e46`.
 
 ## Failure and recovery
 

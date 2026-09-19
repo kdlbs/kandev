@@ -195,11 +195,10 @@ including a browser pointed at a migrating backend.
 - **AC-PLATFORM-STARTUP-PROGRESS-003.5:** The launcher shall write one line per read that observes a phase, sequence-number, or stall-state change, and exactly one further line per 15000 milliseconds while none of those changes, each carrying phase, elapsed time, and the step name when one is active, plus done, total, rate, and estimate whenever the snapshot carries them. A transition not observed between two reads shall not be reported.
 - **AC-PLATFORM-STARTUP-PROGRESS-003.6:** When the backend exits during startup, the
   launcher shall name the last observed step as well as the last observed phase.
-- **AC-PLATFORM-STARTUP-PROGRESS-003.7:** The desktop shell shall display phase, step
-  name, and progress while awaiting readiness, refresh on the
-  AC-PLATFORM-STARTUP-PROGRESS-003.2 interval, replace them with the application once
-  ready, resolve an unparseable or snapshot-free response by
-  AC-PLATFORM-STARTUP-PROGRESS-002.6, and treat neither as a startup failure.
+- **AC-PLATFORM-STARTUP-PROGRESS-003.7 (deferred):** The desktop shell progress
+  display is deferred to follow-up card `c99c6111-e982-4313-b165-5c9b8aa03e46`.
+  This initiative keeps the existing desktop readiness behavior and does not
+  implement the progress display.
 - **AC-PLATFORM-STARTUP-PROGRESS-003.8:** Every startup string rendered by the web
   application or the backend shall be translated in each supported locale for that
   surface, and a count rendered beside a noun shall use plural-aware translation

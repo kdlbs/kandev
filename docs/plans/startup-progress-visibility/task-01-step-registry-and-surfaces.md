@@ -145,7 +145,7 @@ Out of scope).
   media-range specificity and quality-parameter parsing.
 - An automated check fails if a required persisted store is counted by zero
   or more than one sweep step, if a registered identifier falls outside the
-  normative list of ten, or if a step's label key is missing from any
+  normative list of seven, or if a step's label key is missing from any
   supported locale.
 
 ## Verification

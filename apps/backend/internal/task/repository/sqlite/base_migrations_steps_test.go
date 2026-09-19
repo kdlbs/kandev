@@ -85,16 +85,25 @@ func TestMigrateSubagentContextBackfillOpensStepOnlyOnFirstBoot(t *testing.T) {
 func assertOpaqueStepBracket(t *testing.T, logs *observer.ObservedLogs, wantStep startup.StepID) {
 	t.Helper()
 	var startedAt, completedAt = -1, -1
+	var startedCount, completedCount int
 	for i, entry := range logs.All() {
 		if entry.ContextMap()["step"] != string(wantStep) {
 			continue
 		}
 		switch entry.Message {
 		case "Startup step started":
+			startedCount++
 			startedAt = i
 		case "Startup step completed":
+			completedCount++
 			completedAt = i
 		}
+	}
+	if startedCount != 1 {
+		t.Fatalf("startup step %q started %d times, want 1", wantStep, startedCount)
+	}
+	if completedCount != 1 {
+		t.Fatalf("startup step %q completed %d times, want 1", wantStep, completedCount)
 	}
 	if startedAt == -1 {
 		t.Fatalf("no \"Startup step started\" entry for step %q", wantStep)

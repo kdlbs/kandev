@@ -291,6 +291,49 @@ const startupPageScript = `
   var t = data.translations;
   var inFlight = false;
 
+  var phases = {
+    opening_database: true,
+    backing_up_database: true,
+    applying_migrations: true,
+    initializing_services: true,
+    recovering_sessions: true,
+    ready: true
+  };
+  var measures = { opaque: true, counting: true, counted: true };
+  var units = { rows: true, messages: true, turns: true, sessions: true, bytes: true, stores: true };
+
+  function nonNegativeInteger(value) {
+    return typeof value === "number" && isFinite(value) && value >= 0 && Math.floor(value) === value;
+  }
+
+  function nonNegativeNumber(value) {
+    return typeof value === "number" && isFinite(value) && value >= 0;
+  }
+
+  function validStartupStep(step) {
+    if (!step || typeof step !== "object" ||
+        typeof step.id !== "string" || !step.id ||
+        typeof step.label_key !== "string" || !step.label_key ||
+        !measures[step.measure] || !units[step.unit] ||
+        !nonNegativeInteger(step.elapsed_ms) || typeof step.stalled !== "boolean") {
+      return false;
+    }
+    for (var i = 0; i < ["done", "total", "eta_ms", "since_advance_ms"].length; i++) {
+      var key = ["done", "total", "eta_ms", "since_advance_ms"][i];
+      if (step[key] !== undefined && !nonNegativeInteger(step[key])) return false;
+    }
+    return step.rate_per_second === undefined || nonNegativeNumber(step.rate_per_second);
+  }
+
+  function validStartupSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object" || !phases[snapshot.phase] ||
+        !nonNegativeInteger(snapshot.boot) || !nonNegativeInteger(snapshot.seq) ||
+        !nonNegativeInteger(snapshot.elapsed_ms) || !nonNegativeInteger(snapshot.phase_elapsed_ms)) {
+      return false;
+    }
+    return snapshot.step === undefined || validStartupStep(snapshot.step);
+  }
+
   function el(id) { return document.getElementById(id); }
   function setText(id, text) { var e = el(id); if (e) e.textContent = text || ""; }
   function toggle(id, show) { var e = el(id); if (e) e.classList.toggle("hidden", !show); }
@@ -380,7 +423,7 @@ const startupPageScript = `
 
   function handleBody(ok, body) {
     var snapshot = body && body.startup;
-    if (!snapshot) {
+    if (!validStartupSnapshot(snapshot)) {
       // AC-PLATFORM-STARTUP-PROGRESS-002.6: no parseable snapshot means the
       // status code is authoritative.
       if (ok) { window.location.reload(); return; }

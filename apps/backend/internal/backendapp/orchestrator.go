@@ -1222,10 +1222,6 @@ func (a *repositoryResolverAdapter) persistDetectedDefaultBranch(
 	// later write succeeds — and this call site retries with the same
 	// detected value on every future invocation, so a rejection driven by
 	// validation (as opposed to a transient DB error) will repeat forever.
-	// Review round 3, finding #4: this used to log at Warn and nothing
-	// else, making that permanent degradation invisible. Error level plus
-	// the dedicated counter make it observable the same way ancestry/write
-	// failures already are in internal/delivery/metrics.go.
 	if _, err := a.taskSvc.UpdateRepository(ctx, repo.ID, &taskservice.UpdateRepositoryRequest{
 		DefaultBranch: &detected,
 	}); err != nil {

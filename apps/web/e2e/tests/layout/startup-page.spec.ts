@@ -90,6 +90,14 @@ test.describe("Startup page (real render)", () => {
     await expect(page.locator("#startup-progress")).toHaveText("400 of 1000 messages");
     await expect(page.locator("#startup-eta")).toHaveText("About 30 seconds remaining");
 
+    // A failing response with a malformed snapshot must keep the last valid
+    // detail and mark it as stale. The status code remains authoritative when
+    // the body shape cannot be trusted.
+    readyBody = { status: "starting", startup: { ...STARTING_SNAPSHOT, step: {} } };
+    await expect(page.getByText("Last known")).toBeVisible();
+    await expect(page.locator("#startup-step-label")).toHaveText("Service stores");
+    await expect(page.locator("#startup-progress")).toHaveText("400 of 1000 messages");
+
     // Poll-driven update: the embedded script re-fetches /ready on its own
     // schedule and re-renders in place, with no test-issued reload.
     readyBody = ADVANCED_BODY;

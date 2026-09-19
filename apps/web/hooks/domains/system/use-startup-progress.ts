@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError, fetchJson } from "@/lib/api/client";
-import type { StartupSnapshot } from "@/lib/startup-progress/types";
+import { parseStartupSnapshot, type StartupSnapshot } from "@/lib/startup-progress/types";
 
 const POLL_MS = 1000;
 const TIMEOUT_MS = 5000;
 
 type ReadyBody = {
-  startup?: StartupSnapshot;
+  startup?: unknown;
 };
 
 export type StartupProgressState = {
@@ -42,17 +42,22 @@ export function useStartupProgress(enabled: boolean): StartupProgressState {
   const [snapshot, setSnapshot] = useState<StartupSnapshot | null>(null);
   const [lastKnown, setLastKnown] = useState(false);
   const inFlightRef = useRef(false);
+  const activeControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!enabled) {
       setSnapshot(null);
       setLastKnown(false);
+      activeControllerRef.current?.abort();
+      activeControllerRef.current = null;
+      inFlightRef.current = false;
       return;
     }
     let cancelled = false;
 
     const applySnapshot = (ok: boolean, body: ReadyBody | null) => {
-      if (!body?.startup) {
+      const parsed = parseStartupSnapshot(body?.startup);
+      if (!parsed) {
         // AC-PLATFORM-STARTUP-PROGRESS-002.6: a response with no parseable
         // snapshot resolves by the status code, not by assuming staleness -
         // a successful status means ready, only a failing one falls back to
@@ -61,13 +66,14 @@ export function useStartupProgress(enabled: boolean): StartupProgressState {
         return;
       }
       setLastKnown(false);
-      setSnapshot(body.startup);
+      setSnapshot(parsed);
     };
 
     const tick = async () => {
       if (inFlightRef.current) return;
       inFlightRef.current = true;
       const controller = new AbortController();
+      activeControllerRef.current = controller;
       const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
       try {
         const body = await fetchJson<ReadyBody>("/ready", {
@@ -76,10 +82,14 @@ export function useStartupProgress(enabled: boolean): StartupProgressState {
         });
         if (!cancelled) applySnapshot(true, body);
       } catch (err) {
-        if (!cancelled) applySnapshot(false, readyBodyOf(err));
+        const ok = err instanceof ApiError && err.status >= 200 && err.status < 300;
+        if (!cancelled) applySnapshot(ok, readyBodyOf(err));
       } finally {
         clearTimeout(timeoutId);
-        inFlightRef.current = false;
+        if (activeControllerRef.current === controller) {
+          activeControllerRef.current = null;
+          inFlightRef.current = false;
+        }
       }
     };
 
@@ -88,6 +98,9 @@ export function useStartupProgress(enabled: boolean): StartupProgressState {
     return () => {
       cancelled = true;
       clearInterval(interval);
+      activeControllerRef.current?.abort();
+      activeControllerRef.current = null;
+      inFlightRef.current = false;
     };
   }, [enabled]);
 

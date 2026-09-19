@@ -111,6 +111,27 @@ func TestRateFallsBackToStepStartBelowTwoSamples(t *testing.T) {
 	}
 }
 
+func TestRateWindowUsesThePointBeforeTheFirstInWindowSample(t *testing.T) {
+	r := New(nil)
+	r.Set(ApplyingMigrations)
+	r.BeginStep(StepStoresRepositories)
+	now := time.Now()
+	r.active.startedAt = now.Add(-50 * time.Second)
+	r.active.samples = []rateSample{
+		{at: now.Add(-40 * time.Second), delta: 100},
+		{at: now.Add(-10 * time.Second), delta: 10},
+	}
+	r.active.done = 110
+
+	rate := r.active.rate(now)
+	// The in-window sample contributes ten units over the interval from the
+	// preceding sample, rather than being divided by the near-zero age of its
+	// own timestamp.
+	if rate < 0.24 || rate > 0.26 {
+		t.Fatalf("rate = %v, want about 0.25 units/s", rate)
+	}
+}
+
 func TestETAOmittedAboveOneDay(t *testing.T) {
 	r := New(nil)
 	r.Set(ApplyingMigrations)

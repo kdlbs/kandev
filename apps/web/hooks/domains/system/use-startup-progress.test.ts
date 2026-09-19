@@ -99,6 +99,47 @@ describe("useStartupProgress", () => {
     expect(result.current.lastKnown).toBe(false);
   });
 
+  it("treats invalid JSON from a successful response as ready", async () => {
+    vi.useFakeTimers();
+    mocks.fetchJson
+      .mockResolvedValueOnce({ startup: snapshot() })
+      .mockRejectedValueOnce(new ApiError("invalid JSON", 200, null));
+    const { result } = renderHook(() => useStartupProgress(true));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(result.current.lastKnown).toBe(false);
+    expect(result.current.snapshot).not.toBeNull();
+  });
+});
+
+describe("useStartupProgress validation and cleanup", () => {
+  it("keeps the last valid snapshot when a later body is malformed", async () => {
+    vi.useFakeTimers();
+    const first = snapshot();
+    mocks.fetchJson
+      .mockResolvedValueOnce({ startup: first })
+      .mockResolvedValueOnce({ startup: { ...first, step: {} } });
+    const { result } = renderHook(() => useStartupProgress(true));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.snapshot).toEqual(first);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(result.current.snapshot).toEqual(first);
+    expect(result.current.lastKnown).toBe(false);
+  });
+
   it("skips a tick while the previous poll is still outstanding", async () => {
     vi.useFakeTimers();
     let resolveFirst!: (value: { startup: StartupSnapshot }) => void;
@@ -132,5 +173,21 @@ describe("useStartupProgress", () => {
     rerender({ enabled: false });
     expect(result.current.snapshot).toBeNull();
     expect(result.current.lastKnown).toBe(false);
+  });
+
+  it("aborts an active request when disabled", async () => {
+    let signal: AbortSignal | undefined;
+    mocks.fetchJson.mockImplementation((_path: string, options: { init?: RequestInit }) => {
+      signal = options.init?.signal as AbortSignal | undefined;
+      return new Promise(() => {});
+    });
+    const { rerender } = renderHook(({ enabled }) => useStartupProgress(enabled), {
+      initialProps: { enabled: true },
+    });
+
+    await waitFor(() => expect(signal).toBeDefined());
+    rerender({ enabled: false });
+
+    expect(signal?.aborted).toBe(true);
   });
 });

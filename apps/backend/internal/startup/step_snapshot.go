@@ -93,20 +93,23 @@ func (a *stepActivation) rate(now time.Time) float64 {
 // rateWindowStart returns the time and cumulative done count at the older
 // edge of the rate window: the oldest recorded sample no older than 30 s,
 // or the step's start when fewer than two samples have ever been recorded.
-// When every sample is older than the window, it returns "now" paired with
-// the current done count, which yields a zero rate rather than reviving a
-// stale burst.
+// The returned timestamp is the point immediately before the first sample in
+// the window, paired with the cumulative count at that point. When every
+// sample is older than the window, it returns "now" paired with the current
+// done count, which yields a zero rate rather than reviving a stale burst.
 func (a *stepActivation) rateWindowStart(now time.Time) (time.Time, int64) {
 	if len(a.samples) < 2 {
 		return a.startedAt, a.anchorDone
 	}
 	cutoff := now.Add(-rateWindow)
 	cumulative := a.anchorDone
+	previousAt := a.startedAt
 	for _, s := range a.samples {
 		if !s.at.Before(cutoff) {
-			return s.at, cumulative
+			return previousAt, cumulative
 		}
 		cumulative += s.delta
+		previousAt = s.at
 	}
 	return now, a.done
 }

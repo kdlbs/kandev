@@ -141,6 +141,55 @@ func TestManagerStartRecoverySessionsStepReportsZeroTotalOnEmptyInventory(t *tes
 	}
 }
 
+func TestManagerStartKeepsRecoveryStepUntilStopWorkersFinish(t *testing.T) {
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &deadlineRecoveringExecutor{
+		name:        executor.NameStandalone,
+		stopStarted: make(chan struct{}),
+		allowStop:   make(chan struct{}),
+		recovered: []*ExecutorInstance{{
+			InstanceID:           "exec-1",
+			TaskID:               "task-1",
+			SessionID:            "session-1",
+			RuntimeName:          executor.NameStandalone,
+			StandaloneInstanceID: "standalone-1",
+		}},
+	}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetExecutorRunningWriter(&listingWriter{rows: []*models.ExecutorRunning{{SessionID: "session-1"}}})
+	mgr.SetRecoveryDeadlineStart(time.Now().Add(-time.Hour))
+	mgr.SetRecoveryDeadline(time.Millisecond)
+
+	reporter, _ := newObservedSessionsRecoveryReporter(t)
+	reporter.Set(startup.RecoveringSessions)
+	ctx := startup.WithReporter(context.Background(), reporter)
+	done := make(chan error, 1)
+	go func() { done <- mgr.Start(ctx) }()
+
+	select {
+	case <-backend.stopStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("recovery stop worker did not start")
+	}
+
+	if snap := reporter.Snapshot(); snap.Step == nil {
+		t.Fatal("recovery step ended before the stop worker finished")
+	}
+
+	close(backend.allowStop)
+	if err := <-done; err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if snap := reporter.Snapshot(); snap.Step != nil {
+		t.Fatalf("Step after Start = %+v, want nil (step closed)", snap.Step)
+	}
+}
+
 // TestManagerStartRecoverySessionsStepLocksOpaqueOnUnreadableInventory
 // covers the AC-EXECUTORS-SURVIVAL-002.6/002.12 unreadable-inventory path
 // this same file's sibling manager_recovery_inventory_unknown_test.go pins

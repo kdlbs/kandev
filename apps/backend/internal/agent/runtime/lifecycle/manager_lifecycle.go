@@ -340,7 +340,6 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		m.logger.Info("recovered executions", zap.Int("count", len(recovered)))
 	}
-	startup.EndStep(ctx, startup.StepSessionsRecovery)
 	cancelRecovery()
 
 	// AC-EXECUTORS-SURVIVAL-002.11: every dispatchUnreconstructableStop call
@@ -351,6 +350,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	// before returning) so Start remains synchronous overall and
 	// ReleaseAllExceptRetained below never races a still-resolving stop.
 	stopWG.Wait()
+	startup.EndStep(ctx, startup.StepSessionsRecovery)
 
 	// Recovery is synchronous above: by this point every guarded session's
 	// outcome (re-tracked or not) is already decided, so every guard still
