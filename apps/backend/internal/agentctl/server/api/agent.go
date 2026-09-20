@@ -826,7 +826,7 @@ func (s *Server) handleWSBackgroundProbe(_ context.Context, msg *ws.Message) *ws
 		return resp
 	}
 
-	result, err := probe.ProbeBackgroundWorkloads(s.procMgr.AgentPID(), turnStart)
+	result, err := probe.ProbeBackgroundWorkloads(s.procMgr.AgentPID(), turnStart, req.SessionID)
 	if err != nil {
 		s.logger.Warn("background probe failed", zap.String("session_id", req.SessionID), zap.Error(err))
 	}
