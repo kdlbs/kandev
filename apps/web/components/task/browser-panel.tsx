@@ -3,8 +3,14 @@
 import { memo, useState, useEffect, useMemo, useRef } from "react";
 import { IconRefresh, IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
 import { Input } from "@kandev/ui/input";
-import { PanelRoot, PanelBody, PanelHeaderBar } from "./panel-primitives";
+import {
+  PanelRoot,
+  PanelBody,
+  PanelHeaderBarSplit,
+  PanelHeaderOverflowMenu,
+} from "./panel-primitives";
 import { useAppStore } from "@/components/state-provider";
 import { detectPreviewUrlFromOutput, rewritePreviewUrlForProxy } from "@/lib/preview-url-detector";
 import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
@@ -140,7 +146,6 @@ function useBrowserPanelUrl(initialUrl: string) {
 }
 
 export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelProps) {
-  const { t } = useTranslation();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   usePreviewConsoleForwarder(iframeRef);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -160,42 +165,12 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
 
   return (
     <PanelRoot data-testid="browser-panel">
-      <PanelHeaderBar className="h-auto min-h-[52px] py-1 sm:h-[30px] sm:min-h-[30px] sm:py-0">
-        <Input
-          controlSize="none"
-          value={url.displayDraft}
-          onChange={(e) => url.setUrlDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              url.handleUrlSubmit();
-            }
-          }}
-          placeholder={url.detectedUrl || "http://localhost:3000"}
-          className="h-11 flex-1 min-w-0 sm:h-6 sm:min-w-[180px]"
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={url.handleOpenInTab}
-          disabled={!url.directUrl}
-          className="h-11 w-11 cursor-pointer p-0 sm:h-6 sm:w-auto sm:px-2"
-          title={t("task:openInBrowserTab")}
-        >
-          <IconExternalLink className="h-4 w-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => url.setRefreshKey((v) => v + 1)}
-          disabled={!url.directUrl}
-          className="h-11 w-11 cursor-pointer p-0 sm:h-6 sm:w-auto sm:px-2"
-          title={t("task:refresh")}
-        >
-          <IconRefresh className="h-4 w-4" />
-        </Button>
-        {showInspect && <PreviewFeedbackControls capture={capture} enabled={!!activeTaskId} />}
-      </PanelHeaderBar>
+      <BrowserPanelHeader
+        url={url}
+        capture={capture}
+        showInspect={showInspect}
+        enabled={!!activeTaskId}
+      />
 
       <PanelBody padding={false} scroll={false}>
         <BrowserPanelContent
@@ -209,3 +184,91 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
     </PanelRoot>
   );
 });
+
+function BrowserPanelHeader({
+  url,
+  capture,
+  showInspect,
+  enabled,
+}: {
+  url: ReturnType<typeof useBrowserPanelUrl>;
+  capture: ReturnType<typeof usePreviewCapture>;
+  showInspect: boolean;
+  enabled: boolean;
+}) {
+  const { t } = useTranslation();
+  const directActions = (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={url.handleOpenInTab}
+        disabled={!url.directUrl}
+        className="cursor-pointer"
+        title={t("task:openInBrowserTab")}
+        aria-label={t("task:openInBrowserTab")}
+      >
+        <IconExternalLink className="h-4 w-4" />
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => url.setRefreshKey((v) => v + 1)}
+        disabled={!url.directUrl}
+        className="cursor-pointer"
+        title={t("task:refresh")}
+        aria-label={t("task:refresh")}
+      >
+        <IconRefresh className="h-4 w-4" />
+      </Button>
+      {showInspect && <PreviewFeedbackControls capture={capture} enabled={enabled} />}
+    </>
+  );
+  const overflowActions = (
+    <PanelHeaderOverflowMenu label={t("common:showMoreActions")}>
+      <DropdownMenuItem
+        className="cursor-pointer gap-2"
+        disabled={!url.directUrl}
+        onSelect={url.handleOpenInTab}
+      >
+        <IconExternalLink className="size-4" />
+        {t("task:openInBrowserTab")}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="cursor-pointer gap-2"
+        disabled={!url.directUrl}
+        onSelect={() => url.setRefreshKey((v) => v + 1)}
+      >
+        <IconRefresh className="size-4" />
+        {t("task:refresh")}
+      </DropdownMenuItem>
+    </PanelHeaderOverflowMenu>
+  );
+
+  return (
+    <PanelHeaderBarSplit
+      leftClassName="flex-1"
+      left={
+        <Input
+          controlSize="none"
+          value={url.displayDraft}
+          onChange={(e) => url.setUrlDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              url.handleUrlSubmit();
+            }
+          }}
+          placeholder={url.detectedUrl || "http://localhost:3000"}
+          className="h-6 min-w-0 flex-1"
+        />
+      }
+      right={directActions}
+      rightWhenOverflow={
+        showInspect ? <PreviewFeedbackControls capture={capture} enabled={enabled} /> : undefined
+      }
+      overflow={overflowActions}
+      overflowAt={420}
+    />
+  );
+}

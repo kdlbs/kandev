@@ -1075,6 +1075,24 @@ export class SessionPage {
     await tab.click(options);
   }
 
+  /** Open the Changes Diff action in its direct or width-aware overflow presentation. */
+  async openChangesDiff(): Promise<void> {
+    const direct = this.changes.getByRole("button", { name: "Diff", exact: true });
+    const overflow = this.changes.getByTestId("panel-header-overflow").first();
+    await expect
+      .poll(async () => (await direct.isVisible()) || (await overflow.isVisible()), {
+        timeout: 15_000,
+        message: "Waiting for the Changes Diff action",
+      })
+      .toBe(true);
+    if (await direct.isVisible()) {
+      await direct.click();
+      return;
+    }
+    await overflow.click();
+    await this.page.getByRole("menuitem", { name: "Diff", exact: true }).click();
+  }
+
   /**
    * Click the session/chat tab regardless of its current title.
    * Session tabs are renamed from "Agent" to "#N AgentName" by useChatSessionTitle,

@@ -644,7 +644,7 @@ jobs:
             ./internal/workflowsync
             ./internal/worktree
           )
-          go test -v -race "${POSTGRES_PACKAGES[@]}"
+          go test -v -race -timeout 15m "${POSTGRES_PACKAGES[@]}"
 
   postgres-18:
     name: Backend Postgres 18

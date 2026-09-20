@@ -283,7 +283,7 @@ export function MobilePanelArea({
         </div>
       )}
       {currentMobilePanel === "files" && (
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col" data-testid="files-panel">
           {selectedFile ? (
             <MobileFileViewerPanel
               key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}

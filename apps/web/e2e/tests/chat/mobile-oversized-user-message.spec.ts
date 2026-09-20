@@ -15,6 +15,17 @@ import {
 
 const INCIDENT_LOG_LINE_COUNT = 3_921;
 
+test.beforeEach(async ({ backend }) => {
+  // This test asserts the queue UI. Pin the feature off so a steering-enabled
+  // shard cannot change the input mode while the test is running.
+  await backend.restart({ KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING: "false" });
+});
+
+test.afterEach(async ({ backend }) => {
+  // Restore the worker baseline for the next test in the shard.
+  await backend.restart();
+});
+
 function oversizedMessage(prefix: string): { source: string; tail: string; firstLine: string } {
   const tail = `${prefix}-TAIL-MARKER`;
   const logLine = (index: number) =>

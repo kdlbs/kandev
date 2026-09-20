@@ -447,6 +447,60 @@ export function usePendingMessageScroll({
   return { isLoading };
 }
 
+const SCROLL_TO_START_RETRY_DELAY_MS = 50;
+const MAX_SCROLL_TO_START_ATTEMPTS = 120;
+
+type PendingScrollToStartOptions = {
+  messageListRef: RefObject<MessageListHandle | null>;
+  firstMessageId: string | null;
+  hasMore: boolean;
+  pending: boolean;
+  requestKey: number;
+  onComplete: (didScroll: boolean) => void;
+};
+
+/** Keeps a scroll-to-start request alive until the final page's row is mounted. */
+export function usePendingScrollToStart({
+  messageListRef,
+  firstMessageId,
+  hasMore,
+  pending,
+  requestKey,
+  onComplete,
+}: PendingScrollToStartOptions) {
+  useEffect(() => {
+    if (!pending || hasMore) return;
+    if (!firstMessageId) {
+      onComplete(false);
+      return;
+    }
+
+    let cancelled = false;
+    let frameId: number | null = null;
+    let timeoutId: number | null = null;
+    let attempts = 0;
+    const attempt = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const didScroll = Boolean(
+        messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" }),
+      );
+      if (didScroll || attempts >= MAX_SCROLL_TO_START_ATTEMPTS) {
+        onComplete(didScroll);
+        return;
+      }
+      timeoutId = window.setTimeout(attempt, SCROLL_TO_START_RETRY_DELAY_MS);
+    };
+
+    frameId = requestAnimationFrame(attempt);
+    return () => {
+      cancelled = true;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [firstMessageId, hasMore, messageListRef, onComplete, pending, requestKey]);
+}
+
 /** Computes the render-item key the unread "New" divider should appear
  * immediately before: tracks the latest rendered message id for session read
  * tracking, then maps the resulting divider anchor onto the grouped items. */
@@ -1139,23 +1193,24 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // which grows as pages prepend) has settled on the true first prompt by the
   // time the scroll fires.
   const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
+  const [scrollToStartRequest, setScrollToStartRequest] = useState(0);
   useDrainOlderMessages(resolvedSessionId, pendingScrollToStart && hasMore);
-  useEffect(() => {
-    if (!pendingScrollToStart || hasMore) return;
+  const completeScrollToStart = useCallback((didScroll: boolean) => {
     setPendingScrollToStart(false);
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [pendingScrollToStart, hasMore, firstMessageId]);
+    if (didScroll) setIsFirstMessageHidden(false);
+  }, []);
+  usePendingScrollToStart({
+    messageListRef,
+    firstMessageId,
+    hasMore,
+    pending: pendingScrollToStart,
+    requestKey: scrollToStartRequest,
+    onComplete: completeScrollToStart,
+  });
   const scrollToStart = useCallback(() => {
-    if (hasMore) {
-      setPendingScrollToStart(true);
-      return;
-    }
-    if (firstMessageId) {
-      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
-    }
-  }, [hasMore, firstMessageId]);
+    setScrollToStartRequest((request) => request + 1);
+    setPendingScrollToStart(true);
+  }, []);
   // Search can target backend rows before the visible transcript boundary.
   const navigateSearchHit = useCallback(
     (id: string) => {

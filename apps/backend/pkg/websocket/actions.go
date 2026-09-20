@@ -509,11 +509,12 @@ const (
 	ActionMCPSetCanvasState           = "mcp.set_canvas_state"
 
 	// Config-mode MCP actions (agent-native configuration)
-	ActionMCPCreateWorkflow = "mcp.create_workflow"
-	ActionMCPUpdateWorkflow = "mcp.update_workflow"
-	ActionMCPDeleteWorkflow = "mcp.delete_workflow"
-	ActionMCPImportWorkflow = "mcp.import_workflow"
-	ActionMCPExportWorkflow = "mcp.export_workflow"
+	ActionMCPCreateAutomation = "mcp.create_automation"
+	ActionMCPCreateWorkflow   = "mcp.create_workflow"
+	ActionMCPUpdateWorkflow   = "mcp.update_workflow"
+	ActionMCPDeleteWorkflow   = "mcp.delete_workflow"
+	ActionMCPImportWorkflow   = "mcp.import_workflow"
+	ActionMCPExportWorkflow   = "mcp.export_workflow"
 
 	ActionMCPCreateWorkflowStep  = "mcp.create_workflow_step"
 	ActionMCPUpdateWorkflowStep  = "mcp.update_workflow_step"

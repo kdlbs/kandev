@@ -1233,6 +1233,7 @@ export class ApiClient {
       terminal_font_family?: string;
       terminal_font_size?: number;
       startup_page?: "task_overview" | "last_task" | "threads";
+      sidebar_layouts_by_workspace?: Record<string, { revision: number; [key: string]: unknown }>;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -1273,6 +1274,11 @@ export class ApiClient {
       views?: unknown[];
       active_view_id?: string;
       draft?: unknown;
+    };
+    sidebar_layout_state?: {
+      workspace_id: string;
+      expected_revision: number;
+      layout?: unknown;
     };
     thread_views?: unknown[];
     thread_active_view_id?: string;

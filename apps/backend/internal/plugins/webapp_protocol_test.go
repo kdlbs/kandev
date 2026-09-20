@@ -54,6 +54,58 @@ func TestWebAppProtocolContextDoesNotExposeCredentials(t *testing.T) {
 	}
 }
 
+func TestWebAppProtocolCookieDoesNotExpandPermissions(t *testing.T) {
+	svc := &Service{}
+	binding := webapp.CapabilityBinding{
+		UserID: "user-1", InstanceID: "instance-1", PluginID: "plugin-1",
+		ReleaseID: "release-1", WebAppKey: "board", Placement: "task-canvas",
+		Permissions: nil,
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: "kandev_session", Value: "valid-session"})
+	response := httptest.NewRecorder()
+
+	svc.handleWebAppProtocol(response, request, "ignored", binding, "v1/state")
+
+	if response.Code != http.StatusForbidden || !containsBody(response, "plugin_permission_denied") {
+		t.Fatalf("state request = %d %s, want the cookie to leave capability permissions unchanged", response.Code, response.Body.String())
+	}
+}
+
+func TestWebAppProtocolActionChecksCapability(t *testing.T) {
+	baseBinding := webapp.CapabilityBinding{
+		UserID: "user-1", InstanceID: "instance-1", PluginID: "plugin-1",
+		ReleaseID: "release-1", WebAppKey: "board", Placement: "task-canvas",
+		Permissions: nil,
+	}
+
+	denied := httptest.NewRecorder()
+	svc := &Service{}
+	svc.handleWebAppProtocol(
+		denied,
+		httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`)),
+		"",
+		baseBinding,
+		"v1/actions/not-declared",
+	)
+	if denied.Code != http.StatusForbidden || !containsBody(denied, "plugin_permission_denied") {
+		t.Fatalf("undeclared action = %d %s, want permission denial", denied.Code, denied.Body.String())
+	}
+
+	allowed := httptest.NewRecorder()
+	baseBinding.Permissions = []string{"action:declared"}
+	svc.handleWebAppProtocol(
+		allowed,
+		httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`)),
+		"",
+		baseBinding,
+		"v1/actions/declared",
+	)
+	if allowed.Code != http.StatusNotImplemented || !containsBody(allowed, "plugin_action_unavailable") {
+		t.Fatalf("declared action = %d %s, want unavailable action response", allowed.Code, allowed.Body.String())
+	}
+}
+
 func TestWebAppProtocolStateUsesRevisionPreconditions(t *testing.T) {
 	store := newWebAppProtocolStateStore(t)
 	svc := &Service{instanceState: store}

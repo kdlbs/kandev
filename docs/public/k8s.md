@@ -354,6 +354,12 @@ Current connection configuration and recorded workload configuration serve diffe
 
 Ordinary Stop and backend shutdown close local clients and forwards but preserve the Pod and workspace. Agent or main-container restart keeps the Pod volumes; Kandev performs a new nonce handshake and local port-forward. If a Pod disappears, managed or existing PVC storage can support a replacement Pod after identity checks; `emptyDir` cannot.
 
+A recoverable agent error also preserves the established Pod, workspace, and
+recovery credentials. Use **Resume** to continue that session. If its retained
+credentials or storage are missing, recovery fails rather than silently creating
+an empty replacement workspace. A software update cannot restore resources that
+were already deleted.
+
 Archive/delete terminal cleanup and explicit force cleanup are destructive. Before deletion, Kandev verifies the recorded namespace, name, UID, and complete standard plus `kandev.ai/*` ownership-label set. It then deletes the exact Pod with UID/resource-version preconditions and deletes a PVC only when inventory proves Kandev created that managed claim. Existing claims are never deleted. A missing object is idempotent; an inventory read error, same-name replacement, UID mismatch, missing label, changed label, extra `kandev.ai/*` label, or mismatched create nonce fails closed without deleting the ambiguous object.
 
 Kandev blocks deleting an executor, or changing an executor into or out of Kubernetes, while runtime inventory still refers to it. Finish normal session cleanup first. Profile deletion does not rewrite or destroy a retained workload because recovery owns the recorded profile ID and snapshot.

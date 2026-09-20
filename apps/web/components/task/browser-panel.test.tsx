@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "./browser-panel";
 
@@ -38,7 +38,10 @@ const capture = {
   handleIframeLoad: vi.fn(),
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("BrowserPanel preview feedback", () => {
   it("offers task-backed annotation for a localhost page through the injected proxy", () => {
@@ -57,5 +60,28 @@ describe("BrowserPanel preview feedback", () => {
         },
       }),
     );
+  });
+
+  it("keeps task-backed annotation visible when secondary actions overflow", async () => {
+    class ResizeObserverMock {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+
+      observe(target: Element) {
+        Object.defineProperty(target, "getBoundingClientRect", {
+          configurable: true,
+          value: () => ({ width: 240 }),
+        });
+        this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+
+      disconnect() {}
+    }
+
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    usePreviewCapture.mockReturnValue(capture);
+    render(<BrowserPanel panelId="browser-1" params={{ url: "http://localhost:3000/products" }} />);
+
+    await waitFor(() => expect(screen.getByTestId("panel-header-overflow")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Annotate (0)" })).toBeTruthy();
   });
 });

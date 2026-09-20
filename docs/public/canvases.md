@@ -59,12 +59,16 @@ The app uses relative requests such as `./_kandev/v1/data/tasks` and `./_kandev/
 
 A task read includes a read-only summary of that task's dependencies: whether it is blocked, and which tasks it depends on or blocks. Events never carry this summary, so a canvas that displays it refetches the task rather than reading the summary out of the event stream: on a `task.updated`, `task.dependencies_resolved`, or `task.dependency_failed` event for that task or one of its edges, or on a `task.state_changed` event for any task in its cached dependency lists (a predecessor or dependent simply advancing state is not one of the first three events). Kandev refuses an oversized read rather than truncating it silently; the authoring reference has the exact fields and limits.
 
-The host shows canvas controls outside the app frame. The app runs in a sandboxed iframe with an opaque browser origin:
+The host shows canvas controls outside the app frame. The app runs in a
+sandboxed same-origin iframe. Canvas source is trusted with the viewing user's
+ordinary user-session authority:
 
 - The frame allows packaged scripts and forms.
-- The app cannot use the host DOM, cookies, host authentication headers, popups, or top-level navigation.
-- `localStorage`, `sessionStorage`, IndexedDB, and service workers are not available.
+- The app can use same-origin browser storage and cookies and can access the host DOM.
+- The app still cannot open popups or navigate the top-level page.
 - Use Kandev instance state for small shared values. Keep temporary values in memory.
+- Relative Kandev protocol routes still require the capability URL, release binding,
+  scope checks, and declared grants. A browser cookie does not replace those checks.
 - External network access uses exact HTTPS origins that a user approved.
 - Remote scripts are not allowed. Scripts and styles must come from the package.
 
@@ -222,6 +226,6 @@ Direct file and direct-link sharing does not require registry admission.
 - [Plugin manifest reference](plugins-manifest.md#isolated-web-applications) defines the `ui.web_apps` manifest fields.
 - [Authoring a plugin](plugins-authoring.md#build-an-isolated-web-application) explains package authoring without an injected JavaScript API.
 - [Configuration](configuration.md#runtime-feature-toggles) explains the feature flag and restart rule.
-- [Security and trust](security.md#isolated-web-applications) explains sandboxing, capabilities, network access, and opaque storage.
+- [Security and trust](security.md#isolated-web-applications) explains sandboxing, same-origin trust, capabilities, and network access.
 - [Operations](operations.md#canvas-artifacts-and-recovery) explains the database and artifact backup boundary.
 - [Feature status](feature-status.md) records the public support status.

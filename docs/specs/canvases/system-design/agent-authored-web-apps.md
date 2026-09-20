@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-10
+last_updated: 2026-09-19
 requirements:
   - REQ-CANVASES-AGENT-WEB-APPS-001
   - REQ-CANVASES-AGENT-WEB-APPS-002
@@ -28,9 +28,9 @@ application into a workspace application. It owns task creation context,
 promotion, release selection, editing sessions, discovery, and canvas host
 surfaces.
 
-The Plugins system owns package validation, iframe isolation, data access,
+The Plugins system owns package validation, browser trust, data access,
 state, events, grants, and runtime tokens. This design uses
-[the isolated plugin web-application contract](../../plugins/system-design/isolated-web-app-contributions.md).
+[the plugin web-application contract](../../plugins/system-design/isolated-web-app-contributions.md).
 
 See [declarative canvas](collaborative-canvases.md) and
 [marketplace sharing](marketplace-sharing.md).
@@ -297,8 +297,8 @@ The canvas-authoring skill tells the agent to:
 - use relative `./_kandev/v1` data, state, action, and event paths
 - keep Kandev domain data as the source of truth
 - store only application-specific shared state in instance state
-- use memory for temporary values because opaque-origin browser storage is not
-  available
+- use memory for temporary values; use instance state for shared values and
+  do not depend on host browser-storage keys
 - publish after local build checks
 - read validation diagnostics and correct rejected releases
 - use semantic appearance variables and apply live host appearance messages
@@ -711,3 +711,8 @@ tokens.
 - [Plugin agent tools through Kandev MCP](../../../decisions/2026-08-11-plugin-tools-through-kandev-mcp.md)
 - [Host utility agentctl for sessionless flows](../../../decisions/0002-host-utility-agentctl-for-sessionless-flows.md)
 - [Superseded declarative canvases](../../../decisions/2026-08-25-server-owned-declarative-canvases.md)
+
+## Canvas host chrome
+
+The [single-header design](canvas-host-chrome.md) defines embedded and standalone
+chrome, status presentation, and shared panel toolbar integration.
