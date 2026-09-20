@@ -64,6 +64,7 @@ import {
   KEYBOARD_SHORTCUTS_SETTINGS_HREF,
   LAYOUTS_SETTINGS_HREF,
   NOTIFICATIONS_SETTINGS_HREF,
+  SIDEBAR_LAYOUT_TAB_HREF,
   TASK_BEHAVIOR_SETTINGS_HREF,
   TERMINAL_EDITORS_SETTINGS_HREF,
 } from "@/lib/settings-discovery/catalog/preferences";
@@ -137,6 +138,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/preferences/notifications": () => <NotificationsSettings />,
   "/settings/preferences/task-behavior": () => <TaskBehaviorSettings />,
   "/settings/preferences/terminal-editors": () => <TerminalEditorsSettings />,
+  "/settings/sidebar": () => <SettingsRedirect to={SIDEBAR_LAYOUT_TAB_HREF} />,
   // Legacy /settings/general paths, one redirect per page that lived there.
   "/settings/general": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,
   "/settings/general/appearance": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,

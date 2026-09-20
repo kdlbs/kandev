@@ -20,6 +20,31 @@ Use workflow events for predictable transitions on existing work. Use a workspac
 
 Across Kandev's task, configuration, external, and Office MCP modes, each tool call is validated against that mode's live `tools/list` schema before its handler runs. Missing required fields, wrong types, declared constraint violations, and unknown top-level fields return a tool error without performing the requested action. A missing-field error names each absent schema property, but never echoes submitted argument values. Nested configuration maps still accept arbitrary keys when their schema defines them as open.
 
+
+## Create an automation in configuration chat
+
+Ask configuration chat to create a workspace automation, for example:
+“Create a daily progress report at 09:00 UTC.” The chat can use
+`create_automation_kandev` after discovering the workspace and any workflow,
+repository, agent, or executor profiles it needs.
+
+The tool requires `workspace_id` and `name`. It accepts the existing automation
+creation fields, including `prompt`, repository/base-branch selections, target
+mode, continuation policy, concurrency limit, and initial triggers. A scheduled
+trigger uses `config.cron_expression` and optional `config.timezone`.
+
+New automations are enabled. Each trigger has its own `enabled` value, which
+is false when omitted. Creation does not manually start a run, but an enabled
+trigger can fire as soon as its conditions are met. The default target is a
+hidden automation run with no repository, a new task for each firing, and one
+concurrent run. The `normal_task` target requires a workflow.
+
+The result includes the saved automation ID and triggers, plus the webhook
+secret revealed on creation. Later reads redact that secret. You can inspect
+or edit saved automations with the existing settings tools or automation editor.
+Creation is not idempotent, so inspect saved automations before retrying an
+uncertain result. This creation tool is available to configuration chat only.
+
 ## Task creation boundaries
 
 Task creation depends on the caller surface and the destination workspace:

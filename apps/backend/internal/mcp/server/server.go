@@ -989,7 +989,11 @@ func (s *Server) registerPluginTools() {
 				return nil, err
 			}
 			if result.IsError {
-				return mcp.NewToolResultError(result.Text), nil
+				response := mcp.NewToolResultError(result.Text)
+				if result.StructuredContent != nil {
+					response.StructuredContent = result.StructuredContent
+				}
+				return response, nil
 			}
 			if result.StructuredContent != nil {
 				return mcp.NewToolResultStructured(result.StructuredContent, result.Text), nil
@@ -1071,6 +1075,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
 	return []profileToolGroup{
+		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
 		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},

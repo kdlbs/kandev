@@ -14,22 +14,23 @@ import (
 
 // TaskRepositoryInput for creating/updating task repositories
 type TaskRepositoryInput struct {
-	RepositoryID   string `json:"repository_id"`
-	BaseBranch     string `json:"base_branch"`
-	CheckoutBranch string `json:"checkout_branch,omitempty"`
-	BranchPolicyID string `json:"branch_policy_id,omitempty"`
-	PRNumber       int    `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
-	LocalPath      string `json:"local_path,omitempty"`
-	Name           string `json:"name,omitempty"`
-	DefaultBranch  string `json:"default_branch,omitempty"`
-	GitHubURL      string `json:"github_url,omitempty"`
-	RemoteURL      string `json:"remote_url,omitempty"`
-	Provider       string `json:"provider,omitempty"`
-	ProviderHost   string `json:"provider_host,omitempty"`
-	ProviderScope  string `json:"provider_scope,omitempty"`
-	ProviderRepoID string `json:"provider_repo_id,omitempty"`
-	ProviderOwner  string `json:"provider_owner,omitempty"`
-	ProviderName   string `json:"provider_name,omitempty"`
+	CheckoutOptions *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
+	RepositoryID    string                            `json:"repository_id"`
+	BaseBranch      string                            `json:"base_branch"`
+	CheckoutBranch  string                            `json:"checkout_branch,omitempty"`
+	BranchPolicyID  string                            `json:"branch_policy_id,omitempty"`
+	PRNumber        int                               `json:"pr_number,omitempty"` // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
+	LocalPath       string                            `json:"local_path,omitempty"`
+	Name            string                            `json:"name,omitempty"`
+	DefaultBranch   string                            `json:"default_branch,omitempty"`
+	GitHubURL       string                            `json:"github_url,omitempty"`
+	RemoteURL       string                            `json:"remote_url,omitempty"`
+	Provider        string                            `json:"provider,omitempty"`
+	ProviderHost    string                            `json:"provider_host,omitempty"`
+	ProviderScope   string                            `json:"provider_scope,omitempty"`
+	ProviderRepoID  string                            `json:"provider_repo_id,omitempty"`
+	ProviderOwner   string                            `json:"provider_owner,omitempty"`
+	ProviderName    string                            `json:"provider_name,omitempty"`
 
 	// PreserveBaseBranch keeps an effective branch produced after policy
 	// resolution (for example, the branch created by the local fresh-branch
@@ -86,8 +87,17 @@ type CreateTaskRequest struct {
 	// TrustedHandoffMetadata allows the handoff application path to persist its
 	// server-authored provenance fields. It is internal-only and never decoded
 	// from a request body; ordinary task creation cannot forge those fields.
-	TrustedHandoffMetadata bool                   `json:"-"`
-	DeferredLaunch         map[string]interface{} `json:"deferred_launch,omitempty"`
+	TrustedHandoffMetadata bool `json:"-"`
+	// WorkflowAgentOverrides groups one replacement by source profile. The
+	// service expands it to fixed workflow-step bindings before insertion.
+	WorkflowAgentOverrides           map[string]string              `json:"workflow_agent_overrides,omitempty"`
+	normalizedWorkflowAgentOverrides *models.WorkflowAgentOverrides `json:"-"`
+	// ExecutorID and ExecutorProfileID are resolved by authenticated create
+	// adapters and are used to validate task-scoped replacement profiles before
+	// any task row is written.
+	ExecutorID        string                 `json:"-"`
+	ExecutorProfileID string                 `json:"-"`
+	DeferredLaunch    map[string]interface{} `json:"deferred_launch,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.

@@ -119,6 +119,24 @@ describe("fetchJson", () => {
   });
 });
 
+describe("fetchJson response parsing", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves the HTTP status when a successful response is not JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("not-json", { status: 200, statusText: "OK" })),
+    );
+
+    await expect(fetchJson("/ready", { baseUrl: BACKEND_URL })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 200,
+    });
+  });
+});
+
 describe("ApiError response classification", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

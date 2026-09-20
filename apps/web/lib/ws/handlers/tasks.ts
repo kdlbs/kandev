@@ -368,6 +368,8 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
     }),
   );
 
+  store.getState().reconcileWorkflowSessionFocus?.(taskId);
+
   if (archivedAt) {
     if (!localRemovalOwnsDeparture) redirectAwayFromRemovedTask(taskId);
     return;
@@ -403,6 +405,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     "task.deleted": (message) => {
       const deletedId = message.payload.task_id;
       const currentState = store.getState();
+      currentState.cancelWorkflowSessionFocus?.({ taskId: deletedId });
       removeRecentTask(deletedId);
       // A quick chat closed on another device must not linger here as a tab
       // pointing at a task the backend already deleted.

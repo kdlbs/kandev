@@ -104,14 +104,21 @@ func TestProvideServicesStopsWhenManagedRuntimeReconciliationFails(t *testing.T)
 		t.Fatalf("close settings reader: %v", err)
 	}
 
-	_, _, err = provideServices(cfg, log, repos, pool, bus.NewMemoryEventBus(log), agentRegistry, "test-managed-runtime-defaults")
+	_, _, err = provideServices(context.Background(), cfg, log, repos, pool, bus.NewMemoryEventBus(log), agentRegistry, "test-managed-runtime-defaults")
 	if err == nil || !strings.Contains(err.Error(), "reconcile managed runtime defaults") {
 		t.Fatalf("provideServices error = %v, want reconciliation failure before readiness", err)
 	}
 }
 
 func TestProvideServicesReconcilesManagedRuntimeDefaultsBeforeDiscovery(t *testing.T) {
-	provideFn := findFuncDecl(t, "services.go", "provideServices")
+	if !callsFunction(t, "services.go", "provideServices", "initManagedRuntimeAndDiscovery") {
+		t.Fatal("provideServices does not call initManagedRuntimeAndDiscovery")
+	}
+
+	// initManagedRuntimeAndDiscovery is what actually reconciles managed
+	// runtime defaults and loads the discovery registry now; inspect its body
+	// for the ordering guarantee.
+	provideFn := findFuncDecl(t, "services.go", "initManagedRuntimeAndDiscovery")
 	callOrder := []string{}
 	ast.Inspect(provideFn, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -138,10 +145,10 @@ func TestProvideServicesReconcilesManagedRuntimeDefaultsBeforeDiscovery(t *testi
 	reconcileIndex := find("reconcileManagedRuntimeDefaults")
 	discoveryIndex := find("LoadRegistry")
 	if reconcileIndex < 0 {
-		t.Fatal("provideServices does not reconcile managed runtime defaults")
+		t.Fatal("initManagedRuntimeAndDiscovery does not reconcile managed runtime defaults")
 	}
 	if discoveryIndex < 0 {
-		t.Fatal("provideServices does not load the discovery registry")
+		t.Fatal("initManagedRuntimeAndDiscovery does not load the discovery registry")
 	}
 	if reconcileIndex > discoveryIndex {
 		t.Fatalf("managed runtime reconciliation call index %d occurs after discovery index %d", reconcileIndex, discoveryIndex)

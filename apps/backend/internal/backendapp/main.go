@@ -138,6 +138,7 @@ import (
 	// System pages (status / database / backups / logs / updates / about)
 	systemsvc "github.com/kandev/kandev/internal/system"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
+	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 
 	// Database
@@ -416,7 +417,7 @@ func startServices( //nolint:cyclop
 		return false
 	}
 
-	services, agentSettingsController, err := provideServices(cfg, log, repos, dbPool, eventBus, agentRegistry, Version)
+	services, agentSettingsController, err := provideServices(ctx, cfg, log, repos, dbPool, eventBus, agentRegistry, Version)
 	if err != nil {
 		log.Error("Failed to initialize services", zap.Error(err))
 		return false
@@ -657,6 +658,13 @@ func startAgentInfrastructure(
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 	services.Task.SetAgentComparisonTargetPusher(lifecycleMgr)
 	services.Task.SetExecutorCapabilityProber(lifecycleMgr)
+	services.Task.SetRepositoryCheckoutCredentialPolicy(func(ctx context.Context, workspaceID string) (bool, error) {
+		if services.GitHub == nil {
+			return false, nil
+		}
+		policy, err := services.GitHub.DescribeTaskGitCredentialPolicy(ctx, workspaceID)
+		return policy.Mode == githubpkg.TaskGitCredentialsModeManaged, err
+	})
 
 	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,
 	// LSP, terminals) enforce per-user workspace scoping (opt-in auth). The
@@ -709,7 +717,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
-	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
+	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
 		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
 	if err != nil {
@@ -885,7 +893,7 @@ func startAgentInfrastructure(
 	// the ledger's foreign keys require them present at CREATE TABLE time
 	// on PostgreSQL. services.Task satisfies delivery.CheckoutResolver.
 	_, deliveryCleanup, deliveryErr := delivery.Provide(dbPool.Writer(), dbPool.Reader(), services.Task, log)
-	if recordErr := recordRequiredStore(repos.RequiredStores, "delivery", deliveryErr); recordErr != nil {
+	if recordErr := recordRequiredStore(ctx, repos.RequiredStores, "delivery", deliveryErr); recordErr != nil {
 		log.Error("delivery ledger initialization failed", zap.Error(recordErr))
 		return false
 	}
@@ -901,6 +909,27 @@ func startAgentInfrastructure(
 	// in-memory bus while Service.Start is still doing its startup reconciliation.
 	// Service.Start calls Watcher.Start again; the watcher is idempotent and keeps
 	// these subscriptions.
+	//
+	// storage is stores.services's last admission chronologically, so it has
+	// to happen here, immediately before the phase transition and
+	// lifecycleMgr.Start below (which is what actually runs
+	// sessions.recovery's BeginStep/Advance/EndStep sequence): its old
+	// position deep inside startGatewayAndServe ran chronologically after
+	// sessions.recovery had already begun, so BeginStep force-closed
+	// stores.services early and every admission after that point --
+	// including storage's own -- silently no-op'd.
+	storageStore, err := provideStorageStore(ctx, dbPool, repos.RequiredStores)
+	if err != nil {
+		log.Error("Failed to initialize storage store", zap.Error(err))
+		return false
+	}
+
+	// The phase transition must happen here, immediately before
+	// lifecycleMgr.Start below (which is what actually runs
+	// sessions.recovery's BeginStep/Advance/EndStep sequence) rather than
+	// later at HTTP listener bind time in startGatewayAndServe: that point
+	// runs well after this recovery work has already completed.
+	startup.SetPhase(ctx, startup.RecoveringSessions)
 	if err := orchestratorSvc.StartEventWatcher(ctx); err != nil {
 		log.Error("Failed to start orchestrator event watcher for agent recovery", zap.Error(err))
 		return false
@@ -913,7 +942,7 @@ func startAgentInfrastructure(
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
-		sessionCapacityEnvironment, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
+		sessionCapacityEnvironment, storageStore, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
 		restoreCleanups, databaseQuiesce)
 }
 
@@ -978,6 +1007,7 @@ func startGatewayAndServe(
 	repoCloner *repoclone.Cloner,
 	agentctlBinaryPath string,
 	sessionCapacityEnvironment sessioncapacity.Environment,
+	storageStore *storagepkg.Store,
 	addCleanup func(func() error),
 	runCleanups func(),
 	cancelWorkers context.CancelFunc,
@@ -1066,7 +1096,7 @@ func startGatewayAndServe(
 
 	bootstrap := ctx.Value(bootstrapContextKey{}).(*bootstrapRuntime)
 	handler, server, listeners := bootstrap.handler, bootstrap.server, bootstrap.listeners
-	bindListeners := func() error { startup.SetPhase(ctx, startup.RecoveringSessions); return ctx.Err() }
+	bindListeners := func() error { return ctx.Err() }
 
 	if err := startOrchestratorAndAutomationConsumers(
 		bindListeners,
@@ -1212,7 +1242,7 @@ func startGatewayAndServe(
 		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
 		log,
 		func(message string, err error) { log.Error(message, zap.Error(err)) },
-		repos.RequiredStores, repos.SystemSettings,
+		storageStore, repos.SystemSettings,
 	)
 	if err != nil {
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))
@@ -1319,7 +1349,7 @@ func startGatewayAndServe(
 	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, persistenceHealth)
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1345,21 +1375,28 @@ func startGatewayAndServe(
 		return false
 	}
 
-	// Flip readiness before swapping in the fully wired router — see
-	// publishReadiness for why the order matters and
-	// TestPublishReadinessFlipsReadyBeforeSwappingHandler for the regression
-	// test pinning it.
 	if !bootstrap.beginReadinessPublication(ctx) {
 		return false
 	}
-	publishReadiness(func() {
-		ready.Store(true)
-		bootstrap.ready.Store(true)
-	}, func() { handler.Store(builtServer.Handler) })
 
-	startup.SetPhase(ctx, startup.Ready)
+	markStartupReady(func() { startup.SetPhase(ctx, startup.Ready) }, func() {
+		publishReadiness(func() {
+			ready.Store(true)
+			bootstrap.ready.Store(true)
+		}, func() { handler.Store(builtServer.Handler) })
+	})
+
 	awaitShutdown(ctx, server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
+}
+
+// markStartupReady transitions the startup phase to Ready and then publishes
+// readiness, in that order — never the reverse. A GET /ready request racing
+// the two must never observe a successful status against a snapshot that
+// still reports an earlier phase (AC-PLATFORM-STARTUP-PROGRESS-002.3).
+func markStartupReady(setPhaseReady func(), publish func()) {
+	setPhaseReady()
+	publish()
 }
 
 // publishReadiness flips readiness and then swaps in the fully wired router,
@@ -2561,6 +2598,7 @@ func buildHTTPServer(
 	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	progress *startup.Reporter,
 	persistenceHealth ...*requiredstores.Health,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
@@ -2692,6 +2730,7 @@ func buildHTTPServer(
 		homeDir:                       cfg.ResolvedHomeDir(),
 		interimSettingsInterlockToken: interimSettingsInterlockToken,
 		log:                           log,
+		progress:                      progress,
 	})
 
 	// Addr is intentionally left unset: bind addresses are resolved from

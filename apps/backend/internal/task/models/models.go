@@ -409,6 +409,11 @@ const (
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
+	// SessionMetaKeyInitialCreatePromptPassthrough stores the durable
+	// execution and turn evidence for a creation prompt admitted before a
+	// passthrough agent.running event. It prevents recovery from evaluating
+	// the same on_turn_start transition a second time after restart.
+	SessionMetaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
 )
 
 // IsCompletionFollowUpSession reports whether a session was explicitly
@@ -1093,15 +1098,18 @@ const (
 
 // Task represents a task in the database
 type Task struct {
-	ID             string       `json:"id"`
-	WorkspaceID    string       `json:"workspace_id"`
-	WorkflowID     string       `json:"workflow_id"`
-	WorkflowStepID string       `json:"workflow_step_id"`
-	Title          string       `json:"title"`
-	Description    string       `json:"description"`
-	State          v1.TaskState `json:"state"`
-	Priority       string       `json:"priority"`
-	Position       int          `json:"position"` // Order within workflow step
+	ID             string `json:"id"`
+	WorkspaceID    string `json:"workspace_id"`
+	WorkflowID     string `json:"workflow_id"`
+	WorkflowStepID string `json:"workflow_step_id"`
+	// WorkflowAgentOverrides is scoped to WorkflowID and expands the grouped
+	// create choice into fixed step bindings. It is nil for ordinary tasks.
+	WorkflowAgentOverrides *WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                  `json:"title"`
+	Description            string                  `json:"description"`
+	State                  v1.TaskState            `json:"state"`
+	Priority               string                  `json:"priority"`
+	Position               int                     `json:"position"` // Order within workflow step
 	// WIPAdmitted indicates whether this task consumes an active slot in its
 	// current workflow step. Queued tasks remain visible but do not consume the
 	// destination step's WIP capacity.
@@ -2890,14 +2898,15 @@ func (t *Task) ToAPI() *v1.Task {
 	var repositories []v1.TaskRepository
 	for _, repo := range t.Repositories {
 		repositories = append(repositories, v1.TaskRepository{
-			ID:           repo.ID,
-			TaskID:       repo.TaskID,
-			RepositoryID: repo.RepositoryID,
-			BaseBranch:   repo.BaseBranch,
-			Position:     repo.Position,
-			Metadata:     repo.Metadata,
-			CreatedAt:    repo.CreatedAt,
-			UpdatedAt:    repo.UpdatedAt,
+			CheckoutOptions: PublicRepositoryCheckoutOptions(repo.Metadata),
+			ID:              repo.ID,
+			TaskID:          repo.TaskID,
+			RepositoryID:    repo.RepositoryID,
+			BaseBranch:      repo.BaseBranch,
+			Position:        repo.Position,
+			Metadata:        repo.Metadata,
+			CreatedAt:       repo.CreatedAt,
+			UpdatedAt:       repo.UpdatedAt,
 		})
 	}
 

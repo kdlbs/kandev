@@ -2162,10 +2162,13 @@ func seedWorkflowStep(t *testing.T, ctx context.Context, repo *workflowrepo.Repo
 
 // mockSessionLauncher captures LaunchSession calls for testing autoStartTask.
 type mockSessionLauncher struct {
-	mu      sync.Mutex
-	req     *orchestrator.LaunchSessionRequest
-	called  chan struct{}
-	inspect func(context.Context)
+	mu         sync.Mutex
+	req        *orchestrator.LaunchSessionRequest
+	requests   []*orchestrator.LaunchSessionRequest
+	called     chan struct{}
+	calls      chan struct{}
+	calledOnce sync.Once
+	inspect    func(context.Context)
 }
 
 func newMockSessionLauncher() *mockSessionLauncher {
@@ -2175,11 +2178,15 @@ func newMockSessionLauncher() *mockSessionLauncher {
 func (m *mockSessionLauncher) LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	m.mu.Lock()
 	m.req = req
+	m.requests = append(m.requests, req)
 	m.mu.Unlock()
 	if m.inspect != nil {
 		m.inspect(ctx)
 	}
-	close(m.called)
+	m.calledOnce.Do(func() { close(m.called) })
+	if m.calls != nil {
+		m.calls <- struct{}{}
+	}
 	return &orchestrator.LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -2281,6 +2288,41 @@ func TestAutoStartTask_ExplicitExecutorProfilePreserved(t *testing.T) {
 	req := launcher.getRequest()
 	assert.Equal(t, "exec-profile-docker", req.ExecutorProfileID, "explicit executor profile should be preserved")
 	assert.Equal(t, "", req.ExecutorID, "executorID should be empty when profile is set")
+}
+
+func TestLaunchAutoStartTask_ExplicitCreatePromptUsesPreparedStart(t *testing.T) {
+	launcher := newMockSessionLauncher()
+	launcher.calls = make(chan struct{}, 2)
+	h := &Handlers{
+		sessionLauncher: launcher,
+		logger:          testLogger(t),
+	}
+
+	h.launchAutoStartTask(context.Background(), &models.Task{
+		ID: "task-1", WorkflowStepID: "step-explicit", Description: "initial request",
+	}, mcpAutoStartConfig{
+		AgentProfileID:      "agent-profile-1",
+		ExecutorID:          models.ExecutorIDWorktree,
+		InitialCreatePrompt: true,
+	})
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-launcher.calls:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("LaunchSession call %d did not complete", i+1)
+		}
+	}
+
+	launcher.mu.Lock()
+	requests := append([]*orchestrator.LaunchSessionRequest(nil), launcher.requests...)
+	launcher.mu.Unlock()
+	require.Len(t, requests, 2)
+	assert.Equal(t, orchestrator.IntentPrepare, requests[0].Intent)
+	assert.True(t, requests[0].DeferredStart)
+	assert.Equal(t, orchestrator.IntentStartCreated, requests[1].Intent)
+	assert.Equal(t, "session-1", requests[1].SessionID)
+	assert.True(t, requests[1].InitialCreatePrompt)
 }
 
 func TestLaunchAutoStartTask_PreservesContextValuesWithoutCallerCancellation(t *testing.T) {

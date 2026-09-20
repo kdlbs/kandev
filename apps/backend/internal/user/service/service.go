@@ -46,6 +46,7 @@ type Service struct {
 
 type UpdateUserSettingsRequest struct {
 	SidebarViewState                  *models.SidebarWorkspacePatch
+	SidebarLayoutState                *models.SidebarLayoutPatch
 	WorkspaceID                       *string
 	KanbanViewMode                    *string
 	StartupPage                       *string
@@ -215,6 +216,9 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if err := s.validateSidebarWorkspacePatch(ctx, req, sidebarWorkspaceIDs); err != nil {
 		return nil, err
 	}
+	if err := s.validateSidebarLayoutPatch(ctx, req, sidebarWorkspaceIDs); err != nil {
+		return nil, err
+	}
 	if s.sidebarWorkspaceAccess != nil {
 		settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
 		if err != nil {
@@ -236,6 +240,12 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		before := *settings
 		if err := applySidebarWorkspacePatch(settings, req); err != nil {
 			return false, err
+		}
+		if err := applySidebarLayoutPatch(settings, req); err != nil {
+			if errors.Is(err, ErrUserSettingsConflict) {
+				return false, err
+			}
+			return false, fmt.Errorf("%w: %s", ErrValidation, err)
 		}
 		if err := applyBasicSettings(settings, req); err != nil {
 			return false, fmt.Errorf("%w: %s", ErrValidation, err.Error())
@@ -1124,6 +1134,7 @@ func (s *Service) projectSidebarSettingsForEvent(
 func addSidebarWorkspaceState(data map[string]interface{}, settings *models.UserSettings, include bool) {
 	if include {
 		data["sidebar_views_by_workspace"] = settings.SidebarViewsByWorkspace
+		data["sidebar_layouts_by_workspace"] = settings.SidebarLayoutsByWorkspace
 	}
 }
 

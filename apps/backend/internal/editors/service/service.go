@@ -214,6 +214,10 @@ func (s *Service) OpenFolder(ctx context.Context, sessionID, worktreeID string) 
 	if sessionID == "" {
 		return ErrEditorConfigInvalid
 	}
+	if !FolderOpeningAvailable() {
+		return ErrFolderUnavailable
+	}
+
 	session, err := s.taskRepo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -223,17 +227,7 @@ func (s *Service) OpenFolder(ctx context.Context, sessionID, worktreeID string) 
 		return err
 	}
 
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", worktreePath)
-	case "linux":
-		cmd = exec.Command("xdg-open", worktreePath)
-	case "windows":
-		cmd = exec.Command("explorer", worktreePath)
-	default:
-		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
-	}
+	cmd := exec.Command(folderOpenCommand(runtime.GOOS), worktreePath)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to open folder: %w", err)

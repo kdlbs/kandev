@@ -41,7 +41,7 @@ resume on open even while a session is parked. The screenshot is presentation
 evidence; this plan does not claim a new live-state investigation of that task.
 
 The old inspection requirement 001.1 and parked-note requirement 003.3 are
-explicitly superseded by 001.9 and 003.8. Criteria 001.7/8 retain restart and
+explicitly superseded by 001.9 and 003.10. Criteria 001.7/8 retain restart and
 settled-queue coverage. Queue identity, automatic admission, callback correlation,
 and the deadlock fixes remain compatibility constraints.
 
@@ -123,7 +123,7 @@ The task drawer remains the entry point. The session picker selects the
 conversation and normal recovery follows. The dedicated mobile layout, safe-area
 navigation, and single chat scroll owner remain. No hover interaction is required.
 
-UI-01 and UI-02 cover AC 001.9 and 003.8. Placement and absence of parking chrome
+UI-01 and UI-02 cover AC 001.9 and 003.10. Placement and absence of parking chrome
 are requirements; text spacing is illustrative. Existing recovery errors, queue
 waiting, loading, and explicit controls keep their established presentation.
 The nearest mobile exemplar is `mobile-queued-session-ownership.spec.ts`.
@@ -144,7 +144,7 @@ AC suffixes use `AC-TASKS-QUEUED-SESSION-OWNERSHIP-`.
 | Archive, explicit cancellation, completion, authorization failure | Existing lifecycle restrictions remain | 001.9 |
 | Allowed status followed by conflicting queue or route change | Guarded admission rejects stale execution | 001.2, 001.6; 002.6 |
 | Restart after switch or queue settlement | Conversation context survives; opening requests normal recovery | 001.7, 001.8, 001.9 |
-| Desktop/phone with stored parking marker | No parked note; ordinary controls and real queue status remain | 003.8 |
+| Desktop/phone with stored parking marker | No parked note; ordinary controls and real queue status remain | 003.10 |
 
 ## E2E tests
 
