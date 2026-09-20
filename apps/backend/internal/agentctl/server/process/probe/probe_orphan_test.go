@@ -366,3 +366,165 @@ func TestOrphanScan_RevalidationReadError_NeverUnknownAndContinues(t *testing.T)
 		t.Errorf("got %q, want %q (scan must continue past a failed re-validation read)", got, ResultLive)
 	}
 }
+
+// AC-DW-ORPHAN-002.1: on a reader that does not implement environmentReader
+// (Darwin today), the identity scan is skipped entirely regardless of the
+// request's session id — the descendant-only result stands. This is
+// deliberately a plain fakeProcessTableReader, not envCapableReader: it must
+// exercise the `!ok` half of the guard independently of the `sessionID == ""`
+// half, which every other non-capable-reader test in this file passes.
+func TestOrphanScan_NoEnvironmentCapability_DescendantOnlyResult(t *testing.T) {
+	turnStart := time.Unix(1000, 0)
+	reader := fakeProcessTableReader{
+		resolution: time.Millisecond,
+		table: []processInfo{
+			rootEntry,
+			{PID: 500, PPID: 1, StartTime: turnStart, StartTimeDatum: 42},
+		},
+	}
+
+	got, err := probeWithReader(reader, testAgentPID, turnStart, "sess-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != ResultSettled {
+		t.Errorf("got %q, want %q — a non-descendant candidate must not contribute without the environmentReader capability, even with a non-empty session id", got, ResultSettled)
+	}
+}
+
+// AC-DW-ORPHAN-001.5: the identity scan's result does not depend on where in
+// the snapshot the true match sits relative to a candidate that must be
+// skipped (recycled pid: session id matches but the re-validation datum
+// does not) — the scan must keep going past a skip in either direction
+// rather than stopping early or letting a later skip undo an earlier match.
+func TestOrphanScan_EnumerationOrderIndependent(t *testing.T) {
+	turnStart := time.Unix(1000, 0)
+	match := processInfo{PID: 500, PPID: 1, StartTime: turnStart, StartTimeDatum: 42}
+	skip := processInfo{PID: 600, PPID: 1, StartTime: turnStart, StartTimeDatum: 7}
+	sessionIDs := map[int]string{500: "sess-1", 600: "sess-1"}
+	datums := map[int]int64{500: 42, 600: 999} // 600's live datum no longer matches its snapshot
+
+	tests := []struct {
+		name  string
+		table []processInfo
+	}{
+		{"match before skip", []processInfo{rootEntry, match, skip}},
+		{"skip before match", []processInfo{rootEntry, skip, match}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &envCapableReader{
+				fakeProcessTableReader: fakeProcessTableReader{
+					resolution: time.Millisecond,
+					table:      tt.table,
+				},
+				sessionIDs: sessionIDs,
+				datums:     datums,
+			}
+
+			got, err := probeWithReader(reader, testAgentPID, turnStart, "sess-1")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != ResultLive {
+				t.Errorf("got %q, want %q regardless of enumeration order", got, ResultLive)
+			}
+		})
+	}
+}
+
+// AC-DW-ORPHAN-001.6: calling probeWithReader twice for the same pid and
+// session id, with the underlying candidate's live state changed between
+// calls, must reflect that change on the second call rather than a
+// memoized first answer.
+func TestOrphanScan_RepeatCallsNotMemoized(t *testing.T) {
+	turnStart := time.Unix(1000, 0)
+	reader := &envCapableReader{
+		fakeProcessTableReader: fakeProcessTableReader{
+			resolution: time.Millisecond,
+			table: []processInfo{
+				rootEntry,
+				{PID: 500, PPID: 1, StartTime: turnStart, StartTimeDatum: 42},
+			},
+		},
+		sessionIDs: map[int]string{500: "sess-1"},
+		datums:     map[int]int64{500: 42},
+	}
+
+	got1, err := probeWithReader(reader, testAgentPID, turnStart, "sess-1")
+	if err != nil {
+		t.Fatalf("unexpected error on first call: %v", err)
+	}
+	if got1 != ResultLive {
+		t.Fatalf("first call: got %q, want %q", got1, ResultLive)
+	}
+
+	// The candidate's live datum has since diverged from the snapshot's
+	// recorded value (pid 500 exited and was recycled by an unrelated
+	// process before the second probe).
+	reader.datums[500] = 999
+
+	got2, err := probeWithReader(reader, testAgentPID, turnStart, "sess-1")
+	if err != nil {
+		t.Fatalf("unexpected error on second call: %v", err)
+	}
+	if got2 != ResultSettled {
+		t.Errorf("second call: got %q, want %q — a repeat call must not return the first call's memoized answer", got2, ResultSettled)
+	}
+}
+
+// AC-DW-ORPHAN-001.7: concurrent probeWithReader calls against independent
+// readers and independent turn-start/session-id inputs must not share state
+// — each call's answer must match what that same input produces serially.
+// Run with -race to catch any accidental shared mutable state.
+func TestOrphanScan_ConcurrentCallsIndependent(t *testing.T) {
+	turnStart := time.Unix(1000, 0)
+	newReader := func(sessionID string, datum int64) *envCapableReader {
+		return &envCapableReader{
+			fakeProcessTableReader: fakeProcessTableReader{
+				resolution: time.Millisecond,
+				table: []processInfo{
+					rootEntry,
+					{PID: 500, PPID: 1, StartTime: turnStart, StartTimeDatum: datum},
+				},
+			},
+			sessionIDs: map[int]string{500: sessionID},
+			datums:     map[int]int64{500: datum},
+		}
+	}
+
+	const goroutines = 20
+	results := make([]Result, goroutines)
+	errs := make([]error, goroutines)
+	done := make(chan int, goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			// Even-indexed goroutines carry a matching session id (expect
+			// ResultLive); odd-indexed goroutines carry a mismatching one
+			// (expect ResultSettled) — each against its own reader.
+			sessionID := "sess-match"
+			if i%2 == 1 {
+				sessionID = "sess-other"
+			}
+			reader := newReader("sess-match", int64(i))
+			results[i], errs[i] = probeWithReader(reader, testAgentPID, turnStart, sessionID)
+			done <- i
+		}(i)
+	}
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+
+	for i := 0; i < goroutines; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: unexpected error: %v", i, errs[i])
+		}
+		want := ResultLive
+		if i%2 == 1 {
+			want = ResultSettled
+		}
+		if results[i] != want {
+			t.Errorf("goroutine %d: got %q, want %q — concurrent calls must not share state", i, results[i], want)
+		}
+	}
+}

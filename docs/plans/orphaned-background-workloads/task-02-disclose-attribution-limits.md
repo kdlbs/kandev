@@ -1,7 +1,7 @@
 ---
 id: "02-disclose-attribution-limits"
 title: "Disclose orphan attribution limits"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-attribute-orphaned-workloads"

@@ -1,7 +1,7 @@
 ---
 id: "01-attribute-orphaned-workloads"
 title: "Attribute orphaned background workloads"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
