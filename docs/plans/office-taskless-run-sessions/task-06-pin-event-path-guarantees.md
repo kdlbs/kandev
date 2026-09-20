@@ -54,10 +54,12 @@ string continuing to behave that way.
   committed, so a run completes carrying a stale summary with no durable trace.
   The criterion's outcome is preserve-and-complete with visibility: the run stays
   complete, the stored summary stays byte-identical, and the failure is recorded
-  on the run's own event stream naming the scope that was being written. Assert
-  all three, for a failing load and a failing upsert separately. Emitting that
-  run event is the one production change this work order carries; it adds no
-  rollback and changes no terminal state.
+  on the run's own event stream naming the scope that was being written. The
+  public summary loader currently handles its own dependency errors internally,
+  so this work order asserts the reachable upsert failure; the load-error branch
+  remains defensive code and is not claimed as independently tested. Emitting
+  that run event is the one production change this work order carries; it adds
+  no rollback and changes no terminal state.
 - Assert that a run-owned lifecycle event reaching the task-side consumers
   produces no task-session read or write and no workflow transition. Prefer an
   assertion on the observable effect (no task session mutated, no workflow

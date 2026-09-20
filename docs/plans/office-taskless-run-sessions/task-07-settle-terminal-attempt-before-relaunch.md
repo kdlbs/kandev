@@ -1,7 +1,7 @@
 ---
 id: "07-settle-terminal-attempt-before-relaunch"
 title: "Settle a claimed run from its terminal attempt instead of relaunching"
-status: withdrawn
+status: pending
 wave: 1
 depends_on:
   - "04-fail-closed-on-recovery-and-stop-errors"
@@ -15,15 +15,17 @@ system_design:
 
 # Task 07: Settle a claimed run from its terminal attempt instead of relaunching
 
-> **WITHDRAWN — 2026-09-19.** This work order is not to be built. `AC-OFFICE-TASKLESS-001.5`
-> and `.6` were cut from the requirement after five rounds of spec review, and this order
-> existed only to satisfy them. It settled a claimed run from an already-terminal attempt for `AC-OFFICE-TASKLESS-001.6`, and carried `.8`'s replay clause. `.6` no longer exists; `.8`'s replay clause stays in scope and is now satisfied structurally, with no work order, as the system design explains.
+> **PENDING FOLLOW-UP — 2026-09-19.** This work order is not part of the
+> current coverage change. It settles a claimed run from an already-terminal
+> attempt for the still-outstanding `AC-OFFICE-TASKLESS-001.6` requirement and
+> carries `.8`'s replay clause. `.8` remains in scope and is satisfied
+> structurally for the current launch path.
 >
-> The file is kept, unedited below this banner, because a follow-up that revives the
-> deferred flows should start from it rather than re-derive it. The deferral, the accepted
-> gaps and the two problems a follow-up must resolve first are recorded under
-> [Deferred: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
-> References below to `taskless-run-recovery.md` point at a design file retired in the same
+> The file is kept, unedited below this banner, because a follow-up should start
+> from it rather than re-derive it. The current gaps and the two problems a
+> follow-up must resolve first are recorded under
+> [Outstanding: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
+> References below to `taskless-run-recovery.md` point at a design file superseded in the same
 > change; its content is summarized in that section.
 
 ## Summary

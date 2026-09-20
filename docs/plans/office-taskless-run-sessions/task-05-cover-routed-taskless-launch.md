@@ -70,7 +70,7 @@ assertion passes even if both candidates were live at once.
   routed path cannot be driven without changing production behavior, that is a
   finding against `REQ-OFFICE-TASKLESS-001`, not a licence to edit the code
   under test. The launch-failure stop-error gap is already known and is
-  deliberately deferred — see the system design's scheduling and routing
+  deliberately pending follow-up work — see the system design's scheduling and routing
   section — so encountering it is not a new finding and not this order's work.
 - Task 01's cron-to-session chain, which drives the direct branch.
 

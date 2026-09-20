@@ -362,7 +362,7 @@ LIMIT 1
 
 Each wakeup produces a single agent session that runs to completion and exits. The agent receives a structured prompt describing why it was woken.
 
-**Taskless runs always start a fresh session.** A defensive `taskID==""` short-circuit in `HasPriorSessionForAgent` ensures we never resume across taskless fires. The session record itself and its attempt numbering are specified by [run-owned sessions](taskless-run-sessions.md). Cancellation and restart reconciliation for taskless runs are not specified anywhere: they were cut from `REQ-OFFICE-TASKLESS-001` on September 19, 2026 and the accepted gaps are recorded under [Deferred: stop controls and restart recovery](../requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
+**Taskless runs always start a fresh session.** A defensive `taskID==""` short-circuit in `HasPriorSessionForAgent` ensures we never resume across taskless fires. The session record itself and its attempt numbering are specified by [run-owned sessions](taskless-run-sessions.md). Cancellation and restart reconciliation remain outstanding requirements and are not implemented by the current coverage change; the follow-up scope is recorded under [Outstanding: stop controls and restart recovery](../requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
 
 **Task-bound wakeups use session resume by default**: each subsequent wakeup for a `(task, agent)` pair reloads the prior ACP session via `session/load`, falling back to `session/new` on error. See `office-task-session-lifecycle` for the per-pair model.
 

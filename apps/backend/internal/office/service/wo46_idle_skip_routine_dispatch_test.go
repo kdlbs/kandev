@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -81,9 +82,10 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 // before this test drove RunReasonRoutineDispatchEvent through the
 // scheduler to prove it.
 func TestIdleSkip_RoutineDispatchEventWithSkipIdleRuns_NotSkipped(t *testing.T) {
-	mock := &mockTaskStarter{}
-	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	svc := newTestService(t)
 	ctx := context.Background()
+	launcher := &tasklessTestLauncher{svc: svc}
+	svc.SetRunSessionLauncher(launcher)
 
 	agent := &models.AgentInstance{
 		WorkspaceID:        "ws-3",
@@ -106,6 +108,12 @@ func TestIdleSkip_RoutineDispatchEventWithSkipIdleRuns_NotSkipped(t *testing.T) 
 	}
 
 	service.RunSchedulerTick(svc, ctx)
+	if len(launcher.calls) != 1 {
+		t.Fatalf("manual/webhook taskless run launcher calls = %d, want 1", len(launcher.calls))
+	}
+	if !strings.Contains(launcher.calls[0].Prompt, shared.RunReasonRoutineDispatchEvent) {
+		t.Fatalf("manual/webhook launch prompt = %q, want reason %q", launcher.calls[0].Prompt, shared.RunReasonRoutineDispatchEvent)
+	}
 
 	entries, err := svc.ListActivity(ctx, "ws-3", 50)
 	if err != nil {

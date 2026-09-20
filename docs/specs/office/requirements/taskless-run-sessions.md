@@ -28,15 +28,14 @@ event wake without creating a task merely to host its own execution.
 - **AC-OFFICE-TASKLESS-001.2:** Every fire and retry shall use a fresh session. The existing routine-scoped or agent-scoped continuation summary shall carry context; a failed attempt shall not replace the last successful summary. A summary write that fails shall leave the last successful summary unchanged, shall leave the completed run complete, and shall be visible on the run.
 - **AC-OFFICE-TASKLESS-001.3:** Concrete and provider-routed profiles shall both work. Existing budget admission, capabilities, retry/backoff, coalescing and idle-skip rules shall apply. Periodic idle skipping shall not consume a manual or webhook wake.
 - **AC-OFFICE-TASKLESS-001.4:** Run history shall show the exact session, runtime outcome, actual adapter/model and attributed usage. Duplicate or delayed events from an older attempt shall not complete, charge twice, or clear a newer attempt.
+- **AC-OFFICE-TASKLESS-001.5:** Workspace pause, explicit run cancellation, agent disable/removal and workspace removal shall prevent new taskless launches and stop live taskless executions. Partial stop failures shall remain visible and retryable, including when another execution stopped successfully.
+- **AC-OFFICE-TASKLESS-001.6:** After backend restart, unfinished attempts shall be reconciled against runtime evidence before replacement launch. A possibly live predecessor shall block a replacement until it is stopped or proven absent. Interrupted work shall have an explicit outcome; no taskless attempt shall remain claimed indefinitely solely because it has no task.
 - **AC-OFFICE-TASKLESS-001.7:** A taskless session shall retain its workspace and capability boundaries. Task-specific decision tools shall reject it without a task context. Failed ownership lookup shall reject launch or access, never broaden authority.
 - **AC-OFFICE-TASKLESS-001.8:** Existing task-bound launches and their task/session lifecycle shall retain their behavior. Historical unsupported taskless failures shall remain history and shall not be automatically replayed.
 
-`.5` and `.6` are retired, not vacant. They were removed on September 19, 2026
-and the behavior they described is recorded under
-[Deferred: stop controls and restart recovery](#deferred-stop-controls-and-restart-recovery).
-The surviving numbers are deliberately not renumbered: every citation in the
-system design and the implementation plan is by number, and renumbering would
-silently repoint all of them.
+The implementation and coverage in this change focus on `.1` to `.4`, `.7` and
+`.8`. Criteria `.5` and `.6` remain requirements and are outstanding follow-up
+work; this change does not implement their lifecycle or recovery behavior.
 
 ## Out of scope
 
@@ -50,30 +49,26 @@ after its run is gone, and the cost projections join run sessions by session ID.
 A follow-up that changes this needs a retention pass over the run-session store
 and a decision on whether attributed usage must outlive the run it belongs to.
 
-### Deferred: stop controls and restart recovery
+### Outstanding: stop controls and restart recovery
 
 Two flows were in this requirement as `AC-OFFICE-TASKLESS-001.5` and
-`.6` and were cut on September 19, 2026 after five rounds of spec review. The
-cut is a scope decision, not a retraction: the behavior is still wanted and the
-analysis below is the brief a follow-up would start from.
+`.6`. They remain outstanding and are not implemented in this coverage change.
+The analysis below is the brief a follow-up should start from.
 
-**What was cut.** `.5` required workspace pause, explicit run cancellation,
+**Required behavior.** `.5` requires workspace pause, explicit run cancellation,
 agent disable/removal and workspace removal to prevent new taskless launches and
 stop live taskless executions, with partial stop failures remaining visible and
-retryable. `.6` required unfinished attempts to be reconciled against runtime
+retryable. `.6` requires unfinished attempts to be reconciled against runtime
 evidence after a backend restart, a possibly live predecessor to block its
 replacement until stopped or proven absent, interrupted work to reach an
 explicit outcome, and no taskless attempt to remain claimed indefinitely solely
 because it has no task.
 
-**Why it was cut.** Everything this requirement needs for Beta is the launch
-path: an armed trigger reaching a real session. The stop and recovery flows
-describe a lifecycle end that has never executed in production, and specifying
-them precisely enough to build generated new contradictions in each of the last
-two review rounds faster than the previous round's were closed. Cutting them
-also dissolved a direct conflict with `.4`, which forbids a delayed event from
-an older attempt completing a run, while the settlement design required exactly
-that. `.4` is kept verbatim and the design text that contradicted it is gone.
+**Why it is not in this change.** This change proves the launch path from an
+armed trigger to a real session. Stop and recovery need a separate maintainer
+review because they cross runtime ownership, operator controls and restart
+ordering. Keeping them as outstanding criteria avoids treating the current
+gaps as an accepted product decision.
 
 **What is therefore accepted as a known gap today.** Cancelling a run does not
 stop a live coordinator: run cancellation is a status write on `runs` with no
@@ -118,5 +113,6 @@ deliberate stop from a crash.
 
 ## System design
 
-[Run-owned sessions](../system-design/taskless-run-sessions.md) covers every
-criterion here: .1 to .4, .7 and .8.
+[Run-owned sessions](../system-design/taskless-run-sessions.md) covers the
+launched behavior here. Criteria `.5` and `.6` remain outstanding and need a
+separate lifecycle and recovery design pass.

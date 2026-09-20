@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-status: completed
+status: in_progress
 requirements:
   - REQ-OFFICE-TASKLESS-001
 system_design:
@@ -19,17 +19,17 @@ landed: `office_run_sessions` (Office repository, unique `(run_id, attempt)`),
 the `RunSessionLauncher` seam, its `officeRunSessionLauncher` implementation,
 `runs.session_id` binding, and startup reconciliation via `ReconcileRunSessions`.
 
-**Scope was cut on September 19, 2026.** `AC-OFFICE-TASKLESS-001.5` (operator
-stop controls) and `.6` (restart reconciliation) were removed from the
-requirement after five rounds of spec review, and the four work orders that
-served them — Tasks 02, 03, 04 and 07 — are withdrawn. Their files stay in this
-directory, each carrying a withdrawal banner, because a follow-up should start
-from them. The deferral and the accepted gaps are recorded under
-[Deferred: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
+**Coverage scope is limited to the launch and observation path.**
+`AC-OFFICE-TASKLESS-001.5` (operator stop controls) and `.6` (restart
+reconciliation) remain requirements. Their four work orders — Tasks 02, 03, 04
+and 07 — are pending follow-up work and are not implemented by this coverage
+change. Their current gaps and follow-up constraints are recorded under
+[Outstanding: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
 
 **Three results remain, and all three are coverage.** No production change is in
-scope; the three production work orders were the withdrawn ones, except for the
-single run event Task 06 adds for a failed continuation-summary write.
+scope beyond the run event and strict append handling Task 06 uses for a failed
+continuation-summary write. The pending lifecycle work remains outside this
+change.
 
 The first: the end-to-end proof that an **armed cron trigger** reaches a launched
 taskless session is still skipped. `TestRoutine_CronFire_LightweightReachesSession`
@@ -148,16 +148,15 @@ alongside it.
 
 ### Out of scope
 
-- **Operator stop controls and restart reconciliation.** Cut from the
-  requirement on September 19, 2026 along with `AC-OFFICE-TASKLESS-001.5` and
-  `.6`. Tasks 02, 03, 04 and 07 are withdrawn with them. Three accepted gaps
-  follow and are named rather than left silent: run cancellation, agent disable
-  and agent removal do not stop a live run-owned execution; a crash between an
-  attempt's terminal write and its run's terminal write leaves a run claimed
-  behind a terminal attempt; and the launch-failure path discards the
-  `runtime.Stop` error and writes the attempt terminal anyway. All three, and
-  the two problems a follow-up must resolve first, are recorded under
-  [Deferred: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
+- **Operator stop controls and restart reconciliation.** These remain required
+  by `AC-OFFICE-TASKLESS-001.5` and `.6` but are not implemented in this
+  coverage change. Three current gaps are named rather than left silent: run
+  cancellation, agent disable and agent removal do not stop a live run-owned
+  execution; a crash between an attempt's terminal write and its run's terminal
+  write leaves a run claimed behind a terminal attempt; and the launch-failure
+  path discards the `runtime.Stop` error and writes the attempt terminal anyway.
+  All three, and the two problems a follow-up must resolve first, are recorded
+  under [Outstanding: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
 - Any production change beyond the one run event Task 06 adds for a failed
   summary write. Every remaining result is coverage. If a test cannot be written
   without changing production behavior, that is a finding against the
@@ -225,7 +224,7 @@ gap with the work order that closes it.
 | `.7` capability boundary retained | `office/runtime/tasks_list_test.go` — `TestListTasks_TasklessRunWithCapabilitySucceeds` shows a taskless run traversing the capability gate, and `TestListTasks_WithoutCapabilityDenied` shows that gate returning 403 with the lister never called. The pair is the evidence: the denial test is not itself taskless-specific, and it is cited for the gate a taskless run is proven to pass through, not as a neighbouring test |
 | `.8` task-bound launches and their task/session lifecycle unchanged | `office/service/scheduler_taskless_launch_test.go` — `TestSchedulerTick_TaskBoundRunStillLaunches` |
 | `.8` a taskless failure does not auto-pause the agent or re-enter the inbox | same file — `TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent`, `TestSchedulerTick_RepeatTasklessFailures_OnlyFirstStaysInInbox` |
-| `.8` historical unsupported taskless failures are not automatically replayed | **Satisfied structurally; no work order owes it.** Nothing in scope can replay a recorded failure: the unfinished-session query selects `preparing` and `running` only, so a `failed` run is in no population any code path here inspects, and no change in scope adds a channel that relaunches from run-session state. The system design states this. It stops being free the moment the deferred flows land, which is why the follow-up owes it a case |
+| `.8` historical unsupported taskless failures are not automatically replayed | **Satisfied structurally; no work order owes it.** Nothing in scope can replay a recorded failure: the unfinished-session query selects `preparing` and `running` only, so a `failed` run is in no population any code path here inspects, and no change in scope adds a channel that relaunches from run-session state. The system design states this. It stops being free when the outstanding lifecycle work lands, which is why the follow-up owes it a case |
 | Reservation CAS and schema | `office/repository/sqlite/run_sessions_test.go` — `TestRunSessionReservationCAS`, `TestRunSessionSchemaExists` |
 | Run-owned events ignored by task consumers | **Gap.** Enforced structurally by an empty task-session identity; nothing asserts it. Task 06 |
 
@@ -235,8 +234,9 @@ None. `git diff --stat -- apps/web` is empty for this change: there is no
 `apps/web` change, no new user-visible surface, and no UI behavior to drive.
 The taskless run's existing surfaces (run detail, inbox, costs) are unchanged.
 The three surviving work orders are coverage only — the earlier form of this
-decision reasoned about Tasks 03, 04 and 07 adding backend-only behavior, and
-those are withdrawn, so the conclusion holds more strongly rather than less.
+decision reasoned about Tasks 03, 04 and 07 adding backend-only behavior. Those
+pending tasks do not add a user-facing surface, so the conclusion still holds
+for this coverage change.
 
 ## Work orders
 
@@ -244,25 +244,25 @@ those are withdrawn, so the conclusion holds more strongly rather than less.
 - [completed] [Task 05: Cover routed (provider fallback) taskless launch](task-05-cover-routed-taskless-launch.md)
 - [completed] [Task 06: Pin the taskless event-path guarantees no test asserts](task-06-pin-event-path-guarantees.md)
 
-Withdrawn on 2026-09-19 with `AC-OFFICE-TASKLESS-001.5` and `.6`. Not to be
-built; kept for a follow-up:
+Pending follow-up work for `AC-OFFICE-TASKLESS-001.5` and `.6`. These tasks are
+not part of this coverage change:
 
-- [withdrawn] [Task 02: Cover restart reconciliation of unfinished taskless attempts](task-02-cover-restart-reconciliation.md)
-- [withdrawn] [Task 03: Stop live run sessions on run cancel and agent disable/removal](task-03-stop-run-sessions-on-cancel-and-agent-change.md)
-- [withdrawn] [Task 04: Fail closed on discarded requeue and stop errors](task-04-fail-closed-on-recovery-and-stop-errors.md)
-- [withdrawn] [Task 07: Settle a claimed run from its terminal attempt instead of relaunching](task-07-settle-terminal-attempt-before-relaunch.md)
+- [pending] [Task 02: Cover restart reconciliation of unfinished taskless attempts](task-02-cover-restart-reconciliation.md)
+- [pending] [Task 03: Stop live run sessions on run cancel and agent disable/removal](task-03-stop-run-sessions-on-cancel-and-agent-change.md)
+- [pending] [Task 04: Fail closed on discarded requeue and stop errors](task-04-fail-closed-on-recovery-and-stop-errors.md)
+- [pending] [Task 07: Settle a claimed run from its terminal attempt instead of relaunching](task-07-settle-terminal-attempt-before-relaunch.md)
 
 ## Dependency order
 
 ```text
 Task 01   Task 05   Task 06
+
+Task 02 -> Task 03 -> Task 04 -> Task 07 (pending lifecycle follow-up)
 ```
 
-**No dependencies.** All three are wave 1, all three declare `depends_on: []`,
-and all three are coverage touching disjoint test files. They may run in any
-order or together. The `Task 02 -> Task 04 -> Task 07` chain this section used
-to state is gone with its three members; it was the only ordering constraint
-this plan had.
+The three coverage tasks are wave 1, declare `depends_on: []`, and touch
+disjoint test files. The pending lifecycle tasks retain their dependency order
+and must be planned separately from this coverage change.
 
 ## Verification results
 

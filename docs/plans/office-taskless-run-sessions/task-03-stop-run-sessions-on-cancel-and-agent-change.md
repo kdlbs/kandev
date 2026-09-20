@@ -1,7 +1,7 @@
 ---
 id: "03-stop-run-sessions-on-cancel-and-agent-change"
 title: "Stop live run sessions on run cancel and agent disable/removal"
-status: withdrawn
+status: pending
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -14,15 +14,17 @@ system_design:
 
 # Task 03: Stop live run sessions on run cancel and agent disable/removal
 
-> **WITHDRAWN — 2026-09-19.** This work order is not to be built. `AC-OFFICE-TASKLESS-001.5`
-> and `.6` were cut from the requirement after five rounds of spec review, and this order
-> existed only to satisfy them. It gave run cancellation, agent disable and agent removal the run-session stop seam `AC-OFFICE-TASKLESS-001.5` required. That criterion no longer exists, and the three controls not reaching run sessions is now a recorded, accepted gap.
+> **PENDING FOLLOW-UP — 2026-09-19.** This work order is not part of the
+> current coverage change. `AC-OFFICE-TASKLESS-001.5` remains an outstanding
+> requirement, and this order gives run cancellation, agent disable and agent
+> removal the run-session stop seam it requires. The current control gaps remain
+> open until this work is delivered.
 >
-> The file is kept, unedited below this banner, because a follow-up that revives the
-> deferred flows should start from it rather than re-derive it. The deferral, the accepted
-> gaps and the two problems a follow-up must resolve first are recorded under
-> [Deferred: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
-> References below to `taskless-run-recovery.md` point at a design file retired in the same
+> The file is kept, unedited below this banner, because a follow-up should start
+> from it rather than re-derive it. The current gaps and the two problems a
+> follow-up must resolve first are recorded under
+> [Outstanding: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
+> References below to `taskless-run-recovery.md` point at a design file superseded in the same
 > change; its content is summarized in that section.
 
 ## Summary

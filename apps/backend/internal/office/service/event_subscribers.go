@@ -723,8 +723,7 @@ func (s *Service) refreshContinuationSummary(
 	if err != nil {
 		s.logger.Warn("continuation-summary load inputs failed",
 			zap.String("run_id", run.ID), zap.Error(err))
-		s.AppendRunEvent(ctx, run.ID, "continuation_summary.load_failed", string(models.RunEventLevelWarn),
-			map[string]interface{}{"scope": scope, runEventFieldErrorMessage: err.Error()})
+		s.appendContinuationSummaryFailureEvent(ctx, run.ID, "continuation_summary.load_failed", scope, err)
 		return
 	}
 	body := summaryBuild(inputs)
@@ -738,8 +737,19 @@ func (s *Service) refreshContinuationSummary(
 	if upsertErr != nil {
 		s.logger.Warn("continuation-summary upsert failed",
 			zap.String("run_id", run.ID), zap.Error(upsertErr))
-		s.AppendRunEvent(ctx, run.ID, "continuation_summary.upsert_failed", string(models.RunEventLevelWarn),
-			map[string]interface{}{"scope": scope, runEventFieldErrorMessage: upsertErr.Error()})
+		s.appendContinuationSummaryFailureEvent(ctx, run.ID, "continuation_summary.upsert_failed", scope, upsertErr)
+	}
+}
+
+func (s *Service) appendContinuationSummaryFailureEvent(
+	ctx context.Context, runID, eventType, scope string, cause error,
+) {
+	if err := s.appendRunEventStrict(ctx, runID, eventType, string(models.RunEventLevelWarn),
+		map[string]interface{}{"scope": scope, runEventFieldErrorMessage: cause.Error()}); err != nil {
+		s.logger.Warn("continuation-summary failure event append failed",
+			zap.String("run_id", runID),
+			zap.String("event_type", eventType),
+			zap.Error(err))
 	}
 }
 

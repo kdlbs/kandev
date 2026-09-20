@@ -1,7 +1,7 @@
 ---
 id: "04-fail-closed-on-recovery-and-stop-errors"
 title: "Fail closed on discarded requeue and stop errors"
-status: withdrawn
+status: pending
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -14,15 +14,17 @@ system_design:
 
 # Task 04: Fail closed on discarded requeue and stop errors
 
-> **WITHDRAWN — 2026-09-19.** This work order is not to be built. `AC-OFFICE-TASKLESS-001.5`
-> and `.6` were cut from the requirement after five rounds of spec review, and this order
-> existed only to satisfy them. It made the discarded requeue result and the discarded `runtime.Stop` error fail closed for `AC-OFFICE-TASKLESS-001.5` and `.6`. Neither criterion exists now; the discarded stop error is recorded as an accepted gap in the system design's scheduling and routing section.
+> **PENDING FOLLOW-UP — 2026-09-19.** This work order is not part of the
+> current coverage change. It makes the discarded requeue result and the
+> discarded `runtime.Stop` error fail closed for the still-outstanding
+> `AC-OFFICE-TASKLESS-001.5` and `.6` requirements. The current stop error is
+> recorded as an open gap in the system design's scheduling and routing section.
 >
-> The file is kept, unedited below this banner, because a follow-up that revives the
-> deferred flows should start from it rather than re-derive it. The deferral, the accepted
-> gaps and the two problems a follow-up must resolve first are recorded under
-> [Deferred: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
-> References below to `taskless-run-recovery.md` point at a design file retired in the same
+> The file is kept, unedited below this banner, because a follow-up should start
+> from it rather than re-derive it. The current gaps and the two problems a
+> follow-up must resolve first are recorded under
+> [Outstanding: stop controls and restart recovery](../../specs/office/requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
+> References below to `taskless-run-recovery.md` point at a design file superseded in the same
 > change; its content is summarized in that section.
 
 ## Summary

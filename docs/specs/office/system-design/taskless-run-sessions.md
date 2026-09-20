@@ -12,14 +12,14 @@ requirements:
 Office owns run scheduling and durable run-session records. The shared agent
 runtime owns processes and executor resources. Task services retain strict task
 ownership. Follow [ADR](../../../decisions/2026-09-17-office-taskless-run-sessions.md).
-This design completes the taskless behavior in scheduler-01/02; it does not
-replace their queue, continuation or idle-skip rules. The end of a run's
-lifecycle — operator stop controls and settling a run whose attempt already
-reached a terminal state — is deliberately out of scope; it was cut from the
-requirement on September 19, 2026 and is recorded under
-[Deferred: stop controls and restart recovery](../requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
-This document therefore specifies how a taskless run acquires a session, runs
-and is observed, and states where the lifecycle end is known not to hold.
+This design completes the taskless launch and observation behavior in
+scheduler-01/02; it does not replace their queue, continuation or idle-skip
+rules. Operator stop controls and restart reconciliation remain requirements
+under `REQ-OFFICE-TASKLESS-001` and are not implemented by this coverage
+change. The outstanding scope is recorded under
+[Outstanding: stop controls and restart recovery](../requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
+This document specifies how a taskless run acquires a session, runs and is
+observed, and records the current lifecycle gaps for that follow-up.
 
 The mechanism described here has landed. The imperative voice states a durable
 contract, not a build order: each "add", "reserve" or "must" is a rule the code
@@ -33,8 +33,9 @@ current code rather than the contract, it says so.
 | .1, .2 | Persistence; launch flow |
 | .3 | Scheduling and routing |
 | .4 | Events and observation |
+| .5, .6 | Outstanding lifecycle and recovery work |
 | .7 | Runtime admission and security |
-| .8 | Persistence; launch flow; deferred lifecycle scope (replay clause) |
+| .8 | Persistence; launch flow; outstanding lifecycle scope (replay clause) |
 
 All criteria belong to REQ-OFFICE-TASKLESS-001.
 
@@ -91,11 +92,9 @@ conflicts loses the reservation, leaves the predecessor row untouched, and fails
 its own launch rather than retrying inline or adopting the predecessor's
 session. The run then follows the existing failure and retry policy, which
 allocates the next attempt number on its next pass. Allocation is not refused
-for a run that already carries a `finished` attempt. Refusing it was the second
-half of the deferred settlement design, and with that cut there is no defined
-alternative to fall back to, so the rule is gone rather than left half-stated;
-the consequence is recorded with
-[the deferred flows](../requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
+for a run that already carries a `finished` attempt. The settlement guard that
+must prevent a duplicate launch remains part of the outstanding `.6` recovery
+work; this coverage change does not add that guard.
 
 Reserve the session and bind `runs.session_id` atomically while the run is
 claimed. That column names the run's most recently launched attempt, not its
@@ -115,8 +114,8 @@ failed bind must stop/rollback the prepared execution. Workspace deletion
 performs stop-before-delete and retains cleanup evidence when stopping fails.
 Workspace pause does the same. The remaining operator controls — explicit run
 cancellation, agent disable and agent removal — do not reach run sessions, which
-is an accepted gap recorded with
-[the deferred flows](../requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery). Run-history retention deletes runs and run
+is an open gap recorded with
+[the outstanding follow-up](../requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery). Run-history retention deletes runs and run
 events but not run-session rows, which are removed when their workspace is;
 pruning them with the run is named out of scope in the requirement rather than
 claimed as existing behavior. Do not store JWTs or environment secrets.
@@ -194,9 +193,8 @@ the terminal-row-over-live-execution shape named above. Whether the dispatcher
 then falls back to the next candidate is decided by `handleLaunchFailure` in
 `office/scheduler/dispatch_routing.go`, which classifies the launch error by
 string and continues when fallback is allowed. Making the failure path fail
-closed was cut with the lifecycle scope on September 19, 2026; it belongs to
-[the deferred flows](../requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery)
-and no work order in the current plan carries it. The rule above is the target
+closed remains pending lifecycle work under `.5` and `.6`; no work order in the
+current coverage change implements it. The rule above is the target
 the code must eventually meet, stated here so the gap is a named exclusion
 rather than a silence. `runs.session_id` points at the most recently launched candidate,
 which is why run history reads the session table rather than that column.
@@ -274,7 +272,7 @@ That filter admits at most one attempt of a run at a time, and what keeps it to
 one is the rule in scheduling and routing above: a failed candidate must reach a
 terminal session state before its successor launches. Where that rule is not
 enforced — the launch-failure gap named there — a superseded attempt can still
-pass the filter. Closing that is deferred lifecycle work, and it does not soften
+pass the filter. Closing that is pending lifecycle work, and it does not soften
 this criterion: AC .4 is unconditional, and nothing in this document permits an
 event from an older attempt to complete a run that has a live successor. A
 completion arriving from a superseded attempt is a symptom of that gap, not a
@@ -318,17 +316,17 @@ the write boundary. Keep bounded output/continuation semantics rather than
 introducing a new interactive chat UI. Run-detail session links must target a
 run-owned surface, never a task-session URL for a nonexistent task.
 
-## Deferred: stop controls and restart recovery
+## Outstanding: stop controls and restart recovery
 
-Operator stop controls and restart reconciliation were cut from this requirement
-on September 19, 2026. The behavior, the accepted gaps and the analysis a
-follow-up should start from are recorded in the requirement under
-[Deferred: stop controls and restart recovery](../requirements/taskless-run-sessions.md#deferred-stop-controls-and-restart-recovery).
-This document does not specify them, and no work order in the current plan
-implements them. Two consequences are load-bearing here and are stated so they
-are not mistaken for oversights: the launch-failure gap named in scheduling and
-routing above stays open, and a crash between an attempt's terminal write and
-its run's terminal write leaves a run claimed behind a terminal attempt.
+Operator stop controls and restart reconciliation remain required by this
+requirement, but are not implemented by this coverage change. The behavior, the
+open gaps and the analysis a follow-up should start from are recorded in the
+requirement under
+[Outstanding: stop controls and restart recovery](../requirements/taskless-run-sessions.md#outstanding-stop-controls-and-restart-recovery).
+Two consequences are load-bearing here and are stated so they are not mistaken
+for oversights: the launch-failure gap named in scheduling and routing above
+stays open, and a crash between an attempt's terminal write and its run's
+terminal write leaves a run claimed behind a terminal attempt.
 
 **AC .8's replay clause stays in scope and is satisfied structurally.** A
 historical taskless run already recorded as failed must remain history and must
@@ -338,8 +336,8 @@ failure is not in any population this design inspects, and nothing here adds a
 channel that relaunches from run-session state. The clause is therefore a
 non-regression statement over the code as it stands, verified by the existing
 task-bound and taskless lifecycle tests rather than by new recovery machinery.
-It would stop being free the moment the deferred flows land, which is why the
-follow-up owes it a case.
+It would stop being free when the outstanding lifecycle work lands, which is why
+the follow-up owes it a case.
 
 ## Verification and observability
 
@@ -347,8 +345,8 @@ Log sanitized run/session/attempt/execution identities and lifecycle
 transitions; never credentials or full raw provider output. Test SQLite and the
 repository's Postgres migration harness, concrete and routed launch, real
 mock-agent prompt completion, and usage dedup. Cancellation, stop inventories
-and restart reconciliation are not listed because they belong to the deferred
-flows. Routed launch is named separately because it has no coverage at all: a candidate
+and restart reconciliation are not listed because they belong to the pending
+follow-up. Routed launch is named separately because it has no coverage at all: a candidate
 that falls back must be shown to reserve its own attempt, carry the Office
 prompt and skills to the launcher, and leave its predecessor terminal. Keep
 existing task-bound tests in the same targeted checks.

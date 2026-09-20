@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -171,7 +172,8 @@ func TestRoutedTaskless_FirstCandidateSucceeds(t *testing.T) {
 		[]routing.ProviderID{"claude-acp", "codex-acp"})
 
 	agent := createRoutedTestAgent(t, svc, "routed-agent-solo")
-	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, "routed-solo"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger,
+		`{"one_time_instructions":"ROUTED_TASKLESS_PROMPT_SENTINEL"}`, "routed-solo"); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	runs, err := svc.ListRuns(ctx, agent.WorkspaceID)
@@ -184,6 +186,19 @@ func TestRoutedTaskless_FirstCandidateSucceeds(t *testing.T) {
 
 	if launcher.callCount() != 1 || launcher.calls[0].Prompt == "" {
 		t.Fatalf("routed launch = %#v, want exactly one real-prompt call", launcher.calls)
+	}
+	persistedRun, err := svc.GetRun(ctx, run.ID)
+	if err != nil || persistedRun == nil {
+		t.Fatalf("reload dispatched run: %v (run=%v)", err, persistedRun)
+	}
+	if launcher.calls[0].Prompt != persistedRun.AssembledPrompt {
+		t.Fatalf("routed prompt = %q, want persisted Office prompt %q", launcher.calls[0].Prompt, persistedRun.AssembledPrompt)
+	}
+	if !strings.Contains(launcher.calls[0].Prompt, "ROUTED_TASKLESS_PROMPT_SENTINEL") {
+		t.Fatalf("routed prompt lost the known Office instruction: %q", launcher.calls[0].Prompt)
+	}
+	if len(launcher.calls[0].AdditionalSkillSlugs) != 0 {
+		t.Fatalf("taskless launch received task-only skills: %v", launcher.calls[0].AdditionalSkillSlugs)
 	}
 
 	attempts, err := svc.RepoForTest().ListRouteAttempts(ctx, run.ID)
