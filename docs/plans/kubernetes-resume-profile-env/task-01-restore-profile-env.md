@@ -78,3 +78,22 @@ tests, diff checks, and the PR documentation coverage evaluator passed. The
 focused `TestKubernetesResume` race command passed again during PR follow-up.
 Full executor package tests also passed on a detached synthetic merge with the
 current base. Remote CI/review remains a PR delivery gate.
+
+## Review regression coverage
+
+Added `TestKubernetesResumeWithoutRecordedProfileSkipsLookup` for nil, empty,
+and explicitly empty profile metadata. A temporary Go source overlay removing
+the empty-ID guard made the test fail with the sentinel lookup error, proving
+the test detects unintended repository access. This test does not require a production change.
+
+A second review found that the resumed session could retain a conflicting
+profile selection for subsequent subprocess starts. The regression
+`TestKubernetesResumePreservesProfileForExistingWorkspaceStart` first reproduced
+wrong-profile injection after request construction and guarded session
+persistence. It uses the real lifecycle profile/secret resolver and existing
+workspace environment delivery. Resume now restores the recorded profile ID
+alongside the executor ID before persistence.
+
+Post-review validation passed: `go test -race ./internal/orchestrator/executor
+-count=1`, full changed-code Go lint against the current PR base (0 issues),
+documentation catalog validation, specification lint, and diff checks.

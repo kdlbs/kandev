@@ -30,6 +30,7 @@ or rendered UI. The existing recovery specifications retain their draft status.
 ## Tests and acceptance
 
 - Criteria .6/.8: `TestKubernetesResumeRestoresRecordedProfileEnvironment`.
+- Subsequent-start profile identity: `TestKubernetesResumePreservesProfileForExistingWorkspaceStart`.
 - Criterion .7: `TestKubernetesResumeProfileEnvironmentFailures`.
 - Full executor package and focused Kubernetes recovery race tests.
 - Isolated synthetic acceptance: same-Pod Stop/Resume, lost-Pod replacement with

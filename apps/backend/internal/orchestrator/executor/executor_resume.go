@@ -1534,6 +1534,7 @@ func (e *Executor) applyRecordedKubernetesExecutorConfigToResumeRequest(
 		return executorConfig{}, err
 	}
 	session.ExecutorID = executorID
+	session.ExecutorProfileID, _ = running.Metadata[lifecycle.MetadataKeyExecutorProfileID].(string)
 	req.ExecutorType = config.ExecutorType
 	req.ExecutorConfig = config.ExecutorCfg
 	req.Metadata = metadata

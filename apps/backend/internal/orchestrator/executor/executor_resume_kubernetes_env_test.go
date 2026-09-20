@@ -83,6 +83,21 @@ func TestKubernetesResumeProfileEnvironmentFailures(t *testing.T) {
 	}
 }
 
+func TestKubernetesResumeWithoutRecordedProfileSkipsLookup(t *testing.T) {
+	for _, recorded := range []map[string]interface{}{nil, {}, {lifecycle.MetadataKeyExecutorProfileID: ""}} {
+		repo := &resumeProfileRepository{mockRepository: newMockRepository(), err: errors.New("unexpected profile lookup")}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo.mockRepository)
+		exec.repo = repo
+		config := executorConfig{ExecutorID: "recorded"}
+		if err := exec.restoreKubernetesProfileEnvironment(context.Background(), &config, recorded); err != nil {
+			t.Fatalf("resume without a recorded profile: %v", err)
+		}
+		if len(config.ProfileEnvVars) != 0 {
+			t.Fatal("loaded environment without a recorded profile")
+		}
+	}
+}
+
 type resumeProfileRepository struct {
 	*mockRepository
 	profile *models.ExecutorProfile

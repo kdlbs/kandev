@@ -43,7 +43,9 @@ The executor system owns resource retention; task state remains task-owned.
 - **AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.6:** On Kubernetes Resume, the
   resumed process shall receive current environment definitions from the profile
   recorded for its retained runtime, even if the session's selected profile has
-  changed. Environment edits shall not change retained Pod or storage settings.
+  changed. Subsequent process starts in that resumed session shall retain that
+  profile identity. Environment edits shall not change retained Pod or storage
+  settings.
 - **AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.7:** A deleted recorded profile shall
   permit recovery without its unavailable environment definitions. Other profile
   lookup failures or a profile owned by another executor shall block Resume.

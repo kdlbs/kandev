@@ -75,7 +75,10 @@ Criteria .6-.8 use the authoritative `executors_running` profile identity.
 connection settings and immutable recorded workload metadata, then calls
 `restoreKubernetesProfileEnvironment` to load only `ProfileEnvVars` from that
 recorded profile. The mutable session profile selection and current profile
-workload configuration cannot replace the recorded runtime snapshot.
+workload configuration cannot replace the recorded runtime snapshot. Resume also
+restores the session's `ExecutorProfileID` before the existing guarded full-row
+persistence, so `configureExistingWorkspace` and the lifecycle
+`ExecutorProfileEnvForSession` reader use the same profile on later starts.
 
 The environment definitions flow through `resolveLaunchEnvironment` to the
 existing lifecycle launch checkpoint. Literal and secret-reference definitions
