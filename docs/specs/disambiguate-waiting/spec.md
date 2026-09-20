@@ -738,8 +738,7 @@ and the Claude-specific part is one predicate over one payload.
 
 ### Background-workload liveness probe (agentctl)
 
-An internal seam, stated here because its outcomes are contractual and a conformance test must
-be able to drive them:
+An internal seam, documented here because its outcomes are contractual and conformance-tested:
 
 ```
 ProbeBackgroundWorkloads(sessionID) -> live | settled | unknown
@@ -748,30 +747,27 @@ ProbeBackgroundWorkloads(sessionID) -> live | settled | unknown
 The probe enumerates the **transitive descendant set** of the agent process and applies a
 **start-time predicate**:
 
-- **`live`** — the descendant set was enumerated, and it contains at least one non-zombie
-  process whose **start time is at or after the current turn's start time** as recorded by
-  agentctl.
+- **`live`** — the descendant set was enumerated and contains at least one non-zombie process
+  whose **start time is at or after the current turn's start time** as recorded by agentctl.
 - **`settled`** — the descendant set was enumerated and contains no such process.
 - **`unknown`** — the set could not be enumerated with start times on this platform; or
   agentctl holds no recorded turn-start for the session; or the agent process is gone.
 
-**Process-group membership MUST NOT be used, in any form, as the liveness predicate.** §L
-measures why: the group permanently contains the bridge, the CLI, and any stdio MCP servers, so
-membership is always non-empty; and a backgrounded shell is placed in its own process group by
-the CLI, so membership excludes the very process the probe exists to find. An implementation
-that samples the group passes neither AC-70 nor AC-71.
+**Process-group membership MUST NOT be used as the liveness predicate.** §L measures why: the
+group always contains the bridge, CLI, and any stdio MCP servers, so membership is never empty;
+and the CLI places a backgrounded shell in its own process group, excluding the very process the
+probe exists to find. An implementation sampling the group passes neither AC-70 nor AC-71.
 
-**Turn start is recorded by agentctl, in agentctl's own clock.** agentctl stamps the current
+**Turn start is recorded by agentctl, in its own clock.** agentctl stamps the current
 turn's start when it dispatches `session/prompt` for that session — **including the synthetic
 `session/prompt` a `ScheduleWakeup` self-resume issues** (§N: `adapter_prompt.go:388-403` via
-`sendPrompt` at `:71`) — and clears it on session teardown. Both sides of the comparison are
-therefore read on the **same host and the same clock**, so no cross-process skew exists and no
-timestamp travels on the wire. If no turn start is recorded (agentctl restarted mid-turn), the
-result is `unknown`.
+`sendPrompt` at `:71`) — and clears it on session teardown. Both sides read the
+**same host and clock**, so no cross-process skew exists and no timestamp travels on the wire.
+If no turn start is recorded (agentctl restarted mid-turn), the result is `unknown`.
 
-**Start-time source and resolution — named per platform, because they are not interchangeable.**
-An earlier revision offered two Darwin sources as if equivalent. They are not, and the
-difference breaks the predicate's own stated failure direction:
+**Start-time source and resolution — named per platform; they are not interchangeable.** An
+earlier revision offered two Darwin sources as if equivalent. They are not: the difference
+breaks the predicate's stated failure direction:
 
 | Platform | Required source | Resolution | Result |
 |---|---|---|---|
@@ -784,33 +780,33 @@ measurement used `ps`. `lstart` renders a whole-second timestamp, while the reco
 is a Go `time.Time` at nanosecond resolution. A workload spawned 400 ms after `session/prompt`
 in the same wall-clock second would report a start time strictly *before* the turn start and
 the probe would answer `settled` — the **expensive** direction, and precisely the one D5
-promises the inclusive comparison avoids. AC-71 and AC-72 would become timing-dependent rather
-than deterministic. Verified greenfield: `apps/backend/go.mod` carries no process-enumeration
-dependency, so the builder is choosing this, not inheriting it.
+promises the inclusive comparison avoids. AC-71/AC-72 would become timing-dependent rather than
+deterministic. Verified: `apps/backend/go.mod` carries no process-enumeration dependency — a
+chosen design, not an inherited one.
 
 **Comparison rule when the source is coarser than the turn stamp.** The recorded turn start is
-**truncated down** to the enumeration source's resolution before comparing, so a process that
-started in the same source-resolution tick as the turn counts as in-turn. Truncating the turn
-start (rather than rounding the process start) keeps the error in the `live` direction on every
-platform. AC-80 pins this.
+**truncated down** to the source's resolution before comparing, so a process started in the
+same tick as the turn counts as in-turn. Truncating the turn start (not rounding the process
+start) keeps the error toward `live` on every platform. AC-80 pins this.
 
 **Determinism of the predicate**, so a builder invents none of it:
 
-- A process is identified by the pair **(pid, start time)**, never by bare pid. PID reuse inside
-  one turn would otherwise let a recycled pid inherit the wrong verdict, and it would bias
-  toward `settled` — the expensive direction.
+- A process is identified by **(pid, start time)**, never bare pid. PID reuse within a turn would
+  let a recycled pid inherit the wrong verdict, biasing toward `settled` — the expensive
+  direction.
 - The comparison is **inclusive** (`start_time >= truncated_turn_start`), which fails toward
   `live` — the cheap direction.
 - **Zombies are excluded**, on every platform. A reaped-but-unwaited child is not work.
-- The enumeration is **one snapshot**. A process that exits while the walk is in progress is
-  treated as absent; the walk is never restarted, and a partial walk that cannot be completed
-  yields `unknown` rather than a shortened set.
-- No ordering rule is needed: the result is an existence predicate over the set, not a selection
-  from it.
+- The enumeration is **one snapshot**: a process exiting mid-walk is treated as absent; the walk
+  never restarts, and an incomplete walk yields `unknown`, never a shortened set.
+- No ordering rule is needed: the result is an existence predicate, not a selection.
 - The agent process itself is never a member of its own descendant set and is never counted.
 
 Only `live` may park. Both `settled` and `unknown` render exactly as today, and `unknown` MUST
 NOT be recorded, serialized, or rendered as `settled`.
+
+A workload reparented out of this set is covered by
+[orphaned-background-workloads](requirements/orphaned-background-workloads.md).
 
 ### Probe transport (backend ↔ agentctl)
 
@@ -984,6 +980,7 @@ reaches agentctl only through `lifecycle.Manager`, which applies the session-acc
 | Detached launch observed but the agent has no registered recogniser | `observed_detached` is false; behaviour unchanged, and no probe is taken. |
 | Backend restarts while a session is parked | The projection is not reconstructed; the session reads as not parked. The new process's `parked_epoch` is strictly higher, so clients accept the reset (AC-77). |
 | `KANDEV_PARKED_PROBE_BUDGET` set to `0` or negative | Rejected at config load, warn-logged, default used (AC-81). |
+| Parent shell exits without waiting; workload reparents to init | Linux attributes via `KANDEV_SESSION_ID`, reads `live`. Darwin/BSD/Windows can't read another process's environment; reads `settled`. |
 
 ## Persistence guarantees
 
