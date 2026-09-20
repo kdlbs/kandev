@@ -87,8 +87,9 @@ and each run used only the isolated mock backend/workspace.
 
 The original `/slow 30s` fixture divided its delay across several emitter boundaries, so a real
 cancellation could settle before navigation and hydration completed. The `/e2e:cancel-hold` fixture
-has one cancellation boundary and emits no assistant output. In managed E2E only, the profile-owned
-12-second `PromptCancelJoinTimeout` flows through `AgentctlStartupConfig`, the process adapter, and
-ACP; zero preserves ACP's three-second default for normal startup. Fresh managed Chromium repeats
+has one cancellation boundary and emits no assistant output in every mock-agent run. The managed E2E
+profile supplies a three-second `PromptCancelJoinTimeout` baseline through `AgentctlStartupConfig`,
+the process adapter, and ACP; these two cancel-progress regressions scope a 12-second override, and
+zero preserves ACP's three-second default for normal startup. Fresh managed Chromium repeats
 passed five desktop task-switch executions and five mobile reload executions, with the pending
 control observed before eventual idle settlement.

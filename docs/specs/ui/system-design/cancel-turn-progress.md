@@ -42,11 +42,12 @@ is not a durable session lifecycle state and is not persisted across backend res
 4. After lifecycle and session reconciliation settle, the backend publishes a false value with the
    next revision; the shared control returns to its ordinary state.
 
-The mock agent recognizes `/e2e:cancel-hold` only in E2E mode. Its prompt waits at one predictable
-cancellation boundary and produces no assistant output, allowing browser regressions to observe the
-backend-owned pending operation without intercepting a browser request. Managed E2E startup carries
-the profile-owned `PromptCancelJoinTimeout` in private `AgentctlStartupConfig`, through the process
-adapter, to ACP. A zero value leaves ACP's normal three-second join bound in effect.
+The mock agent recognizes `/e2e:cancel-hold` in every mock-agent run. Its prompt waits at one
+predictable cancellation boundary and produces no assistant output, allowing browser regressions to
+observe the backend-owned pending operation without intercepting a browser request. The E2E profile
+sets a three-second `PromptCancelJoinTimeout` baseline through private `AgentctlStartupConfig`, the
+process adapter, and ACP. The two cancel-progress regressions scope a 12-second override through
+their backend fixture; a zero value leaves ACP's normal three-second join bound in effect.
 
 ## Responsive behavior
 
@@ -62,8 +63,8 @@ pending projection is published. A missed live event is repaired by the next boo
 subscription snapshot. On success, reconciliation, rejection, or a bounded cancellation timeout,
 the backend releases pending so a still-running session is retryable.
 
-The E2E hold is scoped to test profiles. Production and non-E2E managed launch paths retain their
-existing cancellation timing and ACP default join bound.
+The E2E profile scopes the fixture timing and cancellation-join configuration to test runs. Production
+and non-E2E managed launch paths retain their existing cancellation timing and ACP default join bound.
 
 ## Verification design
 

@@ -158,10 +158,11 @@ layouts. Because reload persistence changes user-visible behavior on compact scr
 - **Test support:** add a cancellation-pending reader/waiter to
   `apps/web/e2e/helpers/session-store.ts`; remove
   `routeMainWebSocketWithHeldCancelRequest` from `apps/web/e2e/helpers/ws-drop.ts` once no test uses
-  it. The E2E-only hold gives the acknowledged cancellation a single predictable boundary. Managed
-  E2E startup carries its 12-second join bound through `AgentctlStartupConfig` to ACP; normal
-  startup retains ACP's three-second default. No browser request hold, test timeout increase, or
-  production lifecycle change is required.
+  it. The mock-agent hold gives the acknowledged cancellation a single predictable boundary in every
+  mock run. Managed E2E startup carries the profile's three-second baseline through
+  `AgentctlStartupConfig` to ACP; the two cancel-progress regressions scope a 12-second override,
+  while normal startup retains ACP's three-second default. No browser request hold, test timeout
+  increase, or production lifecycle change is required.
 
 ## Verification Results
 
