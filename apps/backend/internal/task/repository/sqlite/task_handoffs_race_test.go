@@ -11,13 +11,18 @@ import (
 // correctness gap in the handoffs-array CAS: SetTaskHandoffsIfUnchanged
 // (task_handoffs_cas.go) is a correct key-scoped compare-and-set, but every
 // full-row task write (UpdateTask, UpdateTaskIfWorkflowMatches,
-// UpdateTaskWithExplicitPosition) marshals whatever metadata is already in
-// the caller's in-memory *models.Task and overwrites the whole metadata
-// column. If that in-memory snapshot was read before a concurrent handoffs
-// CAS append committed, the full-row write must not silently revert the
-// handoffs (or handoff_source) key back to its stale pre-append value — an
-// ordinary unrelated PATCH racing a handoff append must never lose the
-// reverse-link provenance the CAS just wrote.
+// UpdateTaskWithExplicitPosition, UpdateTaskPreservingDeferredLaunch)
+// marshals whatever metadata is already in the caller's in-memory
+// *models.Task and overwrites the whole metadata column. If that in-memory
+// snapshot was read before a concurrent handoffs CAS append committed, the
+// full-row write must not silently revert the handoffs (or handoff_source)
+// key back to its stale pre-append value — an ordinary unrelated PATCH
+// racing a handoff append must never lose the reverse-link provenance the
+// CAS just wrote. UpdateTaskPreservingDeferredLaunch additionally strips and
+// re-splices deferred_launch (buildTaskUpdateQuery's protectDeferredLaunch
+// branch), which must operate on the already-live-merged payload rather than
+// rebuilding from the stale in-memory snapshot, or it silently discards this
+// same handoff-provenance merge a second time.
 func TestFullMetadataWrite_PreservesLiveHandoffProvenance(t *testing.T) {
 	writers := map[string]func(repo *Repository, task *models.Task) error{
 		"UpdateTask": func(repo *Repository, task *models.Task) error {
@@ -28,6 +33,9 @@ func TestFullMetadataWrite_PreservesLiveHandoffProvenance(t *testing.T) {
 		},
 		"UpdateTaskIfWorkflowMatches": func(repo *Repository, task *models.Task) error {
 			return repo.UpdateTaskIfWorkflowMatches(context.Background(), task, "wf-cas")
+		},
+		"UpdateTaskPreservingDeferredLaunch": func(repo *Repository, task *models.Task) error {
+			return repo.UpdateTaskPreservingDeferredLaunch(context.Background(), task)
 		},
 	}
 
