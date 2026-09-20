@@ -7,7 +7,8 @@ depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-OFFICE-TASKLESS-001
-acceptance_criteria: []
+acceptance_criteria:
+  - AC-OFFICE-TASKLESS-001.5
 system_design:
   - ../../specs/office/system-design/taskless-run-sessions.md
 ---
