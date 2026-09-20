@@ -125,3 +125,67 @@ func TestLinuxStartTimeDatum_StableAcrossRepeatedReads(t *testing.T) {
 		t.Errorf("expected a stable start-time datum for an unchanged process, got %d then %d", first, second)
 	}
 }
+
+// AC-DW-ORPHAN-001.10: a just-exec'd process's /proc/<pid>/environ can
+// transiently read as empty, with no error, in the microsecond-scale window
+// before the kernel has the new process's environment region ready. This is
+// indistinguishable from a genuinely empty environment at the point of the
+// read, so readEnvironWithRetry must retry a successful-but-empty read
+// rather than treating it as the variable being absent.
+func TestReadEnvironWithRetry_RetriesOnTransientEmptyRead(t *testing.T) {
+	calls := 0
+	data, err := readEnvironWithRetry(func() ([]byte, error) {
+		calls++
+		if calls < 3 {
+			return nil, nil
+		}
+		return []byte("KANDEV_SESSION_ID=late-value\x00"), nil
+	})
+	if err != nil {
+		t.Fatalf("readEnvironWithRetry: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("got %d calls, want 3 — expected retry until the empty read resolved", calls)
+	}
+	value, ok := parseFirstEnvVar(data, kandevSessionIDEnvVar)
+	if !ok || value != "late-value" {
+		t.Errorf("got (%q, %v), want (%q, true)", value, ok, "late-value")
+	}
+}
+
+// A read that returns an error (exited process, permission denied) must
+// never be retried — AC-DW-ORPHAN-002.2 already treats that as an immediate
+// skip, and retrying it would only add latency to an already-decided case.
+func TestReadEnvironWithRetry_ReturnsImmediatelyOnError(t *testing.T) {
+	calls := 0
+	wantErr := os.ErrNotExist
+	_, err := readEnvironWithRetry(func() ([]byte, error) {
+		calls++
+		return nil, wantErr
+	})
+	if err != wantErr {
+		t.Errorf("got error %v, want %v", err, wantErr)
+	}
+	if calls != 1 {
+		t.Errorf("got %d calls, want 1 — an error must not be retried", calls)
+	}
+}
+
+// A genuinely empty environment (not a transient race) must still resolve
+// in bounded time rather than retrying forever.
+func TestReadEnvironWithRetry_GivesUpAfterMaxAttemptsOnPersistentEmptyRead(t *testing.T) {
+	calls := 0
+	data, err := readEnvironWithRetry(func() ([]byte, error) {
+		calls++
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("readEnvironWithRetry: %v", err)
+	}
+	if len(data) != 0 {
+		t.Errorf("got %q, want empty", data)
+	}
+	if calls != environReadMaxAttempts {
+		t.Errorf("got %d calls, want exactly %d — the retry must be bounded", calls, environReadMaxAttempts)
+	}
+}

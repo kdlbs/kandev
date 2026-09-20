@@ -188,12 +188,41 @@ func (linuxProcessTableReader) StartTimeDatum(pid int) (int64, error) {
 // readLinuxEnvVar returns name's value from pid's environment and whether
 // it was found.
 func readLinuxEnvVar(pid int, name string) (string, bool, error) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+	data, err := readEnvironWithRetry(func() ([]byte, error) {
+		return os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+	})
 	if err != nil {
 		return "", false, err
 	}
 	value, ok := parseFirstEnvVar(data, name)
 	return value, ok, nil
+}
+
+// environReadMaxAttempts bounds the retry below. A just-execve'd process's
+// /proc/<pid>/environ can transiently read as empty, with no error, for a
+// few microseconds before the kernel has that region ready — indistinguishable
+// at read time from a genuinely empty environment. Retrying a *successful*
+// empty read trades at most a few milliseconds of probe latency for
+// correctness against that race; a read that returns an error is never
+// retried, since an unreadable process is already a decided skip.
+const environReadMaxAttempts = 4
+
+// readEnvironWithRetry retries read while it keeps returning a successful
+// but empty result, up to environReadMaxAttempts, backing off briefly
+// between attempts.
+func readEnvironWithRetry(read func() ([]byte, error)) ([]byte, error) {
+	var data []byte
+	var err error
+	for attempt := 0; attempt < environReadMaxAttempts; attempt++ {
+		data, err = read()
+		if err != nil || len(data) > 0 {
+			return data, err
+		}
+		if attempt < environReadMaxAttempts-1 {
+			time.Sleep(time.Duration(1<<attempt) * time.Millisecond)
+		}
+	}
+	return data, err
 }
 
 // parseFirstEnvVar reads a /proc/<pid>/environ-shaped blob — NUL-separated
