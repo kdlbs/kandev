@@ -4,6 +4,7 @@ system: ui
 requirements:
   - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001
   - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002
+  - REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003
 ---
 
 # Kanban Preview Workflow Step Navigation System Design
@@ -21,12 +22,21 @@ contract, a store field, or a persisted preference.
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001`       | [Components](#components-and-responsibilities), [Step resolution](#step-resolution), [Control flow](#control-flow), [Failure and recovery](#failure-and-recovery) |
 | `REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002`       | [Header layout](#header-layout)                                                                                                                             |
+| `REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003`       | [Components](#components-and-responsibilities), [Header layout](#header-layout)                                                                             |
 
 ## Components and responsibilities
 
 - `TaskPreviewPanel` owns the preview header. It gains a step indicator slot
   between the title and the panel controls, and a move-failure slot below the
   header row.
+- `CopyTaskUrlButton` (`components/task/copy-task-url-button.tsx`) renders the
+  copy-task-link control (REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003). It
+  builds the task's detail URL from `linkToTask` (`lib/links.ts`) against
+  `window.location.origin` and writes it with the shared `copyToClipboard`
+  utility (`lib/utils/copy-to-clipboard.ts`), which already covers the
+  non-secure-context fallback this control reuses rather than reimplementing.
+  It is a leaf presentation component that owns only its own transient
+  copied-state timer; it reads no store state beyond the task id it is given.
 - The compact stepper and its disclosure body stay the single implementation of
   the indicator, the step list, and eligibility. They do not implement the move
   request: they take an `onMove` callback and call it. The preview renders the
@@ -185,7 +195,18 @@ order than a first render of the same steps.
 
 The preview header stays one flex row: title, step indicator, panel controls.
 
-- The panel controls do not shrink.
+- The panel controls do not shrink. There are three of them:
+  `CopyTaskUrlButton`, the open-full-page control, and the close control, each
+  rendered at `h-8 w-8` (32px) inside the header's `flex items-center gap-1`
+  control cluster (REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003). When the
+  previewed task offers actions, `TaskActionsMenuTrigger` also renders in that
+  same cluster, ahead of the three panel controls; it is a `p-1 -m-1` icon
+  button whose padding and negative margin cancel, so it claims roughly its
+  16px icon's worth of row space rather than a full 32px, and this section
+  does not fold it into the fixed-width budget below. That omission predates
+  this revision — the budget below never accounted for the trigger — and this
+  revision only makes it explicit instead of leaving the cluster's true width
+  silently under-stated.
 - The step indicator sits in a shrinkable container with an upper bound on the
   share of the row it can claim, so a long step name cannot crowd the title out
   of the row. That bound is half of the row's width remaining after BOTH the
@@ -201,13 +222,30 @@ The preview header stays one flex row: title, step indicator, panel controls.
   panel; the panel's own root carries `border-l` (1px); and the header row adds
   `px-4` on both sides (32px). Box sizing is `border-box` throughout, so each
   border is inside the width it is measured against. The header's content box is
-  therefore `300 - 1 - 4 - 1 - 32` = **262px**. The two `h-8 w-8` panel controls
-  plus their own `gap-1` take 68px, leaving 194px, of which the gaps take `g`.
-  The indicator's cap is therefore `(194 - g) / 2`, and the title is left
-  `(194 - g) / 2`. The title floor of 88px
-  (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3) holds while `g <= 18px`. That is
-  the constraint the header must respect. It remains generous in practice, since
-  the header carries no gap class today, so `g = 0` and the title gets 97px.
+  therefore `300 - 1 - 4 - 1 - 32` = **262px**, unchanged by this revision. The
+  THREE `h-8 w-8` panel controls plus their own two `gap-1` separators now take
+  `32 * 3 + 4 * 2` = **104px** (was 68px for the two controls this section
+  covered before `CopyTaskUrlButton` existed), leaving **158px** (was 194px),
+  of which the gaps take `g`.
+- With two controls, the 194px remainder let the indicator's half-share cap
+  and the 88px title floor (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3) both
+  hold at once, without the cap ever needing to yield: `(194 - g) / 2 >= 88`
+  while `g <= 18px`. With three controls the 158px remainder is too small for
+  that: `(158 - g) / 2` tops out at 79px, below the 88px floor, for every
+  `g >= 0`. **The cap and the floor now conflict whenever the step name is
+  long enough to want its full cap, at every gap value, not only past some
+  threshold.** The title floor still holds, but only because the
+  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4 override is a real, load-bearing
+  layout mechanism here and not merely a theoretical fallback: the title's
+  `min-w-[88px]` is a hard CSS floor, the step indicator's wrapper carries
+  `min-w-0` (it can shrink below its cap, down to 0), and flexbox resolves
+  that conflict by giving the title its floor first and letting the indicator
+  absorb the rest. The bound the header must respect is therefore the simpler
+  one the floor alone needs: `158 - g >= 88`, i.e. **`g <= 70px`**. It remains
+  generous in practice: the header carries no gap class today, so `g = 0`, and
+  the title is guaranteed at least 88px whenever the indicator's content wants
+  more than its share, up to the full 158px when the indicator is short,
+  empty, or absent.
 - Every term in that derivation is named on purpose. Two earlier drafts of this
   section each stated a bound computed from premises they had not inspected: the
   first omitted the inter-element gaps, the second took the header's base width
@@ -215,19 +253,25 @@ The preview header stays one flex row: title, step indicator, panel controls.
   border, the resize handle and the panel border between them. Both produced a
   bound that looked safe and was not. A bound whose terms are not enumerated
   cannot be re-checked when the layout around it changes, so the enumeration is
-  part of the contract rather than commentary on it.
+  part of the contract rather than commentary on it. The addition of
+  `CopyTaskUrlButton` is exactly that kind of change: the 18px bound this
+  section stated before was computed for two controls specifically, and
+  carrying it forward unexamined for three would have repeated the mistake
+  this paragraph already warns against.
 - The two layouts differ by one pixel at the same panel width. The floating
-  layout's outer container has no `border-l`, so its header content box is 263px
-  and its remainder 195px, giving `g <= 19px`. The inline layout is therefore the
-  binding case, and `g <= 18px` is the single bound that holds for both: a header
-  satisfying the inline layout satisfies the floating one by construction.
-- When a row cannot satisfy both bounds — which the inequality above prevents at
-  the 300px minimum, but which must still resolve deterministically at any width
-  and under any future spacing — the title floor wins and the indicator shrinks
-  below its cap. The cap is a maximum, never a reservation, so yielding is always
-  available to it; the floor is a minimum and has nowhere to yield to. The two
-  bounds are stated separately because the cap governs at every width while the
-  floor is what an assertion at the minimum width checks.
+  layout's outer container has no `border-l`, so its header content box is
+  263px and its remainder (after the three controls) is 159px, giving
+  `g <= 71px`. The inline layout is therefore still the binding case, and
+  `g <= 70px` is the single bound that holds for both: a header satisfying the
+  inline layout satisfies the floating one by construction.
+- When a row cannot satisfy both bounds — which is now the steady state at the
+  300px minimum whenever the step name wants its full cap, not an edge case
+  reached only past some threshold — the title floor wins and the indicator
+  shrinks below its cap. The cap is a maximum, never a reservation, so
+  yielding is always available to it; the floor is a minimum and has nowhere
+  to yield to. The two bounds are stated separately because the cap governs at
+  every width while the floor is what an assertion at the minimum width
+  checks.
 - The cap is a share of the width remaining after the controls, NOT a percentage
   of the whole row. A plain `max-width: 50%` on the indicator would resolve
   against the row's full 262px content box and yield 131px, which is not this
@@ -392,8 +436,8 @@ through the board column visibility filter, open the preview on a task, open the
 disclosure, confirm the hidden step is still listed, move the task to it, and
 assert the task's step through the API. A second scenario resizes the preview to
 its minimum width **in the inline layout**, with a step name long enough to drive
-the indicator to its cap, and asserts single-row containment, both panel controls
-clickable, and a title of at least the 88px
+the indicator to its cap, and asserts single-row containment, every panel control
+(copy-task-link, open-full-page, close) visible and clickable, and a title of at least the 88px
 AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 requires — the literal floor, not
 merely a non-zero width, because a non-zero assertion passes on a one-pixel
 title and would leave the containment budget unproven at exactly the width it

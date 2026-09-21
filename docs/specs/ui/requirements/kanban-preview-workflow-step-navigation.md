@@ -50,8 +50,13 @@ continues to own workflow order, move eligibility, and task transitions.
 - **Eligible step:** A step that the existing task-move policy permits as a
   manual target: the step adjacent to the current step, or a step whose
   `allow_manual_move` is set.
-- **Panel controls:** The open-full-page control and the close control in the
-  preview header.
+- **Panel controls:** The copy-task-link control, the open-full-page control,
+  and the close control in the preview header — the three fixed-width icon
+  buttons the header layout's width budget accounts for
+  (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2). When the previewed task offers
+  actions, a task actions menu trigger also renders in the same control
+  cluster, ahead of the panel controls; it is sized differently from the three
+  and is not itself a panel control for that budget.
 
 ## Requirements
 
@@ -200,8 +205,8 @@ and must never turn the header into a second row or a scrolling surface.
   from its 300px minimum to its maximum, the preview header shall stay a single
   row. No header element shall wrap to a second line.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2:** At the 300px minimum width,
-  both panel controls shall stay fully inside the panel and shall stay
-  clickable.
+  every panel control (copy-task-link, open-full-page, close) shall stay fully
+  inside the panel and shall stay clickable.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3:** At the 300px minimum width,
   the task title shall keep at least 88px of rendered width and shall truncate
   with an ellipsis rather than wrap or displace any other header element.
@@ -213,15 +218,55 @@ and must never turn the header into a second row or a scrolling surface.
   visible. This cap is a maximum, not a reservation: when a header row cannot
   satisfy both this cap and the task title floor
   AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 sets, the title floor wins and the
-  step indicator shall shrink below its cap. The two bounds never conflict while
-  the header row's inter-element gaps total 18px or less, which the system design
-  derives from the narrower of the two preview layouts and which the header shall
-  respect.
+  step indicator shall shrink below its cap, including below half of what
+  remains once the title takes its floor. With three panel controls this
+  override is the routinely-engaged path rather than a theoretical edge case:
+  the cap alone can no longer guarantee the title floor at the 300px minimum
+  width whenever the step name is long enough to want its full cap, at any
+  value of the header row's inter-element gaps. The header shall still
+  guarantee the title floor while those gaps total 70px or less, which the
+  system design derives from the narrower of the two preview layouts and which
+  the header shall respect.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.5:** The preview header shall not
   introduce horizontal scrolling in the preview panel at any supported width.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.6:** Truncated header text shall
   keep its full value available to assistive technology and shall not be the
   only carrier of the step name, step number, or total.
+
+### REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003: Copy task link control in the preview header
+
+**Intent:** Copying a task's link today means opening the full task detail
+view and copying it from the browser address bar. A user working from the
+preview panel should be able to copy the same link in one click, without
+leaving the preview.
+
+**User story:** As a board user with the preview open, I want to copy the
+previewed task's link directly from the preview header, so that I can share it
+without opening the full task page.
+
+#### Acceptance criteria
+
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.1:** When the preview panel is
+  open on a task, the preview header shall show a copy-task-link control in
+  the panel controls cluster, positioned before the open-full-page control.
+  When the preview panel has no selected task, the control shall not render,
+  matching the other panel controls.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.2:** Selecting the control shall
+  copy the previewed task's canonical detail URL, the page's origin joined
+  with its task-detail path, to the clipboard, using the same clipboard-write
+  utility the product's other copy-to-clipboard affordances use, including its
+  non-secure-context fallback.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.3:** The control's icon shall be
+  visually distinct from the Link submenu's icon, which represents linking an
+  external pull request, issue, or other tracker resource to the task. The two
+  controls shall not share an icon, so a user scanning the header cannot
+  mistake one action for the other.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.4:** The control shall expose an
+  accessible name and a tooltip identifying it as copying the task's link,
+  worded distinctly from the Link submenu, and shall show a brief visual
+  confirmation after a successful copy, consistent with the product's existing
+  copy-to-clipboard affordances. The confirmation shall clear on its own after
+  a bounded duration rather than persist indefinitely.
 
 ## Decisions
 
@@ -277,5 +322,8 @@ and must never turn the header into a second row or a scrolling surface.
 - Any change to what entering a step triggers. Step `on_enter` actions,
   including agent auto-start, behave exactly as they do for a board drag or a
   task top bar move.
-- New user-facing copy. This surface reuses the existing translated strings for
-  the step indicator, the disclosure, and the move-failure message.
+- New user-facing copy for the step indicator, the disclosure, and the
+  move-failure message: the step-navigation requirements above reuse the
+  existing translated strings for those. The copy-task-link requirement below
+  is the one exception here and introduces its own translated copy for that
+  control specifically.

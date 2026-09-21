@@ -205,20 +205,27 @@ test.describe("Kanban preview workflow step navigation", () => {
     const title = previewPanel.locator("h2");
     const closeButton = previewPanel.getByRole("button", { name: "Close preview" });
     const maximizeButton = previewPanel.getByRole("button", { name: "Open full page" });
+    const copyButton = previewPanel.getByRole("button", { name: "Copy task link" });
     await expect(closeButton).toBeVisible();
     await expect(closeButton).toBeEnabled();
     await expect(maximizeButton).toBeVisible();
     await expect(maximizeButton).toBeEnabled();
+    await expect(copyButton).toBeVisible();
+    await expect(copyButton).toBeEnabled();
 
-    const [titleBox, triggerBox, closeBox] = await Promise.all([
+    const [titleBox, triggerBox, closeBox, copyBox, maximizeBox] = await Promise.all([
       title.boundingBox(),
       trigger.boundingBox(),
       closeButton.boundingBox(),
+      copyButton.boundingBox(),
+      maximizeButton.boundingBox(),
     ]);
     expect(titleBox).not.toBeNull();
     expect(triggerBox).not.toBeNull();
     expect(closeBox).not.toBeNull();
-    if (!titleBox || !triggerBox || !closeBox) return;
+    expect(copyBox).not.toBeNull();
+    expect(maximizeBox).not.toBeNull();
+    if (!titleBox || !triggerBox || !closeBox || !copyBox || !maximizeBox) return;
 
     // Single row: every header element shares the same vertical center. Comparing
     // raw tops would fail spuriously — items-center aligns centers, not tops, and
@@ -226,8 +233,15 @@ test.describe("Kanban preview workflow step navigation", () => {
     const centerY = (box: { y: number; height: number }) => box.y + box.height / 2;
     expect(Math.abs(centerY(titleBox) - centerY(closeBox))).toBeLessThan(4);
     expect(Math.abs(centerY(triggerBox) - centerY(closeBox))).toBeLessThan(4);
+    expect(Math.abs(centerY(copyBox) - centerY(closeBox))).toBeLessThan(4);
 
-    // The title floor AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 requires.
+    // REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.1: the copy control sits in the
+    // panel controls cluster, before the open-full-page control.
+    expect(copyBox.x).toBeLessThan(maximizeBox.x);
+
+    // The title floor AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 requires, now
+    // proven with three fixed-width panel controls in the budget (system design's
+    // Header layout section derives the g<=70px bound this relies on).
     expect(titleBox.width).toBeGreaterThanOrEqual(88);
 
     // No horizontal scrolling in the header row.

@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { TaskPreviewPanel } from "./task-preview-panel";
@@ -12,6 +13,8 @@ const getTaskDeletePreflightMock = vi.hoisted(() =>
 );
 const archiveTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const deleteTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const clipboardMocks = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
+vi.mock("@/lib/utils/copy-to-clipboard", () => clipboardMocks);
 vi.mock("@/lib/api/domains/kanban-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/kanban-api")>(
     "@/lib/api/domains/kanban-api",
@@ -38,6 +41,8 @@ afterEach(() => {
   archiveTaskMock.mockResolvedValue(undefined);
   deleteTaskMock.mockClear();
   deleteTaskMock.mockResolvedValue(undefined);
+  clipboardMocks.copyToClipboard.mockReset();
+  clipboardMocks.copyToClipboard.mockResolvedValue(true);
 });
 
 vi.mock("./task/preview-session-tabs", () => ({
@@ -62,7 +67,9 @@ const CHILD_TASK: Task = {
 function renderPanel(ui: React.ReactNode) {
   return render(
     <ToastProvider>
-      <StateProvider>{ui}</StateProvider>
+      <StateProvider>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </StateProvider>
     </ToastProvider>,
   );
 }
@@ -70,7 +77,9 @@ function renderPanel(ui: React.ReactNode) {
 function rerenderPanel(rerender: (ui: React.ReactNode) => void, ui: React.ReactNode) {
   rerender(
     <ToastProvider>
-      <StateProvider>{ui}</StateProvider>
+      <StateProvider>
+        <TooltipProvider>{ui}</TooltipProvider>
+      </StateProvider>
     </ToastProvider>,
   );
 }
@@ -369,5 +378,58 @@ describe("TaskPreviewPanel actions menu — confirmation retargeting (AC-TASKS-T
     rerenderPanel(rerender, <TaskPreviewPanel task={OTHER_CHILD_TASK} onClose={vi.fn()} />);
 
     expect(screen.queryByTestId(DETACH_CONFIRM_POPOVER_TEST_ID)).toBeNull();
+  });
+});
+
+describe("TaskPreviewPanel copy task link", () => {
+  const COPY_TEST_ID = "task-preview-copy-url";
+  const ARIA_LABEL_ATTRIBUTE = "aria-label";
+
+  it("renders no copy control when the panel has no subject task", () => {
+    renderPanel(<TaskPreviewPanel task={null} onClose={vi.fn()} />);
+
+    expect(screen.queryByTestId(COPY_TEST_ID)).toBeNull();
+  });
+
+  it("copies the task's detail URL and shows transient confirmation", async () => {
+    vi.useFakeTimers();
+    renderPanel(<TaskPreviewPanel task={TASK} onClose={vi.fn()} />);
+
+    const copyButton = screen.getByTestId(COPY_TEST_ID);
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Copy task link");
+
+    fireEvent.click(copyButton);
+    await act(async () => {});
+
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith(
+      `${window.location.origin}/t/${TASK.id}`,
+    );
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Task link copied");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Copy task link");
+  });
+
+  it("does not show copied confirmation when the clipboard write fails", async () => {
+    clipboardMocks.copyToClipboard.mockResolvedValue(false);
+    renderPanel(<TaskPreviewPanel task={TASK} onClose={vi.fn()} />);
+
+    const copyButton = screen.getByTestId(COPY_TEST_ID);
+    fireEvent.click(copyButton);
+
+    await waitFor(() => expect(clipboardMocks.copyToClipboard).toHaveBeenCalled());
+    expect(copyButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Copy task link");
+  });
+
+  it("renders the copy control before Maximize, alongside the other panel controls", () => {
+    renderPanel(<TaskPreviewPanel task={TASK} onClose={vi.fn()} onMaximize={vi.fn()} />);
+
+    const controls = screen.getAllByRole("button");
+    const copyIndex = controls.indexOf(screen.getByTestId(COPY_TEST_ID));
+    const maximizeIndex = controls.findIndex((el) => el.title === "Open full page");
+    expect(copyIndex).toBeGreaterThanOrEqual(0);
+    expect(copyIndex).toBeLessThan(maximizeIndex);
   });
 });

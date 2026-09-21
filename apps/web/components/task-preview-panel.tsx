@@ -16,6 +16,7 @@ import {
 import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
 import { TaskActionsMenuTrigger } from "./task/task-actions-menu-trigger";
 import { TaskActionsMenuDialogs } from "./task/task-actions-menu-dialogs";
+import { CopyTaskUrlButton } from "./task/copy-task-url-button";
 import { useTaskActionsMenu, type TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 import { useTaskCRUD } from "@/hooks/use-task-crud";
 import { useTranslation } from "react-i18next";
@@ -204,6 +205,7 @@ function PreviewPanelHeader({
             onOpenChange={setActionsMenuOpen}
           />
         )}
+        {task && <CopyTaskUrlButton taskId={task.id} />}
         {onMaximize && task && (
           <Button
             variant="ghost"
