@@ -75,7 +75,7 @@ func assistantEffectAllowed(mode, effect string) bool {
 	default:
 		return false
 	}
-	return effect == effectRead || effect == effectReceipt || (effect == "task_write" && (mode == executionModeDesign || mode == executionModeExecute))
+	return effect == effectRead || effect == effectReceipt || (effect == "workspace_write" && mode == executionModeExecute) || (effect == "task_write" && (mode == executionModeDesign || mode == executionModeExecute))
 }
 
 func (s *Service) assistantAuthority(ctx context.Context, taskID string) (*models.AssistantAuthority, error) {
@@ -210,6 +210,8 @@ func assistantRequestEffect(c *gin.Context) string {
 	}
 	path := strings.TrimPrefix(c.FullPath(), "/api/v1/orchestration")
 	switch path {
+	case "/runtime/workspace/manage":
+		return "workspace_write"
 	case "/runtime/comments", "/runtime/objectives", "/runtime/objectives/:id":
 		return "receipt"
 	case "/runtime/tasks", "/runtime/tasks/:id/manage", "/runtime/tasks/:id/status", "/runtime/attention/:id/answer", "/runtime/improvements/:id/maintenance":

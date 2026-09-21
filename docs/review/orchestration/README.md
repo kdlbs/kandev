@@ -7,6 +7,9 @@ above exact v0.94.0. Start with the [root workbench guide](../../../WORKBENCH.md
 
 ## Scope and implementation plan
 
+- [Workspace administration repair](workspace-administration.md): native workspace,
+  workflow/column and repository configuration controls, scope checks and qualification.
+
 - [Orchestrator product boundary](../../decisions/2026-09-18-orchestrator-product-boundary.md): one central product and rollout gate; Office remains legacy compatibility.
 
 - [Full scope audit](scope-audit.md): original requirement crosswalk, all implemented

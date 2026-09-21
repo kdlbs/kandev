@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestration/maintenance"
 	orchestrationmodels "github.com/kandev/kandev/internal/orchestration/models"
 	"github.com/kandev/kandev/internal/orchestration/personas"
@@ -14,12 +15,13 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"path/filepath"
 	"strings"
 )
 
-func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *Services, orch *orchestrator.Service, cli string, log *logger.Logger) *orchestrationruntime.Service {
+func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *Services, orch *orchestrator.Service, cli string, eventBus bus.EventBus, log *logger.Logger) *orchestrationruntime.Service {
 	apiPort := cfg.Server.Port
 	if apiPort == 0 {
 		apiPort = ports.Backend
@@ -39,8 +41,11 @@ func newOrchestrationRuntime(cfg *config.Config, repos *Repositories, services *
 		Credentials:  assistantCredentialReader{store: repos.Secrets},
 		Capabilities: newAssistantCapabilityReader(repos, services),
 		Authority:    assistantAuthorityReader{profiles: repos.AgentSettings, executors: repos.Task, versions: services.ManagedRuntimeSelections, authorize: services.Task.AuthorizeWorkspaceAccess},
-		Manager:      &taskCreatorAdapter{taskSvc: services.Task, profiles: repos.AgentSettings, orch: orch, taskRepo: repos.Task, workflow: repos.Workflow},
-		APIURL:       fmt.Sprintf("http://localhost:%d", apiPort), CLI: cli,
+		Manager: &workspaceAdminAdapter{
+			taskCreatorAdapter: &taskCreatorAdapter{taskSvc: services.Task, profiles: repos.AgentSettings, orch: orch, taskRepo: repos.Task, workflow: repos.Workflow},
+			workflows:          services.Workflow, stepEvents: stepevents.NewPublisher(eventBus, "orchestration", log),
+		},
+		APIURL: fmt.Sprintf("http://localhost:%d", apiPort), CLI: cli,
 		Start: func(ctx context.Context, launch orchestrationruntime.Launch) error {
 			return orch.StartTaskWithRoute(ctx, launch.TaskID, launch.PersonaID, orchestrationLaunchContext(repos, launch), orchexecutor.RouteOverride{ExecutionProfileID: launch.ProfileID})
 		},

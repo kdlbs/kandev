@@ -17,6 +17,7 @@ import (
 type assistantBrokerTool struct{ name, description, method, path string }
 
 var assistantBrokerTools = []assistantBrokerTool{
+	workspaceAdministrationBrokerTool(),
 	{subcmdWorkspace, "Read the authorized workspace directory. Linked targets return bounded names and routing IDs. Optional query: after, limit.", http.MethodGet, "/runtime/workspace"},
 	{"workspace_links", "Discover only explicitly granted linked workspaces and their current scope/revision. Optional query: after, limit. Never infer permission from an old link.", http.MethodGet, "/runtime/workspace-links"},
 	{"workspace_tasks", "Read a bounded page of task summaries in the selected workspace. Optional query: after, limit. No descriptions or transcripts.", http.MethodGet, "/runtime/tasks"},
@@ -85,6 +86,11 @@ func newAssistantMCP(client *kandevClient) *server.MCPServer {
 		})
 	}
 	return s
+}
+
+func workspaceAdministrationBrokerTool() assistantBrokerTool {
+	tool := models.WorkspaceAdministrationTool()
+	return assistantBrokerTool{tool.Name, tool.Description, tool.Method, tool.Path}
 }
 
 func callAssistantBroker(client *kandevClient, definition assistantBrokerTool, args map[string]any) (*mcp.CallToolResult, error) {

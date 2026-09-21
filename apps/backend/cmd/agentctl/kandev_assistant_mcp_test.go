@@ -68,3 +68,16 @@ func TestAssistantBrokerReportsEmptyHTTPFailure(t *testing.T) {
 	require.True(t, result.IsError)
 	require.Contains(t, result.Content, mcp.TextContent{Type: "text", Text: "Kandev returned HTTP 404 (Not Found)"})
 }
+
+func TestOrchestratorBrokerAdvertisesWorkspaceAdministration(t *testing.T) {
+	for _, scope := range []string{"workspace", "assistant"} {
+		t.Run(scope, func(t *testing.T) {
+			t.Setenv("KANDEV_ORCHESTRATOR_SCOPE", scope)
+			tool := newAssistantMCP(&kandevClient{}).GetTool("manage_workspace")
+			require.NotNil(t, tool)
+			for _, resource := range []string{"workflow", "step", "repository", "configuration"} {
+				require.Contains(t, tool.Tool.Description, resource)
+			}
+		})
+	}
+}

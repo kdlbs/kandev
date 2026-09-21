@@ -16,6 +16,22 @@ Each orchestrator has its own persistent conversation, pause/resume/delete contr
 Delivery tasks remain canonical Kanban tasks. The coordinator reads available execution profiles, adopts existing tasks without changing their assigned agent, and explicitly assigns a profile for new work. Existing task assignments are honored on start/resume; intentional user/profile changes are supported. No automatic provider fallback crosses profiles. Task events notify only their coordinating orchestrator, including multiple orchestrators in one workspace. Stable external task IDs prevent duplicate creation. Scope validation applies to workspace, profile, task and conversation.
 
 ## Persistence and API
+
+The signed runtime exposes `POST /api/v1/orchestration/runtime/workspace/manage`
+as the `manage_workspace` broker tool. Its resource/action/configuration command
+supports assigned-workspace settings updates; delivery-workflow CRUD and
+ordering; workflow-step CRUD and ordering; and repository registration, editing
+and removal. Native task services and the workflow controller remain the mutation
+owners. Step events use the shared publisher, including start-step demotions.
+The workspace directory includes current settings and available templates.
+Current run, session, role and intent authority are checked on every invocation;
+private conversations additionally require execute mode. Neither an objective
+nor a user-supplied API key is required for configuration operations. Linked
+observe/coordinate grants do not include administration. Foreign IDs, hidden
+workflows, Improve Kandev workspaces and source-managed definitions are rejected;
+workspace access and installation-wide configuration are not broker operations.
+Unknown configuration outcomes require state inspection rather than replay.
+
 Own persona instructions, memory, conversation mappings, runtime and API in `internal/orchestration`. Reuse core execution profiles, tasks, comments, sessions, runtime authentication and run dispatch. Transfer pre-separation registered personas once, preserving IDs/history; do not continue reading Office storage. Add durable global roles and workspace orchestrator registrations, with workspace/agent deletion cleanup. Expose /api/v1/orchestration/roles and /api/v1/orchestration/workspaces/:wsId/orchestrators for list/create/update/delete and conversation open. Orchestration owns its scoped runtime and conversation endpoints.
 
 ## Experimental rollout

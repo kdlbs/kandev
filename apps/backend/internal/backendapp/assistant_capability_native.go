@@ -11,6 +11,7 @@ func nativeAssistantCapabilities(workspace string) []shared.Capability {
 		name, effect string
 		fields       []string
 	}{
+		{"workspace.manage", capabilityEffectWrite, []string{"resource", "action", "id", "configuration"}},
 		{"workspace.catalog", capabilityEffectRead, nil}, {"task.details", capabilityEffectRead, []string{taskIDPayloadKey}},
 		{"context.read", capabilityEffectRead, []string{"objective_id", "profile_id"}}, {"memory.read", capabilityEffectRead, nil},
 		{"capabilities.read", capabilityEffectRead, nil}, {"task.create", capabilityEffectWrite, []string{"objective_id", "context_ref", "workflow_id", capabilityTitleKey}},

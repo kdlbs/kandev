@@ -144,6 +144,27 @@ A coordinator does not automatically fall back to another account. Tasks retain 
 
 ## The task loop
 
+The Orchestrator can also manage its assigned workspace through the native
+`manage_workspace` tool. Ask it to update workspace settings, register an
+existing local Git checkout or remote repository, create or edit a delivery
+workflow, or add, configure, reorder and remove workflow columns. It uses your
+existing Kandev session authority; no additional API key is needed. Private
+conversations need **Execute** mode for configuration changes.
+
+Workspace defaults include the executor, environment and agent profiles.
+Workflow configuration includes instructions and default agent profiles;
+column configuration includes start columns, events, WIP limits and automatic
+progression. Changes appear through the same live updates as edits in settings.
+Deleting a workflow archives its remaining tasks. Move tasks before deleting
+an occupied column if they should remain assigned to a column. Repository
+removal uses Kandev's normal active-session and cleanup checks.
+
+Configuration access stays within the assigned workspace. Organization access,
+global settings and hidden system workflows remain separate administrative
+controls. GitHub-synced workflow definitions must be edited at their source.
+Linked-workspace task grants do not grant configuration access. If a write has
+an uncertain outcome, the Orchestrator inspects current state before retrying.
+
 The coordinator uses `kandev workspace` to discover workflows, repositories and execution profiles. It creates normal board tasks with `kandev task create --workflow <id> --assignee <execution-profile-id>` and a stable `--external-id` for retry-safe creation. It can adopt an existing task with `kandev task manage --id <id> --action adopt`, then inspect, assign, start, stop or message its existing session.
 
 `kandev task inspect --id <id>` returns task/session status and bounded recent worker output. The full transcript remains on the task. Review, completion, failure and waiting-state events notify the owning coordinator; other coordinators in the workspace do not receive that task's notification. Normal workflow transitions, dependencies and human permission/question gates still apply.

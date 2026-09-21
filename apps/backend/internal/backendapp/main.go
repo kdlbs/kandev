@@ -1075,7 +1075,7 @@ func startGatewayAndServe(
 		return false
 	}
 	if cfg.Features.Orchestration {
-		services.Orchestration = newOrchestrationRuntime(cfg, repos, services, orchestratorSvc, agentctlBinaryPath, log)
+		services.Orchestration = newOrchestrationRuntime(cfg, repos, services, orchestratorSvc, agentctlBinaryPath, eventBus, log)
 		if services.Automation != nil {
 			services.Automation.Service.SetOrchestratorTarget(services.Orchestration)
 		}
