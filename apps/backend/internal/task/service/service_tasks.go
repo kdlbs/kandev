@@ -4002,7 +4002,11 @@ func (s *Service) cleanupDestructiveTaskResources(
 		if !ok {
 			return append(errs, errors.New("worktree cleaner cannot preserve branches during archive cleanup"))
 		}
-		cleanupErr = cleaner.CleanupWorktreesPreservingBranches(ctx, worktrees)
+		reclaimable, filterErrs := s.filterDirtyWorktreesForArchive(ctx, taskID, worktrees)
+		errs = append(errs, filterErrs...)
+		if len(reclaimable) > 0 {
+			cleanupErr = cleaner.CleanupWorktreesPreservingBranches(ctx, reclaimable)
+		}
 	} else if envCleanup.discardWorktreeChanges {
 		cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleanerWithOptions)
 		if !ok {
@@ -4021,6 +4025,54 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
 	}
 	return errs
+}
+
+// filterDirtyWorktreesForArchive drops worktrees carrying uncommitted or
+// untracked local changes from an archive cleanup batch. Archive preserves
+// the branch and the task_environment_repos row for every worktree it does
+// not physically clean up, so a dropped worktree stays reclaimable by a
+// later cleanup once it is clean, instead of being force-removed now.
+//
+// A dirty-inspection failure preserves the entire batch rather than risking
+// a force-remove of a checkout whose state could not be confirmed clean.
+func (s *Service) filterDirtyWorktreesForArchive(
+	ctx context.Context, taskID string, worktrees []*worktree.Worktree,
+) ([]*worktree.Worktree, []error) {
+	if len(worktrees) == 0 {
+		return worktrees, nil
+	}
+	inspector, ok := s.worktreeCleanup.(WorktreeDirtyInspector)
+	if !ok {
+		return worktrees, nil
+	}
+	dirty, err := inspector.InspectDirtyWorktrees(ctx, worktrees)
+	if err != nil {
+		s.logger.Warn("preserving all task worktrees after dirty inspection failed during archive cleanup",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil, []error{fmt.Errorf("inspect worktrees before archive cleanup: %w", err)}
+	}
+	if len(dirty) == 0 {
+		return worktrees, nil
+	}
+	dirtyIDs := make(map[string]struct{}, len(dirty))
+	for _, d := range dirty {
+		dirtyIDs[d.WorktreeID] = struct{}{}
+	}
+	reclaimable := make([]*worktree.Worktree, 0, len(worktrees))
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		if _, isDirty := dirtyIDs[wt.ID]; isDirty {
+			s.logger.Info("preserving dirty worktree during archive cleanup",
+				zap.String("task_id", taskID),
+				zap.String("worktree_id", wt.ID))
+			continue
+		}
+		reclaimable = append(reclaimable, wt)
+	}
+	return reclaimable, nil
 }
 
 func (s *Service) canBatchCleanupTaskWorktrees(cleanup taskEnvironmentCleanup) bool {
