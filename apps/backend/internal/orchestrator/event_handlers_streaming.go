@@ -140,6 +140,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			true,
 		)
 	}
+	s.recordLaunchReceiptInference(ctx, payload)
 	if eventType == agentEventComplete {
 		defer s.clearPromptAttemptEvidence(
 			payload.SessionID,
@@ -211,6 +212,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case streams.EventTypeMCPAttachment:
 		s.handleSessionMCPAttachmentEvent(ctx, payload)
 
+	case "launch_receipt":
+		s.handleSessionLaunchReceiptEvent(ctx, payload)
+
 	case streams.EventTypeSessionInfo:
 		s.handleSessionInfoEvent(ctx, payload)
 
@@ -258,6 +262,75 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// short-circuits on it), so this is also a safe no-op for an ordinary
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
+	}
+}
+
+func (s *Service) handleSessionLaunchReceiptEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload == nil || payload.Data == nil || payload.SessionID == "" || payload.ExecutionID == "" || s.repo == nil {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil {
+		return
+	}
+	history, _ := loadLaunchReceiptHistory(session.Metadata[models.SessionMetaKeyLaunchReceiptState])
+	identity := LaunchAttemptIdentity{
+		SessionID: payload.SessionID, Incarnation: payload.ExecutionID, Generation: payload.Data.PromptGeneration,
+	}
+	fact, ok := payload.Data.Data.(string)
+	if !ok {
+		return
+	}
+	if fact == "started" {
+		history.Start(identity)
+	} else {
+		var kind LaunchFactKind
+		switch fact {
+		case string(LaunchFactProcessStarted):
+			kind = LaunchFactProcessStarted
+		case string(LaunchFactTerminalPreflightFailure):
+			kind = LaunchFactTerminalPreflightFailure
+		default:
+			return
+		}
+		if !history.Apply(LaunchReceiptFact{Identity: identity, Kind: kind}) {
+			return
+		}
+	}
+	if err := s.repo.SetSessionMetadataKey(context.WithoutCancel(ctx), payload.SessionID, models.SessionMetaKeyLaunchReceiptState, history); err != nil {
+		s.logger.Warn("failed to persist launch receipt", zap.String("session_id", payload.SessionID), zap.Error(err))
+	}
+}
+
+func (s *Service) recordLaunchReceiptInference(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload == nil || payload.Data == nil || payload.SessionID == "" || payload.ExecutionID == "" || s.repo == nil {
+		return
+	}
+	switch payload.Data.Type {
+	case "message_streaming", "thinking_streaming", agentEventToolCall, agentEventToolUpdate:
+	default:
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil {
+		return
+	}
+	history, ok := loadLaunchReceiptHistory(session.Metadata[models.SessionMetaKeyLaunchReceiptState])
+	if !ok {
+		return
+	}
+	if history.Current.Identity.SessionID != payload.SessionID || history.Current.Identity.Incarnation != payload.ExecutionID {
+		return
+	}
+	fact := LaunchReceiptFact{
+		Identity: history.Current.Identity,
+		Kind:     LaunchFactInferenceStarted,
+	}
+	if !history.Apply(fact) {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(context.WithoutCancel(ctx), payload.SessionID, models.SessionMetaKeyLaunchReceiptState, history); err != nil {
+		s.logger.Warn("failed to persist launch receipt inference evidence", zap.String("session_id", payload.SessionID), zap.Error(err))
 	}
 }
 
@@ -4148,12 +4221,45 @@ func (s *Service) handleSessionMCPAttachmentEvent(ctx context.Context, payload *
 		s.logger.Warn("failed to persist MCP attachment status", zap.String("session_id", payload.SessionID), zap.Error(err))
 		return
 	}
+	s.bindLaunchReceiptToMCPAttempt(writeCtx, payload.SessionID, payload.ExecutionID, payload.Data)
 	eventPayload := lifecycle.SessionMCPStatusEventPayload{
 		TaskID: payload.TaskID, SessionID: payload.SessionID, History: history,
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if s.eventBus != nil {
 		_ = s.eventBus.Publish(writeCtx, events.BuildSessionMCPStatusSubject(payload.SessionID), bus.NewEvent(events.SessionMCPStatusUpdated, "orchestrator", eventPayload))
+	}
+}
+
+func (s *Service) bindLaunchReceiptToMCPAttempt(
+	ctx context.Context,
+	sessionID, executionID string,
+	data *lifecycle.AgentStreamEventData,
+) {
+	if data == nil || sessionID == "" || executionID == "" || s.repo == nil {
+		return
+	}
+	attemptID := ""
+	if data.MCPAttachmentAttempt != nil {
+		attemptID = data.MCPAttachmentAttempt.AttemptID
+	}
+	if attemptID == "" && data.MCPAttachment != nil {
+		attemptID = data.MCPAttachment.AttemptID
+	}
+	if attemptID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return
+	}
+	receipts, ok := loadLaunchReceiptHistory(session.Metadata[models.SessionMetaKeyLaunchReceiptState])
+	if !ok || receipts.Current.Identity.Incarnation != executionID || receipts.Current.CatalogAttachmentAttemptID == attemptID {
+		return
+	}
+	receipts.Current.CatalogAttachmentAttemptID = attemptID
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLaunchReceiptState, receipts); err != nil {
+		s.logger.Warn("failed to bind launch receipt to MCP attachment", zap.String("session_id", sessionID), zap.Error(err))
 	}
 }
 

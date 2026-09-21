@@ -2458,12 +2458,38 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		m.updateExecutionError(execution.ID, "failed to start agent: "+err.Error())
 		return "", fmt.Errorf("failed to start agent: %w", err)
 	}
+	m.publishLaunchReceipt(execution, launchReceiptProcessStarted)
 
 	bootCommand := fullCommand
 	if bootCommand == "" {
 		bootCommand = execution.AgentCommand
 	}
 	return bootCommand, nil
+}
+
+const (
+	launchReceiptStarted                  = "started"
+	launchReceiptProcessStarted           = "process_started"
+	launchReceiptTerminalPreflightFailure = "terminal_preflight_failure"
+)
+
+// publishLaunchReceipt emits backend-owned launch facts through the existing
+// session stream so the orchestrator can persist one ordered receipt.
+func (m *Manager) publishLaunchReceipt(execution *AgentExecution, fact string) {
+	if m.eventPublisher == nil || execution == nil || execution.SessionID == "" {
+		return
+	}
+	m.eventPublisher.PublishAgentStreamEventPayload(&AgentStreamEventPayload{
+		Type:        "agent/event",
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:     execution.ID,
+		ExecutionID: execution.ID,
+		OwnerKind:   executionOwnerKind(execution),
+		WorkspaceID: execution.WorkspaceID,
+		TaskID:      execution.TaskID,
+		SessionID:   execution.SessionID,
+		Data:        &AgentStreamEventData{Type: "launch_receipt", Data: fact},
+	})
 }
 
 func runtimeEnvFromMetadata(metadata map[string]interface{}) map[string]string {

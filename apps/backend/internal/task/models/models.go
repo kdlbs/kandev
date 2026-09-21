@@ -462,6 +462,10 @@ const SessionMetaKeyACPModelState = "acp_model_state"
 // attachment for this task session and its immediate prior attempts.
 const SessionMetaKeyMCPAttachmentState = "mcp_attachment_state"
 
+// SessionMetaKeyLaunchReceiptState records bounded launch-stage evidence for a
+// task session. It is diagnostic metadata and is never replayed to a provider.
+const SessionMetaKeyLaunchReceiptState = "launch_receipt_state"
+
 // SessionMetaKeyGitCredentialSnapshot records the non-secret Git credential
 // routing contract that successfully launched or resumed a session.
 const SessionMetaKeyGitCredentialSnapshot = "git_credential_snapshot"

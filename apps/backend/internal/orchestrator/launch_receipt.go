@@ -1,5 +1,7 @@
 package orchestrator
 
+import "encoding/json"
+
 // LaunchTriState avoids inferring lifecycle stages from provider error prose.
 type LaunchTriState string
 
@@ -33,15 +35,31 @@ type LaunchReceiptFact struct {
 }
 
 type LaunchReceipt struct {
-	Identity         LaunchAttemptIdentity `json:"identity"`
-	ProcessCreated   LaunchTriState        `json:"process_created"`
-	InferenceStarted LaunchTriState        `json:"inference_started"`
-	Facts            []LaunchReceiptFact   `json:"facts,omitempty"`
+	Identity                   LaunchAttemptIdentity `json:"identity"`
+	CatalogAttachmentAttemptID string                `json:"catalog_attachment_attempt_id,omitempty"`
+	ProcessCreated             LaunchTriState        `json:"process_created"`
+	InferenceStarted           LaunchTriState        `json:"inference_started"`
+	Facts                      []LaunchReceiptFact   `json:"facts,omitempty"`
 }
 
 type LaunchReceiptHistory struct {
 	Current  LaunchReceipt   `json:"current"`
 	Previous []LaunchReceipt `json:"previous,omitempty"`
+}
+
+func loadLaunchReceiptHistory(raw interface{}) (LaunchReceiptHistory, bool) {
+	if history, ok := raw.(LaunchReceiptHistory); ok {
+		return history, history.Current.Identity.SessionID != ""
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return LaunchReceiptHistory{}, false
+	}
+	var history LaunchReceiptHistory
+	if err := json.Unmarshal(encoded, &history); err != nil || history.Current.Identity.SessionID == "" {
+		return LaunchReceiptHistory{}, false
+	}
+	return history, true
 }
 
 func (h *LaunchReceiptHistory) Start(identity LaunchAttemptIdentity) {
