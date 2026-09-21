@@ -6,7 +6,7 @@ system: plugins
 owners:
   - kandev
 created: 2026-08-26
-last_updated: 2026-09-19
+last_updated: 2026-09-21
 ---
 
 # Plugin web-application contributions Requirements
@@ -336,6 +336,15 @@ reverse proxy without a canvas-specific authentication bypass.
 - **AC-PLUGINS-ISOLATED-WEB-APPS-013.7:** Cookie-authenticated relative writes
   and event subscriptions shall work through the same public origin. External
   origins shall not gain cookie forwarding, CORS access, or framing permission.
+- **AC-PLUGINS-ISOLATED-WEB-APPS-013.8:** Runtime document, packaged asset, and
+  host bootstrap responses shall prohibit intermediary transformation while
+  retaining their no-store policy. A proxy that honors this prohibition shall
+  deliver a working retained release without injected analytics or republishing.
+  Startup errors and CSP restrictions shall retain their existing behavior.
+
+## Implementation plans
+
+- [Canvas runtime and task-entry recovery](../../../plans/canvas-runtime-entry-recovery/plan.md)
 
 ## Out of scope
 

@@ -147,10 +147,10 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 ### Core agent service
 
-| YAML key               | Environment variable                              | Default     | Current behavior                                                 |
-| ---------------------- | ------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
-| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `localhost` | Host of the core `agentctl` control server.                      |
-| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback. |
+| YAML key               | Environment variable                              | Default     | Current behavior                                                              |
+| ---------------------- | ------------------------------------------------- | ----------- | ---------------------------------------------------------------------------- |
+| `agent.standaloneHost` | `KANDEV_AGENT_STANDALONE_HOST`                    | `127.0.0.1` | Host of the core `agentctl` control server. The literal avoids IPv6 loopback resolution variance. |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` | `39429`     | Preferred control port. The launcher may supply a free fallback.            |
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
@@ -181,11 +181,13 @@ startup setting, not a database or Settings value.
 sweep. When an unarchived task holds an active session with no live execution
 behind it and no session events or messages for longer than this threshold,
 Kandev emits a `task.stalled` event and logs a warning. After twice the
-threshold of silence, the sweep cancels the orphaned sessions so the task
-stops showing a phantom active session. The cancel is all-or-nothing per
-task: it runs only when every active session of the task is orphaned and
-past the grace window, so a session that still has a live execution blocks
-the cancellation of its siblings rather than being swept along with them.
+threshold of silence, the sweep returns each classified interrupted session to
+`WAITING_FOR_INPUT` and preserves its conversation for recovery when you open
+the task. It abandons only the observed unfinished turn, without reporting a
+successful completion or advancing the workflow. Idle waiting sessions are
+excluded, and recovery runs only when every active session of the task is
+execution-less and past the grace window, so a live execution or idle sibling
+blocks recovery for the task rather than being swept along with it.
 The value is source-specific: an invalid YAML duration fails configuration
 parsing, while a zero or negative YAML duration is rejected at startup with
 `tasks.stallDetectionThreshold must be positive`. An invalid or non-positive
@@ -451,7 +453,7 @@ docker:
   volumeBasePath: "/var/lib/kandev/volumes" # compatibility-only today
 
 agent:
-  standaloneHost: "localhost"
+  standaloneHost: "127.0.0.1"
   standalonePort: 39429
 
 tasks:

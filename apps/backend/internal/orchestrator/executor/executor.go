@@ -813,6 +813,7 @@ type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, 
 type SessionStateTransitionFunc func(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	state models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),

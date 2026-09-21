@@ -152,6 +152,7 @@ function MobileChatPanelContent({
         <TaskChatPanel
           sessionId={effectiveSessionId}
           taskId={effectiveSessionId ? activeTaskId : null}
+          statusTaskId={activeTaskId}
           onOpenFile={onOpenFile}
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}

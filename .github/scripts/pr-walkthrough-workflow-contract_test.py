@@ -183,7 +183,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("arbitrary Git or shell commands", self.skill)
 
     def test_generation_uses_requested_model_native_high_reasoning_variant(self) -> None:
-        model = "opencode-go/muse-spark-1.3-contributor"
+        model = "opencode/muse-spark-1.3-contributor-free"
         variant = "high"
         self.assertIn(f"PR_WALKTHROUGH_MODEL: {model}", self.workflow)
         self.assertIn(f"PR_WALKTHROUGH_VARIANT: {variant}", self.workflow)
@@ -378,8 +378,9 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("curl -fsSL", workflows)
         self.assertTrue(SETUP_OPENCODE_ACTION.is_file())
         action = SETUP_OPENCODE_ACTION.read_text(encoding="utf-8")
+        self.assertIn("OPENCODE_VERSION: v1.18.0", action)
         self.assertIn(
-            "60fe5a92dc9af64ec079348fedde17e12da6a867efe7e8353be8038480607924",
+            "a46af88b710248cc55719abd7f8fb482030494d6c9ed63f37aae7c6d6af4fc90",
             action,
         )
 

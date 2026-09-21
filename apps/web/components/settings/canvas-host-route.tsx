@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import {
   canvasHref,
   getCanvas,
@@ -14,6 +15,11 @@ import {
 } from "@/lib/api/domains/canvas-api";
 import { canvasErrorMessage } from "@/lib/api/domains/canvas-error-copy";
 import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
+import { useAppStore } from "@/components/state-provider";
+import {
+  canvasPresentationUserId,
+  recordCanvasPresentation,
+} from "@/lib/canvas-presentation-storage";
 import { useCanvasHostCanvases } from "./canvas-host-picker";
 import { type CanvasHostState } from "./canvas-host-components";
 import { CanvasHostRouteView } from "./canvas-host-route-view";
@@ -372,10 +378,7 @@ async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void>
   try {
     const response = await startCanvasEdit(canvas.id);
     if (response.task_id) {
-      const query = response.session_id
-        ? `?sessionId=${encodeURIComponent(response.session_id)}`
-        : "";
-      router.push(`/t/${encodeURIComponent(response.task_id)}${query}`);
+      router.push(linkToTask(response.task_id, { sessionId: response.session_id ?? undefined }));
     }
   } catch (reason: unknown) {
     onError(reason);
@@ -395,6 +398,7 @@ export function CanvasHostRoute({
   const { t } = useTranslation();
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
+  const presentationUserId = useAppStore((state) => canvasPresentationUserId(state.auth));
   const {
     canvas,
     runtimeUrl,
@@ -411,6 +415,19 @@ export function CanvasHostRoute({
   const [releasesOpen, setReleasesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!canvas || canvas.scope_kind !== "task" || !canvas.task_id || !presentationUserId) return;
+    recordCanvasPresentation(
+      {
+        userId: presentationUserId,
+        workspaceId: canvas.workspace_id,
+        taskId: canvas.task_id,
+        canvasId: canvas.id,
+      },
+      "manual",
+    );
+  }, [canvas, presentationUserId]);
 
   const edit = () =>
     editCanvasFromHost({

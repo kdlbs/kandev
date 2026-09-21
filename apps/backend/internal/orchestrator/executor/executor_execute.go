@@ -613,18 +613,32 @@ func (e *Executor) transitionSessionState(
 	state models.TaskSessionState,
 	errorMessage string,
 ) (bool, models.TaskSessionState, error) {
-	return e.transitionSessionStateWithHook(ctx, taskID, sessionID, state, errorMessage, nil)
+	return e.transitionSessionStateWithHook(ctx, taskID, sessionID, nil, state, errorMessage, nil)
+}
+
+func (e *Executor) transitionSessionStateFrom(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedState, state models.TaskSessionState,
+	errorMessage string,
+) (bool, models.TaskSessionState, error) {
+	return e.transitionSessionStateWithHook(
+		ctx, taskID, sessionID, &expectedState, state, errorMessage, nil,
+	)
 }
 
 func (e *Executor) transitionSessionStateWithHook(
 	ctx context.Context,
 	taskID, sessionID string,
+	expectedState *models.TaskSessionState,
 	state models.TaskSessionState,
 	errorMessage string,
 	onChanged func(),
 ) (bool, models.TaskSessionState, error) {
 	if e.onSessionStateTransition != nil {
-		return e.onSessionStateTransition(ctx, taskID, sessionID, state, errorMessage, onChanged)
+		return e.onSessionStateTransition(
+			ctx, taskID, sessionID, expectedState, state, errorMessage, onChanged,
+		)
 	}
 
 	current, err := e.repo.GetTaskSession(ctx, sessionID)
@@ -633,6 +647,9 @@ func (e *Executor) transitionSessionStateWithHook(
 	}
 	if current == nil {
 		return false, "", fmt.Errorf("get session before state transition: session %q is nil", sessionID)
+	}
+	if expectedState != nil && current.State != *expectedState {
+		return false, current.State, nil
 	}
 	if isStopTerminalSessionState(current.State) || current.State == state {
 		return false, current.State, nil
@@ -1941,7 +1958,7 @@ func (e *Executor) transitionLaunchFailure(
 		}
 	}
 	changed, _, updateErr := e.transitionSessionStateWithHook(
-		failCtx, taskID, sessionID, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
+		failCtx, taskID, sessionID, nil, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
 	)
 	if updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",

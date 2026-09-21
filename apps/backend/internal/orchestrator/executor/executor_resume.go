@@ -953,8 +953,12 @@ func (e *Executor) resumeSession(
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
 			if startAgent {
-				e.rollbackResumeStateAfterFailure(
-					ctx, task.ID, session.ID, resumeInitialState, err,
+				// The live process owns this session's active lifecycle. Keep the
+				// STARTING projection for that process to reconcile instead of
+				// marking it FAILED as if this duplicate launch had failed.
+				e.restoreResumeCredentialSnapshotIfStarting(
+					ctx,
+					session.ID,
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				)
 			}
@@ -1091,9 +1095,21 @@ func (e *Executor) restoreResumeCredentialSnapshotIfStarting(
 	}
 }
 
+// terminalRollbackState prevents a failed relaunch from restoring an active
+// state when no agent process was recovered.
+func terminalRollbackState(priorState models.TaskSessionState) models.TaskSessionState {
+	switch priorState {
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return models.TaskSessionStateFailed
+	default:
+		return priorState
+	}
+}
+
 // rollbackResumeStateAfterFailure restores the state observed before a resume
 // attempt only while the session is still STARTING. A concurrent terminal
-// transition wins and is left untouched by transitionSessionState.
+// transition wins and is left untouched by transitionSessionState. Active
+// prior states become FAILED because the relaunch did not restore liveness.
 func (e *Executor) rollbackResumeStateAfterFailure(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -1110,12 +1126,20 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 		defer e.onCeilingReservationRelease(sessionID)
 	}
 	e.restoreResumeCredentialSnapshotIfStarting(ctx, sessionID, credentialSnapshot)
+	targetState := terminalRollbackState(priorState)
 	if e.onSessionStateTransition != nil {
 		current, err := e.repo.GetTaskSession(ctx, sessionID)
 		if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
 			return
 		}
-		_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, resumeErr.Error())
+		_, _, rollbackErr := e.transitionSessionStateFrom(
+			ctx,
+			taskID,
+			sessionID,
+			models.TaskSessionStateStarting,
+			targetState,
+			resumeErr.Error(),
+		)
 		if rollbackErr != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
 				zap.String("task_id", taskID),
@@ -1131,7 +1155,7 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 			ctx,
 			sessionID,
 			models.TaskSessionStateStarting,
-			priorState,
+			targetState,
 			resumeErr.Error(),
 		); err != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
@@ -1145,7 +1169,7 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
 		return
 	}
-	_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, resumeErr.Error())
+	_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, targetState, resumeErr.Error())
 	if rollbackErr != nil {
 		e.logger.Warn("failed to roll back session state after resume failure",
 			zap.String("task_id", taskID),
@@ -1530,7 +1554,11 @@ func (e *Executor) applyRecordedKubernetesExecutorConfigToResumeRequest(
 		ExecutorID: executorID, ExecutorType: string(current.Type), ExecutorCfg: current.Config,
 		Metadata: metadata, Resumable: current.Resumable, RuntimeName: string(current.Type),
 	}
+	if err := e.restoreKubernetesProfileEnvironment(ctx, &config, running.Metadata); err != nil {
+		return executorConfig{}, err
+	}
 	session.ExecutorID = executorID
+	session.ExecutorProfileID, _ = running.Metadata[lifecycle.MetadataKeyExecutorProfileID].(string)
 	req.ExecutorType = config.ExecutorType
 	req.ExecutorConfig = config.ExecutorCfg
 	req.Metadata = metadata
@@ -1675,16 +1703,15 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	return execConfig
 }
 
-// isArchiveCancelledResumeSession reports whether session was cancelled by an
-// archive (Service.ArchiveTask's single-task path or HandoffService's cascade
-// archive) rather than an explicit user/coordinator stop. Mirrors
-// orchestrator.isArchiveCancelledSession — kept local to this package since
-// the two live on opposite sides of the executor/orchestrator boundary and
-// the check is two lines over already-exported models helpers.
-func isArchiveCancelledResumeSession(session *models.TaskSession) bool {
+// isRecoverableCancelledResumeSession reports whether session was cancelled by
+// a system reconciliation path rather than an explicit user/coordinator stop.
+// Mirrors the orchestrator's eligibility checks while keeping the executor's
+// prompt-free launch behavior aligned for legacy archive and orphan rows.
+func isRecoverableCancelledResumeSession(session *models.TaskSession) bool {
 	return session != nil &&
 		session.State == models.TaskSessionStateCancelled &&
-		models.IsArchiveCancelReason(session.ErrorMessage)
+		(models.IsArchiveCancelReason(session.ErrorMessage) ||
+			models.IsOrphanCancelReason(session.ErrorMessage))
 }
 
 // applyRunningRecordToResumeRequest loads the ExecutorRunning record and applies
@@ -1698,12 +1725,12 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 ) *models.ExecutorRunning {
 	if running == nil {
 		// Archive cleanup tears down the executors_running row entirely, so an
-		// archive-cancelled session reaches this point with running == nil. The
+		// system-cancelled session reaches this point with running == nil. The
 		// session metadata mirrors the provider conversation identity so an
 		// explicit completed follow-up can still restore the same conversation
 		// after runtime cleanup removed the operational row.
 		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
-			isArchiveCancelledResumeSession(session) ||
+			isRecoverableCancelledResumeSession(session) ||
 			session.State == models.TaskSessionStateCompleted
 		if startAgent && noAutoPromptState {
 			if token := persistedSessionResumeToken(session); token != "" {
@@ -1751,9 +1778,9 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
 	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput ||
-		isArchiveCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
+		isRecoverableCancelledResumeSession(session) || session.State == models.TaskSessionStateCompleted) {
 		// Fresh-start resume (no resume token): don't auto-prompt with the task
-		// description. Also covers completed and archive-cancelled sessions whose
+		// description. Also covers completed and system-cancelled sessions whose
 		// running record survived cleanup but carries no token — the same
 		// auto-resume shape as the running==nil branch above.
 		req.TaskDescription = ""

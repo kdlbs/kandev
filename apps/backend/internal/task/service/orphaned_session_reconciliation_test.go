@@ -54,12 +54,12 @@ func seedOrphanSweepTask(t *testing.T, repo *sqliterepo.Repository, taskID strin
 	}
 }
 
-func TestService_OrphanedSessionReconciliationTerminalizesUnbackedSessions(t *testing.T) {
+func TestService_OrphanedSessionReconciliationPreservesUnbackedSessions(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	seedOrphanSweepFixtures(t, repo)
 
-	stale := time.Now().UTC().Add(-30 * time.Minute)
+	stale := time.Now().UTC().Add(-5 * time.Hour)
 	fresh := time.Now().UTC().Add(-1 * time.Minute)
 
 	seedOrphanSweepTask(t, repo, "task-orphaned", false)
@@ -94,7 +94,7 @@ func TestService_OrphanedSessionReconciliationTerminalizesUnbackedSessions(t *te
 	// Archived task with a stale RUNNING session: the archived pass owns it,
 	// the orphan pass must not touch it.
 	seedSession("session-archived-task", "task-archived", models.TaskSessionStateRunning, stale)
-	// Primary session on the orphaned task: the CANCELLED event must carry
+	// Primary session on the orphaned task: the recovery event must carry
 	// is_primary=true so the status-summary projection keeps the durable
 	// primary assignment.
 	seedSession("session-primary", "task-primary", models.TaskSessionStateRunning, stale)
@@ -114,42 +114,96 @@ func TestService_OrphanedSessionReconciliationTerminalizesUnbackedSessions(t *te
 			t.Errorf("session %s state = %q, want %q", id, session.State, want)
 		}
 	}
-	assertState("session-orphaned-running", models.TaskSessionStateCancelled)
-	assertState("session-orphaned-starting", models.TaskSessionStateCancelled)
+	assertState("session-orphaned-running", models.TaskSessionStateWaitingForInput)
+	assertState("session-orphaned-starting", models.TaskSessionStateWaitingForInput)
 	assertState("session-healthy-sibling", models.TaskSessionStateWaitingForInput)
 	assertState("session-live-execution", models.TaskSessionStateRunning)
 	assertState("session-inflight-launch", models.TaskSessionStateRunning)
 	assertState("session-archived-task", models.TaskSessionStateRunning)
-	assertState("session-primary", models.TaskSessionStateCancelled)
+	assertState("session-primary", models.TaskSessionStateWaitingForInput)
 
 	orphaned, err := repo.GetTaskSession(ctx, "session-orphaned-running")
 	if err != nil {
 		t.Fatalf("GetTaskSession(orphaned): %v", err)
 	}
-	if orphaned.ErrorMessage != models.SessionOrphanedCancelReason {
-		t.Errorf("orphaned session error_message = %q, want %q",
-			orphaned.ErrorMessage, models.SessionOrphanedCancelReason)
+	if orphaned.ErrorMessage != "" {
+		t.Errorf("orphaned session error_message = %q, want empty", orphaned.ErrorMessage)
 	}
 
 	// The event must carry the durable is_primary flag: the primary session's
-	// cancellation reports is_primary=true rather than the zero value.
-	if data := sessionCancelledEvent(eventBus, "session-primary"); data != nil {
+	// recovery reports is_primary=true rather than the zero value.
+	if data := sessionRecoveredEvent(eventBus, "session-primary"); data != nil {
 		if isPrimary, ok := data["is_primary"].(bool); !ok || !isPrimary {
-			t.Errorf("primary session cancellation event is_primary = %v, want true", data["is_primary"])
+			t.Errorf("primary session recovery event is_primary = %v, want true", data["is_primary"])
 		}
 	} else {
-		t.Error("expected a cancellation event for session-primary")
+		t.Error("expected a recovery event for session-primary")
 	}
 
 	for _, id := range []string{"session-orphaned-running", "session-orphaned-starting", "session-primary"} {
-		if !sessionCancelledEventPublished(eventBus, id) {
-			t.Errorf("expected a session.state_changed event for %s from the orphan sweep, got none", id)
+		if !sessionRecoveredEventPublished(eventBus, id) {
+			t.Errorf("expected a recovery session.state_changed event for %s from the orphan sweep, got none", id)
 		}
 	}
 	for _, id := range []string{"session-healthy-sibling", "session-live-execution", "session-inflight-launch", "session-archived-task"} {
-		if sessionCancelledEventPublished(eventBus, id) {
-			t.Errorf("unexpected session.state_changed event for %s", id)
+		if sessionRecoveredEventPublished(eventBus, id) {
+			t.Errorf("unexpected recovery session.state_changed event for %s", id)
 		}
+	}
+}
+
+// TestService_OrphanedSessionReconciliationPreservesInterruptedConversation
+// covers the restart reconciliation pass. A stale STARTING/RUNNING session
+// whose execution disappeared remains the same recoverable conversation,
+// including its unfinished turn, instead of becoming CANCELLED.
+func TestService_OrphanedSessionReconciliationPreservesInterruptedConversation(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedOrphanSweepFixtures(t, repo)
+	seedOrphanSweepTask(t, repo, "task-interrupted", false)
+	stale := time.Now().UTC().Add(-30 * time.Minute)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-interrupted", TaskID: "task-interrupted", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true, UpdatedAt: stale, StartedAt: stale,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	turn, err := svc.StartTurn(ctx, "session-interrupted")
+	if err != nil {
+		t.Fatalf("StartTurn: %v", err)
+	}
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE task_session_turns SET started_at = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		stale, stale, stale, turn.ID); err != nil {
+		t.Fatalf("age turn: %v", err)
+	}
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE task_sessions SET updated_at = ? WHERE id = ?`, stale, "session-interrupted"); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+
+	svc.SetExecutionLivenessChecker(&fakeExecutionLiveness{})
+	svc.runOrphanedSessionReconciliation(ctx)
+
+	session, err := repo.GetTaskSession(ctx, "session-interrupted")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %q, want WAITING_FOR_INPUT", session.State)
+	}
+	if session.ErrorMessage != "" {
+		t.Fatalf("session error_message = %q, want empty", session.ErrorMessage)
+	}
+	storedTurn, err := svc.turns.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if storedTurn.CompletedAt == nil || !storedTurn.CompletedAt.Equal(storedTurn.StartedAt) {
+		t.Fatalf("turn completion = %v, want zero-duration completion at %v", storedTurn.CompletedAt, storedTurn.StartedAt)
+	}
+	if sessionCancelledEventPublished(eventBus, "session-interrupted") {
+		t.Fatal("unexpected cancellation event for recovered session")
 	}
 }
 
@@ -166,18 +220,27 @@ func sessionCancelledEventPublished(eventBus *MockEventBus, sessionID string) bo
 	return false
 }
 
-// sessionCancelledEvent returns the last session.state_changed payload for
-// sessionID, or nil when none published. The orphan sweep's event must carry
-// the durable is_primary flag — the status-summary projector demotes the
-// session when a cancellation event reports is_primary: false.
-func sessionCancelledEvent(eventBus *MockEventBus, sessionID string) map[string]interface{} {
+func sessionRecoveredEventPublished(eventBus *MockEventBus, sessionID string) bool {
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if ok && data["session_id"] == sessionID && data["new_state"] == string(models.TaskSessionStateWaitingForInput) {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionRecoveredEvent(eventBus *MockEventBus, sessionID string) map[string]interface{} {
 	var found map[string]interface{}
 	for _, evt := range eventBus.GetPublishedEvents() {
 		if evt.Type != events.TaskSessionStateChanged {
 			continue
 		}
 		data, ok := evt.Data.(map[string]interface{})
-		if ok && data["session_id"] == sessionID && data["new_state"] == string(models.TaskSessionStateCancelled) {
+		if ok && data["session_id"] == sessionID && data["new_state"] == string(models.TaskSessionStateWaitingForInput) {
 			found = data
 		}
 	}
@@ -254,14 +317,14 @@ type delayedOrphanSessionRepository struct {
 	once    sync.Once
 }
 
-func (r *delayedOrphanSessionRepository) CancelRunningTaskSessionByID(
+func (r *delayedOrphanSessionRepository) RecoverTaskSessionByCandidate(
 	ctx context.Context,
-	sessionID, reason string,
+	candidate models.ActiveSessionRecoveryCandidate,
 	staleBefore time.Time,
 ) (*models.TaskSession, error) {
 	r.once.Do(func() { close(r.entered) })
 	<-r.release
-	return r.Repository.CancelRunningTaskSessionByID(ctx, sessionID, reason, staleBefore)
+	return r.Repository.RecoverTaskSessionByCandidate(ctx, candidate, staleBefore)
 }
 
 func TestService_OrphanedSessionReconciliationUsesFreshEffectsContextAfterDeadline(t *testing.T) {
@@ -287,8 +350,6 @@ func TestService_OrphanedSessionReconciliationUsesFreshEffectsContextAfterDeadli
 	if err != nil {
 		t.Fatalf("GetTaskSession: %v", err)
 	}
-	clarifications := &recordingTaskClarificationCanceller{}
-	svc.SetClarificationCanceller(clarifications)
 	svc.SetExecutionLivenessChecker(&fakeExecutionLiveness{})
 
 	passCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -301,7 +362,7 @@ func TestService_OrphanedSessionReconciliationUsesFreshEffectsContextAfterDeadli
 	select {
 	case <-delayed.entered:
 	case <-time.After(time.Second):
-		t.Fatal("orphan cancellation did not start")
+		t.Fatal("orphan recovery did not start")
 	}
 	select {
 	case <-passCtx.Done():
@@ -315,11 +376,101 @@ func TestService_OrphanedSessionReconciliationUsesFreshEffectsContextAfterDeadli
 		t.Fatal("reconciliation did not finish after the delayed write was released")
 	}
 
-	if len(clarifications.contextErrs) != 1 || clarifications.contextErrs[0] != nil {
-		t.Fatalf("clarification cleanup context errors = %v, want one nil error after a late commit", clarifications.contextErrs)
+	if session, err := repo.GetTaskSession(setupCtx, "session-late-effects"); err != nil {
+		t.Fatalf("GetTaskSession after delayed recovery: %v", err)
+	} else if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after delayed recovery = %q, want WAITING_FOR_INPUT", session.State)
 	}
-	if !sessionCancelledEventPublished(eventBus, "session-late-effects") {
-		t.Fatal("expected cancellation event after the delayed write committed")
+	if !sessionRecoveredEventPublished(eventBus, "session-late-effects") {
+		t.Fatal("expected recovery event after the delayed write committed")
+	}
+}
+
+type successorAfterRecoveryRepository struct {
+	*sqliterepo.Repository
+	afterRecover func()
+}
+
+func (r *successorAfterRecoveryRepository) RecoverTaskSessionByCandidate(
+	ctx context.Context,
+	candidate models.ActiveSessionRecoveryCandidate,
+	staleBefore time.Time,
+) (*models.TaskSession, error) {
+	recovered, err := r.Repository.RecoverTaskSessionByCandidate(ctx, candidate, staleBefore)
+	if recovered != nil && err == nil && r.afterRecover != nil {
+		r.afterRecover()
+	}
+	return recovered, err
+}
+
+// A successor can register after the guarded session write commits but before
+// post-commit effects run. The recovery must leave that successor's executor
+// row and warning marker untouched.
+func TestService_OrphanedSessionReconciliationDoesNotRepairSuccessorExecutor(t *testing.T) {
+	var rawRepo *sqliterepo.Repository
+	var successorInstalled bool
+	wrapper := &successorAfterRecoveryRepository{}
+	svc, _, repo := createTestServiceWithSessionsRepo(t, func(base *sqliterepo.Repository) repository.SessionRepository {
+		rawRepo = base
+		wrapper.Repository = base
+		wrapper.afterRecover = func() {
+			if successorInstalled {
+				return
+			}
+			successorInstalled = true
+			now := time.Now().UTC()
+			if err := base.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
+				ID: "successor-row", SessionID: "session-successor", TaskID: "task-successor",
+				Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "successor-execution",
+				LocalPID: 1234, CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("install successor executor: %v", err)
+			}
+			if err := base.SetTaskMetadataKey(context.Background(), "task-successor", models.MetaKeyInterruptedAt, "successor-marker"); err != nil {
+				t.Fatalf("install successor warning marker: %v", err)
+			}
+		}
+		return wrapper
+	})
+	ctx := context.Background()
+	seedOrphanSweepFixtures(t, repo)
+	seedOrphanSweepTask(t, repo, "task-successor", false)
+	stale := time.Now().UTC().Add(-5 * time.Hour)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-successor", TaskID: "task-successor", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true, UpdatedAt: stale, StartedAt: stale,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	oldExecTime := stale
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "old-row", SessionID: "session-successor", TaskID: "task-successor",
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "old-execution",
+		LocalPID: 99, CreatedAt: oldExecTime, UpdatedAt: oldExecTime,
+	}); err != nil {
+		t.Fatalf("seed old executor: %v", err)
+	}
+	svc.SetExecutionLivenessChecker(&fakeExecutionLiveness{})
+
+	// The active sweep uses the same task/session recovery path as restart
+	// reconciliation, so an expired liveness snapshot cannot stop the successor.
+	svc.SetSessionExecutionRegistry(&stubExecutionRegistry{})
+	svc.SetStallDetectionThreshold(2 * time.Hour)
+	svc.runActiveSessionSweep(ctx, time.Now().UTC())
+
+	running, err := rawRepo.GetExecutorRunningBySessionID(ctx, "session-successor")
+	if err != nil {
+		t.Fatalf("GetExecutorRunningBySessionID: %v", err)
+	}
+	if running.AgentExecutionID != "successor-execution" || running.Status != models.ExecutorRunningStatusRunning || running.LocalPID != 1234 {
+		t.Fatalf("successor executor = %+v, want running successor unchanged", running)
+	}
+	task, err := rawRepo.GetTask(ctx, "task-successor")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if got := task.Metadata[models.MetaKeyInterruptedAt]; got != "successor-marker" {
+		t.Fatalf("successor warning marker = %#v, want successor-marker", got)
 	}
 }
 
@@ -327,7 +478,7 @@ func TestService_OrphanedSessionReconciliationUsesFreshEffectsContextAfterDeadli
 // pins the read-then-write guard: a launch CAS-writes its session to STARTING
 // (bumping updated_at) before it registers an execution in the in-memory
 // store, so the row can be refreshed between the sweep's candidate read and
-// its cancellation write. The cancel's staleBefore predicate must fail to
+// its recovery write. The recovery's staleBefore predicate must fail to
 // match that refreshed row instead of cancelling a launch in progress.
 func TestService_OrphanedSessionReconciliationSparesRowRefreshedSinceCandidateRead(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)

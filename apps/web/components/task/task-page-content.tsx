@@ -21,7 +21,7 @@ import { linkToTaskOverview } from "@/lib/links";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { useTaskCanvasesForTask } from "@/hooks/domains/task/use-task-canvases";
+import { useTaskCanvasesStateForTask } from "@/hooks/domains/task/use-task-canvases";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import type { Layout } from "react-resizable-panels";
 import {
@@ -360,7 +360,7 @@ function TaskPageContentLive({
     onTaskUnarchived,
     refreshTask,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
-  const taskCanvases = useTaskCanvasesForTask(task, isMobile, canvasesEnabled);
+  const taskCanvasesState = useTaskCanvasesStateForTask(task, canvasesEnabled);
   useExternalVcsFileLinkHydration(task, repositories);
 
   const workflowSteps = useWorkflowStepsMapped();
@@ -414,7 +414,8 @@ function TaskPageContentLive({
       officeTaskHref={officeTaskHref}
       ensureSession={ensureSession}
       onTaskUnarchived={onTaskUnarchived}
-      taskCanvases={taskCanvases}
+      taskCanvases={taskCanvasesState.canvases}
+      taskCanvasesStatus={taskCanvasesState.status}
     />
   );
 }
