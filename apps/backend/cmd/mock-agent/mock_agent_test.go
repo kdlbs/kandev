@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -27,55 +28,71 @@ func (u *promptCancelUpdater) RequestPermission(context.Context, acp.RequestPerm
 }
 
 func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
-	const sessionID = acp.SessionId("cancel-hold-session")
-	t.Setenv("KANDEV_E2E_CANCEL_HOLD_DURATION", "30ms")
-	updater := newCapturingUpdater()
-	agent := &mockAgent{
-		model:             "mock-fast",
-		conn:              updater,
-		sessions:          map[acp.SessionId]bool{sessionID: true},
-		promptCancels:     make(map[acp.SessionId]context.CancelFunc),
-		promptCancelHolds: make(map[acp.SessionId]chan struct{}),
-		commandsEmitted:   make(map[acp.SessionId]bool),
-	}
-
-	result := make(chan acp.PromptResponse, 1)
-	go func() {
-		response, err := agent.Prompt(context.Background(), acp.PromptRequest{
-			SessionId: sessionID,
-			Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:cancel-hold")},
-		})
-		if err != nil {
-			t.Errorf("prompt returned error: %v", err)
-			return
+	synctest.Test(t, func(t *testing.T) {
+		const sessionID = acp.SessionId("cancel-hold-session")
+		t.Setenv("KANDEV_E2E_CANCEL_HOLD_DURATION", "30ms")
+		updater := newCapturingUpdater()
+		agent := &mockAgent{
+			model:             "mock-fast",
+			conn:              updater,
+			sessions:          map[acp.SessionId]bool{sessionID: true},
+			promptCancels:     make(map[acp.SessionId]context.CancelFunc),
+			promptCancelHolds: make(map[acp.SessionId]chan struct{}),
+			commandsEmitted:   make(map[acp.SessionId]bool),
 		}
-		result <- response
-	}()
 
-	select {
-	case <-updater.anySeen:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the hold prompt to start")
-	}
-	if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
-		t.Fatalf("cancel prompt: %v", err)
-	}
-	select {
-	case <-result:
-		t.Fatal("cancel-hold prompt completed before its configured hold elapsed")
-	case <-time.After(10 * time.Millisecond):
-	}
-	if texts := updater.textMessages(); len(texts) != 0 {
-		t.Fatalf("cancel-hold emitted assistant text: %v", texts)
-	}
-	select {
-	case response := <-result:
-		if response.StopReason != acp.StopReasonCancelled {
-			t.Fatalf("stop reason = %q, want cancelled", response.StopReason)
+		result := make(chan struct {
+			response acp.PromptResponse
+			err      error
+		}, 1)
+		go func() {
+			response, err := agent.Prompt(context.Background(), acp.PromptRequest{
+				SessionId: sessionID,
+				Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:cancel-hold")},
+			})
+			result <- struct {
+				response acp.PromptResponse
+				err      error
+			}{response: response, err: err}
+		}()
+
+		synctest.Wait()
+		select {
+		case <-updater.anySeen:
+		default:
+			t.Fatal("hold prompt did not start")
 		}
-	case <-time.After(time.Second):
-		t.Fatal("cancel-hold prompt did not complete after its configured hold")
-	}
+		if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
+			t.Fatalf("cancel prompt: %v", err)
+		}
+		synctest.Wait()
+		select {
+		case <-result:
+			t.Fatal("cancel-hold prompt completed before its configured hold elapsed")
+		default:
+		}
+
+		time.Sleep(29 * time.Millisecond)
+		synctest.Wait()
+		select {
+		case <-result:
+			t.Fatal("cancel-hold prompt completed before its configured hold elapsed")
+		default:
+		}
+
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		outcome := <-result
+		if outcome.err != nil {
+			t.Fatalf("prompt returned error: %v", outcome.err)
+		}
+		if outcome.response.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("stop reason = %q, want cancelled", outcome.response.StopReason)
+		}
+		if texts := updater.textMessages(); len(texts) != 0 {
+			t.Fatalf("cancel-hold emitted assistant text: %v", texts)
+		}
+	})
 }
 
 func TestMockAgentCancelStopsPrompt(t *testing.T) {
