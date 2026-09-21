@@ -4,8 +4,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // TestPendingMove_BackwardMoveDispatchesOnEnterWithStaleRoute reproduces the
@@ -27,6 +29,16 @@ import (
 // worked and the existing scenario tests never caught this.
 func TestPendingMove_BackwardMoveDispatchesOnEnterWithStaleRoute(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
+	assertBackwardMoveDispatchesOnEnter(t, sc)
+}
+
+func TestPendingMove_BackwardMoveDispatchesOnEnterWithStaleRoute_AtomicQueue(t *testing.T) {
+	sc := buildPendingMoveScenarioWithQueue(t, true)
+	assertBackwardMoveDispatchesOnEnter(t, sc)
+}
+
+func assertBackwardMoveDispatchesOnEnter(t *testing.T, sc *pendingMoveScenario) {
+	t.Helper()
 
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
 	if err != nil {
@@ -53,17 +65,16 @@ func TestPendingMove_BackwardMoveDispatchesOnEnterWithStaleRoute(t *testing.T) {
 	// The backward move: Review bounces the task back to In Progress, exactly
 	// the production reproducer (a step whose position precedes the current
 	// one).
-	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
-	})
-
-	task = sc.waitForTaskStep(t, stepInProgressID, 2*time.Second)
-	if task.WorkflowStepID != stepInProgressID {
-		t.Fatalf("workflow_step_id = %q, want %q — step change alone is not the bug under test",
-			task.WorkflowStepID, stepInProgressID)
+	move, found, err := sc.svc.messageQueue.GetPendingMoveWithError(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load pending move: %v", err)
 	}
+	if !found || move == nil {
+		t.Fatal("expected a pending move for the review session")
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+
+	sc.waitForTaskStep(t, stepInProgressID, 2*time.Second)
 
 	// THE ACTUAL ASSERTION: on_enter's auto_start_agent action must dispatch,
 	// not just the step change. Before the fix, processOnEnter's staleness
@@ -92,8 +103,8 @@ func TestPendingMove_BackwardMoveDispatchesOnEnterWithStaleRoute(t *testing.T) {
 	}
 }
 
-// waitForTaskStep polls the task's workflow_step_id until it reaches want or
-// the deadline elapses, returning the last-read task either way.
+// waitForTaskStep polls the task's workflow_step_id until it reaches want and
+// fails the test if the deadline elapses first.
 func (sc *pendingMoveScenario) waitForTaskStep(t *testing.T, want string, timeout time.Duration) *models.Task {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -104,11 +115,27 @@ func (sc *pendingMoveScenario) waitForTaskStep(t *testing.T, want string, timeou
 		if err != nil {
 			t.Fatalf("load task: %v", err)
 		}
-		if task.WorkflowStepID == want || time.Now().After(deadline) {
+		if task.WorkflowStepID == want {
+			return task
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("workflow_step_id = %q, want %q after %s", task.WorkflowStepID, want, timeout)
 			return task
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// newSQLiteQueueForTaskRepo shares the task repository's database so the
+// deferred transition takes the production atomic task-and-queue path.
+func newSQLiteQueueForTaskRepo(t *testing.T, repo *sqliterepo.Repository) *messagequeue.Service {
+	t.Helper()
+	db := sqlx.NewDb(repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("create SQLite message queue repository: %v", err)
+	}
+	return messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
 }
 
 // waitForAgentStart polls the mock agent manager until StartAgentProcess has
