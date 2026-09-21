@@ -1,6 +1,6 @@
 ---
 created: 2026-09-21
-status: in_progress
+status: implemented
 requirements:
   - REQ-TASKS-MCP-WORKSPACE-MODE-004
 system_design:
@@ -76,7 +76,10 @@ and `CreateTask`. Return a validation error that recommends
 
 ## Verification results
 
-- The service and MCP admission regressions pass.
+- Service coverage passes for rejection, exact-slot acceptance, legacy
+  unscoped inventory, and pre-materialization passthrough.
+- MCP coverage passes for rejection and existing workspace-mode behavior.
+- Specification validation and diff checks pass.
 
 ## Risks
 

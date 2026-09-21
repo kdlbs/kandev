@@ -87,3 +87,6 @@ None.
 - RED: the service regression failed to compile because the admission method
   did not exist.
 - GREEN: service and MCP handler regressions pass after the guard was added.
+- Review coverage now includes exact active slots, legacy unscoped inventory,
+  inherited environments bound through sessions, and pre-materialization
+  passthrough.

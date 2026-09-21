@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -20,18 +22,26 @@ func (s *Service) ValidateInheritedWorkspaceRepositorySelection(
 	if parentTaskID == "" || len(repositories) == 0 {
 		return nil
 	}
-	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, parentTaskID)
+	if s.taskEnvironments == nil {
+		return nil
+	}
+	target, err := s.resolveBranchMaterializationTarget(ctx, parentTaskID)
 	if err != nil {
 		return fmt.Errorf("%w: inspect inherited workspace", models.ErrWorkspaceReuseUnsafe)
 	}
-	if env == nil {
+	if target == nil || target.environment == nil ||
+		target.environment.Status != models.TaskEnvironmentStatusReady {
 		return nil
 	}
-	rows, err := s.taskEnvironments.ListTaskEnvironmentRepos(ctx, env.ID)
+	rows, err := s.taskEnvironments.ListTaskEnvironmentRepos(ctx, target.environment.ID)
 	if err != nil {
 		return fmt.Errorf("%w: inspect inherited workspace inventory", models.ErrWorkspaceReuseUnsafe)
 	}
 	for _, repository := range repositories {
+		repository, err = s.resolveExistingInheritedRepository(ctx, target.environment.TaskID, repository)
+		if err != nil {
+			return err
+		}
 		if countActiveInventoryMatches(repository, rows) != 1 {
 			return fmt.Errorf(
 				"%w: repository %q branch %q is not an exact match in the inherited workspace; use workspace_mode=new_workspace for a different checkout",
@@ -44,18 +54,77 @@ func (s *Service) ValidateInheritedWorkspaceRepositorySelection(
 	return nil
 }
 
+func (s *Service) resolveExistingInheritedRepository(
+	ctx context.Context,
+	taskID string,
+	repository TaskRepositoryInput,
+) (TaskRepositoryInput, error) {
+	if repository.RepositoryID != "" {
+		return repository, nil
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return repository, fmt.Errorf("%w: resolve inherited repository workspace", models.ErrWorkspaceReuseUnsafe)
+	}
+	var found *models.Repository
+	if path := strings.TrimSpace(repository.LocalPath); path != "" {
+		found, err = s.repoEntities.GetRepositoryByLocalPath(ctx, task.WorkspaceID, filepath.Clean(path))
+	} else if rawURL := effectiveRemoteURL(repository); rawURL != "" {
+		provider, owner, name, _, parseErr := parseRemoteRepositoryURL(rawURL, repository.Provider)
+		if parseErr != nil {
+			return repository, fmt.Errorf("%w: resolve inherited repository locator", models.ErrWorkspaceReuseUnsafe)
+		}
+		repositories, listErr := s.repoEntities.ListRepositories(ctx, task.WorkspaceID)
+		if listErr != nil {
+			return repository, fmt.Errorf("%w: resolve inherited repository locator", models.ErrWorkspaceReuseUnsafe)
+		}
+		for _, candidate := range repositories {
+			if candidate != nil &&
+				strings.EqualFold(candidate.Provider, provider) &&
+				candidate.ProviderOwner == owner &&
+				candidate.ProviderName == name {
+				found = candidate
+				break
+			}
+		}
+	}
+	if found == nil {
+		return repository, fmt.Errorf(
+			"%w: repository locator is not an existing inherited repository; use workspace_mode=new_workspace for a different checkout",
+			models.ErrWorkspaceReuseUnsafe,
+		)
+	}
+	repository.RepositoryID = found.ID
+	if repository.BaseBranch == "" {
+		repository.BaseBranch = found.DefaultBranch
+	}
+	return repository, nil
+}
+
 func countActiveInventoryMatches(
 	repository TaskRepositoryInput,
 	rows []*models.TaskEnvironmentRepo,
 ) int {
 	expectedBranch := worktree.SanitizeBranchSlug(repository.BaseBranch)
+	hasBranchScopedRow := false
+	for _, row := range rows {
+		if row != nil && row.RepositoryID == repository.RepositoryID &&
+			worktree.SanitizeBranchSlug(row.BranchSlug) != "" {
+			hasBranchScopedRow = true
+			break
+		}
+	}
 	matches := 0
 	for _, row := range rows {
 		if row == nil || row.RepositoryID != repository.RepositoryID ||
 			row.DeletedAt != nil || row.Status == "failed" || row.Status == "deleted" {
 			continue
 		}
-		if worktree.SanitizeBranchSlug(row.BranchSlug) == expectedBranch {
+		branchMatches := worktree.SanitizeBranchSlug(row.BranchSlug) == expectedBranch
+		if expectedBranch != "" && !hasBranchScopedRow && row.BranchSlug == "" {
+			branchMatches = true
+		}
+		if branchMatches {
 			matches++
 		}
 	}

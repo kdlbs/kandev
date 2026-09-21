@@ -126,7 +126,6 @@ from the advertised contract.
   one active canonical inventory entry. A missing or ambiguous match shall fail
   before task or session creation, without mutation, and shall direct the caller
   to `new_workspace` when it needs a different checkout.
-  Backend handling of blank values shall remain unchanged.
 
 ## Exclusions
 

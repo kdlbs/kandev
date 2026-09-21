@@ -879,17 +879,16 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	if workspacePolicy.Mode == mcpWorkspaceModeInheritParent &&
-		req.ParentID != "" && len(req.Repositories) > 0 {
-		if err := h.taskSvc.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, repos); err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-		}
-	}
 
 	identity, _ := authn.IdentityFromContext(ctx)
 	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	if workspacePolicy.Mode == mcpWorkspaceModeInheritParent && len(req.Repositories) > 0 {
+		if err := h.taskSvc.ValidateInheritedWorkspaceRepositorySelection(ctx, req.ParentID, repos); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 	}
 
 	// Resolve the destination step before launch metadata. The profile lookup
