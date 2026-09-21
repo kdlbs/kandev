@@ -133,11 +133,13 @@ Complete 03-agent-executor first.
 
 ## Results
 
-Implemented and verified. Workspace settings, secrets, and the integration route adapter now expose shared group chrome while preserving workspace tabs, credential scope, watch tables, form saves, and specialized workflow or automation editors. Existing integration children retain their domain forms and immediate commands.
+Implemented and verified. Workspace settings, secrets, and the integration route adapter now expose shared group chrome while preserving workspace tabs, credential scope, watch tables, form saves, and specialized workflow or automation editors. Repository and workflow sections opt out of the outer group frame so their resource/editor cards remain the single bordered surface. Existing integration children retain their domain forms and immediate commands.
 
 - `(cd apps/web && pnpm exec vitest run components/settings lib/settings-discovery/target.test.ts src/settings-routes.test.ts)`: passed, 207 files and 1,389 tests.
 - `(cd apps/web && pnpm e2e:run e2e/tests/settings/settings-composition.spec.ts)`: passed, 6 desktop tests, including workspace/integration coverage.
 - `(cd apps/web && pnpm e2e:run --project mobile-chrome e2e/tests/settings/mobile-settings-composition.spec.ts)`: passed, 5 mobile tests, including workspace/integration coverage.
 - `(cd apps/web && pnpm e2e:run e2e/tests/integrations/github-workspace-settings.spec.ts e2e/tests/integrations/jira-settings.spec.ts)`: the specialized desktop run passed 20 of 22 tests; the affected repository-scope test passed in the focused rerun after the heading semantics fix. The other specialized integration tests passed in the original run.
 - `(cd apps/web && pnpm e2e:run --project mobile-chrome e2e/tests/integrations/mobile-github-workspace-settings.spec.ts e2e/tests/settings/mobile-workspace-settings-tabs.spec.ts)`: passed as part of the 10-test mobile specialized run.
+- `(cd apps/web && pnpm e2e:run --host --no-build -- --retries=0 e2e/tests/settings/repository-delete.spec.ts e2e/tests/settings/repository-add-local.spec.ts)`: passed, 3 desktop repository tests after removing the duplicate outer card.
+- `(cd apps/web && pnpm e2e:run --host --no-build -- --project=mobile-chrome --retries=0 e2e/tests/settings/mobile-repository-add-local.spec.ts)`: passed, 1 mobile repository test.
 - Typecheck, localization checks, ratchet, scoped ESLint, scoped Prettier, and `git diff --check`: passed.

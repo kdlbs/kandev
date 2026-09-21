@@ -115,7 +115,11 @@ test.describe("Settings composition", () => {
   }) => {
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
     await expect(testPage.getByTestId("workspace-settings-shell")).toBeVisible();
-    await expect(testPage.locator('[data-settings-group="true"]').first()).toBeVisible();
+    const repositoriesGroup = testPage.locator('[data-settings-group="true"]').first();
+    await expect(repositoriesGroup).toBeVisible();
+    await expect(
+      repositoriesGroup.locator(':scope > [data-settings-group-card="true"]'),
+    ).toHaveCount(0);
 
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
     await expect(testPage.getByTestId("workspace-settings-shell")).toBeVisible();
