@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/docker"
-	"github.com/kandev/kandev/internal/task/models"
 )
 
 // containerNetwork is the resolved primary network a task container is created
@@ -55,17 +54,12 @@ const containerNetworkModePrefix = "container:"
 
 // resolveContainerNetwork chooses the primary network for one launch.
 //
-// The install-wide default applies to a local daemon only. A network name is
-// scoped to the daemon that owns it, so a name configured for the backend
-// host's daemon is not a default for a remote one, where it may not exist or
-// may name something else entirely.
-func resolveContainerNetwork(
-	metadata map[string]interface{}, executorType, installDefault string,
-) (containerNetwork, error) {
+// The executor profile is the only source. A network name is scoped to the
+// daemon that owns it, so there is no install-wide default to fall back to:
+// an empty name leaves the daemon's own default, which is what Kandev did
+// before the network was configurable.
+func resolveContainerNetwork(metadata map[string]interface{}) (containerNetwork, error) {
 	name := strings.TrimSpace(getMetadataString(metadata, MetadataKeyDockerNetwork))
-	if name == "" && models.ExecutorType(executorType) == models.ExecutorTypeLocalDocker {
-		name = strings.TrimSpace(installDefault)
-	}
 	if err := validateContainerNetworkName(name); err != nil {
 		return containerNetwork{}, err
 	}

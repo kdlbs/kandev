@@ -24,10 +24,6 @@ type dockerLaunchTarget struct {
 	runtimeName  executor.Name
 	executorType string
 	logger       *logger.Logger
-	// installNetworkDefault is the install-wide docker.defaultNetwork value.
-	// It is meaningful for a daemon the backend host owns; a remote target
-	// leaves it empty, and resolveContainerNetwork ignores it there anyway.
-	installNetworkDefault string
 }
 
 // launchDockerContainer provisions a fresh container and returns the instance
@@ -52,7 +48,7 @@ func launchDockerContainer(
 		return nil, err
 	}
 
-	containerCfg, err := buildDockerContainerConfig(req, target.executorType, target.installNetworkDefault)
+	containerCfg, err := buildDockerContainerConfig(req, target.executorType)
 	if err != nil {
 		return nil, fmt.Errorf("build container launch config: %w", err)
 	}
@@ -93,14 +89,12 @@ func launchDockerContainer(
 // buildDockerContainerConfig composes the container configuration for either
 // Docker runtime. The executor type selects the default prepare script, which
 // both Docker types share.
-func buildDockerContainerConfig(
-	req *ExecutorCreateRequest, executorType, installNetworkDefault string,
-) (ContainerConfig, error) {
+func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string) (ContainerConfig, error) {
 	prepareScript, err := resolveDockerPrepareScript(req, executorType)
 	if err != nil {
 		return ContainerConfig{}, err
 	}
-	containerNet, err := resolveContainerNetwork(req.Metadata, executorType, installNetworkDefault)
+	containerNet, err := resolveContainerNetwork(req.Metadata)
 	if err != nil {
 		return ContainerConfig{}, err
 	}

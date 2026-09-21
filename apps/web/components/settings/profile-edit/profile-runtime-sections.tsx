@@ -71,7 +71,6 @@ export function DockerSections({
         remoteExecutorId={remoteExecutorId}
       />
       <DockerNetworkCard
-        isRemote={remoteExecutorId !== undefined}
         primaryNetwork={networks.primaryNetwork}
         onPrimaryNetworkChange={networks.setPrimaryNetwork}
         primaryGwPriority={networks.primaryGwPriority}

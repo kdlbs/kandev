@@ -400,16 +400,10 @@ type DockerConfig struct {
 	// Enabled controls whether the Docker runtime is available for task execution.
 	// When true and Docker is accessible, tasks can use Docker-based executors.
 	// Default: true (Docker runtime is enabled if Docker is available)
-	Enabled    bool   `mapstructure:"enabled"`
-	Host       string `mapstructure:"host"`
-	APIVersion string `mapstructure:"apiVersion"`
-	TLSVerify  bool   `mapstructure:"tlsVerify"`
-	// DefaultNetwork is the network local Docker *task* containers are created
-	// on when their executor profile names none. It is not the network Kandev's
-	// own container joins. Empty leaves the daemon's own default. It does not
-	// apply to a remote_docker profile, whose daemon is a different machine
-	// where the name may not exist.
-	DefaultNetwork string `mapstructure:"defaultNetwork"`
+	Enabled        bool   `mapstructure:"enabled"`
+	Host           string `mapstructure:"host"`
+	APIVersion     string `mapstructure:"apiVersion"`
+	TLSVerify      bool   `mapstructure:"tlsVerify"`
 	VolumeBasePath string `mapstructure:"volumeBasePath"`
 }
 
@@ -669,9 +663,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docker.host", DefaultDockerHost())
 	v.SetDefault("docker.apiVersion", "") // Empty = auto-negotiate with daemon
 	v.SetDefault("docker.tlsVerify", false)
-	// Empty means the daemon's own default network. A named default would have
-	// to exist on the daemon, and Kandev creates none.
-	v.SetDefault("docker.defaultNetwork", "")
 	v.SetDefault("docker.volumeBasePath", defaultDockerVolumePath())
 
 	// Agent defaults (runtime selection is now per-task based on executor type)

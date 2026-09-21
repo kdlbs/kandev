@@ -390,7 +390,6 @@ function CreateProfileSections({
             onBuildSuccess={form.recordDockerBuildSuccess}
           />
           <DockerNetworkCard
-            isRemote={executorType === "remote_docker"}
             primaryNetwork={form.primaryNetwork}
             onPrimaryNetworkChange={form.setPrimaryNetwork}
             primaryGwPriority={form.primaryGwPriority}

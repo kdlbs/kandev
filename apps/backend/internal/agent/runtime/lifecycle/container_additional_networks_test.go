@@ -22,7 +22,7 @@ func TestResolveContainerNetworkAdditional(t *testing.T) {
 				{"name":"lan-macvlan","gw_priority":-10},
 				{"name":"metrics-internal"}
 			]`,
-		}, "local_docker", "")
+		})
 		require.NoError(t, err)
 		require.Len(t, got.Additional, 2)
 
@@ -36,7 +36,7 @@ func TestResolveContainerNetworkAdditional(t *testing.T) {
 
 	t.Run("an absent value attaches nothing", func(t *testing.T) {
 		got, err := resolveContainerNetwork(
-			map[string]interface{}{MetadataKeyDockerNetwork: "lab-bridge"}, "local_docker", "")
+			map[string]interface{}{MetadataKeyDockerNetwork: "lab-bridge"})
 		require.NoError(t, err)
 		require.Empty(t, got.Additional)
 	})
@@ -44,7 +44,7 @@ func TestResolveContainerNetworkAdditional(t *testing.T) {
 	t.Run("malformed JSON fails the launch and names the field", func(t *testing.T) {
 		_, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerAdditionalNetworks: `[{"name":`,
-		}, "local_docker", "")
+		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), MetadataKeyDockerAdditionalNetworks)
 	})
@@ -52,14 +52,14 @@ func TestResolveContainerNetworkAdditional(t *testing.T) {
 	t.Run("an entry with no name is refused", func(t *testing.T) {
 		_, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerAdditionalNetworks: `[{"name":"  "}]`,
-		}, "local_docker", "")
+		})
 		require.Error(t, err)
 	})
 
 	t.Run("an additional network may name a mode-like value only if it is a network", func(t *testing.T) {
 		_, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerAdditionalNetworks: `[{"name":"host"}]`,
-		}, "local_docker", "")
+		})
 		require.Error(t, err, "a network mode is not attachable as a secondary network either")
 	})
 }
@@ -73,7 +73,7 @@ func TestResolveContainerNetworkRejectsDuplicates(t *testing.T) {
 		_, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerNetwork:            "lab-bridge",
 			MetadataKeyDockerAdditionalNetworks: `[{"name":"lab-bridge"}]`,
-		}, "local_docker", "")
+		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "lab-bridge")
 	})
@@ -81,7 +81,7 @@ func TestResolveContainerNetworkRejectsDuplicates(t *testing.T) {
 	t.Run("duplicate within the list", func(t *testing.T) {
 		_, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerAdditionalNetworks: `[{"name":"lan"},{"name":"lan"}]`,
-		}, "local_docker", "")
+		})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "lan")
 	})
@@ -183,8 +183,7 @@ func TestCreateSeedAndStartRemovesContainerWhenAttachFails(t *testing.T) {
 	require.True(t, strings.Contains(err.Error(), "lan-macvlan"))
 }
 
-// Additional networks are profile-supplied, not install-supplied, so unlike
-// the primary network's install-wide fallback they apply on a remote daemon
+// Additional networks come from the profile, so they apply on a remote daemon
 // exactly as they do on a local one.
 //
 // @covers AC-EXECUTORS-DOCKER-NETWORKS-002.3
@@ -198,7 +197,7 @@ func TestBuildDockerContainerConfigCarriesAdditionalNetworksOnRemote(t *testing.
 		},
 	}
 
-	cfg, err := buildDockerContainerConfig(req, "remote_docker", "install-bridge")
+	cfg, err := buildDockerContainerConfig(req, "remote_docker")
 	require.NoError(t, err)
 	require.Equal(t, "remote-bridge", cfg.Network.Name)
 	require.Len(t, cfg.Network.Additional, 1)

@@ -90,7 +90,6 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "DOCKER_HOST", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_APIVERSION", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_TLSVERIFY", class: "catalog"},
-		{envVar: "KANDEV_DOCKER_DEFAULTNETWORK", class: "catalog"},
 		{envVar: "KANDEV_DOCKER_VOLUMEBASEPATH", class: "catalog"},
 		{envVar: "KANDEV_AGENT_STANDALONE_HOST", class: "catalog"},
 		{envVar: "AGENTCTL_PORT", class: "catalog"},

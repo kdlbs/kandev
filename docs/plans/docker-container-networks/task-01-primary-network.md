@@ -11,7 +11,6 @@ acceptance_criteria:
   - AC-EXECUTORS-DOCKER-NETWORKS-001.1
   - AC-EXECUTORS-DOCKER-NETWORKS-001.2
   - AC-EXECUTORS-DOCKER-NETWORKS-001.3
-  - AC-EXECUTORS-DOCKER-NETWORKS-001.4
   - AC-EXECUTORS-DOCKER-NETWORKS-001.5
   - AC-EXECUTORS-DOCKER-NETWORKS-001.6
   - AC-EXECUTORS-DOCKER-NETWORKS-001.7
@@ -24,10 +23,9 @@ system_design:
 ## Summary
 
 A task container is created on the network its executor profile names. A
-`local_docker` profile that names none falls back to `docker.defaultNetwork`; a
-`remote_docker` profile falls back to the remote daemon's default. The
-install-wide default becomes empty, so an install that configures nothing
-behaves exactly as it does today. A primary network that cannot publish ports,
+profile that names none leaves the daemon's own default, so an install that
+configures nothing behaves exactly as it does today. The unused
+`docker.defaultNetwork` key is retired rather than wired. A primary network that cannot publish ports,
 or that does not exist, fails the launch with a message naming the profile
 field and the reason, before any container is created.
 
@@ -37,15 +35,13 @@ field and the reason, before any container is created.
   and project them into launch metadata as **authoritative** keys in
   `profileConfigAuthoritativeKeys`, so a task's own metadata cannot override the
   profile's placement, including when the profile value is empty.
-- Replace `ContainerManager.networkName` with a resolved network plan carrying
-  the primary network name and its optional gateway priority. Resolve the plan
-  on the launch path in `buildDockerContainerConfig`, with the install-wide
-  fallback applied for `local_docker` and deliberately omitted for
-  `remote_docker`.
-- Change `docker.defaultNetwork`'s default from `kandev-network` to empty in
-  `config.go` and `catalog.go`, and update its row and sample YAML comment in
-  `docs/public/configuration.md` and `docs/configuration.md` to describe real
-  behavior.
+- Replace `ContainerManager.networkName` with a resolved network value carrying
+  the primary network name and its optional gateway priority, resolved on the
+  launch path in `buildDockerContainerConfig`.
+- Retire `docker.defaultNetwork`: remove the struct field, the `SetDefault`
+  call, the `catalog.go` entry and its audit row, and every mention in
+  `docs/public/configuration.md`, `docs/configuration.md`, and
+  `docs/public/executors.md`.
 - Add `Client.InspectNetwork` over `moby/moby/client`'s `NetworkInspect`, and
   validate the primary network before `ContainerCreate`: reject `host`, `none`,
   `default`, and `container:` forms on the string alone; reject a missing
@@ -68,11 +64,9 @@ field and the reason, before any container is created.
 
 ## Acceptance
 
-- A `local_docker` profile with `docker_network: lab-bridge` creates its task
-  container on `lab-bridge`; with no profile value it uses
-  `docker.defaultNetwork`; with both empty it sets no `NetworkMode` and the
-  daemon default applies. A `remote_docker` profile with no profile value sets
-  no `NetworkMode` regardless of `docker.defaultNetwork`.
+- A profile with `docker_network: lab-bridge` creates its task container on
+  `lab-bridge`; a profile naming none sets no `NetworkMode`, so the daemon's own
+  default applies. This holds for both Docker executor types.
 - A task that supplies `docker_network` in its own launch metadata does not
   change the container's network when a profile applies.
 - A primary network naming a network mode, a missing network, or a
@@ -87,8 +81,8 @@ cd apps/backend && gofmt -l ./internal/agent ./internal/common/config ./internal
 make -C apps/backend lint
 ```
 
-New tests must cover: the three-step local resolution order; the omitted
-install-wide step for `remote_docker`; authoritative precedence over task
+New tests must cover: a named network and an empty one; authoritative
+precedence over task
 metadata including the empty-profile-value case; each rejection in the
 validation table; and that a container created with no configured priority
 passes a `nil` `NetworkingConfig`.
@@ -111,8 +105,9 @@ passes a `nil` `NetworkingConfig`.
 `NewContainerManager`'s signature changes, so every caller and test helper that
 passes the current `networkName` string is touched. The local executor caches
 one `ContainerManager` in `ensureClient` while the profile is per-launch, so the
-per-launch part of the plan must travel on the launch path and not be baked into
-the cached manager; baking it in would give every task the first task's network.
+network must travel on the launch path and not be baked into the cached
+manager; baking it in would give every task the first task's network.
 
-Use `/docs-maintainer` for the public configuration change: the
-`docker.defaultNetwork` row currently promises the opposite of the new behavior.
+Use `/docs-maintainer` for the configuration change: `docker.defaultNetwork` has
+a published row, a sample YAML line, and a mention on the executors page, and
+all three go when the key does.

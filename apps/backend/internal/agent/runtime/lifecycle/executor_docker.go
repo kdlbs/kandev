@@ -286,7 +286,7 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 }
 
 func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) (ContainerConfig, error) {
-	return buildDockerContainerConfig(req, string(models.ExecutorTypeLocalDocker), r.cfg.DefaultNetwork)
+	return buildDockerContainerConfig(req, string(models.ExecutorTypeLocalDocker))
 }
 
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {

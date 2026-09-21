@@ -9,69 +9,33 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 )
 
-// resolveContainerNetwork owns the precedence a container's primary network is
-// chosen by. The install-wide default reaches a local daemon only.
+// The executor profile is the only source for a container's primary network.
+// An empty value leaves the daemon's own default, which is what Kandev did
+// before the network was configurable at all.
 //
 // @covers AC-EXECUTORS-DOCKER-NETWORKS-001.1
 // @covers AC-EXECUTORS-DOCKER-NETWORKS-001.2
-// @covers AC-EXECUTORS-DOCKER-NETWORKS-001.4
-func TestResolveContainerNetworkPrecedence(t *testing.T) {
-	tests := []struct {
-		name           string
-		executorType   string
-		profileNetwork string
-		installDefault string
-		want           string
-	}{
-		{
-			name:           "profile value wins over the install default",
-			executorType:   "local_docker",
-			profileNetwork: "lab-bridge",
-			installDefault: "install-bridge",
-			want:           "lab-bridge",
-		},
-		{
-			name:           "local falls back to the install default",
-			executorType:   "local_docker",
-			installDefault: "install-bridge",
-			want:           "install-bridge",
-		},
-		{
-			name:         "local with nothing configured leaves the daemon default",
-			executorType: "local_docker",
-			want:         "",
-		},
-		{
-			name:           "remote uses its own profile value",
-			executorType:   "remote_docker",
-			profileNetwork: "remote-bridge",
-			installDefault: "install-bridge",
-			want:           "remote-bridge",
-		},
-		{
-			name:           "remote never inherits the install default",
-			executorType:   "remote_docker",
-			installDefault: "install-bridge",
-			want:           "",
-		},
-	}
+func TestResolveContainerNetworkUsesTheProfileValue(t *testing.T) {
+	t.Run("a named network is used", func(t *testing.T) {
+		got, err := resolveContainerNetwork(
+			map[string]interface{}{MetadataKeyDockerNetwork: "lab-bridge"})
+		if err != nil {
+			t.Fatalf("resolveContainerNetwork() error = %v, want nil", err)
+		}
+		if got.Name != "lab-bridge" {
+			t.Errorf("Name = %q, want %q", got.Name, "lab-bridge")
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			metadata := map[string]interface{}{}
-			if tt.profileNetwork != "" {
-				metadata[MetadataKeyDockerNetwork] = tt.profileNetwork
-			}
-
-			got, err := resolveContainerNetwork(metadata, tt.executorType, tt.installDefault)
-			if err != nil {
-				t.Fatalf("resolveContainerNetwork() error = %v, want nil", err)
-			}
-			if got.Name != tt.want {
-				t.Errorf("Name = %q, want %q", got.Name, tt.want)
-			}
-		})
-	}
+	t.Run("no configured network leaves the daemon default", func(t *testing.T) {
+		got, err := resolveContainerNetwork(map[string]interface{}{})
+		if err != nil {
+			t.Fatalf("resolveContainerNetwork() error = %v, want nil", err)
+		}
+		if got.Name != "" {
+			t.Errorf("Name = %q, want empty", got.Name)
+		}
+	})
 }
 
 // A gateway priority is optional. Absent means Docker's own default-route
@@ -81,9 +45,7 @@ func TestResolveContainerNetworkPrecedence(t *testing.T) {
 func TestResolveContainerNetworkGatewayPriority(t *testing.T) {
 	t.Run("absent leaves the priority unset", func(t *testing.T) {
 		got, err := resolveContainerNetwork(
-			map[string]interface{}{MetadataKeyDockerNetwork: "lab-bridge"},
-			"local_docker", "",
-		)
+			map[string]interface{}{MetadataKeyDockerNetwork: "lab-bridge"})
 		if err != nil {
 			t.Fatalf("resolveContainerNetwork() error = %v, want nil", err)
 		}
@@ -96,7 +58,7 @@ func TestResolveContainerNetworkGatewayPriority(t *testing.T) {
 		got, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerNetwork:           "lab-bridge",
 			MetadataKeyDockerNetworkGwPriority: "0",
-		}, "local_docker", "")
+		})
 		if err != nil {
 			t.Fatalf("resolveContainerNetwork() error = %v, want nil", err)
 		}
@@ -109,7 +71,7 @@ func TestResolveContainerNetworkGatewayPriority(t *testing.T) {
 		got, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerNetwork:           "lab-bridge",
 			MetadataKeyDockerNetworkGwPriority: "-10",
-		}, "local_docker", "")
+		})
 		if err != nil {
 			t.Fatalf("resolveContainerNetwork() error = %v, want nil", err)
 		}
@@ -122,7 +84,7 @@ func TestResolveContainerNetworkGatewayPriority(t *testing.T) {
 		_, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerNetwork:           "lab-bridge",
 			MetadataKeyDockerNetworkGwPriority: "highest",
-		}, "local_docker", "")
+		})
 		if err == nil {
 			t.Fatal("resolveContainerNetwork() error = nil, want an error")
 		}
@@ -134,7 +96,7 @@ func TestResolveContainerNetworkGatewayPriority(t *testing.T) {
 	t.Run("a priority without a network is rejected", func(t *testing.T) {
 		_, err := resolveContainerNetwork(map[string]interface{}{
 			MetadataKeyDockerNetworkGwPriority: "10",
-		}, "local_docker", "")
+		})
 		if err == nil {
 			t.Fatal("resolveContainerNetwork() error = nil, want an error")
 		}
@@ -150,9 +112,7 @@ func TestResolveContainerNetworkRejectsNetworkModes(t *testing.T) {
 	for _, name := range []string{"host", "none", "default", "container:other", "HOST"} {
 		t.Run(name, func(t *testing.T) {
 			_, err := resolveContainerNetwork(
-				map[string]interface{}{MetadataKeyDockerNetwork: name},
-				"local_docker", "",
-			)
+				map[string]interface{}{MetadataKeyDockerNetwork: name})
 			if err == nil {
 				t.Fatalf("resolveContainerNetwork(%q) error = nil, want an error", name)
 			}
@@ -164,9 +124,7 @@ func TestResolveContainerNetworkRejectsNetworkModes(t *testing.T) {
 
 	t.Run("bridge is a real network and stays allowed", func(t *testing.T) {
 		got, err := resolveContainerNetwork(
-			map[string]interface{}{MetadataKeyDockerNetwork: "bridge"},
-			"local_docker", "",
-		)
+			map[string]interface{}{MetadataKeyDockerNetwork: "bridge"})
 		if err != nil {
 			t.Fatalf("resolveContainerNetwork() error = %v, want nil", err)
 		}
@@ -174,17 +132,6 @@ func TestResolveContainerNetworkRejectsNetworkModes(t *testing.T) {
 			t.Errorf("Name = %q, want %q", got.Name, "bridge")
 		}
 	})
-}
-
-// The install-wide default is operator-supplied too, so it gets the same
-// name check rather than bypassing it by arriving from a different source.
-//
-// @covers AC-EXECUTORS-DOCKER-NETWORKS-001.6
-func TestResolveContainerNetworkValidatesInstallDefault(t *testing.T) {
-	_, err := resolveContainerNetwork(map[string]interface{}{}, "local_docker", "host")
-	if err == nil {
-		t.Fatal("resolveContainerNetwork() error = nil, want an error")
-	}
 }
 
 // The resolved network reaches the Docker container configuration, and a
@@ -253,35 +200,6 @@ func TestBuildContainerConfigCarriesNetwork(t *testing.T) {
 			t.Errorf("NetworkEndpoint = %+v, want nil", got.NetworkEndpoint)
 		}
 	})
-}
-
-// buildDockerContainerConfig is where the launch path resolves the network, so
-// the install-wide default reaches a local launch and not a remote one.
-//
-// @covers AC-EXECUTORS-DOCKER-NETWORKS-001.2
-// @covers AC-EXECUTORS-DOCKER-NETWORKS-001.4
-func TestBuildDockerContainerConfigResolvesNetwork(t *testing.T) {
-	req := &ExecutorCreateRequest{
-		InstanceID: "instance-1",
-		TaskID:     "task-1",
-		Metadata:   map[string]interface{}{},
-	}
-
-	local, err := buildDockerContainerConfig(req, "local_docker", "install-bridge")
-	if err != nil {
-		t.Fatalf("buildDockerContainerConfig(local) error = %v", err)
-	}
-	if local.Network.Name != "install-bridge" {
-		t.Errorf("local Network.Name = %q, want %q", local.Network.Name, "install-bridge")
-	}
-
-	remote, err := buildDockerContainerConfig(req, "remote_docker", "install-bridge")
-	if err != nil {
-		t.Fatalf("buildDockerContainerConfig(remote) error = %v", err)
-	}
-	if remote.Network.Name != "" {
-		t.Errorf("remote Network.Name = %q, want empty", remote.Network.Name)
-	}
 }
 
 // fakeNetworkInspector answers the driver lookup without a daemon.

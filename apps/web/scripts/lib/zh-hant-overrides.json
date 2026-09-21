@@ -37,9 +37,7 @@
       },
       "executors": {
         "containerNetworksDescription": "選擇此設定檔的任務容器所連線的 Docker 網路。",
-        "primaryNetworkMustPublishPorts": "主網路承載已發布的 agentctl 連接埠，因此必須是可發布連接埠的網路。請改為在下方連線 macvlan 或 ipvlan 網路。",
-        "primaryNetworkEmptyDaemonDefault": "留空則使用安裝預設值 (docker.defaultNetwork)。此安裝未設定預設值，因此使用守護程序自身的預設網路。",
-        "primaryNetworkEmptyRemote": "留空則使用遠端守護程序的預設網路。安裝設定 docker.defaultNetwork 不適用於遠端守護程序。"
+        "primaryNetworkMustPublishPorts": "主網路承載已發布的 agentctl 連接埠，因此必須是可發布連接埠的網路。請改為在下方連線 macvlan 或 ipvlan 網路。"
       }
     },
     "zh-hk": {

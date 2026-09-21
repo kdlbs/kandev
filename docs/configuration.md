@@ -84,7 +84,6 @@ docker:
   host: ""                 # empty = platform default (unix:///var/run/docker.sock, etc.)
   apiVersion: ""           # empty = auto-negotiate
   tlsVerify: false
-  defaultNetwork: ""       # empty = the daemon's own default network (local Docker only)
   volumeBasePath: ""       # empty = /var/lib/kandev/volumes (Linux/macOS)
 
 agent:

@@ -12,7 +12,6 @@ acceptance_criteria:
   - AC-EXECUTORS-DOCKER-NETWORKS-003.2
   - AC-EXECUTORS-DOCKER-NETWORKS-003.3
   - AC-EXECUTORS-DOCKER-NETWORKS-003.4
-  - AC-EXECUTORS-DOCKER-NETWORKS-003.5
 system_design:
   - ../../specs/executors/system-design/docker-container-networks.md
 ---
@@ -38,10 +37,8 @@ tell from the empty state which default applies to that profile's daemon.
   `docker_additional_networks` in `buildSaveConfig`, gated on `form.isDocker`,
   so switching to a non-Docker executor type clears them and an untouched
   profile persists no network configuration.
-- Differentiate the empty-state helper text by executor type: `local_docker`
-  names the effective `docker.defaultNetwork`, or states the daemon's own
-  default applies when that value is empty; `remote_docker` states the remote
-  daemon's default applies and that the install setting does not.
+- State in the empty-state helper text that the daemon's own default network
+  applies. It reads the same for both Docker executor types.
 - Localize all copy through `t()` in the five shipped locales, using
   `pnpm run i18n:zh-hant` for the Traditional Chinese pair.
 
@@ -58,11 +55,9 @@ tell from the empty state which default applies to that profile's daemon.
 
 - The network card appears for `local_docker` and `remote_docker` profiles and
   for no other executor type, with the primary field, its gateway priority, and
-  an add/remove additional-network list matching the plan's UI-01 and UI-03
+  an add/remove additional-network list matching the plan's UI-01 and UI-02
   previews.
-- The empty-state helper text matches the profile's executor type, and states
-  the daemon default rather than showing a blank name when the install has no
-  `docker.defaultNetwork`.
+- The empty-state helper text states that the daemon's own default applies.
 - Saving an untouched profile persists no network keys; saving a configured one
   round-trips every value.
 - The phone composition stacks each additional network as its own card with a
@@ -83,7 +78,7 @@ that an empty form produces no network keys.
 
 ## ASCII UI preview
 
-This work order implements plan previews `UI-01`, `UI-02`, and `UI-03`. See
+This work order implements plan previews `UI-01` and `UI-02`. See
 [the plan's ASCII UI previews](plan.md#ascii-ui-previews) for the full
 drawings. Compare the rendered card against the structural requirements stated
 there during verification, and record any difference rather than drifting from

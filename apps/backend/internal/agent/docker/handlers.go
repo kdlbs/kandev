@@ -90,8 +90,7 @@ var errContainerUnowned = errors.New("container has no resolvable owner")
 // authorizer scopes container access to the caller's own task sessions.
 func RegisterDockerRoutes(
 	router *gin.Engine, clientProvider ClientProvider,
-	taskTitleProvider TaskTitleProvider, authorizer SessionAuthorizer,
-	defaultNetwork string, log *logger.Logger,
+	taskTitleProvider TaskTitleProvider, authorizer SessionAuthorizer, log *logger.Logger,
 ) {
 	resolve := func() containerAPI {
 		client := clientProvider()
@@ -100,15 +99,14 @@ func RegisterDockerRoutes(
 		}
 		return client
 	}
-	registerRoutes(router, resolve, taskTitleProvider, authorizer, defaultNetwork, log)
+	registerRoutes(router, resolve, taskTitleProvider, authorizer, log)
 }
 
 // registerRoutes is the testable form of RegisterDockerRoutes, taking the
 // Docker surface as an interface instead of the concrete client.
 func registerRoutes(
 	router *gin.Engine, resolve clientResolver,
-	taskTitleProvider TaskTitleProvider, authorizer SessionAuthorizer,
-	defaultNetwork string, log *logger.Logger,
+	taskTitleProvider TaskTitleProvider, authorizer SessionAuthorizer, log *logger.Logger,
 ) {
 	api := router.Group("/api/v1/docker")
 	// Building an image is a host-level operation with no per-user resource,
@@ -117,20 +115,6 @@ func registerRoutes(
 	api.GET("/containers", handleListContainers(resolve, taskTitleProvider, authorizer, log))
 	api.POST("/containers/:id/stop", handleStopContainer(resolve, authorizer, log))
 	api.DELETE("/containers/:id", handleRemoveContainer(resolve, authorizer, log))
-	// The effective docker.defaultNetwork value. It is an install-wide
-	// operator setting, so it is admin-only like the image build above.
-	api.GET("/network-default", authn.RequireAdmin(), handleNetworkDefault(defaultNetwork))
-}
-
-// handleNetworkDefault handles GET /api/v1/docker/network-default.
-//
-// The value is always present in the response, including when it is empty, so
-// the profile editor can tell "no install default is configured" apart from a
-// response it could not read.
-func handleNetworkDefault(defaultNetwork string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"default_network": defaultNetwork})
-	}
 }
 
 // requireDocker resolves the Docker client and returns 503 if unavailable.

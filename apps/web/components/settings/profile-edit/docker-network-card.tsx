@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { IconInfoCircle, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
@@ -8,16 +7,10 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
-import { getDockerDefaultNetwork } from "@/lib/api/domains/settings-api";
-import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import type { AdditionalNetworkRow } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 
 type DockerNetworkCardProps = {
-  /** A remote profile's daemon is another machine, where the install-wide
-   *  default names nothing. Changes only the empty-state helper text. */
-  isRemote: boolean;
   primaryNetwork: string;
   onPrimaryNetworkChange: (value: string) => void;
   primaryGwPriority: string;
@@ -31,36 +24,7 @@ type DockerNetworkCardProps = {
   baselineAdditionalNetworks?: AdditionalNetworkRow[];
 };
 
-/**
- * Reads the install-wide default so the empty state can name it.
- *
- * The value is admin-only, so a non-admin gets `null` and the card falls back
- * to wording that does not claim to know which network applies.
- */
-function useInstallDefaultNetwork(enabled: boolean): string | null {
-  const [value, setValue] = useState<string | null>(null);
-  const isAdmin = useIsAdmin();
-
-  useEffect(() => {
-    if (!enabled || !isAdmin) return;
-    let active = true;
-    void getDockerDefaultNetwork()
-      .then((result) => {
-        if (active) setValue(result.default_network);
-      })
-      .catch(() => {
-        if (active) setValue(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [enabled, isAdmin]);
-
-  return value;
-}
-
 export function DockerNetworkCard({
-  isRemote,
   primaryNetwork,
   onPrimaryNetworkChange,
   primaryGwPriority,
@@ -74,7 +38,6 @@ export function DockerNetworkCard({
   baselineAdditionalNetworks = [],
 }: DockerNetworkCardProps) {
   const { t } = useTranslation();
-  const installDefault = useInstallDefaultNetwork(!isRemote);
 
   const primaryDirty = primaryNetwork !== baselinePrimaryNetwork;
   const priorityDirty = primaryGwPriority !== baselinePrimaryGwPriority;
@@ -112,7 +75,7 @@ export function DockerNetworkCard({
           </div>
         </div>
 
-        <NetworkNote>{emptyStateText(t, isRemote, installDefault)}</NetworkNote>
+        <NetworkNote>{t("executors:primaryNetworkEmptyDaemonDefault")}</NetworkNote>
         <NetworkNote>{t("executors:primaryNetworkMustPublishPorts")}</NetworkNote>
 
         <div className="space-y-2">
@@ -151,25 +114,6 @@ function NetworkNote({ children }: { children: React.ReactNode }) {
       <span>{children}</span>
     </p>
   );
-}
-
-/**
- * The empty-state line, which differs by daemon.
- *
- * A remote daemon is another machine, so the install-wide value names nothing
- * there. Locally, the value is stated when it is known and described when the
- * install has none.
- */
-function emptyStateText(
-  t: TFunction,
-  isRemote: boolean,
-  installDefault: string | null,
-): string {
-  if (isRemote) return t("executors:primaryNetworkEmptyRemote");
-  if (installDefault) {
-    return t("executors:primaryNetworkEmptyInstallDefault", { network: installDefault });
-  }
-  return t("executors:primaryNetworkEmptyDaemonDefault");
 }
 
 /** One additional-network row: name, optional priority, remove. */

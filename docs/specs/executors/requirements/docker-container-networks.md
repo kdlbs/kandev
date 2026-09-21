@@ -16,14 +16,14 @@ a user-defined network, so a task agent cannot resolve sibling services by DNS
 name, cannot be confined to an `internal` network that denies egress, and
 cannot be given an L2 presence on the daemon host's physical LAN.
 
-The install-wide `docker.defaultNetwork` configuration key exists, is
-documented as a compatibility field that is "not wired into current executor
-networking", and is read by nothing. It is the only setting whose name suggests
-this capability, and it does not provide it.
+A `docker.defaultNetwork` configuration key existed, was documented as a
+compatibility field that is "not wired into current executor networking", and
+was read by nothing. It is retired rather than implemented: a network name only
+means something on the daemon that owns it, and Kandev now drives two, so an
+install-wide default cannot describe both.
 
 This capability makes container network placement an explicit, observable part
-of an executor profile, and makes `docker.defaultNetwork` a real install-wide
-default for the Local Docker executor.
+of an executor profile.
 
 Kandev reaches a task container's `agentctl` through a published host port. The
 Local Docker executor reads the published port from the container's port
@@ -68,18 +68,13 @@ deployment requires.
   executor profile shall accept a primary network name. When the profile names
   one, every task container launched on that profile shall be created on that
   network.
-- **AC-EXECUTORS-DOCKER-NETWORKS-001.2:** When a `local_docker` profile names no
-  primary network, the install-wide `docker.defaultNetwork` value shall be used.
-  When that value is also empty, the container shall be created on the daemon's
-  default network, which is the behavior shipped before this capability.
-- **AC-EXECUTORS-DOCKER-NETWORKS-001.3:** The default value of
-  `docker.defaultNetwork` shall be empty. An installation that has never
-  configured a network shall observe unchanged container networking after
-  upgrading.
-- **AC-EXECUTORS-DOCKER-NETWORKS-001.4:** The install-wide
-  `docker.defaultNetwork` value shall not select, override, or contribute to a
-  `remote_docker` profile's container network. A `remote_docker` profile that
-  names no primary network shall use the remote daemon's default network.
+- **AC-EXECUTORS-DOCKER-NETWORKS-001.2:** When a profile names no primary
+  network, the container shall be created on the daemon's own default network,
+  which is the behavior shipped before this capability. No install-wide setting
+  shall select, override, or contribute to a container's network.
+- **AC-EXECUTORS-DOCKER-NETWORKS-001.3:** The retired `docker.defaultNetwork`
+  key shall not be reintroduced, and an existing installation that still carries
+  it in its configuration file shall start normally with the key ignored.
 - **AC-EXECUTORS-DOCKER-NETWORKS-001.5:** A profile's network selection shall be
   authoritative over any network value supplied in a task's launch metadata,
   including when the profile's value is empty. The agent-facing profile tools
@@ -148,13 +143,8 @@ which network a running task container is on.
   present a network section for `local_docker` and `remote_docker` profiles
   only, containing the primary network name and the additional network list
   with a gateway priority per entry.
-- **AC-EXECUTORS-DOCKER-NETWORKS-003.2:** For a `local_docker` profile whose
-  primary network is empty, the editor shall state which install-wide default
-  applies, including that the default is the daemon's own default network when
-  `docker.defaultNetwork` is unset.
-- **AC-EXECUTORS-DOCKER-NETWORKS-003.3:** For a `remote_docker` profile whose
-  primary network is empty, the editor shall state that the remote daemon's
-  default network applies and that the install-wide value does not.
+- **AC-EXECUTORS-DOCKER-NETWORKS-003.2:** When the primary network is empty, the
+  editor shall state that the daemon's own default network applies.
 - **AC-EXECUTORS-DOCKER-NETWORKS-003.4:** Saving a profile with an empty primary
   network and an empty additional list shall persist no network configuration,
   and shall leave an existing profile's launch behavior unchanged.
@@ -172,6 +162,8 @@ which network a running task container is on.
   are owned elsewhere and are unchanged.
 - `docker.tlsVerify` and `docker.volumeBasePath`, which remain documented
   compatibility fields.
+- Any install-wide or workspace-wide network default. The executor profile is
+  the only place a network is named.
 - Egress filtering as a product feature. An `internal` network is one thing an
   operator can select, not a Kandev-enforced policy; the Sprites network policy
   rules remain the separate, unrelated mechanism.
