@@ -30,6 +30,22 @@ access and global installation configuration remain human administration.
 Regression tests exercise native persistence, lifecycle events, start-column
 demotion, ordering, invalid WIP/cycle references, foreign task/step/review-profile
 references, expired runs, private mode restrictions and broker discovery.
-Provider and deployment qualification are recorded after the immutable bundle
-is built. All demonstrations use synthetic workspaces and generic prompts.
-No user prompts, credential values or production row contents belong in this packet.
+The immutable candidate is `0.94.0-orchestration.20260921.sha8d9bb81c64d0`.
+Its [two-turn Claude-backed trial](workspace-administration-provider-receipt.json)
+verified saved workspace settings, workflow and column creation/edits, repository
+registration and subsequent cleanup. Repository removal is verified using native
+visibility: the registration becomes a tombstone rather than disappearing from
+storage. The trial used the Orchestrator's existing native login after renewal;
+the broker requires no additional API key.
+
+The [portable trial fixture](fixtures/workspace-administration-provider-trial.py)
+accepts the bundle's `bin/kandev` path and the selected native Claude configuration
+directory. It creates a disposable Kandev database and Git checkout, sends only
+generic prompts and checks persisted state. Native provider authentication remains
+in the selected profile; credential contents are never copied or printed. Raw
+provider logs are local diagnostic material and must not be published.
+
+Go race tests cover backend composition, Orchestration and agentctl; repository
+lint/hooks and public documentation validation passed. Deployment qualification
+is recorded in [the live receipt](workspace-administration-live-receipt.json).
+No user prompts, credential values or production row contents are in this packet.

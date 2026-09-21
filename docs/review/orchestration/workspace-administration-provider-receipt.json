@@ -1,0 +1,37 @@
+{
+  "outcome": "passed",
+  "synthetic_only": true,
+  "binary_sha256": "187c0d4c3813a0fd54eefc846b7a94a649de2f79436d4d0c3164f445057c8e1c",
+  "turns": [
+    {
+      "number": 1,
+      "reply_received": true,
+      "verified": [
+        "workspace_update",
+        "workflow_create",
+        "step_create",
+        "step_update",
+        "repository_register"
+      ]
+    },
+    {
+      "number": 2,
+      "reply_received": true,
+      "verified": [
+        "workflow_delete",
+        "step_delete",
+        "repository_remove",
+        "workspace_update"
+      ]
+    }
+  ],
+  "teardown": {
+    "backend_exit": 0,
+    "credential_link_removed": true
+  },
+  "candidate": "0.94.0-orchestration.20260921.sha8d9bb81c64d0",
+  "source_revision": "8d9bb81c64d0fdf2d67cfbc59d189107c41d3129",
+  "provider": "Claude ACP, native personal profile login",
+  "database_and_working_directory": "disposable synthetic fixture",
+  "repository_delete_verification": "native tombstone exists and active registration is absent"
+}

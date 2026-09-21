@@ -5,10 +5,10 @@ migration/replay/rollback rehearsal completed before the authorized cutover.
 
 | Review item | Prepared result |
 | --- | --- |
-| Candidate | `0.94.0-orchestration.20260919.sha0521e64c651c` |
-| Source | `0521e64c651c` |
+| Candidate | `0.94.0-orchestration.20260921.sha8d9bb81c64d0` |
+| Source | `8d9bb81c64d0` |
 | Base | Exact v0.94.0, `bf819a0228e742d069c528293d848c985a4d1bd1` |
-| Bundle | Six immutable binaries; [current SHA-256 receipt](automatic-recovery-live-receipt.json) |
+| Bundle | Six immutable binaries; [current SHA-256 receipt](workspace-administration-live-receipt.json) |
 | Qualification | [Completed checks and platform/provider limits](candidate-qualification.md) |
 | Data rehearsal | [Migration, replay, synthetic Coordinator APIs and matched rollback](migration-rehearsal.md) |
 | Service patch | Staged private override; merged user-unit validation passed |
@@ -51,8 +51,17 @@ move, archive and delete controls to the existing workspace conversation. The
 packaged runtime passed a synthetic three-turn Claude chat trial before live
 cutover. [Task-control deployment receipt](task-control-live-receipt.json).
 
-The current [automatic recovery repair](automatic-recovery.md) handles safe
+The [automatic recovery repair](automatic-recovery.md) handles safe
 transient failures after idle without manual Resume. The exact deployed binary
 passed an injected-failure Claude trial before cutover. The matched cold backup,
 health/version, authentication and retained-data checks all passed. See the
-[current deployment receipt](automatic-recovery-live-receipt.json).
+[recovery deployment receipt](automatic-recovery-live-receipt.json).
+
+The current [workspace administration repair](workspace-administration.md) adds
+workspace settings, workflow/column management and repository registration/removal
+through the native broker. The exact candidate passed a two-turn authenticated
+Claude trial with generic prompts before cutover. The cold backup, web readiness,
+authentication, data integrity and retained-history checks passed, and the running
+binary matches the persistent service selection. Startup health became available
+before the web interface; final verification waited for web readiness. See the
+[current deployment receipt](workspace-administration-live-receipt.json).

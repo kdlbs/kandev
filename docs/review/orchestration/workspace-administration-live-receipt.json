@@ -1,0 +1,26 @@
+{
+  "candidate": "0.94.0-orchestration.20260921.sha8d9bb81c64d0",
+  "binaries_sha256": {
+    "agentctl-linux-amd64": "58022513f25b0e0d24bc42e4b1917fd985e86c02e06323c831574ba4f26eb723",
+    "agentctl-linux-arm64": "f36b77c1317ae43d95fee2fcad6e5c52ceba0869ce01a3a1a63209932c20763b",
+    "agentctl-darwin-arm64": "8baac509e8689b75570fa9a898863c2ddf727243e0823c518ba36a9bbba3b718",
+    "agentctl": "183c8ab3e37e428063d442825768194f0be3151777405af8089ebae9d28b4cd1",
+    "agentctl-darwin-amd64": "7db0058a629fc9a0427246a583e4b23ad0411b1d9ac4daa213e09058439e2baa",
+    "kandev": "187c0d4c3813a0fd54eefc846b7a94a649de2f79436d4d0c3164f445057c8e1c"
+  },
+  "backup_verified": true,
+  "outcome": "passed",
+  "health": {
+    "mode": "websocket+http",
+    "service": "kandev",
+    "status": "ok",
+    "version": "0.94.0-orchestration.20260921.sha8d9bb81c64d0"
+  },
+  "auth_enforced": true,
+  "retained_rows_verified": true,
+  "service_selection_verified": true,
+  "web_ready": true,
+  "readiness_note": "Initial web readiness check encountered temporary startup HTTP 503; candidate remained running, readiness passed and service selection was synchronized without another restart.",
+  "source_commit": "8d9bb81c64d0",
+  "synthetic_provider_trial": "workspace-administration-provider-receipt.json"
+}
