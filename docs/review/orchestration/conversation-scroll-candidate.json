@@ -18,7 +18,7 @@
     "kandev": "7a4d7ec20eeb152dd481baf96bb07e9dd540e3f69d92980821a49a8462d5d574"
   },
   "commit_hooks": {
-    "parent_sha": "15ebb34d3",
+    "parent_sha": "15ebb34d3f356b10426473dcfd9765babbfe57f6",
     "commit_sha": "41b9afc0aae6538acde89bc5feb010af96d9b2f3",
     "pre_commit_hook": "active",
     "commit_msg_hook": "active",
@@ -28,17 +28,17 @@
     "passed": [
       "harness-lint",
       "architecture-lint",
-      "prettier",
-      "eslint",
+      "prettier-format",
+      "web-lint",
       "i18n-new-code",
-      "e2e-sleep-guard",
-      "public-copy-guard",
+      "e2e-sleep-ratchet",
+      "public-copy-em-dash",
       "commitlint"
     ],
     "not_applicable": [
-      "spec-lint",
+      "specification-lint",
       "gofmt",
-      "golangci-lint"
+      "go-lint"
     ]
   }
 }
