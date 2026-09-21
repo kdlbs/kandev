@@ -214,9 +214,10 @@ test.describe("authenticated same-origin canvas runtime", () => {
 
       await proxy.clearAuthentication(context);
       await page.reload();
-      await expect(page.getByTestId("canvas-host-state")).toHaveText("Canvas unavailable", {
-        timeout: 30_000,
-      });
+      await expect(page.getByTestId("canvas-host-state")).toHaveText(
+        "Canvas runtime failed to start",
+        { timeout: 30_000 },
+      );
       await expect(page.getByTestId("web-app-frame")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
 

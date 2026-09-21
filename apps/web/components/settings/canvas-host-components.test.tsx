@@ -4,6 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DropdownMenu, DropdownMenuContent } from "@kandev/ui/dropdown-menu";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 
+const CANVAS_UNAVAILABLE_TITLE = "Canvas unavailable";
+const CANVAS_HOST_STATE_TEST_ID = "canvas-host-state";
+
 const COPY: Record<string, string> = {
   "canvases:editCanvas": "Edit canvas",
   "canvases:releasesAndPermissions": "Releases and permissions",
@@ -28,8 +31,16 @@ const COPY: Record<string, string> = {
   "canvases:shareCanvasDescription":
     "Prepare a verified bundle or source archive for review and sharing.",
   "canvases:ready": "Ready",
-  "canvases:unavailable": "Canvas unavailable",
+  "canvases:unavailable": CANVAS_UNAVAILABLE_TITLE,
   "canvases:unavailableDescription": "The canvas runtime is unavailable.",
+  "canvases:runtimeFailed": "Canvas runtime failed to start",
+  "canvases:runtimeFailedDescription": "The canvas runtime did not start correctly.",
+  "canvases:runtimeFailedDocumentErrorDescription":
+    "The canvas application failed to load. Try again or contact the canvas author.",
+  "canvases:runtimeFailedContextUnavailableDescription":
+    "The canvas application could not reach the Kandev runtime. Try again or contact the canvas author.",
+  "canvases:runtimeFailedTimeoutDescription":
+    "The canvas application did not start in time. Try again.",
   "canvases:retry": "Try again",
 };
 
@@ -229,12 +240,51 @@ describe("canvas host chrome", () => {
     expect(screen.getByTestId("canvas-host-header").textContent).toContain("Task canvas");
     expect(screen.getByTestId("canvas-host-header").textContent).toContain("Release actions");
     expect(screen.getByTestId("canvas-data-scope").textContent).toBe("Workspace data");
-    expect(screen.getByTestId("canvas-host-state").textContent).toContain("Canvas unavailable");
+    expect(screen.getByTestId(CANVAS_HOST_STATE_TEST_ID).textContent).toContain(
+      CANVAS_UNAVAILABLE_TITLE,
+    );
     expect(
       screen
         .getByTestId("canvas-host-state-panel")
-        .contains(screen.getByTestId("canvas-host-state")),
+        .contains(screen.getByTestId(CANVAS_HOST_STATE_TEST_ID)),
     ).toBe(true);
+  });
+
+  it("names the runtime as the cause, not the release, for each startup-failure reason", () => {
+    const cases = [
+      [
+        "document_error",
+        "The canvas application failed to load. Try again or contact the canvas author.",
+      ],
+      [
+        "context_unavailable",
+        "The canvas application could not reach the Kandev runtime. Try again or contact the canvas author.",
+      ],
+      ["timeout", "The canvas application did not start in time. Try again."],
+    ] as const;
+
+    for (const [reason, description] of cases) {
+      const { unmount } = render(
+        <CanvasHostStatePanel
+          state="runtime_failed"
+          runtimeFailureReason={reason}
+          error={null}
+          onRetry={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId(CANVAS_HOST_STATE_TEST_ID).textContent).toBe(
+        "Canvas runtime failed to start",
+      );
+      expect(screen.getByText(description)).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it("keeps a genuinely unavailable release distinct from a runtime-startup failure", () => {
+    render(<CanvasHostStatePanel state="unavailable" error={null} onRetry={vi.fn()} />);
+    expect(screen.getByTestId(CANVAS_HOST_STATE_TEST_ID).textContent).toBe(
+      CANVAS_UNAVAILABLE_TITLE,
+    );
   });
 
   it("announces readiness politely without adding a visible status toolbar", () => {
@@ -255,6 +305,8 @@ describe("canvas host chrome", () => {
     expect(announcement.textContent).toContain("Ready");
     expect(announcement.parentElement?.getAttribute("role")).toBe("status");
     expect(announcement.parentElement?.getAttribute("aria-live")).toBe("polite");
-    expect(screen.getByTestId("canvas-host-route").textContent).not.toContain("Canvas unavailable");
+    expect(screen.getByTestId("canvas-host-route").textContent).not.toContain(
+      CANVAS_UNAVAILABLE_TITLE,
+    );
   });
 });

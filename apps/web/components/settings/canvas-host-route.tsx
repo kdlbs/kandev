@@ -20,6 +20,7 @@ import {
   canvasPresentationUserId,
   recordCanvasPresentation,
 } from "@/lib/canvas-presentation-storage";
+import type { WebAppStartupFailureReason } from "@/components/plugins/web-app-startup";
 import { useCanvasHostCanvases } from "./canvas-host-picker";
 import { type CanvasHostState } from "./canvas-host-components";
 import { CanvasHostRouteView } from "./canvas-host-route-view";
@@ -323,11 +324,18 @@ function useCanvasHost(canvasId: string) {
     setState((current) => (current === "loading_runtime" ? "ready" : current));
   }, []);
 
-  const markRuntimeUnavailable = useCallback(() => {
-    clearRuntimeRenewal();
-    setRuntimeUrl(null);
-    setState("unavailable");
-  }, [clearRuntimeRenewal]);
+  const [runtimeFailureReason, setRuntimeFailureReason] =
+    useState<WebAppStartupFailureReason | null>(null);
+
+  const markRuntimeUnavailable = useCallback(
+    (reason: WebAppStartupFailureReason) => {
+      clearRuntimeRenewal();
+      setRuntimeUrl(null);
+      setRuntimeFailureReason(reason);
+      setState("runtime_failed");
+    },
+    [clearRuntimeRenewal],
+  );
 
   useEffect(() => {
     renewRuntimeRef.current = renewRuntime;
@@ -354,6 +362,7 @@ function useCanvasHost(canvasId: string) {
     runtimeUrl,
     state,
     error,
+    runtimeFailureReason,
     lifecycleRevision,
     load,
     refresh,
@@ -420,6 +429,7 @@ export function CanvasHostRoute({
     runtimeUrl,
     state,
     error,
+    runtimeFailureReason,
     load,
     refresh,
     markRuntimeReady,
@@ -464,6 +474,7 @@ export function CanvasHostRoute({
       runtimeUrl={runtimeUrl}
       state={state}
       error={error}
+      runtimeFailureReason={runtimeFailureReason}
       menuOpen={menuOpen}
       promotionOpen={promotionOpen}
       workspaceDataOpen={workspaceDataOpen}

@@ -257,7 +257,8 @@ blocked by permissions, invalid, or using a prior release.
 - **AC-CANVASES-AGENT-WEB-APPS-007.5:** A runtime URL or iframe load event
   alone shall not display Ready. Until the current frame acknowledges startup,
   the host shall display Loading. After 15 seconds without acknowledgement,
-  it shall show an unavailable state with Retry and Releases actions.
+  it shall show the runtime-startup-failure state of
+  `AC-CANVASES-AGENT-WEB-APPS-007.9` with Retry and Releases actions.
 - **AC-CANVASES-AGENT-WEB-APPS-007.6:** Retry, release replacement, token
   renewal, and canvas navigation shall ignore acknowledgements from previous
   frame attempts. An unavailable frame shall not cover recovery controls.
@@ -269,6 +270,21 @@ blocked by permissions, invalid, or using a prior release.
   once in plain language, identify newly requested access, and show exact
   external origins. Ordinary permission review shall not appear as a validation
   failure. Active and retained valid releases shall have distinct labels.
+
+- **AC-CANVASES-AGENT-WEB-APPS-007.9:** When a canvas application fails its
+  startup acknowledgement while its active release is valid, the host shall
+  show a runtime-startup-failure state whose title and description attribute
+  the failure to the canvas application or its runtime. That state shall be
+  distinct from the release-unavailable state of
+  `AC-CANVASES-AGENT-WEB-APPS-007.1`, and the host shall not describe a valid
+  active release as unavailable.
+- **AC-CANVASES-AGENT-WEB-APPS-007.10:** The runtime-startup-failure state
+  shall distinguish at least these reported causes through its description: an
+  error raised by the canvas application while starting, a canvas application
+  that cannot reach its runtime capability API, a browser failure to load the
+  application document, and an absent acknowledgement at the
+  `AC-CANVASES-AGENT-WEB-APPS-007.5` deadline. A cause that the host cannot
+  determine shall not be reported as a release problem.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-008: Bounded agent authoring
 
