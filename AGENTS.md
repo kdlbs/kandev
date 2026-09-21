@@ -132,10 +132,10 @@ line-anchored and will not see one buried in a `/** */` block. The pseudo-locale
 (Settings → General → Appearance, dev/e2e builds) is still the completeness check
 for copy no literal scan can see.
 
-**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk` and `zh-tw` are
+**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw` and `ja` are
 complete, and `check-i18n-keys.mjs` now fails on a missing key, an extra key, a
 dropped placeholder, or a value left identical to English. Adding user-facing
-copy means adding it in five languages; for the Traditional Chinese pair run
+copy means adding it in six languages; for the Traditional Chinese pair run
 `pnpm run i18n:zh-hant` rather than hand-translating. When the correct
 translation genuinely IS the English word, declare it in
 `src/locales/<locale>/_verbatim.json` with a reason — brand nouns, acronyms and

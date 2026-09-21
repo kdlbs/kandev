@@ -234,7 +234,7 @@ Silence a legitimate one with `// i18n-exempt: <reason>` (required) as a `//`
 LINE comment — the detector's pattern is line-anchored, so a marker inside a
 `/** */` block is silently ignored.
 
-**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw` are complete;
+**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja` are complete;
 `check-i18n-keys.mjs` fails on a missing/extra key, a dropped `{{placeholder}}`
 or `<n>` tag, an empty value, or a value identical to English. Untranslatable
 values are handled in two tiers: those `looksLikeCopy` rejects as non-copy need
