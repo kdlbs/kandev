@@ -164,8 +164,8 @@
   "enterAValue": "値を入力...",
   "enterValue": "値を入力...",
   "error": "エラー",
-  "executor": "実行कर्ता",
-  "executors": "実行कर्ता一覧",
+  "executor": "実行者",
+  "executors": "実行者一覧",
   "externalMcp": "外部MCP",
   "failedToCreateFolder": "フォルダ作成失敗",
   "failedToCreateRepository": "リポジトリ作成失敗",
@@ -540,5 +540,8 @@
   "sidebarWeeks_other": "{{count}}週間",
   "sidebarYears_one": "{{count}}年",
   "sidebarYears_other": "{{count}}年",
-  "sidebarYearsMax": "99年以上"
+  "sidebarYearsMax": "99年以上",
+  "integrationSettings": "統合設定",
+  "pageNavigation": "このページ",
+  "viewOptions": "表示オプション"
 }

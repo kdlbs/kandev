@@ -5,7 +5,15 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/requirements/japanese-locale.md"
+requirements:
+  - REQ-PLATFORM-JAPANESE-LOCALE-001
+acceptance_criteria:
+  - AC-PLATFORM-JAPANESE-LOCALE-001.1
+  - AC-PLATFORM-JAPANESE-LOCALE-001.2
+  - AC-PLATFORM-JAPANESE-LOCALE-001.3
+  - AC-PLATFORM-JAPANESE-LOCALE-001.5
+system_design:
+  - ../../specs/platform/system-design/i18n.md
 ---
 
 # Task 01: Frontend ja catalogs and locale runtime integration
@@ -66,12 +74,12 @@ Data model, API surface (client boot), Scenarios.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm exec vitest run lib/i18n/index.test.ts lib/i18n/boot.test.ts lib/i18n/formats.test.ts lib/i18n/date-locale.test.ts
-cd apps/web && pnpm exec vitest run lib/i18n/bundling.test.ts
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm run i18n:check
-cd apps/web && pnpm run lint
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm exec vitest run lib/i18n/index.test.ts lib/i18n/boot.test.ts lib/i18n/formats.test.ts lib/i18n/date-locale.test.ts)
+(cd apps/web && pnpm exec vitest run lib/i18n/bundling.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run i18n:check)
+(cd apps/web && pnpm run lint)
 ```
 
 Run one focused behavioral test in RED before the production/catalog edit, then

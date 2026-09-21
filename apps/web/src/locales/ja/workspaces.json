@@ -64,7 +64,7 @@
   "addEnvironmentSecret": "環境シークレットを追加",
   "removeEnvironmentSecret": "環境シークレット {{key}} を削除",
   "environmentSecretKeyInvalid": "有効な POSIX 環境キーを使用してください。",
-  "environmentSecretKeyDuplicate": "各環境キーは 1 回 మాత్రమే紐付けできます。",
+  "environmentSecretKeyDuplicate": "各環境キーは 1 回だけ紐付けできます。",
   "environmentSecretKeyReserved": "この環境キーは Kandev によって予約されています。",
   "environmentSecretRequired": "各環境キーに対して保存済みシークレットを選択してください。",
   "globalSecretScope": "Global",

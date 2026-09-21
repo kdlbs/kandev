@@ -301,7 +301,7 @@
   "entityId": "エンティティID",
   "events": "イベント",
   "exceeded": "超過",
-  "executor": "実行कर्ता",
+  "executor": "実行者",
   "executorConfiguration": "実行設定",
   "executorConfigurationSaved": "実行設定を保存しました",
   "executorPreference": "実行設定の優先設定",

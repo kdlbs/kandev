@@ -7,7 +7,13 @@ depends_on:
   - "01-frontend-ja-locale-catalogs"
   - "02-backend-ja-locale-negotiation"
 plan: "plan.md"
-spec: "../../specs/platform/requirements/japanese-locale.md"
+requirements:
+  - REQ-PLATFORM-JAPANESE-LOCALE-001
+acceptance_criteria:
+  - AC-PLATFORM-JAPANESE-LOCALE-001.2
+  - AC-PLATFORM-JAPANESE-LOCALE-001.7
+system_design:
+  - ../../specs/platform/system-design/i18n.md
 ---
 
 # Task 03: Japanese locale E2E

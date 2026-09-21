@@ -71,7 +71,7 @@
   "eventsLabel": "イベント",
   "excludeDraftPrs": "下書きPRを除外",
   "executorProfileLabel": "実行プロファイル",
-  "executorProfilePlaceholder": "実行कर्ताを選択",
+  "executorProfilePlaceholder": "実行者を選択",
   "exportFailed": "自動化をエクスポートできませんでした",
   "exportZip": "エクスポート",
   "failedToDeleteAutomation": "自動化の削除に失敗しました",

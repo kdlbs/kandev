@@ -259,7 +259,7 @@
   "externalMcpGroupAgentProfilesDescription": "プロファイル単位の MCP サーバー設定を管理。",
   "externalMcpGroupAgents": "エージェント",
   "externalMcpGroupAgentsDescription": "エージェントカタログを確認・設定。",
-  "externalMcpGroupExecutors": "実行कर्ता",
+  "externalMcpGroupExecutors": "実行者",
   "externalMcpGroupExecutorsDescription": "実行プロファイルを CRUD する (Docker, standalone, Sprites...)。",
   "externalMcpGroupQuestions": "エージェントの質問への回答",
   "externalMcpGroupQuestionsDescription": "任意のエージェントセッションから来た保留中の確認質問を一覧し、回答または拒否。",

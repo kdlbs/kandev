@@ -8,7 +8,12 @@ depends_on:
   - "02-backend-ja-locale-negotiation"
   - "03-japanese-locale-e2e"
 plan: "plan.md"
-spec: "../../specs/platform/requirements/japanese-locale.md"
+requirements:
+  - REQ-PLATFORM-JAPANESE-LOCALE-001
+acceptance_criteria:
+  - AC-PLATFORM-JAPANESE-LOCALE-001.6
+system_design:
+  - ../../specs/platform/system-design/i18n.md
 ---
 
 # Task 04: Repository verification
@@ -59,8 +64,8 @@ notes as they describe docs/parity conventions.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm run i18n:check && pnpm run typecheck && pnpm run lint
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm run i18n:check && pnpm run typecheck && pnpm run lint)
 (cd apps/backend && make test)
 (cd apps/web && pnpm e2e:run --host --project chromium -- tests/i18n/language-switch.spec.ts)
 python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all
@@ -103,7 +108,6 @@ package ready for user review.
   - `pnpm run typecheck` → exit 0
   - `pnpm run lint` → exit 0
   - `pnpm exec vitest run lib/i18n` → 9 files, 100 tests, GREEN
-  - `go test ./internal/i18n/... ./internal/webapp/...` → GREEN
+  - `go test ./internal/i18n/... ./internal/webapp/...` GREEN. Full
+    `make -C apps/backend test` timed out here and is not claimed green
   - focused E2E chromium + mobile-chrome → GREEN
-- Full `make -C apps/backend test` timed out in this environment; i18n/webapp
-  packages were re-run and passed. Package ready for review.

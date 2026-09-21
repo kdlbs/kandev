@@ -6,7 +6,12 @@ wave: 2
 depends_on:
   - "01-frontend-ja-locale-catalogs"
 plan: "plan.md"
-spec: "../../specs/platform/requirements/japanese-locale.md"
+requirements:
+  - REQ-PLATFORM-JAPANESE-LOCALE-001
+acceptance_criteria:
+  - AC-PLATFORM-JAPANESE-LOCALE-001.4
+system_design:
+  - ../../specs/platform/system-design/i18n.md
 ---
 
 # Task 02: Backend ja locale negotiation

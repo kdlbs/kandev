@@ -1,7 +1,11 @@
 ---
-spec: docs/specs/platform/requirements/japanese-locale.md
 created: 2026-09-20
 status: done
+requirements:
+  - REQ-PLATFORM-JAPANESE-LOCALE-001
+system_design:
+  - ../../specs/platform/system-design/i18n.md
+legacy_specs: []
 ---
 
 # Implementation Plan: Japanese Locale
@@ -58,12 +62,12 @@ branch-level review) (Task 04).
 ## Verification strategy
 
 ```bash
-cd apps && pnpm install --frozen-lockfile          # once after worktree creation
-cd apps/web && pnpm exec vitest run lib/i18n   # focused frontend suites (RED first)
-cd apps/web && pnpm run typecheck
-cd apps/web && pnpm run i18n:check              # drift + parity + identical-to-en gate
-cd apps/web && pnpm run lint
-(cd apps/backend && make test)                   # backend i18n suite
+(cd apps && pnpm install --frozen-lockfile)     # once after worktree creation
+(cd apps/web && pnpm exec vitest run lib/i18n)  # focused frontend suites (RED first)
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run i18n:check)            # drift + parity + identical-to-en gate
+(cd apps/web && pnpm run lint)
+(cd apps/backend && make test)                  # backend i18n suite
 (cd apps/web && pnpm e2e:run --host --project chromium -- tests/i18n/language-switch.spec.ts)
 python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --all
 ```

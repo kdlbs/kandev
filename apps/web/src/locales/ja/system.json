@@ -313,7 +313,7 @@
   "retentionCensusNotComputed": "未計測",
   "retentionCensusStale": "古い情報です。前回の計測に失敗したため、最後に成功した件数を表示しています",
   "retentionCensusAsOfLabel": "基準時点",
-  "retentionUnknownStatusesLabel": "認識できないステータスの行（履歴にもライブ状態にも شمار入されません）",
+  "retentionUnknownStatusesLabel": "認識できないステータスの行（履歴にもライブ状態にも含まれません）",
   "retentionTopRoutineShareLabel": "保持行数に占める最大単一ルーチンの割合",
   "backendReloadRequiredTitle": "再読み込みが必要です",
   "backendReloadRequiredBody": "Kandev が再起動されました。続行するにはこのページを再読み込みしてください。再読み込みすると未保存の変更は破棄されます。",
