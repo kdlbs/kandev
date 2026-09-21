@@ -3370,13 +3370,13 @@ func (s *Service) SnapshotSession(ctx context.Context, sessionID string) ([]Queu
 }
 
 type ownedSessionTransferRepository interface {
-	transferSessionOwned(context.Context, string, string, string, *QueueSessionIdentity) error
+	transferSessionOwned(context.Context, string, string, string, *QueueSessionIdentity, *QueueSessionIdentity) error
 }
 
 func (s *Service) transferRepositorySession(
 	ctx context.Context,
 	oldSessionID, newSessionID, operationID string,
-	destination *QueueSessionIdentity,
+	source, destination *QueueSessionIdentity,
 ) error {
 	if operationID == "" {
 		return s.repo.TransferSession(ctx, oldSessionID, newSessionID)
@@ -3385,7 +3385,7 @@ func (s *Service) transferRepositorySession(
 	if !ok {
 		return errors.New("owned session transfer unavailable")
 	}
-	return repo.transferSessionOwned(ctx, oldSessionID, newSessionID, operationID, destination)
+	return repo.transferSessionOwned(ctx, oldSessionID, newSessionID, operationID, source, destination)
 }
 
 // SnapshotSessionForIdentity captures queue and deferred-move state for one exact incarnation.
@@ -3480,7 +3480,7 @@ func (s *Service) transferRepositorySessionForTask(
 	if transferred {
 		return nil
 	}
-	return s.transferRepositorySession(ctx, oldSessionID, newSessionID, operationID, nil)
+	return s.transferRepositorySession(ctx, oldSessionID, newSessionID, operationID, nil, nil)
 }
 
 func (s *Service) transferRepositorySessionWithLiveIdentities(
@@ -3509,7 +3509,7 @@ func (s *Service) transferRepositorySessionWithLiveIdentities(
 	if operationID == "" {
 		return true, s.repo.TransferSessionIdentities(ctx, source, destination)
 	}
-	return true, s.transferRepositorySession(ctx, oldSessionID, newSessionID, operationID, &destination)
+	return true, s.transferRepositorySession(ctx, oldSessionID, newSessionID, operationID, &source, &destination)
 }
 
 type attachmentCleanupRepository interface {

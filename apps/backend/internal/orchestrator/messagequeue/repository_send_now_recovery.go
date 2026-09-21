@@ -140,7 +140,8 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	oldSessionID, newSessionID string,
-	destination *QueueSessionIdentity,
+	source, destination *QueueSessionIdentity,
+	sourceGeneration int64,
 	queuePositionOffset int64,
 ) error {
 	var claimID, claimJSON string
@@ -175,6 +176,14 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	sessionID, err := sendNowClaimSessionID(&claim)
 	if err != nil || sessionID != oldSessionID || claim.Dispatch.SessionID != oldSessionID {
 		return ErrSendNowClaimChanged
+	}
+	if claim.Identity.SessionIncarnationID != "" {
+		if source == nil || claim.Identity != *source {
+			return ErrSessionIdentityMismatch
+		}
+		if claim.OperationGeneration != sourceGeneration || claim.SessionGeneration != sourceGeneration {
+			return ErrSendNowClaimChanged
+		}
 	}
 	if destination == nil && claim.Identity.SessionIncarnationID != "" {
 		return ErrSessionIdentityMismatch
