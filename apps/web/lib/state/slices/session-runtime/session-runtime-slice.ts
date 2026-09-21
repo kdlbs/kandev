@@ -229,6 +229,19 @@ function buildSessionCommitActions(set: ImmerSet) {
       set((draft) => {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         const existing = draft.sessionCommits.byEnvironmentId[envKey] || [];
+        const duplicateIndex = existing.findIndex(
+          (current) =>
+            current.commit_sha === commit.commit_sha &&
+            (current.repository_name ?? "") === (commit.repository_name ?? ""),
+        );
+        // A commit_created notification can arrive again while a refetch is
+        // replacing the list. Update the fetched row in place so the same
+        // commit is never rendered twice.
+        if (duplicateIndex >= 0) {
+          existing[duplicateIndex] = { ...existing[duplicateIndex], ...commit };
+          draft.sessionCommits.byEnvironmentId[envKey] = existing;
+          return;
+        }
         // For amend: only replace HEAD (first entry) if it has the same parent
         if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
           existing[0] = commit;

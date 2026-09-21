@@ -550,6 +550,7 @@ type LaunchAgentRequest struct {
 	CheckoutBranch          string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
@@ -605,6 +606,7 @@ type RepoSpec struct {
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	CheckoutOptions         *models.RepositoryCheckoutOptions
 	ContributionDestination *models.ContributionDestination
 	ComparisonTarget        *models.ComparisonTarget
 	WorktreeID              string
@@ -659,14 +661,19 @@ type LaunchOptions struct {
 	OfficeAgentProfileID string
 	ExecutorID           string
 	TurnID               string
-	Prompt               string
-	PriorACPSession      string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID       string
-	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
-	McpProfile           *mcpprofile.Context
-	Attachments          []v1.MessageAttachment
-	Env                  map[string]string
+	// OnExecutionAdmitted runs after the launch path has identified and
+	// persisted the execution that will receive this turn, but before its
+	// process is started. Callers use this boundary to bind turn-scoped
+	// evidence to the execution that actually won admission.
+	OnExecutionAdmitted func(executionID string)
+	Prompt              string
+	PriorACPSession     string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID      string
+	StartAgent          bool
+	McpMode             string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile          *mcpprofile.Context
+	Attachments         []v1.MessageAttachment
+	Env                 map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

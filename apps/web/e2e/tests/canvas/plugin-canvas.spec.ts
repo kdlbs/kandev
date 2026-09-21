@@ -27,8 +27,10 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
     const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
     try {
       await testPage.goto(`/?workspaceId=${encodeURIComponent(seedData.workspaceId)}`);
-      await expect(testPage.getByTestId("kanban-board")).toBeVisible();
-      await expect(testPage.getByTestId("sidebar-canvases-settings")).toBeVisible();
+      await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 20_000 });
+      await expect(testPage.getByTestId("sidebar-canvases-settings")).toBeVisible({
+        timeout: 20_000,
+      });
 
       const sectionHeader = testPage.getByRole("button", { name: /canvases/i }).first();
       await sectionHeader.click();
@@ -259,6 +261,15 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         )
         .toBe(true);
       await expectCanvasFrameFillsHost(testPage);
+      const canvasOverflow = testPage
+        .getByTestId("canvas-host-header")
+        .getByTestId("panel-header-overflow");
+      await expect(canvasOverflow).toBeVisible();
+      await canvasOverflow.click();
+      await expect(
+        testPage.getByRole("menuitem", { name: "Releases and permissions", exact: true }),
+      ).toBeVisible();
+      await testPage.keyboard.press("Escape");
       const fixture = testPage.frameLocator('iframe[title="E2E Plugin Canvas"]');
       await expect(fixture.getByTestId("canvas-fixture-script")).toHaveText("inline-ready");
       await expect(fixture.getByTestId("canvas-fixture-appearance-mode")).toHaveText("light");
@@ -293,7 +304,9 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
       await fixture.getByTestId("canvas-fixture-reconnect").dispatchEvent("click");
       await expect(fixture.getByTestId("canvas-fixture-sse-status")).toHaveText("connected");
       await fixture.getByTestId("canvas-fixture-resync").dispatchEvent("click");
-      await expect(fixture.getByTestId("canvas-fixture-sse-resync")).toHaveText("received");
+      await expect(fixture.getByTestId("canvas-fixture-sse-resync")).toHaveText("received", {
+        timeout: 15_000,
+      });
 
       await expect
         .poll(

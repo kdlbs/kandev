@@ -60,6 +60,11 @@ type Config struct {
 // TasksConfig contains task lifecycle startup limits.
 type TasksConfig struct {
 	PreparationTimeout time.Duration `mapstructure:"preparationTimeout"`
+	// StallDetectionThreshold is the event-silence window after which the
+	// session reconciliation sweep classifies an active session with no live
+	// execution as stalled (issue #3712). The orphaned-session healing grace
+	// window is twice this value.
+	StallDetectionThreshold time.Duration `mapstructure:"stallDetectionThreshold"`
 }
 
 // CredentialsConfig contains operator-managed credential file settings.

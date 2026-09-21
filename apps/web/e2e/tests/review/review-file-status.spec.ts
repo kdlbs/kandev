@@ -112,10 +112,7 @@ test.describe("Review file status", () => {
       await expect(testPage.getByTestId(rowTestId)).toBeVisible({ timeout: 20_000 });
     }
 
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();

@@ -2,7 +2,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { moveTask } from "@/lib/api";
+import type { WorkflowMovePreviewResponse } from "@/lib/api";
 import { WorkflowStepper, type WorkflowStepperStep } from "./workflow-stepper";
+
+/* eslint-disable max-lines -- shared desktop and touch stepper coverage uses one fixture. */
 
 const { moveTaskMock, previewWorkflowMoveMock, appStoreState } = vi.hoisted(() => ({
   moveTaskMock: vi.fn(),
@@ -12,6 +15,11 @@ const { moveTaskMock, previewWorkflowMoveMock, appStoreState } = vi.hoisted(() =
     workspaceContextGeneration: 1,
     workflows: { items: [], activeId: null },
     tasks: { activeSessionId: null },
+    taskRemoval: { navigationRevision: 0 },
+    beginWorkflowSessionFocus: vi.fn(() => 1),
+    bindWorkflowSessionFocus: vi.fn(),
+    reconcileWorkflowSessionFocus: vi.fn(),
+    cancelWorkflowSessionFocus: vi.fn(),
     chatInput: { planModeBySessionId: {} },
     kanban: { tasks: [] },
     kanbanMulti: { snapshots: {} },
@@ -114,6 +122,7 @@ vi.mock("@kandev/ui/drawer", async () => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  previewWorkflowMoveMock.mockResolvedValue(undefined);
   mocks.touchDrawer = false;
   appStoreState.kanban.tasks.length = 0;
   const taskSessions = appStoreState.taskSessions.items as Record<string, unknown>;
@@ -172,6 +181,24 @@ const SPINNER_HEIGHT = "h-3.5";
 const SPINNER_WIDTH = "w-3.5";
 const MARKER_SELECTOR = "[data-marker-state]";
 
+function replacementModelPreview(): WorkflowMovePreviewResponse {
+  return {
+    task_id: TASK_ID,
+    workflow_step_id: "c",
+    evaluated_at: "2026-09-19T00:00:00Z",
+    outcome: "create_new",
+    model: {
+      before: { known: false },
+      after: { known: true, label: "gpt-5.6-terra" },
+      after_source: "profile",
+    },
+    context_reset: false,
+    context_reset_state: "unchanged",
+    source_disposition: "park",
+    dispatch: "prompt",
+  };
+}
+
 describe("WorkflowStepper", () => {
   it("shows a pending marker while a move request is unresolved", async () => {
     collapsedMock.mockReturnValue(false);
@@ -197,8 +224,10 @@ describe("WorkflowStepper", () => {
       ).toBe("pending"),
     );
     const marker = screen.getByTestId("workflow-step-Spec").querySelector(MARKER_SELECTOR);
-    expect(marker?.classList.contains(MARKER_FOOTPRINT_HEIGHT)).toBe(true);
-    expect(marker?.classList.contains(MARKER_FOOTPRINT_WIDTH)).toBe(true);
+    expect(
+      marker?.classList.contains(MARKER_FOOTPRINT_HEIGHT) &&
+        marker?.classList.contains(MARKER_FOOTPRINT_WIDTH),
+    ).toBe(true);
     const spinner = marker?.querySelector("svg");
     expect(spinner?.getAttribute("data-marker-visual-size")).toBe("8");
     expect(spinner?.classList.contains(MARKER_FOOTPRINT_HEIGHT)).toBe(true);
@@ -220,8 +249,10 @@ describe("WorkflowStepper", () => {
     );
 
     const marker = screen.getByTestId(WORK_TEST_ID).querySelector(MARKER_SELECTOR);
-    expect(marker?.classList.contains(MARKER_FOOTPRINT_HEIGHT)).toBe(true);
-    expect(marker?.classList.contains(MARKER_FOOTPRINT_WIDTH)).toBe(true);
+    expect(
+      marker?.classList.contains(MARKER_FOOTPRINT_HEIGHT) &&
+        marker?.classList.contains(MARKER_FOOTPRINT_WIDTH),
+    ).toBe(true);
     const spinner = marker?.querySelector("svg");
     expect(spinner?.getAttribute("data-marker-visual-size")).toBe("14");
     expect(spinner?.classList.contains(SPINNER_HEIGHT)).toBe(true);
@@ -274,6 +305,50 @@ describe("WorkflowStepper", () => {
 });
 
 describe("WorkflowStepper progress disclosure", () => {
+  it("renders the planned replacement model in the desktop topbar disclosure", async () => {
+    collapsedMock.mockReturnValue(false);
+    previewWorkflowMoveMock.mockResolvedValue(replacementModelPreview());
+
+    render(
+      <WorkflowStepper steps={STEPS} currentStepId="b" taskId={TASK_ID} workflowId={WORKFLOW_ID} />,
+    );
+
+    fireEvent.mouseEnter(screen.getByTestId("workflow-step-Review"));
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId("workflow-move-preview")
+          .some((preview) => preview.textContent?.includes("gpt-5.6-terra")),
+      ).toBe(true),
+    );
+  });
+
+  it("renders the planned replacement model after a touch disclosure tap", async () => {
+    collapsedMock.mockReturnValue(true);
+    mocks.touchDrawer = true;
+    previewWorkflowMoveMock.mockResolvedValue(replacementModelPreview());
+
+    render(
+      <WorkflowStepper
+        steps={DISCLOSURE_STEPS}
+        currentStepId="b"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER_LABEL }));
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId("workflow-move-preview")
+          .some((preview) => preview.textContent?.includes("gpt-5.6-terra")),
+      ).toBe(true),
+    );
+  });
+
   it("keeps lifecycle details inside the existing disclosure", () => {
     collapsedMock.mockReturnValue(true);
     (appStoreState.kanban.tasks as unknown[]).push({
@@ -600,7 +675,7 @@ describe("WorkflowStepper fallback states", () => {
     // request must not paint a banner describing a move nobody is waiting on.
     let rejectFirst!: (error: unknown) => void;
     moveTaskMock.mockReturnValueOnce(new Promise((_res, rej) => (rejectFirst = rej)));
-    moveTaskMock.mockResolvedValueOnce(undefined);
+    moveTaskMock.mockResolvedValueOnce({});
     const onMoveError = vi.fn();
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const props = {
@@ -626,7 +701,7 @@ describe("WorkflowStepper fallback states", () => {
 
   it("notifies the owning surface when a move starts", () => {
     const onMoveStart = vi.fn();
-    moveTaskMock.mockResolvedValueOnce(undefined);
+    moveTaskMock.mockResolvedValueOnce({});
     const props = {
       steps: STEPS,
       currentStepId: "b",

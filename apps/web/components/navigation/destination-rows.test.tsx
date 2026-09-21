@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DestinationRows } from "./destination-rows";
 import type { ResolvedDestination } from "@/lib/navigation/types";
 
+let pathname = "/";
+
 vi.mock("@/lib/routing/client-router", () => ({
-  usePathname: () => "/",
+  usePathname: () => pathname,
 }));
 
 function Glyph({ className }: { className?: string }) {
@@ -41,7 +43,26 @@ function renderRows(destinations: ResolvedDestination[], pluginTestIdPrefix?: st
 }
 
 describe("DestinationRows", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    pathname = "/";
+  });
+
+  it("highlights the canonical route rather than both Home and its configured target", () => {
+    pathname = "/threads";
+    renderRows([
+      { ...STATS, id: "home", label: "Home", href: "/threads?workspace=ws-1" },
+      { ...STATS, id: "threads", label: "Threads", href: "/threads?workspace=ws-1" },
+    ]);
+    expect(screen.getByRole("link", { name: "Threads" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Home" }).getAttribute("aria-current")).toBeNull();
+  });
+
+  it("highlights Home on the Office home route", () => {
+    pathname = "/office";
+    renderRows([{ ...STATS, id: "home", label: "Home", href: "/office?workspaceId=ws" }]);
+    expect(screen.getByRole("link", { name: "Home" }).getAttribute("aria-current")).toBe("page");
+  });
 
   it("renders a labelled link per destination", () => {
     renderRows([STATS, PLUGIN_PAGE]);

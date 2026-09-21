@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- board preview owns the responsive board and desktop preview surface. */
+
 import {
   useCallback,
   useEffect,
@@ -311,18 +313,109 @@ function useSyncSelectedTaskActivity(params: {
   selectedTaskId: string | null | undefined;
   activeSessionId: string | null;
   setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
+  workflowFocusRequestActive: boolean;
   setActiveTask: (taskId: string) => void;
 }) {
-  const { isOpen, selectedTaskId, activeSessionId, setActiveSession, setActiveTask } = params;
+  const {
+    isOpen,
+    selectedTaskId,
+    activeSessionId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive,
+    setActiveTask,
+  } = params;
 
   useEffect(() => {
     if (!isOpen || !selectedTaskId) return;
     if (activeSessionId) {
-      setActiveSession(selectedTaskId, activeSessionId);
+      if (workflowFocusRequestActive) {
+        setActiveSessionAuto(selectedTaskId, activeSessionId);
+      } else {
+        setActiveSession(selectedTaskId, activeSessionId);
+      }
     } else {
       setActiveTask(selectedTaskId);
     }
-  }, [activeSessionId, isOpen, selectedTaskId, setActiveSession, setActiveTask]);
+  }, [
+    activeSessionId,
+    isOpen,
+    selectedTaskId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive,
+    setActiveTask,
+  ]);
+}
+
+function usePreviewSessionFocus({
+  previewIsOpen,
+  previewTaskId,
+  selectedTask,
+  selectedTaskSessionId,
+  userSelectedSessionId,
+  setUserSelectedSessionId,
+}: {
+  previewIsOpen: boolean;
+  previewTaskId: string | null | undefined;
+  selectedTask: Task | null;
+  selectedTaskSessionId: string | null;
+  userSelectedSessionId: string | null;
+  setUserSelectedSessionId: (sessionId: string | null) => void;
+}) {
+  const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
+  const workflowFocusRequest = useAppStore((state) => state.workflowSessionFocus.request);
+  const acknowledgeWorkflowSessionFocus = useAppStore(
+    (state) => state.acknowledgeWorkflowSessionFocus,
+  );
+  let activeSessionId: string | null = null;
+  if (previewTaskId) {
+    if (workflowFocusRequest?.taskId === previewTaskId) {
+      activeSessionId = workflowFocusRequest.sessionId;
+    } else {
+      activeSessionId =
+        userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId;
+    }
+  }
+
+  const handleSessionChange = useCallback(
+    (sessionId: string | null) => {
+      setUserSelectedSessionId(sessionId);
+      if (previewTaskId && sessionId) setActiveSession(previewTaskId, sessionId);
+    },
+    [previewTaskId, setActiveSession, setUserSelectedSessionId],
+  );
+
+  useEffect(() => {
+    if (!previewIsOpen || !previewTaskId || workflowFocusRequest?.taskId !== previewTaskId) {
+      return;
+    }
+    setUserSelectedSessionId(null);
+    setActiveSessionAuto(previewTaskId, workflowFocusRequest.sessionId);
+    acknowledgeWorkflowSessionFocus(workflowFocusRequest.requestId);
+  }, [
+    acknowledgeWorkflowSessionFocus,
+    previewIsOpen,
+    previewTaskId,
+    setActiveSessionAuto,
+    setUserSelectedSessionId,
+    workflowFocusRequest,
+  ]);
+
+  useSyncSelectedTaskActivity({
+    isOpen: previewIsOpen,
+    selectedTaskId: previewTaskId,
+    activeSessionId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive: workflowFocusRequest?.taskId === previewTaskId,
+    setActiveTask,
+  });
+
+  return { activeSessionId, handleSessionChange };
 }
 
 export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
@@ -334,8 +427,6 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
   const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
   const kanbanMultiSnapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const setActiveTask = useAppStore((state) => state.setActiveTask);
-  const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setKanbanPreviewedTaskId = useAppStore((state) => state.setKanbanPreviewedTaskId);
   const hasLoadedTaskSources = hasLoadedKanbanTaskSources({
     activeWorkflowId: kanbanWorkflowId,
@@ -403,16 +494,13 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
     [router],
   );
 
-  const activeSessionId = previewTaskId
-    ? (userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId)
-    : null;
-
-  useSyncSelectedTaskActivity({
-    isOpen: previewIsOpen,
-    selectedTaskId: previewTaskId,
-    activeSessionId,
-    setActiveSession,
-    setActiveTask,
+  const { activeSessionId, handleSessionChange } = usePreviewSessionFocus({
+    previewIsOpen,
+    previewTaskId,
+    selectedTask,
+    selectedTaskSessionId,
+    userSelectedSessionId,
+    setUserSelectedSessionId,
   });
 
   useUrlSync(previewTaskId ?? null, previewIsOpen ? (activeSessionId ?? null) : null);
@@ -446,7 +534,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       onPreviewTask={handlePreviewTaskWithData}
       onNavigateToTask={handleNavigateToTask}
       onClose={close}
-      onSessionChange={setUserSelectedSessionId}
+      onSessionChange={handleSessionChange}
       onResizeMouseDown={handleResizeMouseDown}
       onActionsMenuOpenChange={setActionsMenuOpen}
     />

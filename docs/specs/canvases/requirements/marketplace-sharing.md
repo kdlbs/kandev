@@ -13,7 +13,7 @@ owners:
 Users distribute a reusable canvas, discover it in Settings > Plugins, and
 install a private instance in their workspace. Canvases owns this vertical
 contract because it owns canvas identity, source lineage, scope, and discovery.
-Plugins supplies the existing catalog, manifest, validation, and isolated runtime.
+Plugins supplies the existing catalog, manifest, validation, and web-application runtime.
 
 This is the first distribution version. Sharing uses downloads and instructions;
 Kandev does not create repositories or publish external releases for the user.
@@ -159,7 +159,7 @@ task, executor, or workspace.
 ### REQ-CANVASES-MARKETPLACE-006: Accessible delivery and compatibility
 
 **Intent:** Desktop and phone users can complete the same sharing and discovery
-flows without weakening existing canvas isolation or feature controls.
+flows under the current plugin runtime trust contract and feature controls.
 
 #### Acceptance criteria
 

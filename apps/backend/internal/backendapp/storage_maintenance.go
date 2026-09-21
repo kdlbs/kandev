@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/system/jobs"
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -58,20 +59,29 @@ type storageDependencies struct {
 	providers        []storagepkg.CleanupProvider
 }
 
-func provideStorageComposition(
-	cfg *config.Config,
+// provideStorageStore constructs the storage system's persistence store and
+// closes stores.services's required-store sweep. storage is stores.
+// services's last admission chronologically (after services.go,
+// orchestrator.go, and main.go's delivery), so this is where the sweep step
+// closes. Callers must run this before sessions.recovery's BeginStep: steps
+// must never overlap, and BeginStep unconditionally ends whatever step is
+// currently active, which would silently truncate the sweep.
+func provideStorageStore(
+	ctx context.Context,
 	pool *db.Pool,
-	tracker *jobs.Tracker,
-	eventBus bus.EventBus,
-	lifecycleMgr *lifecycle.Manager,
-	worktreeMgr *worktree.Manager,
-	taskSvc *taskservice.Service,
-	log *logger.Logger,
-	logError func(string, error),
-) (*storageComposition, error) {
-	return provideStorageCompositionWithDependencies(
-		cfg, pool, tracker, eventBus, lifecycleMgr, worktreeMgr, taskSvc, log, logError, nil, nil,
-	)
+	requiredTracker *requiredstores.Tracker,
+) (*storagepkg.Store, error) {
+	store, err := storagepkg.NewStore(pool)
+	if requiredTracker != nil {
+		if recordErr := recordRequiredStore(ctx, requiredTracker, "storage", err); recordErr != nil {
+			return nil, fmt.Errorf("initialize storage store: %w", recordErr)
+		}
+		startup.EndStep(ctx, startup.StepStoresServices)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("initialize storage store: %w", err)
+	}
+	return store, nil
 }
 
 func provideStorageCompositionWithDependencies(
@@ -84,11 +94,11 @@ func provideStorageCompositionWithDependencies(
 	taskSvc *taskservice.Service,
 	log *logger.Logger,
 	logError func(string, error),
-	requiredTracker *requiredstores.Tracker,
+	store *storagepkg.Store,
 	providedSettings *systemsettings.Store,
 ) (*storageComposition, error) {
 	dependencies, err := prepareStorageDependencies(
-		cfg, pool, requiredTracker, eventBus, lifecycleMgr, worktreeMgr, taskSvc, log, logError, providedSettings,
+		cfg, pool, store, eventBus, lifecycleMgr, worktreeMgr, taskSvc, log, logError, providedSettings,
 	)
 	if err != nil {
 		return nil, err
@@ -136,7 +146,7 @@ func provideStorageCompositionWithDependencies(
 func prepareStorageDependencies(
 	cfg *config.Config,
 	pool *db.Pool,
-	requiredTracker *requiredstores.Tracker,
+	store *storagepkg.Store,
 	eventBus bus.EventBus,
 	lifecycleMgr *lifecycle.Manager,
 	worktreeMgr *worktree.Manager,
@@ -154,15 +164,6 @@ func prepareStorageDependencies(
 		return nil, fmt.Errorf("initialize storage settings: %w", err)
 	}
 	settings := storagepkg.NewSettingsStore(rawSettings)
-	store, err := storagepkg.NewStore(pool)
-	if requiredTracker != nil {
-		if recordErr := recordRequiredStore(requiredTracker, "storage", err); recordErr != nil {
-			return nil, fmt.Errorf("initialize storage store: %w", recordErr)
-		}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("initialize storage store: %w", err)
-	}
 	tempArtifacts := tempartifacts.NewRegistry(tempartifacts.Config{Store: store, TempRoot: os.TempDir()})
 	if err := tempArtifacts.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact registry", err)

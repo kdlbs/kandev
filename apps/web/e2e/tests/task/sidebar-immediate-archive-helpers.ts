@@ -34,7 +34,8 @@ export async function checkImmediateArchive(options: {
     else await locator.click();
   };
   const openPicker = async () => {
-    if (mobile && !(await sheet.isVisible())) await page.getByTestId("mobile-session-menu").tap();
+    if (mobile && !(await sheet.isVisible()))
+      await page.getByTestId("mobile-task-picker-trigger").tap();
   };
   const openArchive = async () => {
     await openPicker();
@@ -58,7 +59,7 @@ export async function checkImmediateArchive(options: {
     await openArchive();
     await press(page.getByTestId("archive-task-confirm"));
     await expect.poll(() => pending !== null).toBe(true);
-    if (mobile) await page.getByTestId("mobile-session-menu").tap();
+    if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).toHaveAttribute("aria-busy", "true");
     await expect(targetRow()).toHaveClass(/opacity-60/);
@@ -86,7 +87,7 @@ export async function checkImmediateArchive(options: {
     await openArchive();
     await press(page.getByTestId("archive-task-confirm"));
     await expect.poll(() => pending !== null).toBe(true);
-    if (mobile) await page.getByTestId("mobile-session-menu").tap();
+    if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).toHaveAttribute("aria-busy", "true");
     await expect(targetRow().getByTestId("task-state-archive-pending")).toBeVisible();

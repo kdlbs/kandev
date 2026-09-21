@@ -325,7 +325,7 @@ Choose **Settings > Executors > Kubernetes**. Only an administrator can create, 
 
 Opening a saved Kubernetes profile puts the shared cluster connection editor, connection test, and executor-wide active sessions before workload settings. The test uses current unsaved connection and profile values. Administrators edit both resources through one Save/Reset flow, while members see the same hierarchy read-only. Configured executor rows and task settings icons open the selected profile directly; the standalone connection route remains only for an executor with no profiles.
 
-Kubernetes Pod glyphs on Kanban cards and in task lists hydrate from the exact task/session status when they render, before any hover. Fine-pointer hover or keyboard focus shows a compact structured Pod summary; touch opens the same summary in a bottom Drawer without activating the task row. Duplicate indicators for the same session share the current read instead of issuing parallel requests.
+Kubernetes Pod glyphs on Kanban cards and in task lists hydrate from the exact task/session status when they render, before any hover. While the page is visible, mounted indicators refresh automatically every 90 seconds and retry failed reads. Fine-pointer hover or keyboard focus shows a compact structured Pod summary; touch opens the same summary in a bottom Drawer without activating the task row. Duplicate indicators for the same session share the current read instead of issuing parallel requests.
 
 Each executor fixes one namespace and connection configuration. Each profile supplies one strict `core/v1` `PodTemplate`, a main-container name, `linux/amd64` or `linux/arm64`, and one workspace mode:
 

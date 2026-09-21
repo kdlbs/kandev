@@ -4,7 +4,8 @@ export type MessageSendErrorCode =
   | "session-unavailable"
   | "plan-comment-migration-pending"
   | "plan-comments-changed"
-  | "primary-session-changed";
+  | "primary-session-changed"
+  | "late-answer-admission-failed";
 
 export class MessageSendError extends Error {
   readonly code: MessageSendErrorCode;
@@ -25,6 +26,7 @@ export function isMessageSendError(error: unknown): error is MessageSendError {
     code === "session-unavailable" ||
     code === "plan-comment-migration-pending" ||
     code === "plan-comments-changed" ||
-    code === "primary-session-changed"
+    code === "primary-session-changed" ||
+    code === "late-answer-admission-failed"
   );
 }

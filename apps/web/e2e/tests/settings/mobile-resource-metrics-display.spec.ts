@@ -71,7 +71,7 @@ test.describe("Mobile resource metrics display", () => {
     expect(displayUpdate.ok).toBe(true);
 
     await testPage.goto("/");
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("app-nav-trigger").click();
     await testPage.getByTestId("mobile-home-status-button").click();
 
     const drawer = testPage.getByTestId("app-status-drawer");
@@ -134,7 +134,7 @@ test.describe("Mobile resource metrics display", () => {
 
     await observeMetricsUnavailable(testPage);
     await testPage.goto("/");
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("app-nav-trigger").click();
     await testPage.getByTestId("mobile-home-status-button").click();
 
     const drawer = testPage.getByTestId("app-status-drawer");

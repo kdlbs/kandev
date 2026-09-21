@@ -15,6 +15,7 @@ package/default generation resets it during startup.
 | Copilot | `@github/copilot` | `--acp` |
 | Gemini | `@google/gemini-cli` | `--acp` |
 | Pi | `pi-acp` | none |
+| Muse | `@bex-co/muse-code-acp` | none |
 
 Normal capability probes, sessions, container commands, and one-shot inference
 use `npx --yes --prefer-offline package@<effective-version>` with the ACP

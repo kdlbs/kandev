@@ -49,6 +49,7 @@ export const defaultState = {
   workspaceContextGeneration: defaultKanbanState.workspaceContextGeneration,
   workspaceContextRead: defaultKanbanState.workspaceContextRead,
   tasks: defaultKanbanState.tasks,
+  workflowSessionFocus: defaultKanbanState.workflowSessionFocus,
   taskRemoval: defaultKanbanState.taskRemoval,
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
@@ -432,6 +433,7 @@ function mergeTaskSessionState(initialState: HydrationState) {
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
   const hydration = { ...initialState };
+  delete hydration.workflowSessionFocus;
   delete hydration.taskRemoval;
   return {
     ...defaultState,

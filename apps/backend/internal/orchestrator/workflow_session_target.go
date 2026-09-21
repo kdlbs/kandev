@@ -15,6 +15,10 @@ import (
 const (
 	workflowSessionRoutePrepared  = "prepared"
 	workflowSessionRouteCommitted = "committed"
+	// workflowSessionRouteTargetProfile identifies the ordinary profile-only
+	// workflow path. It has no target step because the recipient is selected
+	// by the destination step's effective profile policy.
+	workflowSessionRouteTargetProfile = "profile"
 )
 
 type workflowSessionBindingStore interface {
@@ -120,7 +124,14 @@ func (s *Service) resolveSourceWorkflowSessionTarget(
 	if err != nil {
 		return workflowSessionTargetResolution{}, err
 	}
-	return workflowSessionTargetResolution{session: session, profileID: sourceStep.AgentProfileID}, nil
+	profileID, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, sourceStep)
+	if err != nil {
+		return workflowSessionTargetResolution{}, err
+	}
+	return workflowSessionTargetResolution{
+		session:   session,
+		profileID: profileID,
+	}, nil
 }
 
 func validateWorkflowSessionTargetSource(destination, source *wfmodels.WorkflowStep) error {
@@ -150,15 +161,19 @@ func (s *Service) resolveBoundSourceWorkflowSession(
 	if err != nil {
 		return nil, err
 	}
+	effectiveProfileID, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, sourceStep)
+	if err != nil {
+		return nil, err
+	}
 	if binding == nil || binding.TaskID != taskID || binding.WorkflowID != workflowID ||
-		binding.AgentProfileID != sourceStep.AgentProfileID || binding.SessionID == "" {
+		binding.AgentProfileID != effectiveProfileID || binding.SessionID == "" {
 		return nil, nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, binding.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("load session target binding %q: %w", sourceStep.ID, err)
 	}
-	if session == nil || session.TaskID != taskID || session.AgentProfileID != sourceStep.AgentProfileID {
+	if session == nil || session.TaskID != taskID || session.AgentProfileID != effectiveProfileID {
 		return nil, nil
 	}
 	return session, nil
@@ -254,14 +269,22 @@ func (s *Service) promoteWorkflowSessionRoute(
 			promoteErr = err
 			return
 		}
-		destinationParkingStamp = s.captureWorkflowParkingStamp(admissionCtx, destination.ID)
-		if promoter, ok := s.repo.(workflowSessionRoutePromoter); ok && route != nil {
+		promoter, hasAtomicRoutePromotion := s.repo.(workflowSessionRoutePromoter)
+		if hasAtomicRoutePromotion {
+			destinationParkingStamp = s.captureWorkflowParkingStamp(admissionCtx, destination.ID)
+		} else {
+			destinationParkingStamp = workflowParkingStamp(destination)
+		}
+		if hasAtomicRoutePromotion && route != nil {
 			committed := *route
 			committed.DestinationID = destination.ID
 			committed.Phase = workflowSessionRouteCommitted
 			promoted, promoteErr = promoter.SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(admissionCtx, destination.ID, committed)
 			return
 		}
+		// Legacy repository adapters do not expose the atomic route promoter.
+		// Keep the nonterminal promotion guard and persist a route only after
+		// the selected destination has been promoted.
 		promoted, promoteErr = s.setNonterminalSessionPrimary(admissionCtx, destination.ID)
 		if promoteErr != nil || !promoted || route == nil {
 			return
@@ -282,8 +305,24 @@ func (s *Service) promoteWorkflowSessionRoute(
 	// session. Clear the selected destination's current parking projection;
 	// the stamped stop-intent tombstone remains for delayed callbacks.
 	s.clearWorkflowParkingForExplicitExecution(ctx, destination.ID, destinationParkingStamp)
-	s.publishPrimarySessionUpdate(ctx, taskID, destination.ID)
+	if task, err := s.repo.GetTask(ctx, taskID); err == nil && task != nil {
+		s.publishTaskUpdated(ctx, task)
+	} else if err != nil {
+		s.logger.Warn("failed to fetch task after workflow session route promotion",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
 	return true, nil
+}
+
+func workflowParkingStamp(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	parking, ok := models.LoadWorkflowParking(session.Metadata)
+	if !ok {
+		return ""
+	}
+	return parking.Stamp
 }
 
 func (s *Service) clearWorkflowParkingForExplicitExecution(
@@ -310,8 +349,14 @@ func (s *Service) clearWorkflowParkingForExplicitExecution(
 }
 
 func workflowSessionRouteMatchesStep(route *models.WorkflowSessionRoute, step *wfmodels.WorkflowStep, profileID string) bool {
-	if route == nil || step == nil || step.SessionTarget == nil {
+	if route == nil || step == nil {
 		return false
+	}
+	if step.SessionTarget == nil {
+		return route.DestinationStepID == step.ID &&
+			route.TargetKind == workflowSessionRouteTargetProfile &&
+			route.TargetStepID == "" &&
+			route.AgentProfileID == profileID
 	}
 	return route.DestinationStepID == step.ID &&
 		route.TargetKind == string(step.SessionTarget.Kind) &&
@@ -373,12 +418,53 @@ func (s *Service) reuseRecordedWorkflowSession(
 
 func workflowSessionRouteID(taskID, stepID, entryIdentity string, target *wfmodels.WorkflowSessionTarget, startPolicy models.WorkflowProfileSessionStartPolicy) string {
 	targetID := ""
-	targetKind := ""
+	targetKind := workflowSessionRouteTargetProfile
 	if target != nil {
 		targetKind = string(target.Kind)
 		targetID = target.StepID
 	}
 	return fmt.Sprintf("workflow-session:%s:%s:%s:%s:%s:%s", taskID, stepID, entryIdentity, targetKind, targetID, startPolicy)
+}
+
+func workflowProfileSessionRoute(
+	taskID string,
+	currentSession *models.TaskSession,
+	step *wfmodels.WorkflowStep,
+	profileID string,
+	entryIdentity string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+) *models.WorkflowSessionRoute {
+	if currentSession == nil || step == nil || step.SessionTarget != nil {
+		return nil
+	}
+	return &models.WorkflowSessionRoute{
+		OperationID:       workflowSessionRouteID(taskID, step.ID, entryIdentity, nil, startPolicy),
+		DestinationStepID: step.ID,
+		EntryIdentity:     entryIdentity,
+		TargetKind:        workflowSessionRouteTargetProfile,
+		AgentProfileID:    profileID,
+		SourceSessionID:   currentSession.ID,
+		Phase:             workflowSessionRoutePrepared,
+	}
+}
+
+func (s *Service) workflowReplacementRoute(
+	ctx context.Context,
+	taskID, stepID, terminalSessionID string,
+) *models.WorkflowSessionRoute {
+	if s == nil || s.repo == nil || taskID == "" || stepID == "" || terminalSessionID == "" {
+		return nil
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return nil
+	}
+	route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !ok || route.DestinationStepID != stepID || route.DestinationID != terminalSessionID {
+		return nil
+	}
+	route.Phase = workflowSessionRoutePrepared
+	return &route
 }
 
 // workflowEntryIdentity is the durable identity of one workflow-step entry.
@@ -422,6 +508,18 @@ func (s *Service) reuseResolvedWorkflowSession(
 		return nil, false, nil
 	}
 	if targetSession.ID == currentSession.ID {
+		baseRoute.DestinationID = currentSession.ID
+		baseRoute.Phase = workflowSessionRoutePrepared
+		if err := s.persistWorkflowSessionRoute(ctx, taskID, *baseRoute); err != nil {
+			return nil, false, err
+		}
+		promoted, err := s.promoteWorkflowSessionRoute(ctx, taskID, currentSession, baseRoute)
+		if err != nil {
+			return nil, false, err
+		}
+		if !promoted {
+			return nil, false, nil
+		}
 		return currentSession, false, nil
 	}
 
@@ -524,6 +622,10 @@ func (s *Service) recordWorkflowSourceBinding(
 	if task == nil || (task.WorkflowStepID != "" && task.WorkflowStepID != step.ID) {
 		return nil
 	}
+	effectiveProfileID := s.resolveStepAgentProfileForTask(ctx, task, step)
+	if effectiveProfileID == "" {
+		effectiveProfileID = step.AgentProfileID
+	}
 	updatedAt := task.UpdatedAt
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
@@ -535,7 +637,7 @@ func (s *Service) recordWorkflowSourceBinding(
 		TaskID:         taskID,
 		TargetKey:      workflowSessionBindingTargetKey(step.ID),
 		WorkflowID:     step.WorkflowID,
-		AgentProfileID: step.AgentProfileID,
+		AgentProfileID: effectiveProfileID,
 		SessionID:      session.ID,
 		OperationID:    operationID,
 		UpdatedAt:      updatedAt,

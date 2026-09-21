@@ -83,3 +83,8 @@ replace the foundation's resource ownership, recovery, or cleanup rules.
 
 - [Agents](../agents/README.md): supplies the agent command and profile.
 - [Tasks](../tasks/README.md): owns task-scoped execution lifecycle.
+
+The compact task indicator contract is extracted into
+[requirements](requirements/task-status-indicators.md) and
+[design](system-design/task-status-indicators.md), including automatic freshness
+and desktop/touch disclosure. The foundation retains task-page controls.

@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 // TestProvideServicesWiresPluginsKandevVersion pins the production wiring of
@@ -50,12 +51,13 @@ func TestRequiredStoreBootstrapCompleteness(t *testing.T) {
 func TestRequiredStoreFailure(t *testing.T) {
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
 	}
 	constructorErr := errors.New("schema constructor failed")
-	got := recordRequiredStore(tracker, "task", constructorErr)
+	got := recordRequiredStore(context.Background(), tracker, "task", constructorErr)
 	if !errors.Is(got, constructorErr) {
 		t.Fatalf("recordRequiredStore() error = %v, want %v", got, constructorErr)
 	}

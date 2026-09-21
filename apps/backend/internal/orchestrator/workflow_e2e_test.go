@@ -15,6 +15,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/stretchr/testify/require"
 )
 
 // --- Test table types ---
@@ -194,6 +195,118 @@ func TestWorkflowE2E(t *testing.T) {
 	}
 }
 
+func TestWorkflowE2E_InitialCreatePrompt(t *testing.T) {
+	ctx := context.Background()
+	workflowJSON := `{
+  "version": 1,
+  "type": "kandev_workflow",
+  "workflows": [{
+    "name": "Initial create prompt",
+    "steps": [
+      {"name": "Backlog", "position": 0, "is_start_step": true,
+       "events": {"on_turn_start": [{"type": "move_to_next"}]}},
+      {"name": "Spec", "position": 1, "agent_profile": {"agent_name": "profile-destination"},
+       "events": {"on_enter": [{"type": "auto_start_agent"}],
+                  "on_turn_complete": [{"type": "move_to_next"}]}},
+      {"name": "Spec Review", "position": 2}
+    ]
+  }]
+}`
+
+	stepGetter, nameToID := buildWorkflowFromJSON(t, workflowJSON)
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-initial-create-e2e", "session-initial-create-e2e", nameToID["Backlog"])
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-initial-create-e2e", models.TaskSessionStateCreated, ""))
+	initialSession, err := repo.GetTaskSession(ctx, "session-initial-create-e2e")
+	require.NoError(t, err)
+	initialSession.AgentProfileID = "profile-source"
+	initialSession.ExecutorID = models.ExecutorIDLocal
+	initialSession.TaskEnvironmentID = "environment-initial-create-e2e"
+	require.NoError(t, repo.UpdateTaskSession(ctx, initialSession))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:           initialSession.TaskEnvironmentID,
+		TaskID:       initialSession.TaskID,
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}))
+	seedExecutorRunning(t, repo, initialSession.ID, initialSession.TaskID, "execution-initial-create-source")
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task-initial-create-e2e"] = &v1.Task{
+		ID: "task-initial-create-e2e", Title: "Initial create", Description: "write the specification",
+		State: v1.TaskStateInProgress,
+	}
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createEngineServiceWithScheduler(t, repo, stepGetter, taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	var launches []executor.LaunchAgentRequest
+	dispatchStarted := make(chan string, 1)
+	agentMgr.launchAgentFunc = func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		launches = append(launches, *req)
+		observedTask, loadErr := repo.GetTask(ctx, req.TaskID)
+		require.NoError(t, loadErr)
+		require.Equal(t, nameToID["Spec"], observedTask.WorkflowStepID,
+			"the provider must see the destination workflow step")
+		observedSession, loadErr := repo.GetTaskSession(ctx, req.SessionID)
+		require.NoError(t, loadErr)
+		require.Equal(t, "profile-destination", req.AgentProfileID)
+		require.Equal(t, "profile-destination", observedSession.AgentProfileID,
+			"the session settings must be updated before provider launch")
+		require.Equal(t, string(models.ExecutorTypeLocal), req.ExecutorType,
+			"the prepared executor setting must reach provider launch")
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-initial-create-dispatch"}, nil
+	}
+	agentMgr.startAgentProcessFunc = func(_ context.Context, executionID string) error {
+		dispatchStarted <- executionID
+		return nil
+	}
+
+	_, err = svc.LaunchSession(ctx, &LaunchSessionRequest{
+		TaskID:              "task-initial-create-e2e",
+		SessionID:           "session-initial-create-e2e",
+		Intent:              IntentStartCreated,
+		AgentProfileID:      "profile-initial-create-e2e",
+		Prompt:              "write the specification",
+		InitialCreatePrompt: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, launches, 2, "profile switching prepares the destination workspace once before the prompt launch")
+	var promptLaunches []executor.LaunchAgentRequest
+	for _, launch := range launches {
+		if launch.StartAgent {
+			promptLaunches = append(promptLaunches, launch)
+		}
+	}
+	require.Len(t, promptLaunches, 1, "the destination session must have one prompt-bearing provider launch")
+	require.Contains(t, promptLaunches[0].TaskDescription, "write the specification")
+	select {
+	case executionID := <-dispatchStarted:
+		require.Equal(t, "execution-initial-create-dispatch", executionID)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the initial process dispatch")
+	}
+	activeSession, err := repo.GetActiveTaskSessionByTaskID(ctx, "task-initial-create-e2e")
+	require.NoError(t, err)
+	require.NotNil(t, activeSession)
+	require.Equal(t, "profile-destination", activeSession.AgentProfileID,
+		"the destination step profile must own the first process dispatch")
+	require.Equal(t, models.ExecutorIDLocal, activeSession.ExecutorID,
+		"the active session must retain the prepared executor setting")
+
+	task, err := repo.GetTask(ctx, "task-initial-create-e2e")
+	require.NoError(t, err)
+	require.Equal(t, nameToID["Spec"], task.WorkflowStepID)
+	require.Len(t, messages.userMessages, 1)
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, activeSession.ID, models.TaskSessionStateRunning, ""))
+	require.True(t, svc.processOnTurnCompleteViaEngine(ctx, "task-initial-create-e2e", activeSession))
+
+	task, err = repo.GetTask(ctx, "task-initial-create-e2e")
+	require.NoError(t, err)
+	require.Equal(t, nameToID["Spec Review"], task.WorkflowStepID)
+}
+
 func runWorkflowTestCase(t *testing.T, tc workflowTestCase) {
 	t.Helper()
 	ctx := context.Background()
@@ -298,9 +411,14 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 	for _, sp := range steps {
 		id := posToID[sp.Position]
 		events := wfmodels.ConvertPositionToStepID(sp.Events, posToID)
+		agentProfileID := ""
+		if sp.AgentProfile != nil {
+			agentProfileID = sp.AgentProfile.AgentName
+		}
 		sg.steps[id] = &wfmodels.WorkflowStep{
 			ID: id, WorkflowID: "wf1", Name: sp.Name, Position: sp.Position,
-			Prompt: sp.Prompt, Events: events, CompleteTaskOnEnter: sp.CompleteTaskOnEnter,
+			AgentProfileID: agentProfileID, Prompt: sp.Prompt, Events: events,
+			CompleteTaskOnEnter: sp.CompleteTaskOnEnter,
 		}
 		nameToID[sp.Name] = id
 	}
@@ -309,12 +427,33 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 
 // createEngineService creates a Service with the workflow engine initialized.
 func createEngineService(t *testing.T, repo *sqliterepo.Repository, sg *mockStepGetter, agentMgr *mockAgentManager) *Service {
+	return createEngineServiceWithTaskRepo(t, repo, sg, newMockTaskRepo(), agentMgr)
+}
+
+// createEngineServiceWithScheduler keeps the scheduler/executor fixture used by
+// launch tests while making the production workflow engine explicit. The
+// lower-level scheduler helper assigns the getter directly for legacy tests;
+// this helper is for tests that must observe strict engine admission.
+func createEngineServiceWithScheduler(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	sg *mockStepGetter,
+	taskRepo *mockTaskRepo,
+	agentMgr *mockAgentManager,
+) *Service {
+	t.Helper()
+	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
+	svc.SetWorkflowStepGetter(sg)
+	return svc
+}
+
+func createEngineServiceWithTaskRepo(t *testing.T, repo *sqliterepo.Repository, sg *mockStepGetter, taskRepo *mockTaskRepo, agentMgr *mockAgentManager) *Service {
 	t.Helper()
 	log := testLogger()
 	svc := &Service{
 		logger:       log,
 		repo:         repo,
-		taskRepo:     newMockTaskRepo(),
+		taskRepo:     taskRepo,
 		agentManager: agentMgr,
 		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),

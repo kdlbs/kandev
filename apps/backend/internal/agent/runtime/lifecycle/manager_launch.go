@@ -285,6 +285,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	for k, v := range req.Metadata {
 		metadata[k] = v
 	}
+	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
 		if isTrustedExecutorConfigKey(k) {
 			// Executor config wins for connection-routing keys so a malicious
@@ -849,6 +850,9 @@ func invalidScratchPathID(id string) bool {
 // and populates metadata from the request fields. Runtime/profile environment
 // values are composed later, after every managed source has been collected.
 func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string, error) {
+	if err := m.validateLaunchCheckoutOptions(req); err != nil {
+		return LaunchRequest{}, "", err
+	}
 	executionID := uuid.New().String()
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
@@ -1226,6 +1230,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		CheckoutBranch:             req.CheckoutBranch,
 		PRNumber:                   req.PRNumber,
 		RemoteContribution:         req.RemoteContribution,
+		CheckoutOptions:            req.CheckoutOptions,
 		ContributionDestination:    req.ContributionDestination,
 		WorktreeBranch:             getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 		WorktreeBranchPrefix:       req.WorktreeBranchPrefix,
@@ -1263,6 +1268,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				CheckoutBranch:             r.CheckoutBranch,
 				PRNumber:                   r.PRNumber,
 				RemoteContribution:         r.RemoteContribution,
+				CheckoutOptions:            r.CheckoutOptions,
 				WorktreeID:                 r.WorktreeID,
 				AllowBranchReplacement:     req.AllowBranchReplacement || r.AllowBranchReplacement,
 				WorktreeBranchPrefix:       r.WorktreeBranchPrefix,

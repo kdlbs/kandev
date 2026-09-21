@@ -67,6 +67,7 @@ type configSelection struct {
 var yamlOnlyStartupKeys = map[string]struct{}{
 	"server.trustedProxies":                    {},
 	"tasks.preparationTimeout":                 {},
+	"tasks.stallDetectionThreshold":            {},
 	"credentials.file":                         {},
 	"limits.ghMaxConcurrent":                   {},
 	"limits.gitMaxConcurrent":                  {},
@@ -287,6 +288,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 		cfg.Server.TrustedProxies = nil
 	}
 	setDefaultDuration("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute)
+	setDefaultDuration("tasks.stallDetectionThreshold", &cfg.Tasks.StallDetectionThreshold, 2*time.Hour)
 	if !yamlKeys["credentials.file"] {
 		cfg.Credentials.File = ""
 	}
@@ -318,6 +320,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources map[string]SettingSource) {
 	applyTrustedProxiesEnv(cfg, envSnapshot, sources)
 	applyDurationEnv("tasks.preparationTimeout", &cfg.Tasks.PreparationTimeout, 10*time.Minute, envSnapshot, sources)
+	applyDurationEnv("tasks.stallDetectionThreshold", &cfg.Tasks.StallDetectionThreshold, 2*time.Hour, envSnapshot, sources)
 	applyStringEnvAllowEmpty("credentials.file", &cfg.Credentials.File, envSnapshot, sources)
 	applyPositiveIntEnv("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8, envSnapshot, sources)
 	applyPositiveIntEnv("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12, envSnapshot, sources)

@@ -5,7 +5,10 @@ import type { Page } from "@playwright/test";
 import path from "node:path";
 
 async function openMobileChangesPanel(testPage: Page) {
-  await testPage.getByRole("button", { name: "Changes" }).tap();
+  await testPage
+    .getByRole("navigation")
+    .getByRole("button", { name: /Changes$/ })
+    .tap();
   await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible({ timeout: 15_000 });
 }
 
