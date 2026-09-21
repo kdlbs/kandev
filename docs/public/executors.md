@@ -292,7 +292,7 @@ At launch Kandev:
 
 The repository workspace itself is not a normal host bind mount. For a local filesystem clone URL, Kandev temporarily mounts that local clone source read-only so the in-container `git clone` can read it. Images need the selected agent's dependencies; they do not need to contain `agentctl`.
 
-The daemon connection comes from global Kandev configuration. At present, the client uses `docker.host` and optional `docker.apiVersion`. The accepted `docker.tlsVerify`, `docker.defaultNetwork`, and `docker.volumeBasePath` settings are not applied by the current Docker client/container manager. Per-executor `docker_host` values are also not used by this runtime.
+The daemon connection comes from global Kandev configuration. At present, the client uses `docker.host` and optional `docker.apiVersion`. `docker.defaultNetwork` supplies the default primary network for task containers on this daemon; see [Container networks](#container-networks). The accepted `docker.tlsVerify` and `docker.volumeBasePath` settings are not applied by the current Docker client/container manager. Per-executor `docker_host` values are also not used by this runtime.
 
 The current container manager always selects the Linux/amd64 `agentctl` helper. Use a Linux/amd64-compatible agent image and daemon (native or correctly emulated); native ARM64 agent containers are not yet wired to the released ARM64 helper.
 
@@ -309,7 +309,7 @@ Both Docker profiles have a **Container networks** card. It chooses which Docker
 Leaving it empty means:
 
 - On a **Local Docker** profile, the install-wide `docker.defaultNetwork` value, or the daemon's own default when that is unset. See [Configuration](configuration.md).
-- On a **Remote Docker** profile, the remote daemon's own default. `docker.defaultNetwork` names a network on the machine running Kandev, so it deliberately does not apply to another host.
+- On a **Remote Docker** profile, the remote daemon's own default. `docker.defaultNetwork` names a network on the daemon `docker.host` points at, so it deliberately does not apply to another host.
 
 **Additional networks** are attached after the container is created and before it starts, so the agent sees every interface for its whole life. Any driver is allowed here, which is where a `macvlan` or `ipvlan` network belongs when a task container needs an address on your physical LAN.
 

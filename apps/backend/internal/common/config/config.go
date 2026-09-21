@@ -390,6 +390,12 @@ type EventsConfig struct {
 }
 
 // DockerConfig holds Docker client configuration.
+//
+// Every field here configures Kandev as a Docker *client*, driving the daemon
+// it creates task containers on. None of them configures the container Kandev
+// itself runs in: when Kandev runs from the published image, its own network,
+// volumes, and ports come from the `docker run` or Compose invocation that
+// started it, which Kandev never reads.
 type DockerConfig struct {
 	// Enabled controls whether the Docker runtime is available for task execution.
 	// When true and Docker is accessible, tasks can use Docker-based executors.
@@ -398,10 +404,11 @@ type DockerConfig struct {
 	Host       string `mapstructure:"host"`
 	APIVersion string `mapstructure:"apiVersion"`
 	TLSVerify  bool   `mapstructure:"tlsVerify"`
-	// DefaultNetwork is the network local Docker task containers are created
-	// on when their executor profile names none. Empty leaves the daemon's own
-	// default. It does not apply to a remote_docker profile, whose daemon is a
-	// different machine where the name may not exist.
+	// DefaultNetwork is the network local Docker *task* containers are created
+	// on when their executor profile names none. It is not the network Kandev's
+	// own container joins. Empty leaves the daemon's own default. It does not
+	// apply to a remote_docker profile, whose daemon is a different machine
+	// where the name may not exist.
 	DefaultNetwork string `mapstructure:"defaultNetwork"`
 	VolumeBasePath string `mapstructure:"volumeBasePath"`
 }

@@ -134,6 +134,8 @@ An external NATS URL moves event traffic across the configured network and can e
 
 ### Docker runtime
 
+Every `docker.*` key configures Kandev **as a Docker client**, driving the daemon it creates task containers on. None of them configures the container Kandev itself runs in. When you run Kandev from the published image, its own network comes from `docker run --network` or your Compose `networks:` block, and the Docker executor is off by default (`KANDEV_DOCKER_ENABLED=false`) until you mount a daemon socket. See [Docker](docker.md).
+
 | YAML key                | Environment variable           | Default                                                                       | Current behavior                                                                                                                       |
 | ----------------------- | ------------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `docker.enabled`        | `KANDEV_DOCKER_ENABLED`        | `true`                                                                        | Registers the local Docker executor. The client connects lazily, so startup can succeed without a daemon.                              |
