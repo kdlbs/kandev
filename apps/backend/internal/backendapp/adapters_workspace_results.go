@@ -59,7 +59,7 @@ func (a *taskCreatorAdapter) attachLatestWorkspaceMessages(ctx context.Context, 
 			latest = session
 		}
 	}
-	messages, more, err := a.taskSvc.ListMessagesPaginated(ctx, taskservice.ListMessagesRequest{TaskSessionID: latest.ID, Limit: 20, Sort: workspaceResultSortDescending})
+	messages, more, err := a.taskSvc.ListMessagesPaginated(ctx, taskservice.ListMessagesRequest{TaskSessionID: latest.ID, Limit: 20, Sort: workspaceResultSortDescending, AuthorType: string(models.MessageAuthorAgent)})
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (a *taskCreatorAdapter) attachWorkspaceSessionResults(ctx context.Context, 
 	}
 	rows := make([]map[string]any, 0, len(ordered))
 	for _, session := range ordered {
-		messages, more, err := a.taskSvc.ListMessagesPaginated(ctx, taskservice.ListMessagesRequest{TaskSessionID: session.ID, Limit: 10, Sort: workspaceResultSortDescending})
+		messages, more, err := a.taskSvc.ListMessagesPaginated(ctx, taskservice.ListMessagesRequest{TaskSessionID: session.ID, Limit: 10, Sort: workspaceResultSortDescending, AuthorType: string(models.MessageAuthorAgent)})
 		if err != nil {
 			return err
 		}

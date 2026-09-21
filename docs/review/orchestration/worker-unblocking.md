@@ -31,3 +31,17 @@ multi-page results, foreign messages/sessions/cursors, signed workspace scope,
 expired runs, offered one-time options, unsupported bypass modes, native mode
 delivery errors and offline mode persistence. Live prompts and private task data
 are not part of this review packet.
+
+Cold worker starts and resumed sessions use a two-minute broker deadline instead
+of the ordinary thirty-second read deadline. Requests are sent once; an uncertain
+response still requires inspecting native state before any retry. Read deadlines
+and the shared HTTP client remain unchanged. Result previews select agent-authored
+messages so a follow-up prompt does not displace the worker's output.
+
+Validation: backend application, orchestration and native orchestrator package
+suites passed with the race detector. Focused broker, native mode-persistence,
+result-pagination, permission-choice and signed-scope tests passed. A virtual-time
+regression reproduces the former thirty-second cold-resume failure and verifies
+one successful request after thirty-one seconds; normal reads still time out.
+The public-doc validator passed all 48 pages. Normal commit hooks passed without
+bypasses, including architecture and Go lint.

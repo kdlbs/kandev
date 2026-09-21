@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestration/models"
 
@@ -109,7 +110,7 @@ func callAssistantBroker(client *kandevClient, definition assistantBrokerTool, a
 		}
 		path += "?" + values.Encode()
 	}
-	data, status, err := client.do(definition.method, orchestrationAPIPrefix+path, args["request"])
+	data, status, err := assistantBrokerRequestClient(client, definition, args).do(definition.method, orchestrationAPIPrefix+path, args["request"])
 	if err != nil {
 		return mcp.NewToolResultError("broker transport unavailable; a write may have an unknown outcome"), nil
 	}
@@ -120,4 +121,19 @@ func callAssistantBroker(client *kandevClient, definition assistantBrokerTool, a
 		return mcp.NewToolResultError(string(data)), nil
 	}
 	return mcp.NewToolResultText(string(data)), nil
+}
+
+// Session startup can outlast the normal read deadline. Preserve the shared
+// client and never retry a mutation whose response was lost.
+func assistantBrokerRequestClient(client *kandevClient, definition assistantBrokerTool, args map[string]any) *kandevClient {
+	request, _ := args["request"].(map[string]any)
+	action, _ := request["action"].(string)
+	if definition.name != "manage_task" || (action != "start" && action != "message") {
+		return client
+	}
+	scoped := *client
+	transport := *client.http
+	transport.Timeout = 2 * time.Minute
+	scoped.http = &transport
+	return &scoped
 }

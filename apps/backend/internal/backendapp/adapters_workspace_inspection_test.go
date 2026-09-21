@@ -82,3 +82,19 @@ func TestWorkspaceContentRejectsForeignMessageAndSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "A sample description", result.(map[string]any)["content"])
 }
+
+func TestWorkspaceTaskDetailsPrefersWorkerOutputOverFollowupPrompt(t *testing.T) {
+	a, _ := newOfficeTaskAdapterHarness(t)
+	ctx := context.Background()
+	require.NoError(t, a.taskRepo.CreateTask(ctx, &models.Task{ID: "sample", WorkspaceID: "ws-1"}))
+	require.NoError(t, a.taskRepo.CreateTaskSession(ctx, &models.TaskSession{ID: "sample", TaskID: "sample"}))
+	require.NoError(t, a.taskRepo.CreateTurn(ctx, &models.Turn{ID: "sample", TaskID: "sample", TaskSessionID: "sample"}))
+	for _, author := range []models.MessageAuthorType{models.MessageAuthorAgent, models.MessageAuthorUser} {
+		require.NoError(t, a.taskRepo.CreateMessage(ctx, &models.Message{ID: string(author), TaskID: "sample", TaskSessionID: "sample", TurnID: "sample", Type: models.MessageTypeMessage, AuthorType: author, Content: string(author) + " text"}))
+	}
+	result, err := a.WorkspaceTaskDetails(ctx, "ws-1", "sample")
+	require.NoError(t, err)
+	rows := result.(map[string]any)["messages"].([]map[string]any)
+	require.Len(t, rows, 1)
+	require.Equal(t, models.MessageAuthorAgent, rows[0]["author_type"])
+}
