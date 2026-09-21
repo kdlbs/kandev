@@ -170,6 +170,16 @@ After Kandev serves `tools/list`, the current attachment report includes a
 safe catalog for the built-in `kandev` server. Each entry contains the tool
 name, description, input schema, and token estimate from that response.
 
+The report also records `tool_catalog_hash` and
+`tool_catalog_hash_algorithm` (`sha256:mcp-safe-catalog-v1`). The digest is
+computed from the complete safe served catalog after transport-name
+presentation and before catalog persistence limits: tools are sorted by name,
+and each digest entry contains its name, description, and canonicalized input
+schema. It excludes output schemas, annotations, metadata, arguments, results,
+prompts, credentials, endpoints, and connection IDs. No digest is recorded
+until Kandev actually observes `tools/list`; a superseded attempt keeps its
+count and digest while dropping catalog definitions.
+
 The catalog has these limits:
 
 - it contains at most 128 tools, sorted by name.

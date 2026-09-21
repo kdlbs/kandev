@@ -2,7 +2,9 @@ package streams
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -37,6 +39,10 @@ func MCPAttachmentContextFromContext(ctx context.Context) (MCPAttachmentContext,
 }
 
 const (
+	// MCPToolCatalogDigestAlgorithm identifies the stable digest input used for
+	// safe Kandev tools/list evidence.
+	MCPToolCatalogDigestAlgorithm = "sha256:mcp-safe-catalog-v1"
+
 	// MCPAttachmentSchemaVersion versions persisted session attachment metadata.
 	MCPAttachmentSchemaVersion = 1
 
@@ -126,45 +132,49 @@ type MCPAttachmentTestResult struct {
 // It deliberately has no headers, environment, command arguments, tool input,
 // tool result, or full endpoint URL fields.
 type MCPServerAttachment struct {
-	Name                 string                   `json:"name"`
-	Source               MCPServerSource          `json:"source,omitempty"`
-	Transport            string                   `json:"transport,omitempty"`
-	Target               string                   `json:"target,omitempty"`
-	Status               MCPAttachmentStatus      `json:"status"`
-	ReasonCode           string                   `json:"reason_code,omitempty"`
-	Summary              string                   `json:"summary,omitempty"`
-	ConnectionID         string                   `json:"connection_id,omitempty"`
-	ToolCount            int                      `json:"tool_count,omitempty"`
-	ConfiguredAt         *time.Time               `json:"configured_at,omitempty"`
-	DeliveredAt          *time.Time               `json:"delivered_at,omitempty"`
-	ConnectedAt          *time.Time               `json:"connected_at,omitempty"`
-	ToolsListedAt        *time.Time               `json:"tools_listed_at,omitempty"`
-	UsedAt               *time.Time               `json:"used_at,omitempty"`
-	FailedAt             *time.Time               `json:"failed_at,omitempty"`
-	DisconnectedAt       *time.Time               `json:"disconnected_at,omitempty"`
-	EndpointTest         *MCPAttachmentTestResult `json:"endpoint_test,omitempty"`
-	Tools                []MCPToolSummary         `json:"tools,omitempty"`
-	ToolCatalogTruncated bool                     `json:"tool_catalog_truncated,omitempty"`
-	ToolTokenEstimator   string                   `json:"tool_token_estimator,omitempty"`
+	Name                     string                   `json:"name"`
+	Source                   MCPServerSource          `json:"source,omitempty"`
+	Transport                string                   `json:"transport,omitempty"`
+	Target                   string                   `json:"target,omitempty"`
+	Status                   MCPAttachmentStatus      `json:"status"`
+	ReasonCode               string                   `json:"reason_code,omitempty"`
+	Summary                  string                   `json:"summary,omitempty"`
+	ConnectionID             string                   `json:"connection_id,omitempty"`
+	ToolCount                int                      `json:"tool_count,omitempty"`
+	ToolCatalogHash          string                   `json:"tool_catalog_hash,omitempty"`
+	ToolCatalogHashAlgorithm string                   `json:"tool_catalog_hash_algorithm,omitempty"`
+	ConfiguredAt             *time.Time               `json:"configured_at,omitempty"`
+	DeliveredAt              *time.Time               `json:"delivered_at,omitempty"`
+	ConnectedAt              *time.Time               `json:"connected_at,omitempty"`
+	ToolsListedAt            *time.Time               `json:"tools_listed_at,omitempty"`
+	UsedAt                   *time.Time               `json:"used_at,omitempty"`
+	FailedAt                 *time.Time               `json:"failed_at,omitempty"`
+	DisconnectedAt           *time.Time               `json:"disconnected_at,omitempty"`
+	EndpointTest             *MCPAttachmentTestResult `json:"endpoint_test,omitempty"`
+	Tools                    []MCPToolSummary         `json:"tools,omitempty"`
+	ToolCatalogTruncated     bool                     `json:"tool_catalog_truncated,omitempty"`
+	ToolTokenEstimator       string                   `json:"tool_token_estimator,omitempty"`
 }
 
 // MCPAttachmentEvidence is a safe normalized event. The producer may supply a
 // raw network/stdio target or error summary, but Apply persists only the
 // sanitized projection.
 type MCPAttachmentEvidence struct {
-	AttemptID          string                    `json:"attachment_attempt_id"`
-	ServerName         string                    `json:"server_name,omitempty"`
-	Kind               MCPAttachmentEvidenceKind `json:"kind"`
-	OccurredAt         time.Time                 `json:"occurred_at"`
-	Source             MCPServerSource           `json:"source,omitempty"`
-	Transport          string                    `json:"transport,omitempty"`
-	Target             string                    `json:"target,omitempty"`
-	ConnectionID       string                    `json:"connection_id,omitempty"`
-	ToolCount          int                       `json:"tool_count,omitempty"`
-	Tools              []MCPToolSummary          `json:"tools,omitempty"`
-	ToolTokenEstimator string                    `json:"tool_token_estimator,omitempty"`
-	ReasonCode         string                    `json:"reason_code,omitempty"`
-	Summary            string                    `json:"summary,omitempty"`
+	AttemptID                string                    `json:"attachment_attempt_id"`
+	ServerName               string                    `json:"server_name,omitempty"`
+	Kind                     MCPAttachmentEvidenceKind `json:"kind"`
+	OccurredAt               time.Time                 `json:"occurred_at"`
+	Source                   MCPServerSource           `json:"source,omitempty"`
+	Transport                string                    `json:"transport,omitempty"`
+	Target                   string                    `json:"target,omitempty"`
+	ConnectionID             string                    `json:"connection_id,omitempty"`
+	ToolCount                int                       `json:"tool_count,omitempty"`
+	ToolCatalogHash          string                    `json:"tool_catalog_hash,omitempty"`
+	ToolCatalogHashAlgorithm string                    `json:"tool_catalog_hash_algorithm,omitempty"`
+	Tools                    []MCPToolSummary          `json:"tools,omitempty"`
+	ToolTokenEstimator       string                    `json:"tool_token_estimator,omitempty"`
+	ReasonCode               string                    `json:"reason_code,omitempty"`
+	Summary                  string                    `json:"summary,omitempty"`
 }
 
 // MCPAttachmentAttempt is one ACP new/load/reset or passthrough process start.
@@ -286,6 +296,8 @@ func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidenc
 	}
 	if evidence.Kind == MCPAttachmentEvidenceToolsListObserved {
 		s.ToolCount = evidence.ToolCount
+		s.ToolCatalogHash = evidence.ToolCatalogHash
+		s.ToolCatalogHashAlgorithm = evidence.ToolCatalogHashAlgorithm
 		// Apply sanitizes evidence before projecting it, so do not normalize the
 		// same catalog again here. Copy the bounded slice to keep the projection
 		// independent of the event value.
@@ -300,6 +312,51 @@ func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidenc
 		s.Summary = evidence.Summary
 	}
 
+}
+
+// MCPToolCatalogDigest returns a stable digest for the complete safe catalog
+// served by tools/list. It deliberately runs before the persisted catalog is
+// bounded, so a digest always represents the complete served name set.
+func MCPToolCatalogDigest(tools []MCPToolSummary) (string, string) {
+	type digestTool struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		InputSchema json.RawMessage `json:"input_schema"`
+	}
+	digestTools := make([]digestTool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Name == "" {
+			continue
+		}
+		schema := canonicalMCPInputSchema(tool.InputSchema)
+		digestTools = append(digestTools, digestTool{
+			Name:        tool.Name,
+			Description: strings.ToValidUTF8(tool.Description, ""),
+			InputSchema: schema,
+		})
+	}
+	sort.Slice(digestTools, func(i, j int) bool { return digestTools[i].Name < digestTools[j].Name })
+	payload, err := json.Marshal(digestTools)
+	if err != nil {
+		return "", ""
+	}
+	sum := sha256.Sum256(payload)
+	return fmt.Sprintf("sha256:%x", sum), MCPToolCatalogDigestAlgorithm
+}
+
+func canonicalMCPInputSchema(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return json.RawMessage("null")
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return json.RawMessage("null")
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return canonical
 }
 
 // NormalizeMCPToolCatalog removes unusable entries, bounds descriptions and

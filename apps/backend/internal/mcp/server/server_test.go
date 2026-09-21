@@ -74,6 +74,9 @@ func TestMCPAttachmentObserverPublishesToolSummaries(t *testing.T) {
 	if len(evidence.Tools) != 1 || evidence.Tools[0].Name != "create_task_kandev" || evidence.Tools[0].Description != "Create a task" {
 		t.Fatalf("tool summaries = %+v, want name and description", evidence.Tools)
 	}
+	if evidence.ToolCatalogHash == "" || evidence.ToolCatalogHashAlgorithm != streams.MCPToolCatalogDigestAlgorithm {
+		t.Fatalf("catalog digest = %q (%q), want safe catalog digest", evidence.ToolCatalogHash, evidence.ToolCatalogHashAlgorithm)
+	}
 	encoded, err := json.Marshal(evidence)
 	require.NoError(t, err)
 	assert.Contains(t, string(encoded), `"input_schema":{"type":"object","properties":{"secret":{"type":"string"}}}`)
