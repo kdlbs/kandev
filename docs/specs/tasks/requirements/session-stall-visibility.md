@@ -1,5 +1,5 @@
 ---
-status: active
+status: draft
 system: tasks
 created: 2026-09-20
 owners:
@@ -10,14 +10,15 @@ owners:
 
 ## Overview
 
-An unarchived task whose session is in an active DB state (CREATED, STARTING,
-RUNNING, WAITING_FOR_INPUT) but whose backing execution is gone — after a
-backend restart, a lost executor, or a launch that never registered — is
-invisible to every event-driven surface: no request path owns the session,
-no actor will ever advance it, and silence produces no signal. This document
-defines the observable contract for detecting that state and healing it,
-closing the incident where four finished review tasks sat silently in
-`WAITING_FOR_INPUT` for hours with no operator-visible signal.
+Sessions with unfinished work can lose their execution after a restart or
+executor failure. The system detects these stalls and settles the abandoned work.
+A conversation waiting for user input can also have no execution after normal
+idle cleanup. That condition is not a stall.
+
+Opening a recoverable conversation restores its agent without requiring a
+manual Resume action. The task system owns both classification and recovery.
+The September 21 revision is implemented in the
+[recovery plan](../../../plans/orphaned-session-open-recovery/plan.md).
 
 ## Terms
 
@@ -25,10 +26,13 @@ closing the incident where four finished review tasks sat silently in
   or WAITING_FOR_INPUT.
 - **Live execution**: an execution registered in the backend's in-memory
   execution store for the session.
+- **Idle conversation**: a session waiting for user input with no unfinished
+  turn. Its execution can be absent after idle cleanup or restart.
+- **Stall candidate**: an active session that is not an idle conversation.
 - **Event silence**: no persisted activity for the session — the newer of the
   session row's last update and its newest persisted message.
 - **Stall episode**: the continuous period during which one session is
-  active, execution-less, and event-silent past the stall threshold. An
+  a stall candidate, execution-less, and event-silent past the stall threshold. An
   episode ends when the session leaves that state (terminal transition,
   healing, or a live execution reappearing).
 
@@ -43,7 +47,7 @@ silently forever.
 #### Acceptance criteria
 
 - **AC-TASKS-SESSION-STALL-VISIBILITY-001.1:** When an unarchived task holds
-  an active session with no live execution and no persisted session activity
+  a stall candidate with no live execution and no persisted session activity
   for longer than the configurable stall threshold (default 2h), the system
   shall emit a `task.stalled` event and a warning log naming the task and
   its stalled sessions, at most once per session per stall episode.
@@ -51,15 +55,13 @@ silently forever.
   execution, transitions to a terminal state, or otherwise shows persisted
   activity again, its stall episode shall end, and a later stall of the same
   session shall be reported again as a new episode.
-- **AC-TASKS-SESSION-STALL-VISIBILITY-001.3:** When an active session with
-  no live execution has been silent for at least twice the stall threshold,
-  and every active session of the same task is equally orphaned and silent,
-  the system shall cancel those sessions with the reason `orphaned session`
-  and publish the session-state change event clients observe.
-- **AC-TASKS-SESSION-STALL-VISIBILITY-001.4:** The healing cancellation
-  shall never cancel a session with a live execution, including one that
-  registered while the sweep was evaluating the task, and shall never cancel
-  a session outside the set the sweep classified as orphaned.
+- **AC-TASKS-SESSION-STALL-VISIBILITY-001.3:** Superseded by
+  `REQ-TASKS-RESTART-ORPHAN-SESSIONS-002`. Execution loss and prolonged silence
+  shall lead to recoverable interruption settlement, not automatic cancellation.
+- **AC-TASKS-SESSION-STALL-VISIBILITY-001.4:** The healing transition shall
+  never alter a session with a live execution, including one that registered
+  while the sweep was evaluating the task, and shall never alter a session
+  outside the set the sweep classified as orphaned.
 - **AC-TASKS-SESSION-STALL-VISIBILITY-001.5:** When a session's activity
   clock cannot be read (for example a transient database read failure), the
   system shall neither report a stall nor heal for that evaluation, rather
@@ -67,6 +69,30 @@ silently forever.
 - **AC-TASKS-SESSION-STALL-VISIBILITY-001.6:** When the stall detection
   threshold cannot be verified against the live-execution registry, the
   sweep shall do nothing rather than guess that executions are gone.
+- **AC-TASKS-SESSION-STALL-VISIBILITY-001.7:** The system shall preserve idle
+  conversations regardless of silence duration or execution absence. It shall
+  not report them as stalled or cancel them as orphaned. If unfinished-turn
+  evidence is unavailable, classification shall wait for a later evaluation.
+- **AC-TASKS-SESSION-STALL-VISIBILITY-001.8:** When a user opens a recoverable
+  orphan-cancelled conversation, the system shall automatically restore the agent
+  in that session. This applies to existing cancellations and both reconciliation
+  passes. Recovery shall preserve conversation history and workspace identity.
+  It shall not replay a prompt, create a replacement session, or advance the workflow.
+- **AC-TASKS-SESSION-STALL-VISIBILITY-001.9:** Automatic recovery shall honor
+  auto-start prevention, archive status, authorization, capacity, and deferred
+  launch ownership. Explicit user stops and unrelated terminal states shall
+  retain their existing recovery rules. Repeated opening shall not duplicate execution.
+- **AC-TASKS-SESSION-STALL-VISIBILITY-001.10:** Desktop and phone task views
+  shall use normal recovery progress and conversation controls. Successful recovery
+  shall remove the orphan warning. If recovery fails, existing recovery actions
+  shall remain available without an automatic retry loop.
+
+## Related contracts
+
+- [Session-open recovery](queued-session-ownership.md)
+- [Auto-start preference](prevent-agent-autostart-on-open.md)
+- [Restart reconciliation](restart-orphaned-session-terminalization.md)
+- [System design](../system-design/session-stall-visibility.md)
 
 ## Exclusions
 

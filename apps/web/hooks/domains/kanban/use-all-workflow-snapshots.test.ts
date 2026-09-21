@@ -300,6 +300,8 @@ const WORKTREE_EXECUTOR_FIELDS = {
   primaryExecutorName: "Worktree",
   isRemoteExecutor: false,
 };
+const INTERRUPTED_TASK_ID = "task-1";
+const INTERRUPTED_STALE_TASK_TITLE = "Interrupted stale task";
 
 function seedCachedTask(taskOverrides: Record<string, unknown>) {
   mockState.kanbanMulti.snapshots = {
@@ -369,6 +371,37 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
 
     await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
     expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].autopilot).toBe(false);
+  });
+
+  it("preserves a newer live interruption marker over a stale snapshot value", async () => {
+    seedCachedTask({ id: INTERRUPTED_TASK_ID, interrupted: false });
+    let resolveSnapshot: ((value: { steps: unknown[]; tasks: unknown[] }) => void) | undefined;
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise<{ steps: unknown[]; tasks: unknown[] }>((resolve) => {
+          resolveSnapshot = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalled());
+
+    // A live task.updated event marks the task while the older snapshot is in flight.
+    seedCachedTask({ id: INTERRUPTED_TASK_ID, interrupted: true });
+    resolveSnapshot?.({
+      steps: [{ id: "step-1", name: "Review", position: 1 }],
+      tasks: [
+        {
+          id: INTERRUPTED_TASK_ID,
+          workflow_step_id: "step-1",
+          title: INTERRUPTED_STALE_TASK_TITLE,
+          interrupted: false,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    expect(mockSetWorkflowSnapshot.mock.calls[0][1].tasks[0].interrupted).toBe(true);
   });
 });
 

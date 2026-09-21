@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -166,6 +167,120 @@ func TestService_ActiveSessionSweepSkipsRecentSessions(t *testing.T) {
 	}
 }
 
+// TestService_ActiveSessionSweepPreservesIdleWaitingSession proves that a
+// waiting conversation with no unfinished turn is ordinary idle state. It must
+// not be reported as stalled or changed by the execution-loss sweep, even
+// after the full healing grace window.
+func TestService_ActiveSessionSweepPreservesIdleWaitingSession(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	ctx := context.Background()
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx, `
+		UPDATE task_sessions
+		SET state = ?, updated_at = ?
+		WHERE id = ?
+	`, string(models.TaskSessionStateWaitingForInput), fixture.now.Add(-5*time.Hour), "session-1"); err != nil {
+		t.Fatalf("make session idle waiting: %v", err)
+	}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now)
+
+	session, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %q, want WAITING_FOR_INPUT", session.State)
+	}
+	if stalled := findTaskStalledEvents(fixture.eventBus); len(stalled) != 0 {
+		t.Fatalf("task.stalled events = %d, want 0 for idle waiting session", len(stalled))
+	}
+}
+
+// TestService_ActiveSessionSweepRecoversInterruptedConversation proves that
+// a stale execution-less turn returns to the same waiting conversation. The
+// turn is settled without a successful completion event so workflow ownership
+// and the transcript remain available for a later user message.
+func TestService_ActiveSessionSweepRecoversInterruptedConversation(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	ctx := context.Background()
+	turn, err := fixture.svc.StartTurn(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("StartTurn: %v", err)
+	}
+	old := fixture.now.Add(-5 * time.Hour)
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
+		`UPDATE task_session_turns SET started_at = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		old, old, old, turn.ID); err != nil {
+		t.Fatalf("age turn: %v", err)
+	}
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
+		`UPDATE task_sessions SET updated_at = ? WHERE id = ?`, old, "session-1"); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now)
+
+	session, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %q, want WAITING_FOR_INPUT", session.State)
+	}
+	storedTurn, err := fixture.svc.turns.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if storedTurn.CompletedAt == nil || !storedTurn.CompletedAt.Equal(storedTurn.StartedAt) {
+		t.Fatalf("turn completion = %v, want zero-duration completion at %v", storedTurn.CompletedAt, storedTurn.StartedAt)
+	}
+	for _, event := range fixture.eventBus.GetPublishedEvents() {
+		if event.Type != events.TurnCompleted {
+			continue
+		}
+		if data, ok := event.Data.(map[string]interface{}); ok && data["id"] == turn.ID {
+			t.Fatal("system recovery published turn.completed and may advance workflow")
+		}
+	}
+}
+
+func TestService_ActiveSessionSweepRecoversWaitingSessionWithUnfinishedTurn(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	ctx := context.Background()
+	turn, err := fixture.svc.StartTurn(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("StartTurn: %v", err)
+	}
+	old := fixture.now.Add(-5 * time.Hour)
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx, `
+		UPDATE task_sessions SET state = ?, updated_at = ? WHERE id = ?
+	`, string(models.TaskSessionStateWaitingForInput), old, "session-1"); err != nil {
+		t.Fatalf("age waiting session: %v", err)
+	}
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
+		`UPDATE task_session_turns SET started_at = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		old, old, old, turn.ID); err != nil {
+		t.Fatalf("age turn: %v", err)
+	}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now)
+
+	session, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %q, want WAITING_FOR_INPUT", session.State)
+	}
+	storedTurn, err := fixture.svc.turns.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if storedTurn.CompletedAt == nil || !storedTurn.CompletedAt.Equal(storedTurn.StartedAt) {
+		t.Fatalf("turn completion = %v, want zero-duration completion at %v", storedTurn.CompletedAt, storedTurn.StartedAt)
+	}
+}
+
 // TestService_ActiveSessionSweepStallEventEmittedOncePerEpisode proves the
 // episode dedupe: a sweep ticking every minute must not re-emit task.stalled
 // for the same stalled session, but must report it again after the episode
@@ -191,11 +306,10 @@ func TestService_ActiveSessionSweepStallEventEmittedOncePerEpisode(t *testing.T)
 	}
 }
 
-// TestService_ActiveSessionSweepHealsOrphanedSessions is the #3711 half of
+// TestService_ActiveSessionSweepHealsOrphanedSessions is the recovery half of
 // the sweep: once an execution-less session has been silent beyond the grace
-// window (twice the threshold), the sweep cancels it through the same
-// finalizeCancelledSessions transition the archived pass uses, so the DB
-// state becomes truthful and the session.state_changed event fires.
+// window (twice the threshold), the sweep returns it to WAITING_FOR_INPUT so
+// the same conversation remains available for lazy recovery.
 func TestService_ActiveSessionSweepHealsOrphanedSessions(t *testing.T) {
 	// 5h of silence: past the 4h grace window (2 x 2h threshold).
 	fixture := newSweepFixture(t, 5*time.Hour)
@@ -206,11 +320,11 @@ func TestService_ActiveSessionSweepHealsOrphanedSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTaskSession: %v", err)
 	}
-	if session.State != models.TaskSessionStateCancelled {
-		t.Fatalf("session state after healing = %q, want CANCELLED", session.State)
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after healing = %q, want WAITING_FOR_INPUT", session.State)
 	}
-	if session.ErrorMessage != models.SessionOrphanedCancelReason {
-		t.Fatalf("session error_message = %q, want %q", session.ErrorMessage, models.SessionOrphanedCancelReason)
+	if session.ErrorMessage != "" {
+		t.Fatalf("session error_message = %q, want empty", session.ErrorMessage)
 	}
 
 	var stateChanged *bus.Event
@@ -226,8 +340,217 @@ func TestService_ActiveSessionSweepHealsOrphanedSessions(t *testing.T) {
 		t.Fatal("expected a session.state_changed event for session-1 from the healing pass, got none")
 	}
 	data := stateChanged.Data.(map[string]interface{})
-	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
-		t.Errorf("new_state = %v, want CANCELLED", got)
+	if got := data["new_state"]; got != string(models.TaskSessionStateWaitingForInput) {
+		t.Errorf("new_state = %v, want WAITING_FOR_INPUT", got)
+	}
+}
+
+// The active sweep must keep a durable recovery marker on the session when it
+// has no executors_running row. The orchestrator uses that marker to offer the
+// same conversation for lazy focus recovery after a restart.
+func TestService_ActiveSessionSweepMarksMissingExecutorRecovery(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	ctx := context.Background()
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now)
+
+	session, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if !models.HasInterruptedRecoveryPending(session.Metadata) {
+		t.Fatalf("session metadata = %#v, want an interrupted recovery marker", session.Metadata)
+	}
+	task, err := fixture.rawRepo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if _, ok := task.Metadata[models.MetaKeyInterruptedAt]; !ok {
+		t.Fatalf("task metadata = %#v, want interrupted marker", task.Metadata)
+	}
+	var taskUpdated bool
+	for _, event := range fixture.eventBus.GetPublishedEvents() {
+		if event.Type == events.TaskUpdated {
+			if data, ok := event.Data.(map[string]interface{}); ok && data["task_id"] == "task-1" {
+				taskUpdated = true
+				if interrupted, ok := data["interrupted"].(bool); !ok || !interrupted {
+					t.Fatalf("task.updated interrupted = %#v, want true", data["interrupted"])
+				}
+			}
+		}
+	}
+	if !taskUpdated {
+		t.Fatal("expected task.updated after setting the interrupted marker")
+	}
+}
+
+func TestService_ActiveSessionSweepUsesFreshEffectsContextAfterDelayedCommit(t *testing.T) {
+	delayed := &delayedOrphanSessionRepository{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc, eventBus, repo := createTestServiceWithSessionsRepo(t, func(base *sqliterepo.Repository) repository.SessionRepository {
+		delayed.Repository = base
+		return delayed
+	})
+	svc.SetSessionExecutionRegistry(&stubExecutionRegistry{})
+	svc.SetStallDetectionThreshold(2 * time.Hour)
+	ctx := context.Background()
+	seedOrphanSweepFixtures(t, repo)
+	seedOrphanSweepTask(t, repo, "task-active-delay", false)
+	stale := time.Now().UTC().Add(-5 * time.Hour)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-active-delay", TaskID: "task-active-delay", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true, UpdatedAt: stale, StartedAt: stale,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	passCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		svc.runActiveSessionSweep(passCtx, time.Now().UTC())
+		close(done)
+	}()
+	select {
+	case <-delayed.entered:
+	case <-time.After(time.Second):
+		t.Fatal("active sweep did not start the delayed recovery")
+	}
+	select {
+	case <-passCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("active sweep did not reach its deadline")
+	}
+	close(delayed.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("active sweep did not finish after delayed commit")
+	}
+	if !sessionRecoveredEventPublished(eventBus, "session-active-delay") {
+		t.Fatal("expected recovery event after delayed active-sweep commit")
+	}
+}
+
+type failOnceToolSettlementTurns struct {
+	repository.TurnRepository
+	fail bool
+}
+
+func (r *failOnceToolSettlementTurns) CompletePendingToolCallsForTurn(ctx context.Context, turnID string) (int64, error) {
+	if r.fail {
+		r.fail = false
+		return 0, errors.New("tool settlement unavailable")
+	}
+	return r.TurnRepository.CompletePendingToolCallsForTurn(ctx, turnID)
+}
+
+func TestService_ActiveSessionSweepRetriesPartialSettlement(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	ctx := context.Background()
+	turn, err := fixture.svc.StartTurn(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("StartTurn: %v", err)
+	}
+	old := fixture.now.Add(-5 * time.Hour)
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
+		`UPDATE task_session_turns SET started_at = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		old, old, old, turn.ID); err != nil {
+		t.Fatalf("age turn: %v", err)
+	}
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
+		`UPDATE task_sessions SET updated_at = ? WHERE id = ?`, old, "session-1"); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+	if err := fixture.rawRepo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "stale-recovery-row", SessionID: "session-1", TaskID: "task-1",
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "stale-recovery-execution",
+		LocalPID: 42, CreatedAt: old, UpdatedAt: old,
+	}); err != nil {
+		t.Fatalf("seed stale executor row: %v", err)
+	}
+	fixture.svc.turns = &failOnceToolSettlementTurns{TurnRepository: fixture.svc.turns, fail: true}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now)
+	failed, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession after partial settlement: %v", err)
+	}
+	if _, pending := models.LoadInterruptedRecoverySettlement(failed.Metadata); !pending {
+		t.Fatalf("session metadata after partial settlement = %#v, want durable retry marker", failed.Metadata)
+	}
+	stopped, err := fixture.rawRepo.GetExecutorRunningBySessionID(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetExecutorRunningBySessionID after partial settlement: %v", err)
+	}
+	if stopped.Status != models.ExecutorRunningStatusStopped || stopped.LocalPID != 0 {
+		t.Fatalf("executor after partial settlement = %+v, want repaired stopped row", stopped)
+	}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now.Add(time.Minute))
+	retried, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession after retry: %v", err)
+	}
+	if _, pending := models.LoadInterruptedRecoverySettlement(retried.Metadata); pending {
+		t.Fatalf("session metadata after retry = %#v, want settlement marker cleared", retried.Metadata)
+	}
+	stopped, err = fixture.rawRepo.GetExecutorRunningBySessionID(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetExecutorRunningBySessionID after retry: %v", err)
+	}
+	if stopped.Status != models.ExecutorRunningStatusStopped || stopped.LocalPID != 0 {
+		t.Fatalf("executor after retry = %+v, want repaired stopped row", stopped)
+	}
+}
+
+func TestService_ActiveSessionSweepRejectsRetryAfterSessionGenerationChanges(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	ctx := context.Background()
+	turn, err := fixture.svc.StartTurn(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("StartTurn: %v", err)
+	}
+	old := fixture.now.Add(-5 * time.Hour)
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
+		`UPDATE task_session_turns SET started_at = ?, created_at = ?, updated_at = ? WHERE id = ?`,
+		old, old, old, turn.ID); err != nil {
+		t.Fatalf("age turn: %v", err)
+	}
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
+		`UPDATE task_sessions SET updated_at = ? WHERE id = ?`, old, "session-1"); err != nil {
+		t.Fatalf("age session: %v", err)
+	}
+	if err := fixture.rawRepo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "stale-retry-generation-row", SessionID: "session-1", TaskID: "task-1",
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "stale-retry-generation-execution",
+		LocalPID: 42, CreatedAt: old, UpdatedAt: old,
+	}); err != nil {
+		t.Fatalf("seed stale executor row: %v", err)
+	}
+	fixture.svc.turns = &failOnceToolSettlementTurns{TurnRepository: fixture.svc.turns, fail: true}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now)
+	first, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession after first sweep: %v", err)
+	}
+	if _, pending := models.LoadInterruptedRecoverySettlement(first.Metadata); !pending {
+		t.Fatalf("session metadata after first sweep = %#v, want durable retry marker", first.Metadata)
+	}
+	if _, err := fixture.rawRepo.DB().ExecContext(ctx,
+		`UPDATE task_sessions SET updated_at = ? WHERE id = ?`, first.UpdatedAt.Add(time.Second), "session-1"); err != nil {
+		t.Fatalf("advance session generation: %v", err)
+	}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now.Add(time.Minute))
+	second, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession after stale retry: %v", err)
+	}
+	if _, pending := models.LoadInterruptedRecoverySettlement(second.Metadata); !pending {
+		t.Fatalf("session metadata after stale retry = %#v, want settlement marker preserved", second.Metadata)
 	}
 }
 
@@ -261,6 +584,42 @@ func TestService_ActiveSessionSweepDoesNotHealAroundLiveSibling(t *testing.T) {
 	// The orphaned sibling is still detected.
 	if stalled := findTaskStalledEvents(fixture.eventBus); len(stalled) != 1 {
 		t.Fatalf("task.stalled events = %d, want 1 for the orphaned sibling", len(stalled))
+	}
+}
+
+func TestService_ActiveSessionSweepIdleWaitingSiblingBlocksRecovery(t *testing.T) {
+	fixture := newSweepFixture(t, 5*time.Hour)
+	ctx := context.Background()
+	if err := fixture.repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-idle-sibling", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
+		AgentProfileID: "agent-1", UpdatedAt: fixture.now.Add(-5 * time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	fixture.svc.runActiveSessionSweep(ctx, fixture.now)
+
+	running, err := fixture.repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetTaskSession(session-1): %v", err)
+	}
+	if running.State != models.TaskSessionStateRunning {
+		t.Fatalf("running sibling state = %q, want RUNNING while idle sibling blocks recovery", running.State)
+	}
+	idle, err := fixture.repo.GetTaskSession(ctx, "session-idle-sibling")
+	if err != nil {
+		t.Fatalf("GetTaskSession(session-idle-sibling): %v", err)
+	}
+	if idle.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("idle sibling state = %q, want WAITING_FOR_INPUT", idle.State)
+	}
+	stalled := findTaskStalledEvents(fixture.eventBus)
+	if len(stalled) != 1 {
+		t.Fatalf("task.stalled events = %d, want 1", len(stalled))
+	}
+	ids, _ := stalled[0].Data.(map[string]interface{})["session_ids"].([]string)
+	if len(ids) != 1 || ids[0] != "session-1" {
+		t.Fatalf("stalled session_ids = %v, want [session-1]", ids)
 	}
 }
 
@@ -331,8 +690,8 @@ func TestService_ActiveSessionSweepHealAbortedWhenExecutionRegistersMidSweep(t *
 }
 
 // TestService_ActiveSessionSweepHealCancelsOnlyClassifiedSessions proves the
-// ID-scoped cancellation: when the task genuinely qualifies for healing, the
-// cancellation only touches the sessions the sweep classified. A session
+// ID-scoped recovery: when the task genuinely qualifies for healing, the
+// transition only touches the sessions the sweep classified. A session
 // that became active after classification — outside the classified set —
 // keeps running.
 func TestService_ActiveSessionSweepHealCancelsOnlyClassifiedSessions(t *testing.T) {
@@ -347,8 +706,8 @@ func TestService_ActiveSessionSweepHealCancelsOnlyClassifiedSessions(t *testing.
 	if err != nil {
 		t.Fatalf("GetTaskSession: %v", err)
 	}
-	if session.State != models.TaskSessionStateCancelled {
-		t.Fatalf("session-1 state = %q, want CANCELLED", session.State)
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session-1 state = %q, want WAITING_FOR_INPUT", session.State)
 	}
 }
 

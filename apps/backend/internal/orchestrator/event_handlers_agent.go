@@ -567,7 +567,14 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_state", string(session.State)))
 		return
 	}
-	recoveryResolvedAt := s.markRecoveryResolved(ctx, data.SessionID, session)
+	marker := s.interruptedMarkerForResumeAttempt(data.SessionID, data.AttemptID)
+	// Every boot-ready callback is a recovery callback for marker purposes. A
+	// missing/finished attempt, empty attempt ID, or failed task snapshot leaves
+	// marker empty and therefore fails closed in clearTaskInterruptedMarker.
+	// Ordinary sessions without a marker take the same no-op path; only an
+	// immutable marker captured for this attempt can clear the warning.
+	expectedMarker := []string{marker}
+	recoveryResolvedAt := s.markRecoveryResolved(ctx, data.SessionID, session, expectedMarker...)
 
 	// Idempotent: if the session is already WAITING_FOR_INPUT (e.g. revived
 	// from a previously launched session and the boot signal arrived faster
@@ -3215,7 +3222,12 @@ func (s *Service) dismissRecoveredAgentError(
 // The boot transcript is useful observability, but its writes are best effort.
 // Session metadata is the authoritative recovery result used by the frontend
 // after a reload when the transcript row is missing or incomplete.
-func (s *Service) markRecoveryResolved(ctx context.Context, sessionID string, session *models.TaskSession) *time.Time {
+func (s *Service) markRecoveryResolved(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	expectedInterruptedMarker ...string,
+) *time.Time {
 	resolvedAt := time.Now().UTC()
 	resolvedAtValue := resolvedAt.Format(time.RFC3339Nano)
 	if err := s.repo.SetSessionMetadataKey(
@@ -3235,8 +3247,51 @@ func (s *Service) markRecoveryResolved(ctx context.Context, sessionID string, se
 	session.Metadata[models.SessionMetaKeyRecoveryResolvedAt] = resolvedAtValue
 	if session.TaskID != "" {
 		s.dismissRecoveredAgentError(ctx, session.TaskID, session, resolvedAt)
+		// Boot-ready is the provider-confirmed recovery boundary. Keeping this
+		// out of the STARTING/RUNNING state funnel leaves the durable warning in
+		// place when a launch later fails or is cancelled.
+		s.clearTaskInterruptedMarker(ctx, session.TaskID, expectedInterruptedMarker...)
+	}
+	// A guarded boot callback may clear recovery ownership only when it carries
+	// a non-empty immutable marker generation. The handler passes an empty
+	// guarded value for missing/failed/finished attempts, so those callbacks
+	// leave the durable settlement available for retry. Direct legacy callers
+	// that omit the variadic argument retain their established cleanup path.
+	guardedGeneration := len(expectedInterruptedMarker) > 0
+	validGeneration := guardedGeneration && strings.TrimSpace(expectedInterruptedMarker[0]) != ""
+	if !guardedGeneration || validGeneration {
+		s.clearRecoveryMetadataAfterBoot(ctx, sessionID, session)
 	}
 	return &resolvedAt
+}
+
+func (s *Service) clearRecoveryMetadataAfterBoot(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+) {
+	remover, supported := s.repo.(interface {
+		RemoveSessionMetadataKeyIfJSONValue(context.Context, string, string, interface{}) (bool, error)
+	})
+	if !supported || session == nil {
+		return
+	}
+	if pending, ok := session.Metadata[models.SessionMetaKeyInterruptedRecoveryPending].(string); ok && pending != "" {
+		if _, err := remover.RemoveSessionMetadataKeyIfJSONValue(
+			ctx, sessionID, models.SessionMetaKeyInterruptedRecoveryPending, pending,
+		); err != nil {
+			s.logger.Warn("failed to clear interrupted recovery marker",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
+	if settlement, ok := models.LoadInterruptedRecoverySettlement(session.Metadata); ok {
+		if _, err := remover.RemoveSessionMetadataKeyIfJSONValue(
+			ctx, sessionID, models.SessionMetaKeyRecoverySettlementPending, settlement,
+		); err != nil {
+			s.logger.Warn("failed to clear recovery settlement marker after boot",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
 }
 
 // providerRemediationURL returns the adapter-validated remediation URL from the

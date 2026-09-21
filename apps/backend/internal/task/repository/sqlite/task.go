@@ -1806,6 +1806,43 @@ func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key stri
 	return r.removeTaskMetadataKeyWithExecutor(ctx, r.db, taskID, key)
 }
 
+// RemoveTaskMetadataKeyIfValue removes one metadata key only when its scalar
+// JSON value still equals expectedValue. Recovery callbacks use this compare
+// and set boundary so a delayed callback cannot erase a newer interruption
+// marker written by a later restart.
+func (r *Repository) RemoveTaskMetadataKeyIfValue(
+	ctx context.Context,
+	taskID, key, expectedValue string,
+) (bool, error) {
+	if strings.TrimSpace(expectedValue) == "" {
+		return false, nil
+	}
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text, updated_at = ?
+			WHERE id = ? AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) = ?
+		`
+		args = []interface{}{key, time.Now().UTC(), taskID, key, expectedValue}
+	} else {
+		path := jsonPath(key)
+		query = `
+			UPDATE tasks
+			SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?), updated_at = ?
+			WHERE id = ? AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
+		`
+		args = []interface{}{path, time.Now().UTC(), taskID, path, expectedValue}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
 // ClearManualMoveLifecycleMarkersIfCompleted atomically removes the pending
 // and completed markers for a manual move only while the completed marker and
 // task update generation still match the recovery snapshot. A new move clears
@@ -2183,6 +2220,115 @@ func (r *Repository) SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID
 		path = jsonPath(key)
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+// SetTaskMetadataKeyIfAbsentNotArchived writes one metadata key only when the
+// task is live and the key is absent. Recovery marker creation uses this
+// compare-and-set boundary so an older settlement cannot overwrite a newer
+// interruption generation.
+func (r *Repository) SetTaskMetadataKeyIfAbsentNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks
+			SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ?
+			WHERE id = ? AND archived_at IS NULL
+			  AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) IS NULL`
+	} else {
+		query = `UPDATE tasks
+			SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ?
+			WHERE id = ? AND archived_at IS NULL
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NULL`
+	}
+	path := key
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(key)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID, path)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+// SetTaskMetadataKeyIfRecoveryCurrent writes a marker only while the session
+// that owns the recovery settlement is still waiting at the same generation.
+// The settlement token check is deliberately in the same UPDATE as the task
+// metadata write: a successor that changes the session state or consumes the
+// token cannot be followed by a delayed recovery callback that re-adds the
+// interruption warning.
+func (r *Repository) SetTaskMetadataKeyIfRecoveryCurrent(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionUpdatedAt time.Time,
+	expectedRecoveryToken, key string,
+	value interface{},
+) (bool, error) {
+	if taskID == "" || sessionID == "" || expectedRecoveryToken == "" {
+		return false, nil
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	now := time.Now().UTC()
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		base := postgresMetadataObject
+		query = `UPDATE tasks
+			SET metadata = jsonb_set(` + base + `, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ?
+			WHERE id = ? AND archived_at IS NULL
+			  AND jsonb_extract_path(` + base + `, ?) IS NULL
+			  AND EXISTS (
+				SELECT 1 FROM task_sessions recovery_session
+				WHERE recovery_session.id = ?
+				  AND recovery_session.task_id = tasks.id
+				  AND recovery_session.state = ?
+				  AND recovery_session.updated_at = ?
+				  AND jsonb_extract_path_text(
+					CASE WHEN recovery_session.metadata IS NULL OR recovery_session.metadata = 'null' OR recovery_session.metadata = '' THEN '{}'::jsonb ELSE recovery_session.metadata::jsonb END,
+					?, 'token'
+				  ) = ?
+			  )`
+		args = []interface{}{
+			key, string(payload), now, taskID,
+			key, sessionID, string(models.TaskSessionStateWaitingForInput), expectedSessionUpdatedAt,
+			models.SessionMetaKeyRecoverySettlementPending, expectedRecoveryToken,
+		}
+	} else {
+		path := jsonPath(key)
+		markerPath := jsonPath(key)
+		settlementTokenPath := jsonPath(models.SessionMetaKeyRecoverySettlementPending + ".token")
+		base := sqliteMetadataObject
+		query = `UPDATE tasks
+			SET metadata = json_set(` + base + `, ?, json(?)), updated_at = ?
+			WHERE id = ? AND archived_at IS NULL
+			  AND json_type(` + base + `, ?) IS NULL
+			  AND EXISTS (
+				SELECT 1 FROM task_sessions recovery_session
+				WHERE recovery_session.id = ?
+				  AND recovery_session.task_id = tasks.id
+				  AND recovery_session.state = ?
+				  AND recovery_session.updated_at = ?
+				  AND json_extract(CASE WHEN recovery_session.metadata IS NULL OR recovery_session.metadata = 'null' OR recovery_session.metadata = '' THEN '{}' ELSE recovery_session.metadata END, ?) = ?
+			  )`
+		args = []interface{}{
+			path, string(payload), now, taskID,
+			markerPath, sessionID, string(models.TaskSessionStateWaitingForInput), expectedSessionUpdatedAt,
+			settlementTokenPath, expectedRecoveryToken,
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}

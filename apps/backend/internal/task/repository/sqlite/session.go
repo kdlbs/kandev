@@ -2240,6 +2240,162 @@ func (r *Repository) CancelRunningTaskSessionByID(ctx context.Context, sessionID
 	return session, rows.Err()
 }
 
+// RecoverTaskSessionByCandidate returns one execution-less session to
+// WAITING_FOR_INPUT when its state, activity clock, and current turn still
+// match the reconciliation snapshot. The optional staleBefore cutoff is used
+// by the restart pass to preserve its launch grace window; a zero cutoff is
+// used by the active-task stall pass.
+//
+// The write is session-scoped and compare-and-set guarded. A newer message,
+// state transition, successor turn, or refreshed launch causes the UPDATE to
+// match no row, leaving the current owner untouched for the next sweep.
+//
+//nolint:cyclop,funlen // The SQL predicate mirrors the complete recovery CAS contract.
+func (r *Repository) RecoverTaskSessionByCandidate(
+	ctx context.Context,
+	candidate models.ActiveSessionRecoveryCandidate,
+	staleBefore time.Time,
+) (*models.TaskSession, error) {
+	if candidate.SessionID == "" || candidate.TaskID == "" {
+		return nil, nil
+	}
+	switch candidate.ExpectedState {
+	case models.TaskSessionStateCreated,
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput:
+	default:
+		return nil, nil
+	}
+	// PostgreSQL timestamp columns retain microsecond precision. Use the same
+	// precision in the JSON settlement snapshot so a retry compares the
+	// stored generation exactly on both database dialects.
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+
+	// Preserve a durable recovery token and immutable effect snapshot in the
+	// same compare-and-set write as the WAITING_FOR_INPUT transition. A later
+	// focus request can therefore distinguish this recovered conversation from
+	// an ordinary idle session even when executors_running has no row, and a
+	// partial post-commit settlement can retry without inspecting a successor.
+	settlementPending := candidate.ExpectedTurnID != "" ||
+		candidate.ExpectedState == models.TaskSessionStateStarting ||
+		candidate.ExpectedState == models.TaskSessionStateRunning
+	setClause := "state = ?, error_message = ?, completed_at = ?, updated_at = ?"
+	query := `
+		UPDATE task_sessions
+		SET `
+	args := make([]interface{}, 0, 16)
+	if settlementPending {
+		token := interruptedRecoveryToken(candidate)
+		settlement := models.InterruptedRecoverySettlement{
+			Token:                            token,
+			ExpectedState:                    candidate.ExpectedState,
+			RecoveredUpdatedAt:               now,
+			ExpectedTurnID:                   candidate.ExpectedTurnID,
+			ExpectedExecutorID:               candidate.ExpectedExecutorID,
+			ExpectedExecutorAgentExecutionID: candidate.ExpectedExecutorAgentExecutionID,
+			ExpectedExecutorUpdatedAt:        candidate.ExpectedExecutorUpdatedAt,
+		}
+		pendingJSON, err := json.Marshal(token)
+		if err != nil {
+			return nil, err
+		}
+		settlementJSON, err := json.Marshal(settlement)
+		if err != nil {
+			return nil, err
+		}
+		if dialect.IsPostgres(r.db.DriverName()) {
+			base := postgresMetadataObject
+			setClause = "metadata = jsonb_set(jsonb_set(" + base + ", ARRAY[?]::text[], ?::jsonb, true), ARRAY[?]::text[], ?::jsonb, true)::text, " + setClause
+			args = append(args,
+				models.SessionMetaKeyInterruptedRecoveryPending, string(pendingJSON),
+				models.SessionMetaKeyRecoverySettlementPending, string(settlementJSON),
+			)
+		} else {
+			base := sqliteMetadataObject
+			setClause = "metadata = json_set(json_set(" + base + ", ?, json(?)), ?, json(?)), " + setClause
+			args = append(args,
+				jsonPath(models.SessionMetaKeyInterruptedRecoveryPending), string(pendingJSON),
+				jsonPath(models.SessionMetaKeyRecoverySettlementPending), string(settlementJSON),
+			)
+		}
+	}
+	query += setClause + `
+		WHERE id = ?
+		  AND task_id = ?
+		  AND EXISTS (
+			SELECT 1 FROM tasks recoverable_task
+			WHERE recoverable_task.id = task_sessions.task_id
+			  AND recoverable_task.archived_at IS NULL
+		  )
+		  AND state = ?
+		  AND updated_at = ?
+	`
+	args = append(args,
+		string(models.TaskSessionStateWaitingForInput), "", nil, now,
+		candidate.SessionID, candidate.TaskID, string(candidate.ExpectedState), candidate.ExpectedUpdatedAt,
+	)
+	if !staleBefore.IsZero() {
+		query += " AND updated_at < ?\n"
+		args = append(args, staleBefore)
+	}
+	if !candidate.ExpectedLastEventAt.IsZero() {
+		query += `
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_session_messages newer_message
+			WHERE newer_message.task_session_id = task_sessions.id
+			  AND newer_message.updated_at > ?
+		  )
+		`
+		args = append(args, candidate.ExpectedLastEventAt)
+	}
+	if candidate.ExpectedTurnID == "" {
+		query += `
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_session_turns active_turn
+			WHERE active_turn.task_session_id = task_sessions.id
+			  AND active_turn.completed_at IS NULL
+		  )
+		`
+	} else {
+		query += `
+		  AND EXISTS (
+			SELECT 1 FROM task_session_turns active_turn
+			WHERE active_turn.id = ?
+			  AND active_turn.task_session_id = task_sessions.id
+			  AND active_turn.completed_at IS NULL
+		  )
+		`
+		args = append(args, candidate.ExpectedTurnID)
+	}
+	query += `
+		RETURNING id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
+			review_status, metadata, task_environment_id, state, updated_at, is_primary
+	`
+	rows, err := r.db.QueryContext(writeCtx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	session, err := scanCancelledTaskSessionRow(rows, candidate.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	return session, rows.Err()
+}
+
+func interruptedRecoveryToken(candidate models.ActiveSessionRecoveryCandidate) string {
+	return fmt.Sprintf("%s:%s:%s:%s", candidate.SessionID,
+		candidate.ExpectedState,
+		candidate.ExpectedUpdatedAt.UTC().Format(time.RFC3339Nano),
+		candidate.ExpectedTurnID)
+}
+
 // CancelActiveTaskSessionsByIDs is documented on the SessionRepository
 // interface. It shares CancelActiveTaskSessionsByTaskID's atomic
 // UPDATE ... RETURNING shape and detached-but-bounded write context, so the
@@ -2837,6 +2993,52 @@ func (r *Repository) RemoveSessionMetadataKeyIfStamp(
 				AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = ?
 		`
 		args = []interface{}{path, now, sessionID, path + ".stamp", expectedStamp}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+// RemoveSessionMetadataKeyIfJSONValue removes one metadata key only when its
+// complete JSON value still equals expectedValue. Recovery settlement uses
+// this compare-and-set boundary so a delayed effect cannot erase a newer
+// recovery snapshot written after a successor launch.
+func (r *Repository) RemoveSessionMetadataKeyIfJSONValue(
+	ctx context.Context,
+	sessionID, key string,
+	expectedValue interface{},
+) (bool, error) {
+	payload, err := json.Marshal(expectedValue)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize expected session metadata: %w", err)
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(driver) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = (
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END
+				#- ARRAY[?]::text[]
+			)::text, updated_at = ?
+			WHERE id = ?
+			  AND (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END -> ?) = ?::jsonb
+		`
+		args = []interface{}{key, now, sessionID, key, string(payload)}
+	} else {
+		path := jsonPath(key)
+		query = `
+			UPDATE task_sessions
+			SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?), updated_at = ?
+			WHERE id = ?
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = json(?)
+		`
+		args = []interface{}{path, now, sessionID, path, string(payload)}
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {

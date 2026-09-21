@@ -17,10 +17,10 @@ const (
 	// an execution-less active session is classified as stalled
 	// (tasks.stallDetectionThreshold defaults to 2h).
 	defaultStallDetectionThreshold = 2 * time.Hour
-	// stallHealGraceMultiplier derives the orphaned-session healing grace
-	// window from the stall threshold. Healing waits twice as long as
+	// stallHealGraceMultiplier derives the interrupted-session recovery grace
+	// window from the stall threshold. Recovery waits twice as long as
 	// detection so an operator has a full threshold window to act on the
-	// task.stalled event before the sweep cancels the orphaned session, and
+	// task.stalled event before the sweep recovers the orphaned session, and
 	// so a live in-flight launch that has not yet registered its execution
 	// never races the grace window.
 	stallHealGraceMultiplier = 2
@@ -46,11 +46,10 @@ func (s *Service) stallThreshold() time.Duration {
 //
 //   - emits one task.stalled event per stall episode once the session has
 //     been event-silent beyond the stall threshold (detection only), and
-//   - cancels the session via the same finalizeCancelledSessions transition
-//     the archived pass uses once the silence exceeds the grace window
-//     (twice the threshold), making the DB state truthful, delivering the
-//     session.state_changed event clients key off, and unblocking the task's
-//     step lifecycle.
+//   - returns the session to WAITING_FOR_INPUT once the silence exceeds the
+//     grace window (twice the threshold), preserving the same conversation
+//     for lazy recovery and delivering the session.state_changed event clients
+//     key off.
 //
 // The execution check is fail-closed: without the registry the pass cannot
 // prove "no live execution", so it skips rather than healing or alerting on
@@ -117,6 +116,18 @@ func (s *Service) sweepTaskSessions(
 		return
 	}
 
+	s.retryPendingRecoverySettlements(ctx, task, activeSessions, liveSessions)
+	orphaned, filterErr := s.excludeIdleWaitingSessions(ctx, orphaned)
+	if filterErr != nil {
+		// A turn read failure leaves the session's intent unknown. Do not
+		// report or recover any part of this task from an incomplete snapshot.
+		return
+	}
+	if len(orphaned) == 0 {
+		s.clearStallNotifications(task.ID)
+		return
+	}
+
 	stalled, healable, lastEventBySession, classErr := s.classifyOrphanedSessions(
 		ctx, orphaned, now, threshold, grace,
 	)
@@ -130,6 +141,40 @@ func (s *Service) sweepTaskSessions(
 	}
 	s.notifyStalledSessions(ctx, task, stalled, lastEventBySession, now, threshold)
 	s.healOrphanedSessions(ctx, task, activeSessions, orphaned, healable, lastEventBySession)
+}
+
+// excludeIdleWaitingSessions removes ordinary waiting conversations from the
+// execution-loss candidate set. WAITING_FOR_INPUT with no active turn is a
+// healthy idle state and must neither emit task.stalled nor participate in
+// task-wide healing. A turn read error fails closed for the whole task.
+func (s *Service) excludeIdleWaitingSessions(
+	ctx context.Context,
+	candidates []*models.TaskSession,
+) ([]*models.TaskSession, error) {
+	filtered := make([]*models.TaskSession, 0, len(candidates))
+	for _, session := range candidates {
+		if session == nil || session.State != models.TaskSessionStateWaitingForInput {
+			filtered = append(filtered, session)
+			continue
+		}
+		if _, pending := models.LoadInterruptedRecoverySettlement(session.Metadata); pending {
+			// A prior recovery already owns this waiting row. The retry pass
+			// above handles its effects; it must not be reclassified as a new
+			// stall episode while the settlement marker remains.
+			continue
+		}
+		turn, err := s.GetActiveTurn(ctx, session.ID)
+		if err != nil {
+			s.logger.Warn("active-session sweep: failed to inspect waiting session turn; skipping task",
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			return nil, err
+		}
+		if turn != nil {
+			filtered = append(filtered, session)
+		}
+	}
+	return filtered, nil
 }
 
 // classifyOrphanedSessions splits execution-less sessions into stalled
@@ -170,7 +215,9 @@ func (s *Service) classifyOrphanedSessions(
 func sessionIDs(sessions []*models.TaskSession) []string {
 	ids := make([]string, 0, len(sessions))
 	for _, session := range sessions {
-		ids = append(ids, session.ID)
+		if session != nil && session.ID != "" {
+			ids = append(ids, session.ID)
+		}
 	}
 	return ids
 }
@@ -271,20 +318,18 @@ func (s *Service) notifyStalledSessions(
 	}
 }
 
-// healOrphanedSessions cancels execution-less sessions that have been silent
-// beyond the grace window, reusing the archived pass's
-// finalizeCancelledSessions transition (cancellation with the orphaned
-// reason, clarification expiry, parked-projection cleanup, ceiling release,
-// and the session.state_changed event) so clients keying off that event see
-// the session stop. Repeat passes are no-ops: the underlying UPDATE only
-// matches rows still in an active state.
+// healOrphanedSessions returns execution-less sessions that have been silent
+// beyond the grace window to WAITING_FOR_INPUT. It preserves the conversation
+// and settles only the turn observed by the compare-and-set snapshot. No
+// cancellation effects run: questions, queued work, and workflow ownership
+// remain available for lazy recovery.
 //
 // Healing is task-scoped at the eligibility boundary, so it only runs when
 // every active session of the task is execution-less and past the grace
 // window. The write itself is candidate-scoped, so a same-session resume or a
-// newer turn cannot be cancelled by a stale sweep snapshot.
+// newer turn cannot be changed by a stale sweep snapshot.
 //
-// The guard is re-evaluated at the cancellation boundary itself: the
+// The guard is re-evaluated at the recovery boundary itself: the
 // liveness snapshot was taken before the silence reads, and an execution
 // that registered (or a session that started) in between must abort the
 // heal. Re-checking LiveSessionIDsForTask immediately before the write is
@@ -308,7 +353,13 @@ func (s *Service) healOrphanedSessions(
 			zap.Int("live_sessions", len(live)))
 		return
 	}
-	candidates := make([]models.ActiveSessionCancellationCandidate, 0, len(healable))
+	repo, ok := s.sessions.(interface {
+		RecoverTaskSessionByCandidate(context.Context, models.ActiveSessionRecoveryCandidate, time.Time) (*models.TaskSession, error)
+	})
+	if !ok {
+		return
+	}
+	candidates := make([]models.ActiveSessionRecoveryCandidate, 0, len(healable))
 	for _, session := range healable {
 		turn, err := s.GetActiveTurn(ctx, session.ID)
 		if err != nil {
@@ -322,32 +373,93 @@ func (s *Service) healOrphanedSessions(
 		if lastEvent.IsZero() {
 			lastEvent = session.UpdatedAt
 		}
-		candidate := models.ActiveSessionCancellationCandidate{
+		candidate := models.ActiveSessionRecoveryCandidate{
+			TaskID:              task.ID,
 			SessionID:           session.ID,
+			ExpectedState:       session.State,
 			ExpectedUpdatedAt:   session.UpdatedAt,
 			ExpectedLastEventAt: lastEvent,
 		}
 		if turn != nil {
 			candidate.ExpectedTurnID = turn.ID
 		}
+		s.captureRecoveryExecutorSnapshot(ctx, &candidate)
 		candidates = append(candidates, candidate)
 	}
-	s.logger.Info("active-session sweep: healing orphaned sessions",
+	s.logger.Info("active-session sweep: preserving interrupted sessions for lazy recovery",
 		zap.String("task_id", task.ID),
-		zap.Strings("session_ids", cancellationCandidateIDs(candidates)))
+		zap.Strings("session_ids", recoveryCandidateIDs(candidates)))
 	deadline := archivecascade.ArchiveDeadline(ctx)
 	healCtx, cancel := archivecascade.ContinuationContextUntil(ctx, deadline)
 	defer cancel()
-	// Candidates scope the cancellation to exactly the sessions this pass
-	// classified as orphaned and compare their activity/turn identity in the
-	// UPDATE. A same-session resume or successor turn therefore survives the
-	// write and is retried by the next sweep.
-	s.finalizeCancelledSessionCandidates(
-		healCtx, task.ID, activeSessions, candidates, deadline, models.SessionOrphanedCancelReason,
-	)
+	for _, candidate := range candidates {
+		if !time.Now().Before(deadline) {
+			return
+		}
+		if _, live := s.liveSessionSet(task.ID)[candidate.SessionID]; live {
+			continue
+		}
+		recovered, err := repo.RecoverTaskSessionByCandidate(healCtx, candidate, time.Time{})
+		if err != nil {
+			s.logger.Warn("active-session sweep: failed to recover interrupted session",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", candidate.SessionID),
+				zap.Error(err))
+			continue
+		}
+		if recovered == nil {
+			continue
+		}
+		completionDeadline := time.Now().Add(taskPublicationTimeout)
+		completionCtx, cancelCompletion := context.WithDeadline(
+			context.WithoutCancel(healCtx), completionDeadline,
+		)
+		s.settleRecoveredSession(completionCtx, candidate, recovered)
+		cancelCompletion()
+	}
 }
 
-func cancellationCandidateIDs(candidates []models.ActiveSessionCancellationCandidate) []string {
+// retryPendingRecoverySettlements retries cross-repository effects that did
+// not finish during an earlier recovery write. The session metadata carries
+// the original turn and executor snapshot, so this pass never reads a
+// successor identity merely to repair it.
+func (s *Service) retryPendingRecoverySettlements(
+	ctx context.Context,
+	task *models.Task,
+	activeSessions []*models.TaskSession,
+	liveSessions map[string]struct{},
+) {
+	if task == nil {
+		return
+	}
+	for _, session := range activeSessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		if _, live := liveSessions[session.ID]; live {
+			continue
+		}
+		settlement, ok := models.LoadInterruptedRecoverySettlement(session.Metadata)
+		if !ok {
+			continue
+		}
+		candidate := models.ActiveSessionRecoveryCandidate{
+			TaskID:                           task.ID,
+			SessionID:                        session.ID,
+			ExpectedState:                    settlement.ExpectedState,
+			RecoveredUpdatedAt:               settlement.RecoveredUpdatedAt,
+			ExpectedTurnID:                   settlement.ExpectedTurnID,
+			ExpectedExecutorID:               settlement.ExpectedExecutorID,
+			ExpectedExecutorAgentExecutionID: settlement.ExpectedExecutorAgentExecutionID,
+			ExpectedExecutorUpdatedAt:        settlement.ExpectedExecutorUpdatedAt,
+		}
+		completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), taskPublicationTimeout)
+		s.settleRecoveredSession(completionCtx, candidate, session)
+		cancel()
+	}
+}
+
+func recoveryCandidateIDs(candidates []models.ActiveSessionRecoveryCandidate) []string {
 	ids := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		ids = append(ids, candidate.SessionID)

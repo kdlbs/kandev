@@ -4,13 +4,13 @@ import { SessionPage } from "../../pages/session-page";
 
 // Interrupted-task indicator: when Kandev dies while a task's session is
 // mid-turn, startup reconciliation marks the task with the `interrupted_at`
-// metadata key and the task list shows a red alert icon until the task is
+// metadata key and the task list shows a warning triangle until the task is
 // resumed. Seeding `interrupted_at` through the public task-metadata surface
 // is the deterministic stand-in for a real crash; the icon itself must render
 // from that marker alone.
 
 test.describe("Task list — interrupted-task icon", () => {
-  test("shows the red interrupted icon only for marked tasks", async ({
+  test("shows the warning triangle only for marked tasks", async ({
     testPage,
     apiClient,
     seedData,
@@ -59,6 +59,13 @@ test.describe("Task list — interrupted-task icon", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    const interruptedCard = kanban.taskCard(interrupted.id);
+    await expect(interruptedCard).toBeVisible({ timeout: 20_000 });
+    const cardIcon = interruptedCard.getByTestId("task-state-interrupted");
+    await expect(cardIcon).toBeVisible({ timeout: 20_000 });
+    await expect(cardIcon).toHaveClass(/tabler-icon-alert-triangle/);
+    await expect(cardIcon).toHaveClass(/text-yellow-500/);
+
     const anchorCard = kanban.taskCardByTitle("Anchor Session");
     await expect(anchorCard).toBeVisible({ timeout: 20_000 });
     await anchorCard.click();

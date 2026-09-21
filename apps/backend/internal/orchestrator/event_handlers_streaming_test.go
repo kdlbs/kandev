@@ -2758,10 +2758,10 @@ func seedInterruptedMarker(t *testing.T, repo *sqliterepo.Repository, taskID str
 	}
 }
 
-func TestSessionStartClearsInterruptedMarker(t *testing.T) {
+func TestSessionStartKeepsInterruptedMarkerUntilRecovery(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("state hook transition to STARTING clears and republishes", func(t *testing.T) {
+	t.Run("state hook transition to STARTING keeps the marker", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedInterruptedMarker(t, repo, "t1")
@@ -2779,12 +2779,12 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
-		require.False(t, marked, "marker must be cleared when the session enters STARTING")
-		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
-			"task.updated must be republished after clearing the marker")
+		require.True(t, marked, "marker must survive the STARTING transition")
+		require.Empty(t, publisher.updatedTaskIDs,
+			"STARTING must not publish a marker-clearing task.updated")
 	})
 
-	t.Run("launch path via setSessionStarting clears and republishes", func(t *testing.T) {
+	t.Run("launch path via setSessionStarting keeps the marker", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		seedInterruptedMarker(t, repo, "t1")
@@ -2804,9 +2804,98 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 		task, err := repo.GetTask(ctx, "t1")
 		require.NoError(t, err)
 		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
-		require.False(t, marked, "marker must be cleared on the launch path")
+		require.True(t, marked, "the launch attempt must not clear the marker")
+		require.Empty(t, publisher.updatedTaskIDs,
+			"the launch attempt must not publish a marker-clearing task.updated")
+	})
+
+	t.Run("confirmed boot recovery clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		marker, ok := task.Metadata[models.MetaKeyInterruptedAt].(string)
+		require.True(t, ok)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, marker))
+
+		task, err = repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "successful boot recovery must clear the marker")
 		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
-			"task.updated must be republished after clearing the marker")
+			"successful boot recovery must publish the marker-clearing task.updated")
+	})
+
+	t.Run("stale recovery preserves a newer interruption marker", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "old-marker"))
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, "old-marker"))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+		require.Empty(t, publisher.updatedTaskIDs,
+			"a stale recovery callback must not publish a marker-clearing update")
+	})
+
+	t.Run("recovery callback with no marker snapshot fails closed", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		// A recovery attempt can finish after its task snapshot failed to load.
+		// Passing an empty expected marker must remain a guarded no-op.
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, ""))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
+		require.Empty(t, publisher.updatedTaskIDs)
+	})
+
+	t.Run("finished recovery attempt retains its immutable marker snapshot", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "old-marker"))
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		registry := newResumeAttemptRegistry()
+		svc.resumeAttemptsMu.Lock()
+		svc.resumeAttempts = registry
+		svc.resumeAttemptsMu.Unlock()
+		attempt, owner := registry.begin(ctx, "t1", "s1")
+		require.True(t, owner)
+		attempt.setInterruptedMarkerSnapshot("old-marker", true)
+		attempt.finish(registry)
+		require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyInterruptedAt, "new-marker"))
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		marker := svc.interruptedMarkerForResumeAttempt("s1", attempt.identity())
+		require.Equal(t, "old-marker", marker)
+		require.NotNil(t, svc.markRecoveryResolved(ctx, "s1", session, marker))
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "new-marker", task.Metadata[models.MetaKeyInterruptedAt])
 	})
 
 	t.Run("no marker means no republish", func(t *testing.T) {

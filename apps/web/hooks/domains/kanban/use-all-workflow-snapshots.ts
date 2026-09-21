@@ -60,6 +60,14 @@ function hasNewerLiveAutoStartFailed(
   return existing.autoStartFailed !== fetchStart.autoStartFailed;
 }
 
+function hasNewerLiveInterrupted(
+  existing: KanbanTask,
+  fetchStart: KanbanTask | undefined,
+): boolean {
+  if (!fetchStart) return true;
+  return existing.interrupted !== fetchStart.interrupted;
+}
+
 function hasNewerLiveWorkspaceOrphaned(
   existing: KanbanTask,
   fetchStart: KanbanTask | undefined,
@@ -85,6 +93,9 @@ function preserveLiveMarkerFields(
 ): void {
   // A task.updated event can set or clear either marker while the snapshot
   // is in flight. Preserve the newer live value instead of rolling it back.
+  if (merged.interrupted === undefined || hasNewerLiveInterrupted(existing, fetchStart)) {
+    merged.interrupted = existing.interrupted;
+  }
   if (merged.autoStartFailed === undefined || hasNewerLiveAutoStartFailed(existing, fetchStart)) {
     merged.autoStartFailed = existing.autoStartFailed;
   }

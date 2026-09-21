@@ -2286,6 +2286,74 @@ func TestCancelActiveTaskSessionsByCandidatesRejectsNewActivityAndTurn(t *testin
 	}
 }
 
+func TestRecoverTaskSessionByCandidatePreservesConversationAndGuardsTurn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedRepoLink(t, repo, "ws-recover", "repo-recover", "task-recover", "session-recover", "RUNNING")
+	seedRepoLink(t, repo, "ws-recover", "repo-recover-2", "task-recover-2", "session-recover-2", "RUNNING")
+
+	idleCandidate, err := repo.GetTaskSession(ctx, "session-recover")
+	if err != nil {
+		t.Fatalf("GetTaskSession idle candidate: %v", err)
+	}
+	// A cutoff in the future admits this stale snapshot. The absence of an
+	// active turn is part of the candidate predicate for a session whose actor
+	// died before a turn row was persisted.
+	recovered, err := repo.RecoverTaskSessionByCandidate(ctx, models.ActiveSessionRecoveryCandidate{
+		TaskID:              idleCandidate.TaskID,
+		SessionID:           idleCandidate.ID,
+		ExpectedState:       idleCandidate.State,
+		ExpectedUpdatedAt:   idleCandidate.UpdatedAt,
+		ExpectedLastEventAt: idleCandidate.UpdatedAt,
+	}, time.Now().UTC().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("RecoverTaskSessionByCandidate without turn: %v", err)
+	}
+	if recovered == nil {
+		t.Fatal("RecoverTaskSessionByCandidate without turn returned nil")
+	}
+	if recovered.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("recovered state = %q, want WAITING_FOR_INPUT", recovered.State)
+	}
+	if recovered.TaskID != idleCandidate.TaskID {
+		t.Fatalf("recovered task id = %q, want %q", recovered.TaskID, idleCandidate.TaskID)
+	}
+
+	turn := &models.Turn{ID: "turn-recover", TaskSessionID: "session-recover-2", TaskID: "task-recover-2"}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	turnCandidate, err := repo.GetTaskSession(ctx, "session-recover-2")
+	if err != nil {
+		t.Fatalf("GetTaskSession turn candidate: %v", err)
+	}
+	guarded := models.ActiveSessionRecoveryCandidate{
+		TaskID:              turnCandidate.TaskID,
+		SessionID:           turnCandidate.ID,
+		ExpectedState:       turnCandidate.State,
+		ExpectedUpdatedAt:   turnCandidate.UpdatedAt,
+		ExpectedLastEventAt: turnCandidate.UpdatedAt,
+		ExpectedTurnID:      turn.ID,
+	}
+	// A successor turn refreshes the session and invalidates the observed
+	// identity before the recovery write.
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-recover-successor", TaskSessionID: "session-recover-2", TaskID: "task-recover-2",
+	}); err != nil {
+		t.Fatalf("Create successor turn: %v", err)
+	}
+	recovered, err = repo.RecoverTaskSessionByCandidate(ctx, guarded, time.Time{})
+	if err != nil {
+		t.Fatalf("RecoverTaskSessionByCandidate stale turn: %v", err)
+	}
+	if recovered != nil {
+		t.Fatalf("stale turn candidate recovered session = %+v, want nil", recovered)
+	}
+	if got := sessionState(t, repo, "session-recover-2"); got != "RUNNING" {
+		t.Fatalf("session with successor turn = %q, want RUNNING", got)
+	}
+}
+
 // sameStringSet reports whether got and want contain the same strings,
 // ignoring order and duplicates count-for-count — used to compare the set of
 // cancelled session IDs against an expected set regardless of return order.
