@@ -141,6 +141,7 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	tx *sqlx.Tx,
 	oldSessionID, newSessionID string,
 	destination *QueueSessionIdentity,
+	queuePositionOffset int64,
 ) error {
 	var claimID, claimJSON string
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
@@ -180,6 +181,7 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	}
 	for sourceIndex := range claim.Sources {
 		claim.Sources[sourceIndex].SessionID = newSessionID
+		claim.Sources[sourceIndex].Position += queuePositionOffset
 	}
 	claim.Dispatch.SessionID = newSessionID
 	if destination != nil {
