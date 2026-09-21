@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestHandleAgentStreamEventMarksLaunchReceiptInferenceFromActivity(t *testing.T) {
@@ -121,5 +122,57 @@ func TestHandleAgentStreamEventRejectsDelayedSameExecutionStartupFact(t *testing
 	identity := current["identity"].(map[string]interface{})
 	if identity["generation"] != float64(2) || current["process_created"] != string(LaunchTriStateUnknown) {
 		t.Fatalf("current receipt = %#v, want replacement generation with no stale process fact", current)
+	}
+}
+
+func TestSyntheticCopilotFreshAndResumeReceiptsReachFirstActivity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	seedSession(t, repo, "copilot-task", "copilot-session", "copilot-step")
+	for _, tc := range []struct {
+		executionID string
+		generation  uint64
+	}{{"copilot-fresh-exec", 1}, {"copilot-resume-exec", 2}} {
+		for _, fact := range []string{"started", "process_started"} {
+			svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{TaskID: "copilot-task", SessionID: "copilot-session", ExecutionID: tc.executionID,
+				Data: &lifecycle.AgentStreamEventData{Type: "launch_receipt", Data: fact, StartupGeneration: tc.generation}})
+		}
+		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{TaskID: "copilot-task", SessionID: "copilot-session", ExecutionID: tc.executionID,
+			Data: &lifecycle.AgentStreamEventData{Type: agentEventToolCall, ToolCallID: "copilot-activity", ToolStatus: "running"}})
+		session, err := repo.GetTaskSession(ctx, "copilot-session")
+		if err != nil {
+			t.Fatalf("get receipt: %v", err)
+		}
+		current := session.Metadata["launch_receipt_state"].(map[string]interface{})["current"].(map[string]interface{})
+		if current["process_created"] != string(LaunchTriStateTrue) || current["inference_started"] != string(LaunchTriStateTrue) {
+			t.Fatalf("receipt = %#v", current)
+		}
+	}
+}
+
+func TestCallerCatalogRemainsActiveWhenTargetBootstrapFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "message-task", "caller-session", "message-step")
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "target-session", TaskID: "message-task", State: models.TaskSessionStateRunning}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	caller := &lifecycle.AgentStreamEventPayload{TaskID: "message-task", SessionID: "caller-session", ExecutionID: "caller-exec", Data: &lifecycle.AgentStreamEventData{
+		MCPAttachmentAttempt: &streams.MCPAttachmentAttempt{AttemptID: "caller-catalog", ExecutionID: "caller-exec"},
+		MCPAttachment:        &streams.MCPAttachmentEvidence{AttemptID: "caller-catalog", ServerName: "kandev", Kind: streams.MCPAttachmentEvidenceToolsListObserved, ToolCount: 1, Tools: []streams.MCPToolSummary{{Name: "message_task_kandev"}}},
+	}}
+	svc.handleSessionMCPAttachmentEvent(ctx, caller)
+	for _, fact := range []string{"started", "terminal_preflight_failure"} {
+		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{TaskID: "message-task", SessionID: "target-session", ExecutionID: "target-exec", Data: &lifecycle.AgentStreamEventData{Type: "launch_receipt", Data: fact, StartupGeneration: 1}})
+	}
+	callerSession, _ := repo.GetTaskSession(ctx, "caller-session")
+	targetSession, _ := repo.GetTaskSession(ctx, "target-session")
+	callerState := callerSession.Metadata[models.SessionMetaKeyMCPAttachmentState].(map[string]interface{})
+	callerServer := callerState["current"].(map[string]interface{})["servers"].([]interface{})[0].(map[string]interface{})
+	targetReceipt := targetSession.Metadata[models.SessionMetaKeyLaunchReceiptState].(map[string]interface{})["current"].(map[string]interface{})
+	if callerServer["status"] != string(streams.MCPAttachmentStatusActive) || targetReceipt["process_created"] != string(LaunchTriStateFalse) || targetReceipt["inference_started"] != string(LaunchTriStateFalse) {
+		t.Fatalf("caller catalog=%#v target receipt=%#v", callerServer, targetReceipt)
 	}
 }
