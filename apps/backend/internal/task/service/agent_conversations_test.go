@@ -130,9 +130,10 @@ func acItoa(n int) string {
 }
 
 type acFakeSessionRepo struct {
-	mu       sync.Mutex
-	sessions map[string]*models.TaskSession
-	nextIdx  int
+	mu         sync.Mutex
+	sessions   map[string]*models.TaskSession
+	nextIdx    int
+	primaryErr error
 }
 
 func newACFakeSessionRepo() *acFakeSessionRepo {
@@ -142,6 +143,9 @@ func newACFakeSessionRepo() *acFakeSessionRepo {
 func (f *acFakeSessionRepo) GetPrimarySessionByTaskID(_ context.Context, taskID string) (*models.TaskSession, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.primaryErr != nil {
+		return nil, f.primaryErr
+	}
 	for _, s := range f.sessions {
 		if s.TaskID == taskID && s.IsPrimary {
 			return s, nil
@@ -674,6 +678,22 @@ func TestResolveManagedConversationRequiresCurrentOwnedPrimarySession(t *testing
 	_, err = svc.ResolveManagedConversation(ctx, "", "ws-1", desc.SessionID)
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("empty plugin error = %v, want InvalidArgument", err)
+	}
+}
+
+func TestResolveManagedConversationPropagatesPrimarySessionLookupFailures(t *testing.T) {
+	svc, deps := newACTestService()
+	ctx := context.Background()
+	desc, _, err := svc.Ensure(ctx, "plugin-a", pluginsdk.AgentConversationSpec{WorkspaceID: "ws-1", ConversationKey: "coordinator"})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	want := errors.New("session repository unavailable")
+	deps.sess.primaryErr = want
+
+	_, err = svc.ResolveManagedConversation(ctx, "plugin-a", "ws-1", desc.SessionID)
+	if !errors.Is(err, want) {
+		t.Fatalf("ResolveManagedConversation error = %v, want %v", err, want)
 	}
 }
 

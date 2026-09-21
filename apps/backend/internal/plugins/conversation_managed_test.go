@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -93,22 +94,31 @@ func TestManagedConversationV2GrantIsolation(t *testing.T) {
 		response := request(path)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	}
+	taskID := "managed-task"
+	cursor, err := service.conversationTokens.mintSourceCursor(
+		"managed-plugin", "user_1", conversationGeneration(created), "managed-session",
+		&taskID, "desc", nil, "message-cursor", service.conversationEpoch, 20,
+	)
+	require.NoError(t, err)
+	response := request(paths[0] + "?cursor=" + url.QueryEscape(cursor))
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, "message-cursor", reader.sourceMessageRequest.CursorID)
 	require.Equal(t, "managed-task", optionalStringValue(reader.sourceMessageRequest.TaskID))
 	require.Equal(t, "managed-task", optionalStringValue(reader.sourceTurnRequest.TaskID))
-	require.Equal(t, 1, reader.sourceMessageReads)
+	require.Equal(t, 2, reader.sourceMessageReads)
 	require.Equal(t, 1, reader.sourceTurnReads)
 	require.Equal(t, 1, reader.sourceRevisionReads)
 	for _, path := range paths[:2] {
 		foreign := request(path + "?task_id=other-task")
 		require.Equal(t, http.StatusBadRequest, foreign.Code, foreign.Body.String())
 	}
-	require.Equal(t, 1, reader.sourceMessageReads)
+	require.Equal(t, 2, reader.sourceMessageReads)
 	require.Equal(t, 1, reader.sourceTurnReads)
 	for _, path := range paths {
 		response := request(strings.Replace(path, "managed-session", "other-session", 1))
 		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 	}
-	require.Equal(t, 1, reader.sourceMessageReads)
+	require.Equal(t, 2, reader.sourceMessageReads)
 	require.Equal(t, 1, reader.sourceTurnReads)
 	require.Equal(t, 1, reader.sourceRevisionReads)
 	bridge.descriptor.TaskID = "replacement-task"
@@ -116,7 +126,7 @@ func TestManagedConversationV2GrantIsolation(t *testing.T) {
 		response := request(path)
 		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 	}
-	require.Equal(t, 1, reader.sourceMessageReads)
+	require.Equal(t, 2, reader.sourceMessageReads)
 	require.Equal(t, 1, reader.sourceTurnReads)
 	require.Equal(t, 1, reader.sourceRevisionReads)
 	bridge.descriptor.TaskID = "managed-task"
@@ -127,7 +137,7 @@ func TestManagedConversationV2GrantIsolation(t *testing.T) {
 			require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
 		}
 	}
-	require.Equal(t, 1, reader.sourceMessageReads)
+	require.Equal(t, 2, reader.sourceMessageReads)
 	require.Equal(t, 1, reader.sourceTurnReads)
 	require.Equal(t, 1, reader.sourceRevisionReads)
 	service.registry.Add(managedConversationPluginRecord("managed-plugin", created.Add(time.Minute)))
@@ -135,7 +145,7 @@ func TestManagedConversationV2GrantIsolation(t *testing.T) {
 		response := request(path)
 		require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 	}
-	require.Equal(t, 1, reader.sourceMessageReads)
+	require.Equal(t, 2, reader.sourceMessageReads)
 	require.Equal(t, 1, reader.sourceTurnReads)
 	require.Equal(t, 1, reader.sourceRevisionReads)
 }

@@ -624,8 +624,11 @@ func (s *AgentConversationService) ResolveManagedConversation(ctx context.Contex
 			if !isManagedConversationOwnedByPlugin(task, pluginID) || task.WorkspaceID != workspaceID {
 				continue
 			}
-			primary, sessionErr := s.sess.GetPrimarySessionByTaskID(ctx, task.ID)
-			if sessionErr != nil || primary == nil || primary.ID != sessionID {
+			primary, err := s.managedConversationPrimarySession(ctx, task.ID, sessionID)
+			if err != nil {
+				return pluginsdk.AgentConversationDescriptor{}, err
+			}
+			if primary == nil {
 				continue
 			}
 			key, _ := task.Metadata[metaKeyConversationKey].(string)
@@ -639,6 +642,20 @@ func (s *AgentConversationService) ResolveManagedConversation(ctx context.Contex
 		}
 	}
 	return pluginsdk.AgentConversationDescriptor{}, status.Error(codes.NotFound, "managed conversation not found")
+}
+
+func (s *AgentConversationService) managedConversationPrimarySession(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if primary == nil || primary.ID != sessionID {
+		return nil, nil
+	}
+	return primary, nil
 }
 
 func agentConversationDispatch(task *models.Task, session *models.TaskSession, workspaceID, conversationKey, dispatchStatus string) pluginsdk.AgentConversationDispatch {

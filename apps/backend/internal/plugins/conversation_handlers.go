@@ -183,11 +183,8 @@ func (c *Controller) conversationSourceMessages(ctx *gin.Context) {
 		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
 		return
 	}
-	query, expected, cursorID, ok := c.parseSourceRequest(ctx, record, identity.UserID, true)
+	query, expected, cursorID, ok := c.parseSourceRequest(ctx, record, identity.UserID, true, descriptorIfManaged(descriptor, managed))
 	if !ok {
-		return
-	}
-	if managed && !c.applyManagedTaskScope(ctx, &query, descriptor) {
 		return
 	}
 	sessionID := ctx.Param("sessionId")
@@ -240,11 +237,8 @@ func (c *Controller) conversationSourceTurns(ctx *gin.Context) {
 		writeConversationError(ctx, http.StatusInternalServerError, "upstream_failure", "conversation service unavailable", true)
 		return
 	}
-	query, expected, cursorID, ok := c.parseSourceRequest(ctx, record, identity.UserID, false)
+	query, expected, cursorID, ok := c.parseSourceRequest(ctx, record, identity.UserID, false, descriptorIfManaged(descriptor, managed))
 	if !ok {
-		return
-	}
-	if managed && !c.applyManagedTaskScope(ctx, &query, descriptor) {
 		return
 	}
 	sessionID := ctx.Param("sessionId")
@@ -316,9 +310,19 @@ func (c *Controller) applyManagedTaskScope(ctx *gin.Context, query *conversation
 	return true
 }
 
-func (c *Controller) parseSourceRequest(ctx *gin.Context, record *store.Record, userID string, allowAuthors bool) (conversationMessageQuery, *int64, string, bool) {
+func descriptorIfManaged(descriptor pluginsdk.AgentConversationDescriptor, managed bool) *pluginsdk.AgentConversationDescriptor {
+	if !managed {
+		return nil
+	}
+	return &descriptor
+}
+
+func (c *Controller) parseSourceRequest(ctx *gin.Context, record *store.Record, userID string, allowAuthors bool, descriptor *pluginsdk.AgentConversationDescriptor) (conversationMessageQuery, *int64, string, bool) {
 	query, ok := parseConversationMessageQuery(ctx)
 	if !ok {
+		return conversationMessageQuery{}, nil, "", false
+	}
+	if descriptor != nil && !c.applyManagedTaskScope(ctx, &query, *descriptor) {
 		return conversationMessageQuery{}, nil, "", false
 	}
 	if !allowAuthors && len(query.authors) > 0 {

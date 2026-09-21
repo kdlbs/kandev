@@ -6,6 +6,7 @@ import { WorkspaceAgentChat } from "./workspace-agent-chat";
 
 const transport = vi.hoisted(() => ({
   fetch: vi.fn(),
+  dispatch: vi.fn(),
   messages: [{ id: "m-1", content: "existing transcript" }],
   removed: false,
   transcriptError: null as { code: string } | null,
@@ -14,6 +15,7 @@ const transport = vi.hoisted(() => ({
 vi.mock("@/lib/plugins/conversation-scope", () => ({
   pluginConversationUrl: (pluginId: string, path: string) => `/api/plugins/${pluginId}${path}`,
   fetchConversationBinding: () => Promise.resolve({ bindingToken: "binding-token" }),
+  dispatchManagedConversation: transport.dispatch,
   ConversationScopeContext: React.createContext({
     ready: () => Promise.resolve({ bindingToken: "binding-token" }),
   }),
@@ -34,25 +36,25 @@ describe("WorkspaceAgentChat", () => {
   afterEach(cleanup);
   beforeEach(() => {
     transport.fetch.mockReset();
+    transport.dispatch.mockReset();
+    transport.dispatch.mockResolvedValue(undefined);
     transport.transcriptError = null;
     transport.removed = false;
     vi.stubGlobal("fetch", transport.fetch);
   });
 
   it("loads an exact descriptor, renders its transcript, and dispatches through the scoped bridge", async () => {
-    transport.fetch
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            taskId: "task-1",
-            sessionId: "session-1",
-            workspaceId: "ws-1",
-            managedConversationToken: "managed-token",
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "sent" }), { status: 200 }));
+    transport.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          taskId: "task-1",
+          sessionId: "session-1",
+          workspaceId: "ws-1",
+          managedConversationToken: "managed-token",
+        }),
+        { status: 200 },
+      ),
+    );
     render(
       <WorkspaceAgentChat
         pluginId="plugin-1"
@@ -65,16 +67,18 @@ describe("WorkspaceAgentChat", () => {
     expect(screen.getByText("existing transcript")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(transport.fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(transport.dispatch).toHaveBeenCalledTimes(1));
     expect(transport.fetch.mock.calls[0][1].headers).toEqual({
       "X-Kandev-Plugin-Binding": "binding-token",
     });
-    expect(transport.fetch.mock.calls[1][1].headers).toMatchObject({
-      "X-Kandev-Plugin-Binding": "binding-token",
+    expect(transport.dispatch).toHaveBeenCalledWith({
+      bindingToken: "binding-token",
+      content: "hello",
+      occurrenceKey: expect.any(String),
+      pluginId: "plugin-1",
+      sessionId: "session-1",
+      workspaceId: "ws-1",
     });
-    expect(transport.fetch.mock.calls[1][0]).toContain(
-      "/managed/session-1/dispatch?workspace_id=ws-1",
-    );
   });
 
   it("clears the prompt when dispatch starts a new managed session", async () => {
@@ -152,19 +156,18 @@ describe("WorkspaceAgentChat", () => {
   });
 
   it("keeps the prompt and announces a failed dispatch", async () => {
-    transport.fetch
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            taskId: "task-1",
-            sessionId: "session-1",
-            workspaceId: "ws-1",
-            managedConversationToken: "managed-token",
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    transport.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          taskId: "task-1",
+          sessionId: "session-1",
+          workspaceId: "ws-1",
+          managedConversationToken: "managed-token",
+        }),
+        { status: 200 },
+      ),
+    );
+    transport.dispatch.mockRejectedValueOnce(new Error("dispatch unavailable"));
     render(
       <WorkspaceAgentChat
         pluginId="plugin-1"
@@ -183,21 +186,18 @@ describe("WorkspaceAgentChat", () => {
   });
 
   it("keeps the prompt when a busy managed session does not accept the dispatch", async () => {
-    transport.fetch
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            taskId: "task-1",
-            sessionId: "session-1",
-            workspaceId: "ws-1",
-            managedConversationToken: "managed-token",
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ status: "skipped_busy" }), { status: 200 }),
-      );
+    transport.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          taskId: "task-1",
+          sessionId: "session-1",
+          workspaceId: "ws-1",
+          managedConversationToken: "managed-token",
+        }),
+        { status: 200 },
+      ),
+    );
+    transport.dispatch.mockRejectedValueOnce(new Error("dispatch rejected"));
     render(
       <WorkspaceAgentChat
         pluginId="plugin-1"

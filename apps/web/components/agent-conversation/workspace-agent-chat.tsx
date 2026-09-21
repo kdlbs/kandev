@@ -7,6 +7,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { useTranslation } from "react-i18next";
 import { generateUUID } from "@/lib/utils";
 import {
+  dispatchManagedConversation,
   pluginConversationUrl,
   PluginConversationScopeProvider,
   ConversationScopeContext,
@@ -21,9 +22,6 @@ type ManagedDescriptor = {
   workspaceId: string;
   managedConversationToken: string;
 };
-
-// i18n-exempt: managed conversation dispatch protocol statuses, not user-facing copy.
-const ACCEPTED_DISPATCH_STATUSES = new Set(["started", "sent", "duplicate_occurrence"]);
 
 type InternalProps = WorkspaceAgentChatProps & { pluginId?: string };
 const permissionDeniedStatus: WorkspaceAgentChatStatus = "permission-denied";
@@ -133,25 +131,14 @@ function ManagedTranscript({
     try {
       const binding = await scope?.ready();
       if (!binding) throw new Error("binding unavailable");
-      const response = await fetch(
-        pluginConversationUrl(
-          pluginId,
-          `/conversation/managed/${encodeURIComponent(descriptor.sessionId)}/dispatch?workspace_id=${encodeURIComponent(descriptor.workspaceId)}`,
-        ),
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Kandev-Plugin-Binding": binding.bindingToken,
-          },
-          body: JSON.stringify({ content, occurrenceKey: generateUUID() }),
-        },
-      );
-      const delivery = (await response.json().catch(() => null)) as { status?: string } | null;
-      if (!response.ok || !delivery?.status || !ACCEPTED_DISPATCH_STATUSES.has(delivery.status)) {
-        throw new Error("send failed");
-      }
+      await dispatchManagedConversation({
+        pluginId,
+        sessionId: descriptor.sessionId,
+        workspaceId: descriptor.workspaceId,
+        content,
+        occurrenceKey: generateUUID(),
+        bindingToken: binding.bindingToken,
+      });
       setContent("");
     } catch {
       setSendFailed(true);
@@ -183,7 +170,13 @@ function ManagedTranscript({
     <div data-testid="workspace-agent-chat" className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3" aria-busy={loading}>
         {messages.map((message) => (
-          <div key={message.id} className="rounded-md bg-muted p-3 text-sm">
+          <div
+            key={message.id}
+            data-testid={
+              message.authorType === "agent" ? "workspace-agent-chat-agent-message" : undefined
+            }
+            className="rounded-md bg-muted p-3 text-sm"
+          >
             {message.content}
           </div>
         ))}

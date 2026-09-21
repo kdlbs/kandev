@@ -118,6 +118,46 @@ export async function fetchConversationBinding(
   return parseConversationResponse<Binding>(response);
 }
 
+// i18n-exempt: managed conversation dispatch protocol statuses, not user-facing copy.
+const acceptedManagedDispatchStatuses = new Set(["started", "sent", "duplicate_occurrence"]);
+
+export async function dispatchManagedConversation({
+  pluginId,
+  sessionId,
+  workspaceId,
+  content,
+  occurrenceKey,
+  bindingToken,
+}: {
+  pluginId: string;
+  sessionId: string;
+  workspaceId: string;
+  content: string;
+  occurrenceKey: string;
+  bindingToken: string;
+}): Promise<void> {
+  const response = await fetch(
+    pluginConversationUrl(
+      pluginId,
+      `/conversation/managed/${encodeURIComponent(sessionId)}/dispatch?workspace_id=${encodeURIComponent(workspaceId)}`,
+    ),
+    {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kandev-Plugin-Binding": bindingToken,
+      },
+      body: JSON.stringify({ content, occurrenceKey }),
+    },
+  );
+  const delivery = (await response.json().catch(() => null)) as { status?: string } | null;
+  if (!response.ok || !delivery?.status || !acceptedManagedDispatchStatuses.has(delivery.status)) {
+    // i18n-exempt: internal transport error, rendered through localized component copy.
+    throw new Error("managed conversation dispatch failed");
+  }
+}
+
 const SESSION_REMOVED_EVENT = "session.removed";
 const SESSION_SUBSCRIBE_ACTION = "session.subscribe";
 

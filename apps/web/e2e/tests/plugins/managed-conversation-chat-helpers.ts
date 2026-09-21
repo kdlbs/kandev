@@ -32,10 +32,15 @@ export async function exerciseManagedConversationChat(
 ) {
   const message = `${viewport} managed conversation message`;
   const input = page.getByLabel("Message");
+  const agentMessages = page.getByTestId("workspace-agent-chat-agent-message");
+  const agentMessageCount = await agentMessages.count();
   await input.fill(message);
   await page.getByRole("button", { name: "Send" }).click();
   await expect(input).toHaveValue("");
-  await expect(page.getByText(message)).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(async () => agentMessages.count(), { timeout: 30_000 })
+    .toBeGreaterThan(agentMessageCount);
+  await expect(agentMessages.last()).toBeVisible();
   await prCapture.screenshot(`${viewport}-managed-conversation-ready`, {
     caption: `${viewport} managed conversation ready state using the real scoped transcript and dispatch bridge`,
   });
