@@ -378,6 +378,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("curl -fsSL", workflows)
         self.assertTrue(SETUP_OPENCODE_ACTION.is_file())
         action = SETUP_OPENCODE_ACTION.read_text(encoding="utf-8")
+        self.assertIn("OPENCODE_VERSION: v1.18.0", action)
         self.assertIn(
             "a46af88b710248cc55719abd7f8fb482030494d6c9ed63f37aae7c6d6af4fc90",
             action,
