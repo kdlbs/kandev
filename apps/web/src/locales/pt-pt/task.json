@@ -2374,5 +2374,10 @@
   "checkoutOptions.credentialsUnsupported": "Utilize credenciais Git geridas pelo Kandev para as opções avançadas de obtenção.",
   "toolPayloadRemovedAt": "Detalhes da ferramenta removidos em {{date}}.",
   "toolPayloadRemoved": "Detalhes da ferramenta removidos.",
-  "openTaskSwitcherFor": "Abrir seletor de tarefas: {{title}}"
+  "openTaskSwitcherFor": "Abrir seletor de tarefas: {{title}}",
+  "bulkColorPartialError": "Cores guardadas para {{saved}} de {{total}} tarefas. Tente novamente para as restantes.",
+  "bulkColorSaving": "A guardar cores...",
+  "bulkColorAutomaticHint": "As regras automáticas podem substituir a cor visível.",
+  "bulkColorTitle_one": "Cor para {{count}} tarefa",
+  "bulkColorTitle_other": "Cor para {{count}} tarefas"
 }

@@ -2374,5 +2374,10 @@
   "checkoutOptions.credentialsUnsupported": "Ũśē Ķàńďēv-ḿàńàĝēď Ĝĩţ ćŕēďēńţĩàĺś ƒōŕ àďvàńćēď ćĥēćķōũţ ōƥţĩōńś.",
   "toolPayloadRemovedAt": "Ţōōĺ ďēţàĩĺś ŕēḿōvēď ōń {{date}}.",
   "toolPayloadRemoved": "Ţōōĺ ďēţàĩĺś ŕēḿōvēď.",
-  "openTaskSwitcherFor": "Ōƥēń ţàśķ śŵĩţćĥēŕ: {{title}}"
+  "openTaskSwitcherFor": "Ōƥēń ţàśķ śŵĩţćĥēŕ: {{title}}",
+  "bulkColorPartialError": "Ćōĺōŕś śàvēď ƒōŕ {{saved}} ōƒ {{total}} ţàśķś. Ţŕŷ àĝàĩń ƒōŕ ţĥē ŕēśţ.",
+  "bulkColorSaving": "Śàvĩńĝ ćōĺōŕś...",
+  "bulkColorAutomaticHint": "Àũţōḿàţĩć ŕũĺēś ḿàŷ ōvēŕŕĩďē ţĥē vĩśĩƀĺē ćōĺōŕ.",
+  "bulkColorTitle_one": "Ćōĺōŕ ƒōŕ {{count}} ţàśķ",
+  "bulkColorTitle_other": "Ćōĺōŕ ƒōŕ {{count}} ţàśķś"
 }

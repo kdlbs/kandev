@@ -2374,5 +2374,10 @@
   "checkoutOptions.credentialsUnsupported": "请使用由 Kandev 管理的 Git 凭据启用高级检出选项。",
   "toolPayloadRemovedAt": "工具详细数据已于 {{date}} 删除。",
   "toolPayloadRemoved": "工具详细数据已删除。",
-  "openTaskSwitcherFor": "打开任务切换器：{{title}}"
+  "openTaskSwitcherFor": "打开任务切换器：{{title}}",
+  "bulkColorPartialError": "已保存 {{total}} 个任务中 {{saved}} 个任务的颜色。请重试其余任务。",
+  "bulkColorSaving": "正在保存颜色...",
+  "bulkColorAutomaticHint": "自动规则可能覆盖显示的颜色。",
+  "bulkColorTitle_other": "为 {{count}} 个任务设置颜色",
+  "bulkColorTitle_one": "为 {{count}} 个任务设置颜色"
 }

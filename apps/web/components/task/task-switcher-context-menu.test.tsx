@@ -275,6 +275,7 @@ describe("TaskItemWithContextMenu — grouped bulk actions", () => {
 
     expect(labels).toEqual([
       "Pin 2 tasks",
+      "Color",
       "Move to",
       "Send to workflow",
       "Archive 2 tasks",
@@ -405,7 +406,7 @@ describe("TaskItemWithContextMenu — pointer containment", () => {
     fireEvent.pointerMove(screen.getByRole("menuitem", { name: /color/i }), {
       pointerType: "mouse",
     });
-    const redSwatch = await screen.findByRole("menuitem", { name: /red/i });
+    const redSwatch = await screen.findByRole("menuitemradio", { name: /red/i });
     fireEvent.touchStart(redSwatch);
     expect(onTouchStart).not.toHaveBeenCalled();
   });
@@ -417,7 +418,7 @@ describe("TaskItemWithContextMenu — pointer containment", () => {
     fireEvent.pointerMove(screen.getByRole("menuitem", { name: /color/i }), {
       pointerType: "mouse",
     });
-    const redSwatch = await screen.findByRole("menuitem", { name: /red/i });
+    const redSwatch = await screen.findByRole("menuitemradio", { name: /red/i });
     fireEvent.mouseDown(redSwatch);
     fireEvent.pointerDown(redSwatch);
 

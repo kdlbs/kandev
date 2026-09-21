@@ -627,6 +627,16 @@ On desktop and tablet, drag a card up or down within its column to reorder it re
 
 On phones, Kanban focuses one workflow and one step at a time. The board navigator always names both; open it to choose either level, or use the previous/next controls and horizontal swipe to move between steps. Choosing a workflow makes it the active workflow for board actions and task creation. Tap a card to open that task directly. Its **More options** menu opens as a touch-sized bottom surface; **Move to** changes the task's workflow or step. **Edit** can still rename a task after work starts, while its original prompt remains locked.
 
+### Color several tasks
+
+Use a bulk color when a group of tasks should share the same personal marker:
+
+1. On desktop, select sidebar rows with `Cmd/Ctrl`-click or select cards on the board. On a phone, choose **Select tasks** above the Kanban board, then tap the cards.
+2. Open **Color** from the menu for a selected sidebar row or from the board selection bar.
+3. Choose one of the seven colors. Choose **None** to clear existing manual colors from the selection.
+
+The selection and active task remain in place, and the colors persist across reloads. Automatic color rules still take precedence over a manual color in the visible sidebar marker; the picker explains this while preserving the saved manual choice. If part of a large selection cannot be saved, Kandev keeps the completed changes, restores the unsaved tasks, and leaves the selection available to retry.
+
 Regular Kanban does not currently expose label editing or label filters. Do not design a supported Kanban process around labels.
 
 <details>

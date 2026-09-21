@@ -2374,5 +2374,10 @@
   "checkoutOptions.credentialsUnsupported": "Use Kandev-managed Git credentials for advanced checkout options.",
   "toolPayloadRemovedAt": "Tool details removed on {{date}}.",
   "toolPayloadRemoved": "Tool details removed.",
-  "openTaskSwitcherFor": "Open task switcher: {{title}}"
+  "openTaskSwitcherFor": "Open task switcher: {{title}}",
+  "bulkColorPartialError": "Colors saved for {{saved}} of {{total}} tasks. Try again for the rest.",
+  "bulkColorSaving": "Saving colors...",
+  "bulkColorAutomaticHint": "Automatic rules may override the visible color.",
+  "bulkColorTitle_one": "Color for {{count}} task",
+  "bulkColorTitle_other": "Color for {{count}} tasks"
 }
