@@ -1,6 +1,6 @@
 ---
 created: 2026-09-21
-status: planned
+status: done
 requirements:
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004
 system_design:
@@ -109,22 +109,31 @@ scenario to assert and no mobile composition to check.
 
 ## Work orders
 
-- [ ] [Task 01: Observe concurrent worktree sessions](task-01-observe-concurrent-worktree-sessions.md)
+- [x] [Task 01: Observe concurrent worktree sessions](task-01-observe-concurrent-worktree-sessions.md)
 
 ## Verification results
 
-Pending implementation.
+See task-01's "Definition-of-Done receipts" and "Pre-existing failure proof"
+sections for full commands and output. Summary: `apps/backend` fmt/lint/test
+green except 4 `internal/worktree` tests reproduced identically against
+`origin/main` (pre-existing, unrelated package); root `lint-format` and
+`apps/web`'s `i18n:ratchet` green (no UI files touched); spec validation
+green. Committed as `06f16e718` on `feature/two-live-sessions-ca-nal`.
 
 ## Risks
 
-- `ListTaskSessions` runs once per agent start. It is already called on this
-  path for other reasons, so the added cost is one read per start, not per
-  turn. A task with many historical sessions makes the read larger; the helper
-  must stop at the first working sibling for the boolean caller and collect
-  bounded IDs for the log entry.
+- `ListTaskSessions` runs once per agent start/resume — a new read on that
+  path, not reused from elsewhere. Implemented without an early-stop
+  optimization: a task's live-session count is small in practice and the read
+  happens once per launch, not per turn, so the collect-all approach was kept
+  for simplicity over the plan's original "stop at first working sibling"
+  idea. Revisit only if a task with a pathologically large session history is
+  observed to matter.
 - Observing inside the per-session lock must not perform a blocking call that
   could extend lock hold time materially. The read is the same bounded
   repository call the path already makes.
 - An operator who reads the warning may expect Kandev to have prevented the
-  overlap. The log wording must state that the condition is permitted and that
-  the operator owns the decision.
+  overlap. The log wording states the condition is permitted ("Kandev permits
+  concurrent sessions on one task") and avoids language implying a failure to
+  prevent it; pinned by
+  `TestObserveSessionCoresidency_WorkingSiblingLogsWarningAndIncrementsCounter`.
