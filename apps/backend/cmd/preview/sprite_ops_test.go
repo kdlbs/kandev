@@ -136,6 +136,106 @@ func TestGetOrCreateSpriteReturnsFinalTransientErrorAfterRetryBudget(t *testing.
 	}
 }
 
+func TestEnablePublicURLRetriesTransientUpdate(t *testing.T) {
+	updateCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/sprites/kandev-pr-2115":
+			updateCalls++
+			if updateCalls == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sprites/kandev-pr-2115":
+			_, _ = w.Write([]byte(`{"name":"kandev-pr-2115","url":"https://preview.example"}`))
+		default:
+			t.Errorf("unexpected %s %s request", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := sprites.New("token", sprites.WithBaseURL(server.URL))
+	t.Cleanup(func() { _ = client.Close() })
+
+	got, err := enablePublicURL(t.Context(), client, "kandev-pr-2115")
+	if err != nil {
+		t.Fatalf("enablePublicURL() error = %v", err)
+	}
+	if got != "https://preview.example" {
+		t.Fatalf("enablePublicURL() = %q, want preview URL", got)
+	}
+	if updateCalls != 2 {
+		t.Fatalf("URL settings update calls = %d, want 2", updateCalls)
+	}
+}
+
+func TestEnablePublicURLRetriesTransientSpriteLookup(t *testing.T) {
+	getCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/sprites/kandev-pr-2115":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sprites/kandev-pr-2115":
+			getCalls++
+			if getCalls == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			_, _ = w.Write([]byte(`{"name":"kandev-pr-2115","url":"https://preview.example"}`))
+		default:
+			t.Errorf("unexpected %s %s request", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := sprites.New("token", sprites.WithBaseURL(server.URL))
+	t.Cleanup(func() { _ = client.Close() })
+
+	got, err := enablePublicURL(t.Context(), client, "kandev-pr-2115")
+	if err != nil {
+		t.Fatalf("enablePublicURL() error = %v", err)
+	}
+	if got != "https://preview.example" {
+		t.Fatalf("enablePublicURL() = %q, want preview URL", got)
+	}
+	if getCalls != 2 {
+		t.Fatalf("sprite GET calls = %d, want 2", getCalls)
+	}
+}
+
+func TestEnablePublicURLDoesNotRetryPermanentUpdateError(t *testing.T) {
+	updateCalls := 0
+	getCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/sprites/kandev-pr-2115":
+			updateCalls++
+			w.WriteHeader(http.StatusUnauthorized)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/sprites/kandev-pr-2115":
+			getCalls++
+			_, _ = w.Write([]byte(`{"name":"kandev-pr-2115","url":"https://preview.example"}`))
+		default:
+			t.Errorf("unexpected %s %s request", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := sprites.New("token", sprites.WithBaseURL(server.URL))
+	t.Cleanup(func() { _ = client.Close() })
+
+	_, err := enablePublicURL(t.Context(), client, "kandev-pr-2115")
+	if err == nil {
+		t.Fatal("enablePublicURL() error = nil, want unauthorized error")
+	}
+	if updateCalls != 1 {
+		t.Fatalf("URL settings update calls = %d, want 1", updateCalls)
+	}
+	if getCalls != 0 {
+		t.Fatalf("sprite GET calls = %d, want 0 after update failure", getCalls)
+	}
+}
+
 func TestBuildExtractScript(t *testing.T) {
 	script := buildExtractScript(12345)
 

@@ -105,6 +105,26 @@ func waitForSpriteRetry(ctx context.Context, operation string, attempt int, err 
 	}
 }
 
+func retrySpriteControl(ctx context.Context, operation string, action func(context.Context) error) error {
+	var lastErr error
+	for attempt := 1; attempt <= spriteControlRetries; attempt++ {
+		stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+		err := action(stepCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientSpriteError(err) || attempt == spriteControlRetries {
+			return err
+		}
+		if err := waitForSpriteRetry(ctx, operation, attempt, err); err != nil {
+			return err
+		}
+	}
+	return lastErr
+}
+
 // uploadBundle uploads the bundle tarball to the sprite via the Filesystem API.
 // Retries up to spriteUploadRetries times on transient errors with context-aware backoff.
 func uploadBundle(ctx context.Context, sprite *sprites.Sprite, tarPath string) error {
