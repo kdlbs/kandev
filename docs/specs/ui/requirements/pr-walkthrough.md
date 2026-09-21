@@ -92,8 +92,8 @@ the dedicated Cloudflare R2 walkthrough bucket. Lifecycle controls retention.
   variable. The trusted, non-generating repair path for edited descriptions is
   in `.github/workflows/pr-walkthrough-reconcile.yml`. It does not share the
   `OPENCODE_REVIEW_ENABLED` code-review gate.
-- The initial runner uses `opencode-go/muse-spark-1.3-contributor` and its
-  built-in `high` reasoning variant. The workflow passes these values with the
+- The runner uses `opencode/muse-spark-1.3-contributor-free` and the built-in
+  `high` reasoning variant. The workflow passes these values with the
   OpenCode 1.17.7 `--model` and `--variant` options.
 - The workflow preserves the generated JSON and HTML as CI artifacts and
   uploads only the HTML to the `kandev-pr-walkthroughs` R2 bucket.
