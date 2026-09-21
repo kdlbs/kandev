@@ -509,6 +509,20 @@ func TestGetFileTree_HidesOnlyRootOwnershipMarker(t *testing.T) {
 	}
 }
 
+func TestGetFileTree_RejectsAbsolutePathBeforeFilesystemAccess(t *testing.T) {
+	workspace := t.TempDir()
+	external := t.TempDir()
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = (&WorkspaceTracker{workDir: workspace, logger: log}).GetFileTree(external, 1)
+	if err == nil || !strings.Contains(err.Error(), "file tree path must be workspace-relative") {
+		t.Fatalf("GetFileTree error = %v, want workspace-relative validation error", err)
+	}
+}
+
 func TestGetFileList_HidesOnlyRootOwnershipMarker(t *testing.T) {
 	taskRoot := createOwnershipMarkerFixture(t)
 	initGitRepoAt(t, taskRoot)
