@@ -47,8 +47,7 @@ func TestKanbanCatalogParityRetainsMessageTaskAcrossAdditiveCapabilities(t *test
 
 func TestKanbanCatalogDigestIncludesMessageTaskBeforeBoundedPublication(t *testing.T) {
 	log := newTestLogger(t)
-	backend := NewChannelBackendClient(log)
-	t.Cleanup(backend.Close)
+	backend := &testBackend{}
 	server := NewWithProfile(backend, "session", "task", 10005, log, "", false,
 		mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil))
 	evidenceEvents := make(chan streams.MCPAttachmentEvidence, 2)
@@ -66,6 +65,7 @@ func TestKanbanCatalogDigestIncludesMessageTaskBeforeBoundedPublication(t *testi
 	require.NotEmpty(t, evidence.ToolCatalogHash)
 	require.Equal(t, streams.MCPToolCatalogDigestAlgorithm, evidence.ToolCatalogHashAlgorithm)
 	require.Contains(t, evidenceToolNames(evidence.Tools), "message_task_kandev")
+	assert.Empty(t, backend.lastAction, "catalog observation is evidence only; it must not invoke message delivery")
 
 	summaries := make([]streams.MCPToolSummary, 0, len(tools))
 	for _, tool := range tools {
