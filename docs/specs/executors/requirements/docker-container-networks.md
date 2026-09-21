@@ -82,7 +82,9 @@ deployment requires.
   names no primary network shall use the remote daemon's default network.
 - **AC-EXECUTORS-DOCKER-NETWORKS-001.5:** A profile's network selection shall be
   authoritative over any network value supplied in a task's launch metadata,
-  including when the profile's value is empty.
+  including when the profile's value is empty. The agent-facing profile tools
+  shall reject a network value, and shall preserve the operator's network
+  selection when an agent updates a profile without one.
 - **AC-EXECUTORS-DOCKER-NETWORKS-001.6:** A primary network shall be rejected
   when it is not a port-publishing network, when it names a network mode rather
   than a network (`host`, `none`, `default`, or a `container:` form), or when it

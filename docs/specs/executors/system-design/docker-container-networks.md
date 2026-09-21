@@ -136,6 +136,16 @@ an `internal` network the profile confined it to, or onto a LAN segment the
 profile never granted. The profile value wins unconditionally, including when it
 is empty, and `clearAuthoritativeMetadataKeys` blanks it when no profile applies.
 
+That guard covers launch metadata, not who may write the profile. The
+agent-facing `create_executor_profile` and `update_executor_profile` MCP tools
+take an arbitrary config map, so all three keys also join
+`operatorOnlyConfigKeys` in `internal/mcp/handlers`: an agent that could set
+them on a profile it creates would be choosing its own containment. The
+"operator already exposes `prepare_script`, which is strictly more powerful"
+reasoning that keeps other keys off that list does not apply here, because a
+prepare script runs inside the container and cannot reach a network the
+container was never attached to.
+
 The keys are added to `metadataPassthroughKeys` in `executor_backend.go` so they
 survive metadata round-trips, and read on the launch path with the existing
 `getMetadataString` helper.

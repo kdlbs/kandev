@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -24,6 +25,15 @@ const allowUserNamespacesProfileConfigKey = "allow_user_namespaces"
 // powerful).
 var operatorOnlyConfigKeys = []string{
 	allowUserNamespacesProfileConfigKey,
+	// Network placement decides what a task container can reach: an internal
+	// network denies egress, a macvlan gives it an address on the operator's
+	// physical LAN. An agent that set these on a profile it creates would be
+	// choosing its own containment. A prepare script cannot cross that
+	// boundary, so the "prepare_script is strictly more powerful" reasoning
+	// above does not cover them.
+	lifecycle.MetadataKeyDockerNetwork,
+	lifecycle.MetadataKeyDockerNetworkGwPriority,
+	lifecycle.MetadataKeyDockerAdditionalNetworks,
 }
 
 // rejectOperatorConfigKeys returns an error if the config map contains any
